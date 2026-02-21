@@ -5,6 +5,10 @@
   "packageManager": "pnpm@10.15.0",
   "scripts": {
     "go": "pnpm docker:db:up && pnpm run dev",
+    "ios": "pnpm --filter=@zero/ios start",
+    "ios:simulator": "pnpm --filter=@zero/ios ios",
+    "ios:build:preview": "pnpm --filter=@zero/ios build:ios:preview",
+    "ios:build:production": "pnpm --filter=@zero/ios build:ios:production",
     "prepare": "husky",
     "nizzy": "tsx ./packages/cli/src/cli.ts",
     "postinstall": "pnpm nizzy sync",

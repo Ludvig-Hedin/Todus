@@ -1,0 +1,27 @@
+{
+  "name": "@zero/ios",
+  "version": "1.0.0",
+  "main": "index.ts",
+  "scripts": {
+    "start": "expo start",
+    "ios": "expo start --ios",
+    "android": "expo start --android",
+    "web": "expo start --web",
+    "doctor": "npx expo-doctor",
+    "bundle:ios": "expo export --platform ios --output-dir dist --clear",
+    "build:ios:preview": "eas build --platform ios --profile preview",
+    "build:ios:production": "eas build --platform ios --profile production",
+    "submit:ios": "eas submit --platform ios --profile production"
+  },
+  "dependencies": {
+    "expo": "~54.0.33",
+    "expo-status-bar": "~3.0.9",
+    "react": "19.1.0",
+    "react-native": "0.81.5",
+    "react-native-webview": "13.15.0"
+  },
+  "devDependencies": {
+    "typescript": "~5.9.2"
+  },
+  "private": true
+}
