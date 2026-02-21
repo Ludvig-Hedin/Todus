@@ -1,6 +1,14 @@
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useRef, useState } from 'react';
-import { ActivityIndicator, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Linking,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+  useColorScheme,
+} from 'react-native';
 import { WebView } from 'react-native-webview';
 
 const WEB_BASE_URL =
@@ -29,6 +37,8 @@ const isAllowedInWebView = (url: string) => {
 };
 
 export default function App() {
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
   const webviewRef = useRef<WebView>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
@@ -51,12 +61,24 @@ export default function App() {
     webviewRef.current?.reload();
   }, []);
 
+  const resolvedTheme = isDark ? 'dark' : 'light';
+  const injectedThemeSync = `
+    try {
+      var currentTheme = localStorage.getItem('theme');
+      if (!currentTheme || currentTheme === 'system') {
+        localStorage.setItem('theme', '${resolvedTheme}');
+      }
+      document.documentElement.style.colorScheme = '${resolvedTheme}';
+    } catch (e) {}
+    true;
+  `;
+
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, isDark ? styles.containerDark : styles.containerLight]}>
       <WebView
         ref={webviewRef}
         source={{ uri: APP_ENTRY_URL }}
-        style={styles.webView}
+        style={[styles.webView, isDark ? styles.webViewDark : styles.webViewLight]}
         onLoadStart={() => setIsLoading(true)}
         onLoadEnd={() => setIsLoading(false)}
         onError={() => {
@@ -73,27 +95,40 @@ export default function App() {
         automaticallyAdjustContentInsets={false}
         contentInsetAdjustmentBehavior="never"
         bounces={false}
+        forceDarkOn={isDark}
+        injectedJavaScriptBeforeContentLoaded={injectedThemeSync}
         startInLoadingState
       />
 
       {isLoading && !hasError ? (
-        <View style={styles.loadingOverlay}>
-          <ActivityIndicator size="small" color="#111827" />
-          <Text style={styles.loadingText}>Loading Zero Mail...</Text>
+        <View style={[styles.loadingOverlay, isDark ? styles.loadingOverlayDark : styles.loadingOverlayLight]}>
+          <ActivityIndicator size="small" color={isDark ? '#e5e7eb' : '#111827'} />
+          <Text style={[styles.loadingText, isDark ? styles.loadingTextDark : styles.loadingTextLight]}>
+            Loading Todus...
+          </Text>
         </View>
       ) : null}
 
       {hasError ? (
-        <View style={styles.errorOverlay}>
-          <Text style={styles.errorTitle}>Could not load the app</Text>
-          <Text style={styles.errorBody}>Check your internet connection and try again.</Text>
-          <Pressable style={styles.retryButton} onPress={handleRetry}>
-            <Text style={styles.retryButtonText}>Retry</Text>
+        <View style={[styles.errorOverlay, isDark ? styles.errorOverlayDark : styles.errorOverlayLight]}>
+          <Text style={[styles.errorTitle, isDark ? styles.errorTitleDark : styles.errorTitleLight]}>
+            Could not load the app
+          </Text>
+          <Text style={[styles.errorBody, isDark ? styles.errorBodyDark : styles.errorBodyLight]}>
+            Check your internet connection and try again.
+          </Text>
+          <Pressable
+            style={[styles.retryButton, isDark ? styles.retryButtonDark : styles.retryButtonLight]}
+            onPress={handleRetry}
+          >
+            <Text style={[styles.retryButtonText, isDark ? styles.retryButtonTextDark : styles.retryButtonTextLight]}>
+              Retry
+            </Text>
           </Pressable>
         </View>
       ) : null}
 
-      <StatusBar style="dark" />
+      <StatusBar style={isDark ? 'light' : 'dark'} />
     </View>
   );
 }
@@ -101,12 +136,14 @@ export default function App() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0b0f14',
   },
+  containerDark: { backgroundColor: '#0b0f14' },
+  containerLight: { backgroundColor: '#f5f6f7' },
   webView: {
     flex: 1,
-    backgroundColor: '#0b0f14',
   },
+  webViewDark: { backgroundColor: '#0b0f14' },
+  webViewLight: { backgroundColor: '#f5f6f7' },
   loadingOverlay: {
     position: 'absolute',
     top: 12,
@@ -116,16 +153,24 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
   },
+  loadingOverlayDark: {
+    backgroundColor: '#111827',
+    borderColor: '#374151',
+  },
+  loadingOverlayLight: {
+    backgroundColor: '#ffffff',
+    borderColor: '#e5e7eb',
+  },
   loadingText: {
-    color: '#111827',
     fontSize: 13,
     fontWeight: '500',
   },
+  loadingTextDark: { color: '#e5e7eb' },
+  loadingTextLight: { color: '#111827' },
   errorOverlay: {
     position: 'absolute',
     left: 16,
@@ -133,31 +178,49 @@ const styles = StyleSheet.create({
     top: '38%',
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
-    backgroundColor: '#ffffff',
     padding: 16,
     gap: 10,
   },
+  errorOverlayDark: {
+    borderColor: '#374151',
+    backgroundColor: '#111827',
+  },
+  errorOverlayLight: {
+    borderColor: '#e5e7eb',
+    backgroundColor: '#ffffff',
+  },
   errorTitle: {
-    color: '#111827',
     fontSize: 16,
     fontWeight: '600',
   },
+  errorTitleDark: { color: '#f3f4f6' },
+  errorTitleLight: { color: '#111827' },
   errorBody: {
-    color: '#374151',
     fontSize: 14,
     lineHeight: 20,
   },
+  errorBodyDark: { color: '#d1d5db' },
+  errorBodyLight: { color: '#374151' },
   retryButton: {
     alignSelf: 'flex-start',
     borderRadius: 8,
-    backgroundColor: '#111827',
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
+  retryButtonDark: {
+    backgroundColor: '#f3f4f6',
+  },
+  retryButtonLight: {
+    backgroundColor: '#111827',
+  },
   retryButtonText: {
-    color: '#ffffff',
     fontSize: 14,
     fontWeight: '600',
+  },
+  retryButtonTextDark: {
+    color: '#111827',
+  },
+  retryButtonTextLight: {
+    color: '#ffffff',
   },
 });

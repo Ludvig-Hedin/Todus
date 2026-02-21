@@ -1,6 +1,6 @@
-# Zero iOS WebView App
+# Todus iOS WebView App
 
-This app wraps the deployed Zero web app in a native iOS shell.
+This app wraps your deployed mail web app in a native iOS shell.
 
 ## Quick start
 
@@ -30,7 +30,7 @@ EXPO_PUBLIC_APP_ENTRY_URL=https://your-domain.com/mail/inbox pnpm ios
 
 Bundle identifier is set in `app.config.ts`:
 
-- iOS: `com.ludvighedin.zero`
+- iOS: `com.ludvighedin.todus`
 
 Change this before App Store/TestFlight submission if needed.
 

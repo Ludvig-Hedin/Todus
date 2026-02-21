@@ -30,7 +30,7 @@ const createWindow = () => {
     height: 840,
     minWidth: 1000,
     minHeight: 700,
-    title: 'Zero Mail',
+    title: 'Todus',
     backgroundColor: '#0b0f14',
     autoHideMenuBar: true,
     webPreferences: {

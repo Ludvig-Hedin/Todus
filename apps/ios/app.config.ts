@@ -8,15 +8,15 @@ const backendUrl =
 const appEntryUrl = process.env.EXPO_PUBLIC_APP_ENTRY_URL ?? `${webUrl}/mail/inbox`;
 
 const config: ExpoConfig = {
-  name: 'Zero Mail',
-  slug: 'zero-mail-ios',
+  name: 'Todus',
+  slug: 'todus-ios',
   version: '1.0.0',
   orientation: 'portrait',
   icon: './assets/icon.png',
-  userInterfaceStyle: 'light',
+  userInterfaceStyle: 'automatic',
   newArchEnabled: true,
   ios: {
-    bundleIdentifier: 'com.ludvighedin.zero',
+    bundleIdentifier: 'com.ludvighedin.todus',
     supportsTablet: true,
   },
   android: {
@@ -25,7 +25,7 @@ const config: ExpoConfig = {
       backgroundColor: '#ffffff',
     },
     edgeToEdgeEnabled: true,
-    package: 'com.ludvighedin.zero',
+    package: 'com.ludvighedin.todus',
   },
   web: {
     favicon: './assets/favicon.png',

@@ -1,4 +1,4 @@
-# Zero macOS WebView App
+# Todus macOS WebView App
 
 This is a lightweight Electron wrapper around your deployed Zero frontend.
 
