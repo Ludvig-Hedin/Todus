@@ -1,17 +1,18 @@
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { APP_NAME } from '@/lib/branding';
 import { useState, useEffect } from 'react';
 import confetti from 'canvas-confetti';
 
 const steps = [
   {
-    title: 'Welcome to Zero Email!',
+    title: `Welcome to ${APP_NAME}!`,
     description: 'Your new intelligent email experience starts here.',
     video: 'https://assets.0.email/get-started.png',
   },
   {
     title: 'Chat with your inbox',
-    description: 'Zero allows you to chat with your inbox, and take actions on your behalf.',
+    description: `${APP_NAME} lets you chat with your inbox and take action faster.`,
     video: 'https://assets.0.email/step2.gif',
   },
   {
@@ -21,7 +22,7 @@ const steps = [
   },
   {
     title: 'Label your emails',
-    description: 'Zero helps you label your emails to focus on what matters.',
+    description: `${APP_NAME} helps you label emails so you can focus on what matters.`,
     video: 'https://assets.0.email/step3.gif',
   },
   {

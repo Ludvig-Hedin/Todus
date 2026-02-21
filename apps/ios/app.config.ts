@@ -6,9 +6,10 @@ const backendUrl =
   process.env.EXPO_PUBLIC_BACKEND_URL ??
   'https://zero-server-v1-production.ludvighedin15.workers.dev';
 const appEntryUrl = process.env.EXPO_PUBLIC_APP_ENTRY_URL ?? `${webUrl}/mail/inbox`;
+const appName = process.env.EXPO_PUBLIC_APP_NAME ?? 'Todus';
 
 const config: ExpoConfig = {
-  name: 'Todus',
+  name: appName,
   slug: 'todus-ios',
   version: '1.0.0',
   orientation: 'portrait',
@@ -31,6 +32,7 @@ const config: ExpoConfig = {
     favicon: './assets/favicon.png',
   },
   extra: {
+    appName,
     webUrl,
     backendUrl,
     appEntryUrl,

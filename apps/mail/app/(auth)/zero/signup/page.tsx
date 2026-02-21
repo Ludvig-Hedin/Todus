@@ -1,6 +1,7 @@
 import { Form, FormControl, FormField, FormItem, FormLabel } from '@/components/ui/form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Button } from '@/components/ui/button';
+import { APP_NAME } from '@/lib/branding';
 import { Input } from '@/components/ui/input';
 import { useForm } from 'react-hook-form';
 import { toast } from 'sonner';
@@ -37,7 +38,7 @@ export default function SignupZero() {
     <div className="flex h-full min-h-screen w-full items-center justify-center bg-black">
       <div className="animate-in slide-in-from-bottom-4 w-full max-w-md px-6 py-8 duration-500">
         <div className="mb-4 text-center">
-          <h1 className="mb-2 text-4xl font-bold text-white">Signup with Zero</h1>
+          <h1 className="mb-2 text-4xl font-bold text-white">{`Signup with ${APP_NAME}`}</h1>
           <p className="text-muted-foreground">Enter your email below to signup to your account</p>
         </div>
 

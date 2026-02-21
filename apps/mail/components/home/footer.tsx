@@ -1,4 +1,5 @@
 import { LinkedIn, Twitter, Discord } from '../icons/icons';
+import { APP_NAME } from '@/lib/branding';
 import { motion } from 'motion/react';
 import { Button } from '../ui/button';
 import { Link } from 'react-router';
@@ -155,7 +156,7 @@ export default function Footer() {
                   rel="noreferrer"
                 >
                   <div className="justify-start self-stretch text-sm md:text-base leading-none text-white opacity-80 transition-opacity hover:opacity-100">
-                    Chat with Zero
+                    {`Chat with ${APP_NAME}`}
                   </div>
                 </a>
                 <a
@@ -165,7 +166,7 @@ export default function Footer() {
                   rel="noreferrer"
                 >
                   <div className="justify-start self-stretch text-sm md:text-base leading-none text-white opacity-80 transition-opacity hover:opacity-100">
-                    Zero AI
+                    {`${APP_NAME} AI`}
                   </div>
                 </a>
                 <a
@@ -213,7 +214,7 @@ export default function Footer() {
         <div className="flex flex-col items-start justify-start gap-6 self-stretch">
           <div className="inline-flex items-center justify-between self-stretch flex-col-reverse md:flex-row gap-3">
             <div className="justify-start text-xs font-medium leading-tight text-white opacity-80 sm:text-sm">
-              © 2025 Zero Email Inc, All Rights Reserved
+              {`© 2025 ${APP_NAME}, All Rights Reserved`}
             </div>
             <div className="flex items-center gap-4">
               <Link

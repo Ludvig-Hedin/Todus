@@ -6,6 +6,7 @@ import ErrorMessage from '@/app/(auth)/login/error-message';
 import { Button } from '@/components/ui/button';
 import { TriangleAlert } from 'lucide-react';
 import { signIn } from '@/lib/auth-client';
+import { APP_NAME } from '@/lib/branding';
 import { useNavigate } from 'react-router';
 import { useQueryState } from 'nuqs';
 import { toast } from 'sonner';
@@ -48,14 +49,14 @@ const getProviderIcon = (providerId: string, className?: string): ReactNode => {
         <>
           <img
             src="/white-icon.svg"
-            alt="Zero"
+            alt={APP_NAME}
             width={15}
             height={15}
             className="mr-2 hidden dark:block"
           />
           <img
             src="/black-icon.svg"
-            alt="Zero"
+            alt={APP_NAME}
             width={15}
             height={15}
             className="mr-2 block dark:hidden"
@@ -111,11 +112,11 @@ function LoginClientContent({ providers, isProd }: LoginClientProps) {
     if (provider.isCustom && provider.customRedirectPath) {
       navigate(provider.customRedirectPath);
     } else {
-      toast.promise(
-        signIn.social({
-          provider: provider.id as any,
-          callbackURL: `${window.location.origin}/mail`,
-        }),
+          toast.promise(
+            signIn.social({
+              provider: provider.id as any,
+              callbackURL: `${window.location.origin}/mail/inbox`,
+            }),
         {
           error: 'Login redirect failed',
         },
@@ -136,7 +137,9 @@ function LoginClientContent({ providers, isProd }: LoginClientProps) {
     <div className="flex min-h-screen w-full flex-col items-center justify-between bg-[#111111]">
       <div className="animate-in slide-in-from-bottom-4 mx-auto flex max-w-[600px] grow items-center justify-center space-y-8 px-4 duration-500 sm:px-12 md:px-0">
         <div className="w-full space-y-4">
-          <p className="text-center text-4xl font-bold text-white md:text-5xl">Login to Zero</p>
+          <p className="text-center text-4xl font-bold text-white md:text-5xl">
+            {`Login to ${APP_NAME}`}
+          </p>
 
           {error && (
             <Alert variant="default" className="border-orange-500/40 bg-orange-500/10">

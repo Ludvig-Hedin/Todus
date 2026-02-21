@@ -1,6 +1,6 @@
 # Todus macOS WebView App
 
-This is a lightweight Electron wrapper around your deployed Zero frontend.
+This is a lightweight Electron wrapper around your deployed Todus frontend.
 
 ## Run
 
@@ -14,6 +14,7 @@ pnpm dev
 - Web: `https://zero-production.ludvighedin15.workers.dev`
 - Backend/Auth: `https://zero-server-v1-production.ludvighedin15.workers.dev`
 - Entry: `/mail/inbox`
+- App name: `Todus`
 
 ## Override
 
@@ -21,4 +22,5 @@ pnpm dev
 EXPO_PUBLIC_WEB_URL=https://your-domain.com pnpm dev
 EXPO_PUBLIC_BACKEND_URL=https://your-backend.workers.dev pnpm dev
 EXPO_PUBLIC_APP_ENTRY_URL=https://your-domain.com/mail/inbox pnpm dev
+EXPO_PUBLIC_APP_NAME=YourAppName pnpm dev
 ```

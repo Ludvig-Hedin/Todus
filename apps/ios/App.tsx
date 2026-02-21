@@ -4,6 +4,7 @@ import {
   ActivityIndicator,
   Linking,
   Pressable,
+  SafeAreaView,
   StyleSheet,
   Text,
   View,
@@ -13,24 +14,14 @@ import { WebView } from 'react-native-webview';
 
 const WEB_BASE_URL =
   process.env.EXPO_PUBLIC_WEB_URL ?? 'https://zero-production.ludvighedin15.workers.dev';
-const BACKEND_URL =
-  process.env.EXPO_PUBLIC_BACKEND_URL ??
-  'https://zero-server-v1-production.ludvighedin15.workers.dev';
+const APP_NAME = process.env.EXPO_PUBLIC_APP_NAME ?? 'Todus';
 const APP_ENTRY_URL = process.env.EXPO_PUBLIC_APP_ENTRY_URL ?? `${WEB_BASE_URL}/mail/inbox`;
 
-const ALLOWED_AUTH_HOSTS = new Set([
-  new URL(WEB_BASE_URL).host,
-  new URL(BACKEND_URL).host,
-  'accounts.google.com',
-  'oauth2.googleapis.com',
-]);
-
-const isAllowedInWebView = (url: string) => {
+const isInAppWebUrl = (url: string) => {
   if (url === 'about:blank') return true;
   try {
     const parsed = new URL(url);
-    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return false;
-    return ALLOWED_AUTH_HOSTS.has(parsed.host);
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:';
   } catch {
     return false;
   }
@@ -45,7 +36,7 @@ export default function App() {
 
   const handleShouldStartLoadWithRequest = useCallback((request: { url: string }) => {
     const requestedUrl = request.url;
-    if (isAllowedInWebView(requestedUrl)) {
+    if (isInAppWebUrl(requestedUrl)) {
       return true;
     }
 
@@ -74,7 +65,7 @@ export default function App() {
   `;
 
   return (
-    <View style={[styles.container, isDark ? styles.containerDark : styles.containerLight]}>
+    <SafeAreaView style={[styles.container, isDark ? styles.containerDark : styles.containerLight]}>
       <WebView
         ref={webviewRef}
         source={{ uri: APP_ENTRY_URL }}
@@ -92,8 +83,8 @@ export default function App() {
         allowsBackForwardNavigationGestures
         pullToRefreshEnabled
         refreshControlLightMode
-        automaticallyAdjustContentInsets={false}
-        contentInsetAdjustmentBehavior="never"
+        automaticallyAdjustContentInsets
+        contentInsetAdjustmentBehavior="automatic"
         bounces={false}
         forceDarkOn={isDark}
         injectedJavaScriptBeforeContentLoaded={injectedThemeSync}
@@ -104,7 +95,7 @@ export default function App() {
         <View style={[styles.loadingOverlay, isDark ? styles.loadingOverlayDark : styles.loadingOverlayLight]}>
           <ActivityIndicator size="small" color={isDark ? '#e5e7eb' : '#111827'} />
           <Text style={[styles.loadingText, isDark ? styles.loadingTextDark : styles.loadingTextLight]}>
-            Loading Todus...
+            {`Loading ${APP_NAME}...`}
           </Text>
         </View>
       ) : null}
@@ -129,7 +120,7 @@ export default function App() {
       ) : null}
 
       <StatusBar style={isDark ? 'light' : 'dark'} />
-    </View>
+    </SafeAreaView>
   );
 }
 

@@ -5,6 +5,7 @@ const WEB_BASE_URL =
 const BACKEND_URL =
   process.env.EXPO_PUBLIC_BACKEND_URL ??
   'https://zero-server-v1-production.ludvighedin15.workers.dev';
+const APP_NAME = process.env.EXPO_PUBLIC_APP_NAME ?? 'Todus';
 const APP_ENTRY_URL = process.env.EXPO_PUBLIC_APP_ENTRY_URL ?? `${WEB_BASE_URL}/mail/inbox`;
 
 const allowedHosts = new Set([
@@ -30,7 +31,7 @@ const createWindow = () => {
     height: 840,
     minWidth: 1000,
     minHeight: 700,
-    title: 'Todus',
+    title: APP_NAME,
     backgroundColor: '#0b0f14',
     autoHideMenuBar: true,
     webPreferences: {

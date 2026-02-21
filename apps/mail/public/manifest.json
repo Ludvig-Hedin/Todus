@@ -1,7 +1,7 @@
 {
-  "name": "Zero",
-  "short_name": "0",
-  "description": "Zero - the first open source email app that puts your privacy and safety first.",
+  "name": "Todus",
+  "short_name": "Todus",
+  "description": "Todus is an AI-native email app that helps you move through inbox work faster.",
   "scope": "/",
   "start_url": "/mail/inbox",
   "display": "standalone",

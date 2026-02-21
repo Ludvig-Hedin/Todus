@@ -1,6 +1,8 @@
-const TITLE = 'Zero';
+import { APP_NAME } from '@/lib/branding';
+
+const TITLE = APP_NAME;
 const DESCRIPTION =
-  'Experience email the way you want with 0 - the first open source email app that puts your privacy and safety first.';
+  `${APP_NAME} is an AI-native email app that helps you move through inbox work faster.`;
 
 export const siteConfig = {
   title: TITLE,
@@ -8,7 +10,7 @@ export const siteConfig = {
   icons: {
     icon: '/favicon.ico',
   },
-  applicationName: 'Zero',
+  applicationName: APP_NAME,
   creator: '@nizzyabi @bruvimtired @ripgrim @needleXO @dakdevs @mrgsub',
   openGraph: {
     title: TITLE,

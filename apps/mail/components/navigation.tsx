@@ -10,6 +10,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/co
 import { GitHub, Twitter, Discord, LinkedIn, Star } from './icons/icons';
 import { AnimatedNumber } from '@/components/ui/animated-number';
 import { signIn, useSession } from '@/lib/auth-client';
+import { APP_NAME } from '@/lib/branding';
 import { Separator } from '@/components/ui/separator';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router';
@@ -50,7 +51,7 @@ const aboutLinks = [
   {
     title: 'About',
     href: '/about',
-    description: 'Learn more about Zero and our mission.',
+    description: `Learn more about ${APP_NAME} and our mission.`,
   },
   {
     title: 'Privacy',
@@ -65,7 +66,7 @@ const aboutLinks = [
   {
     title: 'Contributors',
     href: '/contributors',
-    description: 'See the contributors to Zero.',
+    description: `See the contributors to ${APP_NAME}.`,
   },
 ];
 
@@ -114,7 +115,7 @@ export function Navigation() {
         <nav className="border-input/50 flex w-full max-w-4xl items-center justify-between gap-2 rounded-xl border-t bg-[#1E1E1E] p-3 px-6">
           <div className="flex items-center gap-6">
             <Link to="/" className="relative bottom-1 cursor-pointer">
-              <img src="white-icon.svg" alt="Zero Email" width={22} height={22} />
+              <img src="white-icon.svg" alt={APP_NAME} width={22} height={22} />
               <span className="text-muted-foreground absolute -right-[-0.5px] text-[10px]">
                 beta
               </span>
@@ -197,7 +198,7 @@ export function Navigation() {
                   toast.promise(
                     signIn.social({
                       provider: 'google',
-                      callbackURL: `${window.location.origin}/mail`,
+                      callbackURL: `${window.location.origin}/mail/inbox`,
                     }),
                     {
                       error: 'Login redirect failed',
@@ -226,7 +227,7 @@ export function Navigation() {
                 <Link to="/" onClick={() => setOpen(false)}>
                   <img
                     src="white-icon.svg"
-                    alt="Zero Email"
+                    alt={APP_NAME}
                     className="hidden object-contain dark:block"
                     width={22}
                     height={22}
