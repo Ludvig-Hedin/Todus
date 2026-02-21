@@ -1,6 +1,11 @@
 import type { ExpoConfig } from 'expo/config';
 
-const webUrl = process.env.EXPO_PUBLIC_WEB_URL ?? 'https://0.email';
+const webUrl =
+  process.env.EXPO_PUBLIC_WEB_URL ?? 'https://zero-production.ludvighedin15.workers.dev';
+const backendUrl =
+  process.env.EXPO_PUBLIC_BACKEND_URL ??
+  'https://zero-server-v1-production.ludvighedin15.workers.dev';
+const appEntryUrl = process.env.EXPO_PUBLIC_APP_ENTRY_URL ?? `${webUrl}/mail/inbox`;
 
 const config: ExpoConfig = {
   name: 'Zero Mail',
@@ -27,6 +32,8 @@ const config: ExpoConfig = {
   },
   extra: {
     webUrl,
+    backendUrl,
+    appEntryUrl,
   },
 };
 

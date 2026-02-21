@@ -17,11 +17,15 @@ pnpm ios
 
 ## Configuration
 
-- Default URL: `https://0.email`
-- Override URL:
+- Default web base URL: `https://zero-production.ludvighedin15.workers.dev`
+- Default backend URL: `https://zero-server-v1-production.ludvighedin15.workers.dev`
+- Default app entry URL: `https://zero-production.ludvighedin15.workers.dev/mail/inbox`
+- Override URLs:
 
 ```bash
 EXPO_PUBLIC_WEB_URL=https://your-domain.com pnpm ios
+EXPO_PUBLIC_BACKEND_URL=https://your-backend.workers.dev pnpm ios
+EXPO_PUBLIC_APP_ENTRY_URL=https://your-domain.com/mail/inbox pnpm ios
 ```
 
 Bundle identifier is set in `app.config.ts`:

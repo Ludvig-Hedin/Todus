@@ -1,9 +1,32 @@
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useRef, useState } from 'react';
-import { ActivityIndicator, Linking, Pressable, SafeAreaView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { WebView } from 'react-native-webview';
 
-const APP_URL = process.env.EXPO_PUBLIC_WEB_URL ?? 'https://0.email';
+const WEB_BASE_URL =
+  process.env.EXPO_PUBLIC_WEB_URL ?? 'https://zero-production.ludvighedin15.workers.dev';
+const BACKEND_URL =
+  process.env.EXPO_PUBLIC_BACKEND_URL ??
+  'https://zero-server-v1-production.ludvighedin15.workers.dev';
+const APP_ENTRY_URL = process.env.EXPO_PUBLIC_APP_ENTRY_URL ?? `${WEB_BASE_URL}/mail/inbox`;
+
+const ALLOWED_AUTH_HOSTS = new Set([
+  new URL(WEB_BASE_URL).host,
+  new URL(BACKEND_URL).host,
+  'accounts.google.com',
+  'oauth2.googleapis.com',
+]);
+
+const isAllowedInWebView = (url: string) => {
+  if (url === 'about:blank') return true;
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return false;
+    return ALLOWED_AUTH_HOSTS.has(parsed.host);
+  } catch {
+    return false;
+  }
+};
 
 export default function App() {
   const webviewRef = useRef<WebView>(null);
@@ -12,7 +35,7 @@ export default function App() {
 
   const handleShouldStartLoadWithRequest = useCallback((request: { url: string }) => {
     const requestedUrl = request.url;
-    if (requestedUrl.startsWith(APP_URL) || requestedUrl === 'about:blank') {
+    if (isAllowedInWebView(requestedUrl)) {
       return true;
     }
 
@@ -29,10 +52,11 @@ export default function App() {
   }, []);
 
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={styles.container}>
       <WebView
         ref={webviewRef}
-        source={{ uri: APP_URL }}
+        source={{ uri: APP_ENTRY_URL }}
+        style={styles.webView}
         onLoadStart={() => setIsLoading(true)}
         onLoadEnd={() => setIsLoading(false)}
         onError={() => {
@@ -42,9 +66,13 @@ export default function App() {
         onShouldStartLoadWithRequest={handleShouldStartLoadWithRequest}
         sharedCookiesEnabled
         thirdPartyCookiesEnabled
+        setSupportMultipleWindows={false}
         allowsBackForwardNavigationGestures
         pullToRefreshEnabled
         refreshControlLightMode
+        automaticallyAdjustContentInsets={false}
+        contentInsetAdjustmentBehavior="never"
+        bounces={false}
         startInLoadingState
       />
 
@@ -66,14 +94,18 @@ export default function App() {
       ) : null}
 
       <StatusBar style="dark" />
-    </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#ffffff',
+    backgroundColor: '#0b0f14',
+  },
+  webView: {
+    flex: 1,
+    backgroundColor: '#0b0f14',
   },
   loadingOverlay: {
     position: 'absolute',

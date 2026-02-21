@@ -11,7 +11,7 @@
 | Local Dev | ✅ Complete | `http://localhost:3000` |
 | Web (Production) | ✅ Live | `https://0.email` |
 | iOS App | 🟡 In Progress | Expo + TestFlight |
-| macOS App | 🔲 Not Started | TestFlight / Direct |
+| macOS App | 🟡 In Progress | Electron Wrapper |
 
 ---
 
@@ -83,8 +83,8 @@ Create a native macOS app wrapper.
 
 ### Option B: Electron (Alternative)
 
-- [ ] Create Electron project in `/apps/macos-electron`
-- [ ] Configure BrowserWindow with production URL
+- [x] Create Electron project in `/apps/macos`
+- [x] Configure BrowserWindow with production URL
 - [ ] Add native menus
 - [ ] Package as `.dmg`
 - [ ] Notarize for distribution
@@ -107,6 +107,7 @@ Create a native macOS app wrapper.
 - [x] Scaffold iOS Expo app in `/apps/ios`
 - [x] Implement iOS WebView wrapper to production URL
 - [x] Add EAS build configuration for TestFlight
+- [x] Scaffold macOS web wrapper in `/apps/macos`
 
 ### Next Steps
 

@@ -1,0 +1,14 @@
+{
+  "name": "@zero/macos",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "main.mjs",
+  "scripts": {
+    "dev": "electron .",
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^37.4.0"
+  }
+}
