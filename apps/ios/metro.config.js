@@ -15,7 +15,7 @@ config.resolver.nodeModulesPaths = [
   path.resolve(workspaceRoot, 'node_modules'),
 ];
 
-// Enable symlinks for pnpm workspace packages
-config.resolver.unstable_enableSymlinks = true;
+// Enable package exports resolution (needed for ESM modules like getDevServer)
+config.resolver.unstable_enablePackageExports = true;
 
 module.exports = config;
