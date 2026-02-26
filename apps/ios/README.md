@@ -17,9 +17,9 @@ pnpm ios
 
 ## Configuration
 
-- Default web base URL: `https://zero-production.ludvighedin15.workers.dev`
-- Default backend URL: `https://zero-server-v1-production.ludvighedin15.workers.dev`
-- Default app entry URL: `https://zero-production.ludvighedin15.workers.dev/mail/inbox`
+- Default web base URL: `https://todus-production.ludvighedin15.workers.dev`
+- Default backend URL: `https://todus-server-v1-production.ludvighedin15.workers.dev`
+- Default app entry URL: `https://todus-production.ludvighedin15.workers.dev/mail/inbox`
 - Default app name: `Todus`
 - Override URLs:
 

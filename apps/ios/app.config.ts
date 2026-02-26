@@ -1,21 +1,22 @@
 import type { ExpoConfig } from 'expo/config';
 
 const webUrl =
-  process.env.EXPO_PUBLIC_WEB_URL ?? 'https://zero-production.ludvighedin15.workers.dev';
+  process.env.EXPO_PUBLIC_WEB_URL ?? 'https://todus-production.ludvighedin15.workers.dev';
 const backendUrl =
   process.env.EXPO_PUBLIC_BACKEND_URL ??
-  'https://zero-server-v1-production.ludvighedin15.workers.dev';
-const appEntryUrl = process.env.EXPO_PUBLIC_APP_ENTRY_URL ?? `${webUrl}/mail/inbox`;
+  'https://todus-server-v1-production.ludvighedin15.workers.dev';
 const appName = process.env.EXPO_PUBLIC_APP_NAME ?? 'Todus';
 
 const config: ExpoConfig = {
   name: appName,
   slug: 'todus-ios',
   version: '1.0.0',
+  scheme: 'todus',
   orientation: 'portrait',
   icon: './assets/icon.png',
   userInterfaceStyle: 'automatic',
   newArchEnabled: true,
+  plugins: ['expo-router', 'expo-secure-store'],
   ios: {
     bundleIdentifier: 'com.ludvighedin.todus',
     supportsTablet: true,
@@ -31,11 +32,16 @@ const config: ExpoConfig = {
   web: {
     favicon: './assets/favicon.png',
   },
+  experiments: {
+    typedRoutes: true,
+  },
   extra: {
     appName,
     webUrl,
     backendUrl,
-    appEntryUrl,
+    router: {
+      origin: false,
+    },
   },
 };
 

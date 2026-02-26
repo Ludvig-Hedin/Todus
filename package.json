@@ -5,6 +5,12 @@
   "packageManager": "pnpm@10.15.0",
   "scripts": {
     "go": "pnpm docker:db:up && pnpm run dev",
+    "native:start": "pnpm --filter=@zero/native start",
+    "native:ios": "pnpm --filter=@zero/native ios",
+    "native:android": "pnpm --filter=@zero/native android",
+    "native:macos": "pnpm --filter=@zero/native macos",
+    "native:ios:compile": "pnpm --filter=@zero/native ios:build:compile",
+    "native:macos:compile": "pnpm --filter=@zero/native macos:build:compile",
     "ios": "pnpm --filter=@zero/ios start",
     "ios:simulator": "pnpm --filter=@zero/ios ios",
     "ios:build:preview": "pnpm --filter=@zero/ios build:ios:preview",
