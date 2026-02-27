@@ -4,7 +4,6 @@ import { useCommandPalette } from '../context/command-palette-context.jsx';
 import { LabelDialog } from '@/components/labels/label-dialog';
 import { useActiveConnection } from '@/hooks/use-connections';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import Intercom, { show } from '@intercom/messenger-js-sdk';
 import { MessageSquare, OldPhone } from '../icons/icons';
 import { useSidebar } from '../context/sidebar-context';
 import { useTRPC } from '@/providers/query-provider';
@@ -55,17 +54,8 @@ export function NavMain({ items }: NavMainProps) {
   const pathname = location.pathname;
   const searchParams = new URLSearchParams();
 
-  const trpc = useTRPC();
-  const { data: intercomToken } = useQuery(trpc.user.getIntercomToken.queryOptions());
 
-  React.useEffect(() => {
-    if (intercomToken) {
-      Intercom({
-        app_id: 'aavenrba',
-        intercom_user_jwt: intercomToken,
-      });
-    }
-  }, [intercomToken]);
+  const trpc = useTRPC();
 
   const { mutateAsync: createLabel } = useMutation(trpc.labels.create.mutationOptions());
 
@@ -168,13 +158,13 @@ export function NavMain({ items }: NavMainProps) {
         await refetch();
         return result;
       });
-      
+
       toast.promise(promise, {
         loading: 'Creating label...',
         success: 'Label created successfully',
         error: 'Failed to create label',
       });
-      
+
       await promise;
     } catch (error) {
       console.error('Failed to create label:', error);
@@ -186,14 +176,6 @@ export function NavMain({ items }: NavMainProps) {
       <SidebarMenu>
         {isBottomNav ? (
           <>
-            <SidebarMenuButton
-              onClick={() => show()}
-              tooltip={state === 'collapsed' ? m['common.commandPalette.groups.help']() : undefined}
-              className="hover:bg-subtleWhite flex cursor-pointer items-center dark:hover:bg-[#202020]"
-            >
-              <OldPhone className="relative mr-2.5 h-2 w-2 fill-[#8F8F8F]" />
-              <p className="relative bottom-0.5 mt-0.5 truncate text-[13px]">Live Support</p>
-            </SidebarMenuButton>
             <NavItem
               key={'feedback'}
               isActive={isUrlActive('https://feedback.0.email')}

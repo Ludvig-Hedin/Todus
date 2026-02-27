@@ -8,15 +8,23 @@ export class DatadogService {
     private appKey: string;
     private site: string;
 
+    private enabled = false;
+
     constructor(env?: ZeroEnv) {
         // Runtime validation for required Datadog credentials
-        if (!env?.DD_API_KEY || env.DD_API_KEY.trim() === '') {
-            throw new Error('DD_API_KEY environment variable is required and cannot be empty for Datadog service');
+        if (!env?.DD_API_KEY || env.DD_API_KEY.trim() === '' || !env?.DD_APP_KEY || env.DD_APP_KEY.trim() === '') {
+            console.warn('⚠️ Datadog API keys missing. Logging to Datadog is disabled.');
+            this.enabled = false;
+            // Initialize with dummy values to avoid undefined errors if called, 
+            // but logSingleCall will check the enabled flag.
+            this.apiInstance = {} as any;
+            this.apiKey = '';
+            this.appKey = '';
+            this.site = '';
+            return;
         }
 
-        if (!env?.DD_APP_KEY || env.DD_APP_KEY.trim() === '') {
-            throw new Error('DD_APP_KEY environment variable is required and cannot be empty for Datadog service');
-        }
+        this.enabled = true;
 
         const configuration = client.createConfiguration({
             authMethods: {
@@ -51,6 +59,10 @@ export class DatadogService {
     }
 
     async logSingleCall(sessionId: string, userId: string, log: TRPCCallLog): Promise<void> {
+        if (!this.enabled) {
+            return;
+        }
+
         // Skip logging-related procedures to avoid recursive logging
         if (this.isLoggingProcedure(log.procedure)) {
             return;
