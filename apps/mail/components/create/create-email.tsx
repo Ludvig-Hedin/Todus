@@ -91,16 +91,18 @@ export function CreateEmail({
   }) => {
     const fromEmail = data.fromEmail || aliases?.[0]?.email || userEmail;
 
-    const zeroSignature = settings?.settings.zeroSignature
-      ? '<p style="color: #666; font-size: 12px;">Sent via <a href="https://0.email/" style="color: #0066cc; text-decoration: none;">Todus</a></p>'
+    const todusSignature = settings?.settings.zeroSignature
+      ? '<p style="color: #666; font-size: 12px;">Sent via <a href="https://todus.app/" style="color: #0066cc; text-decoration: none;">Todus</a></p>'
       : '';
+
 
     const result = await sendEmail({
       to: data.to.map((email) => ({ email, name: email.split('@')[0] || email })),
       cc: data.cc?.map((email) => ({ email, name: email.split('@')[0] || email })),
       bcc: data.bcc?.map((email) => ({ email, name: email.split('@')[0] || email })),
       subject: data.subject,
-      message: data.message + zeroSignature,
+      message: data.message + todusSignature,
+
       attachments: await serializeFiles(data.attachments),
       fromEmail: userName.trim() ? `${userName.replace(/[<>]/g, '')} <${fromEmail}>` : fromEmail,
       draftId: draftId ?? undefined,
@@ -155,17 +157,17 @@ export function CreateEmail({
   const undoEmailData = useMemo((): EmailData | null => {
     if (isComposeOpen !== 'true') return null;
     if (typeof window === 'undefined') return null;
-    
+
     const storedData = localStorage.getItem('undoEmailData');
     if (!storedData) return null;
-    
+
     try {
       const parsedData = JSON.parse(storedData);
-      
+
       if (parsedData.attachments && Array.isArray(parsedData.attachments)) {
         parsedData.attachments = deserializeFiles(parsedData.attachments);
       }
-      
+
       return parsedData;
     } catch (error) {
       console.error('Failed to parse undo email data:', error);
@@ -230,8 +232,8 @@ export function CreateEmail({
               className="mb-12 rounded-2xl border"
               onSendEmail={handleSendEmail}
               initialMessage={
-                undoEmailData?.message || 
-                typedDraft?.content || 
+                undoEmailData?.message ||
+                typedDraft?.content ||
                 initialBody
               }
               initialTo={
@@ -258,8 +260,8 @@ export function CreateEmail({
               }}
               initialAttachments={undoEmailData?.attachments || files}
               initialSubject={
-                undoEmailData?.subject || 
-                typedDraft?.subject || 
+                undoEmailData?.subject ||
+                typedDraft?.subject ||
                 initialSubject
               }
               autofocus={false}

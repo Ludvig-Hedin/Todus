@@ -14,10 +14,10 @@ export const api = createTRPCClient<AppRouter>({
                 fetch(url, { ...options, credentials: 'include' }).then((res) => {
                     if (typeof window !== 'undefined') {
                         const currentPath = new URL(window.location.href).pathname;
-                        const redirectPath = res.headers.get('X-Zero-Redirect');
+                        const redirectPath = res.headers.get('X-Todus-Redirect');
                         if (!!redirectPath && redirectPath !== currentPath) {
                             window.location.href = redirectPath;
-                            res.headers.delete('X-Zero-Redirect');
+                            res.headers.delete('X-Todus-Redirect');
                         }
                     }
                     return res;

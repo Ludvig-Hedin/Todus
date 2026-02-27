@@ -63,7 +63,7 @@ export default function Footer() {
                 className="hidden flex-col items-center justify-start md:flex"
               >
                 <div className="justify-start text-center text-lg font-normal leading-7 text-white lg:text-2xl">
-                  Get started and see how 0.email helps you process your inbox in a fraction of the
+                  Get started and see how todus.app helps you process your inbox in a fraction of the
                   time.
                 </div>
               </motion.div>
@@ -86,7 +86,7 @@ export default function Footer() {
           <div className="inline-flex flex-col items-start justify-between gap-4 mb-10 md:mb-0 self-stretch">
             <div className="inline-flex w-8 items-center justify-start gap-3">
               <a href="/">
-                <img src="/white-icon.svg" alt="logo" width={100} height={100} />
+                <img src="/logo.png" alt="logo" width={100} height={100} />
               </a>
             </div>
             <div className="inline-flex items-center justify-start gap-4">
@@ -130,7 +130,7 @@ export default function Footer() {
                 <a
                   target="_blank"
                   rel="noreferrer"
-                  href="https://trust.inc/zero"
+                  href="https://trust.inc/todus"
                   className="w-full"
                 >
                   <div className="justify-start self-stretch text-sm md:text-base font-normal leading-none text-white opacity-80 transition-opacity hover:opacity-100">
@@ -199,7 +199,7 @@ export default function Footer() {
                 <a
                   target="_blank"
                   rel="noreferrer"
-                  href="https://github.com/Mail-0/Zero"
+                  href="https://github.com/todus-app"
                   className="w-full"
                 >
                   <div className="justify-start self-stretch text-sm md:text-base font-normal leading-none text-white opacity-80 transition-opacity hover:opacity-100">

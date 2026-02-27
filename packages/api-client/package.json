@@ -1,0 +1,29 @@
+{
+  "name": "@zero/api-client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@tanstack/react-query": "^5.90.0",
+    "@trpc/client": "^11.1.4",
+    "@trpc/server": "^11.1.4",
+    "@zero/shared": "workspace:*",
+    "superjson": "^2.2.2"
+  },
+  "devDependencies": {
+    "@tanstack/react-query": "^5.90.2",
+    "@trpc/client": "catalog:",
+    "@trpc/server": "catalog:",
+    "@zero/shared": "workspace:*",
+    "superjson": "catalog:",
+    "@zero/tsconfig": "workspace:*",
+    "@zero/server": "workspace:*",
+    "typescript": "catalog:"
+  }
+}

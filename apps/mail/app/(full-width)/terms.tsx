@@ -1,6 +1,12 @@
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard';
 import { Card, CardHeader, CardTitle } from '@/components/ui/card';
-import { Github, ArrowLeft, Link2 } from 'lucide-react';
+import { ArrowLeft, Link2, Github } from 'lucide-react';
+
+// Type casts for Lucide icons to resolve TS2786
+const ArrowLeftIcon = ArrowLeft as any;
+const Link2Icon = Link2 as any;
+const GithubIcon = Github as any;
+
 import { Navigation } from '@/components/navigation';
 import { Button } from '@/components/ui/button';
 import Footer from '@/components/home/footer';
@@ -30,7 +36,8 @@ export default function TermsOfService() {
               size="sm"
               className="gap-2 text-gray-600 hover:text-gray-900 dark:text-white dark:hover:text-white/80"
             >
-              <ArrowLeft className="h-4 w-4" />
+              <ArrowLeftIcon className="h-4 w-4" />
+
               Back
             </Button>
           </a>

@@ -1,10 +1,10 @@
 import { app, BrowserWindow, shell } from 'electron';
 
 const WEB_BASE_URL =
-  process.env.EXPO_PUBLIC_WEB_URL ?? 'https://zero-production.ludvighedin15.workers.dev';
+  process.env.EXPO_PUBLIC_WEB_URL ?? 'https://todus-production.ludvighedin15.workers.dev';
 const BACKEND_URL =
   process.env.EXPO_PUBLIC_BACKEND_URL ??
-  'https://zero-server-v1-production.ludvighedin15.workers.dev';
+  'https://todus-server-v1-production.ludvighedin15.workers.dev';
 const APP_NAME = process.env.EXPO_PUBLIC_APP_NAME ?? 'Todus';
 const APP_ENTRY_URL = process.env.EXPO_PUBLIC_APP_ENTRY_URL ?? `${WEB_BASE_URL}/mail/inbox`;
 

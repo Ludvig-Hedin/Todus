@@ -1,10 +1,9 @@
 import type { ExpoConfig } from 'expo/config';
 
 const webUrl =
-  process.env.EXPO_PUBLIC_WEB_URL ?? 'https://todus-production.ludvighedin15.workers.dev';
+  process.env.EXPO_PUBLIC_WEB_URL ?? 'https://todus.app';
 const backendUrl =
-  process.env.EXPO_PUBLIC_BACKEND_URL ??
-  'https://todus-server-v1-production.ludvighedin15.workers.dev';
+  process.env.EXPO_PUBLIC_BACKEND_URL ?? 'https://api.todus.app';
 const appName = process.env.EXPO_PUBLIC_APP_NAME ?? 'Todus';
 
 const config: ExpoConfig = {

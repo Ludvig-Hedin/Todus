@@ -22,12 +22,6 @@ import { toast } from 'sonner';
 
 const resources = [
   {
-    title: 'GitHub',
-    href: 'https://github.com/Mail-0/Zero',
-    description: 'Check out our open-source projects and contributions.',
-    platform: 'github' as const,
-  },
-  {
     title: 'Twitter',
     href: 'https://x.com/mail0dotcom',
     description: 'Follow us for the latest updates and announcements.',
@@ -83,30 +77,8 @@ interface GitHubApiResponse {
 
 export function Navigation() {
   const [open, setOpen] = useState(false);
-  const [stars, setStars] = useState(0); // Default fallback value
   const { data: session } = useSession();
   const navigate = useNavigate();
-
-  const { data: githubData } = useQuery({
-    queryKey: ['githubStars'],
-    queryFn: async () => {
-      const response = await fetch('https://api.github.com/repos/Mail-0/Zero', {
-        headers: {
-          Accept: 'application/vnd.github.v3+json',
-        },
-      });
-      if (!response.ok) {
-        throw new Error('Failed to fetch GitHub stars');
-      }
-      return response.json() as Promise<GitHubApiResponse>;
-    },
-  });
-
-  useEffect(() => {
-    if (githubData) {
-      setStars(githubData.stargazers_count || 0);
-    }
-  }, [githubData]);
 
   return (
     <>
@@ -115,7 +87,7 @@ export function Navigation() {
         <nav className="border-input/50 flex w-full max-w-4xl items-center justify-between gap-2 rounded-xl border-t bg-[#1E1E1E] p-3 px-6">
           <div className="flex items-center gap-6">
             <Link to="/" className="relative bottom-1 cursor-pointer">
-              <img src="white-icon.svg" alt={APP_NAME} width={22} height={22} />
+              <img src="/brand-logo.png" alt={APP_NAME} className="rounded-md" width={22} height={22} />
               <span className="text-muted-foreground absolute -right-[-0.5px] text-[10px]">
                 beta
               </span>
@@ -171,24 +143,6 @@ export function Navigation() {
             </NavigationMenu>
           </div>
           <div className="flex gap-2">
-            <a
-              href="https://github.com/Mail-0/Zero"
-              target="_blank"
-              rel="noopener noreferrer"
-              className={cn(
-                'group inline-flex h-8 items-center gap-2 rounded-lg bg-black px-2 text-sm text-white transition-colors hover:bg-black/90',
-              )}
-            >
-              <div className="flex items-center text-white">
-                <GitHub className="mr-1 size-4 fill-white" />
-                <span className="ml-1 lg:hidden">Star</span>
-                <span className="ml-1 hidden lg:inline">GitHub</span>
-              </div>
-              <div className="flex items-center gap-1 text-sm">
-                <Star className="relative top-px size-4 fill-gray-400 duration-300 group-hover:fill-yellow-400 group-hover:drop-shadow-[0_0_8px_rgba(250,204,21,0.6)]" />
-                <AnimatedNumber value={stars} className="font-medium text-white" />
-              </div>
-            </a>
             <Button
               className="h-8 bg-white text-black hover:bg-white hover:text-black cursor-pointer"
               onClick={() => {
@@ -226,16 +180,9 @@ export function Navigation() {
               <SheetTitle>
                 <Link to="/" onClick={() => setOpen(false)}>
                   <img
-                    src="white-icon.svg"
+                    src="/brand-logo.png"
                     alt={APP_NAME}
-                    className="hidden object-contain dark:block"
-                    width={22}
-                    height={22}
-                  />
-                  <img
-                    src="/black-icon.svg"
-                    alt="0.email Logo"
-                    className="object-contain dark:hidden"
+                    className="rounded-md object-contain"
                     width={22}
                     height={22}
                   />

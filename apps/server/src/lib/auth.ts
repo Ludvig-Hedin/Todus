@@ -329,6 +329,33 @@ export const createAuth = () => {
 const createAuthConfig = () => {
   const cache = redis();
   const { db } = createDb(env.HYPERDRIVE.connectionString);
+  const toOrigin = (input: string) => {
+    try {
+      return new URL(input).origin;
+    } catch {
+      return input;
+    }
+  };
+  const trustedOrigins = Array.from(
+    new Set(
+      [
+        'https://app.0.email',
+        'https://sapi.0.email',
+        'https://staging.0.email',
+        'https://0.email',
+        'https://todus.app',
+        'https://todus-production.ludvighedin15.workers.dev',
+        'https://todus-server-v1-production.ludvighedin15.workers.dev',
+        'https://zero-server-v1-production.ludvighedin15.workers.dev',
+        'http://localhost:3000',
+        'http://localhost:8787',
+        toOrigin(env.VITE_PUBLIC_APP_URL),
+        toOrigin(env.VITE_PUBLIC_BACKEND_URL),
+        'todus://auth-callback',
+      ].filter(Boolean),
+    ),
+  );
+
   return {
     database: drizzleAdapter(db, { provider: 'pg' }),
     secondaryStorage: {
@@ -355,13 +382,7 @@ const createAuthConfig = () => {
       },
     },
     baseURL: env.VITE_PUBLIC_BACKEND_URL,
-    trustedOrigins: [
-      'https://app.0.email',
-      'https://sapi.0.email',
-      'https://staging.0.email',
-      'https://0.email',
-      'http://localhost:3000',
-    ],
+    trustedOrigins,
     session: {
       cookieCache: {
         enabled: true,

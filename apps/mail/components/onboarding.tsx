@@ -8,22 +8,22 @@ const steps = [
   {
     title: `Welcome to ${APP_NAME}!`,
     description: 'Your new intelligent email experience starts here.',
-    video: 'https://assets.0.email/get-started.png',
+    video: 'https://assets.todus.app/get-started.png',
   },
   {
     title: 'Chat with your inbox',
     description: `${APP_NAME} lets you chat with your inbox and take action faster.`,
-    video: 'https://assets.0.email/step2.gif',
+    video: 'https://assets.todus.app/step2.gif',
   },
   {
     title: 'AI Compose & Reply',
     description: 'Our AI assistant allows you to write emails that sound like you.',
-    video: 'https://assets.0.email/step1.gif',
+    video: 'https://assets.todus.app/step1.gif',
   },
   {
     title: 'Label your emails',
     description: `${APP_NAME} helps you label emails so you can focus on what matters.`,
-    video: 'https://assets.0.email/step3.gif',
+    video: 'https://assets.todus.app/step3.gif',
   },
   {
     title: 'Coming Soon',
@@ -34,12 +34,12 @@ const steps = [
         </span>
       </>
     ),
-    video: 'https://assets.0.email/coming-soon.png',
+    video: 'https://assets.todus.app/coming-soon.png',
   },
   {
     title: 'Ready to start?',
     description: 'Click below to begin your intelligent email experience!',
-    video: 'https://assets.0.email/ready.png',
+    video: 'https://assets.todus.app/ready.png',
   },
 ];
 
@@ -86,9 +86,8 @@ export function OnboardingDialog({
                     step.video && (
                       <div
                         key={step.title}
-                        className={`absolute inset-0 transition-opacity duration-300 ${
-                          index === currentStep ? 'opacity-100' : 'opacity-0'
-                        }`}
+                        className={`absolute inset-0 transition-opacity duration-300 ${index === currentStep ? 'opacity-100' : 'opacity-0'
+                          }`}
                       >
                         <img
                           loading="eager"
@@ -130,9 +129,8 @@ export function OnboardingDialog({
                 {steps.map((_, index) => (
                   <div
                     key={_.title}
-                    className={`h-1 w-4 rounded-full md:w-10 ${
-                      index === currentStep ? 'bg-primary' : 'bg-muted'
-                    }`}
+                    className={`h-1 w-4 rounded-full md:w-10 ${index === currentStep ? 'bg-primary' : 'bg-muted'
+                      }`}
                   />
                 ))}
               </div>

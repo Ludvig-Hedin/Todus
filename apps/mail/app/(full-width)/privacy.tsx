@@ -1,6 +1,14 @@
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard';
 import { Card, CardHeader, CardTitle } from '@/components/ui/card';
-import { Github, Mail, ArrowLeft, Link2 } from 'lucide-react';
+
+import { ArrowLeft, Link2, Mail, Github } from 'lucide-react';
+
+// Type casts for Lucide icons to resolve TS2786
+const ArrowLeftIcon = ArrowLeft as any;
+const Link2Icon = Link2 as any;
+const MailIcon = Mail as any;
+const GithubIcon = Github as any;
+
 import { Navigation } from '@/components/navigation';
 import { Button } from '@/components/ui/button';
 import Footer from '@/components/home/footer';
@@ -14,7 +22,7 @@ export default function PrivacyPolicy() {
   const { copiedValue: copiedSection, copyToClipboard } = useCopyToClipboard();
 
   const handleCopyLink = (sectionId: string) => {
-    const url = `${window.location.origin}${window.location.pathname}#${sectionId}`;
+    const url = `${window.location.origin}${window.location.pathname} #${sectionId} `;
     copyToClipboard(url, sectionId);
   };
 
@@ -29,7 +37,8 @@ export default function PrivacyPolicy() {
               size="sm"
               className="gap-2 text-gray-600 hover:text-gray-900 dark:text-white dark:hover:text-white/80"
             >
-              <ArrowLeft className="h-4 w-4" />
+              <ArrowLeftIcon className="h-4 w-4" />
+
               Back
             </Button>
           </a>
@@ -64,10 +73,11 @@ export default function PrivacyPolicy() {
                         className="text-gray-400 hover:text-gray-700 dark:text-white/60 dark:hover:text-white/80"
                         aria-label={`Copy link to ${section.title} section`}
                       >
-                        <Link2
+                        <Link2Icon
                           className={`h-4 w-4 ${copiedSection === sectionId ? 'text-green-500 dark:text-green-400' : ''}`}
                         />
                       </button>
+
                     </div>
                     <div className="prose prose-sm prose-a:text-blue-600 hover:prose-a:text-blue-800 dark:prose-a:text-blue-400 dark:hover:prose-a:text-blue-300 max-w-none text-gray-600 dark:text-white/80">
                       {section.content}
@@ -424,16 +434,18 @@ const sections = [
             href="mailto:founders@todus.app"
             className="inline-flex items-center text-blue-600 hover:text-blue-800"
           >
-            <Mail className="mr-2 h-4 w-4" />
+            <MailIcon className="mr-2 h-4 w-4" />
             founders@todus.app
           </a>
+
           <a
             href="https://github.com/todus-app"
             className="inline-flex items-center text-blue-600 hover:text-blue-800"
           >
-            <Github className="mr-2 h-4 w-4" />
+            <GithubIcon className="mr-2 h-4 w-4" />
             Open an issue on GitHub
           </a>
+
         </div>
       </div>
     ),

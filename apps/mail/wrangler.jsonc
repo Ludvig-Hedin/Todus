@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "zero",
+  "name": "todus",
   "compatibility_date": "2025-06-27",
   "observability": {
     "enabled": true,
@@ -12,7 +12,7 @@
   },
   "env": {
     "local": {
-      "name": "zero-local",
+      "name": "todus-local",
       "vars": {
         "VITE_PUBLIC_BACKEND_URL": "http://localhost:8787",
         "VITE_PUBLIC_APP_URL": "http://localhost:3000",
@@ -20,18 +20,18 @@
       },
     },
     "staging": {
-      "name": "zero-staging",
+      "name": "todus-staging",
       "vars": {
-        "VITE_PUBLIC_BACKEND_URL": "https://sapi.0.email",
-        "VITE_PUBLIC_APP_URL": "https://staging.0.email",
+        "VITE_PUBLIC_BACKEND_URL": "https://sapi.todus.app",
+        "VITE_PUBLIC_APP_URL": "https://staging.todus.app",
         "VITE_PUBLIC_APP_NAME": "Todus",
       },
     },
     "production": {
-      "name": "zero-production",
+      "name": "todus-production",
       "vars": {
-        "VITE_PUBLIC_BACKEND_URL": "https://zero-server-v1-production.ludvighedin15.workers.dev",
-        "VITE_PUBLIC_APP_URL": "https://zero-production.ludvighedin15.workers.dev",
+        "VITE_PUBLIC_BACKEND_URL": "https://api.todus.app",
+        "VITE_PUBLIC_APP_URL": "https://todus.app",
         "VITE_PUBLIC_APP_NAME": "Todus",
       },
     },

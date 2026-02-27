@@ -58,6 +58,7 @@ import { eq, desc, isNotNull } from 'drizzle-orm';
 import migrations from './db/drizzle/migrations';
 import { getPromptName } from '../../pipelines';
 import { anthropic } from '@ai-sdk/anthropic';
+import { google } from '@ai-sdk/google';
 import { connection } from '../../db/schema';
 import type { WSMessage } from 'partyserver';
 import { tools as authTools } from './tools';
@@ -1771,9 +1772,16 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
         );
 
         const model =
-          this.env.USE_OPENAI === 'true'
-            ? groq('openai/gpt-oss-120b')
-            : anthropic(this.env.OPENAI_MODEL || 'claude-3-7-sonnet-20250219');
+          this.env.OPENROUTER_API_KEY
+            ? openai(this.env.DEFAULT_MODEL || 'google/gemini-2.0-flash-001', {
+              baseURL: 'https://openrouter.ai/api/v1',
+              apiKey: this.env.OPENROUTER_API_KEY,
+            })
+            : this.env.GOOGLE_GENERATIVE_AI_API_KEY
+              ? google(this.env.DEFAULT_MODEL || 'gemini-1.5-flash')
+              : this.env.USE_OPENAI === 'true'
+                ? openai(this.env.OPENAI_MODEL || 'gpt-4o')
+                : anthropic(this.env.OPENAI_MODEL || 'claude-3-7-sonnet-20250219');
 
         const result = streamText({
           model,

@@ -147,38 +147,41 @@ export default function ReplyCompose({ messageId }: ReplyComposeProps) {
 
       const ccRecipients: Sender[] | undefined = data.cc
         ? data.cc.map((email) => ({
-            email,
-            name: email.split('@')[0] || 'User',
-          }))
+          email,
+          name: email.split('@')[0] || 'User',
+        }))
         : undefined;
 
       const bccRecipients: Sender[] | undefined = data.bcc
         ? data.bcc.map((email) => ({
-            email,
-            name: email.split('@')[0] || 'User',
-          }))
+          email,
+          name: email.split('@')[0] || 'User',
+        }))
         : undefined;
 
-      const zeroSignature = settings?.settings.zeroSignature
-        ? '<p style="color: #666; font-size: 12px;">Sent via <a href="https://0.email/" style="color: #0066cc; text-decoration: none;">Todus</a></p>'
+      const todusSignature = settings?.settings.zeroSignature
+        ? '<p style="color: #666; font-size: 12px;">Sent via <a href="https://todus.app/" style="color: #0066cc; text-decoration: none;">Todus</a></p>'
         : '';
+
 
       const emailBody =
         mode === 'forward'
           ? constructForwardBody(
-              data.message + zeroSignature,
-              new Date(replyToMessage.receivedOn || '').toLocaleString(),
-              { ...replyToMessage.sender, subject: replyToMessage.subject },
-              toRecipients,
-              //   replyToMessage.decodedBody,
-            )
+            data.message + todusSignature,
+
+            new Date(replyToMessage.receivedOn || '').toLocaleString(),
+            { ...replyToMessage.sender, subject: replyToMessage.subject },
+            toRecipients,
+            //   replyToMessage.decodedBody,
+          )
           : constructReplyBody(
-              data.message + zeroSignature,
-              new Date(replyToMessage.receivedOn || '').toLocaleString(),
-              replyToMessage.sender,
-              toRecipients,
-              //   replyToMessage.decodedBody,
-            );
+            data.message + todusSignature,
+
+            new Date(replyToMessage.receivedOn || '').toLocaleString(),
+            replyToMessage.sender,
+            toRecipients,
+            //   replyToMessage.decodedBody,
+          );
 
       const result = await sendEmail({
         to: toRecipients,
@@ -210,7 +213,7 @@ export default function ReplyCompose({ messageId }: ReplyComposeProps) {
       // Reset states
       setMode(null);
       await refetch();
-      
+
       handleUndoSend(result, settings, {
         to: data.to,
         cc: data.cc,

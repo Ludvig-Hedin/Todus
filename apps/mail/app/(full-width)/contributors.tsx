@@ -8,6 +8,19 @@ import {
   GitPullRequest,
   LayoutGrid,
 } from 'lucide-react';
+
+// Type casts for Lucide icons to resolve TS2786
+const GithubIcon = Github as any;
+const StarIcon = Star as any;
+const GitForkIcon = GitFork as any;
+const MessageCircleIcon = MessageCircle as any;
+const GitGraphIcon = GitGraph as any;
+const ChartAreaIconComp = ChartAreaIcon as any;
+const GitPullRequestIcon = GitPullRequest as any;
+const LayoutGridIcon = LayoutGrid as any;
+
+
+
 import {
   Area,
   AreaChart,
@@ -26,6 +39,7 @@ import { Separator } from '@/components/ui/separator';
 import { Navigation } from '@/components/navigation';
 import { useEffect, useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
+
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 
@@ -66,7 +80,7 @@ const coreTeamMembers = [
   'dakdevs',
   'mrgsub',
 ];
-const REPOSITORY = 'Mail-0/Zero';
+const REPOSITORY = 'todus-app/mail';
 
 const specialRoles: Record<
   string,
@@ -142,8 +156,8 @@ export default function OpenPage() {
   const [error, setError] = useState<string | null>(null);
   const [allContributors, setAllContributors] = useState<Contributor[]>([]);
   const [, setIsRendered] = useState(false);
-
   useEffect(() => setIsRendered(true), []);
+
 
   const { data: initialContributors } = useQuery({
     queryFn: () =>
@@ -228,9 +242,9 @@ export default function OpenPage() {
     if (repoError || commitsError || prsError) {
       setError(
         repoError?.message ||
-          commitsError?.message ||
-          prsError?.message ||
-          'An error occurred while fetching data',
+        commitsError?.message ||
+        prsError?.message ||
+        'An error occurred while fetching data',
       );
       generateFallbackData();
       return;
@@ -387,13 +401,13 @@ export default function OpenPage() {
                 <a href="/">
                   <div className="relative h-8 w-8">
                     <img
-                      src="/black-icon.svg"
-                      alt="0.email Logo"
+                      src="/brand-logo.png"
+                      alt="Todus Logo"
                       className="object-contain dark:hidden"
                     />
                     <img
-                      src="/white-icon.svg"
-                      alt="0.email Logo"
+                      src="/brand-logo.png"
+                      alt="Todus Logo"
                       className="hidden object-contain dark:block"
                     />
                   </div>
@@ -411,9 +425,10 @@ export default function OpenPage() {
                 className="gap-2 border-neutral-200 bg-white/50 text-neutral-700 hover:bg-neutral-100 hover:text-neutral-900 dark:border-neutral-700 dark:bg-neutral-900/50 dark:text-neutral-200 dark:hover:bg-neutral-800 dark:hover:text-white"
               >
                 <a href={`https://github.com/${REPOSITORY}`} target="_blank">
-                  <Github className="h-4 w-4" />
+                  <GithubIcon className="h-4 w-4" />
                   View on GitHub
                 </a>
+
               </Button>
             </div>
           </div>
@@ -422,7 +437,8 @@ export default function OpenPage() {
 
           <div className="flex flex-wrap items-center divide-x divide-neutral-200 dark:divide-neutral-700">
             <div className="flex items-center gap-3 px-3 first:pl-0 last:pr-0 sm:px-4">
-              <Star className="h-4 w-4 text-neutral-600 dark:text-neutral-400" />
+              <StarIcon className="h-4 w-4 text-neutral-600 dark:text-neutral-400" />
+
               <div className="flex items-baseline gap-1">
                 <span className="text-base font-bold text-neutral-900 sm:text-lg dark:text-white">
                   {repoStats.stars}
@@ -434,7 +450,8 @@ export default function OpenPage() {
             </div>
 
             <div className="flex items-center gap-3 px-3 first:pl-0 last:pr-0 sm:px-4">
-              <GitFork className="h-4 w-4 text-neutral-600 dark:text-neutral-400" />
+              <GitForkIcon className="h-4 w-4 text-neutral-600 dark:text-neutral-400" />
+
               <div className="flex items-baseline gap-1">
                 <span className="text-base font-bold text-neutral-900 sm:text-lg dark:text-white">
                   {repoStats.forks}
@@ -446,7 +463,8 @@ export default function OpenPage() {
             </div>
 
             <div className="hidden items-center gap-3 px-3 first:pl-0 last:pr-0 sm:flex sm:px-4">
-              <Github className="h-4 w-4 text-neutral-600 dark:text-neutral-400" />
+              <GithubIcon className="h-4 w-4 text-neutral-600 dark:text-neutral-400" />
+
               <div className="flex items-baseline gap-1">
                 <span className="text-base font-bold text-neutral-900 sm:text-lg dark:text-white">
                   {repoStats.watchers}
@@ -458,7 +476,8 @@ export default function OpenPage() {
             </div>
 
             <div className="flex items-center gap-3 px-3 first:pl-0 last:pr-0 sm:px-4">
-              <MessageCircle className="h-4 w-4 text-neutral-600 dark:text-neutral-400" />
+              <MessageCircleIcon className="h-4 w-4 text-neutral-600 dark:text-neutral-400" />
+
               <div className="flex items-baseline gap-1">
                 <span className="text-base font-bold text-neutral-900 sm:text-lg dark:text-white">
                   {repoStats.openIssues}
@@ -470,7 +489,8 @@ export default function OpenPage() {
             </div>
 
             <div className="flex items-center gap-3 px-3 first:pl-0 last:pr-0 sm:px-4">
-              <GitPullRequest className="h-4 w-4 text-neutral-600 dark:text-neutral-400" />
+              <GitPullRequestIcon className="h-4 w-4 text-neutral-600 dark:text-neutral-400" />
+
               <div className="flex items-baseline gap-1">
                 <span className="text-base font-bold text-neutral-900 sm:text-lg dark:text-white">
                   {repoStats.openPRs}
@@ -531,7 +551,8 @@ export default function OpenPage() {
                           <div className="rounded-lg border border-neutral-200 bg-white p-3 shadow-lg dark:border-neutral-800 dark:bg-neutral-900">
                             <div className="grid gap-2">
                               <div className="flex items-center gap-2">
-                                <Star className="h-4 w-4 text-neutral-900 dark:text-white" />
+                                <StarIcon className="h-4 w-4 text-neutral-900 dark:text-white" />
+
                                 <span className="text-sm text-neutral-600 dark:text-neutral-400">
                                   Stars:
                                 </span>
@@ -540,7 +561,8 @@ export default function OpenPage() {
                                 </span>
                               </div>
                               <div className="flex items-center gap-2">
-                                <GitFork className="h-4 w-4 text-neutral-700 dark:text-neutral-300" />
+                                <GitForkIcon className="h-4 w-4 text-neutral-700 dark:text-neutral-300" />
+
                                 <span className="text-sm text-neutral-600 dark:text-neutral-400">
                                   Forks:
                                 </span>
@@ -605,7 +627,8 @@ export default function OpenPage() {
                           <div className="rounded-lg border border-neutral-200 bg-white p-3 shadow-lg dark:border-neutral-800 dark:bg-neutral-900">
                             <div className="grid gap-2">
                               <div className="flex items-center gap-2">
-                                <GitGraph className="h-4 w-4 text-neutral-900 dark:text-white" />
+                                <GitGraphIcon className="h-4 w-4 text-neutral-900 dark:text-white" />
+
                                 <span className="text-sm text-neutral-600 dark:text-neutral-400">
                                   Commits:
                                 </span>
@@ -614,7 +637,8 @@ export default function OpenPage() {
                                 </span>
                               </div>
                               <div className="flex items-center gap-2">
-                                <MessageCircle className="h-4 w-4 text-neutral-700 dark:text-neutral-300" />
+                                <MessageCircleIcon className="h-4 w-4 text-neutral-700 dark:text-neutral-300" />
+
                                 <span className="text-sm text-neutral-600 dark:text-neutral-400">
                                   Issues:
                                 </span>
@@ -623,7 +647,8 @@ export default function OpenPage() {
                                 </span>
                               </div>
                               <div className="flex items-center gap-2">
-                                <GitPullRequest className="h-4 w-4 text-neutral-500 dark:text-neutral-500" />
+                                <GitPullRequestIcon className="h-4 w-4 text-neutral-500 dark:text-neutral-500" />
+
                                 <span className="text-sm text-neutral-600 dark:text-neutral-400">
                                   PRs:
                                 </span>
@@ -665,7 +690,7 @@ export default function OpenPage() {
             <h1 className="text-3xl font-semibold tracking-tight text-neutral-900/80 dark:text-white">
               Core Team
             </h1>
-            <p className="text-muted-foreground mt-2">Meet the people behind 0.email</p>
+            <p className="text-muted-foreground mt-2">Meet the people behind Todus</p>
           </div>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -704,7 +729,8 @@ export default function OpenPage() {
                       target="_blank"
                       className="rounded-md p-1 text-neutral-600 transition-colors hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-white"
                     >
-                      <Github className="h-4 w-4" />
+                      <GithubIcon className="h-4 w-4" />
+
                     </a>
                     {specialRoles[member.login.toLowerCase()]?.x && (
                       <a
@@ -751,7 +777,7 @@ export default function OpenPage() {
               Contributors
             </h1>
             <div className="text-muted-foreground mt-2 flex items-center justify-center gap-2">
-              <span>Thank you to all the contributors who have helped make 0.email possible</span>
+              <span>Thank you to all the contributors who have helped make Todus possible</span>
             </div>
           </div>
 
@@ -763,14 +789,16 @@ export default function OpenPage() {
                     value="grid"
                     className="flex items-center gap-2 text-neutral-600 data-[state=active]:bg-white data-[state=active]:text-neutral-900 data-[state=active]:shadow-sm dark:text-neutral-400 dark:data-[state=active]:bg-neutral-800 dark:data-[state=active]:text-white"
                   >
-                    <LayoutGrid className="h-4 w-4" />
+                    <LayoutGridIcon className="h-4 w-4" />
+
                     Grid
                   </TabsTrigger>
                   <TabsTrigger
                     value="chart"
                     className="flex items-center gap-2 text-neutral-600 data-[state=active]:bg-white data-[state=active]:text-neutral-900 data-[state=active]:shadow-sm dark:text-neutral-400 dark:data-[state=active]:bg-neutral-800 dark:data-[state=active]:text-white"
                   >
-                    <ChartAreaIcon className="h-4 w-4" />
+                    <ChartAreaIconComp className="h-4 w-4" />
+
                     Chart
                   </TabsTrigger>
                 </TabsList>

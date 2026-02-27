@@ -15,7 +15,7 @@
     "ios:simulator": "pnpm --filter=@zero/ios ios",
     "ios:build:preview": "pnpm --filter=@zero/ios build:ios:preview",
     "ios:build:production": "pnpm --filter=@zero/ios build:ios:production",
-    "macos": "pnpm --filter=@zero/macos dev",
+    "macos": "pnpm --filter=@zero/macos dev:macos",
     "prepare": "husky",
     "nizzy": "tsx ./packages/cli/src/cli.ts",
     "postinstall": "pnpm nizzy sync",
@@ -48,7 +48,8 @@
     "test:ai": "dotenv -- pnpm --filter=@zero/server run test:ai",
     "eval": "dotenv -- pnpm --filter=@zero/server run eval",
     "eval:dev": "dotenv -- pnpm --filter=@zero/server run eval:dev",
-    "eval:ci": "dotenv -- pnpm --filter=@zero/server run eval:ci"
+    "eval:ci": "dotenv -- pnpm --filter=@zero/server run eval:ci",
+    "android": "expo run:android"
   },
   "devDependencies": {
     "@types/node": "24.3.0",
@@ -66,6 +67,9 @@
     "drizzle-kit": "catalog:",
     "react-router": "^7.6.3",
     "zod": "4.1.1",
-    "zod-to-json-schema": "3.24.6"
+    "zod-to-json-schema": "3.24.6",
+    "expo": "~54.0.33",
+    "react": "19.1.0",
+    "react-native": "0.81.5"
   }
 }

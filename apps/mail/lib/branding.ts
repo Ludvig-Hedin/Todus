@@ -1,2 +1,2 @@
-export const APP_NAME = import.meta.env.VITE_PUBLIC_APP_NAME ?? 'Todus';
+export const APP_NAME = 'Todus';
 

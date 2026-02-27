@@ -1,0 +1,22 @@
+{
+  "name": "@zero/ui-native",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@zero/design-tokens": "workspace:*",
+    "react": "catalog:",
+    "react-native": "0.81.5"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.4",
+    "@zero/tsconfig": "workspace:*",
+    "typescript": "catalog:"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  }
+}

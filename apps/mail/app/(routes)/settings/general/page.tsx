@@ -133,7 +133,7 @@ export default function GeneralPage() {
       timezone: getBrowserTimezone(),
       dynamicContent: false,
       customPrompt: '',
-      zeroSignature: true,
+      todusSignature: true,
       defaultEmailAlias: '',
       animations: false,
     },
@@ -272,7 +272,7 @@ export default function GeneralPage() {
     [aliases],
   );
 
-  const renderZeroSignatureField = useCallback(
+  const renderTodusSignatureField = useCallback(
     ({ field }: { field: any }) => (
       <FormItem className="flex max-w-xl flex-row items-center justify-between rounded-lg border px-4 py-2">
         <div className="space-y-0.5">
@@ -354,8 +354,8 @@ export default function GeneralPage() {
 
             <FormField
               control={form.control}
-              name="zeroSignature"
-              render={renderZeroSignatureField}
+              name="todusSignature"
+              render={renderTodusSignatureField}
             />
             <FormField
               control={form.control}

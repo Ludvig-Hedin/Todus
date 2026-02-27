@@ -11,8 +11,8 @@ pnpm dev
 
 ## Defaults
 
-- Web: `https://zero-production.ludvighedin15.workers.dev`
-- Backend/Auth: `https://zero-server-v1-production.ludvighedin15.workers.dev`
+- Web: `https://todus-production.ludvighedin15.workers.dev`
+- Backend/Auth: `https://todus-server-v1-production.ludvighedin15.workers.dev`
 - Entry: `/mail/inbox`
 - App name: `Todus`
 

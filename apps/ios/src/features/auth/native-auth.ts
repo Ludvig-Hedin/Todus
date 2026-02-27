@@ -32,34 +32,62 @@ export async function loadNativeAuthProviders(baseUrl: string): Promise<NativeAu
     });
 }
 
-/** Initiates OAuth sign-in and returns the authorization URL */
-export async function beginNativeProviderSignIn(
-  baseUrl: string,
-  providerId: string,
+/** Calls better-auth's sign-in endpoint to get the OAuth provider URL.
+ * The URL points directly to the OAuth provider (e.g. Google consent screen).
+ * This avoids loading the web app's login page — user goes straight to Google. */
+export async function getSocialAuthUrl(
+  backendUrl: string,
+  webUrl: string,
+  provider: string,
   callbackUrl: string,
 ): Promise<string> {
-  const response = await fetch(`${baseUrl.replace(/\/$/, '')}/api/auth/sign-in/social`, {
+  const normalizedBackend = backendUrl.replace(/\/$/, '');
+  const normalizedWeb = webUrl.replace(/\/$/, '');
+
+  // Use redirect: 'manual' so we can capture the Location header if better-auth
+  // responds with a 302 redirect instead of JSON. Without this, fetch follows
+  // the redirect to accounts.google.com and we'd try to parse HTML as JSON.
+  const response = await fetch(`${normalizedBackend}/api/auth/sign-in/social`, {
     method: 'POST',
+    redirect: 'manual',
     headers: {
       'Content-Type': 'application/json',
+      // better-auth requires Origin header for CSRF — use the web app origin
+      // which is in the server's trustedOrigins list.
+      Origin: normalizedWeb,
     },
     body: JSON.stringify({
-      provider: providerId,
+      provider,
       callbackURL: callbackUrl,
-      disableRedirect: true,
     }),
   });
+
+  // Handle 302/303 redirect — the Location header contains the OAuth provider URL
+  if (response.status >= 300 && response.status < 400) {
+    const location = response.headers.get('Location');
+    if (location) {
+      return location;
+    }
+    throw new Error('Redirect response without Location header');
+  }
+
   if (!response.ok) {
-    throw new Error(`Provider sign-in failed (${response.status})`);
+    const body = await response.text().catch(() => '');
+    throw new Error(`Sign-in request failed (${response.status}): ${body}`);
   }
 
-  const payload = (await response.json()) as { url?: string };
+  const data = (await response.json()) as { url?: string; redirect?: boolean };
 
-  if (payload.url) {
-    return payload.url;
+  if (!data.url) {
+    throw new Error('No auth URL returned from server');
   }
 
-  throw new Error('Provider did not return an authorization URL.');
+  return data.url;
+}
+
+/** Returns the web app login URL as fallback when direct API call fails. */
+export function getWebLoginUrl(webUrl: string): string {
+  return `${webUrl.replace(/\/$/, '')}/login`;
 }
 
 /** Extracts bearer token from OAuth callback URL parameters */

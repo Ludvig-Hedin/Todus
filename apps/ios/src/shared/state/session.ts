@@ -18,24 +18,30 @@ export const currentPathAtom = atom<string>(nativeRouteDefaults.appEntryPath);
 
 /** Reads persisted session from secure storage and sets auth status */
 export const bootstrapSessionAtom = atom(null, async (_get, set) => {
-  const [session, lastVisitedPath] = await Promise.all([
-    secureStorage.getSession(),
-    secureStorage.getLastVisitedPath(),
-  ]);
+  try {
+    const [session, lastVisitedPath] = await Promise.all([
+      secureStorage.getSession(),
+      secureStorage.getLastVisitedPath(),
+    ]);
 
-  if (lastVisitedPath) {
-    set(currentPathAtom, lastVisitedPath);
+    if (lastVisitedPath) {
+      set(currentPathAtom, lastVisitedPath);
+    }
+
+    if (session && !isNativeAuthSessionExpired(session)) {
+      set(sessionAtom, session);
+      set(authStatusAtom, 'authenticated');
+      return;
+    }
+
+    set(sessionAtom, null);
+    await secureStorage.clearSession().catch(() => {});
+    set(authStatusAtom, 'unauthenticated');
+  } catch {
+    // If secure storage fails (e.g. Expo Go sandbox), fall through to unauthenticated
+    set(sessionAtom, null);
+    set(authStatusAtom, 'unauthenticated');
   }
-
-  if (session && !isNativeAuthSessionExpired(session)) {
-    set(sessionAtom, session);
-    set(authStatusAtom, 'authenticated');
-    return;
-  }
-
-  set(sessionAtom, null);
-  await secureStorage.clearSession();
-  set(authStatusAtom, 'unauthenticated');
 });
 
 /** Stores a new bearer token session */

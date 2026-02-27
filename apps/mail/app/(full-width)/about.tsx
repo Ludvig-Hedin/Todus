@@ -5,10 +5,17 @@ import { Button } from '@/components/ui/button';
 import Footer from '@/components/home/footer';
 import React from 'react';
 
+// Type casts for Lucide icons to resolve TS2786
+const GithubIcon = Github as any;
+const MailIcon = Mail as any;
+const ArrowLeftIcon = ArrowLeft as any;
+
+
 export default function AboutPage() {
   return (
     <div className="relative flex min-h-screen w-full flex-col overflow-auto bg-white dark:bg-[#111111]">
       <Navigation />
+
       <div className="relative z-10 flex grow flex-col">
         <div className="absolute right-4 top-6 md:left-8 md:right-auto md:top-8">
           <a href="/">
@@ -17,7 +24,8 @@ export default function AboutPage() {
               size="sm"
               className="gap-2 text-gray-600 hover:text-gray-900 dark:text-white dark:hover:text-white/80"
             >
-              <ArrowLeft className="h-4 w-4" />
+              <ArrowLeftIcon className="h-4 w-4" />
+
               Back
             </Button>
           </a>
@@ -142,14 +150,16 @@ const sections = [
             href="mailto:founders@todus.app"
             className="inline-flex items-center text-blue-400 hover:text-blue-300"
           >
-            <Mail className="mr-2 h-4 w-4" />
+            <MailIcon className="mr-2 h-4 w-4" />
+
             founders@todus.app
           </a>
           <a
             href="https://github.com/todus-app"
             className="inline-flex items-center text-blue-400 hover:text-blue-300"
           >
-            <Github className="mr-2 h-4 w-4" />
+            <GithubIcon className="mr-2 h-4 w-4" />
+
             Open an issue on GitHub
           </a>
         </div>

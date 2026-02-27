@@ -1,8 +1,8 @@
 import { APP_NAME } from '@/lib/branding';
 
-const TITLE = APP_NAME;
+const TITLE = 'Todus | AI-Native Email Assistant for Peak Productivity';
 const DESCRIPTION =
-  `${APP_NAME} is an AI-native email app that helps you move through inbox work faster.`;
+  'Todus is the world\'s most powerful AI-native email app. Organize, summarize, and blast through your inbox with surgical precision using advanced AI features.';
 
 export const siteConfig = {
   title: TITLE,

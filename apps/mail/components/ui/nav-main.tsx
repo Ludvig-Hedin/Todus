@@ -178,9 +178,10 @@ export function NavMain({ items }: NavMainProps) {
           <>
             <NavItem
               key={'feedback'}
-              isActive={isUrlActive('https://feedback.0.email')}
-              href={'https://feedback.0.email'}
-              url={'https://feedback.0.email'}
+              isActive={isUrlActive('https://feedback.todus.app')}
+              href={'https://feedback.todus.app'}
+              url={'https://feedback.todus.app'}
+
               icon={MessageSquare}
               target={'_blank'}
               title={m['navigation.sidebar.feedback']()}

@@ -1,0 +1,8 @@
+{
+  "android": {
+    "package": "com.ludvighedin15.zero"
+  },
+  "ios": {
+    "bundleIdentifier": "com.ludvighedin15.zero"
+  }
+}

@@ -1,6 +1,6 @@
-# Todus iOS WebView App
+# Todus iOS App
 
-This app wraps your deployed mail web app in a native iOS shell.
+Native React Native (Expo Router) mail client for iOS.
 
 ## Quick start
 
@@ -17,17 +17,16 @@ pnpm ios
 
 ## Configuration
 
-- Default web base URL: `https://todus-production.ludvighedin15.workers.dev`
-- Default backend URL: `https://todus-server-v1-production.ludvighedin15.workers.dev`
-- Default app entry URL: `https://todus-production.ludvighedin15.workers.dev/mail/inbox`
+- Default web URL: `https://todus.app`
+- Default backend URL: `https://api.todus.app`
+- Default app entry URL: `https://todus.app/mail/inbox`
 - Default app name: `Todus`
 - Override URLs:
 
 ```bash
-EXPO_PUBLIC_WEB_URL=https://your-domain.com pnpm ios
-EXPO_PUBLIC_BACKEND_URL=https://your-backend.workers.dev pnpm ios
-EXPO_PUBLIC_APP_ENTRY_URL=https://your-domain.com/mail/inbox pnpm ios
-EXPO_PUBLIC_APP_NAME=YourAppName pnpm ios
+EXPO_PUBLIC_WEB_URL=https://todus.app pnpm ios
+EXPO_PUBLIC_BACKEND_URL=https://api.todus.app pnpm ios
+EXPO_PUBLIC_APP_NAME=Todus pnpm ios
 ```
 
 Bundle identifier is set in `app.config.ts`:
@@ -66,5 +65,6 @@ pnpm submit:ios
 
 ## Notes
 
-- External links are opened in Safari.
-- In-app loading and retry states are handled in `App.tsx`.
+- OAuth login opens Google consent screen directly in a WebView (no intermediate web login page).
+- Bearer token stored in iOS Keychain via `expo-secure-store`.
+- TRPC queries use Bearer auth header for API calls.

@@ -87,8 +87,9 @@ export default function DeveloperPage() {
             <div className="space-y-4">
               <h1 className="text-2xl font-bold sm:text-3xl">Developer Resources</h1>
               <p className="text-muted-foreground text-base sm:text-lg">
-                Everything you need to build with 0.email&apos;s APIs and tools.
+                Everything you need to build with Todus APIs and tools.
               </p>
+
             </div>
           </div>
 

@@ -15,11 +15,8 @@ export default [
     route('/hr', '(full-width)/hr.tsx'),
   ]),
 
-  route('/login', '(auth)/login/page.tsx'),
-
-  // Enable this when we have a zero signup page
-  // route('/zero/signup', '(auth)/zero/signup/page.tsx'),
-  // route('/zero/login', '(auth)/zero/login/page.tsx'),
+  route('/login', '(auth)/todus/login/page.tsx'),
+  route('/signup', '(auth)/todus/signup/page.tsx'),
 
   layout('(routes)/layout.tsx', [
     route('/developer', '(routes)/developer/page.tsx'),
