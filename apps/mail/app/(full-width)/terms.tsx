@@ -93,8 +93,8 @@ const sections = [
     title: 'Overview',
     content: (
       <p>
-        0.email is an open-source email solution that enables users to self-host their email service
-        or integrate with external email providers. By using 0.email, you agree to these terms.
+        Todus is an open-source email solution that enables users to self-host their email service
+        or integrate with external email providers. By using Todus, you agree to these terms.
       </p>
     ),
   },
@@ -105,7 +105,7 @@ const sections = [
         <div>
           <h3 className="text-card-foreground mb-3 text-xl font-medium">Self-Hosted Service</h3>
           <ul className="ml-4 list-disc space-y-2">
-            <li>0.email provides software that users can deploy on their own infrastructure</li>
+            <li>Todus provides software that users can deploy on their own infrastructure</li>
             <li>Users are responsible for their own hosting, maintenance, and compliance</li>
             <li>The software is provided &quot;as is&quot; under the MIT License</li>
           </ul>
@@ -115,7 +115,7 @@ const sections = [
             External Email Integration
           </h3>
           <ul className="ml-4 list-disc space-y-2">
-            <li>0.email can integrate with third-party email providers</li>
+            <li>Todus can integrate with third-party email providers</li>
             <li>Users must comply with third-party providers&apos; terms of service</li>
             <li>We are not responsible for third-party service disruptions</li>
           </ul>
@@ -142,7 +142,7 @@ const sections = [
     title: 'Software License',
     content: (
       <div className="text-muted-foreground mt-4 space-y-3">
-        <p>0.email is licensed under the MIT License:</p>
+        <p>Todus is licensed under the MIT License:</p>
         <ul className="ml-4 list-disc space-y-2">
           <li>Users can freely use, modify, and distribute the software</li>
           <li>The software comes with no warranties</li>
@@ -172,7 +172,7 @@ const sections = [
         <p>For questions about these terms:</p>
         <div className="flex flex-col space-y-2">
           <a
-            href="https://github.com/Mail-0/Zero"
+            href="https://github.com/todus-app"
             className="inline-flex items-center text-blue-600 hover:text-blue-800"
           >
             <Github className="mr-2 h-4 w-4" />

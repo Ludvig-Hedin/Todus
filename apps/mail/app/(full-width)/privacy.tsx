@@ -421,14 +421,14 @@ const sections = [
         <p>For privacy-related questions or concerns:</p>
         <div className="flex flex-col space-y-2">
           <a
-            href="mailto:founders@0.email"
+            href="mailto:founders@todus.app"
             className="inline-flex items-center text-blue-600 hover:text-blue-800"
           >
             <Mail className="mr-2 h-4 w-4" />
-            founders@0.email
+            founders@todus.app
           </a>
           <a
-            href="https://github.com/Mail-0/Zero"
+            href="https://github.com/todus-app"
             className="inline-flex items-center text-blue-600 hover:text-blue-800"
           >
             <Github className="mr-2 h-4 w-4" />

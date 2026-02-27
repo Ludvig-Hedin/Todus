@@ -1,13 +1,19 @@
-/**
- * Login screen — shows available OAuth providers (Google, Microsoft, etc.)
- * and initiates the sign-in flow via WebView OAuth callback.
- */
 import { useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Linking, Pressable, StyleSheet, Text, View, SafeAreaView } from 'react-native';
+import {
+  ActivityIndicator,
+  Linking,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+  SafeAreaView,
+  useColorScheme,
+  Image,
+} from 'react-native';
 import { getNativeEnv } from '../../src/shared/config/env';
-import { beginNativeProviderSignIn, loadNativeAuthProviders } from '../../src/features/auth/native-auth';
-import { Google, Microsoft, LogoVector } from '../../src/shared/components/icons';
+import { loadNativeAuthProviders } from '../../src/features/auth/native-auth';
+import { GoogleColored, Microsoft, LogoVector } from '../../src/shared/components/icons';
 
 type ProviderState = {
   id: string;
@@ -20,10 +26,11 @@ type ProviderState = {
 export default function LoginScreen() {
   const env = getNativeEnv();
   const router = useRouter();
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
 
   const [providers, setProviders] = useState<ProviderState[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [activeProvider, setActiveProvider] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -60,42 +67,36 @@ export default function LoginScreen() {
     [providers],
   );
 
-  const startProviderSignIn = async (provider: ProviderState) => {
+  /** Opens the WebView with the provider ID to trigger direct OAuth.
+   * The WebView handles the API call internally (correct Origin header). */
+  const startProviderSignIn = (provider: ProviderState) => {
     setErrorMessage(null);
-    setActiveProvider(provider.id);
 
-    try {
-      if (provider.isCustom && provider.customRedirectPath) {
-        const url = `${env.webUrl.replace(/\/$/, '')}${provider.customRedirectPath}`;
-        await Linking.openURL(url);
-        return;
-      }
-
-      const authUrl = await beginNativeProviderSignIn(
-        env.backendUrl,
-        provider.id,
-        env.authCallbackUrl,
-      );
-
-      // Navigate to WebView OAuth screen with the auth URL
-      router.push({ pathname: '/(auth)/web-auth', params: { url: authUrl } });
-    } catch {
-      setErrorMessage(`Failed to start ${provider.name} sign-in.`);
-    } finally {
-      setActiveProvider(null);
+    if (provider.isCustom && provider.customRedirectPath) {
+      const url = `${env.webUrl.replace(/\/$/, '')}${provider.customRedirectPath}`;
+      Linking.openURL(url).catch(() => { });
+      return;
     }
+
+    router.push({
+      pathname: '/(auth)/web-auth',
+      params: {
+        provider: provider.id,
+        callbackUrl: env.authCallbackUrl,
+      },
+    });
   };
 
   const sortedProviders = [...enabledProviders].sort((a, b) => {
-    if (a.id === 'zero') return -1;
-    if (b.id === 'zero') return 1;
+    if (a.id === 'google') return -1;
+    if (b.id === 'google') return 1;
     return 0;
   });
 
   const getProviderIcon = (providerId: string, color: string) => {
     switch (providerId) {
       case 'google':
-        return <Google width={20} height={20} color={color} style={styles.icon} />;
+        return <GoogleColored width={20} height={20} style={styles.icon} />;
       case 'microsoft':
         return <Microsoft width={20} height={20} color={color} style={styles.icon} />;
       case 'zero':
@@ -105,11 +106,22 @@ export default function LoginScreen() {
     }
   };
 
+  const themeStyles = isDark ? darkStyles : lightStyles;
+
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={[styles.container, themeStyles.container]}>
       <View style={styles.content}>
         <View style={styles.headerContainer}>
-          <Text style={styles.title}>Login to {env.appName}</Text>
+          <View style={styles.logoContainer}>
+            {/* Using the brand-logo.png identified from web app assets */}
+            <Image
+              source={require('../../assets/brand-logo.png')}
+              style={styles.logo}
+              resizeMode="contain"
+            />
+          </View>
+          <Text style={[styles.title, themeStyles.title]}>Welcome to Todus</Text>
+          <Text style={[styles.subtitle, themeStyles.subtitle]}>Your AI agent for emails</Text>
         </View>
 
         {errorMessage && (
@@ -121,28 +133,26 @@ export default function LoginScreen() {
 
         <View style={styles.providersContainer}>
           {isLoading ? (
-            <ActivityIndicator size="large" color="#ffffff" style={styles.loader} />
+            <ActivityIndicator size="large" color={isDark ? '#ffffff' : '#000000'} style={styles.loader} />
           ) : (
             sortedProviders.map((provider) => (
               <Pressable
                 key={provider.id}
                 onPress={() => startProviderSignIn(provider)}
-                disabled={Boolean(activeProvider)}
                 style={({ pressed }) => [
                   styles.providerButton,
-                  pressed && styles.providerButtonPressed,
-                  activeProvider === provider.id && styles.providerButtonDisabled,
+                  themeStyles.providerButton,
+                  pressed && themeStyles.providerButtonPressed,
                 ]}
               >
-                {getProviderIcon(provider.id, '#111827')}
-                <Text style={styles.providerButtonText}>
-                  {activeProvider === provider.id ? 'Starting...' : `Continue with ${provider.name}`}
+                {getProviderIcon(provider.id, isDark ? '#ffffff' : '#111827')}
+                <Text style={[styles.providerButtonText, themeStyles.providerButtonText]}>
+                  Sign in with {provider.name}
                 </Text>
               </Pressable>
             ))
           )}
 
-          {/* Fallback to web login if no native providers available */}
           {!isLoading && sortedProviders.length === 0 && (
             <Pressable
               onPress={() => {
@@ -151,17 +161,18 @@ export default function LoginScreen() {
                   params: { url: `${env.webUrl.replace(/\/$/, '')}/login` },
                 });
               }}
-              style={styles.providerButton}
+              style={[styles.providerButton, themeStyles.providerButton]}
             >
-              <Text style={styles.providerButtonText}>Open web login</Text>
+              <Text style={[styles.providerButtonText, themeStyles.providerButtonText]}>Open web login</Text>
             </Pressable>
           )}
         </View>
       </View>
 
       <View style={styles.footer}>
-        <Text style={styles.footerLinkText}>Terms of Service</Text>
-        <Text style={styles.footerLinkText}>Privacy Policy</Text>
+        <Text style={[styles.footerLinkText, themeStyles.footerLinkText]}>Terms of Service</Text>
+        <View style={[styles.dot, themeStyles.dot]} />
+        <Text style={[styles.footerLinkText, themeStyles.footerLinkText]}>Privacy Policy</Text>
       </View>
     </SafeAreaView>
   );
@@ -170,47 +181,73 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#111111',
     justifyContent: 'space-between',
   },
   content: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 24,
+    paddingHorizontal: 32,
     maxWidth: 600,
     width: '100%',
     alignSelf: 'center',
+    marginTop: -40, // Visual balance
   },
   headerContainer: {
-    marginBottom: 32,
+    marginBottom: 48,
     alignItems: 'center',
     width: '100%',
   },
+  logoContainer: {
+    width: 64,
+    height: 64,
+    borderRadius: 16,
+    backgroundColor: '#000000',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 5,
+  },
+  logo: {
+    width: 40,
+    height: 40,
+  },
   title: {
-    fontSize: 36,
+    fontSize: 28,
     fontWeight: '700',
-    color: '#ffffff',
     textAlign: 'center',
+    marginBottom: 8,
+    letterSpacing: -0.5,
+  },
+  subtitle: {
+    fontSize: 17,
+    fontWeight: '400',
+    textAlign: 'center',
+    opacity: 0.6,
   },
   errorBox: {
     width: '100%',
-    backgroundColor: 'rgba(249, 115, 22, 0.1)',
-    borderColor: 'rgba(249, 115, 22, 0.4)',
+    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+    borderColor: 'rgba(239, 68, 68, 0.2)',
     borderWidth: 1,
-    borderRadius: 8,
+    borderRadius: 12,
     padding: 16,
     marginBottom: 24,
   },
   errorTitle: {
-    color: '#fb923c',
+    color: '#ef4444',
     fontWeight: '600',
-    fontSize: 16,
+    fontSize: 14,
     marginBottom: 4,
   },
   errorText: {
-    color: '#ffffff',
+    color: '#ef4444',
     fontSize: 14,
+    opacity: 0.8,
   },
   providersContainer: {
     width: '100%',
@@ -223,37 +260,95 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#ffffff',
-    height: 48,
-    borderRadius: 8,
-    borderWidth: 2,
-    borderColor: '#e5e7eb',
-  },
-  providerButtonPressed: {
-    backgroundColor: '#f3f4f6',
-  },
-  providerButtonDisabled: {
-    opacity: 0.7,
+    height: 52,
+    borderRadius: 999,
+    borderWidth: 1,
   },
   providerButtonText: {
-    color: '#111827',
     fontSize: 16,
-    fontWeight: '500',
+    fontWeight: '600',
+    letterSpacing: -0.2,
   },
   icon: {
-    marginRight: 10,
+    marginRight: 12,
   },
   footer: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: 16,
+    paddingVertical: 24,
     paddingHorizontal: 24,
-    gap: 24,
     width: '100%',
   },
   footerLinkText: {
-    fontSize: 11,
-    color: '#9ca3af',
+    fontSize: 13,
+    fontWeight: '400',
+  },
+  dot: {
+    width: 3,
+    height: 3,
+    borderRadius: 1.5,
+    marginHorizontal: 12,
+  },
+});
+
+const lightStyles = StyleSheet.create({
+  container: {
+    backgroundColor: '#FFFFFF',
+  },
+  title: {
+    color: '#000000',
+  },
+  subtitle: {
+    color: '#000000',
+  },
+  providerButton: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E5E5E5',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  providerButtonPressed: {
+    backgroundColor: '#F8F8F8',
+  },
+  providerButtonText: {
+    color: '#000000',
+  },
+  footerLinkText: {
+    color: '#666666',
+  },
+  dot: {
+    backgroundColor: '#DDDDDD',
+  },
+});
+
+const darkStyles = StyleSheet.create({
+  container: {
+    backgroundColor: '#0A0A0A',
+  },
+  title: {
+    color: '#FFFFFF',
+  },
+  subtitle: {
+    color: '#FFFFFF',
+  },
+  providerButton: {
+    backgroundColor: '#1A1A1A',
+    borderColor: '#2A2A2A',
+  },
+  providerButtonPressed: {
+    backgroundColor: '#252525',
+  },
+  providerButtonText: {
+    color: '#FFFFFF',
+  },
+  footerLinkText: {
+    color: '#888888',
+  },
+  dot: {
+    backgroundColor: '#333333',
   },
 });
