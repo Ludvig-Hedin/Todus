@@ -93,7 +93,7 @@ export default function LoginTodus() {
                   <FormLabel className="text-muted-foreground">Email</FormLabel>
                   <FormControl>
                     <Input
-                      placeholder="nizzy@todus.app"
+                      placeholder="email@example.com"
                       {...field}
                       className="bg-black text-sm text-white placeholder:text-sm rounded-full"
                     />

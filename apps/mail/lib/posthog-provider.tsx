@@ -21,7 +21,7 @@ export function PostHogProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (session?.user) {
+    if (session?.user?.id) {
       posthog.identify(session.user.id, {
         email: session.user.email,
         name: session.user.name,

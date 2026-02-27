@@ -7,7 +7,7 @@ export function ServerProviders({
   connectionId,
 }: PropsWithChildren<{ connectionId: string | null }>) {
   return (
-    <AutumnProvider backendUrl={import.meta.env.VITE_PUBLIC_BACKEND_URL}>
+    <AutumnProvider backendUrl={import.meta.env.VITE_PUBLIC_BACKEND_URL} includeCredentials>
       <QueryProvider connectionId={connectionId}>{children}</QueryProvider>
     </AutumnProvider>
   );
