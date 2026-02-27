@@ -7,7 +7,7 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Bell, Lightning, Mail, ScanEye, Tag, User, X, Search } from '../icons/icons';
 import { useCategorySettings, useDefaultCategoryId } from '@/hooks/use-categories';
-import { ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
+import { ResizablePanel, ResizablePanelGroup, ResizableHandle } from '@/components/ui/resizable';
 import { useCommandPalette } from '../context/command-palette-context';
 import { useHotkeys, useHotkeysContext } from 'react-hotkeys-hook';
 import { ThreadDisplay } from '@/components/mail/thread-display';
@@ -422,6 +422,8 @@ export function MailLayout() {
           className="rounded-inherit overflow-hidden"
         >
           <ResizablePanel
+            id="mail-list"
+            order={1}
             defaultSize={35}
             minSize={35}
             maxSize={35}
@@ -429,8 +431,8 @@ export function MailLayout() {
               `bg-panelLight dark:bg-panelDark mb-1 w-fit shadow-sm md:mr-[3px] md:rounded-2xl lg:flex lg:h-[calc(100dvh-8px)] lg:shadow-sm`,
               isDesktop && threadId && 'hidden lg:block',
             )}
-            // onMouseEnter={handleMailListMouseEnter}
-            // onMouseLeave={handleMailListMouseLeave}
+          // onMouseEnter={handleMailListMouseEnter}
+          // onMouseLeave={handleMailListMouseLeave}
           >
             <div className="w-full md:h-[calc(100dvh-10px)]">
               <div className="z-15 sticky top-0 p-4 pb-0">
@@ -539,10 +541,12 @@ export function MailLayout() {
             </div>
           </ResizablePanel>
 
-          {/* <ResizableHandle className="mr-0.5 hidden opacity-0 md:block" /> */}
+          <ResizableHandle className="mr-0.5 hidden opacity-0 md:block" />
 
           {isDesktop && (
             <ResizablePanel
+              id="thread-display"
+              order={2}
               className={cn(
                 'bg-panelLight dark:bg-panelDark mb-1 mr-0.5 w-fit rounded-2xl shadow-sm lg:h-[calc(100dvh-8px)]',
                 // Only show on md screens and larger when there is a threadId
@@ -802,8 +806,8 @@ function CategoryDropdown({ isMultiSelectMode }: CategoryDropdownProps) {
             {(category.searchValue === ''
               ? labels.length === 0
               : category.searchValue.split(',').some((val) => labels.includes(val))) && (
-              <Check className="text-primary ml-auto h-4 w-4" />
-            )}
+                <Check className="text-primary ml-auto h-4 w-4" />
+              )}
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>

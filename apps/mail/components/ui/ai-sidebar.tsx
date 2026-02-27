@@ -1,7 +1,7 @@
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
 import { ArrowsPointingIn, PanelLeftOpen, Phone } from '../icons/icons';
 import { useActiveConnection } from '@/hooks/use-connections';
-import { ResizablePanel } from '@/components/ui/resizable';
+import { ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
 import { useSearchValue } from '@/hooks/use-search-value';
 import { useState, useEffect, useCallback } from 'react';
 import useSearchLabels from '@/hooks/use-labels-search';
@@ -478,8 +478,10 @@ function AISidebar({ className }: AISidebarProps) {
           {/* Desktop view - visible on md and larger screens */}
           {isSidebar && !isFullScreen && (
             <>
-              <div className="w-px opacity-0" />
+              <ResizableHandle className="hidden md:flex w-px bg-transparent" />
               <ResizablePanel
+                id="ai-sidebar"
+                order={3}
                 defaultSize={24}
                 minSize={24}
                 maxSize={24}

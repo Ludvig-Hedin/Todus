@@ -36,7 +36,12 @@ export const brainRouter = router({
     )
     .query(async ({ input, ctx }) => {
       const { threadId } = input;
-      const response = await env.VECTORIZE.getByIds([threadId]);
+      let response: any[] = [];
+      try {
+        response = await env.VECTORIZE.getByIds([threadId]);
+      } catch (error) {
+        console.error('[brain.generateSummary] Vectorize error:', error);
+      }
       if (response.length && response?.[0]?.metadata?.['summary']) {
         const result = response[0].metadata as { summary: string; connection: string };
         if (result.connection !== ctx.activeConnection.id) return null;
