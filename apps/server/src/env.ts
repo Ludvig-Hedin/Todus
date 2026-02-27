@@ -103,7 +103,6 @@ export type ZeroEnv = {
   DD_APP_KEY: string;
   DD_SITE: string;
   DEFAULT_MODEL: string;
-  GOOGLE_GENERATIVE_AI_API_KEY: string;
   OPENROUTER_API_KEY: string;
 };
 
