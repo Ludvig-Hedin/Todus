@@ -5,7 +5,7 @@
   "type": "module",
   "main": "main.mjs",
   "scripts": {
-    "dev": "electron .",
+    "dev:macos": "electron .",
     "start": "electron ."
   },
   "devDependencies": {
