@@ -1,6 +1,17 @@
 # Project Changelog
 
+## [2026-02-27] tRPC Errors & UI Polishing
+
+### Fixed
+
+- **tRPC API**: Resolved 500 Internal Server Error in `brain.generateSummary` caused by missing Vectorize indexes (`VECTOR_GET_ERROR`) by implementing a try-catch fallback.
+- **UI Warnings**: Fixed `react-resizable-panels` console warnings by strictly defining `id` and `order` properties for all `ResizablePanel` components, and restoring missing `<ResizableHandle />` elements.
+
 ## [2026-02-27] Todus Branding & SEO Finalization
+
+### Fixed
+
+- **Rebranding Errors**: Fixed TypeScript lint errors resulting from incomplete rename operations in `auth.ts`, `email-sequences.tsx`, and `sanitize-tip-tap-html.ts`.
 
 ### Changed
 

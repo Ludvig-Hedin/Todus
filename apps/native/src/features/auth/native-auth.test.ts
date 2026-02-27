@@ -15,29 +15,29 @@ describe('native auth helpers', () => {
   });
 
   it('returns null values when callback has no token', () => {
-    expect(parseAuthCallback('https://staging.0.email/mail/inbox')).toEqual({
+    expect(parseAuthCallback('https://todus.app/mail/inbox')).toEqual({
       token: null,
       expiresAt: null,
     });
   });
 
   it('accepts only whitelisted hosts for in-app webview', () => {
-    const hosts = ['staging.0.email', 'sapi.0.email'];
+    const hosts = ['todus.app', 'api.todus.app'];
 
-    expect(isAllowedWebUrl('https://staging.0.email/mail/inbox', hosts)).toBe(true);
+    expect(isAllowedWebUrl('https://todus.app/mail/inbox', hosts)).toBe(true);
     expect(isAllowedWebUrl('https://example.com/phishing', hosts)).toBe(false);
   });
 
   it('detects login and signed-in paths for auth guard transitions', () => {
-    const origin = 'https://staging.0.email';
+    const origin = 'https://todus.app';
 
-    expect(isLoginPath('https://staging.0.email/login', origin)).toBe(true);
-    expect(isSignedInPath('https://staging.0.email/mail/inbox', origin)).toBe(true);
-    expect(isSignedInPath('https://staging.0.email/privacy', origin)).toBe(false);
+    expect(isLoginPath('https://todus.app/login', origin)).toBe(true);
+    expect(isSignedInPath('https://todus.app/mail/inbox', origin)).toBe(true);
+    expect(isSignedInPath('https://todus.app/privacy', origin)).toBe(false);
   });
 
   it('normalizes path from route URL', () => {
-    expect(resolveWebPathFromUrl('https://staging.0.email/settings/general?tab=profile')).toBe(
+    expect(resolveWebPathFromUrl('https://todus.app/settings/general?tab=profile')).toBe(
       '/settings/general?tab=profile',
     );
   });

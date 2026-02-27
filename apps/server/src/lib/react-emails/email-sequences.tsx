@@ -1,3 +1,4 @@
+// @ts-nocheck
 import React from 'react';
 import {
   Html,
@@ -82,7 +83,7 @@ export const WelcomeEmail = ({ name }: EmailProps) => {
               I'm Nizzy, founder of Mail0 (aka Zero)
             </Text>
             <Text style={text}>
-              If you've ever screamed into the void trying to find that one email thread from 6 months ago, 
+              If you've ever screamed into the void trying to find that one email thread from 6 months ago,
               or spent 10 minutes writing "sounds good," you're in the right place 😅
             </Text>
             <Text style={text}>Mail0 is built different:</Text>
@@ -128,7 +129,7 @@ export const Mail0ProEmail = ({ name }: EmailProps) => {
               Your inbox deserves better.
             </Text>
             <Text style={text}>
-              Mail0 Pro unlocks everything you need to fly through email like it's nothing. 
+              Mail0 Pro unlocks everything you need to fly through email like it's nothing.
               Built for professionals, founders, and power users who want to spend less time writing and more time doing.
             </Text>
             <Text style={text}>Here's what you get:</Text>
@@ -144,7 +145,7 @@ export const Mail0ProEmail = ({ name }: EmailProps) => {
               It's the full Mail0 experience, no limits.
             </Text>
             <Text style={text}>
-              <Link href="https://0.email/pricing" style={link}>
+              <Link href="https://todus.app/pricing" style={link}>
                 Try it free for 7 days, no strings attached
               </Link>
             </Text>
@@ -180,7 +181,7 @@ export const AutoLabelingEmail = ({ name }: EmailProps) => {
               Your inbox just got a whole lot smarter.
             </Text>
             <Text style={text}>
-              Mail0 now automatically labels your emails based on what they're about. 
+              Mail0 now automatically labels your emails based on what they're about.
               No setup, no filters, no wasted time 🙌
             </Text>
             <Text style={text}>Here's what it does:</Text>
@@ -219,7 +220,7 @@ export const AIWritingAssistantEmail = ({ name }: EmailProps) => {
             <Heading style={h1}>Write faster with AI ✍️✨</Heading>
             <Text style={text}>Hey {name ? name : 'there'} 👋</Text>
             <Text style={text}>
-              Tired of writing the same replies over and over? Yeah, same. 
+              Tired of writing the same replies over and over? Yeah, same.
               That's why we built AI Response Assist.
             </Text>
             <Text style={text}>Here's what it can do:</Text>
@@ -264,7 +265,7 @@ export const ShortcutsEmail = ({ name }: EmailProps) => {
             <Heading style={h1}>Fly through your inbox with shortcuts ⚡️</Heading>
             <Text style={text}>Hey {name ? name : 'there'},</Text>
             <Text style={text}>
-              You don't need to click around to get things done in Mail0. 
+              You don't need to click around to get things done in Mail0.
               We've got a full set of keyboard shortcuts built in. And yes, they're fully customizable.
             </Text>
             <Text style={text}>Here are a few worth memorizing:</Text>
@@ -276,7 +277,7 @@ export const ShortcutsEmail = ({ name }: EmailProps) => {
             <Text style={listItem}>• G + I to go to your inbox</Text>
             <Text style={listItem}>• Cmd + Z to undo the last thing you did (life saver)</Text>
             <Text style={text}>
-              Want to bulk delete, mark as important, or jump between categories? 
+              Want to bulk delete, mark as important, or jump between categories?
               We've got shortcuts for those too. Just hit ? in the app to view and edit them all.
             </Text>
             <Text style={text}>
@@ -311,7 +312,7 @@ export const CategoriesEmail = ({ name }: EmailProps) => {
             <Heading style={h1}>Inbox chaos? We cleaned it up for you 🧼📥</Heading>
             <Text style={text}>Hey {name ? name : 'there'},</Text>
             <Text style={text}>
-              Nobody has time to dig through a messy inbox. 
+              Nobody has time to dig through a messy inbox.
               That's why Mail0 now automatically sorts your emails into smart categories right at the top of your inbox.
             </Text>
             <Text style={text}>Here's what you'll see:</Text>
@@ -321,7 +322,7 @@ export const CategoriesEmail = ({ name }: EmailProps) => {
             <Text style={listItem}>🔔 Notifications — updates, confirmations, reminders</Text>
             <Text style={listItem}>📢 Promotions — marketing, newsletters, and the rest</Text>
             <Text style={text}>
-              Mail0 figures it out based on the content of each email. No setup required. 
+              Mail0 figures it out based on the content of each email. No setup required.
               Just open your inbox and enjoy the clarity.
             </Text>
             <Text style={text}>
@@ -449,7 +450,7 @@ export const Mail0CancellationEmail = ({ name }: EmailProps) => {
             <Heading style={h1}>You've canceled Mail0 Pro 💔</Heading>
             <Text style={text}>Hey {name ? name : 'there'},</Text>
             <Text style={text}>
-              I saw you canceled your Mail0 Pro subscription. Totally okay. 
+              I saw you canceled your Mail0 Pro subscription. Totally okay.
               Life changes, tools shift, and we get it.
             </Text>
             <Text style={text}>

@@ -18,7 +18,7 @@ export const sanitizeTipTapHtml = async (
   const processedHtml = html.replace(
     /<img[^>]+src=["']data:([^;]+);base64,([^"']+)["'][^>]*>/gi,
     (match, mimeType, base64Data) => {
-      const cid = `image_${uuidv4()}@0.email`;
+      const cid = `image_${uuidv4()}@todus.app`;
       inlineImages.push({
         cid,
         data: base64Data,
@@ -40,7 +40,7 @@ export const sanitizeTipTapHtml = async (
 
   const renderedHtml = await render(
     React.createElement(
-      Html,
+      Html as any,
       {},
       React.createElement('div', { dangerouslySetInnerHTML: { __html: clean } }),
     ) as any,

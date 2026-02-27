@@ -1,5 +1,5 @@
-const DEFAULT_BACKEND_URL = 'https://sapi.0.email';
-const DEFAULT_WEB_URL = 'https://staging.0.email';
+const DEFAULT_BACKEND_URL = 'https://api.todus.app';
+const DEFAULT_WEB_URL = 'https://todus.app';
 const DEFAULT_APP_NAME = 'Todus';
 const DEFAULT_AUTH_CALLBACK_URL = `${DEFAULT_WEB_URL}/mail/inbox`;
 const NATIVE_APP_USER_AGENT = 'TodusNative/1.0';
