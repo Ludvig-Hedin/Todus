@@ -1,4 +1,4 @@
-### Zero MCP
+### Todus MCP
 
 ## Capabilties
 
