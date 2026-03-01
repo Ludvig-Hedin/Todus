@@ -150,3 +150,25 @@ All marked DONE — these are WebView-based, not truly native.
 - OAuth redirect updates for native deep-link callbacks
 - Production analytics/Intercom/Sentry DSNs/keys
 - See `MANUAL_INPUTS_GUIDE.md` for details
+
+---
+
+## Parity Gap Tasks (2026-03-01)
+
+| ID | Task | Status | Notes |
+|---|---|---|---|
+| PG-001 | Implement native public route set parity (`/`, `/home`, `/about`, `/terms`, `/pricing`, `/privacy`, `/contributors`, `/developer`, `/hr`) | PENDING | Route and content parity for iOS/Android; explicit macOS strategy required |
+| PG-002 | Add native `/signup` parity flow | PENDING | Include Google OAuth-first UX and fallback behavior parity |
+| PG-003 | Complete native mail shell parity for `/mail/:folder` | PENDING | Include category tabs, command palette entry points, bulk selection UX |
+| PG-004 | Implement `/mail/create` and `/mail/under-construction/:path` parity behaviors | PENDING | Redirect/placeholder parity with web semantics |
+| PG-005 | Rebuild native compose parity (`/mail/compose`) | PENDING | Rich text, attachments, templates, schedule send, undo send, draft lifecycle |
+| PG-006 | Add native mailto parity (`/api/mailto-handler`) | PENDING | Parse mailto payload and create draft before opening compose |
+| PG-007 | Complete settings parity for missing sections | PENDING | `/settings/categories`, `/settings/notifications`, `/settings/privacy`, `/settings/security`, `/settings/shortcuts`, `/settings/danger-zone` |
+| PG-008 | Upgrade native existing settings sections from partial to full parity | PENDING | `/settings/general`, `/settings/appearance`, `/settings/connections`, `/settings/labels` |
+| PG-009 | Implement labels/categories CRUD + assignment parity in native | PENDING | Include color selection and default-category constraints |
+| PG-010 | Implement native AI assistant and voice parity | PENDING | Match web AI sidebar workflows and usage gating |
+| PG-011 | Implement native integrations parity: PostHog + Dub + Sentry + Autumn | PENDING | Include env wiring and event schema parity |
+| PG-012 | Establish screenshot-driven visual regression proof in `/parity_screenshots/` | PENDING | Enforce naming convention and per-screen diff notes |
+| PG-013 | Build parity-focused automated tests (unit/integration/E2E) | PENDING | Cover critical workflows and high-risk edge cases |
+| PG-014 | Resolve macOS architecture blocker | BLOCKED | Current `apps/macos` is Electron wrapper, not RN macOS parity implementation |
+
