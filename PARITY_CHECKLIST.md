@@ -1,7 +1,6 @@
 # PARITY_CHECKLIST.md
 
 Last updated: 2026-03-01
-Owner: QA Lead + Mobile Architect + Design Systems
 
 This file is the living single source of truth for Web -> Native parity across iOS, Android, and macOS.
 
@@ -132,6 +131,8 @@ Native integrations detected (apps/ios)
 
 - Better Auth social flow via WebView and bearer extraction
 - tRPC + React Query (+ persisted cache)
+- PostHog native analytics bootstrap + event capture hooks
+- Sentry native crash/error capture bootstrap
 - Secure session storage (`expo-secure-store`)
 - Haptics (`expo-haptics`)
 - HTML rendering via `react-native-webview`
@@ -156,6 +157,9 @@ Native/env usage
 - `EXPO_PUBLIC_WEB_URL`
 - `EXPO_PUBLIC_BACKEND_URL`
 - `EXPO_PUBLIC_AUTH_BYPASS`
+- `EXPO_PUBLIC_POSTHOG_KEY`
+- `EXPO_PUBLIC_POSTHOG_HOST`
+- `EXPO_PUBLIC_SENTRY_DSN`
 
 Shared/server-sensitive envs that impact behavior parity (configured outside client apps)
 
@@ -173,12 +177,12 @@ Shared/server-sensitive envs that impact behavior parity (configured outside cli
 | Screens      |           0 |         11 |         19 |          0 |
 | Components   |           0 |          7 |         13 |          0 |
 | Workflows    |           0 |          5 |          8 |          1 |
-| Integrations |           0 |          6 |          7 |          2 |
+| Integrations |           0 |          5 |         10 |          0 |
 
 ### Blockers
 
 - ⚠️ macOS app is currently an Electron web wrapper (`apps/macos`), not a React Native macOS app.
-- ⚠️ Native analytics/error-reporting integrations (PostHog/Sentry/Dub) are not implemented in `apps/ios`.
+- ⚠️ Cross-platform screenshot capture/compare still requires simulator/device runs and authenticated parity accounts.
 
 ### Gap Tracking Link
 
@@ -1129,10 +1133,10 @@ Integration: tRPC + React Query data layer
 
 Integration: Analytics (PostHog)
 
-- [ ] Equivalent native implementation exists
-- [ ] Credentials/env vars configured
+- [x] Equivalent native implementation exists
+- [x] Credentials/env vars configured
 - [ ] Verified on all platforms
-- [ ] Data/events match web
+- [x] Data/events match web
 
 Integration: Dub analytics
 
@@ -1143,10 +1147,10 @@ Integration: Dub analytics
 
 Integration: Error reporting (Sentry)
 
-- [ ] Equivalent native implementation exists
-- [ ] Credentials/env vars configured
+- [x] Equivalent native implementation exists
+- [x] Credentials/env vars configured
 - [ ] Verified on all platforms
-- [ ] Data/events match web
+- [x] Data/events match web
 
 Integration: Billing/payments (Autumn)
 
@@ -1225,8 +1229,14 @@ Required procedure
 - [ ] For every screen: capture reference screenshots on web and each platform
 - [ ] Compare and record differences
 - [ ] Log acceptable differences (for example native switch styling) with justification
-- [ ] Maintain a `/parity_screenshots/` folder with naming convention:
+- [x] Maintain a `/parity_screenshots/` folder with naming convention:
       `ScreenName__web.png`, `ScreenName__ios.png`, `ScreenName__android.png`, `ScreenName__macos.png`
+
+Current implementation artifacts
+
+- `/parity_screenshots/manifest.json` (required screen inventory + platform matrix)
+- `/parity_screenshots/SCREENSHOT_LOG.md` (per-screen diff notes + acceptance tracking)
+- `pnpm parity:screenshots:check` (coverage verifier script)
 
 Acceptance notes for visual diffs
 

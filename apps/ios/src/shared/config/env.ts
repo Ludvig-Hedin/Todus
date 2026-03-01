@@ -12,6 +12,9 @@ export type NativeEnv = {
   appName: string;
   backendUrl: string;
   webUrl: string;
+  posthogKey: string;
+  posthogHost: string;
+  sentryDsn: string;
   appEntryPath: string;
   appEntryUrl: string;
   authCallbackUrl: string;
@@ -37,6 +40,9 @@ function isTruthyEnv(value: string | undefined): boolean {
 export function getNativeEnv(): NativeEnv {
   const backendUrl = process.env.EXPO_PUBLIC_BACKEND_URL ?? DEFAULT_BACKEND_URL;
   const webUrl = process.env.EXPO_PUBLIC_WEB_URL ?? DEFAULT_WEB_URL;
+  const posthogKey = process.env.EXPO_PUBLIC_POSTHOG_KEY ?? '';
+  const posthogHost = process.env.EXPO_PUBLIC_POSTHOG_HOST ?? 'https://us.i.posthog.com';
+  const sentryDsn = process.env.EXPO_PUBLIC_SENTRY_DSN ?? '';
   const appEntryPath = '/mail/inbox';
   const appName = process.env.EXPO_PUBLIC_APP_NAME ?? DEFAULT_APP_NAME;
   const appEntryUrl = `${webUrl.replace(/\/$/, '')}${appEntryPath}`;
@@ -60,6 +66,9 @@ export function getNativeEnv(): NativeEnv {
     appName,
     backendUrl,
     webUrl,
+    posthogKey,
+    posthogHost,
+    sentryDsn,
     appEntryPath,
     appEntryUrl,
     authCallbackUrl,

@@ -1,9 +1,10 @@
 import type { ExpoConfig } from 'expo/config';
 
-const webUrl =
-  process.env.EXPO_PUBLIC_WEB_URL ?? 'https://todus.app';
-const backendUrl =
-  process.env.EXPO_PUBLIC_BACKEND_URL ?? 'https://api.todus.app';
+const webUrl = process.env.EXPO_PUBLIC_WEB_URL ?? 'https://todus.app';
+const backendUrl = process.env.EXPO_PUBLIC_BACKEND_URL ?? 'https://api.todus.app';
+const posthogKey = process.env.EXPO_PUBLIC_POSTHOG_KEY ?? '';
+const posthogHost = process.env.EXPO_PUBLIC_POSTHOG_HOST ?? 'https://us.i.posthog.com';
+const sentryDsn = process.env.EXPO_PUBLIC_SENTRY_DSN ?? '';
 const appName = process.env.EXPO_PUBLIC_APP_NAME ?? 'Todus';
 
 const config: ExpoConfig = {
@@ -15,7 +16,7 @@ const config: ExpoConfig = {
   icon: './assets/icon.png',
   userInterfaceStyle: 'automatic',
   newArchEnabled: true,
-  plugins: ['expo-router', 'expo-secure-store'],
+  plugins: ['expo-router', 'expo-secure-store', '@sentry/react-native/expo'],
   ios: {
     bundleIdentifier: 'com.ludvighedin.todus',
     supportsTablet: true,
@@ -38,6 +39,9 @@ const config: ExpoConfig = {
     appName,
     webUrl,
     backendUrl,
+    posthogKey,
+    posthogHost,
+    sentryDsn,
     router: {
       origin: false,
     },

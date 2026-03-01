@@ -2,23 +2,28 @@
  * ThreadListItem — individual thread row in the mail list.
  * Fetches thread data via TRPC and displays sender, subject, snippet, date, and read/star status.
  */
-import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, Pressable } from 'react-native';
-import { useTheme } from '../../shared/theme/ThemeContext';
-import { Star } from 'lucide-react-native';
 import { useTRPC } from '../../providers/QueryTrpcProvider';
+import { useTheme } from '../../shared/theme/ThemeContext';
 import { useQuery } from '@tanstack/react-query';
+import { Star } from 'lucide-react-native';
+import React, { useMemo } from 'react';
 
 interface ThreadListItemProps {
   threadId: string;
   onPress: (threadId: string) => void;
+  selected?: boolean;
 }
 
-export function ThreadListItem({ threadId, onPress }: ThreadListItemProps) {
+function ThreadListItemComponent({ threadId, onPress, selected = false }: ThreadListItemProps) {
   const { colors } = useTheme();
   const trpc = useTRPC();
   const { data: threadData, isLoading } = useQuery({
     ...trpc.mail.get.queryOptions({ id: threadId }),
+    staleTime: 60_000,
+    gcTime: 5 * 60_000,
+    refetchOnMount: false,
+    refetchOnReconnect: false,
   });
 
   const uiThread = useMemo(() => {
@@ -26,7 +31,8 @@ export function ThreadListItem({ threadId, onPress }: ThreadListItemProps) {
     const latest = threadData.latest || threadData.messages[threadData.messages.length - 1];
     if (!latest) return null;
 
-    const isStarred = latest.tags?.some((t: any) => t.name === 'STARRED') ?? false;
+    const isStarred =
+      latest.tags?.some((tag: any) => tag?.name?.toLowerCase().startsWith('starred')) ?? false;
 
     return {
       id: threadId,
@@ -49,9 +55,19 @@ export function ThreadListItem({ threadId, onPress }: ThreadListItemProps) {
             <View style={[styles.skeleton, { backgroundColor: colors.secondary, width: 50 }]} />
           </View>
           {/* Row 2: subject skeleton */}
-          <View style={[styles.skeleton, { backgroundColor: colors.secondary, width: '70%', marginBottom: 6 }]} />
+          <View
+            style={[
+              styles.skeleton,
+              { backgroundColor: colors.secondary, width: '70%', marginBottom: 6 },
+            ]}
+          />
           {/* Row 3: snippet skeleton */}
-          <View style={[styles.skeleton, { backgroundColor: colors.secondary, width: '90%', height: 12 }]} />
+          <View
+            style={[
+              styles.skeleton,
+              { backgroundColor: colors.secondary, width: '90%', height: 12 },
+            ]}
+          />
         </View>
       </View>
     );
@@ -64,16 +80,14 @@ export function ThreadListItem({ threadId, onPress }: ThreadListItemProps) {
       style={({ pressed }) => [
         styles.container,
         {
-          backgroundColor: pressed ? colors.secondary : colors.background,
+          backgroundColor: selected || pressed ? colors.secondary : colors.background,
           borderBottomColor: colors.border,
         },
       ]}
       onPress={() => onPress(uiThread.id)}
     >
       {/* Unread indicator dot */}
-      {!uiThread.isRead && (
-        <View style={[styles.unreadDot, { backgroundColor: colors.primary }]} />
-      )}
+      {!uiThread.isRead && <View style={[styles.unreadDot, { backgroundColor: colors.primary }]} />}
 
       <View style={styles.content}>
         {/* Top row: Sender + Date */}
@@ -124,6 +138,14 @@ export function ThreadListItem({ threadId, onPress }: ThreadListItemProps) {
     </Pressable>
   );
 }
+
+export const ThreadListItem = React.memo(
+  ThreadListItemComponent,
+  (previous, next) =>
+    previous.threadId === next.threadId &&
+    previous.selected === next.selected &&
+    previous.onPress === next.onPress,
+);
 
 /** Formats a date as relative time or short date */
 function formatDate(date: Date): string {

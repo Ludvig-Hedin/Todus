@@ -2,14 +2,32 @@
  * App group layout — Gmail-style drawer navigation.
  * The drawer sidebar shows mail folders and settings link.
  */
-import { Drawer } from 'expo-router/drawer';
+import { Platform, StyleSheet, useWindowDimensions } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { StyleSheet } from 'react-native';
-import { useTheme } from '../../src/shared/theme/ThemeContext';
+import { identifyPostHog } from '../../src/shared/telemetry/posthog';
 import { MailSidebar } from '../../src/features/mail/MailSidebar';
+import { useTRPC } from '../../src/providers/QueryTrpcProvider';
+import { useTheme } from '../../src/shared/theme/ThemeContext';
+import { useQuery } from '@tanstack/react-query';
+import { Drawer } from 'expo-router/drawer';
+import { useEffect } from 'react';
 
 export default function AppLayout() {
   const { colors } = useTheme();
+  const { width } = useWindowDimensions();
+  const isWideLayout = Platform.OS === 'macos' || width >= 768;
+  const trpc = useTRPC();
+  const defaultConnectionQuery = useQuery(trpc.connections.getDefault.queryOptions());
+
+  useEffect(() => {
+    const defaultConnection = defaultConnectionQuery.data as any;
+    if (!defaultConnection?.id) return;
+
+    identifyPostHog(`connection:${defaultConnection.id}`, {
+      email: defaultConnection.email ?? null,
+      provider: defaultConnection.providerId ?? null,
+    });
+  }, [defaultConnectionQuery.data]);
 
   return (
     <GestureHandlerRootView style={styles.root}>
@@ -17,7 +35,8 @@ export default function AppLayout() {
         drawerContent={(props) => <MailSidebar {...props} />}
         screenOptions={{
           headerShown: false,
-          drawerType: 'front',
+          drawerType: isWideLayout ? 'permanent' : 'front',
+          swipeEnabled: !isWideLayout,
           drawerStyle: {
             backgroundColor: colors.background,
             width: 280,

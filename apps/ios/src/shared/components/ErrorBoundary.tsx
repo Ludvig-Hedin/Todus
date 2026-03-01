@@ -2,8 +2,9 @@
  * ErrorBoundary — catches React render errors and shows a recovery UI.
  * Prevents the entire app from crashing on component-level errors.
  */
-import React, { Component, type ErrorInfo, type PropsWithChildren } from 'react';
 import { Pressable, StyleSheet, Text, View, useColorScheme } from 'react-native';
+import React, { Component, type ErrorInfo, type PropsWithChildren } from 'react';
+import { captureSentryException } from '../telemetry/sentry';
 import { semanticColors } from '@zero/design-tokens';
 
 interface ErrorBoundaryState {
@@ -11,7 +12,10 @@ interface ErrorBoundaryState {
   error: Error | null;
 }
 
-export class ErrorBoundary extends Component<PropsWithChildren<{ fallback?: React.ReactNode }>, ErrorBoundaryState> {
+export class ErrorBoundary extends Component<
+  PropsWithChildren<{ fallback?: React.ReactNode }>,
+  ErrorBoundaryState
+> {
   state: ErrorBoundaryState = { hasError: false, error: null };
 
   static getDerivedStateFromError(error: Error): ErrorBoundaryState {
@@ -20,6 +24,10 @@ export class ErrorBoundary extends Component<PropsWithChildren<{ fallback?: Reac
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('[ErrorBoundary]', error, errorInfo.componentStack);
+    captureSentryException(error, {
+      source: 'ErrorBoundary.componentDidCatch',
+      componentStack: errorInfo.componentStack,
+    });
   }
 
   handleRetry = () => {

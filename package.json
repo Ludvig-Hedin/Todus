@@ -42,7 +42,8 @@
     "eval": "dotenv -- pnpm --filter=@zero/server run eval",
     "eval:dev": "dotenv -- pnpm --filter=@zero/server run eval:dev",
     "eval:ci": "dotenv -- pnpm --filter=@zero/server run eval:ci",
-    "android": "expo run:android"
+    "android": "expo run:android",
+    "parity:screenshots:check": "node ./scripts/parity/check-screenshots.mjs"
   },
   "devDependencies": {
     "@types/node": "24.3.0",

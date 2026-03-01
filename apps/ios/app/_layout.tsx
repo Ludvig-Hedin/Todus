@@ -2,23 +2,27 @@
  * Root layout — wraps all routes with providers and handles auth guard redirects.
  * Expo Router auto-renders this as the outermost layout.
  */
-import { Stack, useRouter, useSegments } from 'expo-router';
-import { useAtomValue } from 'jotai';
-import { useEffect } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View, useColorScheme } from 'react-native';
-import { StatusBar } from 'expo-status-bar';
-import { semanticColors } from '@zero/design-tokens';
+import { Stack, usePathname, useRouter, useSegments } from 'expo-router';
+import { ErrorBoundary } from '../src/shared/components/ErrorBoundary';
+import { captureScreen } from '../src/shared/telemetry/posthog';
 import { AppProviders } from '../src/providers/AppProviders';
 import { authStatusAtom } from '../src/shared/state/session';
-import { ErrorBoundary } from '../src/shared/components/ErrorBoundary';
+import { semanticColors } from '@zero/design-tokens';
+import * as Sentry from '@sentry/react-native';
+import { StatusBar } from 'expo-status-bar';
+import { useEffect, useRef } from 'react';
+import { useAtomValue } from 'jotai';
 
 function AuthGuard() {
   const authStatus = useAtomValue(authStatusAtom);
   const segments = useSegments();
+  const pathname = usePathname();
   const router = useRouter();
   const systemColorScheme = useColorScheme();
   const isDark = systemColorScheme === 'dark';
   const colors = isDark ? semanticColors.dark : semanticColors.light;
+  const lastTrackedPathRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (authStatus === 'bootstrapping') return;
@@ -36,6 +40,18 @@ function AuthGuard() {
       router.replace('/(app)/(mail)/inbox');
     }
   }, [authStatus, segments, router]);
+
+  useEffect(() => {
+    if (!pathname) return;
+    if (lastTrackedPathRef.current === pathname) return;
+    lastTrackedPathRef.current = pathname;
+
+    captureScreen(pathname, {
+      path: pathname,
+      auth_status: authStatus,
+      segment_root: segments[0] ?? null,
+    });
+  }, [authStatus, pathname, segments]);
 
   // Show loading screen while bootstrapping session
   if (authStatus === 'bootstrapping') {
@@ -57,7 +73,7 @@ function AuthGuard() {
   );
 }
 
-export default function RootLayout() {
+function RootLayout() {
   const systemColorScheme = useColorScheme();
   const isDark = systemColorScheme === 'dark';
 
@@ -70,6 +86,8 @@ export default function RootLayout() {
     </ErrorBoundary>
   );
 }
+
+export default Sentry.wrap(RootLayout);
 
 const styles = StyleSheet.create({
   bootScreen: {

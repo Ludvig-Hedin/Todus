@@ -2,15 +2,16 @@
  * TRPC + React Query provider with offline cache persistence.
  * Reads Bearer token from secure storage and attaches to all API requests.
  */
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createAsyncStoragePersister } from '@tanstack/query-async-storage-persister';
-import { QueryCache, QueryClient } from '@tanstack/react-query';
 import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
-import { createTRPCContext } from '@trpc/tanstack-react-query';
 import { createZeroTrpcClient, type AppRouter } from '@zero/api-client';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { captureSentryException } from '../shared/telemetry/sentry';
+import { secureStorage } from '../shared/storage/secure-storage';
+import { QueryCache, QueryClient } from '@tanstack/react-query';
+import { createTRPCContext } from '@trpc/tanstack-react-query';
 import { useState, type PropsWithChildren } from 'react';
 import { getNativeEnv } from '../shared/config/env';
-import { secureStorage } from '../shared/storage/secure-storage';
 
 const CACHE_BUSTER = 'native-expo-router-v1';
 
@@ -25,10 +26,16 @@ export function QueryTrpcProvider({ children }: PropsWithChildren) {
         queryCache: new QueryCache({
           onError: (error) => {
             console.error('[native-query-error]', error);
+            captureSentryException(error, { source: 'react-query.queryCache' });
           },
         }),
         defaultOptions: {
-          queries: { retry: false, refetchOnWindowFocus: false },
+          queries: {
+            retry: false,
+            refetchOnWindowFocus: false,
+            staleTime: 30_000,
+            gcTime: 5 * 60_000,
+          },
           mutations: { retry: false },
         },
       }),
