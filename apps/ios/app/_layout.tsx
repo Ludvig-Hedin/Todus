@@ -24,10 +24,15 @@ function AuthGuard() {
     if (authStatus === 'bootstrapping') return;
 
     const inAuthGroup = segments[0] === '(auth)';
+    const inAppGroup = segments[0] === '(app)';
+    const inAllowedModalRoute = segments[0] === 'compose' || segments[0] === 'search';
 
     if (authStatus === 'unauthenticated' && !inAuthGroup) {
       router.replace('/(auth)/login');
-    } else if (authStatus === 'authenticated' && inAuthGroup) {
+    } else if (
+      authStatus === 'authenticated' &&
+      (inAuthGroup || (!inAppGroup && !inAllowedModalRoute))
+    ) {
       router.replace('/(app)/(mail)/inbox');
     }
   }, [authStatus, segments, router]);
