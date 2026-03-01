@@ -1,5 +1,78 @@
 # Project Changelog
 
+## [2026-03-01] App Consolidation + Archive Cleanup
+
+### Changed
+
+- Consolidated active app surface to:
+  - `apps/ios` (only active iPhone native app)
+  - `apps/macos` (only active desktop webview wrapper)
+- Archived duplicate/legacy app implementations to `apps/archived/*`:
+  - `apps/native` -> `apps/archived/native`
+  - `apps/webview-swift` -> `apps/archived/webview-swift`
+  - `apps/apple` -> `apps/archived/apple`
+- Removed `native:*` scripts from root `package.json` to prevent accidental double-build paths.
+
+### Updated
+
+- Updated app structure and scripts documentation to reflect the canonical targets.
+- Renamed remaining archived native Xcode display/product naming from `Zero*` to `Todus` (display/product/module identifiers in archived native projects).
+
+## [2026-03-01] EAS Build Configuration
+
+### Added
+
+- **EAS Project ID**: Added `extra.eas.projectId` to `apps/ios/app.config.ts` for EAS builds
+- **App Version Source**: Set `cli.appVersionSource` to `"local"` in `apps/ios/eas.json` to use app.config.ts version
+
+### Files Modified
+
+- `apps/ios/app.config.ts` - Added EAS project ID (10b2cbe2-6786-4328-a831-ba6ccbca1e89)
+- `apps/ios/eas.json` - Added appVersionSource configuration
+
+## [2026-03-01] App Structure Reorganization
+
+### Changed
+
+- **apps/apple → apps/webview-swift**: Moved SwiftUI WebView wrapper to clearly indicate it's a legacy wrapper, not the primary native app (`apps/apple/` → `apps/webview-swift/`).
+- **apps/native deprecation**: Marked `apps/native` as deprecated in favor of `apps/ios` which is more complete and TestFlight-ready. Added `DEPRECATED.md` to guide developers to the correct app.
+
+### Added
+
+- **APPS_STRUCTURE.md**: Comprehensive documentation of all apps in the monorepo with status, purpose, and recommended usage.
+- **APPS_NATIVE_MIGRATION.md**: Migration plan for deprecating `apps/native` in favor of `apps/ios`.
+- **SCRIPTS_GUIDE.md**: Quick reference guide for all package.json scripts with explanations and recommended workflows.
+
+### Architecture Decision
+
+**Primary Apps Going Forward**:
+
+- **Web**: `apps/mail` (Next.js)
+- **iOS**: `apps/ios` (Expo React Native) - TestFlight ready
+- **macOS**: `apps/macos` (Electron wrapper)
+- **Backend**: `apps/server` (Cloudflare Worker)
+
+**Deprecated/Legacy**:
+
+- `apps/native` - Less complete than apps/ios, only kept for potential macOS React Native development
+- `apps/webview-swift` - Simple WebView wrapper, not a true native app
+
+## [2026-03-01] Login Page Styling
+
+### Changed
+
+- **Auth Layout**: Redesigned the `login` and `signup` pages to a 2-column layout. The left column now hosts the authentication form with a top-left logo placement, while the right column displays a beautifully padded, high-radius hero image (`email-preview.png`) (`apps/mail/app/(auth)/todus/login/page.tsx`, `apps/mail/app/(auth)/todus/signup/page.tsx`).
+- **Typography & Details**: Adjusted typography to match requests—"Your AI agent for emails" is now at parity with header size but muted, and sub-text changed to "Sign up for free with your email".
+
+## [2026-03-01] Google OAuth 500 Fix & Redis Robustness
+
+### Fixed
+
+- **OAuth Callback**: Resolved a 500 Internal Server Error during Google OAuth login caused by an invalid `REDIS_TOKEN`.
+- **Redis Resilience**: Implemented a `try/catch` fallback mechanism in `apps/server/src/lib/auth.ts` to gracefully switch to PostgreSQL session storage if Redis connection fails (e.g., due to expired/invalid tokens).
+- **Cleanup**: Removed temporary debug instrumentation from `main.ts`.
+- **Onboarding Assets**: Fixed broken image/animation links in the onboarding modal by switching from non-resolving `assets.todus.app` to local `/public/onboarding` assets.
+
 ## [2026-02-27] Frontend Stability & Environment Config Fixes
 
 ### Fixed
@@ -133,3 +206,5 @@
 - Redis uses `upstash-local-token` which matches the Docker proxy setup
 
 [2026-02-21] [Feature] Integrated real TRPC data for the native Thread list (N3-05) via useQuery hook on MailFolderScreen and ThreadListItem (apps/native/src/features/mail/*).
+
+[2026-03-01] [Fix] Fixed chat modal opacity overlay, restricted pricing dialog trigger area to primary CTA button, and resolved chat connection Error code 400 by adjusting unsupported gpt-5 model name configuration to gpt-4o. (apps/mail/components/ui/ai-sidebar.tsx, apps/mail/components/create/ai-chat.tsx, apps/server/.dev.vars).

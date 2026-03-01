@@ -63,6 +63,10 @@ PORT=3100 npm run dev
 
 ## Mobile
 
+### Run on iOS simulator with bypass authentication
+
+EXPO_PUBLIC_AUTH_BYPASS=1 pnpm ios
+
 rm -rf .expo node_modules/.cache
 rm -rf node_modules
 rm package-lock.json

@@ -12,6 +12,7 @@ import {
   clearSessionAtom,
   sessionAtom,
   setBearerSessionAtom,
+  setPreviewBypassSessionAtom,
 } from '../shared/state/session';
 
 export function SessionBootstrap({ children }: PropsWithChildren) {
@@ -20,16 +21,26 @@ export function SessionBootstrap({ children }: PropsWithChildren) {
   const bootstrapSession = useSetAtom(bootstrapSessionAtom);
   const clearSession = useSetAtom(clearSessionAtom);
   const setBearerSession = useSetAtom(setBearerSessionAtom);
+  const setPreviewBypassSession = useSetAtom(setPreviewBypassSessionAtom);
 
   // Bootstrap session from secure storage on mount
   useEffect(() => {
+    if (env.authBypassEnabled) {
+      setPreviewBypassSession();
+      return;
+    }
+
     bootstrapSession().catch(() => {
       // No-op: bootstrap failures should not crash app init
     });
-  }, [bootstrapSession]);
+  }, [bootstrapSession, env.authBypassEnabled, setPreviewBypassSession]);
 
   // Revalidate bearer token on mount and when app returns to foreground
   useEffect(() => {
+    if (env.authBypassEnabled) {
+      return;
+    }
+
     if (!session || session.mode !== 'bearer' || !session.token) {
       return;
     }
@@ -59,7 +70,7 @@ export function SessionBootstrap({ children }: PropsWithChildren) {
     return () => {
       subscription.remove();
     };
-  }, [clearSession, env.backendUrl, session, setBearerSession]);
+  }, [clearSession, env.authBypassEnabled, env.backendUrl, session, setBearerSession]);
 
   return children;
 }

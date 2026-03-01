@@ -9,6 +9,22 @@ cd /Users/ludvighedin/Programming/personal/mail/apps/ios
 pnpm start
 ```
 
+### Temporary auth bypass (for UI testing)
+
+If login is currently broken and you want to inspect the app quickly, run with:
+
+```bash
+EXPO_PUBLIC_AUTH_BYPASS=1 pnpm ios
+```
+
+This bypass is in-memory only for the current run and is safe to disable immediately.
+
+To revert to normal auth, run without the flag:
+
+```bash
+pnpm ios
+```
+
 For iPhone simulator:
 
 ```bash

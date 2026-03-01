@@ -9,7 +9,7 @@ pnpm deploy:frontend
 pnpm deploy:backend
 ```
 
-2. iPhone app via TestFlight (real app install, no Expo Go):
+2. iPhone app via TestFlight:
 
 ```bash
 pnpm ios:build:production
@@ -17,49 +17,27 @@ pnpm --filter=@zero/ios submit:ios
 ```
 
 Then in App Store Connect:
-
-- Add Internal Testers first (fastest)
-- Add External Testers next (Apple beta review required)
+- add Internal Testers first
+- add External Testers next (beta review required)
 
 3. Mac usage right now:
+- share the same web URL immediately
+- optional desktop wrapper: `apps/macos`
 
-- Fastest: share the same web URL (friends can install as Safari/Chrome app)
-- Native wrapper exists in `apps/macos`, but signed/notarized distribution needs Apple signing setup
+## Active app structure
 
-## Custom domain routing (Cloudflare)
-
-Use two hostnames:
-
-1. `todus.app` (or `app.todus.app`) -> frontend Worker `todus-production`
-2. `api.todus.app` -> backend Worker `todus-server-v1-production`
-
-Do not point your app domain to the old `zero` Worker.
-
-Set these env vars in Cloudflare Worker environments:
-
-- `VITE_PUBLIC_APP_URL=https://todus.app` (or your chosen app host)
-- `VITE_PUBLIC_BACKEND_URL=https://api.todus.app`
-- `BETTER_AUTH_URL=https://api.todus.app`
-- `COOKIE_DOMAIN=todus.app`
-
-## Why login can appear in browser
-
-Google OAuth can leave embedded WebViews depending on provider flow and popup behavior.
-This repo now keeps all normal HTTP/HTTPS navigation in-app, but if Google forces an external step,
-that is provider behavior, not Supabase.
+- iPhone native app: `apps/ios`
+- Desktop webview wrapper: `apps/macos`
+- Legacy/duplicate apps: `apps/archived/*` (reference only)
 
 ## Native iOS auth return requirements
 
-To return from Google auth back into the app instead of staying in Safari:
+To return from Google auth back into app instead of staying in browser:
 
-1. iOS app must register URL scheme `todus://` (already set in `apps/apple/Todus/Todus.xcodeproj`).
-2. Web login must send callback URL `todus://auth-callback` for native user agent (already set in `apps/mail/app/(auth)/login/login-client.tsx`).
-3. Backend auth allowlist must include:
-   - deployed app origin
-   - deployed backend origin
-   - `todus://auth-callback`
-     (configured in `apps/server/src/lib/auth.ts`).
-4. Redeploy backend and frontend after these changes:
+1. iOS app URL scheme `todus://` must be configured in `apps/ios/app.config.ts`.
+2. Web login should use callback `todus://auth-callback` for native flows.
+3. Backend trusted origins/redirect allowlist must include `todus://auth-callback`.
+4. Redeploy backend + frontend after auth config changes:
 
 ```bash
 pnpm deploy:backend

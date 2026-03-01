@@ -73,6 +73,19 @@ export const setWebCookieSessionAtom = atom(null, async (_get, set) => {
   set(authStatusAtom, 'authenticated');
 });
 
+/** Creates an authenticated preview session without persisting to secure storage. */
+export const setPreviewBypassSessionAtom = atom(null, (_get, set) => {
+  const session: NativeAuthSession = {
+    mode: 'web-cookie',
+    token: null,
+    createdAt: Date.now(),
+    expiresAt: null,
+  };
+  set(sessionAtom, session);
+  set(authStatusAtom, 'authenticated');
+  set(currentPathAtom, nativeRouteDefaults.appEntryPath);
+});
+
 /** Clears the session and resets to unauthenticated */
 export const clearSessionAtom = atom(null, async (_get, set) => {
   await secureStorage.clearSession();

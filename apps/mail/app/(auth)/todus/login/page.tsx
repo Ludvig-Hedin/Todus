@@ -16,7 +16,7 @@ const formSchema = z.object({
 
 export default function LoginTodus() {
   const form = useForm<z.infer<typeof formSchema>>({
-    resolver: zodResolver(formSchema) as any,
+    resolver: zodResolver(formSchema as any),
     defaultValues: {
       email: '',
       password: '',
@@ -51,115 +51,142 @@ export default function LoginTodus() {
   }
 
   return (
-    <div className="flex h-full min-h-screen w-full items-center justify-center bg-black">
-      <div className="animate-in slide-in-from-bottom-4 w-full max-w-md px-6 py-8 duration-500">
-        <div className="mb-8 text-center flex flex-col items-center">
+    <div className="flex min-h-screen w-full bg-background">
+      {/* Left Column - Form */}
+      <div className="flex w-full flex-col lg:w-1/2 p-8 md:p-12 xl:p-16">
+        <div className="flex items-center gap-2 mb-auto">
           <img
             src="/brand-logo.png"
             alt="Todus Logo"
-            className="h-16 w-16 mb-4"
+            className="h-8 w-8"
           />
-          <h1 className="mb-2 text-4xl font-bold text-white">Welcome to Todus</h1>
-          <p className="text-muted-foreground">
-            Your AI agent for emails
-          </p>
+          <span className="font-semibold tracking-tight">Todus</span>
         </div>
 
-        {/* Google OAuth — primary working auth method */}
-        <Button
-          onClick={handleGoogleSignIn}
-          className="bg-white text-black hover:bg-white/90 mb-6 h-12 w-full rounded-full border-0 font-medium"
-        >
-          <Google className="mr-2 h-5 w-5" />
-          Continue with Google
-        </Button>
-
-        <div className="relative mb-4">
-          <div className="absolute inset-0 flex items-center">
-            <span className="w-full border-t border-gray-700" />
+        <div className="mx-auto flex w-full max-w-sm flex-col justify-center my-auto animate-in slide-in-from-bottom-4 duration-500">
+          <div className="mb-8 flex flex-col items-start text-left">
+            <h1 className="text-2xl font-semibold tracking-tight">Welcome to Todus</h1>
+            <p className="text-2xl font-semibold tracking-tight text-muted-foreground mb-4">
+              Your AI agent for emails
+            </p>
+            <p className="text-sm text-muted-foreground">
+              Sign up for free with your email
+            </p>
           </div>
-          <div className="relative flex justify-center text-xs uppercase">
-            <span className="bg-black px-2 text-gray-500">or</span>
-          </div>
-        </div>
 
-        <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-3">
-            <FormField
-              control={form.control}
-              name="email"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel className="text-muted-foreground">Email</FormLabel>
-                  <FormControl>
-                    <Input
-                      placeholder="email@example.com"
-                      {...field}
-                      className="bg-black text-sm text-white placeholder:text-sm rounded-full"
-                    />
-                  </FormControl>
-                </FormItem>
-              )}
-            />
+          {/* Google OAuth — primary working auth method */}
+          <Button
+            type="button"
+            variant="outline"
+            onClick={handleGoogleSignIn}
+            className="mb-6 w-full"
+          >
+            <Google className="mr-2 h-4 w-4" />
+            Continue with Google
+          </Button>
 
-            <FormField
-              control={form.control}
-              name="password"
-              render={({ field }) => (
-                <FormItem>
-                  <div className="flex items-center justify-between">
-                    <FormLabel className="text-muted-foreground">Password</FormLabel>
-                    <Link
-                      to="/forgot-password"
-                      className="text-muted-foreground text-xs hover:text-white"
-                    >
-                      Forgot your password?
-                    </Link>
+          {false && (
+            <>
+              <div className="relative mb-4">
+                <div className="absolute inset-0 flex items-center">
+                  <span className="w-full border-t border-border" />
+                </div>
+                <div className="relative flex justify-center text-xs uppercase">
+                  <span className="bg-background px-2 text-muted-foreground">or</span>
+                </div>
+              </div>
+
+              <Form {...form}>
+                <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+                  <FormField
+                    control={form.control}
+                    name="email"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Email</FormLabel>
+                        <FormControl>
+                          <Input
+                            placeholder="email@example.com"
+                            {...field}
+                          />
+                        </FormControl>
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="password"
+                    render={({ field }) => (
+                      <FormItem>
+                        <div className="flex items-center justify-between">
+                          <FormLabel>Password</FormLabel>
+                          <Link
+                            to="/forgot-password"
+                            className="text-muted-foreground text-xs hover:text-foreground"
+                          >
+                            Forgot your password?
+                          </Link>
+                        </div>
+                        <FormControl>
+                          <Input
+                            type="password"
+                            placeholder="••••••••"
+                            {...field}
+                          />
+                        </FormControl>
+                      </FormItem>
+                    )}
+                  />
+
+                  <Button type="submit" className="w-full">
+                    Login
+                  </Button>
+
+                  <div className="mt-6 text-center text-sm">
+                    <p className="text-muted-foreground">
+                      Don't have an account?{' '}
+                      <a href="/signup" className="font-medium underline underline-offset-4 hover:text-foreground">
+                        Sign up
+                      </a>
+                    </p>
                   </div>
-                  <FormControl>
-                    <Input
-                      type="password"
-                      placeholder="••••••••"
-                      {...field}
-                      className="bg-black text-white rounded-full"
-                    />
-                  </FormControl>
-                </FormItem>
-              )}
-            />
+                </form>
+              </Form>
+            </>
+          )}
+        </div>
 
-            <Button type="submit" className="w-full rounded-full h-12">
-              Login
-            </Button>
-
-            <div className="mt-6 text-center text-sm">
-              <p className="text-muted-foreground">
-                Don't have an account?{' '}
-                <a href="/signup" className="text-white underline hover:text-white/80">
-                  Sign up
-                </a>
-              </p>
-            </div>
-          </form>
-        </Form>
+        <footer className="mt-auto">
+          <div className="flex items-center gap-6">
+            <a
+              href="/terms"
+              className="text-xs text-muted-foreground transition-colors hover:text-foreground"
+            >
+              Terms of Service
+            </a>
+            <a
+              href="/privacy"
+              className="text-xs text-muted-foreground transition-colors hover:text-foreground"
+            >
+              Privacy Policy
+            </a>
+          </div>
+        </footer>
       </div>
 
-      <footer className="absolute bottom-0 w-full px-6 py-4">
-        <div className="mx-auto flex max-w-6xl items-center justify-center gap-6">
-          <a
-            href="/terms"
-            className="text-[10px] text-gray-500 transition-colors hover:text-gray-300"
-          >
-            Terms of Service
-          </a>
-          <a
-            href="/privacy"
-            className="text-[10px] text-gray-500 transition-colors hover:text-gray-300"
-          >
-            Privacy Policy
-          </a>
+      {/* Right Column - Image Showcase */}
+      <div className="hidden lg:flex w-1/2 p-4 xl:p-6">
+        <div className="relative flex h-full w-full items-center justify-center overflow-hidden rounded-[2.5rem] bg-[#0F0F0F] border border-[#2A2A2A] px-12 xl:px-20">
+          <div className="relative w-full">
+            <img
+              src="/email-preview.png"
+              alt="Todus Interface"
+              className="rounded-xl border border-[#252525] shadow-[0_0_50px_-12px_rgba(0,0,0,0.5)] object-cover w-full h-auto"
+            />
+          </div>
         </div>
-      </footer>
+      </div>
     </div>
   );
 }

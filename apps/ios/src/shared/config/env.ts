@@ -17,6 +17,7 @@ export type NativeEnv = {
   authCallbackUrl: string;
   userAgent: string;
   allowedHosts: string[];
+  authBypassEnabled: boolean;
 };
 
 function parseHost(input: string): string | null {
@@ -25,6 +26,12 @@ function parseHost(input: string): string | null {
   } catch {
     return null;
   }
+}
+
+function isTruthyEnv(value: string | undefined): boolean {
+  if (!value) return false;
+  const normalized = value.trim().toLowerCase();
+  return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
 }
 
 export function getNativeEnv(): NativeEnv {
@@ -36,6 +43,7 @@ export function getNativeEnv(): NativeEnv {
   // Must use the web app URL (not the API URL) so after OAuth the browser
   // lands on the web app. The origin must be in the server's trustedOrigins.
   const authCallbackUrl = `${webUrl.replace(/\/$/, '')}/mail/inbox`;
+  const authBypassEnabled = isTruthyEnv(process.env.EXPO_PUBLIC_AUTH_BYPASS);
 
   const allowedHosts = Array.from(
     new Set(
@@ -57,5 +65,6 @@ export function getNativeEnv(): NativeEnv {
     authCallbackUrl,
     userAgent: NATIVE_APP_USER_AGENT,
     allowedHosts,
+    authBypassEnabled,
   };
 }

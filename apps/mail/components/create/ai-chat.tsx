@@ -263,13 +263,12 @@ export function AIChat({
         <div className="min-h-full px-2 py-4">
           {chatMessages && !chatMessages.enabled ? (
             <div
-              onClick={() => setPricingDialog('true')}
               className="absolute inset-0 flex flex-col items-center justify-center"
             >
               <TextShimmer className="text-center text-xl font-medium">
                 Upgrade to Todus Pro for unlimited AI chat
               </TextShimmer>
-              <Button className="mt-2 h-8 w-52">Start 7 day free trial</Button>
+              <Button onClick={() => setPricingDialog('true')} className="mt-2 h-8 w-52">Start 7 day free trial</Button>
             </div>
           ) : !messages.length ? (
             <div className="absolute inset-0 flex flex-col items-center justify-center">
@@ -296,11 +295,11 @@ export function AIChat({
                 <div key={`${message.id}-${index}`} className="mb-2 flex flex-col" data-message-role={message.role}>
                   {toolParts.map(
                     (part, index) =>
-                      part.toolInvocation?.result && (
+                      (part.toolInvocation as any)?.result && (
                         <ToolResponse
                           key={`${part.toolInvocation.toolName}-${index}`}
                           toolName={part.toolInvocation.toolName}
-                          result={part.toolInvocation.result}
+                          result={(part.toolInvocation as any).result}
                           args={part.toolInvocation.args}
                         />
                       ),
@@ -480,6 +479,6 @@ export function AIChat({
         </div>
         </div> */}
       </div>
-    </div>
+    </div >
   );
 }

@@ -259,7 +259,7 @@ export const createAuth = () => {
       },
     },
     emailAndPassword: {
-      enabled: false,
+      enabled: true,
       requireEmailVerification: true,
       sendResetPassword: async ({ user, url }) => {
         await resend().emails.send({
@@ -359,15 +359,28 @@ const createAuthConfig = () => {
     database: drizzleAdapter(db, { provider: 'pg' }),
     secondaryStorage: {
       get: async (key: string) => {
-        const value = await cache.get(key);
-        return typeof value === 'string' ? value : value ? JSON.stringify(value) : null;
+        try {
+          const value = await cache.get(key);
+          return typeof value === 'string' ? value : value ? JSON.stringify(value) : null;
+        } catch (err) {
+          console.warn('Redis get error:', err);
+          return null; // Fallback to database
+        }
       },
       set: async (key: string, value: string, ttl?: number) => {
-        if (ttl) await cache.set(key, value, { ex: ttl });
-        else await cache.set(key, value);
+        try {
+          if (ttl) await cache.set(key, value, { ex: ttl });
+          else await cache.set(key, value);
+        } catch (err) {
+          console.warn('Redis set error:', err);
+        }
       },
       delete: async (key: string) => {
-        await cache.del(key);
+        try {
+          await cache.del(key);
+        } catch (err) {
+          console.warn('Redis del error:', err);
+        }
       },
     },
     advanced: {
