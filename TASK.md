@@ -19,11 +19,12 @@ Auth/login is currently owned by another agent stream and is excluded from this 
 
 ## Current Execution Order (Highest Priority First)
 
-1. `PG-006` Add native mailto parity (`/api/mailto-handler`)
-2. `PG-002` Add native `/signup` parity flow
-3. `PG-001` Complete remaining public route parity (`/hr`)
-4. `N8-03` Accessibility pass (VoiceOver/TalkBack/keyboard nav)
-5. `N8-04` Release pipeline setup (TestFlight, Play Console, macOS)
+1. `PG-003` Complete native mail shell parity for `/mail/:folder`
+2. `PG-004` Implement `/mail/create` and `/mail/under-construction/:path` parity behaviors
+3. `PG-011` Implement native integrations parity: Dub + Autumn
+4. `PG-013` Build parity-focused automated tests (unit/integration/E2E)
+5. `N8-03` Accessibility pass (VoiceOver/TalkBack/keyboard nav)
+6. `N8-04` Release pipeline setup (TestFlight, Play Console, macOS)
 
 ---
 
@@ -194,6 +195,8 @@ All marked DONE — these are WebView-based, not truly native.
 - `N6-04` completed with Sentry integration in native (`apps/ios/src/shared/telemetry/sentry.ts`, initialization in `apps/ios/src/providers/AppProviders.tsx`, app wrapper in `apps/ios/app/_layout.tsx`, and capture hooks in `apps/ios/src/shared/components/ErrorBoundary.tsx` + `apps/ios/src/providers/QueryTrpcProvider.tsx`).
 - `N8-01` moved to `BLOCKED` after implementing screenshot governance artifacts in `/parity_screenshots` (`manifest.json`, `SCREENSHOT_LOG.md`, `README.md`) and adding coverage enforcement via `pnpm parity:screenshots:check`; full completion requires runtime captures on web/iOS/Android/macOS.
 - `N8-02` completed with targeted native performance improvements in mail flows: list/detail query cache tuning (`staleTime`/`gcTime`), reduced auto-refetch churn, FlashList virtualization tuning, and memoized thread rows.
+- `PG-006` completed with native `/api/mailto-handler` parity in `apps/ios/app/api/mailto-handler.tsx`, shared parser/draft helpers in `apps/ios/src/features/compose/mailtoParity.ts`, compose route prefill + `draftId` send wiring in `apps/ios/app/compose.tsx`, and in-thread `mailto:` interception in `apps/ios/src/features/mail/MessageCard.tsx`.
+- `PG-001` completed by adding native public `/hr` parity wrapper route in `apps/ios/app/(public)/hr.tsx`.
 - Login/auth flow remains untouched in this stream per ownership constraint.
 - `N3-09` and `N5-06` remain blocked because current workspace-level test/typecheck runs fail in unrelated server/packages paths, preventing reliable green test baselines.
 
@@ -201,7 +204,7 @@ All marked DONE — these are WebView-based, not truly native.
 
 - Workspace TypeScript checks remain blocked by pre-existing cross-package errors outside iOS scope (not introduced by this stream).
 - Screenshot coverage check currently fails intentionally (`0/128`) until parity screenshots are captured and committed.
-- iOS targeted unit tests pass via `pnpm --filter @zero/ios run test:unit` (12/12 passing).
+- iOS targeted unit tests pass via `pnpm --filter @zero/ios run test:unit` (20/20 passing).
 - Targeted formatting checks pass on all files touched in this session.
 
 ---
@@ -210,12 +213,12 @@ All marked DONE — these are WebView-based, not truly native.
 
 | ID     | Task                                                                                                                                      | Status  | Notes                                                                                                                                                               |
 | ------ | ----------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| PG-001 | Implement native public route set parity (`/`, `/home`, `/about`, `/terms`, `/pricing`, `/privacy`, `/contributors`, `/developer`, `/hr`) | PENDING | `/`, `/home`, `/about`, `/terms`, `/pricing`, `/privacy`, `/contributors`, and `/developer` are mapped in native public route group; remaining route is `/hr`          |
-| PG-002 | Add native `/signup` parity flow                                                                                                          | PENDING | Include Google OAuth-first UX and fallback behavior parity                                                                                                          |
+| PG-001 | Implement native public route set parity (`/`, `/home`, `/about`, `/terms`, `/pricing`, `/privacy`, `/contributors`, `/developer`, `/hr`) | DONE    | Public parity wrappers now cover all listed routes, including `/hr` in `apps/ios/app/(public)/hr.tsx`                                                            |
+| PG-002 | Add native `/signup` parity flow                                                                                                          | BLOCKED | Auth/signup flow is currently owned by another agent stream; deferred in this stream by explicit ownership constraint                                             |
 | PG-003 | Complete native mail shell parity for `/mail/:folder`                                                                                     | PENDING | Include category tabs, command palette entry points, bulk selection UX                                                                                              |
 | PG-004 | Implement `/mail/create` and `/mail/under-construction/:path` parity behaviors                                                            | PENDING | Redirect/placeholder parity with web semantics                                                                                                                      |
 | PG-005 | Rebuild native compose parity (`/mail/compose`)                                                                                           | DONE    | Compose parity shipped with rich text, attachments, drafts, reply/reply-all/forward, undo-send, schedule send, and templates                                          |
-| PG-006 | Add native mailto parity (`/api/mailto-handler`)                                                                                          | PENDING | Parse mailto payload and create draft before opening compose                                                                                                        |
+| PG-006 | Add native mailto parity (`/api/mailto-handler`)                                                                                          | DONE    | Native `/api/mailto-handler` parses mailto payloads, attempts draft creation, and opens compose with fallback params + `draftId` when available                   |
 | PG-007 | Complete settings parity for missing sections                                                                                             | DONE    | Native forms added for `/settings/categories`, `/settings/notifications`, `/settings/privacy`, `/settings/security`, `/settings/shortcuts`, `/settings/danger-zone` |
 | PG-008 | Upgrade native existing settings sections from partial to full parity                                                                     | DONE    | `/settings/general`, `/settings/appearance`, `/settings/connections`, `/settings/labels` upgraded with parity-focused forms/actions                                 |
 | PG-009 | Implement labels/categories CRUD + assignment parity in native                                                                            | DONE    | Labels CRUD + color selection and category default/order/filter editing implemented                                                                                 |

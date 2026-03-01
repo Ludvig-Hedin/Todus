@@ -37,6 +37,12 @@ import {
   uniqueEmails,
   type SendResultLike,
 } from '../src/features/compose/composeParity';
+import {
+  extractComposePrefillParams,
+  hasComposePrefillContent,
+  plainTextBodyToHtml,
+  type ComposePrefillParams,
+} from '../src/features/compose/mailtoParity';
 import { useAtom } from 'jotai';
 import {
   pendingUndoSendAtom,
@@ -79,7 +85,16 @@ type TemplateLike = {
 
 export default function ComposeScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ mode?: string; threadId?: string }>();
+  const params = useLocalSearchParams<{
+    mode?: string;
+    threadId?: string;
+    draftId?: string | string[];
+    to?: string | string[];
+    cc?: string | string[];
+    bcc?: string | string[];
+    subject?: string | string[];
+    body?: string | string[];
+  }>();
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const trpc = useTRPC();
@@ -121,6 +136,21 @@ export default function ComposeScreen() {
   const isReply = params.mode === 'reply' || params.mode === 'replyAll';
   const isReplyAll = params.mode === 'replyAll';
   const isForward = params.mode === 'forward';
+  const composeRoutePrefill = useMemo(
+    () =>
+      extractComposePrefillParams({
+        draftId: params.draftId,
+        to: params.to,
+        cc: params.cc,
+        bcc: params.bcc,
+        subject: params.subject,
+        body: params.body,
+      }),
+    [params.bcc, params.body, params.cc, params.draftId, params.subject, params.to],
+  );
+  const draftIdParam = composeRoutePrefill.draftId;
+  const shouldApplyRoutePrefill =
+    !isReply && !isForward && hasComposePrefillContent(composeRoutePrefill);
   const defaultConnectionQuery = useQuery(trpc.connections.getDefault.queryOptions());
   const templatesQuery = useQuery(trpc.templates.list.queryOptions());
 
@@ -224,19 +254,45 @@ export default function ComposeScreen() {
     [editor, setUndoComposePrefill],
   );
 
+  const applyRoutePrefill = useCallback(
+    (prefill: ComposePrefillParams) => {
+      setTo(prefill.to ?? '');
+      setCc(prefill.cc ?? '');
+      setBcc(prefill.bcc ?? '');
+      setSubject(prefill.subject ?? '');
+      setScheduleAt(undefined);
+      if ((prefill.cc ?? '').trim() || (prefill.bcc ?? '').trim()) {
+        setShowCcBcc(true);
+      }
+      if (prefill.body) {
+        editor.setContent(plainTextBodyToHtml(prefill.body));
+      }
+    },
+    [editor],
+  );
+
   useEffect(() => {
     if (hasRestoredDraftRef.current) return;
-    hasRestoredDraftRef.current = true;
 
     const restoreComposeState = async () => {
       if (undoComposePrefill) {
         applyUndoPrefill(undoComposePrefill);
+        hasRestoredDraftRef.current = true;
+        return;
+      }
+
+      if (shouldApplyRoutePrefill) {
+        applyRoutePrefill(composeRoutePrefill);
+        hasRestoredDraftRef.current = true;
         return;
       }
 
       try {
         const rawDraft = await AsyncStorage.getItem(draftKey);
-        if (!rawDraft) return;
+        if (!rawDraft) {
+          hasRestoredDraftRef.current = true;
+          return;
+        }
 
         const draft: DraftState = JSON.parse(rawDraft);
         setTo(draft.to ?? '');
@@ -254,10 +310,19 @@ export default function ComposeScreen() {
       } catch {
         // ignore corrupted draft payloads
       }
+      hasRestoredDraftRef.current = true;
     };
 
     void restoreComposeState();
-  }, [applyUndoPrefill, draftKey, editor, setUndoComposePrefill, undoComposePrefill]);
+  }, [
+    applyRoutePrefill,
+    applyUndoPrefill,
+    composeRoutePrefill,
+    draftKey,
+    editor,
+    shouldApplyRoutePrefill,
+    undoComposePrefill,
+  ]);
 
   useEffect(() => {
     if (!undoComposePrefill || hasAppliedUndoPrefillRef.current) return;
@@ -433,6 +498,7 @@ export default function ComposeScreen() {
           : undefined,
       isForward: isForward || undefined,
       originalMessage: latestMessage?.decodedBody || latestMessage?.body || undefined,
+      ...(draftIdParam ? { draftId: draftIdParam } : {}),
       ...(params.threadId ? { threadId: params.threadId } : {}),
       ...(scheduleAt ? { scheduleAt } : {}),
     } as any);

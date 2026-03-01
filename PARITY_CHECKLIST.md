@@ -54,12 +54,14 @@ This file is the living single source of truth for Web -> Native parity across i
 | `/(public)/privacy`               | `/privacy`                           | Implemented (partial parity) |
 | `/(public)/pricing`               | `/pricing`                           | Implemented (partial parity) |
 | `/(public)/contributors`          | `/contributors`                      | Implemented (partial parity) |
+| `/(public)/hr`                    | `/hr`                                | Implemented (partial parity) |
 | `/(public)/developer`             | `/developer`                         | Implemented (partial parity) |
 | `/(auth)/login`                   | `/login`                             | Implemented (partial parity) |
 | `/(auth)/web-auth`                | OAuth flow helper for `/login`       | Implemented                  |
 | `/(app)/(mail)/[folder]`          | `/mail/:folder`                      | Implemented (partial parity) |
 | `/(app)/(mail)/thread/[threadId]` | Thread detail inside `/mail/:folder` | Implemented (partial parity) |
 | `/compose`                        | `/mail/compose`                      | Implemented (partial parity) |
+| `/api/mailto-handler`             | `/api/mailto-handler`                | Implemented (partial parity) |
 | `/(app)/assistant`                | AI sidebar assistant                 | Implemented (partial parity) |
 | `/search`                         | Search in mail shell                 | Implemented (partial parity) |
 | `/(app)/settings/index`           | `/settings`                          | Implemented (partial parity) |
@@ -189,10 +191,10 @@ Shared/server-sensitive envs that impact behavior parity (configured outside cli
 
 | Category     | ✅ Complete | 🟡 Partial | 🔴 Missing | ⚠️ Blocked |
 | ------------ | ----------: | ---------: | ---------: | ---------: |
-| Screens      |           0 |         11 |         19 |          0 |
+| Screens      |           0 |         13 |         17 |          0 |
 | Components   |           0 |          7 |         13 |          0 |
-| Workflows    |           0 |          5 |          8 |          1 |
-| Integrations |           0 |          5 |         10 |          0 |
+| Workflows    |           0 |          6 |          7 |          1 |
+| Integrations |           0 |          6 |          9 |          0 |
 
 ### Blockers
 
@@ -403,10 +405,10 @@ Checklist:
 - [ ] Analytics events parity (same names/properties if used)
 - [ ] Screenshots captured (web vs iOS vs Android vs macOS)
 
-### Screen: `/hr` -> RN: Missing
+### Screen: `/hr` -> RN: `/(public)/hr`
 
-**Status:** 🔴
-**Platforms:** iOS missing / Android missing / macOS rendered only via Electron web wrapper
+**Status:** 🟡
+**Platforms:** iOS implemented via native WebView wrapper / Android same code path (needs validation) / macOS rendered only via Electron web wrapper
 
 Checklist:
 
@@ -414,9 +416,9 @@ Checklist:
 - [ ] Typography matches web (font family, size scale, weights, line height)
 - [ ] Colors match web (tokens, gradients, borders, shadows)
 - [ ] Components match web (inputs, buttons, cards, modals)
-- [ ] Navigation matches (entry points, back behavior, deep links if any)
-- [ ] Data loaded matches web (same API endpoints/queries, same params)
-- [ ] Loading states match web (skeletons/spinners, placement)
+- [x] Navigation matches (entry points, back behavior, deep links if any)
+- [x] Data loaded matches web (same API endpoints/queries, same params)
+- [x] Loading states match web (skeletons/spinners, placement)
 - [ ] Empty states match web (copy, visuals, actions)
 - [ ] Error states match web (messages, retry flows)
 - [ ] Forms match web (validation rules, masking, keyboard behavior)
@@ -865,10 +867,10 @@ Checklist:
 - [ ] Analytics events parity (same names/properties if used)
 - [ ] Screenshots captured (web vs iOS vs Android vs macOS)
 
-### Screen: `/api/mailto-handler` -> RN: Missing (no native mailto parser/create-draft bridge)
+### Screen: `/api/mailto-handler` -> RN: `/api/mailto-handler`
 
-**Status:** 🔴
-**Platforms:** iOS missing / Android missing / macOS handled by web wrapper path only
+**Status:** 🟡
+**Platforms:** iOS implemented / Android same code path (needs validation) / macOS handled by web wrapper path only
 
 Checklist:
 
@@ -876,9 +878,9 @@ Checklist:
 - [ ] Typography matches web (font family, size scale, weights, line height)
 - [ ] Colors match web (tokens, gradients, borders, shadows)
 - [ ] Components match web (inputs, buttons, cards, modals)
-- [ ] Navigation matches (entry points, back behavior, deep links if any)
-- [ ] Data loaded matches web (same API endpoints/queries, same params)
-- [ ] Loading states match web (skeletons/spinners, placement)
+- [x] Navigation matches (entry points, back behavior, deep links if any)
+- [x] Data loaded matches web (same API endpoints/queries, same params)
+- [x] Loading states match web (skeletons/spinners, placement)
 - [ ] Empty states match web (copy, visuals, actions)
 - [ ] Error states match web (messages, retry flows)
 - [ ] Forms match web (validation rules, masking, keyboard behavior)
@@ -1133,11 +1135,11 @@ Workflow: AI assistant + compose helpers
 
 Workflow: Mailto URL -> draft -> compose
 
-- [ ] Matches web steps exactly
+- [x] Matches web steps exactly
 - [ ] Handles same edge cases
-- [ ] Same backend calls in same order
-- [ ] Same data persisted (and cleared) as web
-- [ ] Same success/failure user feedback
+- [x] Same backend calls in same order
+- [x] Same data persisted (and cleared) as web
+- [x] Same success/failure user feedback
 - [ ] Offline / flaky network behavior handled (if web handles it)
 - [ ] E2E test exists (or manual test script documented)
 
@@ -1212,10 +1214,10 @@ Integration: AI helpers (OpenAI/Perplexity-backed features)
 
 Integration: Deep linking + mailto handling
 
-- [ ] Equivalent native implementation exists
-- [ ] Credentials/env vars configured
+- [x] Equivalent native implementation exists
+- [x] Credentials/env vars configured
 - [ ] Verified on all platforms
-- [ ] Data/events match web
+- [x] Data/events match web
 
 Integration: OAuth/social login
 

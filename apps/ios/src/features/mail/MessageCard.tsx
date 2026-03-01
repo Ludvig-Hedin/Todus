@@ -7,6 +7,7 @@ import React, { useCallback, useState } from 'react';
 import { Linking, View, Text, StyleSheet } from 'react-native';
 import { WebView, type WebViewNavigation } from 'react-native-webview';
 import { useTheme } from '../../shared/theme/ThemeContext';
+import { useRouter } from 'expo-router';
 
 interface MessageCardProps {
   message: {
@@ -20,6 +21,7 @@ interface MessageCardProps {
 
 export function MessageCard({ message }: MessageCardProps) {
   const { colors } = useTheme();
+  const router = useRouter();
   const [webViewHeight, setWebViewHeight] = useState(100);
 
   const senderName = message.sender?.name || message.sender?.email || 'Unknown';
@@ -46,10 +48,17 @@ export function MessageCard({ message }: MessageCardProps) {
       Linking.openURL(url).catch(() => {});
       return false;
     }
-    // Open mailto: and other schemes via OS
+    if (url.startsWith('mailto:')) {
+      router.push({
+        pathname: '/api/mailto-handler',
+        params: { mailto: url },
+      });
+      return false;
+    }
+    // Open other schemes via OS
     Linking.openURL(url).catch(() => {});
     return false;
-  }, []);
+  }, [router]);
 
   // JS injected to measure the rendered HTML content height
   const injectedJavaScript = `
