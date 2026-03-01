@@ -10,6 +10,11 @@ import {
   Palette,
   Link,
   Tag,
+  Bell,
+  Lock,
+  AlertTriangle,
+  Grid2x2,
+  Keyboard,
 } from 'lucide-react-native';
 
 const SETTINGS_ITEMS = [
@@ -17,6 +22,22 @@ const SETTINGS_ITEMS = [
   { key: 'appearance', label: 'Appearance', description: 'Theme & display', icon: Palette },
   { key: 'connections', label: 'Connections', description: 'Email accounts', icon: Link },
   { key: 'labels', label: 'Labels', description: 'Manage labels', icon: Tag },
+  { key: 'categories', label: 'Categories', description: 'Inbox category views', icon: Grid2x2 },
+  {
+    key: 'notifications',
+    label: 'Notifications',
+    description: 'Email notification preferences',
+    icon: Bell,
+  },
+  { key: 'privacy', label: 'Privacy', description: 'Image loading and trusted senders', icon: Lock },
+  { key: 'security', label: 'Security', description: 'Account protection options', icon: Lock },
+  { key: 'shortcuts', label: 'Shortcuts', description: 'Keyboard shortcut reference', icon: Keyboard },
+  {
+    key: 'danger-zone',
+    label: 'Danger Zone',
+    description: 'Destructive account actions',
+    icon: AlertTriangle,
+  },
 ] as const;
 
 export default function SettingsIndex() {

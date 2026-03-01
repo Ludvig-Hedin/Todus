@@ -1,99 +1,98 @@
 /**
- * Appearance settings — theme toggle (light/dark/system).
+ * Appearance settings — color theme preference parity with web settings.
  */
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import {
+  SettingsButton,
+  SettingsCard,
+  SettingsDescription,
+  SettingsOptionGroup,
+  SettingsScreenContainer,
+  SettingsSectionTitle,
+} from '../../../src/features/settings/SettingsUI';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { ActivityIndicator, Alert, StyleSheet, View } from 'react-native';
+import { useTRPC } from '../../../src/providers/QueryTrpcProvider';
 import { useTheme } from '../../../src/shared/theme/ThemeContext';
-import { Sun, Moon, Smartphone } from 'lucide-react-native';
-import { haptics } from '../../../src/shared/utils/haptics';
+import { useEffect, useState } from 'react';
 
-const THEMES = [
-  { id: 'system', label: 'System', icon: Smartphone },
-  { id: 'light', label: 'Light', icon: Sun },
-  { id: 'dark', label: 'Dark', icon: Moon },
-] as const;
+type ThemePreference = 'light' | 'dark' | 'system';
 
 export default function AppearanceSettings() {
   const { colors, colorMode } = useTheme();
-  const insets = useSafeAreaInsets();
+  const trpc = useTRPC();
+  const queryClient = useQueryClient();
+  const settingsQuery = useQuery(trpc.settings.get.queryOptions());
+  const [themePreference, setThemePreference] = useState<ThemePreference>('system');
+  const [isDirty, setIsDirty] = useState(false);
+
+  const saveMutation = useMutation({
+    ...trpc.settings.save.mutationOptions(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: trpc.settings.get.queryKey() });
+      setIsDirty(false);
+    },
+  });
+
+  useEffect(() => {
+    const settingTheme = settingsQuery.data?.settings?.colorTheme;
+    if (!settingTheme) return;
+    setThemePreference(settingTheme);
+    setIsDirty(false);
+  }, [settingsQuery.data?.settings?.colorTheme]);
+
+  const saveChanges = async () => {
+    try {
+      await saveMutation.mutateAsync({
+        colorTheme: themePreference,
+      });
+      Alert.alert('Saved', 'Appearance settings were updated.');
+    } catch (error: any) {
+      Alert.alert('Save failed', error?.message || 'Could not save appearance settings.');
+    }
+  };
+
+  if (settingsQuery.isLoading) {
+    return (
+      <View style={[styles.loading, { backgroundColor: colors.background }]}>
+        <ActivityIndicator color={colors.primary} />
+      </View>
+    );
+  }
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <ScrollView contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 16 }]}>
-        <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Theme</Text>
-        <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          {THEMES.map((theme, index) => {
-            const isLast = index === THEMES.length - 1;
-            const isActive = theme.id === 'system'; // Default to system for now
-            const Icon = theme.icon;
-            return (
-              <Pressable
-                key={theme.id}
-                onPress={() => haptics.selection()}
-                style={[
-                  styles.themeItem,
-                  !isLast && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
-                ]}
-              >
-                <Icon size={20} color={isActive ? colors.primary : colors.mutedForeground} />
-                <Text
-                  style={[
-                    styles.themeLabel,
-                    { color: isActive ? colors.foreground : colors.mutedForeground },
-                    isActive && { fontWeight: '600' },
-                  ]}
-                >
-                  {theme.label}
-                </Text>
-                {isActive && (
-                  <View style={[styles.activeIndicator, { backgroundColor: colors.primary }]} />
-                )}
-              </Pressable>
-            );
-          })}
-        </View>
-        <Text style={[styles.footnote, { color: colors.mutedForeground }]}>
-          Currently using {colorMode} mode. Theme persistence will be added in a future update.
-        </Text>
-      </ScrollView>
-    </View>
+    <SettingsScreenContainer>
+      <SettingsCard>
+        <SettingsSectionTitle>Theme</SettingsSectionTitle>
+        <SettingsDescription>
+          Choose light, dark, or system theme. The current rendered mode is {colorMode}.
+        </SettingsDescription>
+        <SettingsOptionGroup
+          value={themePreference}
+          onSelect={(value) => {
+            setThemePreference(value);
+            setIsDirty(true);
+          }}
+          options={[
+            { label: 'System', value: 'system' },
+            { label: 'Light', value: 'light' },
+            { label: 'Dark', value: 'dark' },
+          ]}
+        />
+      </SettingsCard>
+
+      <SettingsButton
+        label={saveMutation.isPending ? 'Saving...' : 'Save Changes'}
+        onPress={saveChanges}
+        disabled={saveMutation.isPending || !isDirty}
+      />
+    </SettingsScreenContainer>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  content: { padding: 16 },
-  sectionTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginBottom: 8,
-  },
-  section: {
-    borderRadius: 12,
-    borderWidth: StyleSheet.hairlineWidth,
-    overflow: 'hidden',
-  },
-  themeItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    gap: 12,
-  },
-  themeLabel: {
-    fontSize: 16,
+  loading: {
     flex: 1,
-  },
-  activeIndicator: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  footnote: {
-    fontSize: 13,
-    marginTop: 8,
-    paddingHorizontal: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

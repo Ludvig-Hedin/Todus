@@ -7,6 +7,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { identifyPostHog } from '../../src/shared/telemetry/posthog';
 import { MailSidebar } from '../../src/features/mail/MailSidebar';
 import { useTRPC } from '../../src/providers/QueryTrpcProvider';
+import { UndoSendBanner } from '../../src/shared/components/UndoSendBanner';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
 import { useQuery } from '@tanstack/react-query';
 import { Drawer } from 'expo-router/drawer';
@@ -31,24 +32,28 @@ export default function AppLayout() {
 
   return (
     <GestureHandlerRootView style={styles.root}>
-      <Drawer
-        drawerContent={(props) => <MailSidebar {...props} />}
-        screenOptions={{
-          headerShown: false,
-          drawerType: isWideLayout ? 'permanent' : 'front',
-          swipeEnabled: !isWideLayout,
-          drawerStyle: {
-            backgroundColor: colors.background,
-            width: 280,
-          },
-          sceneStyle: {
-            backgroundColor: colors.background,
-          },
-        }}
-      >
-        <Drawer.Screen name="(mail)" options={{ drawerLabel: 'Mail' }} />
-        <Drawer.Screen name="settings" options={{ drawerLabel: 'Settings' }} />
-      </Drawer>
+      <>
+        <Drawer
+          drawerContent={(props) => <MailSidebar {...props} />}
+          screenOptions={{
+            headerShown: false,
+            drawerType: isWideLayout ? 'permanent' : 'front',
+            swipeEnabled: !isWideLayout,
+            drawerStyle: {
+              backgroundColor: colors.background,
+              width: 280,
+            },
+            sceneStyle: {
+              backgroundColor: colors.background,
+            },
+          }}
+        >
+          <Drawer.Screen name="(mail)" options={{ drawerLabel: 'Mail' }} />
+          <Drawer.Screen name="assistant" options={{ drawerLabel: 'Assistant' }} />
+          <Drawer.Screen name="settings" options={{ drawerLabel: 'Settings' }} />
+        </Drawer>
+        <UndoSendBanner />
+      </>
     </GestureHandlerRootView>
   );
 }

@@ -24,6 +24,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -33,7 +34,8 @@ import { useTRPC } from '../../providers/QueryTrpcProvider';
 import { useTheme } from '../../shared/theme/ThemeContext';
 import { haptics } from '../../shared/utils/haptics';
 import { MessageCard } from './MessageCard';
-import { useEffect, useRef } from 'react';
+import { sortThreadNotes } from './notesUtils';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'expo-router';
 
 interface ThreadDetailPaneProps {
@@ -57,6 +59,7 @@ export function ThreadDetailPane({
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const listThreadsKey = trpc.mail.listThreads.queryKey();
+  const notesQueryKey = trpc.notes.list.queryKey({ threadId: threadId ?? '' });
   const archiveSnapshotsRef = useRef<ReturnType<typeof getThreadListSnapshots>>([]);
   const deleteSnapshotsRef = useRef<ReturnType<typeof getThreadListSnapshots>>([]);
   const spamSnapshotsRef = useRef<ReturnType<typeof getThreadListSnapshots>>([]);
@@ -64,12 +67,23 @@ export function ThreadDetailPane({
     null,
   );
   const starEventNameRef = useRef<string | null>(null);
+  const [newNoteContent, setNewNoteContent] = useState('');
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [editingNoteContent, setEditingNoteContent] = useState('');
 
   const { data: threadData, isLoading } = useQuery({
     ...trpc.mail.get.queryOptions({ id: threadId ?? '' }),
     enabled: !!threadId,
     staleTime: 30_000,
     gcTime: 5 * 60_000,
+    refetchOnMount: false,
+    refetchOnReconnect: false,
+  });
+
+  const notesQuery = useQuery({
+    ...trpc.notes.list.queryOptions({ threadId: threadId ?? '' }),
+    enabled: !!threadId,
+    staleTime: 30_000,
     refetchOnMount: false,
     refetchOnReconnect: false,
   });
@@ -233,6 +247,42 @@ export function ThreadDetailPane({
     },
   });
 
+  const createNoteMutation = useMutation({
+    ...trpc.notes.create.mutationOptions(),
+    onSuccess: () => {
+      haptics.success();
+      setNewNoteContent('');
+      queryClient.invalidateQueries({ queryKey: notesQueryKey });
+    },
+    onError: (error) => {
+      Alert.alert('Add note failed', error.message || 'Could not add note.');
+    },
+  });
+
+  const updateNoteMutation = useMutation({
+    ...trpc.notes.update.mutationOptions(),
+    onSuccess: () => {
+      haptics.selection();
+      setEditingNoteId(null);
+      setEditingNoteContent('');
+      queryClient.invalidateQueries({ queryKey: notesQueryKey });
+    },
+    onError: (error) => {
+      Alert.alert('Update note failed', error.message || 'Could not update note.');
+    },
+  });
+
+  const deleteNoteMutation = useMutation({
+    ...trpc.notes.delete.mutationOptions(),
+    onSuccess: () => {
+      haptics.warning();
+      queryClient.invalidateQueries({ queryKey: notesQueryKey });
+    },
+    onError: (error) => {
+      Alert.alert('Delete note failed', error.message || 'Could not delete note.');
+    },
+  });
+
   if (!threadId) {
     return (
       <View style={[styles.centered, { backgroundColor: colors.background }]}>
@@ -247,6 +297,28 @@ export function ThreadDetailPane({
   const messages = threadData?.messages ?? [];
   const subject = messages[0]?.subject || '(no subject)';
   const labels = threadData?.labels ?? [];
+  const notes = ((notesQuery.data as { notes?: any[] } | undefined)?.notes ?? []) as any[];
+  const sortedNotes = useMemo(() => sortThreadNotes(notes), [notes]);
+
+  const createNote = () => {
+    if (!threadId || !newNoteContent.trim()) return;
+    createNoteMutation.mutate({
+      threadId,
+      content: newNoteContent.trim(),
+      color: 'default',
+      isPinned: false,
+    });
+  };
+
+  const saveEditedNote = () => {
+    if (!editingNoteId || !editingNoteContent.trim()) return;
+    updateNoteMutation.mutate({
+      noteId: editingNoteId,
+      data: {
+        content: editingNoteContent.trim(),
+      },
+    });
+  };
 
   return (
     <View
@@ -333,6 +405,132 @@ export function ThreadDetailPane({
               ))}
             </View>
           )}
+
+          <View style={[styles.notesSection, { borderColor: colors.border, backgroundColor: colors.card }]}>
+            <View style={styles.notesHeader}>
+              <Text style={[styles.notesTitle, { color: colors.foreground }]}>Notes</Text>
+              <Text style={[styles.notesCount, { color: colors.mutedForeground }]}>
+                {notes.length}
+              </Text>
+            </View>
+
+            <View style={styles.noteComposer}>
+              <TextInput
+                style={[
+                  styles.noteInput,
+                  {
+                    borderColor: colors.border,
+                    color: colors.foreground,
+                    backgroundColor: colors.background,
+                  },
+                ]}
+                placeholder="Add a thread note"
+                placeholderTextColor={colors.mutedForeground}
+                value={newNoteContent}
+                onChangeText={setNewNoteContent}
+                multiline
+              />
+              <Pressable
+                style={[
+                  styles.noteAddButton,
+                  {
+                    backgroundColor:
+                      createNoteMutation.isPending || !newNoteContent.trim()
+                        ? colors.secondary
+                        : colors.primary,
+                  },
+                ]}
+                disabled={createNoteMutation.isPending || !newNoteContent.trim()}
+                onPress={createNote}
+              >
+                <Text style={[styles.noteAddText, { color: colors.primaryForeground }]}>
+                  {createNoteMutation.isPending ? 'Saving...' : 'Add'}
+                </Text>
+              </Pressable>
+            </View>
+
+            {sortedNotes.length === 0 ? (
+              <Text style={[styles.notesEmpty, { color: colors.mutedForeground }]}>
+                No notes for this thread yet.
+              </Text>
+            ) : (
+              sortedNotes.map((note) => {
+                const isEditing = editingNoteId === note.id;
+                return (
+                  <View key={note.id} style={[styles.noteCard, { borderColor: colors.border }]}>
+                    {isEditing ? (
+                      <TextInput
+                        style={[
+                          styles.noteEditInput,
+                          {
+                            borderColor: colors.border,
+                            color: colors.foreground,
+                            backgroundColor: colors.background,
+                          },
+                        ]}
+                        value={editingNoteContent}
+                        onChangeText={setEditingNoteContent}
+                        multiline
+                      />
+                    ) : (
+                      <Text style={[styles.noteContent, { color: colors.foreground }]}>
+                        {note.content}
+                      </Text>
+                    )}
+                    <View style={styles.noteMetaRow}>
+                      <Text style={[styles.noteMetaText, { color: colors.mutedForeground }]}>
+                        {new Date(note.updatedAt ?? note.createdAt).toLocaleString()}
+                      </Text>
+                      <View style={styles.noteActions}>
+                        <Pressable
+                          onPress={() => {
+                            if (isEditing) {
+                              saveEditedNote();
+                            } else {
+                              setEditingNoteId(note.id);
+                              setEditingNoteContent(note.content ?? '');
+                            }
+                          }}
+                        >
+                          <Text style={[styles.noteActionText, { color: colors.primary }]}>
+                            {isEditing ? 'Save' : 'Edit'}
+                          </Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={() =>
+                            updateNoteMutation.mutate({
+                              noteId: note.id,
+                              data: { isPinned: !note.isPinned },
+                            })
+                          }
+                        >
+                          <Text style={[styles.noteActionText, { color: colors.foreground }]}>
+                            {note.isPinned ? 'Unpin' : 'Pin'}
+                          </Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={() =>
+                            Alert.alert('Delete note?', 'This cannot be undone.', [
+                              { text: 'Cancel', style: 'cancel' },
+                              {
+                                text: 'Delete',
+                                style: 'destructive',
+                                onPress: () => deleteNoteMutation.mutate({ noteId: note.id }),
+                              },
+                            ])
+                          }
+                        >
+                          <Text style={[styles.noteActionText, { color: colors.destructive }]}>
+                            Delete
+                          </Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                  </View>
+                );
+              })
+            )}
+          </View>
 
           {messages.map((msg: any) => (
             <MessageCard key={msg.id} message={msg} />
@@ -437,6 +635,91 @@ const styles = StyleSheet.create({
   tagText: {
     fontSize: 12,
     fontWeight: '500',
+  },
+  notesSection: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 20,
+    gap: 10,
+  },
+  notesHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  notesTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  notesCount: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  noteComposer: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 8,
+  },
+  noteInput: {
+    flex: 1,
+    minHeight: 40,
+    maxHeight: 110,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    fontSize: 14,
+  },
+  noteAddButton: {
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  noteAddText: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  notesEmpty: {
+    fontSize: 13,
+  },
+  noteCard: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    gap: 8,
+  },
+  noteContent: {
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  noteEditInput: {
+    minHeight: 58,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    fontSize: 14,
+  },
+  noteMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  noteMetaText: {
+    fontSize: 11,
+    flex: 1,
+  },
+  noteActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  noteActionText: {
+    fontSize: 12,
+    fontWeight: '600',
   },
   replyActions: {
     position: 'absolute',

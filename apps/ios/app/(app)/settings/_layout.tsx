@@ -20,6 +20,12 @@ export default function SettingsLayout() {
       <Stack.Screen name="appearance" options={{ title: 'Appearance' }} />
       <Stack.Screen name="connections" options={{ title: 'Connections' }} />
       <Stack.Screen name="labels" options={{ title: 'Labels' }} />
+      <Stack.Screen name="categories" options={{ title: 'Categories' }} />
+      <Stack.Screen name="notifications" options={{ title: 'Notifications' }} />
+      <Stack.Screen name="privacy" options={{ title: 'Privacy' }} />
+      <Stack.Screen name="security" options={{ title: 'Security' }} />
+      <Stack.Screen name="shortcuts" options={{ title: 'Shortcuts' }} />
+      <Stack.Screen name="danger-zone" options={{ title: 'Danger Zone' }} />
     </Stack>
   );
 }

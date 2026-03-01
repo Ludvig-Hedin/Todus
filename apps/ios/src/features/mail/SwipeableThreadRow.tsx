@@ -2,12 +2,12 @@
  * SwipeableThreadRow — wraps a thread list item with swipe-to-archive (right)
  * and swipe-to-delete (left) actions, with haptic feedback.
  */
-import React, { useCallback, useRef } from 'react';
+import { useTheme } from '../../shared/theme/ThemeContext';
 import { Animated, StyleSheet, View } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
 import { Archive, Trash2 } from 'lucide-react-native';
-import { useTheme } from '../../shared/theme/ThemeContext';
 import { haptics } from '../../shared/utils/haptics';
+import React, { useCallback, useRef } from 'react';
 
 interface SwipeableThreadRowProps {
   children: React.ReactNode;
@@ -32,7 +32,10 @@ export function SwipeableThreadRow({ children, onArchive, onDelete }: SwipeableT
   }, [onDelete]);
 
   // Swipe right → green archive action
-  const renderLeftActions = (_progress: Animated.AnimatedInterpolation<number>, dragX: Animated.AnimatedInterpolation<number>) => {
+  const renderLeftActions = (
+    _progress: Animated.AnimatedInterpolation<number>,
+    dragX: Animated.AnimatedInterpolation<number>,
+  ) => {
     const scale = dragX.interpolate({
       inputRange: [0, 80],
       outputRange: [0.5, 1],
@@ -48,7 +51,10 @@ export function SwipeableThreadRow({ children, onArchive, onDelete }: SwipeableT
   };
 
   // Swipe left → red delete action
-  const renderRightActions = (_progress: Animated.AnimatedInterpolation<number>, dragX: Animated.AnimatedInterpolation<number>) => {
+  const renderRightActions = (
+    _progress: Animated.AnimatedInterpolation<number>,
+    dragX: Animated.AnimatedInterpolation<number>,
+  ) => {
     const scale = dragX.interpolate({
       inputRange: [-80, 0],
       outputRange: [1, 0.5],
@@ -69,8 +75,8 @@ export function SwipeableThreadRow({ children, onArchive, onDelete }: SwipeableT
       renderLeftActions={renderLeftActions}
       renderRightActions={renderRightActions}
       onSwipeableOpen={(direction) => {
-        if (direction === 'left') handleArchive();
-        else if (direction === 'right') handleDelete();
+        if (direction === 'left') handleDelete();
+        else if (direction === 'right') handleArchive();
       }}
       leftThreshold={80}
       rightThreshold={80}

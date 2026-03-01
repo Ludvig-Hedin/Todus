@@ -47,17 +47,32 @@ This file is the living single source of truth for Web -> Native parity across i
 
 | Native Route                      | Web Equivalent                       | Status                       |
 | --------------------------------- | ------------------------------------ | ---------------------------- |
+| `/(public)/index`                 | `/`                                  | Implemented (partial parity) |
+| `/(public)/home`                  | `/home`                              | Implemented (partial parity) |
+| `/(public)/about`                 | `/about`                             | Implemented (partial parity) |
+| `/(public)/terms`                 | `/terms`                             | Implemented (partial parity) |
+| `/(public)/privacy`               | `/privacy`                           | Implemented (partial parity) |
+| `/(public)/pricing`               | `/pricing`                           | Implemented (partial parity) |
+| `/(public)/contributors`          | `/contributors`                      | Implemented (partial parity) |
+| `/(public)/developer`             | `/developer`                         | Implemented (partial parity) |
 | `/(auth)/login`                   | `/login`                             | Implemented (partial parity) |
 | `/(auth)/web-auth`                | OAuth flow helper for `/login`       | Implemented                  |
 | `/(app)/(mail)/[folder]`          | `/mail/:folder`                      | Implemented (partial parity) |
 | `/(app)/(mail)/thread/[threadId]` | Thread detail inside `/mail/:folder` | Implemented (partial parity) |
 | `/compose`                        | `/mail/compose`                      | Implemented (partial parity) |
+| `/(app)/assistant`                | AI sidebar assistant                 | Implemented (partial parity) |
 | `/search`                         | Search in mail shell                 | Implemented (partial parity) |
 | `/(app)/settings/index`           | `/settings`                          | Implemented (partial parity) |
-| `/(app)/settings/general`         | `/settings/general`                  | Placeholder only             |
-| `/(app)/settings/appearance`      | `/settings/appearance`               | Partial                      |
-| `/(app)/settings/connections`     | `/settings/connections`              | Partial                      |
-| `/(app)/settings/labels`          | `/settings/labels`                   | Partial                      |
+| `/(app)/settings/general`         | `/settings/general`                  | Implemented (partial parity) |
+| `/(app)/settings/appearance`      | `/settings/appearance`               | Implemented (partial parity) |
+| `/(app)/settings/connections`     | `/settings/connections`              | Implemented (partial parity) |
+| `/(app)/settings/labels`          | `/settings/labels`                   | Implemented (partial parity) |
+| `/(app)/settings/categories`      | `/settings/categories`               | Implemented (partial parity) |
+| `/(app)/settings/notifications`   | `/settings/notifications`            | Implemented (partial parity) |
+| `/(app)/settings/privacy`         | `/settings/privacy`                  | Implemented (partial parity) |
+| `/(app)/settings/security`        | `/settings/security`                 | Implemented (partial parity) |
+| `/(app)/settings/shortcuts`       | `/settings/shortcuts`                | Implemented (partial parity) |
+| `/(app)/settings/danger-zone`     | `/settings/danger-zone`              | Implemented (partial parity) |
 | `+not-found`                      | `/*`                                 | Partial                      |
 
 #### macOS (`apps/macos`)
@@ -190,10 +205,10 @@ Shared/server-sensitive envs that impact behavior parity (configured outside cli
 
 ## B) Screen-by-Screen Parity Checklist
 
-### Screen: `/` -> RN: Missing
+### Screen: `/` -> RN: `/(public)/index`
 
-**Status:** 🔴
-**Platforms:** iOS missing / Android missing / macOS rendered only via Electron web wrapper
+**Status:** 🟡
+**Platforms:** iOS implemented via native WebView wrapper / Android same code path (needs validation) / macOS rendered only via Electron web wrapper
 
 Checklist:
 
@@ -201,9 +216,9 @@ Checklist:
 - [ ] Typography matches web (font family, size scale, weights, line height)
 - [ ] Colors match web (tokens, gradients, borders, shadows)
 - [ ] Components match web (inputs, buttons, cards, modals)
-- [ ] Navigation matches (entry points, back behavior, deep links if any)
-- [ ] Data loaded matches web (same API endpoints/queries, same params)
-- [ ] Loading states match web (skeletons/spinners, placement)
+- [x] Navigation matches (entry points, back behavior, deep links if any)
+- [x] Data loaded matches web (same API endpoints/queries, same params)
+- [x] Loading states match web (skeletons/spinners, placement)
 - [ ] Empty states match web (copy, visuals, actions)
 - [ ] Error states match web (messages, retry flows)
 - [ ] Forms match web (validation rules, masking, keyboard behavior)
@@ -212,10 +227,10 @@ Checklist:
 - [ ] Analytics events parity (same names/properties if used)
 - [ ] Screenshots captured (web vs iOS vs Android vs macOS)
 
-### Screen: `/home` -> RN: Missing
+### Screen: `/home` -> RN: `/(public)/home`
 
-**Status:** 🔴
-**Platforms:** iOS missing / Android missing / macOS rendered only via Electron web wrapper
+**Status:** 🟡
+**Platforms:** iOS implemented via native WebView wrapper / Android same code path (needs validation) / macOS rendered only via Electron web wrapper
 
 Checklist:
 
@@ -223,9 +238,9 @@ Checklist:
 - [ ] Typography matches web (font family, size scale, weights, line height)
 - [ ] Colors match web (tokens, gradients, borders, shadows)
 - [ ] Components match web (inputs, buttons, cards, modals)
-- [ ] Navigation matches (entry points, back behavior, deep links if any)
-- [ ] Data loaded matches web (same API endpoints/queries, same params)
-- [ ] Loading states match web (skeletons/spinners, placement)
+- [x] Navigation matches (entry points, back behavior, deep links if any)
+- [x] Data loaded matches web (same API endpoints/queries, same params)
+- [x] Loading states match web (skeletons/spinners, placement)
 - [ ] Empty states match web (copy, visuals, actions)
 - [ ] Error states match web (messages, retry flows)
 - [ ] Forms match web (validation rules, masking, keyboard behavior)
@@ -278,10 +293,10 @@ Checklist:
 - [ ] Analytics events parity (same names/properties if used)
 - [ ] Screenshots captured (web vs iOS vs Android vs macOS)
 
-### Screen: `/about` -> RN: Missing
+### Screen: `/about` -> RN: `/(public)/about`
 
-**Status:** 🔴
-**Platforms:** iOS missing / Android missing / macOS rendered only via Electron web wrapper
+**Status:** 🟡
+**Platforms:** iOS implemented via native WebView wrapper / Android same code path (needs validation) / macOS rendered only via Electron web wrapper
 
 Checklist:
 
@@ -289,9 +304,9 @@ Checklist:
 - [ ] Typography matches web (font family, size scale, weights, line height)
 - [ ] Colors match web (tokens, gradients, borders, shadows)
 - [ ] Components match web (inputs, buttons, cards, modals)
-- [ ] Navigation matches (entry points, back behavior, deep links if any)
-- [ ] Data loaded matches web (same API endpoints/queries, same params)
-- [ ] Loading states match web (skeletons/spinners, placement)
+- [x] Navigation matches (entry points, back behavior, deep links if any)
+- [x] Data loaded matches web (same API endpoints/queries, same params)
+- [x] Loading states match web (skeletons/spinners, placement)
 - [ ] Empty states match web (copy, visuals, actions)
 - [ ] Error states match web (messages, retry flows)
 - [ ] Forms match web (validation rules, masking, keyboard behavior)
@@ -300,10 +315,10 @@ Checklist:
 - [ ] Analytics events parity (same names/properties if used)
 - [ ] Screenshots captured (web vs iOS vs Android vs macOS)
 
-### Screen: `/terms` -> RN: Missing
+### Screen: `/terms` -> RN: `/(public)/terms`
 
-**Status:** 🔴
-**Platforms:** iOS missing / Android missing / macOS rendered only via Electron web wrapper
+**Status:** 🟡
+**Platforms:** iOS implemented via native WebView wrapper / Android same code path (needs validation) / macOS rendered only via Electron web wrapper
 
 Checklist:
 
@@ -311,9 +326,9 @@ Checklist:
 - [ ] Typography matches web (font family, size scale, weights, line height)
 - [ ] Colors match web (tokens, gradients, borders, shadows)
 - [ ] Components match web (inputs, buttons, cards, modals)
-- [ ] Navigation matches (entry points, back behavior, deep links if any)
-- [ ] Data loaded matches web (same API endpoints/queries, same params)
-- [ ] Loading states match web (skeletons/spinners, placement)
+- [x] Navigation matches (entry points, back behavior, deep links if any)
+- [x] Data loaded matches web (same API endpoints/queries, same params)
+- [x] Loading states match web (skeletons/spinners, placement)
 - [ ] Empty states match web (copy, visuals, actions)
 - [ ] Error states match web (messages, retry flows)
 - [ ] Forms match web (validation rules, masking, keyboard behavior)
@@ -322,10 +337,10 @@ Checklist:
 - [ ] Analytics events parity (same names/properties if used)
 - [ ] Screenshots captured (web vs iOS vs Android vs macOS)
 
-### Screen: `/pricing` -> RN: Missing
+### Screen: `/pricing` -> RN: `/(public)/pricing`
 
-**Status:** 🔴
-**Platforms:** iOS missing / Android missing / macOS rendered only via Electron web wrapper
+**Status:** 🟡
+**Platforms:** iOS implemented via native WebView wrapper / Android same code path (needs validation) / macOS rendered only via Electron web wrapper
 
 Checklist:
 
@@ -333,9 +348,9 @@ Checklist:
 - [ ] Typography matches web (font family, size scale, weights, line height)
 - [ ] Colors match web (tokens, gradients, borders, shadows)
 - [ ] Components match web (inputs, buttons, cards, modals)
-- [ ] Navigation matches (entry points, back behavior, deep links if any)
-- [ ] Data loaded matches web (same API endpoints/queries, same params)
-- [ ] Loading states match web (skeletons/spinners, placement)
+- [x] Navigation matches (entry points, back behavior, deep links if any)
+- [x] Data loaded matches web (same API endpoints/queries, same params)
+- [x] Loading states match web (skeletons/spinners, placement)
 - [ ] Empty states match web (copy, visuals, actions)
 - [ ] Error states match web (messages, retry flows)
 - [ ] Forms match web (validation rules, masking, keyboard behavior)
@@ -344,10 +359,10 @@ Checklist:
 - [ ] Analytics events parity (same names/properties if used)
 - [ ] Screenshots captured (web vs iOS vs Android vs macOS)
 
-### Screen: `/privacy` -> RN: Missing
+### Screen: `/privacy` -> RN: `/(public)/privacy`
 
-**Status:** 🔴
-**Platforms:** iOS missing / Android missing / macOS rendered only via Electron web wrapper
+**Status:** 🟡
+**Platforms:** iOS implemented via native WebView wrapper / Android same code path (needs validation) / macOS rendered only via Electron web wrapper
 
 Checklist:
 
@@ -355,9 +370,9 @@ Checklist:
 - [ ] Typography matches web (font family, size scale, weights, line height)
 - [ ] Colors match web (tokens, gradients, borders, shadows)
 - [ ] Components match web (inputs, buttons, cards, modals)
-- [ ] Navigation matches (entry points, back behavior, deep links if any)
-- [ ] Data loaded matches web (same API endpoints/queries, same params)
-- [ ] Loading states match web (skeletons/spinners, placement)
+- [x] Navigation matches (entry points, back behavior, deep links if any)
+- [x] Data loaded matches web (same API endpoints/queries, same params)
+- [x] Loading states match web (skeletons/spinners, placement)
 - [ ] Empty states match web (copy, visuals, actions)
 - [ ] Error states match web (messages, retry flows)
 - [ ] Forms match web (validation rules, masking, keyboard behavior)
@@ -366,10 +381,10 @@ Checklist:
 - [ ] Analytics events parity (same names/properties if used)
 - [ ] Screenshots captured (web vs iOS vs Android vs macOS)
 
-### Screen: `/contributors` -> RN: Missing
+### Screen: `/contributors` -> RN: `/(public)/contributors`
 
-**Status:** 🔴
-**Platforms:** iOS missing / Android missing / macOS rendered only via Electron web wrapper
+**Status:** 🟡
+**Platforms:** iOS implemented via native WebView wrapper / Android same code path (needs validation) / macOS rendered only via Electron web wrapper
 
 Checklist:
 
@@ -377,9 +392,9 @@ Checklist:
 - [ ] Typography matches web (font family, size scale, weights, line height)
 - [ ] Colors match web (tokens, gradients, borders, shadows)
 - [ ] Components match web (inputs, buttons, cards, modals)
-- [ ] Navigation matches (entry points, back behavior, deep links if any)
-- [ ] Data loaded matches web (same API endpoints/queries, same params)
-- [ ] Loading states match web (skeletons/spinners, placement)
+- [x] Navigation matches (entry points, back behavior, deep links if any)
+- [x] Data loaded matches web (same API endpoints/queries, same params)
+- [x] Loading states match web (skeletons/spinners, placement)
 - [ ] Empty states match web (copy, visuals, actions)
 - [ ] Error states match web (messages, retry flows)
 - [ ] Forms match web (validation rules, masking, keyboard behavior)
@@ -410,10 +425,10 @@ Checklist:
 - [ ] Analytics events parity (same names/properties if used)
 - [ ] Screenshots captured (web vs iOS vs Android vs macOS)
 
-### Screen: `/developer` -> RN: Missing
+### Screen: `/developer` -> RN: `/(public)/developer`
 
-**Status:** 🔴
-**Platforms:** iOS missing / Android missing / macOS rendered only via Electron web wrapper
+**Status:** 🟡
+**Platforms:** iOS implemented via native WebView wrapper / Android same code path (needs validation) / macOS rendered only via Electron web wrapper
 
 Checklist:
 
@@ -421,9 +436,9 @@ Checklist:
 - [ ] Typography matches web (font family, size scale, weights, line height)
 - [ ] Colors match web (tokens, gradients, borders, shadows)
 - [ ] Components match web (inputs, buttons, cards, modals)
-- [ ] Navigation matches (entry points, back behavior, deep links if any)
-- [ ] Data loaded matches web (same API endpoints/queries, same params)
-- [ ] Loading states match web (skeletons/spinners, placement)
+- [x] Navigation matches (entry points, back behavior, deep links if any)
+- [x] Data loaded matches web (same API endpoints/queries, same params)
+- [x] Loading states match web (skeletons/spinners, placement)
 - [ ] Empty states match web (copy, visuals, actions)
 - [ ] Error states match web (messages, retry flows)
 - [ ] Forms match web (validation rules, masking, keyboard behavior)
@@ -486,22 +501,44 @@ Checklist:
 - [ ] Layout matches web (spacing, alignment, breakpoints equivalents)
 - [ ] Typography matches web (font family, size scale, weights, line height)
 - [ ] Colors match web (tokens, gradients, borders, shadows)
-- [ ] Components match web (inputs, buttons, cards, modals)
+- [x] Components match web (inputs, buttons, cards, modals)
 - [x] Navigation matches (entry points, back behavior, deep links if any)
 - [x] Data loaded matches web (same API endpoints/queries, same params)
-- [ ] Loading states match web (skeletons/spinners, placement)
-- [ ] Empty states match web (copy, visuals, actions)
+- [x] Loading states match web (skeletons/spinners, placement)
+- [x] Empty states match web (copy, visuals, actions)
 - [x] Error states match web (messages, retry flows)
-- [ ] Forms match web (validation rules, masking, keyboard behavior)
+- [x] Forms match web (validation rules, masking, keyboard behavior)
 - [ ] Accessibility parity (labels, focus order, dynamic type support where applicable)
 - [ ] Performance acceptable (no jank on scroll, avoids excessive re-renders)
-- [ ] Analytics events parity (same names/properties if used)
+- [x] Analytics events parity (same names/properties if used)
 - [ ] Screenshots captured (web vs iOS vs Android vs macOS)
 
-### Screen: `/mail/create` -> RN: Missing
+### Screen: `AI assistant sidebar` -> RN: `/(app)/assistant`
 
-**Status:** 🔴
-**Platforms:** iOS missing / Android missing / macOS route handled only in web wrapper
+**Status:** 🟡
+**Platforms:** iOS implemented / Android same code path (needs validation) / macOS route handled only in web wrapper
+
+Checklist:
+
+- [ ] Layout matches web (spacing, alignment, breakpoints equivalents)
+- [ ] Typography matches web (font family, size scale, weights, line height)
+- [ ] Colors match web (tokens, gradients, borders, shadows)
+- [x] Components match web (inputs, buttons, cards, modals)
+- [x] Navigation matches (entry points, back behavior, deep links if any)
+- [x] Data loaded matches web (same API endpoints/queries, same params)
+- [x] Loading states match web (skeletons/spinners, placement)
+- [x] Empty states match web (copy, visuals, actions)
+- [x] Error states match web (messages, retry flows)
+- [x] Forms match web (validation rules, masking, keyboard behavior)
+- [ ] Accessibility parity (labels, focus order, dynamic type support where applicable)
+- [ ] Performance acceptable (no jank on scroll, avoids excessive re-renders)
+- [x] Analytics events parity (same names/properties if used)
+- [ ] Screenshots captured (web vs iOS vs Android vs macOS)
+
+### Screen: `/mail/create` -> RN: `/compose` (alias behavior)
+
+**Status:** 🟡
+**Platforms:** iOS mapped to `/compose` / Android same code path (needs validation) / macOS route handled only in web wrapper
 
 Checklist:
 
@@ -509,8 +546,8 @@ Checklist:
 - [ ] Typography matches web (font family, size scale, weights, line height)
 - [ ] Colors match web (tokens, gradients, borders, shadows)
 - [ ] Components match web (inputs, buttons, cards, modals)
-- [ ] Navigation matches (entry points, back behavior, deep links if any)
-- [ ] Data loaded matches web (same API endpoints/queries, same params)
+- [x] Navigation matches (entry points, back behavior, deep links if any)
+- [x] Data loaded matches web (same API endpoints/queries, same params)
 - [ ] Loading states match web (skeletons/spinners, placement)
 - [ ] Empty states match web (copy, visuals, actions)
 - [ ] Error states match web (messages, retry flows)
@@ -520,10 +557,10 @@ Checklist:
 - [ ] Analytics events parity (same names/properties if used)
 - [ ] Screenshots captured (web vs iOS vs Android vs macOS)
 
-### Screen: `/mail/under-construction/:path` -> RN: Missing
+### Screen: `/mail/under-construction/:path` -> RN: `/(app)/(mail)/under-construction/[path]`
 
-**Status:** 🔴
-**Platforms:** iOS missing / Android missing / macOS route handled only in web wrapper
+**Status:** 🟡
+**Platforms:** iOS implemented / Android same code path (needs validation) / macOS route handled only in web wrapper
 
 Checklist:
 
@@ -531,10 +568,10 @@ Checklist:
 - [ ] Typography matches web (font family, size scale, weights, line height)
 - [ ] Colors match web (tokens, gradients, borders, shadows)
 - [ ] Components match web (inputs, buttons, cards, modals)
-- [ ] Navigation matches (entry points, back behavior, deep links if any)
-- [ ] Data loaded matches web (same API endpoints/queries, same params)
-- [ ] Loading states match web (skeletons/spinners, placement)
-- [ ] Empty states match web (copy, visuals, actions)
+- [x] Navigation matches (entry points, back behavior, deep links if any)
+- [x] Data loaded matches web (same API endpoints/queries, same params)
+- [x] Loading states match web (skeletons/spinners, placement)
+- [x] Empty states match web (copy, visuals, actions)
 - [ ] Error states match web (messages, retry flows)
 - [ ] Forms match web (validation rules, masking, keyboard behavior)
 - [ ] Accessibility parity (labels, focus order, dynamic type support where applicable)
@@ -652,32 +689,10 @@ Checklist:
 - [ ] Analytics events parity (same names/properties if used)
 - [ ] Screenshots captured (web vs iOS vs Android vs macOS)
 
-### Screen: `/settings/categories` -> RN: Missing
+### Screen: `/settings/categories` -> RN: `/(app)/settings/categories`
 
-**Status:** 🔴
-**Platforms:** iOS missing / Android missing / macOS route handled only in web wrapper
-
-Checklist:
-
-- [ ] Layout matches web (spacing, alignment, breakpoints equivalents)
-- [ ] Typography matches web (font family, size scale, weights, line height)
-- [ ] Colors match web (tokens, gradients, borders, shadows)
-- [ ] Components match web (inputs, buttons, cards, modals)
-- [ ] Navigation matches (entry points, back behavior, deep links if any)
-- [ ] Data loaded matches web (same API endpoints/queries, same params)
-- [ ] Loading states match web (skeletons/spinners, placement)
-- [ ] Empty states match web (copy, visuals, actions)
-- [ ] Error states match web (messages, retry flows)
-- [ ] Forms match web (validation rules, masking, keyboard behavior)
-- [ ] Accessibility parity (labels, focus order, dynamic type support where applicable)
-- [ ] Performance acceptable (no jank on scroll, avoids excessive re-renders)
-- [ ] Analytics events parity (same names/properties if used)
-- [ ] Screenshots captured (web vs iOS vs Android vs macOS)
-
-### Screen: `/settings/notifications` -> RN: Missing
-
-**Status:** 🔴
-**Platforms:** iOS missing / Android missing / macOS route handled only in web wrapper
+**Status:** 🟡
+**Platforms:** iOS implemented / Android same code path (needs validation) / macOS route handled only in web wrapper
 
 Checklist:
 
@@ -696,32 +711,10 @@ Checklist:
 - [ ] Analytics events parity (same names/properties if used)
 - [ ] Screenshots captured (web vs iOS vs Android vs macOS)
 
-### Screen: `/settings/privacy` -> RN: Missing
+### Screen: `/settings/notifications` -> RN: `/(app)/settings/notifications`
 
-**Status:** 🔴
-**Platforms:** iOS missing / Android missing / macOS route handled only in web wrapper
-
-Checklist:
-
-- [ ] Layout matches web (spacing, alignment, breakpoints equivalents)
-- [ ] Typography matches web (font family, size scale, weights, line height)
-- [ ] Colors match web (tokens, gradients, borders, shadows)
-- [ ] Components match web (inputs, buttons, cards, modals)
-- [ ] Navigation matches (entry points, back behavior, deep links if any)
-- [ ] Data loaded matches web (same API endpoints/queries, same params)
-- [ ] Loading states match web (skeletons/spinners, placement)
-- [ ] Empty states match web (copy, visuals, actions)
-- [ ] Error states match web (messages, retry flows)
-- [ ] Forms match web (validation rules, masking, keyboard behavior)
-- [ ] Accessibility parity (labels, focus order, dynamic type support where applicable)
-- [ ] Performance acceptable (no jank on scroll, avoids excessive re-renders)
-- [ ] Analytics events parity (same names/properties if used)
-- [ ] Screenshots captured (web vs iOS vs Android vs macOS)
-
-### Screen: `/settings/security` -> RN: Missing
-
-**Status:** 🔴
-**Platforms:** iOS missing / Android missing / macOS route handled only in web wrapper
+**Status:** 🟡
+**Platforms:** iOS implemented / Android same code path (needs validation) / macOS route handled only in web wrapper
 
 Checklist:
 
@@ -740,10 +733,10 @@ Checklist:
 - [ ] Analytics events parity (same names/properties if used)
 - [ ] Screenshots captured (web vs iOS vs Android vs macOS)
 
-### Screen: `/settings/shortcuts` -> RN: Missing
+### Screen: `/settings/privacy` -> RN: `/(app)/settings/privacy`
 
-**Status:** 🔴
-**Platforms:** iOS missing / Android missing / macOS route handled only in web wrapper
+**Status:** 🟡
+**Platforms:** iOS implemented / Android same code path (needs validation) / macOS route handled only in web wrapper
 
 Checklist:
 
@@ -762,10 +755,54 @@ Checklist:
 - [ ] Analytics events parity (same names/properties if used)
 - [ ] Screenshots captured (web vs iOS vs Android vs macOS)
 
-### Screen: `/settings/danger-zone` -> RN: Missing
+### Screen: `/settings/security` -> RN: `/(app)/settings/security`
 
-**Status:** 🔴
-**Platforms:** iOS missing / Android missing / macOS route handled only in web wrapper
+**Status:** 🟡
+**Platforms:** iOS implemented / Android same code path (needs validation) / macOS route handled only in web wrapper
+
+Checklist:
+
+- [ ] Layout matches web (spacing, alignment, breakpoints equivalents)
+- [ ] Typography matches web (font family, size scale, weights, line height)
+- [ ] Colors match web (tokens, gradients, borders, shadows)
+- [ ] Components match web (inputs, buttons, cards, modals)
+- [ ] Navigation matches (entry points, back behavior, deep links if any)
+- [ ] Data loaded matches web (same API endpoints/queries, same params)
+- [ ] Loading states match web (skeletons/spinners, placement)
+- [ ] Empty states match web (copy, visuals, actions)
+- [ ] Error states match web (messages, retry flows)
+- [ ] Forms match web (validation rules, masking, keyboard behavior)
+- [ ] Accessibility parity (labels, focus order, dynamic type support where applicable)
+- [ ] Performance acceptable (no jank on scroll, avoids excessive re-renders)
+- [ ] Analytics events parity (same names/properties if used)
+- [ ] Screenshots captured (web vs iOS vs Android vs macOS)
+
+### Screen: `/settings/shortcuts` -> RN: `/(app)/settings/shortcuts`
+
+**Status:** 🟡
+**Platforms:** iOS implemented / Android same code path (needs validation) / macOS route handled only in web wrapper
+
+Checklist:
+
+- [ ] Layout matches web (spacing, alignment, breakpoints equivalents)
+- [ ] Typography matches web (font family, size scale, weights, line height)
+- [ ] Colors match web (tokens, gradients, borders, shadows)
+- [ ] Components match web (inputs, buttons, cards, modals)
+- [ ] Navigation matches (entry points, back behavior, deep links if any)
+- [ ] Data loaded matches web (same API endpoints/queries, same params)
+- [ ] Loading states match web (skeletons/spinners, placement)
+- [ ] Empty states match web (copy, visuals, actions)
+- [ ] Error states match web (messages, retry flows)
+- [ ] Forms match web (validation rules, masking, keyboard behavior)
+- [ ] Accessibility parity (labels, focus order, dynamic type support where applicable)
+- [ ] Performance acceptable (no jank on scroll, avoids excessive re-renders)
+- [ ] Analytics events parity (same names/properties if used)
+- [ ] Screenshots captured (web vs iOS vs Android vs macOS)
+
+### Screen: `/settings/danger-zone` -> RN: `/(app)/settings/danger-zone`
+
+**Status:** 🟡
+**Platforms:** iOS implemented / Android same code path (needs validation) / macOS route handled only in web wrapper
 
 Checklist:
 
@@ -900,7 +937,7 @@ Component: `CreateEmail` + `EmailComposer` -> RN: `compose.tsx`
 - [x] Disabled/loading states parity
 - [ ] Error/validation display parity
 - [x] Theming/token usage parity
-- [ ] Unit tests for core behaviors
+- [x] Unit tests for core behaviors
 
 Component: `ReplyCompose` -> RN: `compose.tsx` reply mode
 
@@ -910,7 +947,7 @@ Component: `ReplyCompose` -> RN: `compose.tsx` reply mode
 - [x] Disabled/loading states parity
 - [ ] Error/validation display parity
 - [x] Theming/token usage parity
-- [ ] Unit tests for core behaviors
+- [x] Unit tests for core behaviors
 
 Component: `SettingsCard` -> RN: settings section cards (`settings/*.tsx`)
 
@@ -962,24 +999,24 @@ Component: `CommandPaletteProvider` -> RN: missing
 - [ ] Theming/token usage parity
 - [ ] Unit tests for core behaviors
 
-Component: `AISidebar` -> RN: missing
+Component: `AISidebar` -> RN: `/(app)/assistant`
 
-- [ ] Props parity (same behaviors, defaults)
+- [x] Props parity (same behaviors, defaults)
 - [ ] Visual parity (dimensions, typography, colors)
-- [ ] Interaction parity (hover -> native equivalent, press states)
-- [ ] Disabled/loading states parity
-- [ ] Error/validation display parity
-- [ ] Theming/token usage parity
+- [x] Interaction parity (hover -> native equivalent, press states)
+- [x] Disabled/loading states parity
+- [x] Error/validation display parity
+- [x] Theming/token usage parity
 - [ ] Unit tests for core behaviors
 
-Component: `NotesPanel` -> RN: missing
+Component: `NotesPanel` -> RN: `ThreadDetailPane` notes section
 
-- [ ] Props parity (same behaviors, defaults)
+- [x] Props parity (same behaviors, defaults)
 - [ ] Visual parity (dimensions, typography, colors)
-- [ ] Interaction parity (hover -> native equivalent, press states)
-- [ ] Disabled/loading states parity
-- [ ] Error/validation display parity
-- [ ] Theming/token usage parity
+- [x] Interaction parity (hover -> native equivalent, press states)
+- [x] Disabled/loading states parity
+- [x] Error/validation display parity
+- [x] Theming/token usage parity
 - [ ] Unit tests for core behaviors
 
 Component: `ThreadContextMenu` bulk actions -> RN: partial (`SwipeableThreadRow` + header actions)
@@ -1016,31 +1053,31 @@ Workflow: Browse folder -> open thread -> archive/delete/spam/star/mark-read
 
 Workflow: Compose new email
 
-- [ ] Matches web steps exactly
-- [ ] Handles same edge cases
-- [ ] Same backend calls in same order
-- [ ] Same data persisted (and cleared) as web
-- [ ] Same success/failure user feedback
+- [x] Matches web steps exactly
+- [x] Handles same edge cases
+- [x] Same backend calls in same order
+- [x] Same data persisted (and cleared) as web
+- [x] Same success/failure user feedback
 - [ ] Offline / flaky network behavior handled (if web handles it)
 - [ ] E2E test exists (or manual test script documented)
 
 Workflow: Reply / reply-all / forward
 
-- [ ] Matches web steps exactly
-- [ ] Handles same edge cases
-- [ ] Same backend calls in same order
-- [ ] Same data persisted (and cleared) as web
-- [ ] Same success/failure user feedback
+- [x] Matches web steps exactly
+- [x] Handles same edge cases
+- [x] Same backend calls in same order
+- [x] Same data persisted (and cleared) as web
+- [x] Same success/failure user feedback
 - [ ] Offline / flaky network behavior handled (if web handles it)
 - [ ] E2E test exists (or manual test script documented)
 
 Workflow: Draft autosave/restore/delete
 
-- [ ] Matches web steps exactly
-- [ ] Handles same edge cases
-- [ ] Same backend calls in same order
-- [ ] Same data persisted (and cleared) as web
-- [ ] Same success/failure user feedback
+- [x] Matches web steps exactly
+- [x] Handles same edge cases
+- [x] Same backend calls in same order
+- [x] Same data persisted (and cleared) as web
+- [x] Same success/failure user feedback
 - [ ] Offline / flaky network behavior handled (if web handles it)
 - [ ] E2E test exists (or manual test script documented)
 
@@ -1088,9 +1125,9 @@ Workflow: AI assistant + compose helpers
 
 - [ ] Matches web steps exactly
 - [ ] Handles same edge cases
-- [ ] Same backend calls in same order
+- [x] Same backend calls in same order
 - [ ] Same data persisted (and cleared) as web
-- [ ] Same success/failure user feedback
+- [x] Same success/failure user feedback
 - [ ] Offline / flaky network behavior handled (if web handles it)
 - [ ] E2E test exists (or manual test script documented)
 
@@ -1159,7 +1196,7 @@ Integration: Billing/payments (Autumn)
 - [ ] Verified on all platforms
 - [ ] Data/events match web
 
-Integration: Voice (ElevenLabs)
+Integration: Voice (ElevenLabs) — ⚠️ Blocked (web implementation depends on browser-only `@elevenlabs/react`)
 
 - [ ] Equivalent native implementation exists
 - [ ] Credentials/env vars configured
@@ -1168,10 +1205,10 @@ Integration: Voice (ElevenLabs)
 
 Integration: AI helpers (OpenAI/Perplexity-backed features)
 
-- [ ] Equivalent native implementation exists
-- [ ] Credentials/env vars configured
+- [x] Equivalent native implementation exists
+- [x] Credentials/env vars configured
 - [ ] Verified on all platforms
-- [ ] Data/events match web
+- [x] Data/events match web
 
 Integration: Deep linking + mailto handling
 

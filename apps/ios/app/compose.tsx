@@ -5,8 +5,10 @@
 import {
   Alert,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -16,14 +18,31 @@ import { RichText, Toolbar, useEditorBridge, useEditorContent } from '@10play/te
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { captureEvent } from '../src/shared/telemetry/posthog';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useTRPC } from '../src/providers/QueryTrpcProvider';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTheme } from '../src/shared/theme/ThemeContext';
 import * as FileSystemLegacy from 'expo-file-system/legacy';
 import * as DocumentPicker from 'expo-document-picker';
 import { haptics } from '../src/shared/utils/haptics';
+import {
+  formatScheduleLabel,
+  isSendFailure,
+  isUndoEligibleResult,
+  nextDefaultScheduleDate,
+  splitRecipientInput,
+  toRecipientObjects,
+  uniqueEmails,
+  type SendResultLike,
+} from '../src/features/compose/composeParity';
+import { useAtom } from 'jotai';
+import {
+  pendingUndoSendAtom,
+  undoComposePrefillAtom,
+  type UndoComposePayload,
+} from '../src/shared/state/undoSend';
 
 type SerializedAttachment = {
   name: string;
@@ -40,11 +59,22 @@ type DraftState = {
   subject: string;
   message: string;
   attachments: SerializedAttachment[];
+  scheduleAt?: string;
 };
 
 type SenderLike = {
   email?: string | null;
   name?: string | null;
+};
+
+type TemplateLike = {
+  id: string;
+  name: string;
+  subject?: string | null;
+  body?: string | null;
+  to?: string[] | null;
+  cc?: string[] | null;
+  bcc?: string[] | null;
 };
 
 export default function ComposeScreen() {
@@ -61,6 +91,21 @@ export default function ComposeScreen() {
   const [subject, setSubject] = useState('');
   const [showCcBcc, setShowCcBcc] = useState(false);
   const [attachments, setAttachments] = useState<SerializedAttachment[]>([]);
+  const [scheduleAt, setScheduleAt] = useState<string | undefined>();
+  const [scheduleModalVisible, setScheduleModalVisible] = useState(false);
+  const [scheduleDraftDate, setScheduleDraftDate] = useState<Date>(() => nextDefaultScheduleDate());
+  const [androidPickerMode, setAndroidPickerMode] = useState<'date' | 'time' | null>(null);
+  const [showTemplatesModal, setShowTemplatesModal] = useState(false);
+  const [showSaveTemplateModal, setShowSaveTemplateModal] = useState(false);
+  const [templateName, setTemplateName] = useState('');
+  const [templateSearch, setTemplateSearch] = useState('');
+  const [, setPendingUndoSend] = useAtom(pendingUndoSendAtom);
+  const [undoComposePrefill, setUndoComposePrefill] = useAtom(undoComposePrefillAtom);
+  const pendingUndoPayloadRef = useRef<{
+    wasUserScheduled: boolean;
+    payload: UndoComposePayload;
+  } | null>(null);
+
   const editor = useEditorBridge({
     autofocus: false,
     avoidIosKeyboard: true,
@@ -77,6 +122,7 @@ export default function ComposeScreen() {
   const isReplyAll = params.mode === 'replyAll';
   const isForward = params.mode === 'forward';
   const defaultConnectionQuery = useQuery(trpc.connections.getDefault.queryOptions());
+  const templatesQuery = useQuery(trpc.templates.list.queryOptions());
 
   const { data: threadData } = useQuery({
     ...trpc.mail.get.queryOptions({ id: params.threadId ?? '' }),
@@ -153,14 +199,41 @@ export default function ComposeScreen() {
   }, [defaultConnectionQuery.data, isForward, isReply, isReplyAll, threadData]);
 
   const hasRestoredDraftRef = useRef(false);
+  const hasAppliedUndoPrefillRef = useRef(false);
   const pendingSendEventRef = useRef<{ name: string; properties?: Record<string, unknown> } | null>(
     null,
   );
+
+  const applyUndoPrefill = useCallback(
+    (prefill: UndoComposePayload) => {
+      hasAppliedUndoPrefillRef.current = true;
+      setTo(prefill.to ?? '');
+      setCc(prefill.cc ?? '');
+      setBcc(prefill.bcc ?? '');
+      setSubject(prefill.subject ?? '');
+      setAttachments(prefill.attachments ?? []);
+      setScheduleAt(undefined);
+      if ((prefill.cc ?? '').trim() || (prefill.bcc ?? '').trim()) {
+        setShowCcBcc(true);
+      }
+      if (prefill.message) {
+        editor.setContent(prefill.message);
+      }
+      setUndoComposePrefill(null);
+    },
+    [editor, setUndoComposePrefill],
+  );
+
   useEffect(() => {
     if (hasRestoredDraftRef.current) return;
     hasRestoredDraftRef.current = true;
 
-    const restoreDraft = async () => {
+    const restoreComposeState = async () => {
+      if (undoComposePrefill) {
+        applyUndoPrefill(undoComposePrefill);
+        return;
+      }
+
       try {
         const rawDraft = await AsyncStorage.getItem(draftKey);
         if (!rawDraft) return;
@@ -171,6 +244,7 @@ export default function ComposeScreen() {
         setBcc(draft.bcc ?? '');
         setSubject(draft.subject ?? '');
         setAttachments(draft.attachments ?? []);
+        setScheduleAt(draft.scheduleAt);
         if ((draft.cc ?? '').trim() || (draft.bcc ?? '').trim()) {
           setShowCcBcc(true);
         }
@@ -182,8 +256,13 @@ export default function ComposeScreen() {
       }
     };
 
-    void restoreDraft();
-  }, [draftKey, editor]);
+    void restoreComposeState();
+  }, [applyUndoPrefill, draftKey, editor, setUndoComposePrefill, undoComposePrefill]);
+
+  useEffect(() => {
+    if (!undoComposePrefill || hasAppliedUndoPrefillRef.current) return;
+    applyUndoPrefill(undoComposePrefill);
+  }, [applyUndoPrefill, undoComposePrefill]);
 
   useEffect(() => {
     const draft: DraftState = {
@@ -193,6 +272,7 @@ export default function ComposeScreen() {
       subject,
       message: editorHtml,
       attachments,
+      scheduleAt,
     };
     const isEmpty =
       !draft.to.trim() &&
@@ -200,7 +280,8 @@ export default function ComposeScreen() {
       !draft.bcc.trim() &&
       !draft.subject.trim() &&
       !stripHtml(draft.message).trim() &&
-      draft.attachments.length === 0;
+      draft.attachments.length === 0 &&
+      !draft.scheduleAt;
 
     const timer = setTimeout(async () => {
       if (isEmpty) {
@@ -211,15 +292,68 @@ export default function ComposeScreen() {
     }, 800);
 
     return () => clearTimeout(timer);
-  }, [attachments, bcc, cc, draftKey, editorHtml, subject, to]);
+  }, [attachments, bcc, cc, draftKey, editorHtml, scheduleAt, subject, to]);
+
+  const createTemplateMutation = useMutation({
+    ...trpc.templates.create.mutationOptions(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: trpc.templates.list.queryKey() });
+      haptics.success();
+      setTemplateName('');
+      setShowSaveTemplateModal(false);
+    },
+    onError: (error) => {
+      haptics.error();
+      Alert.alert('Template save failed', error.message || 'Could not save template.');
+    },
+  });
+
+  const deleteTemplateMutation = useMutation({
+    ...trpc.templates.delete.mutationOptions(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: trpc.templates.list.queryKey() });
+    },
+    onError: (error) => {
+      Alert.alert('Template delete failed', error.message || 'Could not delete template.');
+    },
+  });
 
   const sendMutation = useMutation({
     ...trpc.mail.send.mutationOptions(),
-    onSuccess: async () => {
+    onSuccess: async (result) => {
+      const sendResult = (result ?? {}) as SendResultLike;
+
+      if (isSendFailure(sendResult)) {
+        pendingSendEventRef.current = null;
+        pendingUndoPayloadRef.current = null;
+        haptics.error();
+        Alert.alert(
+          'Send Failed',
+          sendResult.error || 'Could not send the email. Please try again.',
+        );
+        return;
+      }
+
       if (pendingSendEventRef.current) {
         captureEvent(pendingSendEventRef.current.name, pendingSendEventRef.current.properties);
       }
+
+      if (
+        isUndoEligibleResult(sendResult) &&
+        sendResult.messageId &&
+        typeof sendResult.sendAt === 'number'
+      ) {
+        const pendingPayload = pendingUndoPayloadRef.current;
+        setPendingUndoSend({
+          messageId: sendResult.messageId,
+          sendAt: sendResult.sendAt,
+          wasUserScheduled: pendingPayload?.wasUserScheduled ?? false,
+          payload: pendingPayload?.wasUserScheduled ? undefined : pendingPayload?.payload,
+        });
+      }
+
       pendingSendEventRef.current = null;
+      pendingUndoPayloadRef.current = null;
       haptics.success();
       await AsyncStorage.removeItem(draftKey);
       queryClient.invalidateQueries({ queryKey: trpc.mail.listThreads.queryKey() });
@@ -227,6 +361,7 @@ export default function ComposeScreen() {
     },
     onError: (error) => {
       pendingSendEventRef.current = null;
+      pendingUndoPayloadRef.current = null;
       haptics.error();
       Alert.alert('Send Failed', error.message || 'Could not send the email. Please try again.');
     },
@@ -238,28 +373,17 @@ export default function ComposeScreen() {
       return;
     }
 
+    if (scheduleAt && new Date(scheduleAt).getTime() <= Date.now()) {
+      Alert.alert('Invalid schedule', 'Scheduled time must be in the future.');
+      return;
+    }
+
     const messageHtml = await editor.getHTML();
     const latestMessage = threadData?.latest;
 
-    const toRecipients = to
-      .split(',')
-      .map((email) => email.trim())
-      .filter(Boolean)
-      .map((email) => ({ email }));
-    const ccRecipients = cc
-      ? cc
-          .split(',')
-          .map((email) => email.trim())
-          .filter(Boolean)
-          .map((email) => ({ email }))
-      : [];
-    const bccRecipients = bcc
-      ? bcc
-          .split(',')
-          .map((email) => email.trim())
-          .filter(Boolean)
-          .map((email) => ({ email }))
-      : [];
+    const toRecipients = toRecipientObjects(to);
+    const ccRecipients = toRecipientObjects(cc);
+    const bccRecipients = toRecipientObjects(bcc);
 
     const composedBody = buildThreadAwareBody({
       body: messageHtml?.trim() || '',
@@ -280,6 +404,17 @@ export default function ComposeScreen() {
       hasCc: ccRecipients.length > 0,
       hasBcc: bccRecipients.length > 0,
     });
+    pendingUndoPayloadRef.current = {
+      wasUserScheduled: Boolean(scheduleAt),
+      payload: {
+        to,
+        cc,
+        bcc,
+        subject,
+        message: messageHtml?.trim() || '',
+        attachments,
+      },
+    };
 
     sendMutation.mutate({
       to: toRecipients,
@@ -299,6 +434,7 @@ export default function ComposeScreen() {
       isForward: isForward || undefined,
       originalMessage: latestMessage?.decodedBody || latestMessage?.body || undefined,
       ...(params.threadId ? { threadId: params.threadId } : {}),
+      ...(scheduleAt ? { scheduleAt } : {}),
     } as any);
   };
 
@@ -341,6 +477,110 @@ export default function ComposeScreen() {
     );
   };
 
+  const templates = ((templatesQuery.data as { templates?: TemplateLike[] } | undefined)
+    ?.templates ?? []) as TemplateLike[];
+  const filteredTemplates = templates.filter((template) =>
+    template.name.toLowerCase().includes(templateSearch.trim().toLowerCase()),
+  );
+
+  const saveTemplate = async () => {
+    if (!templateName.trim()) {
+      Alert.alert('Missing name', 'Please provide a template name.');
+      return;
+    }
+
+    const body = await editor.getHTML();
+    createTemplateMutation.mutate({
+      name: templateName.trim(),
+      subject: subject.trim(),
+      body: body?.trim() || '',
+      to: splitRecipientInput(to),
+      cc: splitRecipientInput(cc),
+      bcc: splitRecipientInput(bcc),
+    } as any);
+  };
+
+  const applyTemplate = (template: TemplateLike) => {
+    setSubject(template.subject ?? '');
+    setTo((template.to ?? []).join(', '));
+    setCc((template.cc ?? []).join(', '));
+    setBcc((template.bcc ?? []).join(', '));
+    setShowCcBcc(Boolean((template.cc ?? []).length || (template.bcc ?? []).length));
+    if (template.body) {
+      editor.setContent(template.body);
+    }
+    setShowTemplatesModal(false);
+  };
+
+  const confirmDeleteTemplate = (template: TemplateLike) => {
+    Alert.alert('Delete Template', `Delete "${template.name}"?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () => deleteTemplateMutation.mutate({ id: template.id }),
+      },
+    ]);
+  };
+
+  const openSchedulePicker = () => {
+    const initialDate = scheduleAt ? new Date(scheduleAt) : nextDefaultScheduleDate();
+    if (Platform.OS === 'android') {
+      setScheduleDraftDate(initialDate);
+      setAndroidPickerMode('date');
+      return;
+    }
+    setScheduleDraftDate(initialDate);
+    setScheduleModalVisible(true);
+  };
+
+  const clearSchedule = () => {
+    setScheduleAt(undefined);
+    setScheduleModalVisible(false);
+    setAndroidPickerMode(null);
+  };
+
+  const applyScheduleDate = (value: Date) => {
+    if (value.getTime() <= Date.now()) {
+      Alert.alert('Invalid schedule', 'Scheduled time must be in the future.');
+      return;
+    }
+    setScheduleAt(value.toISOString());
+  };
+
+  const handleAndroidScheduleChange = (event: DateTimePickerEvent, value?: Date) => {
+    if (!androidPickerMode) return;
+
+    if (event.type === 'dismissed') {
+      setAndroidPickerMode(null);
+      return;
+    }
+
+    if (!value) {
+      setAndroidPickerMode(null);
+      return;
+    }
+
+    if (androidPickerMode === 'date') {
+      const merged = new Date(scheduleDraftDate);
+      merged.setFullYear(value.getFullYear(), value.getMonth(), value.getDate());
+      setScheduleDraftDate(merged);
+      setAndroidPickerMode('time');
+      return;
+    }
+
+    const merged = new Date(scheduleDraftDate);
+    merged.setHours(value.getHours(), value.getMinutes(), 0, 0);
+    setAndroidPickerMode(null);
+    applyScheduleDate(merged);
+  };
+
+  const confirmIosSchedule = () => {
+    applyScheduleDate(scheduleDraftDate);
+    setScheduleModalVisible(false);
+  };
+
+  const scheduleLabel = scheduleAt ? formatScheduleLabel(scheduleAt) : 'Send later';
   const isReplying = params.mode === 'reply' || params.mode === 'replyAll';
   const title = isReplying ? 'Reply' : params.mode === 'forward' ? 'Forward' : 'New Message';
 
@@ -357,18 +597,27 @@ export default function ComposeScreen() {
           <Text style={[styles.cancelText, { color: colors.primary }]}>Cancel</Text>
         </Pressable>
         <Text style={[styles.headerTitle, { color: colors.foreground }]}>{title}</Text>
-        <Pressable
-          style={[
-            styles.sendButton,
-            { backgroundColor: sendMutation.isPending ? colors.secondary : colors.primary },
-          ]}
-          onPress={handleSend}
-          disabled={sendMutation.isPending}
-        >
-          <Text style={[styles.sendText, { color: colors.primaryForeground }]}>
-            {sendMutation.isPending ? 'Sending...' : 'Send'}
-          </Text>
-        </Pressable>
+        <View style={styles.headerActions}>
+          <Pressable
+            style={[styles.headerSecondaryButton, { borderColor: colors.border }]}
+            onPress={openSchedulePicker}
+            disabled={sendMutation.isPending}
+          >
+            <Text style={[styles.headerSecondaryText, { color: colors.foreground }]}>Later</Text>
+          </Pressable>
+          <Pressable
+            style={[
+              styles.sendButton,
+              { backgroundColor: sendMutation.isPending ? colors.secondary : colors.primary },
+            ]}
+            onPress={handleSend}
+            disabled={sendMutation.isPending}
+          >
+            <Text style={[styles.sendText, { color: colors.primaryForeground }]}>
+              {sendMutation.isPending ? 'Sending...' : scheduleAt ? 'Schedule' : 'Send'}
+            </Text>
+          </Pressable>
+        </View>
       </View>
 
       {/* Compose form */}
@@ -438,6 +687,39 @@ export default function ComposeScreen() {
         </View>
 
         <View style={[styles.attachmentRow, { borderBottomColor: colors.border }]}>
+          <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>When:</Text>
+          <Pressable
+            style={[styles.inlineButton, { borderColor: colors.border }]}
+            onPress={openSchedulePicker}
+          >
+            <Text style={{ color: colors.foreground, fontWeight: '500' }}>{scheduleLabel}</Text>
+          </Pressable>
+          {scheduleAt && (
+            <Pressable onPress={clearSchedule}>
+              <Text style={{ color: colors.destructive, fontWeight: '600' }}>Clear</Text>
+            </Pressable>
+          )}
+        </View>
+
+        <View style={[styles.attachmentRow, { borderBottomColor: colors.border }]}>
+          <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>Template:</Text>
+          <View style={styles.inlineActions}>
+            <Pressable
+              style={[styles.inlineButton, { borderColor: colors.border }]}
+              onPress={() => setShowTemplatesModal(true)}
+            >
+              <Text style={{ color: colors.foreground, fontWeight: '500' }}>Use</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.inlineButton, { borderColor: colors.border }]}
+              onPress={() => setShowSaveTemplateModal(true)}
+            >
+              <Text style={{ color: colors.foreground, fontWeight: '500' }}>Save</Text>
+            </Pressable>
+          </View>
+        </View>
+
+        <View style={[styles.attachmentRow, { borderBottomColor: colors.border }]}>
           <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>Attach:</Text>
           <Pressable
             style={[styles.attachmentButton, { backgroundColor: colors.secondary }]}
@@ -484,26 +766,184 @@ export default function ComposeScreen() {
           <Toolbar editor={editor} />
         </View>
       </View>
+
+      {Platform.OS === 'android' && androidPickerMode ? (
+        <DateTimePicker
+          value={scheduleDraftDate}
+          mode={androidPickerMode}
+          minimumDate={androidPickerMode === 'date' ? new Date() : undefined}
+          onChange={handleAndroidScheduleChange}
+        />
+      ) : null}
+
+      <Modal
+        visible={scheduleModalVisible}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setScheduleModalVisible(false)}
+      >
+        <View style={styles.modalScrim}>
+          <View
+            style={[
+              styles.modalCard,
+              {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            <Text style={[styles.modalTitle, { color: colors.foreground }]}>Schedule Send</Text>
+            <DateTimePicker
+              value={scheduleDraftDate}
+              mode="datetime"
+              display="spinner"
+              onChange={(_, value) => {
+                if (value) setScheduleDraftDate(value);
+              }}
+              minimumDate={new Date()}
+            />
+            <View style={styles.modalActions}>
+              <Pressable
+                style={[styles.modalButton, { borderColor: colors.border }]}
+                onPress={() => setScheduleModalVisible(false)}
+              >
+                <Text style={{ color: colors.foreground, fontWeight: '600' }}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.modalButton, { backgroundColor: colors.primary }]}
+                onPress={confirmIosSchedule}
+              >
+                <Text style={{ color: colors.primaryForeground, fontWeight: '700' }}>Set</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={showTemplatesModal}
+        animationType="slide"
+        onRequestClose={() => setShowTemplatesModal(false)}
+      >
+        <View style={[styles.modalPage, { backgroundColor: colors.background }]}>
+          <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
+            <Text style={[styles.modalTitle, { color: colors.foreground }]}>Templates</Text>
+            <Pressable onPress={() => setShowTemplatesModal(false)}>
+              <Text style={{ color: colors.primary, fontWeight: '600' }}>Close</Text>
+            </Pressable>
+          </View>
+          <View style={[styles.searchRow, { borderColor: colors.border }]}>
+            <TextInput
+              value={templateSearch}
+              onChangeText={setTemplateSearch}
+              placeholder="Search templates"
+              placeholderTextColor={colors.mutedForeground}
+              style={[styles.searchInput, { color: colors.foreground }]}
+            />
+          </View>
+          <ScrollView
+            style={styles.templateList}
+            contentContainerStyle={styles.templateListContent}
+            keyboardShouldPersistTaps="handled"
+          >
+            {templatesQuery.isLoading && (
+              <Text style={[styles.templateMeta, { color: colors.mutedForeground }]}>
+                Loading templates...
+              </Text>
+            )}
+            {!templatesQuery.isLoading && filteredTemplates.length === 0 && (
+              <Text style={[styles.templateMeta, { color: colors.mutedForeground }]}>
+                No templates found.
+              </Text>
+            )}
+            {filteredTemplates.map((template) => (
+              <View
+                key={template.id}
+                style={[styles.templateRow, { borderBottomColor: colors.border }]}
+              >
+                <Pressable style={styles.templateText} onPress={() => applyTemplate(template)}>
+                  <Text style={[styles.templateName, { color: colors.foreground }]}>
+                    {template.name}
+                  </Text>
+                  {!!template.subject && (
+                    <Text style={[styles.templateMeta, { color: colors.mutedForeground }]}>
+                      {template.subject}
+                    </Text>
+                  )}
+                </Pressable>
+                <Pressable onPress={() => confirmDeleteTemplate(template)}>
+                  <Text style={{ color: colors.destructive, fontWeight: '600' }}>Delete</Text>
+                </Pressable>
+              </View>
+            ))}
+          </ScrollView>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={showSaveTemplateModal}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setShowSaveTemplateModal(false)}
+      >
+        <View style={styles.modalScrim}>
+          <View
+            style={[
+              styles.modalCard,
+              {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            <Text style={[styles.modalTitle, { color: colors.foreground }]}>Save Template</Text>
+            <TextInput
+              value={templateName}
+              onChangeText={setTemplateName}
+              placeholder="Template name"
+              placeholderTextColor={colors.mutedForeground}
+              style={[
+                styles.templateNameInput,
+                {
+                  borderColor: colors.border,
+                  color: colors.foreground,
+                },
+              ]}
+            />
+            <View style={styles.modalActions}>
+              <Pressable
+                style={[styles.modalButton, { borderColor: colors.border }]}
+                onPress={() => {
+                  setShowSaveTemplateModal(false);
+                  setTemplateName('');
+                }}
+              >
+                <Text style={{ color: colors.foreground, fontWeight: '600' }}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={[
+                  styles.modalButton,
+                  { backgroundColor: createTemplateMutation.isPending ? colors.secondary : colors.primary },
+                ]}
+                disabled={createTemplateMutation.isPending}
+                onPress={() => {
+                  void saveTemplate();
+                }}
+              >
+                <Text style={{ color: colors.primaryForeground, fontWeight: '700' }}>
+                  {createTemplateMutation.isPending ? 'Saving...' : 'Save'}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
 
 function stripHtml(value: string): string {
   return value.replace(/<[^>]*>/g, '');
-}
-
-function uniqueEmails(emails: string[]): string[] {
-  const seen = new Set<string>();
-  const deduped: string[] = [];
-  for (const value of emails) {
-    const trimmed = value.trim();
-    if (!trimmed) continue;
-    const normalized = trimmed.toLowerCase();
-    if (seen.has(normalized)) continue;
-    seen.add(normalized);
-    deduped.push(trimmed);
-  }
-  return deduped;
 }
 
 function toEmailList(entries: SenderLike[] | null | undefined): string[] {
@@ -648,6 +1088,21 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: '600',
   },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  headerSecondaryButton: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  headerSecondaryText: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
   sendButton: {
     paddingHorizontal: 16,
     paddingVertical: 8,
@@ -692,6 +1147,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
+  inlineActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  inlineButton: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
   attachmentsList: {
     borderBottomWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: 16,
@@ -729,5 +1195,86 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     paddingTop: 6,
     paddingBottom: 2,
+  },
+  modalScrim: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+  },
+  modalCard: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 14,
+    padding: 16,
+    gap: 12,
+  },
+  modalPage: {
+    flex: 1,
+  },
+  modalHeader: {
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  modalTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  modalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 10,
+  },
+  modalButton: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  searchRow: {
+    margin: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+  },
+  searchInput: {
+    height: 40,
+    fontSize: 15,
+  },
+  templateList: {
+    flex: 1,
+    paddingHorizontal: 16,
+  },
+  templateListContent: {
+    paddingBottom: 24,
+  },
+  templateRow: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  templateText: {
+    flex: 1,
+    gap: 2,
+  },
+  templateName: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  templateMeta: {
+    fontSize: 13,
+  },
+  templateNameInput: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 10,
+    fontSize: 15,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
   },
 });
