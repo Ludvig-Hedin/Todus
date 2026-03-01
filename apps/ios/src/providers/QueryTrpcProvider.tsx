@@ -38,7 +38,13 @@ export function QueryTrpcProvider({ children }: PropsWithChildren) {
       baseUrl: env.backendUrl,
       maxItems: 100,
       async getHeaders() {
-        const session = await secureStorage.getSession();
+        let session = null;
+        try {
+          session = await secureStorage.getSession();
+        } catch {
+          session = null;
+        }
+
         if (!session || session.mode !== 'bearer' || !session.token) {
           return undefined;
         }

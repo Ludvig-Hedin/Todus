@@ -6,7 +6,8 @@ import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { NativeAuthSession } from '@zero/shared';
 
-const SESSION_KEY = 'zero:session:v1';
+// expo-secure-store accepts only [A-Za-z0-9._-] in keys.
+const SESSION_KEY = 'zero.session.v1';
 const THEME_MODE_KEY = 'zero:theme:mode';
 const LAST_VISITED_PATH_KEY = 'zero:last-visited-path';
 
@@ -15,9 +16,9 @@ type ThemeMode = 'light' | 'dark' | 'system';
 class SecureStorageAdapter {
   /** Session token stored in Keychain (encrypted) */
   async getSession(): Promise<NativeAuthSession | null> {
-    const rawValue = await SecureStore.getItemAsync(SESSION_KEY);
-    if (!rawValue) return null;
     try {
+      const rawValue = await SecureStore.getItemAsync(SESSION_KEY);
+      if (!rawValue) return null;
       return JSON.parse(rawValue) as NativeAuthSession;
     } catch {
       return null;
@@ -25,11 +26,19 @@ class SecureStorageAdapter {
   }
 
   async setSession(session: NativeAuthSession): Promise<void> {
-    await SecureStore.setItemAsync(SESSION_KEY, JSON.stringify(session));
+    try {
+      await SecureStore.setItemAsync(SESSION_KEY, JSON.stringify(session));
+    } catch {
+      // No-op: callers should continue gracefully if secure storage is unavailable.
+    }
   }
 
   async clearSession(): Promise<void> {
-    await SecureStore.deleteItemAsync(SESSION_KEY);
+    try {
+      await SecureStore.deleteItemAsync(SESSION_KEY);
+    } catch {
+      // No-op: clearing a missing/invalid key should not block logout flow.
+    }
   }
 
   /** Theme mode stored in AsyncStorage (non-sensitive) */
