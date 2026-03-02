@@ -59,10 +59,17 @@ export default function LoginScreen() {
         redirectUrl = redirectUrl.replace(':///', '://');
       }
 
+      // Debug: log the exact redirect URL so we can verify it matches what the server sends
+      console.log('[GoogleSignIn] redirectUrl for openAuthSessionAsync:', redirectUrl);
+
       // 2. The callbackURL tells better-auth where to redirect AFTER Google OAuth.
       // We point it to the mobile-token bridge which reads the session cookie
       // (available in SFSafariViewController) and redirects to todus:// with token.
-      const mobileTokenUrl = `${env.backendUrl.replace(/\/$/, '')}/api/auth/mobile-token`;
+      // IMPORTANT: Keep this URL clean without extra query params — better-auth
+      // may mangle or drop query strings in the callbackURL during redirect processing.
+      const backendBase = env.backendUrl.replace(/\/$/, '');
+      const mobileTokenUrl = `${backendBase}/api/auth/mobile-token`;
+      console.log('[GoogleSignIn] mobileTokenUrl (callbackURL for better-auth):', mobileTokenUrl);
 
       // 3. Get the Google OAuth consent URL from better-auth.
       const googleOAuthUrl = await getSocialAuthUrl(
@@ -71,6 +78,7 @@ export default function LoginScreen() {
         'google',
         mobileTokenUrl,
       );
+      console.log('[GoogleSignIn] googleOAuthUrl:', googleOAuthUrl);
 
       // 4. Open in SFSafariViewController (iOS system browser sheet).
       // This shares cookies with Safari, handles redirects natively, and
@@ -79,6 +87,7 @@ export default function LoginScreen() {
 
       const handleAuthUrl = async (url: string) => {
         if (authHandled) return;
+        console.log('[GoogleSignIn] handleAuthUrl received:', url);
         const token = extractTokenFromUrl(url);
         if (token) {
           authHandled = true;
@@ -89,11 +98,13 @@ export default function LoginScreen() {
 
       // Fallback listener for deep link redirects (iOS edge cases)
       const subscription = Linking.addEventListener('url', ({ url }) => {
+        console.log('[GoogleSignIn] Linking url event:', url);
         handleAuthUrl(url);
       });
 
       try {
         const result = await WebBrowser.openAuthSessionAsync(googleOAuthUrl, redirectUrl);
+        console.log('[GoogleSignIn] openAuthSessionAsync result:', JSON.stringify(result));
         subscription.remove();
 
         if (!authHandled) {

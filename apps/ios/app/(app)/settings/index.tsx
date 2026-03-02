@@ -1,7 +1,7 @@
 /**
  * Settings hub — lists all settings sections with navigation to detail pages.
  */
-import { useRouter } from 'expo-router';
+import { useNavigation, useRouter } from 'expo-router';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../../src/shared/theme/ThemeContext';
@@ -15,6 +15,8 @@ import {
   AlertTriangle,
   Grid2x2,
   Keyboard,
+  ChevronLeft,
+  Menu,
 } from 'lucide-react-native';
 
 const SETTINGS_ITEMS = [
@@ -42,12 +44,38 @@ const SETTINGS_ITEMS = [
 
 export default function SettingsIndex() {
   const router = useRouter();
+  const navigation = useNavigation();
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
+
+  const goBackToMail = () => {
+    if (router.canGoBack()) {
+      router.back();
+      return;
+    }
+    router.replace('/(app)/(mail)/inbox');
+  };
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <ScrollView contentContainerStyle={[styles.content, { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 16 }]}>
+        <View style={styles.topActions}>
+          <Pressable
+            style={[styles.topActionButton, { borderColor: colors.border }]}
+            onPress={goBackToMail}
+          >
+            <ChevronLeft size={16} color={colors.foreground} />
+            <Text style={[styles.topActionText, { color: colors.foreground }]}>Mail</Text>
+          </Pressable>
+          <Pressable
+            style={[styles.topActionButton, { borderColor: colors.border }]}
+            onPress={() => ((navigation as any).openDrawer?.() ?? navigation.dispatch({ type: 'OPEN_DRAWER' }))}
+          >
+            <Menu size={16} color={colors.foreground} />
+            <Text style={[styles.topActionText, { color: colors.foreground }]}>Menu</Text>
+          </Pressable>
+        </View>
+
         <Text style={[styles.title, { color: colors.foreground }]}>Settings</Text>
 
         <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -88,6 +116,25 @@ const styles = StyleSheet.create({
   },
   content: {
     padding: 16,
+  },
+  topActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginBottom: 10,
+  },
+  topActionButton: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  topActionText: {
+    fontSize: 13,
+    fontWeight: '600',
   },
   title: {
     fontSize: 28,

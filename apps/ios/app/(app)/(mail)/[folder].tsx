@@ -13,6 +13,7 @@ import {
   Platform,
   Pressable,
   RefreshControl,
+  ScrollView,
   StyleSheet,
   Text,
   useWindowDimensions,
@@ -27,17 +28,27 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTRPC } from '../../../src/providers/QueryTrpcProvider';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../../src/shared/theme/ThemeContext';
+import { getNativeEnv } from '../../../src/shared/config/env';
 import { sessionAtom } from '../../../src/shared/state/session';
 import { haptics } from '../../../src/shared/utils/haptics';
 import { Archive, CheckCheck, Menu, Plus, Search, Trash2, X } from 'lucide-react-native';
 import { FlashList } from '@shopify/flash-list';
 import { useAtomValue } from 'jotai';
 
+type MailCategory = {
+  id: string;
+  name: string;
+  searchValue: string;
+  order: number;
+  isDefault?: boolean;
+};
+
 export default function MailFolderScreen() {
   const { folder, threadId } = useLocalSearchParams<{ folder: string; threadId?: string }>();
   const router = useRouter();
   const navigation = useNavigation();
   const { width } = useWindowDimensions();
+  const env = getNativeEnv();
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const session = useAtomValue(sessionAtom);
@@ -52,9 +63,56 @@ export default function MailFolderScreen() {
     threadId && typeof threadId === 'string' ? threadId : null,
   );
   const [selectedThreadIds, setSelectedThreadIds] = useState<string[]>([]);
+  const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
+
+  const settingsQuery = useQuery({
+    ...trpc.settings.get.queryOptions(),
+    enabled: !env.authBypassEnabled,
+  });
+  const categoryDefaultsQuery = useQuery(trpc.categories.defaults.queryOptions());
+
+  const categoryOptions = useMemo(() => {
+    const settingsCategories = settingsQuery.data?.settings?.categories as MailCategory[] | undefined;
+    const fallbackCategories = categoryDefaultsQuery.data as MailCategory[] | undefined;
+    const source = settingsCategories?.length ? settingsCategories : fallbackCategories ?? [];
+    return [...source].sort((a, b) => a.order - b.order);
+  }, [categoryDefaultsQuery.data, settingsQuery.data?.settings?.categories]);
+
+  const defaultCategoryId = useMemo(
+    () =>
+      categoryOptions.find((category) => category.isDefault)?.id ?? categoryOptions[0]?.id ?? null,
+    [categoryOptions],
+  );
+
+  useEffect(() => {
+    if (activeFolder !== 'inbox') {
+      setSelectedCategoryId(null);
+      return;
+    }
+
+    setSelectedCategoryId((current) => {
+      if (current && categoryOptions.some((category) => category.id === current)) {
+        return current;
+      }
+      return defaultCategoryId;
+    });
+  }, [activeFolder, categoryOptions, defaultCategoryId]);
+
+  const selectedCategory = useMemo(
+    () => categoryOptions.find((category) => category.id === selectedCategoryId) ?? null,
+    [categoryOptions, selectedCategoryId],
+  );
+
+  const listThreadsInput = useMemo(() => {
+    const query = activeFolder === 'inbox' ? selectedCategory?.searchValue?.trim() ?? '' : '';
+    return {
+      folder: activeFolder,
+      ...(query ? { q: query } : {}),
+    };
+  }, [activeFolder, selectedCategory?.searchValue]);
 
   const { data, isLoading, refetch, isRefetching } = useQuery({
-    ...trpc.mail.listThreads.queryOptions({ folder: activeFolder }),
+    ...trpc.mail.listThreads.queryOptions(listThreadsInput),
     enabled: !!session,
     staleTime: 30_000,
     gcTime: 5 * 60_000,
@@ -392,6 +450,49 @@ export default function MailFolderScreen() {
         </View>
       </View>
 
+      {activeFolder === 'inbox' && categoryOptions.length > 0 && !isSelectionMode && (
+        <View
+          style={[
+            styles.categoryTabsContainer,
+            { borderBottomColor: colors.border, backgroundColor: colors.background },
+          ]}
+        >
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.categoryTabsContent}
+          >
+            {categoryOptions.map((category) => {
+              const isActive = selectedCategoryId === category.id;
+              return (
+                <Pressable
+                  key={category.id}
+                  style={[
+                    styles.categoryTabChip,
+                    {
+                      backgroundColor: isActive ? colors.primary : colors.secondary,
+                      borderColor: isActive ? colors.primary : colors.border,
+                    },
+                  ]}
+                  onPress={() => setSelectedCategoryId(category.id)}
+                >
+                  <Text
+                    style={[
+                      styles.categoryTabText,
+                      {
+                        color: isActive ? colors.primaryForeground : colors.foreground,
+                      },
+                    ]}
+                  >
+                    {category.name}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        </View>
+      )}
+
       {isSplitLayout ? (
         <View style={styles.splitContent}>
           <View style={[styles.listPane, { borderRightColor: colors.border }]}>
@@ -453,6 +554,24 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  categoryTabsContainer: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingVertical: 10,
+  },
+  categoryTabsContent: {
+    paddingHorizontal: 12,
+    gap: 8,
+  },
+  categoryTabChip: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  categoryTabText: {
+    fontSize: 13,
+    fontWeight: '600',
   },
   listContainer: {
     flex: 1,

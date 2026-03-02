@@ -30,16 +30,15 @@ function AuthGuard() {
     if (authStatus === 'bootstrapping') return;
 
     const inAuthGroup = segments[0] === '(auth)';
-    const inPublicGroup = segments[0] === '(public)';
     const inAppGroup = segments[0] === '(app)';
     const inApiGroup = segments[0] === 'api';
     const inAllowedModalRoute = segments[0] === 'compose' || segments[0] === 'search';
 
-    if (authStatus === 'unauthenticated' && !inAuthGroup && !inPublicGroup && !inApiGroup) {
-      router.replace('/(public)/home');
+    if (authStatus === 'unauthenticated' && !inAuthGroup && !inApiGroup) {
+      router.replace('/(auth)/login');
     } else if (
       authStatus === 'authenticated' &&
-      (inAuthGroup || inPublicGroup || (!inAppGroup && !inAllowedModalRoute && !inApiGroup))
+      (inAuthGroup || (!inAppGroup && !inAllowedModalRoute && !inApiGroup))
     ) {
       router.replace('/(app)/(mail)/inbox');
     }
@@ -70,7 +69,6 @@ function AuthGuard() {
   return (
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="(auth)" />
-      <Stack.Screen name="(public)" />
       <Stack.Screen name="(app)" />
       <Stack.Screen name="api/mailto-handler" />
       <Stack.Screen name="compose" options={{ presentation: 'modal' }} />

@@ -717,6 +717,12 @@ const api = new Hono<HonoContext>()
     // for the native iOS app. Called from the system browser after web login.
     // The system browser has the session cookie, so we can read the session
     // and generate a bearer token, then redirect to the app's deep link.
+    //
+    // IMPORTANT: We return an HTML page with a JavaScript redirect instead of
+    // a 302 redirect. iOS's ASWebAuthenticationSession (used by expo-web-browser)
+    // unreliably intercepts HTTP 302 redirects to custom URL schemes (todus://)
+    // through long redirect chains (Google → better-auth → mobile-token → todus://).
+    // A JS-based redirect from an HTML page is the standard workaround.
     const auth = c.var.auth;
     const session = await auth.api.getSession({ headers: c.req.raw.headers });
     if (!session?.session?.token) {
@@ -724,7 +730,23 @@ const api = new Hono<HonoContext>()
       return c.redirect(`${env.VITE_PUBLIC_APP_URL}/login?error=no_session`);
     }
     const token = session.session.token;
-    return c.redirect(`todus://auth-callback?token=${encodeURIComponent(token)}`);
+
+    // Build the deep link URL for the native app
+    const redirectUrl = c.req.query('redirect') || 'todus://auth-callback';
+    const separator = redirectUrl.includes('?') ? '&' : '?';
+    const deepLink = `${redirectUrl}${separator}token=${encodeURIComponent(token)}`;
+
+    // Return an HTML page that triggers the deep link via JavaScript.
+    // This is more reliable than a 302 redirect for custom URL schemes on iOS.
+    return c.html(`<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Redirecting...</title></head>
+<body style="display:flex;align-items:center;justify-content:center;height:100vh;margin:0;font-family:system-ui;background:#000;color:#fff">
+<p>Redirecting to Todus…</p>
+<script>window.location.href=${JSON.stringify(deepLink)};</script>
+</body>
+</html>`);
   })
   .on(['GET', 'POST', 'OPTIONS'], '/auth/*', async (c) => {
     try {

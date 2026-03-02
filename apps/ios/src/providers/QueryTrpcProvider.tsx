@@ -25,6 +25,13 @@ export function QueryTrpcProvider({ children }: PropsWithChildren) {
       new QueryClient({
         queryCache: new QueryCache({
           onError: (error) => {
+            const message = error instanceof Error ? error.message : String(error);
+            const isUnauthorizedError = message.toUpperCase().includes('UNAUTHORIZED');
+
+            if (env.authBypassEnabled && isUnauthorizedError) {
+              return;
+            }
+
             console.error('[native-query-error]', error);
             captureSentryException(error, { source: 'react-query.queryCache' });
           },

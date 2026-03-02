@@ -6,6 +6,7 @@ import { Platform, StyleSheet, useWindowDimensions } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { identifyPostHog } from '../../src/shared/telemetry/posthog';
 import { MailSidebar } from '../../src/features/mail/MailSidebar';
+import { getNativeEnv } from '../../src/shared/config/env';
 import { useTRPC } from '../../src/providers/QueryTrpcProvider';
 import { UndoSendBanner } from '../../src/shared/components/UndoSendBanner';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
@@ -17,8 +18,12 @@ export default function AppLayout() {
   const { colors } = useTheme();
   const { width } = useWindowDimensions();
   const isWideLayout = Platform.OS === 'macos' || width >= 768;
+  const env = getNativeEnv();
   const trpc = useTRPC();
-  const defaultConnectionQuery = useQuery(trpc.connections.getDefault.queryOptions());
+  const defaultConnectionQuery = useQuery({
+    ...trpc.connections.getDefault.queryOptions(),
+    enabled: !env.authBypassEnabled,
+  });
 
   useEffect(() => {
     const defaultConnection = defaultConnectionQuery.data as any;
