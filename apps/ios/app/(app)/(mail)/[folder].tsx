@@ -29,7 +29,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../../src/shared/theme/ThemeContext';
 import { sessionAtom } from '../../../src/shared/state/session';
 import { haptics } from '../../../src/shared/utils/haptics';
-import { Menu, Search, Plus } from 'lucide-react-native';
+import { Archive, CheckCheck, Menu, Plus, Search, Trash2, X } from 'lucide-react-native';
 import { FlashList } from '@shopify/flash-list';
 import { useAtomValue } from 'jotai';
 
@@ -51,6 +51,7 @@ export default function MailFolderScreen() {
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(
     threadId && typeof threadId === 'string' ? threadId : null,
   );
+  const [selectedThreadIds, setSelectedThreadIds] = useState<string[]>([]);
 
   const { data, isLoading, refetch, isRefetching } = useQuery({
     ...trpc.mail.listThreads.queryOptions({ folder: activeFolder }),
@@ -104,6 +105,19 @@ export default function MailFolderScreen() {
   });
 
   const threads = useMemo(() => data?.threads ?? [], [data?.threads]);
+  const isSelectionMode = selectedThreadIds.length > 0;
+  const allVisibleThreadsSelected =
+    threads.length > 0 && selectedThreadIds.length === threads.length;
+
+  useEffect(() => {
+    setSelectedThreadIds((current) =>
+      current.filter((selectedId) => threads.some((thread: any) => thread.id === selectedId)),
+    );
+  }, [threads]);
+
+  useEffect(() => {
+    setSelectedThreadIds([]);
+  }, [activeFolder]);
 
   useEffect(() => {
     if (!isSplitLayout || !threadId || typeof threadId !== 'string') return;
@@ -144,6 +158,14 @@ export default function MailFolderScreen() {
   const handleThreadPress = useCallback(
     (threadId: string) => {
       haptics.light();
+      if (isSelectionMode) {
+        setSelectedThreadIds((current) =>
+          current.includes(threadId)
+            ? current.filter((selectedId) => selectedId !== threadId)
+            : [...current, threadId],
+        );
+        return;
+      }
       if (isSplitLayout) {
         setSelectedThreadId(threadId);
         router.setParams({ threadId });
@@ -154,8 +176,24 @@ export default function MailFolderScreen() {
         params: { threadId },
       });
     },
-    [isSplitLayout, router],
+    [isSelectionMode, isSplitLayout, router],
   );
+
+  const handleThreadLongPress = useCallback((threadId: string) => {
+    haptics.medium();
+    setSelectedThreadIds((current) => {
+      if (current.includes(threadId)) return current;
+      return [...current, threadId];
+    });
+  }, []);
+
+  const clearSelection = useCallback(() => {
+    setSelectedThreadIds([]);
+  }, []);
+
+  const selectAllVisibleThreads = useCallback(() => {
+    setSelectedThreadIds(threads.map((thread: any) => thread.id));
+  }, [threads]);
 
   const handleArchive = useCallback(
     (threadId: string) => archiveMutation.mutate({ ids: [threadId] }),
@@ -166,6 +204,32 @@ export default function MailFolderScreen() {
     (threadId: string) => deleteMutation.mutate({ ids: [threadId] }),
     [deleteMutation],
   );
+
+  const handleBulkArchive = useCallback(() => {
+    if (selectedThreadIds.length === 0) return;
+    archiveMutation.mutate({ ids: selectedThreadIds });
+    setSelectedThreadIds([]);
+  }, [archiveMutation, selectedThreadIds]);
+
+  const handleBulkDelete = useCallback(() => {
+    if (selectedThreadIds.length === 0) return;
+    const selectedCount = selectedThreadIds.length;
+    Alert.alert(
+      'Delete selected threads?',
+      `This will move ${selectedCount} thread${selectedCount === 1 ? '' : 's'} to trash.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => {
+            deleteMutation.mutate({ ids: selectedThreadIds });
+            setSelectedThreadIds([]);
+          },
+        },
+      ],
+    );
+  }, [deleteMutation, selectedThreadIds]);
 
   const closeSplitThread = useCallback(() => {
     setSelectedThreadId((current) => {
@@ -199,18 +263,27 @@ export default function MailFolderScreen() {
         data={threads}
         {...({ estimatedItemSize: 88, drawDistance: 320 } as any)}
         keyExtractor={(item: any) => item.id}
-        renderItem={({ item }: { item: any }) => (
-          <SwipeableThreadRow
-            onArchive={() => handleArchive(item.id)}
-            onDelete={() => handleDelete(item.id)}
-          >
-            <ThreadListItem
-              threadId={item.id}
-              onPress={handleThreadPress}
-              selected={isSplitLayout && selectedThreadId === item.id}
-            />
-          </SwipeableThreadRow>
-        )}
+        renderItem={({ item }: { item: any }) => {
+          const isRowSelected = isSelectionMode
+            ? selectedThreadIds.includes(item.id)
+            : isSplitLayout && selectedThreadId === item.id;
+
+          return (
+            <SwipeableThreadRow
+              onArchive={() => handleArchive(item.id)}
+              onDelete={() => handleDelete(item.id)}
+              disabled={isSelectionMode}
+            >
+              <ThreadListItem
+                threadId={item.id}
+                onPress={handleThreadPress}
+                onLongPress={handleThreadLongPress}
+                selected={isRowSelected}
+                selectionMode={isSelectionMode}
+              />
+            </SwipeableThreadRow>
+          );
+        }}
         refreshControl={
           <RefreshControl
             refreshing={isRefetching}
@@ -247,30 +320,75 @@ export default function MailFolderScreen() {
         ]}
       >
         <View style={styles.headerLeft}>
-          {!isSplitLayout && (
-            <Pressable
-              style={({ pressed }) => [styles.iconButton, pressed && { opacity: 0.7 }]}
-              onPress={openDrawer}
-            >
-              <Menu color={colors.foreground} size={24} />
-            </Pressable>
+          {isSelectionMode ? (
+            <>
+              <Pressable
+                style={({ pressed }) => [styles.iconButton, pressed && { opacity: 0.7 }]}
+                onPress={clearSelection}
+              >
+                <X color={colors.foreground} size={22} />
+              </Pressable>
+              <Text style={[styles.selectionTitle, { color: colors.foreground }]}>
+                {selectedThreadIds.length} selected
+              </Text>
+            </>
+          ) : (
+            <>
+              {!isSplitLayout && (
+                <Pressable
+                  style={({ pressed }) => [styles.iconButton, pressed && { opacity: 0.7 }]}
+                  onPress={openDrawer}
+                >
+                  <Menu color={colors.foreground} size={24} />
+                </Pressable>
+              )}
+              <Text style={[styles.headerTitle, { color: colors.foreground }]}>{folderLabel}</Text>
+            </>
           )}
-          <Text style={[styles.headerTitle, { color: colors.foreground }]}>{folderLabel}</Text>
         </View>
 
         <View style={styles.headerRight}>
-          <Pressable
-            style={({ pressed }) => [styles.iconButton, pressed && { opacity: 0.7 }]}
-            onPress={() => router.push('/search')}
-          >
-            <Search color={colors.foreground} size={22} />
-          </Pressable>
-          <Pressable
-            style={[styles.composeButton, { backgroundColor: colors.primary }]}
-            onPress={() => router.push('/compose')}
-          >
-            <Plus color={colors.primaryForeground} size={20} />
-          </Pressable>
+          {isSelectionMode ? (
+            <>
+              {!allVisibleThreadsSelected && threads.length > 0 && (
+                <Pressable
+                  style={({ pressed }) => [styles.iconButton, pressed && { opacity: 0.7 }]}
+                  onPress={selectAllVisibleThreads}
+                >
+                  <CheckCheck color={colors.foreground} size={20} />
+                </Pressable>
+              )}
+              <Pressable
+                style={({ pressed }) => [styles.iconButton, pressed && { opacity: 0.7 }]}
+                onPress={handleBulkArchive}
+                disabled={archiveMutation.isPending || deleteMutation.isPending}
+              >
+                <Archive color={colors.foreground} size={20} />
+              </Pressable>
+              <Pressable
+                style={({ pressed }) => [styles.iconButton, pressed && { opacity: 0.7 }]}
+                onPress={handleBulkDelete}
+                disabled={archiveMutation.isPending || deleteMutation.isPending}
+              >
+                <Trash2 color={colors.destructive} size={20} />
+              </Pressable>
+            </>
+          ) : (
+            <>
+              <Pressable
+                style={({ pressed }) => [styles.iconButton, pressed && { opacity: 0.7 }]}
+                onPress={() => router.push('/search')}
+              >
+                <Search color={colors.foreground} size={22} />
+              </Pressable>
+              <Pressable
+                style={[styles.composeButton, { backgroundColor: colors.primary }]}
+                onPress={() => router.push('/compose')}
+              >
+                <Plus color={colors.primaryForeground} size={20} />
+              </Pressable>
+            </>
+          )}
         </View>
       </View>
 
@@ -323,6 +441,11 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: '800',
     letterSpacing: -0.5,
+  },
+  selectionTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    letterSpacing: -0.2,
   },
   composeButton: {
     width: 36,

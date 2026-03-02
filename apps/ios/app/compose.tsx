@@ -24,8 +24,6 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useTRPC } from '../src/providers/QueryTrpcProvider';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTheme } from '../src/shared/theme/ThemeContext';
-import * as FileSystemLegacy from 'expo-file-system/legacy';
-import * as DocumentPicker from 'expo-document-picker';
 import { haptics } from '../src/shared/utils/haptics';
 import {
   formatScheduleLabel,
@@ -506,7 +504,20 @@ export default function ComposeScreen() {
 
   const pickAttachments = async () => {
     try {
-      const result = await DocumentPicker.getDocumentAsync({
+      const [documentPickerModule, fileSystemLegacyModule] = await Promise.all([
+        import('expo-document-picker').catch(() => null),
+        import('expo-file-system/legacy').catch(() => null),
+      ]);
+
+      if (!documentPickerModule || !fileSystemLegacyModule) {
+        Alert.alert(
+          'Attachment unavailable',
+          'Document picking is unavailable in this build. Rebuild the native app and try again.',
+        );
+        return;
+      }
+
+      const result = await documentPickerModule.getDocumentAsync({
         multiple: true,
         copyToCacheDirectory: true,
       });
@@ -517,8 +528,8 @@ export default function ComposeScreen() {
 
       const nextAttachments: SerializedAttachment[] = [];
       for (const asset of result.assets) {
-        const base64 = await FileSystemLegacy.readAsStringAsync(asset.uri, {
-          encoding: FileSystemLegacy.EncodingType.Base64,
+        const base64 = await fileSystemLegacyModule.readAsStringAsync(asset.uri, {
+          encoding: fileSystemLegacyModule.EncodingType.Base64,
         });
         nextAttachments.push({
           name: asset.name,

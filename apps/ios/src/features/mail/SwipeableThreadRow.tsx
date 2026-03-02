@@ -13,9 +13,15 @@ interface SwipeableThreadRowProps {
   children: React.ReactNode;
   onArchive: () => void;
   onDelete: () => void;
+  disabled?: boolean;
 }
 
-export function SwipeableThreadRow({ children, onArchive, onDelete }: SwipeableThreadRowProps) {
+export function SwipeableThreadRow({
+  children,
+  onArchive,
+  onDelete,
+  disabled = false,
+}: SwipeableThreadRowProps) {
   const { colors } = useTheme();
   const swipeableRef = useRef<Swipeable>(null);
 
@@ -68,6 +74,10 @@ export function SwipeableThreadRow({ children, onArchive, onDelete }: SwipeableT
       </View>
     );
   };
+
+  if (disabled) {
+    return <>{children}</>;
+  }
 
   return (
     <Swipeable

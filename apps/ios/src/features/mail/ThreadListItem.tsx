@@ -6,16 +6,24 @@ import { View, Text, StyleSheet, Pressable } from 'react-native';
 import { useTRPC } from '../../providers/QueryTrpcProvider';
 import { useTheme } from '../../shared/theme/ThemeContext';
 import { useQuery } from '@tanstack/react-query';
-import { Star } from 'lucide-react-native';
+import { Check, Star } from 'lucide-react-native';
 import React, { useMemo } from 'react';
 
 interface ThreadListItemProps {
   threadId: string;
   onPress: (threadId: string) => void;
+  onLongPress?: (threadId: string) => void;
   selected?: boolean;
+  selectionMode?: boolean;
 }
 
-function ThreadListItemComponent({ threadId, onPress, selected = false }: ThreadListItemProps) {
+function ThreadListItemComponent({
+  threadId,
+  onPress,
+  onLongPress,
+  selected = false,
+  selectionMode = false,
+}: ThreadListItemProps) {
   const { colors } = useTheme();
   const trpc = useTRPC();
   const { data: threadData, isLoading } = useQuery({
@@ -85,9 +93,23 @@ function ThreadListItemComponent({ threadId, onPress, selected = false }: Thread
         },
       ]}
       onPress={() => onPress(uiThread.id)}
+      onLongPress={onLongPress ? () => onLongPress(uiThread.id) : undefined}
     >
       {/* Unread indicator dot */}
       {!uiThread.isRead && <View style={[styles.unreadDot, { backgroundColor: colors.primary }]} />}
+      {selectionMode && (
+        <View
+          style={[
+            styles.selectionBadge,
+            {
+              borderColor: selected ? colors.primary : colors.border,
+              backgroundColor: selected ? colors.primary : 'transparent',
+            },
+          ]}
+        >
+          {selected && <Check size={12} color={colors.primaryForeground} />}
+        </View>
+      )}
 
       <View style={styles.content}>
         {/* Top row: Sender + Date */}
@@ -144,6 +166,8 @@ export const ThreadListItem = React.memo(
   (previous, next) =>
     previous.threadId === next.threadId &&
     previous.selected === next.selected &&
+    previous.selectionMode === next.selectionMode &&
+    previous.onLongPress === next.onLongPress &&
     previous.onPress === next.onPress,
 );
 
@@ -182,6 +206,17 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 4,
     top: 18,
+  },
+  selectionBadge: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'absolute',
+    left: 10,
+    top: 12,
   },
   content: {
     flex: 1,
