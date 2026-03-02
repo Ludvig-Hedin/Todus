@@ -15,7 +15,9 @@ export default function MailLayout() {
       }}
     >
       <Stack.Screen name="[folder]" />
+      <Stack.Screen name="create" />
       <Stack.Screen name="thread/[threadId]" />
+      <Stack.Screen name="under-construction/[path]" />
     </Stack>
   );
 }

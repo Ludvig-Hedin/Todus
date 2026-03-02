@@ -345,6 +345,8 @@ export function ThreadDetailPane({
           <Pressable
             style={({ pressed }) => [styles.headerButton, pressed && { opacity: 0.6 }]}
             onPress={onBackPress}
+            accessibilityRole="button"
+            accessibilityLabel="Back to thread list"
           >
             <ArrowLeft size={22} color={colors.foreground} />
           </Pressable>
@@ -356,12 +358,16 @@ export function ThreadDetailPane({
           <Pressable
             style={({ pressed }) => [styles.headerButton, pressed && { opacity: 0.6 }]}
             onPress={() => archiveMutation.mutate({ ids: [threadId] })}
+            accessibilityRole="button"
+            accessibilityLabel="Archive thread"
           >
             <Archive size={20} color={colors.foreground} />
           </Pressable>
           <Pressable
             style={({ pressed }) => [styles.headerButton, pressed && { opacity: 0.6 }]}
             onPress={() => deleteMutation.mutate({ ids: [threadId] })}
+            accessibilityRole="button"
+            accessibilityLabel="Delete thread"
           >
             <Trash2 size={20} color={colors.foreground} />
           </Pressable>
@@ -374,12 +380,16 @@ export function ThreadDetailPane({
                 removeLabels: ['INBOX'],
               })
             }
+            accessibilityRole="button"
+            accessibilityLabel="Move thread to spam"
           >
             <AlertTriangle size={20} color={colors.foreground} />
           </Pressable>
           <Pressable
             style={({ pressed }) => [styles.headerButton, pressed && { opacity: 0.6 }]}
             onPress={() => starMutation.mutate({ ids: [threadId] })}
+            accessibilityRole="button"
+            accessibilityLabel="Toggle star for thread"
           >
             <Star size={20} color={colors.foreground} />
           </Pressable>
@@ -548,6 +558,8 @@ export function ThreadDetailPane({
                 params: { mode: 'reply', threadId },
               })
             }
+            accessibilityRole="button"
+            accessibilityLabel="Reply to thread"
           >
             <Reply size={20} color={colors.primaryForeground} />
             <Text style={[styles.replyFabText, { color: colors.primaryForeground }]}>Reply</Text>
@@ -560,6 +572,8 @@ export function ThreadDetailPane({
                 params: { mode: 'replyAll', threadId },
               })
             }
+            accessibilityRole="button"
+            accessibilityLabel="Reply all to thread"
           >
             <ReplyAll size={18} color={colors.secondaryForeground} />
             <Text style={[styles.replyFabText, { color: colors.secondaryForeground }]}>
@@ -574,6 +588,8 @@ export function ThreadDetailPane({
                 params: { mode: 'forward', threadId },
               })
             }
+            accessibilityRole="button"
+            accessibilityLabel="Forward thread"
           >
             <Forward size={18} color={colors.secondaryForeground} />
             <Text style={[styles.replyFabText, { color: colors.secondaryForeground }]}>

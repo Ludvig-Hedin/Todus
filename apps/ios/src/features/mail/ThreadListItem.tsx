@@ -83,6 +83,8 @@ function ThreadListItemComponent({
 
   if (!uiThread) return null;
 
+  const accessibilityLabel = `${uiThread.isRead ? 'Read' : 'Unread'} thread from ${uiThread.sender}. Subject: ${uiThread.subject}. ${uiThread.snippet}`.trim();
+
   return (
     <Pressable
       style={({ pressed }) => [
@@ -94,6 +96,12 @@ function ThreadListItemComponent({
       ]}
       onPress={() => onPress(uiThread.id)}
       onLongPress={onLongPress ? () => onLongPress(uiThread.id) : undefined}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+      accessibilityHint={
+        selectionMode ? 'Double tap to toggle selection.' : 'Double tap to open thread details.'
+      }
+      accessibilityState={{ selected }}
     >
       {/* Unread indicator dot */}
       {!uiThread.isRead && <View style={[styles.unreadDot, { backgroundColor: colors.primary }]} />}

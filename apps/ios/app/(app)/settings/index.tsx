@@ -17,12 +17,14 @@ import {
   Keyboard,
   ChevronLeft,
   Menu,
+  Banknote,
 } from 'lucide-react-native';
 
 const SETTINGS_ITEMS = [
   { key: 'general', label: 'General', description: 'Account preferences', icon: Settings },
   { key: 'appearance', label: 'Appearance', description: 'Theme & display', icon: Palette },
   { key: 'connections', label: 'Connections', description: 'Email accounts', icon: Link },
+  { key: 'billing', label: 'Billing', description: 'Plans and invoices', icon: Banknote },
   { key: 'labels', label: 'Labels', description: 'Manage labels', icon: Tag },
   { key: 'categories', label: 'Categories', description: 'Inbox category views', icon: Grid2x2 },
   {
@@ -63,6 +65,8 @@ export default function SettingsIndex() {
           <Pressable
             style={[styles.topActionButton, { borderColor: colors.border }]}
             onPress={goBackToMail}
+            accessibilityRole="button"
+            accessibilityLabel="Back to mail"
           >
             <ChevronLeft size={16} color={colors.foreground} />
             <Text style={[styles.topActionText, { color: colors.foreground }]}>Mail</Text>
@@ -70,6 +74,8 @@ export default function SettingsIndex() {
           <Pressable
             style={[styles.topActionButton, { borderColor: colors.border }]}
             onPress={() => ((navigation as any).openDrawer?.() ?? navigation.dispatch({ type: 'OPEN_DRAWER' }))}
+            accessibilityRole="button"
+            accessibilityLabel="Open app menu"
           >
             <Menu size={16} color={colors.foreground} />
             <Text style={[styles.topActionText, { color: colors.foreground }]}>Menu</Text>
@@ -90,6 +96,8 @@ export default function SettingsIndex() {
                   !isLast && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
                 ]}
                 onPress={() => router.push(`/(app)/settings/${item.key}` as any)}
+                accessibilityRole="button"
+                accessibilityLabel={`${item.label}. ${item.description}.`}
               >
                 <Icon size={20} color={colors.mutedForeground} />
                 <View style={styles.settingsItemContent}>

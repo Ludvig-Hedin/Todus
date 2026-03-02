@@ -19,6 +19,7 @@ import {
   Star,
   Clock,
   AlertTriangle,
+  Search,
   Settings,
   LogOut,
 } from 'lucide-react-native';
@@ -77,6 +78,9 @@ export function MailSidebar(props: DrawerContentComponentProps) {
                 { backgroundColor: isActive ? colors.secondary : 'transparent' },
               ]}
               onPress={() => navigateToFolder(folder.id)}
+              accessibilityRole="button"
+              accessibilityLabel={`Open ${folder.label} folder`}
+              accessibilityState={{ selected: isActive }}
             >
               {folder.icon(isActive ? colors.foreground : colors.mutedForeground)}
               <Text
@@ -101,9 +105,24 @@ export function MailSidebar(props: DrawerContentComponentProps) {
         <Pressable
           style={styles.folderRow}
           onPress={() => {
+            router.push('/search');
+            props.navigation.closeDrawer();
+          }}
+          accessibilityRole="button"
+          accessibilityLabel="Open search"
+        >
+          <Search width={20} height={20} color={colors.mutedForeground} />
+          <Text style={[styles.folderLabel, { color: colors.mutedForeground }]}>Search</Text>
+        </Pressable>
+
+        <Pressable
+          style={styles.folderRow}
+          onPress={() => {
             router.push('/(app)/settings' as any);
             props.navigation.closeDrawer();
           }}
+          accessibilityRole="button"
+          accessibilityLabel="Open settings"
         >
           <Settings width={20} height={20} color={colors.mutedForeground} />
           <Text style={[styles.folderLabel, { color: colors.mutedForeground }]}>Settings</Text>
@@ -116,6 +135,8 @@ export function MailSidebar(props: DrawerContentComponentProps) {
           <Pressable
             style={styles.logoutRow}
             onPress={handleLogout}
+            accessibilityRole="button"
+            accessibilityLabel="Sign out"
           >
             <LogOut width={18} height={18} color={colors.destructive} />
             <Text style={[styles.logoutText, { color: colors.destructive }]}>Sign Out</Text>

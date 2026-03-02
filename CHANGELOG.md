@@ -1,5 +1,16 @@
 # Project Changelog
 
+## [2026-03-02] Login UI & Logo Visibility
+
+### Fixed
+
+- Fixed logo visibility on iOS login screen by implementing adaptive `tintColor` (black for light mode, white for dark mode).
+- Removed native iOS navigation header from login screen to match web app aesthetic.
+
+### Changed
+
+- Updated iOS login screen to better align with web app layout and typography.
+
 ## [2026-03-01] App Consolidation + Archive Cleanup
 
 ### Changed

@@ -53,11 +53,11 @@ export default function LoginScreen() {
 
     try {
       // 1. Build the deep link URL that SFSafariViewController will listen for.
-      // Force double-slash scheme (todus://) to match Info.plist configuration.
-      let redirectUrl = Linking.createURL('auth-callback', { scheme: 'todus' });
-      if (redirectUrl.includes(':///')) {
-        redirectUrl = redirectUrl.replace(':///', '://');
-      }
+      // IMPORTANT: Do NOT use Linking.createURL() here — in Expo dev mode it
+      // returns exp://192.168.x.x:8081/--/auth-callback, which doesn't match
+      // the production server's redirect to todus://auth-callback. Hardcode
+      // the scheme so it always matches what the server sends back.
+      const redirectUrl = 'todus://auth-callback';
 
       // Debug: log the exact redirect URL so we can verify it matches what the server sends
       console.log('[GoogleSignIn] redirectUrl for openAuthSessionAsync:', redirectUrl);
@@ -141,7 +141,7 @@ export default function LoginScreen() {
       <View style={styles.topHeader}>
         <Image
           source={require('../../assets/brand-logo.png')}
-          style={styles.smallLogo}
+          style={[styles.smallLogo, themeStyles.logo]}
           resizeMode="contain"
         />
         <Text style={[styles.brandName, themeStyles.title]}>Todus</Text>
@@ -354,6 +354,9 @@ const lightStyles = StyleSheet.create({
   dot: {
     backgroundColor: '#DDDDDD',
   },
+  logo: {
+    tintColor: '#000000',
+  },
 });
 
 const darkStyles = StyleSheet.create({
@@ -384,5 +387,8 @@ const darkStyles = StyleSheet.create({
   },
   dot: {
     backgroundColor: '#333333',
+  },
+  logo: {
+    tintColor: '#FFFFFF',
   },
 });

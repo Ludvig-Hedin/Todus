@@ -1,0 +1,116 @@
+name: Native Release Pipeline
+
+on:
+  pull_request:
+    paths:
+      - 'apps/ios/**'
+      - 'apps/macos/**'
+      - '.github/workflows/native-release.yml'
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: 'Release platform'
+        required: true
+        type: choice
+        options:
+          - ios
+          - android
+      profile:
+        description: 'EAS profile'
+        required: true
+        type: choice
+        options:
+          - preview
+          - production
+      submit:
+        description: 'Submit build to store after build completes'
+        required: true
+        type: boolean
+        default: false
+
+jobs:
+  native-qa:
+    name: Native QA Checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run iOS unit tests
+        run: pnpm --filter @zero/ios run test:unit
+
+      - name: Run iOS bundle export smoke check
+        run: pnpm --filter @zero/ios run bundle:ios
+
+      - name: Validate macOS wrapper entrypoint
+        run: node --check apps/macos/main.mjs
+
+  eas-build:
+    name: EAS Build (${{ github.event.inputs.platform }} / ${{ github.event.inputs.profile }})
+    needs: native-qa
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: ${{ github.event_name == 'workflow_dispatch' && secrets.EXPO_TOKEN != '' }}
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+    defaults:
+      run:
+        working-directory: apps/ios
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Trigger EAS build
+        run: |
+          pnpm dlx eas-cli build \
+            --platform "${{ github.event.inputs.platform }}" \
+            --profile "${{ github.event.inputs.profile }}" \
+            --non-interactive \
+            --no-wait
+
+      - name: Submit to store
+        if: ${{ github.event.inputs.submit == 'true' }}
+        run: |
+          pnpm dlx eas-cli submit \
+            --platform "${{ github.event.inputs.platform }}" \
+            --profile production \
+            --non-interactive
+
+  eas-build-skipped:
+    name: EAS Build Skipped
+    needs: native-qa
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' && secrets.EXPO_TOKEN == '' }}
+    steps:
+      - name: Missing EXPO_TOKEN
+        run: |
+          echo "EXPO_TOKEN is not configured. EAS release build was skipped."

@@ -16,7 +16,13 @@ const config: ExpoConfig = {
   icon: './assets/icon.png',
   userInterfaceStyle: 'automatic',
   newArchEnabled: true,
-  plugins: ['expo-router', 'expo-secure-store', '@sentry/react-native/expo'],
+  plugins: [
+    'expo-router',
+    'expo-secure-store',
+    'expo-web-browser',
+    '@react-native-community/datetimepicker',
+    '@sentry/react-native/expo',
+  ],
   ios: {
     bundleIdentifier: 'com.ludvighedin.todus',
     supportsTablet: true,

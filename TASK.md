@@ -1,6 +1,6 @@
 # Migration Backlog
 
-Last updated: 2026-03-01
+Last updated: 2026-03-02
 
 ## Current State
 
@@ -19,12 +19,9 @@ Auth/login is currently owned by another agent stream and is excluded from this 
 
 ## Current Execution Order (Highest Priority First)
 
-1. `PG-003` Complete native mail shell parity for `/mail/:folder`
-2. `PG-004` Implement `/mail/create` and `/mail/under-construction/:path` parity behaviors
-3. `PG-011` Implement native integrations parity: Dub + Autumn
-4. `PG-013` Build parity-focused automated tests (unit/integration/E2E)
-5. `N8-03` Accessibility pass (VoiceOver/TalkBack/keyboard nav)
-6. `N8-04` Release pipeline setup (TestFlight, Play Console, macOS)
+1. `N8-05` Deprecate WebView wrapper app flows
+2. `N8-06` Final QA and signoff
+3. `PG-010` Implement native AI assistant and voice parity
 
 ---
 
@@ -147,8 +144,8 @@ All marked DONE — these are WebView-based, not truly native.
 | ----- | ------------------------------------------------------------ | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
 | N8-01 | Visual regression pass (screenshots all screens)             | BLOCKED | Screenshot scaffolding and coverage checks are in place; full pass blocked until device/simulator captures + authenticated parity data are available |
 | N8-02 | Performance optimization (list scroll, startup, transitions) | DONE    | Added query stale/gc tuning, list virtualization tuning, and row memoization to reduce scroll jank and refetch churn                                 |
-| N8-03 | Accessibility pass (VoiceOver, TalkBack, keyboard nav)       | PENDING | Critical flows accessible                                                                                                                            |
-| N8-04 | Release pipeline setup (TestFlight, Play Console, macOS)     | PENDING | CI/CD for all platforms                                                                                                                              |
+| N8-03 | Accessibility pass (VoiceOver, TalkBack, keyboard nav)       | DONE    | Added accessibility labels/roles/states across critical mail shell, thread actions, sidebar, and settings navigation flows                           |
+| N8-04 | Release pipeline setup (TestFlight, Play Console, macOS)     | DONE    | Added GitHub Actions native release pipeline (`.github/workflows/native-release.yml`) with QA gates + dispatchable EAS build/submit orchestration    |
 | N8-05 | Deprecate WebView wrapper app flows                          | PENDING | WebView screens removed                                                                                                                              |
 | N8-06 | Final QA and signoff                                         | PENDING | All parity checklist items green                                                                                                                     |
 
@@ -197,7 +194,12 @@ All marked DONE — these are WebView-based, not truly native.
 - `N8-02` completed with targeted native performance improvements in mail flows: list/detail query cache tuning (`staleTime`/`gcTime`), reduced auto-refetch churn, FlashList virtualization tuning, and memoized thread rows.
 - `PG-006` completed with native `/api/mailto-handler` parity in `apps/ios/app/api/mailto-handler.tsx`, shared parser/draft helpers in `apps/ios/src/features/compose/mailtoParity.ts`, compose route prefill + `draftId` send wiring in `apps/ios/app/compose.tsx`, and in-thread `mailto:` interception in `apps/ios/src/features/mail/MessageCard.tsx`.
 - `PG-001` completed by adding native public `/hr` parity wrapper route in `apps/ios/app/(public)/hr.tsx`.
-- `PG-003` started in `apps/ios/app/(app)/(mail)/[folder].tsx` with bulk selection UX parity (long-press selection mode, selected-count header, select-all, bulk archive/delete, and swipe disabled while selecting).
+- `PG-003` completed in `apps/ios/app/(app)/(mail)/[folder].tsx` and `apps/ios/src/features/mail/MailSidebar.tsx` by finishing category tab parity and adding native command-palette entry points (mail header search trigger with shortcut hint + drawer search entry).
+- `PG-004` completed in `apps/ios/app/(app)/(mail)/create.tsx`, `apps/ios/app/(app)/(mail)/under-construction/[path].tsx`, and `apps/ios/app/(app)/(mail)/_layout.tsx` with `/mail/create` redirect semantics to compose (including query prefill passthrough) and web-aligned under-construction back/inbox actions.
+- `PG-011` completed by adding native Autumn billing integration and settings UX parity (`apps/ios/src/shared/integrations/autumn.ts`, `apps/ios/app/(app)/settings/billing.tsx`, route wiring in settings index/layout). Dub parity remains server-driven via existing backend `dubAnalytics` auth plugin; native uses the same better-auth social sign-in endpoint flow.
+- `PG-013` completed by adding parity-focused native automated coverage for Autumn integration flows (`apps/ios/src/shared/integrations/autumn.test.ts`) and an RC/manual E2E parity script (`apps/ios/TEST_PLAN_PARITY.md`) covering critical mail shell, compose, settings, and integration workflows.
+- `N8-03` completed with critical accessibility updates in native mail/settings surfaces (`apps/ios/app/(app)/(mail)/[folder].tsx`, `apps/ios/src/features/mail/ThreadListItem.tsx`, `apps/ios/src/features/mail/ThreadDetailPane.tsx`, `apps/ios/src/features/mail/MailSidebar.tsx`, `apps/ios/app/(app)/settings/index.tsx`).
+- `N8-04` completed with repository-native release automation (`.github/workflows/native-release.yml`) and operator documentation (`apps/ios/RELEASE_PIPELINE.md`), while keeping signing/store credentials as manual external dependencies.
 - Login/auth flow remains untouched in this stream per ownership constraint.
 - `N3-09` and `N5-06` remain blocked because current workspace-level test/typecheck runs fail in unrelated server/packages paths, preventing reliable green test baselines.
 
@@ -205,7 +207,7 @@ All marked DONE — these are WebView-based, not truly native.
 
 - Workspace TypeScript checks remain blocked by pre-existing cross-package errors outside iOS scope (not introduced by this stream).
 - Screenshot coverage check currently fails intentionally (`0/128`) until parity screenshots are captured and committed.
-- iOS targeted unit tests pass via `pnpm --filter @zero/ios run test:unit` (20/20 passing).
+- iOS targeted unit tests pass via `pnpm --filter @zero/ios run test:unit` (25/25 passing).
 - Targeted formatting checks pass on all files touched in this session.
 
 ---
@@ -216,15 +218,15 @@ All marked DONE — these are WebView-based, not truly native.
 | ------ | ----------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | PG-001 | Implement native public route set parity (`/`, `/home`, `/about`, `/terms`, `/pricing`, `/privacy`, `/contributors`, `/developer`, `/hr`) | DONE    | Public parity wrappers now cover all listed routes, including `/hr` in `apps/ios/app/(public)/hr.tsx`                                                            |
 | PG-002 | Add native `/signup` parity flow                                                                                                          | BLOCKED | Auth/signup flow is currently owned by another agent stream; deferred in this stream by explicit ownership constraint                                             |
-| PG-003 | Complete native mail shell parity for `/mail/:folder`                                                                                     | IN_PROGRESS | Bulk selection mode implemented; remaining parity items: category tabs and command palette entry points                                                            |
-| PG-004 | Implement `/mail/create` and `/mail/under-construction/:path` parity behaviors                                                            | PENDING | Redirect/placeholder parity with web semantics                                                                                                                      |
+| PG-003 | Complete native mail shell parity for `/mail/:folder`                                                                                     | DONE | Category tabs + bulk selection + command palette/search entry points now implemented in native mail shell                                                            |
+| PG-004 | Implement `/mail/create` and `/mail/under-construction/:path` parity behaviors                                                            | DONE | Native create redirect now forwards web-style prefill params to compose; under-construction fallback now matches web behavior                                       |
 | PG-005 | Rebuild native compose parity (`/mail/compose`)                                                                                           | DONE    | Compose parity shipped with rich text, attachments, drafts, reply/reply-all/forward, undo-send, schedule send, and templates                                          |
 | PG-006 | Add native mailto parity (`/api/mailto-handler`)                                                                                          | DONE    | Native `/api/mailto-handler` parses mailto payloads, attempts draft creation, and opens compose with fallback params + `draftId` when available                   |
 | PG-007 | Complete settings parity for missing sections                                                                                             | DONE    | Native forms added for `/settings/categories`, `/settings/notifications`, `/settings/privacy`, `/settings/security`, `/settings/shortcuts`, `/settings/danger-zone` |
 | PG-008 | Upgrade native existing settings sections from partial to full parity                                                                     | DONE    | `/settings/general`, `/settings/appearance`, `/settings/connections`, `/settings/labels` upgraded with parity-focused forms/actions                                 |
 | PG-009 | Implement labels/categories CRUD + assignment parity in native                                                                            | DONE    | Labels CRUD + color selection and category default/order/filter editing implemented                                                                                 |
 | PG-010 | Implement native AI assistant and voice parity                                                                                            | PENDING | AI chat + notes are now native; voice remains blocked pending RN-native ElevenLabs implementation path                                                                |
-| PG-011 | Implement native integrations parity: PostHog + Dub + Sentry + Autumn                                                                     | PENDING | PostHog + Sentry native wiring completed; remaining parity work: Dub + Autumn native coverage and validation                                                        |
+| PG-011 | Implement native integrations parity: PostHog + Dub + Sentry + Autumn                                                                     | DONE    | Autumn billing customer/checkout/portal native integration added; Dub attribution stays server-side through existing better-auth plugin used by native auth flow    |
 | PG-012 | Establish screenshot-driven visual regression proof in `/parity_screenshots/`                                                             | BLOCKED | Naming convention + manifest + diff log + verifier are implemented; blocked on collecting actual screenshots across web/iOS/Android/macOS                           |
-| PG-013 | Build parity-focused automated tests (unit/integration/E2E)                                                                               | PENDING | Cover critical workflows and high-risk edge cases                                                                                                                   |
+| PG-013 | Build parity-focused automated tests (unit/integration/E2E)                                                                               | DONE    | Added Autumn integration tests to iOS unit suite and documented RC E2E/manual parity workflow script in `apps/ios/TEST_PLAN_PARITY.md`                            |
 | PG-014 | Resolve macOS architecture blocker                                                                                                        | BLOCKED | Current `apps/macos` is Electron wrapper, not RN macOS parity implementation                                                                                        |

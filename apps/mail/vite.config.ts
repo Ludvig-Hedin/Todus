@@ -67,9 +67,9 @@ export default defineConfig(({ mode }) => {
       pure: ['console.log'],
     },
     define: {
-      'import.meta.env.VITE_PUBLIC_BACKEND_URL': JSON.stringify(env.VITE_PUBLIC_BACKEND_URL || process.env.VITE_PUBLIC_BACKEND_URL),
-      'import.meta.env.VITE_PUBLIC_APP_URL': JSON.stringify(env.VITE_PUBLIC_APP_URL || process.env.VITE_PUBLIC_APP_URL),
-      'import.meta.env.VITE_PUBLIC_APP_NAME': JSON.stringify(env.VITE_PUBLIC_APP_NAME || process.env.VITE_PUBLIC_APP_NAME),
+      'import.meta.env.VITE_PUBLIC_BACKEND_URL': JSON.stringify(env.VITE_PUBLIC_BACKEND_URL || process.env.VITE_PUBLIC_BACKEND_URL || 'https://api.todus.app'),
+      'import.meta.env.VITE_PUBLIC_APP_URL': JSON.stringify(env.VITE_PUBLIC_APP_URL || process.env.VITE_PUBLIC_APP_URL || 'https://todus.app'),
+      'import.meta.env.VITE_PUBLIC_APP_NAME': JSON.stringify(env.VITE_PUBLIC_APP_NAME || process.env.VITE_PUBLIC_APP_NAME || 'Todus'),
     },
     build: {
       sourcemap: false,

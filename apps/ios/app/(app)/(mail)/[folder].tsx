@@ -56,6 +56,8 @@ export default function MailFolderScreen() {
   const queryClient = useQueryClient();
   const activeFolder = folder ?? 'inbox';
   const isSplitLayout = Platform.OS === 'macos' || width >= 768;
+  const showCommandPaletteHint = Platform.OS === 'macos' || width >= 390;
+  const commandPaletteHint = Platform.OS === 'ios' || Platform.OS === 'macos' ? 'Cmd+K' : 'Ctrl+K';
   const listThreadsKey = trpc.mail.listThreads.queryKey();
   const archiveSnapshotsRef = useRef<ReturnType<typeof getThreadListSnapshots>>([]);
   const deleteSnapshotsRef = useRef<ReturnType<typeof getThreadListSnapshots>>([]);
@@ -383,6 +385,8 @@ export default function MailFolderScreen() {
               <Pressable
                 style={({ pressed }) => [styles.iconButton, pressed && { opacity: 0.7 }]}
                 onPress={clearSelection}
+                accessibilityRole="button"
+                accessibilityLabel="Clear thread selection"
               >
                 <X color={colors.foreground} size={22} />
               </Pressable>
@@ -396,6 +400,8 @@ export default function MailFolderScreen() {
                 <Pressable
                   style={({ pressed }) => [styles.iconButton, pressed && { opacity: 0.7 }]}
                   onPress={openDrawer}
+                  accessibilityRole="button"
+                  accessibilityLabel="Open mail menu"
                 >
                   <Menu color={colors.foreground} size={24} />
                 </Pressable>
@@ -412,6 +418,8 @@ export default function MailFolderScreen() {
                 <Pressable
                   style={({ pressed }) => [styles.iconButton, pressed && { opacity: 0.7 }]}
                   onPress={selectAllVisibleThreads}
+                  accessibilityRole="button"
+                  accessibilityLabel="Select all visible threads"
                 >
                   <CheckCheck color={colors.foreground} size={20} />
                 </Pressable>
@@ -420,6 +428,8 @@ export default function MailFolderScreen() {
                 style={({ pressed }) => [styles.iconButton, pressed && { opacity: 0.7 }]}
                 onPress={handleBulkArchive}
                 disabled={archiveMutation.isPending || deleteMutation.isPending}
+                accessibilityRole="button"
+                accessibilityLabel="Archive selected threads"
               >
                 <Archive color={colors.foreground} size={20} />
               </Pressable>
@@ -427,6 +437,8 @@ export default function MailFolderScreen() {
                 style={({ pressed }) => [styles.iconButton, pressed && { opacity: 0.7 }]}
                 onPress={handleBulkDelete}
                 disabled={archiveMutation.isPending || deleteMutation.isPending}
+                accessibilityRole="button"
+                accessibilityLabel="Delete selected threads"
               >
                 <Trash2 color={colors.destructive} size={20} />
               </Pressable>
@@ -434,14 +446,42 @@ export default function MailFolderScreen() {
           ) : (
             <>
               <Pressable
-                style={({ pressed }) => [styles.iconButton, pressed && { opacity: 0.7 }]}
+                style={({ pressed }) => [
+                  styles.commandPaletteButton,
+                  {
+                    backgroundColor: colors.secondary,
+                    borderColor: colors.border,
+                    opacity: pressed ? 0.7 : 1,
+                  },
+                ]}
                 onPress={() => router.push('/search')}
+                accessibilityRole="button"
+                accessibilityLabel="Open search and command palette"
               >
-                <Search color={colors.foreground} size={22} />
+                <Search color={colors.mutedForeground} size={18} />
+                <Text style={[styles.commandPaletteLabel, { color: colors.mutedForeground }]}>
+                  Search
+                </Text>
+                {showCommandPaletteHint && (
+                  <View
+                    style={[
+                      styles.commandPaletteHintChip,
+                      { backgroundColor: colors.background, borderColor: colors.border },
+                    ]}
+                  >
+                    <Text
+                      style={[styles.commandPaletteHintText, { color: colors.mutedForeground }]}
+                    >
+                      {commandPaletteHint}
+                    </Text>
+                  </View>
+                )}
               </Pressable>
               <Pressable
                 style={[styles.composeButton, { backgroundColor: colors.primary }]}
                 onPress={() => router.push('/compose')}
+                accessibilityRole="button"
+                accessibilityLabel="Compose new email"
               >
                 <Plus color={colors.primaryForeground} size={20} />
               </Pressable>
@@ -475,6 +515,9 @@ export default function MailFolderScreen() {
                     },
                   ]}
                   onPress={() => setSelectedCategoryId(category.id)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Filter by ${category.name}`}
+                  accessibilityState={{ selected: isActive }}
                 >
                   <Text
                     style={[
@@ -537,6 +580,29 @@ const styles = StyleSheet.create({
   },
   iconButton: {
     padding: 4,
+  },
+  commandPaletteButton: {
+    minHeight: 36,
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  commandPaletteLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  commandPaletteHintChip: {
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  commandPaletteHintText: {
+    fontSize: 11,
+    fontWeight: '600',
   },
   headerTitle: {
     fontSize: 28,
