@@ -4,17 +4,20 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
 } from 'react-native';
 import { extractResponseText, nextStreamCursor } from '../../src/features/assistant/assistantUtils';
-import { captureEvent } from '../../src/shared/telemetry/posthog';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { captureEvent } from '../../src/shared/telemetry/posthog';
 import { useTRPC } from '../../src/providers/QueryTrpcProvider';
+import { Square, Volume2 } from 'lucide-react-native';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
 import { useMutation } from '@tanstack/react-query';
-import { useEffect, useRef, useState } from 'react';
+import * as Speech from 'expo-speech';
 
 type AssistantMessage = {
   id: string;
@@ -37,8 +40,19 @@ export default function AssistantScreen() {
   const [messages, setMessages] = useState<AssistantMessage[]>([]);
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
+  const [isVoicePlaying, setIsVoicePlaying] = useState(false);
+  const [autoSpeak, setAutoSpeak] = useState(false);
 
   const canSend = input.trim().length > 0 && !isStreaming;
+  const latestAssistantMessage = useMemo(() => {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index];
+      if (message.role === 'assistant' && message.text.trim().length > 0) {
+        return message.text;
+      }
+    }
+    return '';
+  }, [messages]);
 
   const webSearchMutation = useMutation({
     ...trpc.ai.webSearch.mutationOptions(),
@@ -64,11 +78,38 @@ export default function AssistantScreen() {
     scrollRef.current?.scrollToEnd({ animated: true });
   }, [messages]);
 
+  const stopVoicePlayback = useCallback(() => {
+    Speech.stop();
+    setIsVoicePlaying(false);
+  }, []);
+
+  const speakAssistantText = useCallback((text: string, mode: 'manual' | 'auto') => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+
+    Speech.stop();
+    setIsVoicePlaying(true);
+    captureEvent('AI Voice Play', {
+      mode,
+      length: trimmed.length,
+    });
+
+    Speech.speak(trimmed, {
+      language: 'en-US',
+      rate: 0.96,
+      pitch: 1.0,
+      onDone: () => setIsVoicePlaying(false),
+      onStopped: () => setIsVoicePlaying(false),
+      onError: () => setIsVoicePlaying(false),
+    });
+  }, []);
+
   useEffect(() => {
     return () => {
       if (streamTimerRef.current) {
         clearInterval(streamTimerRef.current);
       }
+      Speech.stop();
     };
   }, []);
 
@@ -125,21 +166,30 @@ export default function AssistantScreen() {
           streamTimerRef.current = null;
         }
         setIsStreaming(false);
+        if (autoSpeak && fullText.trim()) {
+          speakAssistantText(fullText, 'auto');
+        }
       }
     }, 20);
   };
 
   const emptyState = (
     <View style={styles.emptyState}>
-      <Text style={[styles.emptyTitle, { color: colors.foreground }]}>AI Assistant</Text>
+      <Text style={[styles.emptyTitle, { color: colors.foreground }]}>Inbox assistant</Text>
       <Text style={[styles.emptyBody, { color: colors.mutedForeground }]}>
-        Ask for summaries, drafts, or quick writing help.
+        Ask for summaries, draft ideas, and quick rewrites.
       </Text>
-      <View style={styles.quickPromptList}>
-        {QUICK_PROMPTS.map((prompt) => (
+      <View style={[styles.quickPromptGroup, { borderColor: colors.border, backgroundColor: colors.card }]}>
+        {QUICK_PROMPTS.map((prompt, index) => (
           <Pressable
             key={prompt}
-            style={[styles.quickPrompt, { borderColor: colors.border }]}
+            style={[
+              styles.quickPrompt,
+              {
+                borderBottomWidth: index < QUICK_PROMPTS.length - 1 ? StyleSheet.hairlineWidth : 0,
+                borderBottomColor: colors.border,
+              },
+            ]}
             onPress={() => sendPrompt(prompt)}
           >
             <Text style={[styles.quickPromptText, { color: colors.foreground }]}>{prompt}</Text>
@@ -157,12 +207,21 @@ export default function AssistantScreen() {
       <View
         style={[
           styles.header,
-          { paddingTop: insets.top + 10, borderBottomColor: colors.border, backgroundColor: colors.card },
+          {
+            paddingTop: insets.top + 8,
+            borderBottomColor: colors.border,
+            backgroundColor: colors.background,
+          },
         ]}
       >
-        <Text style={[styles.headerTitle, { color: colors.foreground }]}>Assistant</Text>
+        <View style={styles.headerTitleWrap}>
+          <Text style={[styles.headerTitle, { color: colors.foreground }]}>Assistant</Text>
+          <Text style={[styles.headerSubtitle, { color: colors.mutedForeground }]}>
+            Focused help for email tasks
+          </Text>
+        </View>
         <Pressable
-          style={[styles.clearButton, { borderColor: colors.border }]}
+          style={[styles.clearButton, { borderColor: colors.border, backgroundColor: colors.card }]}
           onPress={() => setMessages([])}
           disabled={pending || messages.length === 0}
         >
@@ -182,7 +241,7 @@ export default function AssistantScreen() {
 
       <ScrollView
         ref={scrollRef}
-        style={styles.messageList}
+        style={[styles.messageList, { backgroundColor: colors.background }]}
         contentContainerStyle={styles.messageContent}
         keyboardShouldPersistTaps="handled"
       >
@@ -196,16 +255,24 @@ export default function AssistantScreen() {
                 style={[
                   styles.messageBubble,
                   message.role === 'user'
-                    ? [styles.userBubble, { backgroundColor: colors.primary }]
-                    : [styles.assistantBubble, { backgroundColor: colors.secondary }],
+                    ? [
+                        styles.userBubble,
+                        {
+                          backgroundColor: colors.secondary,
+                          borderColor: colors.border,
+                        },
+                      ]
+                    : [
+                        styles.assistantBubble,
+                        { backgroundColor: colors.card, borderColor: colors.border },
+                      ],
                 ]}
               >
                 <Text
                   style={[
                     styles.messageText,
                     {
-                      color:
-                        message.role === 'user' ? colors.primaryForeground : colors.secondaryForeground,
+                      color: message.role === 'user' ? colors.foreground : colors.foreground,
                     },
                   ]}
                 >
@@ -226,38 +293,99 @@ export default function AssistantScreen() {
         style={[
           styles.composer,
           {
-            paddingBottom: insets.bottom + 10,
+            paddingBottom: insets.bottom + 8,
             borderTopColor: colors.border,
-            backgroundColor: colors.card,
+            backgroundColor: colors.background,
           },
         ]}
       >
-        <TextInput
-          value={input}
-          onChangeText={setInput}
-          placeholder={composerPlaceholder}
-          placeholderTextColor={colors.mutedForeground}
-          style={[
-            styles.composerInput,
-            {
-              borderColor: colors.border,
-              color: colors.foreground,
-              backgroundColor: colors.background,
-            },
-          ]}
-          multiline
-          editable={!pending}
-        />
-        <Pressable
-          style={[
-            styles.sendButton,
-            { backgroundColor: canSend ? colors.primary : colors.secondary },
-          ]}
-          onPress={() => sendPrompt()}
-          disabled={!canSend}
+        <View
+          style={[styles.voicePanel, { borderColor: colors.border, backgroundColor: colors.card }]}
         >
-          <Text style={[styles.sendText, { color: colors.primaryForeground }]}>Send</Text>
-        </Pressable>
+          <View style={styles.voicePanelLeft}>
+            <Pressable
+              style={[
+                styles.voiceAction,
+                {
+                  borderColor: colors.border,
+                  backgroundColor: isVoicePlaying ? colors.secondary : colors.card,
+                },
+              ]}
+              onPress={() => {
+                if (isVoicePlaying) {
+                  stopVoicePlayback();
+                  return;
+                }
+                speakAssistantText(latestAssistantMessage, 'manual');
+              }}
+              disabled={!isVoicePlaying && latestAssistantMessage.trim().length === 0}
+            >
+              {isVoicePlaying ? (
+                <Square size={14} color={colors.foreground} />
+              ) : (
+                <Volume2 size={14} color={colors.foreground} />
+              )}
+              <Text style={[styles.voiceActionText, { color: colors.foreground }]}>
+                {isVoicePlaying ? 'Stop voice' : 'Read latest'}
+              </Text>
+            </Pressable>
+          </View>
+          <View style={styles.voicePanelRight}>
+            <Text style={[styles.autoSpeakLabel, { color: colors.mutedForeground }]}>
+              Auto-read
+            </Text>
+            <Switch
+              value={autoSpeak}
+              onValueChange={(enabled) => {
+                setAutoSpeak(enabled);
+                if (!enabled) {
+                  stopVoicePlayback();
+                }
+              }}
+              trackColor={{ false: colors.border, true: colors.mutedForeground }}
+              thumbColor={autoSpeak ? colors.foreground : colors.background}
+            />
+          </View>
+        </View>
+
+        <View style={styles.composerRow}>
+          <TextInput
+            value={input}
+            onChangeText={setInput}
+            placeholder={composerPlaceholder}
+            placeholderTextColor={colors.mutedForeground}
+            style={[
+              styles.composerInput,
+              {
+                borderColor: colors.border,
+                color: colors.foreground,
+                backgroundColor: colors.card,
+              },
+            ]}
+            multiline
+            editable={!pending}
+          />
+          <Pressable
+            style={[
+              styles.sendButton,
+              {
+                backgroundColor: canSend ? colors.foreground : colors.card,
+                borderColor: colors.border,
+              },
+            ]}
+            onPress={() => sendPrompt()}
+            disabled={!canSend}
+          >
+            <Text
+              style={[
+                styles.sendText,
+                { color: canSend ? colors.primaryForeground : colors.mutedForeground },
+              ]}
+            >
+              Send
+            </Text>
+          </Pressable>
+        </View>
       </View>
     </KeyboardAvoidingView>
   );
@@ -270,63 +398,82 @@ const styles = StyleSheet.create({
   header: {
     borderBottomWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: 16,
-    paddingBottom: 12,
+    paddingBottom: 10,
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-end',
     justifyContent: 'space-between',
+    gap: 10,
+  },
+  headerTitleWrap: {
+    flex: 1,
+    gap: 1,
   },
   headerTitle: {
     fontSize: 18,
-    fontWeight: '700',
+    fontWeight: '650',
+    letterSpacing: 0,
+  },
+  headerSubtitle: {
+    fontSize: 12,
+    lineHeight: 16,
+    letterSpacing: 0,
   },
   clearButton: {
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 8,
+    borderRadius: 10,
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
   clearButtonText: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '600',
+    letterSpacing: 0,
   },
   messageList: {
     flex: 1,
   },
   messageContent: {
-    padding: 14,
-    gap: 10,
+    paddingHorizontal: 12,
+    paddingTop: 10,
+    paddingBottom: 14,
+    gap: 8,
   },
   emptyState: {
-    paddingTop: 24,
-    gap: 8,
+    paddingTop: 14,
+    gap: 6,
   },
   emptyTitle: {
-    fontSize: 20,
+    fontSize: 16,
     fontWeight: '700',
+    lineHeight: 22,
+    letterSpacing: 0,
   },
   emptyBody: {
-    fontSize: 14,
-    lineHeight: 20,
+    fontSize: 13,
+    lineHeight: 18,
+    letterSpacing: 0,
   },
-  quickPromptList: {
+  quickPromptGroup: {
     marginTop: 8,
-    gap: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 12,
+    overflow: 'hidden',
   },
   quickPrompt: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
   },
   quickPromptText: {
     fontSize: 13,
     lineHeight: 18,
+    letterSpacing: 0,
   },
   messageBubble: {
-    maxWidth: '90%',
+    maxWidth: '88%',
     borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderWidth: StyleSheet.hairlineWidth,
   },
   userBubble: {
     alignSelf: 'flex-end',
@@ -335,39 +482,92 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
   },
   messageText: {
-    fontSize: 14,
-    lineHeight: 20,
+    fontSize: 13,
+    lineHeight: 18,
+    letterSpacing: 0,
   },
   pendingText: {
-    fontSize: 12,
-    fontStyle: 'italic',
+    fontSize: 11,
     marginTop: 4,
+    marginLeft: 2,
+    lineHeight: 14,
+    letterSpacing: 0,
   },
   composer: {
     borderTopWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: 12,
-    paddingTop: 10,
+    paddingTop: 8,
+    gap: 8,
+  },
+  voicePanel: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  voicePanelLeft: {
+    flex: 1,
+    alignItems: 'flex-start',
+  },
+  voiceAction: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 9,
+    minHeight: 30,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  voiceActionText: {
+    fontSize: 12,
+    fontWeight: '600',
+    letterSpacing: 0,
+  },
+  voicePanelRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  autoSpeakLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: 0,
+  },
+  composerRow: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    gap: 10,
+    gap: 8,
   },
   composerInput: {
     flex: 1,
-    minHeight: 42,
-    maxHeight: 120,
+    minHeight: 38,
+    maxHeight: 112,
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 10,
     paddingHorizontal: 10,
     paddingVertical: 8,
-    fontSize: 14,
+    fontSize: 13,
+    lineHeight: 17,
+    letterSpacing: 0,
   },
   sendButton: {
+    borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    minHeight: 38,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    alignSelf: 'flex-end',
   },
   sendText: {
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: '700',
+    letterSpacing: 0,
   },
 });

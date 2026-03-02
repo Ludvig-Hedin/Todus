@@ -19,9 +19,8 @@ Auth/login is currently owned by another agent stream and is excluded from this 
 
 ## Current Execution Order (Highest Priority First)
 
-1. `N8-05` Deprecate WebView wrapper app flows
-2. `N8-06` Final QA and signoff
-3. `PG-010` Implement native AI assistant and voice parity
+1. `N8-06` Final QA and signoff (`BLOCKED` pending screenshot matrix + remaining blocked parity items)
+2. `PG-010` Implement native AI assistant and voice parity (`BLOCKED` on full real-time voice parity)
 
 ---
 
@@ -94,17 +93,17 @@ All marked DONE — these are WebView-based, not truly native.
 
 ### N4 Compose + Drafts
 
-| ID    | Task                                                | Status  | Definition of Done                                                                                                           |
-| ----- | --------------------------------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| N4-01 | Build compose screen with recipients/CC/BCC/subject | DONE    | Compose now supports To/Cc/Bcc/Subject parity with reply/reply-all/forward prefill updates                                   |
-| N4-02 | Integrate @10play/tentap-editor for rich text       | DONE    | Rich text editor + toolbar integrated in compose using TenTap                                                                |
-| N4-03 | Implement attachment pick/upload/preview            | DONE    | Compose supports multi-file picking, preview/removal, and serialized attachment upload payloads                              |
-| N4-04 | Implement draft auto-save/restore/delete            | DONE    | Compose draft auto-save + restore + clear-on-send implemented via local persisted draft state                                |
-| N4-05 | Implement reply/reply-all/forward                   | DONE    | Reply/reply-all/forward actions now enforce web recipient parity, thread-aware send payload fields, and inline action parity |
-| N4-06 | Implement undo-send                                 | DONE    | Undo banner + unsend flow now mirrors web behavior, including compose restore for non-user-scheduled sends                   |
-| N4-07 | Implement schedule send                             | DONE    | Calendar/time picker is wired for delayed send payloads with future-time validation                                           |
-| N4-08 | Implement templates                                 | DONE    | Template save/list/apply/delete is implemented in native compose                                                              |
-| N4-09 | Add M4 tests                                        | DONE    | Added native compose parity unit tests and runnable iOS unit test command                                                     |
+| ID    | Task                                                | Status | Definition of Done                                                                                                           |
+| ----- | --------------------------------------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| N4-01 | Build compose screen with recipients/CC/BCC/subject | DONE   | Compose now supports To/Cc/Bcc/Subject parity with reply/reply-all/forward prefill updates                                   |
+| N4-02 | Integrate @10play/tentap-editor for rich text       | DONE   | Rich text editor + toolbar integrated in compose using TenTap                                                                |
+| N4-03 | Implement attachment pick/upload/preview            | DONE   | Compose supports multi-file picking, preview/removal, and serialized attachment upload payloads                              |
+| N4-04 | Implement draft auto-save/restore/delete            | DONE   | Compose draft auto-save + restore + clear-on-send implemented via local persisted draft state                                |
+| N4-05 | Implement reply/reply-all/forward                   | DONE   | Reply/reply-all/forward actions now enforce web recipient parity, thread-aware send payload fields, and inline action parity |
+| N4-06 | Implement undo-send                                 | DONE   | Undo banner + unsend flow now mirrors web behavior, including compose restore for non-user-scheduled sends                   |
+| N4-07 | Implement schedule send                             | DONE   | Calendar/time picker is wired for delayed send payloads with future-time validation                                          |
+| N4-08 | Implement templates                                 | DONE   | Template save/list/apply/delete is implemented in native compose                                                             |
+| N4-09 | Add M4 tests                                        | DONE   | Added native compose parity unit tests and runnable iOS unit test command                                                    |
 
 ### N5 Settings
 
@@ -119,24 +118,24 @@ All marked DONE — these are WebView-based, not truly native.
 
 ### N6 AI + Voice + Integrations
 
-| ID    | Task                                         | Status  | Definition of Done                                                                            |
-| ----- | -------------------------------------------- | ------- | --------------------------------------------------------------------------------------------- |
-| N6-01 | Build AI chat panel with streaming responses | DONE    | Native assistant screen added with working AI send/receive and streamed response rendering     |
-| N6-02 | Implement voice with ElevenLabs              | BLOCKED | Web voice stack is browser-only (`@elevenlabs/react`); no RN-native implementation in repo    |
-| N6-03 | Integrate PostHog analytics                  | DONE    | Native PostHog bootstrap, screen tracking, identify, and key mail events are wired for parity |
-| N6-04 | Integrate Sentry crash reporting             | DONE    | Native Sentry init + boundary/query capture hooks + expo plugin wiring added                  |
-| N6-05 | Implement notes panel                        | DONE    | Thread detail now includes native notes CRUD + pin/unpin backed by `trpc.notes.*`            |
-| N6-06 | Add M6 tests                                 | DONE    | Added iOS unit coverage for assistant streaming helpers and notes sorting logic               |
+| ID    | Task                                         | Status  | Definition of Done                                                                                                                      |
+| ----- | -------------------------------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| N6-01 | Build AI chat panel with streaming responses | DONE    | Native assistant screen added with working AI send/receive and streamed response rendering                                              |
+| N6-02 | Implement voice with ElevenLabs              | BLOCKED | Browser-only web stack (`@elevenlabs/react`) has no RN real-time equivalent here; native playback fallback now exists via `expo-speech` |
+| N6-03 | Integrate PostHog analytics                  | DONE    | Native PostHog bootstrap, screen tracking, identify, and key mail events are wired for parity                                           |
+| N6-04 | Integrate Sentry crash reporting             | DONE    | Native Sentry init + boundary/query capture hooks + expo plugin wiring added                                                            |
+| N6-05 | Implement notes panel                        | DONE    | Thread detail now includes native notes CRUD + pin/unpin backed by `trpc.notes.*`                                                       |
+| N6-06 | Add M6 tests                                 | DONE    | Added iOS unit coverage for assistant streaming helpers and notes sorting logic                                                         |
 
 ### N7 Public Pages + Remaining Screens
 
-| ID    | Task                                     | Status  | Definition of Done                    |
-| ----- | ---------------------------------------- | ------- | ------------------------------------- |
-| N7-01 | Landing/home screens (WebView or native) | DONE    | Added unauthenticated public route group with native WebView wrappers for `/` and `/home` |
-| N7-02 | Legal pages (WebView)                    | DONE    | Added native public route wrappers for `/about`, `/terms`, and `/privacy` |
-| N7-03 | Pricing screen                           | DONE    | Added native public route wrapper for `/pricing` using shared WebView route screen |
-| N7-04 | Contributors/developer screens           | DONE    | Added native public route wrappers for `/contributors` and `/developer` |
-| N7-05 | Not-found / under-construction screens   | DONE    | Added explicit native `/mail/under-construction/:path` fallback route; `+not-found` already exists |
+| ID    | Task                                     | Status | Definition of Done                                                                                 |
+| ----- | ---------------------------------------- | ------ | -------------------------------------------------------------------------------------------------- |
+| N7-01 | Landing/home screens (WebView or native) | DONE   | Added unauthenticated public route group with native WebView wrappers for `/` and `/home`          |
+| N7-02 | Legal pages (WebView)                    | DONE   | Added native public route wrappers for `/about`, `/terms`, and `/privacy`                          |
+| N7-03 | Pricing screen                           | DONE   | Added native public route wrapper for `/pricing` using shared WebView route screen                 |
+| N7-04 | Contributors/developer screens           | DONE   | Added native public route wrappers for `/contributors` and `/developer`                            |
+| N7-05 | Not-found / under-construction screens   | DONE   | Added explicit native `/mail/under-construction/:path` fallback route; `+not-found` already exists |
 
 ### N8 Polish, Performance, Release
 
@@ -146,8 +145,8 @@ All marked DONE — these are WebView-based, not truly native.
 | N8-02 | Performance optimization (list scroll, startup, transitions) | DONE    | Added query stale/gc tuning, list virtualization tuning, and row memoization to reduce scroll jank and refetch churn                                 |
 | N8-03 | Accessibility pass (VoiceOver, TalkBack, keyboard nav)       | DONE    | Added accessibility labels/roles/states across critical mail shell, thread actions, sidebar, and settings navigation flows                           |
 | N8-04 | Release pipeline setup (TestFlight, Play Console, macOS)     | DONE    | Added GitHub Actions native release pipeline (`.github/workflows/native-release.yml`) with QA gates + dispatchable EAS build/submit orchestration    |
-| N8-05 | Deprecate WebView wrapper app flows                          | PENDING | WebView screens removed                                                                                                                              |
-| N8-06 | Final QA and signoff                                         | PENDING | All parity checklist items green                                                                                                                     |
+| N8-05 | Deprecate WebView wrapper app flows                          | DONE    | Removed deprecated public-route WebView wrappers (`apps/ios/app/(public)/*`) and shared wrapper component (`PublicWebRouteScreen`)                   |
+| N8-06 | Final QA and signoff                                         | BLOCKED | Blocked until parity screenshot matrix is captured and all remaining blocked parity items are resolved                                               |
 
 ---
 
@@ -158,6 +157,32 @@ All marked DONE — these are WebView-based, not truly native.
 - OAuth redirect updates for native deep-link callbacks
 - Production analytics/Intercom/Sentry DSNs/keys
 - See `MANUAL_INPUTS_GUIDE.md` for details
+
+## Session Notes (2026-03-02)
+
+- Compose visual polish pass completed in `apps/ios/app/compose.tsx` to improve parity and usability:
+  - Fixed rich-text editor typography/padding/colors via TenTap injected CSS (removes serif placeholder/body text).
+  - Reworked compose header alignment and action hierarchy (`Cancel` / `Later` / `Send`) for cleaner native layout.
+  - Reduced excessive iOS modal top spacing by adjusting safe-area handling in compose header.
+  - Increased row/label/input spacing for better readability and removed label wrapping issues.
+  - Aligned button/background/border styling more closely with web color tokens in light/dark modes.
+- Verification completed after the polish:
+  - `pnpm --filter @zero/ios run test:unit` passes (25/25).
+  - `pnpm --filter @zero/ios run bundle:ios` passes.
+- `N8-05` completed by removing deprecated public WebView wrapper app flows:
+  - Deleted `apps/ios/app/(public)/*`.
+  - Deleted `apps/ios/src/features/public/PublicWebRouteScreen.tsx`.
+  - Updated `parity_screenshots/manifest.json` to remove deprecated public wrapper surfaces from screenshot requirements.
+- `PG-010` advanced with native assistant voice UX + visual polish in `apps/ios/app/(app)/assistant.tsx`:
+  - Added voice playback for assistant responses via `expo-speech`.
+  - Added manual `Read latest` / `Stop voice` actions and an `Auto-read` toggle.
+  - Redesigned assistant screen UI with improved hierarchy, spacing, and restrained monochrome styling.
+  - Refined visual language again to reduce chat-bot/dashboard feel (denser typography, cleaner grouping, subtler contrast, tighter controls) while preserving all behavior.
+  - Full web-equivalent real-time ElevenLabs voice conversation remains blocked in current repo context.
+- Verification after WebView deprecation + assistant voice work:
+  - `pnpm --filter @zero/ios run test:unit` passes (25/25).
+  - `pnpm --filter @zero/ios run bundle:ios` passes.
+  - `pnpm parity:screenshots:check` fails as expected (`0/92`) until screenshot captures are added.
 
 ## Session Notes (2026-03-01)
 
@@ -206,7 +231,7 @@ All marked DONE — these are WebView-based, not truly native.
 ### Test / Build Status
 
 - Workspace TypeScript checks remain blocked by pre-existing cross-package errors outside iOS scope (not introduced by this stream).
-- Screenshot coverage check currently fails intentionally (`0/128`) until parity screenshots are captured and committed.
+- Screenshot coverage check currently fails intentionally (`0/92`) until parity screenshots are captured and committed (manifest now excludes deprecated public wrapper routes removed in `N8-05`).
 - iOS targeted unit tests pass via `pnpm --filter @zero/ios run test:unit` (25/25 passing).
 - Targeted formatting checks pass on all files touched in this session.
 
@@ -216,17 +241,17 @@ All marked DONE — these are WebView-based, not truly native.
 
 | ID     | Task                                                                                                                                      | Status  | Notes                                                                                                                                                               |
 | ------ | ----------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| PG-001 | Implement native public route set parity (`/`, `/home`, `/about`, `/terms`, `/pricing`, `/privacy`, `/contributors`, `/developer`, `/hr`) | DONE    | Public parity wrappers now cover all listed routes, including `/hr` in `apps/ios/app/(public)/hr.tsx`                                                            |
-| PG-002 | Add native `/signup` parity flow                                                                                                          | BLOCKED | Auth/signup flow is currently owned by another agent stream; deferred in this stream by explicit ownership constraint                                             |
-| PG-003 | Complete native mail shell parity for `/mail/:folder`                                                                                     | DONE | Category tabs + bulk selection + command palette/search entry points now implemented in native mail shell                                                            |
-| PG-004 | Implement `/mail/create` and `/mail/under-construction/:path` parity behaviors                                                            | DONE | Native create redirect now forwards web-style prefill params to compose; under-construction fallback now matches web behavior                                       |
-| PG-005 | Rebuild native compose parity (`/mail/compose`)                                                                                           | DONE    | Compose parity shipped with rich text, attachments, drafts, reply/reply-all/forward, undo-send, schedule send, and templates                                          |
-| PG-006 | Add native mailto parity (`/api/mailto-handler`)                                                                                          | DONE    | Native `/api/mailto-handler` parses mailto payloads, attempts draft creation, and opens compose with fallback params + `draftId` when available                   |
+| PG-001 | Implement native public route set parity (`/`, `/home`, `/about`, `/terms`, `/pricing`, `/privacy`, `/contributors`, `/developer`, `/hr`) | DONE    | Completed historically; these public WebView wrapper routes were later deprecated/removed in `N8-05` as part of native wrapper-flow cleanup                         |
+| PG-002 | Add native `/signup` parity flow                                                                                                          | BLOCKED | Auth/signup flow is currently owned by another agent stream; deferred in this stream by explicit ownership constraint                                               |
+| PG-003 | Complete native mail shell parity for `/mail/:folder`                                                                                     | DONE    | Category tabs + bulk selection + command palette/search entry points now implemented in native mail shell                                                           |
+| PG-004 | Implement `/mail/create` and `/mail/under-construction/:path` parity behaviors                                                            | DONE    | Native create redirect now forwards web-style prefill params to compose; under-construction fallback now matches web behavior                                       |
+| PG-005 | Rebuild native compose parity (`/mail/compose`)                                                                                           | DONE    | Compose parity shipped with rich text, attachments, drafts, reply/reply-all/forward, undo-send, schedule send, and templates                                        |
+| PG-006 | Add native mailto parity (`/api/mailto-handler`)                                                                                          | DONE    | Native `/api/mailto-handler` parses mailto payloads, attempts draft creation, and opens compose with fallback params + `draftId` when available                     |
 | PG-007 | Complete settings parity for missing sections                                                                                             | DONE    | Native forms added for `/settings/categories`, `/settings/notifications`, `/settings/privacy`, `/settings/security`, `/settings/shortcuts`, `/settings/danger-zone` |
 | PG-008 | Upgrade native existing settings sections from partial to full parity                                                                     | DONE    | `/settings/general`, `/settings/appearance`, `/settings/connections`, `/settings/labels` upgraded with parity-focused forms/actions                                 |
 | PG-009 | Implement labels/categories CRUD + assignment parity in native                                                                            | DONE    | Labels CRUD + color selection and category default/order/filter editing implemented                                                                                 |
-| PG-010 | Implement native AI assistant and voice parity                                                                                            | PENDING | AI chat + notes are now native; voice remains blocked pending RN-native ElevenLabs implementation path                                                                |
+| PG-010 | Implement native AI assistant and voice parity                                                                                            | BLOCKED | AI chat + notes are native and assistant voice playback/auto-read is implemented, but full real-time mic+agent parity with web ElevenLabs flow remains blocked      |
 | PG-011 | Implement native integrations parity: PostHog + Dub + Sentry + Autumn                                                                     | DONE    | Autumn billing customer/checkout/portal native integration added; Dub attribution stays server-side through existing better-auth plugin used by native auth flow    |
 | PG-012 | Establish screenshot-driven visual regression proof in `/parity_screenshots/`                                                             | BLOCKED | Naming convention + manifest + diff log + verifier are implemented; blocked on collecting actual screenshots across web/iOS/Android/macOS                           |
-| PG-013 | Build parity-focused automated tests (unit/integration/E2E)                                                                               | DONE    | Added Autumn integration tests to iOS unit suite and documented RC E2E/manual parity workflow script in `apps/ios/TEST_PLAN_PARITY.md`                            |
+| PG-013 | Build parity-focused automated tests (unit/integration/E2E)                                                                               | DONE    | Added Autumn integration tests to iOS unit suite and documented RC E2E/manual parity workflow script in `apps/ios/TEST_PLAN_PARITY.md`                              |
 | PG-014 | Resolve macOS architecture blocker                                                                                                        | BLOCKED | Current `apps/macos` is Electron wrapper, not RN macOS parity implementation                                                                                        |
