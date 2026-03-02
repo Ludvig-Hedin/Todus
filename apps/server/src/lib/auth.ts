@@ -159,13 +159,16 @@ const connectionHandlerHook = async (account: Account) => {
 
 export const createAuth = () => {
   const twilioClient = twilio();
-  const dub = new Dub();
+
+  // Only enable Dub analytics if API key is configured — without it, the
+  // dubAnalytics plugin throws during social sign-in and causes 500 errors
+  const dubPlugins = env.DUB_API_KEY
+    ? [dubAnalytics({ dubClient: new Dub() })]
+    : [];
 
   return betterAuth({
     plugins: [
-      dubAnalytics({
-        dubClient: dub,
-      }),
+      ...dubPlugins,
       mcp({
         loginPage: env.VITE_PUBLIC_APP_URL + '/login',
       }),

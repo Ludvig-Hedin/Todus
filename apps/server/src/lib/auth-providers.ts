@@ -36,7 +36,10 @@ export const authProviders = (env: Record<string, string>): ProviderConfig[] => 
       { name: 'GOOGLE_CLIENT_SECRET', source: 'Google Cloud Console' },
     ],
     config: {
-      prompt: env.FORCE_GOOGLE_AUTH ? 'consent' : undefined,
+      // Always force consent so Google returns a refresh_token. Without this,
+      // returning users (e.g. mobile after web signup) don't get refresh tokens
+      // and the connectionHandlerHook throws "Missing Access/Refresh Tokens".
+      prompt: 'consent',
       accessType: 'offline',
       scope: [
         'https://mail.google.com/',

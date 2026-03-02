@@ -587,6 +587,12 @@ function hashIpAddress(ip: string | undefined): string | undefined {
 const api = new Hono<HonoContext>()
   .use(contextStorage())
   .use('*', async (c, next) => {
+    // Public routes don't need auth or DB — skip the heavy middleware
+    const path = new URL(c.req.url).pathname;
+    if (path.startsWith('/api/public/') || path === '/api/public') {
+      return next();
+    }
+
     // Initialize request tracing using headers (no context pollution)
     const traceId = c.req.header('X-Trace-ID') || crypto.randomUUID();
     const requestId = c.req.header('X-Request-Id') || crypto.randomUUID();
@@ -706,8 +712,33 @@ const api = new Hono<HonoContext>()
   .route('/ai', aiRouter)
   .route('/autumn', autumnApi)
   .route('/public', publicRouter)
-  .on(['GET', 'POST', 'OPTIONS'], '/auth/*', (c) => {
-    return c.var.auth.handler(c.req.raw);
+  .get('/auth/mobile-token', async (c) => {
+    // Bridge endpoint: converts a cookie-based web session into a bearer token
+    // for the native iOS app. Called from the system browser after web login.
+    // The system browser has the session cookie, so we can read the session
+    // and generate a bearer token, then redirect to the app's deep link.
+    const auth = c.var.auth;
+    const session = await auth.api.getSession({ headers: c.req.raw.headers });
+    if (!session?.session?.token) {
+      // No session — redirect back to web login
+      return c.redirect(`${env.VITE_PUBLIC_APP_URL}/login?error=no_session`);
+    }
+    const token = session.session.token;
+    return c.redirect(`todus://auth-callback?token=${encodeURIComponent(token)}`);
+  })
+  .on(['GET', 'POST', 'OPTIONS'], '/auth/*', async (c) => {
+    try {
+      return await c.var.auth.handler(c.req.raw);
+    } catch (err) {
+      // better-auth throws Response objects on errors (CSRF, validation, etc.)
+      // Log the details so we can debug instead of returning empty 500s
+      if (err instanceof Response) {
+        const body = await err.clone().text().catch(() => '');
+        console.error('[auth] better-auth threw Response:', err.status, body);
+        return err;
+      }
+      throw err;
+    }
   })
   .use(
     trpcServer({

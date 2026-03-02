@@ -104,6 +104,7 @@ export type ZeroEnv = {
   DD_SITE: string;
   DEFAULT_MODEL: string;
   OPENROUTER_API_KEY: string;
+  DUB_API_KEY?: string;
 };
 
 const env = _env as ZeroEnv;

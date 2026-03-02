@@ -1,8 +1,10 @@
-import { useRouter } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
+import * as WebBrowser from 'expo-web-browser';
+import * as Linking from 'expo-linking';
+import { useSetAtom } from 'jotai';
+import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Linking,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -11,117 +13,134 @@ import {
   useColorScheme,
   Image,
 } from 'react-native';
+import { StatusBar } from 'expo-status-bar';
 import { getNativeEnv } from '../../src/shared/config/env';
-import { loadNativeAuthProviders } from '../../src/features/auth/native-auth';
-import { GoogleColored, Microsoft, LogoVector } from '../../src/shared/components/icons';
+import { setBearerSessionAtom } from '../../src/shared/state/session';
+import { getSocialAuthUrl } from '../../src/features/auth/native-auth';
+import { GoogleColored } from '../../src/shared/components/icons';
 
-type ProviderState = {
-  id: string;
-  name: string;
-  enabled: boolean;
-  isCustom?: boolean;
-  customRedirectPath?: string;
-};
+// Required for expo-web-browser redirect handling
+WebBrowser.maybeCompleteAuthSession();
 
 export default function LoginScreen() {
   const env = getNativeEnv();
-  const router = useRouter();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
+  const setBearerSession = useSetAtom(setBearerSessionAtom);
 
-  const [providers, setProviders] = useState<ProviderState[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  // Clean up browser session on unmount (iOS-only)
   useEffect(() => {
-    let cancelled = false;
-
-    const loadProviders = async () => {
-      setIsLoading(true);
-      setErrorMessage(null);
-
-      try {
-        const result = await loadNativeAuthProviders(env.backendUrl);
-        if (!cancelled) {
-          setProviders(result);
-        }
-      } catch {
-        if (!cancelled) {
-          setErrorMessage('Could not load login providers. Please try again later.');
-        }
-      } finally {
-        if (!cancelled) {
-          setIsLoading(false);
-        }
+    return () => {
+      if (Platform.OS === 'ios') {
+        WebBrowser.dismissAuthSession();
       }
     };
+  }, []);
 
-    loadProviders();
-    return () => {
-      cancelled = true;
-    };
-  }, [env.backendUrl]);
+  // Failsafe: reset loading if stuck for >15s
+  useEffect(() => {
+    if (!loading) return;
+    const timeout = setTimeout(() => setLoading(false), 15000);
+    return () => clearTimeout(timeout);
+  }, [loading]);
 
-  const enabledProviders = useMemo(
-    () => providers.filter((provider) => provider.enabled || provider.isCustom),
-    [providers],
-  );
-
-  /** Opens the WebView with the provider ID to trigger direct OAuth.
-   * The WebView handles the API call internally (correct Origin header). */
-  const startProviderSignIn = (provider: ProviderState) => {
+  async function handleGoogleSignIn() {
+    setLoading(true);
     setErrorMessage(null);
 
-    if (provider.isCustom && provider.customRedirectPath) {
-      const url = `${env.webUrl.replace(/\/$/, '')}${provider.customRedirectPath}`;
-      Linking.openURL(url).catch(() => { });
-      return;
+    try {
+      // 1. Build the deep link URL that SFSafariViewController will listen for.
+      // Force double-slash scheme (todus://) to match Info.plist configuration.
+      let redirectUrl = Linking.createURL('auth-callback', { scheme: 'todus' });
+      if (redirectUrl.includes(':///')) {
+        redirectUrl = redirectUrl.replace(':///', '://');
+      }
+
+      // 2. The callbackURL tells better-auth where to redirect AFTER Google OAuth.
+      // We point it to the mobile-token bridge which reads the session cookie
+      // (available in SFSafariViewController) and redirects to todus:// with token.
+      const mobileTokenUrl = `${env.backendUrl.replace(/\/$/, '')}/api/auth/mobile-token`;
+
+      // 3. Get the Google OAuth consent URL from better-auth.
+      const googleOAuthUrl = await getSocialAuthUrl(
+        env.backendUrl,
+        env.webUrl,
+        'google',
+        mobileTokenUrl,
+      );
+
+      // 4. Open in SFSafariViewController (iOS system browser sheet).
+      // This shares cookies with Safari, handles redirects natively, and
+      // auto-closes when it detects the todus:// deep link redirect.
+      let authHandled = false;
+
+      const handleAuthUrl = async (url: string) => {
+        if (authHandled) return;
+        const token = extractTokenFromUrl(url);
+        if (token) {
+          authHandled = true;
+          if (Platform.OS === 'ios') WebBrowser.dismissAuthSession();
+          await setBearerSession({ token, expiresAt: null });
+        }
+      };
+
+      // Fallback listener for deep link redirects (iOS edge cases)
+      const subscription = Linking.addEventListener('url', ({ url }) => {
+        handleAuthUrl(url);
+      });
+
+      try {
+        const result = await WebBrowser.openAuthSessionAsync(googleOAuthUrl, redirectUrl);
+        subscription.remove();
+
+        if (!authHandled) {
+          setLoading(false);
+          if (result.type === 'success' && result.url) {
+            const token = extractTokenFromUrl(result.url);
+            if (token) {
+              authHandled = true;
+              await setBearerSession({ token, expiresAt: null });
+            } else {
+              setErrorMessage('No authentication token received. Please try again.');
+            }
+          } else if (result.type === 'dismiss' || result.type === 'cancel') {
+            // User closed the browser — no error needed
+          }
+        }
+      } catch (err) {
+        subscription.remove();
+        throw err;
+      }
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Failed to sign in with Google';
+      setErrorMessage(message);
+    } finally {
+      setTimeout(() => setLoading(false), 500);
     }
-
-    router.push({
-      pathname: '/(auth)/web-auth',
-      params: {
-        provider: provider.id,
-        callbackUrl: env.authCallbackUrl,
-      },
-    });
-  };
-
-  const sortedProviders = [...enabledProviders].sort((a, b) => {
-    if (a.id === 'google') return -1;
-    if (b.id === 'google') return 1;
-    return 0;
-  });
-
-  const getProviderIcon = (providerId: string, color: string) => {
-    switch (providerId) {
-      case 'google':
-        return <GoogleColored width={20} height={20} style={styles.icon} />;
-      case 'microsoft':
-        return <Microsoft width={20} height={20} color={color} style={styles.icon} />;
-      case 'zero':
-        return <LogoVector width={18} height={18} color={color} style={styles.icon} />;
-      default:
-        return null;
-    }
-  };
+  }
 
   const themeStyles = isDark ? darkStyles : lightStyles;
 
   return (
-    <SafeAreaView style={[styles.container, themeStyles.container]}>
+    <SafeAreaView style={[styles.safeArea, themeStyles.container]}>
+      <StatusBar style={isDark ? 'light' : 'dark'} />
+      <View style={styles.topHeader}>
+        <Image
+          source={require('../../assets/brand-logo.png')}
+          style={styles.smallLogo}
+          resizeMode="contain"
+        />
+        <Text style={[styles.brandName, themeStyles.title]}>Todus</Text>
+      </View>
+
       <View style={styles.content}>
         <View style={styles.headerContainer}>
-          <View style={styles.logoContainer}>
-            {/* Using the brand-logo.png identified from web app assets */}
-            <Image
-              source={require('../../assets/brand-logo.png')}
-              style={styles.logo}
-              resizeMode="contain"
-            />
-          </View>
           <Text style={[styles.title, themeStyles.title]}>Welcome to Todus</Text>
           <Text style={[styles.subtitle, themeStyles.subtitle]}>Your AI agent for emails</Text>
+          <Text style={[styles.description, themeStyles.description]}>Sign up for free with your email</Text>
         </View>
 
         {errorMessage && (
@@ -132,40 +151,25 @@ export default function LoginScreen() {
         )}
 
         <View style={styles.providersContainer}>
-          {isLoading ? (
-            <ActivityIndicator size="large" color={isDark ? '#ffffff' : '#000000'} style={styles.loader} />
-          ) : (
-            sortedProviders.map((provider) => (
-              <Pressable
-                key={provider.id}
-                onPress={() => startProviderSignIn(provider)}
-                style={({ pressed }) => [
-                  styles.providerButton,
-                  themeStyles.providerButton,
-                  pressed && themeStyles.providerButtonPressed,
-                ]}
-              >
-                {getProviderIcon(provider.id, isDark ? '#ffffff' : '#111827')}
-                <Text style={[styles.providerButtonText, themeStyles.providerButtonText]}>
-                  Sign in with {provider.name}
-                </Text>
-              </Pressable>
-            ))
-          )}
-
-          {!isLoading && sortedProviders.length === 0 && (
-            <Pressable
-              onPress={() => {
-                router.push({
-                  pathname: '/(auth)/web-auth',
-                  params: { url: `${env.webUrl.replace(/\/$/, '')}/login` },
-                });
-              }}
-              style={[styles.providerButton, themeStyles.providerButton]}
-            >
-              <Text style={[styles.providerButtonText, themeStyles.providerButtonText]}>Open web login</Text>
-            </Pressable>
-          )}
+          <Pressable
+            onPress={handleGoogleSignIn}
+            disabled={loading}
+            style={({ pressed }) => [
+              styles.providerButton,
+              themeStyles.providerButton,
+              pressed && themeStyles.providerButtonPressed,
+              loading && styles.providerButtonDisabled,
+            ]}
+          >
+            {loading ? (
+              <ActivityIndicator size="small" color={isDark ? '#ffffff' : '#000000'} style={styles.icon} />
+            ) : (
+              <GoogleColored width={20} height={20} style={styles.icon} />
+            )}
+            <Text style={[styles.providerButtonText, themeStyles.providerButtonText]}>
+              {loading ? 'Signing in...' : 'Continue with Google'}
+            </Text>
+          </Pressable>
         </View>
       </View>
 
@@ -178,55 +182,74 @@ export default function LoginScreen() {
   );
 }
 
+/** Extracts the bearer token from a todus:// deep link URL */
+function extractTokenFromUrl(rawUrl: string): string | null {
+  try {
+    const url = new URL(rawUrl);
+    return (
+      url.searchParams.get('token') ??
+      url.searchParams.get('set-auth-token') ??
+      url.searchParams.get('authToken') ??
+      null
+    );
+  } catch {
+    return null;
+  }
+}
+
 const styles = StyleSheet.create({
-  container: {
+  safeArea: {
     flex: 1,
-    justifyContent: 'space-between',
+  },
+  topHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 32,
+    paddingTop: 16,
+    gap: 8,
+  },
+  smallLogo: {
+    width: 32,
+    height: 32,
+  },
+  brandName: {
+    fontSize: 16,
+    fontWeight: '600',
+    letterSpacing: -0.5,
   },
   content: {
     flex: 1,
     justifyContent: 'center',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     paddingHorizontal: 32,
     maxWidth: 600,
     width: '100%',
     alignSelf: 'center',
-    marginTop: -40, // Visual balance
   },
   headerContainer: {
-    marginBottom: 48,
-    alignItems: 'center',
+    marginBottom: 32,
+    alignItems: 'flex-start',
     width: '100%',
   },
-  logoContainer: {
-    width: 64,
-    height: 64,
-    borderRadius: 16,
-    backgroundColor: '#000000',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 24,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 12,
-    elevation: 5,
-  },
-  logo: {
-    width: 40,
-    height: 40,
-  },
   title: {
-    fontSize: 28,
-    fontWeight: '700',
-    textAlign: 'center',
-    marginBottom: 8,
+    fontSize: 24,
+    fontWeight: '600',
+    textAlign: 'left',
+    marginBottom: 0,
     letterSpacing: -0.5,
   },
   subtitle: {
-    fontSize: 17,
+    fontSize: 24,
+    fontWeight: '600',
+    textAlign: 'left',
+    opacity: 0.6,
+    marginBottom: 16,
+    letterSpacing: -0.5,
+  },
+  description: {
+    fontSize: 14,
     fontWeight: '400',
-    textAlign: 'center',
+    textAlign: 'left',
     opacity: 0.6,
   },
   errorBox: {
@@ -253,24 +276,23 @@ const styles = StyleSheet.create({
     width: '100%',
     gap: 12,
   },
-  loader: {
-    marginVertical: 20,
-  },
   providerButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    height: 52,
-    borderRadius: 999,
+    height: 40,
+    borderRadius: 8,
     borderWidth: 1,
   },
+  providerButtonDisabled: {
+    opacity: 0.7,
+  },
   providerButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    letterSpacing: -0.2,
+    fontSize: 14,
+    fontWeight: '500',
   },
   icon: {
-    marginRight: 12,
+    marginRight: 8,
   },
   footer: {
     flexDirection: 'row',
@@ -302,14 +324,12 @@ const lightStyles = StyleSheet.create({
   subtitle: {
     color: '#000000',
   },
+  description: {
+    color: '#000000',
+  },
   providerButton: {
     backgroundColor: '#FFFFFF',
     borderColor: '#E5E5E5',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 2,
   },
   providerButtonPressed: {
     backgroundColor: '#F8F8F8',
@@ -335,12 +355,15 @@ const darkStyles = StyleSheet.create({
   subtitle: {
     color: '#FFFFFF',
   },
+  description: {
+    color: '#FFFFFF',
+  },
   providerButton: {
-    backgroundColor: '#1A1A1A',
+    backgroundColor: '#0A0A0A',
     borderColor: '#2A2A2A',
   },
   providerButtonPressed: {
-    backgroundColor: '#252525',
+    backgroundColor: '#1A1A1A',
   },
   providerButtonText: {
     color: '#FFFFFF',
