@@ -54,11 +54,12 @@ export const connectionsRouter = router({
       await db.deleteConnection(connectionId);
 
       const activeConnection = await getActiveConnection();
-      if (connectionId === activeConnection.id) await db.updateUser({ defaultConnectionId: null });
+      if (activeConnection && connectionId === activeConnection.id) await db.updateUser({ defaultConnectionId: null });
     }),
   getDefault: publicProcedure.query(async ({ ctx }) => {
     if (!ctx.sessionUser) return null;
     const connection = await getActiveConnection();
+    if (!connection) return null;
     return {
       id: connection.id,
       email: connection.email,

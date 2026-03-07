@@ -1,5 +1,5 @@
 import { Form, FormControl, FormField, FormItem, FormLabel } from '@/components/ui/form';
-import { GoogleColor as Google } from '@/components/icons/icons';
+import { Apple, GoogleColor as Google } from '@/components/icons/icons';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { signIn } from '@/lib/auth-client';
 import { Button } from '@/components/ui/button';
@@ -50,6 +50,18 @@ export default function LoginTodus() {
     );
   }
 
+  function handleAppleSignIn() {
+    toast.promise(
+      signIn.social({
+        provider: 'apple',
+        callbackURL: `${window.location.origin}/mail/inbox`,
+      }),
+      {
+        error: 'Login redirect failed',
+      },
+    );
+  }
+
   return (
     <div className="flex min-h-screen w-full bg-background">
       {/* Left Column - Form */}
@@ -74,16 +86,27 @@ export default function LoginTodus() {
             </p>
           </div>
 
-          {/* Google OAuth — primary working auth method */}
-          <Button
-            type="button"
-            variant="outline"
-            onClick={handleGoogleSignIn}
-            className="mb-6 w-full"
-          >
-            <Google className="mr-2 h-4 w-4" />
-            Continue with Google
-          </Button>
+          {/* OAuth Buttons */}
+          <div className="flex flex-col gap-3 mb-6">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleGoogleSignIn}
+              className="w-full"
+            >
+              <Google className="mr-2 h-4 w-4" />
+              Continue with Google
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleAppleSignIn}
+              className="w-full"
+            >
+              <Apple className="mr-2 h-4 w-4 fill-current" />
+              Continue with Apple
+            </Button>
+          </div>
 
           {false && (
             <>

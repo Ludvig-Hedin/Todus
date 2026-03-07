@@ -43,7 +43,7 @@ import { publicRouter } from './routes/auth';
 import { WorkflowRunner } from './pipelines';
 import { autumnApi } from './routes/autumn';
 import { initTracing } from './lib/tracing';
-import { env, type ZeroEnv } from './env';
+import { env, setEnv, type ZeroEnv } from './env';
 import type { HonoContext } from './ctx';
 import { createDb, type DB } from './db';
 import { createAuth } from './lib/auth';
@@ -799,10 +799,17 @@ const app = new Hono<HonoContext>()
         } catch {
           return null;
         }
+        // Hardcoded fallback domains to ensure CORS works even if env.COOKIE_DOMAIN
+        // isn't populated yet (Cloudflare Workers static env timing edge case).
+        const allowedDomains = ['todus.app', 'localhost'];
         const cookieDomain = env.COOKIE_DOMAIN;
-        if (!cookieDomain) return null;
-        if (hostname === cookieDomain || hostname.endsWith('.' + cookieDomain)) {
-          return origin;
+        if (cookieDomain && !allowedDomains.includes(cookieDomain)) {
+          allowedDomains.push(cookieDomain);
+        }
+        for (const domain of allowedDomains) {
+          if (hostname === domain || hostname.endsWith('.' + domain)) {
+            return origin;
+          }
         }
         return null;
       },
@@ -983,6 +990,7 @@ const app = new Hono<HonoContext>()
   });
 const handler = {
   async fetch(request: Request, env: ZeroEnv, ctx: ExecutionContext): Promise<Response> {
+    setEnv(env);
     return app.fetch(request, env, ctx);
   },
 };
@@ -1014,6 +1022,7 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
   async queue(
     batch: MessageBatch<unknown> | { queue: string; messages: Array<{ body: IEmailSendBatch }> },
   ) {
+    setEnv(this.env);
     switch (true) {
       case batch.queue.startsWith('subscribe-queue'): {
         console.log('batch', batch);
@@ -1147,6 +1156,7 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
     }
   }
   async scheduled() {
+    setEnv(this.env);
     console.log('Running scheduled tasks...');
 
     await this.processScheduledEmails();

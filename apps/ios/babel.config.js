@@ -1,11 +1,14 @@
 module.exports = function (api) {
   api.cache(true);
   return {
-    presets: ['babel-preset-expo'],
+    presets: [
+      ['babel-preset-expo', {
+        'react-compiler': {
+          target: '19'
+        }
+      }]
+    ],
     plugins: [
-      ['babel-plugin-react-compiler', {
-        target: '19'
-      }],
       'react-native-reanimated/plugin'
     ],
   };

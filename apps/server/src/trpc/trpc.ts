@@ -67,6 +67,13 @@ export const activeConnectionProcedure = privateProcedure.use(async ({ ctx, next
   try {
     const activeConnection = await getActiveConnection();
 
+    if (!activeConnection) {
+      throw new TRPCError({
+        code: 'NOT_FOUND',
+        message: 'No active connection found',
+      });
+    }
+
     if (connectionSpan) {
       completeRequestSpan(ctx.c, connectionSpan.id, {
         success: true,
@@ -77,6 +84,16 @@ export const activeConnectionProcedure = privateProcedure.use(async ({ ctx, next
 
     return next({ ctx: { ...ctx, activeConnection } });
   } catch (err) {
+    if (err instanceof TRPCError && err.code === 'NOT_FOUND') {
+      if (connectionSpan) {
+        completeRequestSpan(ctx.c, connectionSpan.id, {
+          success: false,
+          reason: 'connection_not_found',
+        }, 'No active connection found');
+      }
+      throw err;
+    }
+
     if (connectionSpan) {
       completeRequestSpan(ctx.c, connectionSpan.id, {
         success: false,

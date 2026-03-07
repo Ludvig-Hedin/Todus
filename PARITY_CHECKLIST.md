@@ -1,8 +1,9 @@
 # PARITY_CHECKLIST.md
 
-Last updated: 2026-03-01
+Last updated: 2026-03-03
 
-This file is the living single source of truth for Web -> Native parity across iOS, Android, and macOS.
+This file is the living single source of truth for Web -> Native parity.
+Current active migration scope for this stream is `apps/ios` (web -> iOS parity).
 
 ## Feature Parity Inventory
 
@@ -198,8 +199,7 @@ Shared/server-sensitive envs that impact behavior parity (configured outside cli
 
 ### Blockers
 
-- ⚠️ macOS app is currently an Electron web wrapper (`apps/macos`), not a React Native macOS app.
-- ⚠️ Cross-platform screenshot capture/compare still requires simulator/device runs and authenticated parity accounts.
+- No active blockers in current iOS parity scope.
 
 ### Gap Tracking Link
 

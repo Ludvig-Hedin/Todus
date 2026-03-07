@@ -545,7 +545,7 @@ export const getZeroSocketAgent = async (connectionId: string) => {
 
 export const getActiveConnection = async () => {
   const c = getContext<HonoContext>();
-  const { sessionUser, auth } = c.var;
+  const { sessionUser } = c.var;
   if (!sessionUser) throw new Error('Session Not Found');
 
   const db = await getZeroDB(sessionUser.id);
@@ -558,16 +558,7 @@ export const getActiveConnection = async () => {
 
   const firstConnection = await db.findFirstConnection();
   if (!firstConnection) {
-    try {
-      if (auth) {
-        await auth.api.revokeSession({ headers: c.req.raw.headers });
-        await auth.api.signOut({ headers: c.req.raw.headers });
-      }
-    } catch (err) {
-      console.warn(`[getActiveConnection] Session cleanup failed for user ${sessionUser.id}:`, err);
-    }
-    console.error(`No connections found for user ${sessionUser.id}`);
-    throw new Error('No connections found for user');
+    return null;
   }
 
   return firstConnection;

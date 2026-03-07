@@ -1,4 +1,13 @@
 import {
+  applyDefaultCategory,
+  deleteCategoryAndNormalize,
+  hasExactlyOneDefault,
+  moveCategoryAndNormalize,
+  resetFromDefaults,
+  sortCategoriesByOrder,
+  type CategorySetting,
+} from '../../../src/features/settings/categoriesSettingsUtils';
+import {
   SettingsButton,
   SettingsCard,
   SettingsDescription,
@@ -12,14 +21,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTRPC } from '../../../src/providers/QueryTrpcProvider';
 import { useTheme } from '../../../src/shared/theme/ThemeContext';
 import { useEffect, useMemo, useState } from 'react';
-
-type CategorySetting = {
-  id: string;
-  name: string;
-  searchValue: string;
-  order: number;
-  isDefault?: boolean;
-};
 
 export default function CategoriesSettings() {
   const { colors } = useTheme();
@@ -40,15 +41,12 @@ export default function CategoriesSettings() {
 
   useEffect(() => {
     const saved = settingsQuery.data?.settings?.categories ?? [];
-    const ordered = [...saved].sort((a, b) => a.order - b.order);
+    const ordered = sortCategoriesByOrder(saved);
     setCategories(ordered);
     setIsDirty(false);
   }, [settingsQuery.data?.settings?.categories]);
 
-  const hasDefault = useMemo(
-    () => categories.filter((category) => category.isDefault).length === 1,
-    [categories],
-  );
+  const hasDefault = useMemo(() => hasExactlyOneDefault(categories), [categories]);
 
   const updateCategory = (id: string, update: Partial<CategorySetting>) => {
     setCategories((current) =>
@@ -58,21 +56,12 @@ export default function CategoriesSettings() {
   };
 
   const setDefaultCategory = (id: string) => {
-    setCategories((current) =>
-      current.map((category) => ({ ...category, isDefault: category.id === id })),
-    );
+    setCategories((current) => applyDefaultCategory(current, id));
     setIsDirty(true);
   };
 
   const deleteCategory = (id: string) => {
-    setCategories((current) => {
-      const remaining = current.filter((category) => category.id !== id);
-      if (remaining.length === 0) return current;
-      if (!remaining.some((category) => category.isDefault)) {
-        remaining[0] = { ...remaining[0], isDefault: true };
-      }
-      return remaining.map((category, index) => ({ ...category, order: index }));
-    });
+    setCategories((current) => deleteCategoryAndNormalize(current, id));
     setIsDirty(true);
   };
 
@@ -91,13 +80,7 @@ export default function CategoriesSettings() {
   };
 
   const moveCategory = (index: number, direction: 'up' | 'down') => {
-    setCategories((current) => {
-      const next = [...current];
-      const target = direction === 'up' ? index - 1 : index + 1;
-      if (target < 0 || target >= current.length) return current;
-      [next[index], next[target]] = [next[target], next[index]];
-      return next.map((category, idx) => ({ ...category, order: idx }));
-    });
+    setCategories((current) => moveCategoryAndNormalize(current, index, direction));
     setIsDirty(true);
   };
 
@@ -117,7 +100,7 @@ export default function CategoriesSettings() {
   const resetDefaults = async () => {
     const defaults = defaultsQuery.data;
     if (!defaults || defaults.length === 0) return;
-    setCategories(defaults.map((category, index) => ({ ...category, order: index })));
+    setCategories(resetFromDefaults(defaults));
     setIsDirty(true);
   };
 

@@ -43,7 +43,12 @@
     "eval:dev": "dotenv -- pnpm --filter=@zero/server run eval:dev",
     "eval:ci": "dotenv -- pnpm --filter=@zero/server run eval:ci",
     "android": "expo run:android",
-    "parity:screenshots:check": "node ./scripts/parity/check-screenshots.mjs"
+    "parity:screenshots:check": "node ./scripts/parity/check-screenshots.mjs",
+    "parity:screenshots:sync": "node ./scripts/parity/sync-screenshot-log.mjs",
+    "parity:screenshots:capture:ios": "node ./scripts/parity/capture-ios-interactive.mjs",
+    "parity:screenshots:capture:ios:auto": "node ./scripts/parity/capture-ios-deeplink.mjs",
+    "parity:screenshots:capture:android:auto": "node ./scripts/parity/capture-android-deeplink.mjs",
+    "parity:screenshots:capture:macos:auto": "node ./scripts/parity/capture-macos-electron.mjs"
   },
   "devDependencies": {
     "@types/node": "24.3.0",

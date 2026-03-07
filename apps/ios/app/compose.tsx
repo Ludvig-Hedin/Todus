@@ -3,29 +3,6 @@
  * Supports new message, reply, reply-all, and forward modes.
  */
 import {
-  Alert,
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
-import { RichText, Toolbar, useEditorBridge, useEditorContent } from '@10play/tentap-editor';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
-import { captureEvent } from '../src/shared/telemetry/posthog';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useTRPC } from '../src/providers/QueryTrpcProvider';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useTheme } from '../src/shared/theme/ThemeContext';
-import { haptics } from '../src/shared/utils/haptics';
-import {
   formatScheduleLabel,
   isSendFailure,
   isUndoEligibleResult,
@@ -41,12 +18,41 @@ import {
   plainTextBodyToHtml,
   type ComposePrefillParams,
 } from '../src/features/compose/mailtoParity';
-import { useAtom } from 'jotai';
+import {
+  Alert,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import {
   pendingUndoSendAtom,
   undoComposePrefillAtom,
   type UndoComposePayload,
 } from '../src/shared/state/undoSend';
+import {
+  RichText,
+  Toolbar,
+  useBridgeState,
+  useEditorBridge,
+  useEditorContent,
+} from '@10play/tentap-editor';
+import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { captureEvent } from '../src/shared/telemetry/posthog';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useTRPC } from '../src/providers/QueryTrpcProvider';
+import { useTheme } from '../src/shared/theme/ThemeContext';
+import { haptics } from '../src/shared/utils/haptics';
+import { useAtom } from 'jotai';
 
 type SerializedAttachment = {
   name: string;
@@ -118,17 +124,163 @@ export default function ComposeScreen() {
     wasUserScheduled: boolean;
     payload: UndoComposePayload;
   } | null>(null);
+  const appliedEditorCssRef = useRef('');
+
+  const editorTheme = useMemo(
+    () => ({
+      webview: {
+        backgroundColor: colors.card,
+      },
+      toolbar: {
+        toolbarBody: {
+          borderTopWidth: StyleSheet.hairlineWidth,
+          borderBottomWidth: 0,
+          borderTopColor: colors.border,
+          backgroundColor: colors.background,
+          minWidth: '100%',
+          height: 46,
+        },
+        toolbarButton: {
+          backgroundColor: colors.background,
+          paddingHorizontal: 10,
+          alignItems: 'center',
+          justifyContent: 'center',
+        },
+        iconDisabled: {
+          tintColor: colors.mutedForeground,
+        },
+        iconWrapperDisabled: {
+          opacity: 0.35,
+        },
+        iconWrapperActive: {
+          backgroundColor: colors.secondary,
+        },
+        iconWrapper: {
+          borderRadius: 8,
+          backgroundColor: 'transparent',
+        },
+        icon: {
+          height: 26,
+          width: 26,
+          tintColor: colors.mutedForeground,
+        },
+        iconActive: {
+          tintColor: colors.foreground,
+        },
+        hidden: {
+          display: 'none',
+        },
+        keyboardAvoidingView: {
+          position: 'absolute',
+          width: '100%',
+          bottom: 0,
+        },
+        linkBarTheme: {
+          addLinkContainer: {
+            flex: 1,
+            flexDirection: 'row',
+            height: 46,
+            borderTopWidth: StyleSheet.hairlineWidth,
+            borderBottomWidth: 0,
+            borderTopColor: colors.border,
+            backgroundColor: colors.background,
+            paddingVertical: 6,
+            paddingHorizontal: 10,
+            alignItems: 'center',
+            justifyContent: 'center',
+          },
+          linkInput: {
+            paddingLeft: 12,
+            paddingTop: 2,
+            paddingBottom: 2,
+            paddingRight: 12,
+            flex: 1,
+            color: colors.foreground,
+            backgroundColor: colors.background,
+          },
+          placeholderTextColor: colors.mutedForeground,
+          doneButton: {
+            backgroundColor: colors.primary,
+            justifyContent: 'center',
+            height: 34,
+            paddingHorizontal: 12,
+            borderRadius: 8,
+          },
+          doneButtonText: {
+            color: colors.primaryForeground,
+            fontWeight: '600',
+          },
+          linkToolbarButton: {
+            paddingHorizontal: 0,
+          },
+        },
+      },
+    }),
+    [
+      colors.background,
+      colors.border,
+      colors.card,
+      colors.foreground,
+      colors.mutedForeground,
+      colors.primary,
+      colors.primaryForeground,
+      colors.secondary,
+    ],
+  );
+
+  const editorCss = useMemo(
+    () => `
+      body {
+        margin: 0;
+        padding: 0;
+        background: ${colors.card};
+      }
+
+      #root > div:nth-of-type(1) {
+        background: ${colors.card};
+      }
+
+      #root div .ProseMirror {
+        min-height: 100%;
+        padding: 14px 16px 18px;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        font-size: 16px;
+        line-height: 1.5;
+        letter-spacing: 0;
+        color: ${colors.foreground};
+        caret-color: ${colors.foreground};
+        box-sizing: border-box;
+      }
+
+      .is-editor-empty:first-child::before {
+        color: ${colors.mutedForeground};
+        opacity: 0.88;
+      }
+    `,
+    [colors.card, colors.foreground, colors.mutedForeground],
+  );
 
   const editor = useEditorBridge({
     autofocus: false,
     avoidIosKeyboard: true,
     initialContent: '',
+    theme: editorTheme,
   });
+  const editorState = useBridgeState(editor);
   const editorHtml = useEditorContent(editor, { type: 'html', debounceInterval: 400 }) ?? '';
   const draftKey = useMemo(
     () => `compose-draft:${params.threadId ? `thread:${params.threadId}` : 'new'}`,
     [params.threadId],
   );
+
+  useEffect(() => {
+    if (!editorState.isReady) return;
+    if (appliedEditorCssRef.current !== editorCss) {
+      editor.injectCSS(editorCss, 'compose-editor-css');
+      appliedEditorCssRef.current = editorCss;
+    }
+    editor.setPlaceholder('Write your message...');
+  }, [editor, editorCss, editorState.isReady]);
 
   // If replying/forwarding, fetch thread data to prefill fields
   const isReply = params.mode === 'reply' || params.mode === 'replyAll';
@@ -668,32 +820,50 @@ export default function ComposeScreen() {
     >
       {/* Header */}
       <View
-        style={[styles.header, { paddingTop: insets.top + 8, borderBottomColor: colors.border }]}
+        style={[
+          styles.header,
+          {
+            paddingTop: Platform.OS === 'ios' ? 12 : insets.top + 8,
+            borderBottomColor: colors.border,
+          },
+        ]}
       >
-        <Pressable onPress={() => router.back()}>
-          <Text style={[styles.cancelText, { color: colors.primary }]}>Cancel</Text>
-        </Pressable>
-        <Text style={[styles.headerTitle, { color: colors.foreground }]}>{title}</Text>
-        <View style={styles.headerActions}>
-          <Pressable
-            style={[styles.headerSecondaryButton, { borderColor: colors.border }]}
-            onPress={openSchedulePicker}
-            disabled={sendMutation.isPending}
-          >
-            <Text style={[styles.headerSecondaryText, { color: colors.foreground }]}>Later</Text>
-          </Pressable>
-          <Pressable
-            style={[
-              styles.sendButton,
-              { backgroundColor: sendMutation.isPending ? colors.secondary : colors.primary },
-            ]}
-            onPress={handleSend}
-            disabled={sendMutation.isPending}
-          >
-            <Text style={[styles.sendText, { color: colors.primaryForeground }]}>
-              {sendMutation.isPending ? 'Sending...' : scheduleAt ? 'Schedule' : 'Send'}
-            </Text>
-          </Pressable>
+        <View style={styles.headerRow}>
+          <View style={styles.headerSideStart}>
+            <Pressable style={styles.cancelButton} onPress={() => router.back()}>
+              <Text style={[styles.cancelText, { color: colors.foreground }]}>Cancel</Text>
+            </Pressable>
+          </View>
+          <View style={styles.headerCenter}>
+            <Text style={[styles.headerTitle, { color: colors.foreground }]}>{title}</Text>
+          </View>
+          <View style={styles.headerSideEnd}>
+            <Pressable
+              style={[
+                styles.headerSecondaryButton,
+                {
+                  borderColor: colors.border,
+                  backgroundColor: colors.background,
+                },
+              ]}
+              onPress={openSchedulePicker}
+              disabled={sendMutation.isPending}
+            >
+              <Text style={[styles.headerSecondaryText, { color: colors.foreground }]}>Later</Text>
+            </Pressable>
+            <Pressable
+              style={[
+                styles.sendButton,
+                { backgroundColor: sendMutation.isPending ? colors.secondary : colors.primary },
+              ]}
+              onPress={handleSend}
+              disabled={sendMutation.isPending}
+            >
+              <Text style={[styles.sendText, { color: colors.primaryForeground }]}>
+                {sendMutation.isPending ? 'Sending...' : scheduleAt ? 'Schedule' : 'Send'}
+              </Text>
+            </Pressable>
+          </View>
         </View>
       </View>
 
@@ -766,7 +936,10 @@ export default function ComposeScreen() {
         <View style={[styles.attachmentRow, { borderBottomColor: colors.border }]}>
           <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>When:</Text>
           <Pressable
-            style={[styles.inlineButton, { borderColor: colors.border }]}
+            style={[
+              styles.inlineButton,
+              { borderColor: colors.border, backgroundColor: colors.background },
+            ]}
             onPress={openSchedulePicker}
           >
             <Text style={{ color: colors.foreground, fontWeight: '500' }}>{scheduleLabel}</Text>
@@ -782,13 +955,19 @@ export default function ComposeScreen() {
           <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>Template:</Text>
           <View style={styles.inlineActions}>
             <Pressable
-              style={[styles.inlineButton, { borderColor: colors.border }]}
+              style={[
+                styles.inlineButton,
+                { borderColor: colors.border, backgroundColor: colors.background },
+              ]}
               onPress={() => setShowTemplatesModal(true)}
             >
               <Text style={{ color: colors.foreground, fontWeight: '500' }}>Use</Text>
             </Pressable>
             <Pressable
-              style={[styles.inlineButton, { borderColor: colors.border }]}
+              style={[
+                styles.inlineButton,
+                { borderColor: colors.border, backgroundColor: colors.background },
+              ]}
               onPress={() => setShowSaveTemplateModal(true)}
             >
               <Text style={{ color: colors.foreground, fontWeight: '500' }}>Save</Text>
@@ -833,7 +1012,7 @@ export default function ComposeScreen() {
             style={[
               styles.richText,
               {
-                backgroundColor: colors.background,
+                backgroundColor: colors.card,
                 borderColor: colors.border,
               },
             ]}
@@ -1000,7 +1179,11 @@ export default function ComposeScreen() {
               <Pressable
                 style={[
                   styles.modalButton,
-                  { backgroundColor: createTemplateMutation.isPending ? colors.secondary : colors.primary },
+                  {
+                    backgroundColor: createTemplateMutation.isPending
+                      ? colors.secondary
+                      : colors.primary,
+                  },
                 ]}
                 disabled={createTemplateMutation.isPending}
                 onPress={() => {
@@ -1151,43 +1334,71 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   header: {
+    paddingHorizontal: 20,
+    paddingBottom: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingBottom: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    minHeight: 44,
+  },
+  headerSideStart: {
+    width: 92,
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+  },
+  headerCenter: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+  },
+  headerSideEnd: {
+    width: 190,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 8,
+  },
+  cancelButton: {
+    minHeight: 40,
+    justifyContent: 'center',
+    paddingRight: 4,
   },
   cancelText: {
     fontSize: 16,
+    fontWeight: '500',
   },
   headerTitle: {
     fontSize: 17,
-    fontWeight: '600',
-  },
-  headerActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+    fontWeight: '700',
   },
   headerSecondaryButton: {
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    borderRadius: 12,
+    minHeight: 40,
+    minWidth: 74,
+    paddingHorizontal: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   headerSecondaryText: {
-    fontSize: 13,
+    fontSize: 15,
     fontWeight: '600',
   },
   sendButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 8,
+    minHeight: 40,
+    minWidth: 98,
+    paddingHorizontal: 18,
+    paddingVertical: 9,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   sendText: {
     fontSize: 15,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   form: {
     flex: 1,
@@ -1195,50 +1406,58 @@ const styles = StyleSheet.create({
   fieldRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    minHeight: 56,
+    paddingHorizontal: 20,
+    paddingVertical: 13,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   fieldLabel: {
     fontSize: 15,
-    width: 60,
+    width: 88,
+    minWidth: 88,
+    flexShrink: 0,
   },
   fieldInput: {
     flex: 1,
-    fontSize: 15,
-    padding: 0,
+    fontSize: 16,
+    lineHeight: 22,
+    paddingVertical: 4,
+    paddingHorizontal: 0,
   },
   ccToggle: {
-    fontSize: 14,
-    paddingLeft: 8,
+    fontSize: 15,
+    paddingLeft: 10,
   },
   attachmentRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
+    minHeight: 56,
+    paddingHorizontal: 20,
     paddingVertical: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
+    gap: 8,
   },
   attachmentButton: {
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
   },
   inlineActions: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    flexWrap: 'wrap',
   },
   inlineButton: {
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
   },
   attachmentsList: {
     borderBottomWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
     gap: 8,
   },
   attachmentItem: {
@@ -1260,18 +1479,20 @@ const styles = StyleSheet.create({
   },
   bodyContainer: {
     flex: 1,
-    padding: 12,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 8,
   },
   richText: {
     flex: 1,
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 10,
+    borderRadius: 14,
     overflow: 'hidden',
   },
   toolbarContainer: {
     borderTopWidth: StyleSheet.hairlineWidth,
-    paddingTop: 6,
-    paddingBottom: 2,
+    paddingTop: 0,
+    paddingBottom: 0,
   },
   modalScrim: {
     flex: 1,

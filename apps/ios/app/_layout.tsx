@@ -9,9 +9,7 @@ import { captureScreen } from '../src/shared/telemetry/posthog';
 import { getNativeEnv } from '../src/shared/config/env';
 import { AppProviders } from '../src/providers/AppProviders';
 import { authStatusAtom } from '../src/shared/state/session';
-import { initSentry } from '../src/shared/telemetry/sentry';
 import { semanticColors } from '@zero/design-tokens';
-import * as Sentry from '@sentry/react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useRef } from 'react';
 import { useAtomValue } from 'jotai';
@@ -91,15 +89,7 @@ function RootLayout() {
   );
 }
 
-const env = getNativeEnv();
-if (env.sentryDsn) {
-  initSentry({
-    dsn: env.sentryDsn,
-    tunnel: `${env.backendUrl.replace(/\/$/, '')}/monitoring/sentry`,
-  });
-}
-
-export default env.sentryDsn ? Sentry.wrap(RootLayout) : RootLayout;
+export default RootLayout;
 
 const styles = StyleSheet.create({
   bootScreen: {

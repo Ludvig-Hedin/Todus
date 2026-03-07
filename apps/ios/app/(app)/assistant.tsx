@@ -9,15 +9,22 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import {
+  authBypassVoiceUnavailableMessage,
+  buildAuthBypassAssistantReply,
+} from '../../src/features/assistant/authBypassAssistant';
 import { extractResponseText, nextStreamCursor } from '../../src/features/assistant/assistantUtils';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { getNativeEnv } from '../../src/shared/config/env';
 import { captureEvent } from '../../src/shared/telemetry/posthog';
 import { useTRPC } from '../../src/providers/QueryTrpcProvider';
-import { Square, Volume2 } from 'lucide-react-native';
+import { Mic, Square, Volume2 } from 'lucide-react-native';
+import * as FileSystemLegacy from 'expo-file-system/legacy';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
 import { useMutation } from '@tanstack/react-query';
 import * as Speech from 'expo-speech';
+import type { Audio } from 'expo-av';
 
 type AssistantMessage = {
   id: string;
@@ -32,18 +39,23 @@ const QUICK_PROMPTS = [
 ];
 
 export default function AssistantScreen() {
+  const env = getNativeEnv();
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const trpc = useTRPC();
   const scrollRef = useRef<ScrollView>(null);
   const streamTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const recordingRef = useRef<Audio.Recording | null>(null);
+  const audioModuleRef = useRef<typeof import('expo-av') | null>(null);
   const [messages, setMessages] = useState<AssistantMessage[]>([]);
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [isVoicePlaying, setIsVoicePlaying] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
   const [autoSpeak, setAutoSpeak] = useState(false);
+  const [handsFreeMode, setHandsFreeMode] = useState(false);
+  const resumeConversationRef = useRef(false);
 
-  const canSend = input.trim().length > 0 && !isStreaming;
   const latestAssistantMessage = useMemo(() => {
     for (let index = messages.length - 1; index >= 0; index -= 1) {
       const message = messages[index];
@@ -64,15 +76,101 @@ export default function AssistantScreen() {
       });
     },
     onError: (error) => {
-      streamAssistantMessage(error.message || 'Something went wrong. Please try again.');
+      resumeConversationRef.current = false;
+      const rawMessage = error.message || 'Something went wrong. Please try again.';
+      const message = rawMessage.toUpperCase().includes('UNAUTHORIZED')
+        ? 'Assistant requires a signed-in mailbox connection. Auth bypass mode cannot access this feature yet.'
+        : rawMessage;
+      streamAssistantMessage(message);
       captureEvent('AI Chat Error', {
-        message: error.message,
+        message,
       });
     },
   });
 
-  const pending = webSearchMutation.isPending || isStreaming;
-  const composerPlaceholder = pending ? 'Waiting for assistant...' : 'Ask the assistant...';
+  const transcribeMutation = useMutation({
+    ...trpc.ai.transcribeAudio.mutationOptions(),
+    onSuccess: (result) => {
+      const transcript = result.text.trim();
+      if (!transcript) {
+        resumeConversationRef.current = false;
+        streamAssistantMessage('I could not detect speech. Please try again.');
+        captureEvent('AI Voice Input Empty');
+        return;
+      }
+
+      captureEvent('AI Voice Input Transcript', {
+        length: transcript.length,
+      });
+      sendPrompt(transcript);
+    },
+    onError: (error) => {
+      resumeConversationRef.current = false;
+      const rawMessage = error.message || 'Voice transcription failed. Please try again.';
+      const message = rawMessage.toUpperCase().includes('UNAUTHORIZED')
+        ? 'Voice dictation requires a signed-in mailbox connection. Auth bypass mode cannot access this feature yet.'
+        : rawMessage;
+      streamAssistantMessage(message);
+      captureEvent('AI Voice Input Error', {
+        message,
+      });
+    },
+  });
+
+  const sendPrompt = useCallback(
+    (rawPrompt?: string) => {
+      const prompt = (rawPrompt ?? input).trim();
+      if (!prompt || webSearchMutation.isPending || isStreaming || isRecording) {
+        return;
+      }
+
+      const userMessage: AssistantMessage = {
+        id: `user-${Date.now()}`,
+        role: 'user',
+        text: prompt,
+      };
+      setMessages((prev) => [...prev, userMessage]);
+      setInput('');
+      captureEvent('AI Chat Prompt', {
+        length: prompt.length,
+      });
+
+      if (env.authBypassEnabled) {
+        const fallbackText = buildAuthBypassAssistantReply(prompt);
+        streamAssistantMessage(fallbackText);
+        captureEvent('AI Chat Response', {
+          length: fallbackText.length,
+          source: 'auth_bypass_fallback',
+        });
+        return;
+      }
+
+      webSearchMutation.mutate({ query: prompt });
+    },
+    [env.authBypassEnabled, input, isRecording, isStreaming, webSearchMutation],
+  );
+
+  const pending = webSearchMutation.isPending || isStreaming || transcribeMutation.isPending;
+  const canSend = input.trim().length > 0 && !pending && !isRecording;
+  const composerPlaceholder = isRecording
+    ? 'Listening...'
+    : pending
+      ? 'Waiting for assistant...'
+      : 'Ask the assistant...';
+
+  const loadAudioModule = useCallback(async () => {
+    if (audioModuleRef.current) {
+      return audioModuleRef.current;
+    }
+
+    try {
+      const module = await import('expo-av');
+      audioModuleRef.current = module;
+      return module;
+    } catch {
+      return null;
+    }
+  }, []);
 
   useEffect(() => {
     scrollRef.current?.scrollToEnd({ animated: true });
@@ -94,44 +192,139 @@ export default function AssistantScreen() {
       length: trimmed.length,
     });
 
+    const stopVoice = () => {
+      if (mode === 'auto' && handsFreeMode) {
+        resumeConversationRef.current = true;
+      }
+      setIsVoicePlaying(false);
+    };
+
     Speech.speak(trimmed, {
       language: 'en-US',
       rate: 0.96,
       pitch: 1.0,
-      onDone: () => setIsVoicePlaying(false),
-      onStopped: () => setIsVoicePlaying(false),
-      onError: () => setIsVoicePlaying(false),
+      onDone: stopVoice,
+      onStopped: stopVoice,
+      onError: stopVoice,
     });
-  }, []);
+  }, [handsFreeMode]);
 
   useEffect(() => {
     return () => {
       if (streamTimerRef.current) {
         clearInterval(streamTimerRef.current);
       }
+      const activeRecording = recordingRef.current;
+      if (activeRecording) {
+        activeRecording.stopAndUnloadAsync().catch(() => undefined);
+        recordingRef.current = null;
+      }
+      loadAudioModule()
+        .then((module) =>
+          module?.Audio.setAudioModeAsync({
+            allowsRecordingIOS: false,
+            playsInSilentModeIOS: true,
+          }).catch(() => undefined),
+        )
+        .catch(() => undefined);
       Speech.stop();
     };
-  }, []);
+  }, [loadAudioModule]);
 
-  const sendPrompt = (rawPrompt?: string) => {
-    const prompt = (rawPrompt ?? input).trim();
-    if (!prompt || pending) {
+  const startVoiceRecording = useCallback(async () => {
+    if (pending || isRecording) {
       return;
     }
 
-    const userMessage: AssistantMessage = {
-      id: `user-${Date.now()}`,
-      role: 'user',
-      text: prompt,
-    };
-    setMessages((prev) => [...prev, userMessage]);
-    setInput('');
-    captureEvent('AI Chat Prompt', {
-      length: prompt.length,
-    });
+    if (env.authBypassEnabled) {
+      streamAssistantMessage(authBypassVoiceUnavailableMessage());
+      captureEvent('AI Voice Input Bypass Blocked');
+      return;
+    }
 
-    webSearchMutation.mutate({ query: prompt });
-  };
+    try {
+      const audioModule = await loadAudioModule();
+      if (!audioModule) {
+        streamAssistantMessage(
+          'Voice dictation is unavailable in this build. Install expo-av native module and rebuild the app.',
+        );
+        captureEvent('AI Voice Input Unavailable');
+        return;
+      }
+
+      const permission = await audioModule.Audio.requestPermissionsAsync();
+      if (!permission.granted) {
+        streamAssistantMessage('Microphone access is required for voice input.');
+        return;
+      }
+
+      await audioModule.Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+      });
+
+      const recording = new audioModule.Audio.Recording();
+      await recording.prepareToRecordAsync(audioModule.Audio.RecordingOptionsPresets.HIGH_QUALITY);
+      await recording.startAsync();
+      recordingRef.current = recording;
+      setIsRecording(true);
+
+      captureEvent('AI Voice Input Start');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to start recording.';
+      streamAssistantMessage(message);
+      setIsRecording(false);
+      recordingRef.current = null;
+    }
+  }, [env.authBypassEnabled, isRecording, loadAudioModule, pending]);
+
+  const stopVoiceRecording = useCallback(async () => {
+    const recording = recordingRef.current;
+    if (!recording) {
+      return;
+    }
+
+    setIsRecording(false);
+    recordingRef.current = null;
+
+    let recordingUri: string | null = null;
+    try {
+      await recording.stopAndUnloadAsync();
+      recordingUri = recording.getURI();
+      if (!recordingUri) {
+        throw new Error('Unable to process the recording.');
+      }
+
+      const audioBase64 = await FileSystemLegacy.readAsStringAsync(recordingUri, {
+        encoding: FileSystemLegacy.EncodingType.Base64,
+      });
+
+      resumeConversationRef.current = handsFreeMode;
+      captureEvent('AI Voice Input Stop', {
+        bytes: audioBase64.length,
+      });
+      transcribeMutation.mutate({
+        audioBase64,
+        mimeType: 'audio/mp4',
+        language: 'en',
+      });
+    } catch (error) {
+      resumeConversationRef.current = false;
+      const message = error instanceof Error ? error.message : 'Unable to transcribe recording.';
+      streamAssistantMessage(message);
+      captureEvent('AI Voice Input Error', { message });
+    } finally {
+      const audioModule = await loadAudioModule();
+      await audioModule?.Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+        playsInSilentModeIOS: true,
+      }).catch(() => undefined);
+
+      if (recordingUri) {
+        await FileSystemLegacy.deleteAsync(recordingUri, { idempotent: true }).catch(() => undefined);
+      }
+    }
+  }, [handsFreeMode, loadAudioModule, transcribeMutation]);
 
   const streamAssistantMessage = (fullText: string) => {
     if (streamTimerRef.current) {
@@ -168,10 +361,27 @@ export default function AssistantScreen() {
         setIsStreaming(false);
         if (autoSpeak && fullText.trim()) {
           speakAssistantText(fullText, 'auto');
+        } else if (handsFreeMode && fullText.trim()) {
+          resumeConversationRef.current = true;
         }
       }
     }, 20);
   };
+
+  useEffect(() => {
+    if (!handsFreeMode) {
+      resumeConversationRef.current = false;
+      return;
+    }
+    if (!resumeConversationRef.current || pending || isRecording || isVoicePlaying) {
+      return;
+    }
+
+    resumeConversationRef.current = false;
+    startVoiceRecording().catch(() => {
+      resumeConversationRef.current = false;
+    });
+  }, [handsFreeMode, isRecording, isVoicePlaying, pending, startVoiceRecording]);
 
   const emptyState = (
     <View style={styles.emptyState}>
@@ -303,48 +513,98 @@ export default function AssistantScreen() {
           style={[styles.voicePanel, { borderColor: colors.border, backgroundColor: colors.card }]}
         >
           <View style={styles.voicePanelLeft}>
-            <Pressable
-              style={[
-                styles.voiceAction,
-                {
-                  borderColor: colors.border,
-                  backgroundColor: isVoicePlaying ? colors.secondary : colors.card,
-                },
-              ]}
-              onPress={() => {
-                if (isVoicePlaying) {
-                  stopVoicePlayback();
-                  return;
-                }
-                speakAssistantText(latestAssistantMessage, 'manual');
-              }}
-              disabled={!isVoicePlaying && latestAssistantMessage.trim().length === 0}
-            >
-              {isVoicePlaying ? (
-                <Square size={14} color={colors.foreground} />
-              ) : (
-                <Volume2 size={14} color={colors.foreground} />
-              )}
-              <Text style={[styles.voiceActionText, { color: colors.foreground }]}>
-                {isVoicePlaying ? 'Stop voice' : 'Read latest'}
-              </Text>
-            </Pressable>
+            <View style={styles.voiceActionsRow}>
+              <Pressable
+                style={[
+                  styles.voiceAction,
+                  {
+                    borderColor: colors.border,
+                    backgroundColor: isVoicePlaying ? colors.secondary : colors.card,
+                  },
+                ]}
+                onPress={() => {
+                  if (isVoicePlaying) {
+                    stopVoicePlayback();
+                    return;
+                  }
+                  speakAssistantText(latestAssistantMessage, 'manual');
+                }}
+                disabled={!isVoicePlaying && latestAssistantMessage.trim().length === 0}
+              >
+                {isVoicePlaying ? (
+                  <Square size={14} color={colors.foreground} />
+                ) : (
+                  <Volume2 size={14} color={colors.foreground} />
+                )}
+                <Text style={[styles.voiceActionText, { color: colors.foreground }]}>
+                  {isVoicePlaying ? 'Stop voice' : 'Read latest'}
+                </Text>
+              </Pressable>
+
+              <Pressable
+                style={[
+                  styles.voiceAction,
+                  {
+                    borderColor: colors.border,
+                    backgroundColor: isRecording ? colors.secondary : colors.card,
+                  },
+                ]}
+                onPress={isRecording ? stopVoiceRecording : startVoiceRecording}
+                disabled={pending && !isRecording}
+              >
+                {isRecording ? (
+                  <Square size={14} color={colors.foreground} />
+                ) : (
+                  <Mic size={14} color={colors.foreground} />
+                )}
+                <Text style={[styles.voiceActionText, { color: colors.foreground }]}>
+                  {isRecording ? 'Stop rec' : transcribeMutation.isPending ? 'Transcribing' : 'Dictate'}
+                </Text>
+              </Pressable>
+            </View>
           </View>
           <View style={styles.voicePanelRight}>
-            <Text style={[styles.autoSpeakLabel, { color: colors.mutedForeground }]}>
-              Auto-read
-            </Text>
-            <Switch
-              value={autoSpeak}
-              onValueChange={(enabled) => {
-                setAutoSpeak(enabled);
-                if (!enabled) {
-                  stopVoicePlayback();
-                }
-              }}
-              trackColor={{ false: colors.border, true: colors.mutedForeground }}
-              thumbColor={autoSpeak ? colors.foreground : colors.background}
-            />
+            <View style={styles.voiceToggleRow}>
+              <Text style={[styles.autoSpeakLabel, { color: colors.mutedForeground }]}>
+                Auto-read
+              </Text>
+              <Switch
+                value={autoSpeak}
+                onValueChange={(enabled) => {
+                  setAutoSpeak(enabled);
+                  if (!enabled) {
+                    stopVoicePlayback();
+                  }
+                }}
+                trackColor={{ false: colors.border, true: colors.mutedForeground }}
+                thumbColor={autoSpeak ? colors.foreground : colors.background}
+              />
+            </View>
+            <View style={styles.voiceToggleRow}>
+              <Text style={[styles.autoSpeakLabel, { color: colors.mutedForeground }]}>
+                Hands-free
+              </Text>
+              <Switch
+                value={handsFreeMode}
+                onValueChange={(enabled) => {
+                  if (enabled && env.authBypassEnabled) {
+                    streamAssistantMessage(authBypassVoiceUnavailableMessage());
+                    captureEvent('AI Voice HandsFree Blocked');
+                    return;
+                  }
+                  setHandsFreeMode(enabled);
+                  if (enabled) {
+                    setAutoSpeak(true);
+                    captureEvent('AI Voice HandsFree Enabled');
+                  } else {
+                    resumeConversationRef.current = false;
+                    captureEvent('AI Voice HandsFree Disabled');
+                  }
+                }}
+                trackColor={{ false: colors.border, true: colors.mutedForeground }}
+                thumbColor={handsFreeMode ? colors.foreground : colors.background}
+              />
+            </View>
           </View>
         </View>
 
@@ -363,7 +623,7 @@ export default function AssistantScreen() {
               },
             ]}
             multiline
-            editable={!pending}
+            editable={!pending && !isRecording}
           />
           <Pressable
             style={[
@@ -513,6 +773,11 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'flex-start',
   },
+  voiceActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
   voiceAction: {
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 9,
@@ -529,6 +794,10 @@ const styles = StyleSheet.create({
     letterSpacing: 0,
   },
   voicePanelRight: {
+    alignItems: 'flex-end',
+    gap: 6,
+  },
+  voiceToggleRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,

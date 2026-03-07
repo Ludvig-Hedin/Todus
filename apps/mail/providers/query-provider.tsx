@@ -13,6 +13,12 @@ import { signOut } from '@/lib/auth-client';
 import { get, set, del } from 'idb-keyval';
 import superjson from 'superjson';
 
+// CR-001: Guard with import.meta.env.DEV so Vite tree-shakes the bypass in production builds
+const parityAuthBypass =
+  import.meta.env.DEV &&
+  (String(import.meta.env.VITE_PUBLIC_PARITY_AUTH_BYPASS ?? '').toLowerCase() === '1' ||
+    String(import.meta.env.VITE_PUBLIC_PARITY_AUTH_BYPASS ?? '').toLowerCase() === 'true');
+
 function createIDBPersister(idbValidKey: IDBValidKey = 'zero-query-cache') {
   return {
     persistClient: async (client: PersistedClient) => {
@@ -37,6 +43,7 @@ export const makeQueryClient = (connectionId: string | null) =>
           err.message === 'Required scopes missing' ||
           err.message.includes('Invalid connection')
         ) {
+          if (parityAuthBypass) return;
           signOut({
             fetchOptions: {
               onSuccess: () => {
@@ -97,7 +104,7 @@ export const trpcClient = createTRPCClient<AppRouter>({
         fetch(url, { ...options, credentials: 'include' }).then((res) => {
           const currentPath = new URL(window.location.href).pathname;
           const redirectPath = res.headers.get('X-Zero-Redirect');
-          if (!!redirectPath && redirectPath !== currentPath) {
+          if (!parityAuthBypass && !!redirectPath && redirectPath !== currentPath) {
             window.location.href = redirectPath;
             res.headers.delete('X-Zero-Redirect');
           }

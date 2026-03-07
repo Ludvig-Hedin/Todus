@@ -1,3 +1,4 @@
+import * as AppleAuthentication from 'expo-apple-authentication';
 import * as WebBrowser from 'expo-web-browser';
 import * as Linking from 'expo-linking';
 import { useSetAtom } from 'jotai';
@@ -9,11 +10,11 @@ import {
   StyleSheet,
   Text,
   View,
-  SafeAreaView,
   useColorScheme,
   Image,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { getNativeEnv } from '../../src/shared/config/env';
 import { setBearerSessionAtom } from '../../src/shared/state/session';
 import { getSocialAuthUrl } from '../../src/features/auth/native-auth';
@@ -28,7 +29,8 @@ export default function LoginScreen() {
   const isDark = colorScheme === 'dark';
   const setBearerSession = useSetAtom(setBearerSessionAtom);
 
-  const [loading, setLoading] = useState(false);
+  const [loadingGoogle, setLoadingGoogle] = useState(false);
+  const [loadingApple, setLoadingApple] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Clean up browser session on unmount (iOS-only)
@@ -42,13 +44,16 @@ export default function LoginScreen() {
 
   // Failsafe: reset loading if stuck for >15s
   useEffect(() => {
-    if (!loading) return;
-    const timeout = setTimeout(() => setLoading(false), 15000);
+    if (!loadingGoogle && !loadingApple) return;
+    const timeout = setTimeout(() => {
+      setLoadingGoogle(false);
+      setLoadingApple(false);
+    }, 15000);
     return () => clearTimeout(timeout);
-  }, [loading]);
+  }, [loadingGoogle, loadingApple]);
 
   async function handleGoogleSignIn() {
-    setLoading(true);
+    setLoadingGoogle(true);
     setErrorMessage(null);
 
     try {
@@ -108,7 +113,7 @@ export default function LoginScreen() {
         subscription.remove();
 
         if (!authHandled) {
-          setLoading(false);
+          setLoadingGoogle(false);
           if (result.type === 'success' && result.url) {
             const token = extractTokenFromUrl(result.url);
             if (token) {
@@ -129,7 +134,76 @@ export default function LoginScreen() {
       const message = e instanceof Error ? e.message : 'Failed to sign in with Google';
       setErrorMessage(message);
     } finally {
-      setTimeout(() => setLoading(false), 500);
+      setTimeout(() => setLoadingGoogle(false), 500);
+    }
+  }
+
+  async function handleAppleSignIn() {
+    setLoadingApple(true);
+    setErrorMessage(null);
+
+    try {
+      const credential = await AppleAuthentication.signInAsync({
+        requestedScopes: [
+          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+          AppleAuthentication.AppleAuthenticationScope.EMAIL,
+        ],
+      });
+
+      if (__DEV__) console.log('[AppleSignIn] credential received');
+
+      if (credential.identityToken) {
+        // Send the identityToken to better-auth
+        // We use the same backend bridge as Google but direct for Apple native
+        const backendBase = env.backendUrl.replace(/\/$/, '');
+        const authUrl = `${backendBase}/api/auth/sign-in/social`;
+
+        if (__DEV__) console.log('[AppleSignIn] sending idToken to:', authUrl);
+
+        const response = await fetch(authUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            provider: 'apple',
+            idToken: credential.identityToken,
+            callbackURL: 'todus://auth-callback',
+          }),
+        });
+
+        // CR-006: Check response status before parsing JSON
+        if (!response.ok) {
+          setErrorMessage(`Apple Sign-in server error (${response.status}). Please try again.`);
+          return;
+        }
+
+        const result = await response.json();
+        if (__DEV__) console.log('[AppleSignIn] response status:', response.status);
+
+        if (result.url) {
+          // Better-auth returns a redirect URL that includes the token
+          const token = extractTokenFromUrl(result.url);
+          if (token) {
+            await setBearerSession({ token, expiresAt: null });
+          } else {
+            setErrorMessage('Failed to extract token from Apple login response.');
+          }
+        } else if (result.error) {
+          setErrorMessage(result.error.message || 'Apple Sign-in failed on server.');
+        }
+      } else {
+        // CR-007: identityToken can be null on subsequent Apple sign-ins
+        setErrorMessage('Apple did not provide an identity token. Please try again.');
+      }
+    } catch (e: any) {
+      if (e.code === 'ERR_CANCELED' || e.code === 'ERR_REQUEST_CANCELED' || (e.message && e.message.includes('canceled'))) {
+        // User cancelled
+      } else {
+        setErrorMessage(e.message || 'Failed to sign in with Apple');
+      }
+    } finally {
+      setLoadingApple(false);
     }
   }
 
@@ -164,23 +238,42 @@ export default function LoginScreen() {
         <View style={styles.providersContainer}>
           <Pressable
             onPress={handleGoogleSignIn}
-            disabled={loading}
+            disabled={loadingGoogle || loadingApple}
             style={({ pressed }) => [
               styles.providerButton,
               themeStyles.providerButton,
               pressed && themeStyles.providerButtonPressed,
-              loading && styles.providerButtonDisabled,
+              (loadingGoogle || loadingApple) && styles.providerButtonDisabled,
             ]}
           >
-            {loading ? (
+            {loadingGoogle ? (
               <ActivityIndicator size="small" color={isDark ? '#ffffff' : '#000000'} style={styles.icon} />
             ) : (
               <GoogleColored width={20} height={20} style={styles.icon} />
             )}
             <Text style={[styles.providerButtonText, themeStyles.providerButtonText]}>
-              {loading ? 'Signing in...' : 'Continue with Google'}
+              {loadingGoogle ? 'Signing in...' : 'Continue with Google'}
             </Text>
           </Pressable>
+
+          {Platform.OS === 'ios' && (
+            <View
+              style={{ opacity: loadingGoogle || loadingApple ? 0.7 : 1, width: '100%' }}
+              pointerEvents={loadingGoogle || loadingApple ? 'none' : 'auto'}
+            >
+              <AppleAuthentication.AppleAuthenticationButton
+                buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
+                buttonStyle={
+                  isDark
+                    ? AppleAuthentication.AppleAuthenticationButtonStyle.WHITE
+                    : AppleAuthentication.AppleAuthenticationButtonStyle.BLACK
+                }
+                cornerRadius={8}
+                style={{ width: '100%', height: 40 }}
+                onPress={handleAppleSignIn}
+              />
+            </View>
+          )}
         </View>
       </View>
 
@@ -220,8 +313,8 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   smallLogo: {
-    width: 32,
-    height: 32,
+    width: 24,
+    height: 24,
   },
   brandName: {
     fontSize: 16,
@@ -285,7 +378,7 @@ const styles = StyleSheet.create({
   },
   providersContainer: {
     width: '100%',
-    gap: 12,
+    gap: 16,
   },
   providerButton: {
     flexDirection: 'row',

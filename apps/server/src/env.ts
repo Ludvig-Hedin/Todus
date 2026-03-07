@@ -105,7 +105,14 @@ export type ZeroEnv = {
   DEFAULT_MODEL: string;
   OPENROUTER_API_KEY: string;
   DUB_API_KEY?: string;
+  APPLE_CLIENT_ID: string;
+  APPLE_TEAM_ID: string;
+  APPLE_KEY_ID: string;
+  APPLE_PRIVATE_KEY: string;
 };
 
-const env = _env as ZeroEnv;
-export { env };
+export let env = _env as ZeroEnv;
+
+export function setEnv(newEnv: ZeroEnv) {
+  env = newEnv;
+}

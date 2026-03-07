@@ -78,6 +78,19 @@ export const authProviders = (env: Record<string, string>): ProviderConfig[] => 
   //     },
   //     required: false,
   //   },
+  {
+    id: 'apple',
+    name: 'Apple',
+    requiredEnvVars: ['APPLE_CLIENT_ID', 'APPLE_TEAM_ID', 'APPLE_KEY_ID', 'APPLE_PRIVATE_KEY'],
+    config: {
+      clientId: env.APPLE_CLIENT_ID,
+      clientSecret: {
+        teamId: env.APPLE_TEAM_ID,
+        keyId: env.APPLE_KEY_ID,
+        privateKey: env.APPLE_PRIVATE_KEY,
+      },
+    },
+  },
 ];
 
 export function isProviderEnabled(provider: ProviderConfig, env: Record<string, string>): boolean {

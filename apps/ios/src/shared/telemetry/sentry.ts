@@ -1,25 +1,17 @@
 /**
- * Native Sentry client bootstrap and helpers.
+ * Sentry stubs — Sentry has been removed from the iOS app to eliminate
+ * Xcode build errors caused by missing org/project config. These no-op
+ * functions keep existing call sites from breaking.
+ * If you re-add Sentry later, replace these stubs with real implementations.
  */
-import * as Sentry from '@sentry/react-native';
 
-let sentryInitialized = false;
-
-export function initSentry(config: { dsn?: string; tunnel?: string }) {
-  if (!config.dsn || sentryInitialized) {
-    return;
-  }
-
-  Sentry.init({
-    dsn: config.dsn,
-    tunnel: config.tunnel,
-    debug: false,
-    tracesSampleRate: 1.0,
-  });
-
-  sentryInitialized = true;
+export function initSentry(_config: { dsn?: string; tunnel?: string }) {
+  // No-op: Sentry is not installed
 }
 
-export function captureSentryException(error: unknown, context?: Record<string, unknown>) {
-  Sentry.captureException(error, context ? { extra: context } : undefined);
+export function captureSentryException(_error: unknown, _context?: Record<string, unknown>) {
+  // No-op: Sentry is not installed — errors are only logged to console
+  if (__DEV__) {
+    console.warn('[Sentry stub] captureSentryException called but Sentry is not installed:', _error);
+  }
 }
