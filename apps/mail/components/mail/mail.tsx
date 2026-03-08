@@ -11,8 +11,10 @@ import { ResizablePanel, ResizablePanelGroup, ResizableHandle } from '@/componen
 import { useCommandPalette } from '../context/command-palette-context';
 import { useHotkeys, useHotkeysContext } from 'react-hotkeys-hook';
 import { ThreadDisplay } from '@/components/mail/thread-display';
+import { useMutation } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useActiveConnection } from '@/hooks/use-connections';
+import { useTRPC } from '@/providers/query-provider';
 import { Check, ChevronDown, RefreshCcw } from 'lucide-react';
 import { useMediaQuery } from '../../hooks/use-media-query';
 import useSearchLabels from '@/hooks/use-labels-search';
@@ -34,6 +36,11 @@ import { isMac } from '@/lib/platform';
 import { useQueryState } from 'nuqs';
 import { cn } from '@/lib/utils';
 import { useAtom } from 'jotai';
+
+const LOCAL_AUTO_SYNC_INTERVAL_MS = 60_000;
+const isLocalAutoSyncEnabled =
+  import.meta.env.DEV &&
+  String(import.meta.env.VITE_PUBLIC_BACKEND_URL ?? '').includes('localhost');
 
 // const AutoLabelingSettings = () => {
 //   const trpc = useTRPC();
@@ -325,6 +332,8 @@ export function MailLayout() {
   const { data: activeConnection } = useActiveConnection();
   const { activeFilters, clearAllFilters } = useCommandPalette();
   const [, setIsCommandPaletteOpen] = useQueryState('isCommandPaletteOpen');
+  const localAutoSyncInFlightRef = useRef(false);
+  const trpc = useTRPC();
 
   useEffect(() => {
     if (prevFolderRef.current !== folder && mail.bulkSelected.length > 0) {
@@ -337,9 +346,10 @@ export function MailLayout() {
     if (!session?.user && !isPending) {
       navigate('/login');
     }
-  }, [session?.user, isPending]);
+  }, [session?.user, isPending, navigate]);
 
   const [{ isFetching, refetch: refetchThreads }] = useThreads();
+  const { mutateAsync: forceSync } = useMutation(trpc.mail.forceSync.mutationOptions());
   const isDesktop = useMediaQuery('(min-width: 768px)');
 
   const [threadId] = useQueryState('threadId');
@@ -404,9 +414,63 @@ export function MailLayout() {
     setMail({ ...mail, bulkSelected: [] });
   }, [mail, setMail]);
 
+  const runLocalAutoSync = useCallback(async (skipWhenHidden: boolean = true) => {
+    if (!isLocalAutoSyncEnabled) return;
+    if (!session?.user?.id || !activeConnection?.id) return;
+    if (skipWhenHidden && typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+      return;
+    }
+    if (localAutoSyncInFlightRef.current) return;
+
+    localAutoSyncInFlightRef.current = true;
+
+    try {
+      await forceSync();
+      await refetchThreads();
+    } catch (error) {
+      console.error('Local auto-sync failed:', error);
+    } finally {
+      localAutoSyncInFlightRef.current = false;
+    }
+  }, [activeConnection?.id, forceSync, refetchThreads, session?.user?.id]);
+
   const handleRefetchThreads = useCallback(() => {
+    if (isLocalAutoSyncEnabled) {
+      void runLocalAutoSync(false);
+      return;
+    }
+
     refetchThreads();
-  }, [refetchThreads]);
+  }, [refetchThreads, runLocalAutoSync]);
+
+  useEffect(() => {
+    if (!isLocalAutoSyncEnabled) return;
+
+    void runLocalAutoSync(false);
+
+    const intervalId = window.setInterval(() => {
+      void runLocalAutoSync();
+    }, LOCAL_AUTO_SYNC_INTERVAL_MS);
+
+    const handleWindowFocus = () => {
+      void runLocalAutoSync();
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        void runLocalAutoSync();
+      }
+    };
+
+    window.addEventListener('focus', handleWindowFocus);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener('focus', handleWindowFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [runLocalAutoSync]);
 
   const handleOpenCommandPalette = useCallback(() => {
     setIsCommandPaletteOpen('true');

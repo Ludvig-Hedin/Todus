@@ -83,6 +83,13 @@
 - `apps/native` - Less complete than apps/ios, only kept for potential macOS React Native development
 - `apps/webview-swift` - Simple WebView wrapper, not a true native app
 
+## [2026-03-08] Local Mail Auto-Sync Fallback
+
+### Fixed
+
+- **Local Inbox Freshness**: Added a local-only auto-sync fallback that periodically triggers the existing `mail.forceSync` path and refreshes the inbox data, so new emails appear during local development without relying on Gmail push webhooks.
+- **Production Safety**: Kept this behavior gated to Vite dev sessions pointed at a localhost backend, leaving staging and production mail sync behavior unchanged.
+
 ## [2026-03-08] Local tRPC Rate Limit Fallback
 
 ### Fixed
