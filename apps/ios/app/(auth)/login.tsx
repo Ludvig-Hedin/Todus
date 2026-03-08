@@ -11,14 +11,13 @@ import {
   Text,
   View,
   useColorScheme,
-  Image,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getNativeEnv } from '../../src/shared/config/env';
 import { setBearerSessionAtom } from '../../src/shared/state/session';
 import { getSocialAuthUrl } from '../../src/features/auth/native-auth';
-import { GoogleColored } from '../../src/shared/components/icons';
+import { GoogleColored, LogoVector } from '../../src/shared/components/icons';
 
 // Required for expo-web-browser redirect handling
 WebBrowser.maybeCompleteAuthSession();
@@ -212,17 +211,9 @@ export default function LoginScreen() {
   return (
     <SafeAreaView style={[styles.safeArea, themeStyles.container]}>
       <StatusBar style={isDark ? 'light' : 'dark'} />
-      <View style={styles.topHeader}>
-        <Image
-          source={require('../../assets/brand-logo.png')}
-          style={[styles.smallLogo, themeStyles.logo]}
-          resizeMode="contain"
-        />
-        <Text style={[styles.brandName, themeStyles.title]}>Todus</Text>
-      </View>
-
       <View style={styles.content}>
         <View style={styles.headerContainer}>
+          <LogoVector width={17} height={17} style={[styles.symbolLogo, themeStyles.logo]} />
           <Text style={[styles.title, themeStyles.title]}>Welcome to Todus</Text>
           <Text style={[styles.subtitle, themeStyles.subtitle]}>Your AI agent for emails</Text>
           <Text style={[styles.description, themeStyles.description]}>Sign up for free with your email</Text>
@@ -268,8 +259,8 @@ export default function LoginScreen() {
                     ? AppleAuthentication.AppleAuthenticationButtonStyle.WHITE
                     : AppleAuthentication.AppleAuthenticationButtonStyle.BLACK
                 }
-                cornerRadius={8}
-                style={{ width: '100%', height: 40 }}
+                cornerRadius={24}
+                style={{ width: '100%', height: 48 }}
                 onPress={handleAppleSignIn}
               />
             </View>
@@ -305,26 +296,10 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
   },
-  topHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 32,
-    paddingTop: 16,
-    gap: 8,
-  },
-  smallLogo: {
-    width: 24,
-    height: 24,
-  },
-  brandName: {
-    fontSize: 16,
-    fontWeight: '600',
-    letterSpacing: -0.5,
-  },
   content: {
     flex: 1,
     justifyContent: 'center',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     paddingHorizontal: 32,
     maxWidth: 600,
     width: '100%',
@@ -332,20 +307,23 @@ const styles = StyleSheet.create({
   },
   headerContainer: {
     marginBottom: 32,
-    alignItems: 'flex-start',
+    alignItems: 'center',
     width: '100%',
+  },
+  symbolLogo: {
+    marginBottom: 12,
   },
   title: {
     fontSize: 24,
     fontWeight: '600',
-    textAlign: 'left',
+    textAlign: 'center',
     marginBottom: 0,
     letterSpacing: -0.5,
   },
   subtitle: {
     fontSize: 24,
     fontWeight: '600',
-    textAlign: 'left',
+    textAlign: 'center',
     opacity: 0.6,
     marginBottom: 16,
     letterSpacing: -0.5,
@@ -353,7 +331,7 @@ const styles = StyleSheet.create({
   description: {
     fontSize: 14,
     fontWeight: '400',
-    textAlign: 'left',
+    textAlign: 'center',
     opacity: 0.6,
   },
   errorBox: {
@@ -364,17 +342,20 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 16,
     marginBottom: 24,
+    alignItems: 'center',
   },
   errorTitle: {
     color: '#ef4444',
     fontWeight: '600',
     fontSize: 14,
     marginBottom: 4,
+    textAlign: 'center',
   },
   errorText: {
     color: '#ef4444',
     fontSize: 14,
     opacity: 0.8,
+    textAlign: 'center',
   },
   providersContainer: {
     width: '100%',
@@ -384,8 +365,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    height: 40,
-    borderRadius: 8,
+    height: 48,
+    borderRadius: 24,
     borderWidth: 1,
   },
   providerButtonDisabled: {
@@ -409,6 +390,7 @@ const styles = StyleSheet.create({
   footerLinkText: {
     fontSize: 13,
     fontWeight: '400',
+    textAlign: 'center',
   },
   dot: {
     width: 3,

@@ -88,6 +88,7 @@ pnpm submit:ios
 - OAuth login opens Google consent screen directly in a WebView (no intermediate web login page).
 - Bearer token stored in iOS Keychain via `expo-secure-store`.
 - TRPC queries use Bearer auth header for API calls.
+- Login screen uses the symbol-only Todus mark above the heading, centered copy, and 48px rounded auth buttons.
 
 ## App icon source of truth
 
