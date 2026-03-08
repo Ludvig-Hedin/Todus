@@ -4,6 +4,7 @@ import type { HonoContext, HonoVariables } from '../ctx';
 import { getConnInfo } from 'hono/cloudflare-workers';
 import { initTRPC, TRPCError } from '@trpc/server';
 import { createLoggingMiddleware } from '../lib/trpc-logging';
+import { env } from '../env';
 
 import { redis } from '../lib/services';
 import type { Context } from 'hono';
@@ -161,25 +162,36 @@ export const createRateLimiterMiddleware = (config: {
   generatePrefix: (ctx: TrpcContext, input: any) => string;
 }) =>
   t.middleware(async ({ next, ctx, input }) => {
-    const ratelimiter = new Ratelimit({
-      redis: redis(),
-      limiter: config.limiter,
-      analytics: true,
-      prefix: config.generatePrefix(ctx, input),
-    });
     const finalIp = getConnInfo(ctx.c).remote.address ?? 'no-ip';
-    const { success, limit, reset, remaining } = await ratelimiter.limit(finalIp);
+    const prefix = config.generatePrefix(ctx, input);
 
-    ctx.c.res.headers.append('X-RateLimit-Limit', limit.toString());
-    ctx.c.res.headers.append('X-RateLimit-Remaining', remaining.toString());
-    ctx.c.res.headers.append('X-RateLimit-Reset', reset.toString());
-
-    if (!success) {
-      console.log(`Rate limit exceeded for IP ${finalIp}.`);
-      throw new TRPCError({
-        code: 'TOO_MANY_REQUESTS',
-        message: 'Too many requests. Please try again later.',
+    try {
+      const ratelimiter = new Ratelimit({
+        redis: redis(),
+        limiter: config.limiter,
+        analytics: true,
+        prefix,
       });
+      const { success, limit, reset, remaining } = await ratelimiter.limit(finalIp);
+
+      ctx.c.res.headers.append('X-RateLimit-Limit', limit.toString());
+      ctx.c.res.headers.append('X-RateLimit-Remaining', remaining.toString());
+      ctx.c.res.headers.append('X-RateLimit-Reset', reset.toString());
+
+      if (!success) {
+        console.log(`Rate limit exceeded for IP ${finalIp}.`);
+        throw new TRPCError({
+          code: 'TOO_MANY_REQUESTS',
+          message: 'Too many requests. Please try again later.',
+        });
+      }
+    } catch (error) {
+      const canBypassInDev = env.NODE_ENV === 'local' || env.NODE_ENV === 'development';
+
+      if (!canBypassInDev) throw error;
+
+      console.warn(`Rate limiter unavailable for ${prefix}. Continuing without rate limiting.`, error);
+      ctx.c.res.headers.append('X-RateLimit-Bypass', 'redis-unavailable');
     }
 
     return next();
