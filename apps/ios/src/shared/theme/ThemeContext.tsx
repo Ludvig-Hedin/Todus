@@ -3,13 +3,7 @@
  * Uses the shared web tokens, then derives a denser native surface system
  * so screens stay visually consistent without each one hardcoding shades.
  */
-import {
-  semanticColors,
-  spacing,
-  typography,
-  radius,
-  type ColorMode,
-} from '@zero/design-tokens';
+import { semanticColors, spacing, typography, radius, type ColorMode } from '@zero/design-tokens';
 import { createContext, useContext, useMemo, type PropsWithChildren } from 'react';
 import { useColorScheme } from 'react-native';
 
@@ -74,24 +68,28 @@ export function useTheme(): ThemeContextValue {
 
 function createNativeUiTokens(colorMode: ColorMode): NativeUiTokens {
   const isDark = colorMode === 'dark';
+  const darkInk = '#f2f0eb';
+  const lightInk = '#1f1d1a';
+  const darkAccent = '#8d8479';
+  const lightAccent = '#6f675e';
 
   return {
-    canvas: isDark ? '#090b0e' : '#f3f2ef',
-    surface: isDark ? '#111418' : '#fbfaf7',
-    surfaceMuted: isDark ? '#161a1f' : '#f1efea',
-    surfaceRaised: isDark ? '#1b2026' : '#ffffff',
-    surfaceInset: isDark ? '#0d1014' : '#ece8e1',
-    borderSubtle: isDark ? withAlpha('#ffffff', 0.08) : withAlpha('#111827', 0.08),
-    borderStrong: isDark ? withAlpha('#ffffff', 0.14) : withAlpha('#111827', 0.12),
-    pressed: isDark ? '#21262d' : '#e8e5de',
-    accent: isDark ? '#8ba0dd' : '#5d74ba',
-    accentSoft: isDark ? withAlpha('#8ba0dd', 0.2) : withAlpha('#5d74ba', 0.12),
-    accentMuted: isDark ? withAlpha('#8ba0dd', 0.12) : withAlpha('#5d74ba', 0.07),
-    avatar: isDark ? '#232932' : '#e9e5de',
-    avatarText: isDark ? '#f3f3f1' : '#252a31',
-    shadow: isDark ? '#050608' : '#111827',
-    overlay: isDark ? withAlpha('#090b0e', 0.72) : withAlpha('#111827', 0.16),
-    warning: isDark ? '#b9a06a' : '#8b7242',
+    canvas: isDark ? '#0b0b0c' : '#f6f5f2',
+    surface: isDark ? '#111214' : '#ffffff',
+    surfaceMuted: isDark ? '#17181a' : '#f0efea',
+    surfaceRaised: isDark ? '#101113' : '#fbfaf7',
+    surfaceInset: isDark ? '#0e0f11' : '#ebe9e3',
+    borderSubtle: isDark ? withAlpha(darkInk, 0.08) : withAlpha(lightInk, 0.08),
+    borderStrong: isDark ? withAlpha(darkInk, 0.14) : withAlpha(lightInk, 0.12),
+    pressed: isDark ? '#202124' : '#e7e5de',
+    accent: isDark ? darkAccent : lightAccent,
+    accentSoft: isDark ? withAlpha(darkAccent, 0.2) : withAlpha(lightAccent, 0.12),
+    accentMuted: isDark ? withAlpha(darkAccent, 0.12) : withAlpha(lightAccent, 0.08),
+    avatar: isDark ? '#232428' : '#e6e3dc',
+    avatarText: isDark ? darkInk : lightInk,
+    shadow: isDark ? '#040405' : lightInk,
+    overlay: isDark ? withAlpha('#0b0b0c', 0.72) : withAlpha(lightInk, 0.16),
+    warning: isDark ? '#baa070' : '#876d3a',
   };
 }
 
@@ -100,9 +98,9 @@ function withAlpha(hex: string, alpha: number): string {
   const safeHex =
     normalized.length === 3
       ? normalized
-        .split('')
-        .map((char) => `${char}${char}`)
-        .join('')
+          .split('')
+          .map((char) => `${char}${char}`)
+          .join('')
       : normalized;
 
   const red = parseInt(safeHex.slice(0, 2), 16);

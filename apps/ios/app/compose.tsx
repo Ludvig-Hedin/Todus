@@ -43,6 +43,7 @@ import {
   useEditorContent,
 } from '@10play/tentap-editor';
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
+import { Clock3, FileText, Keyboard, Paperclip, X } from 'lucide-react-native';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -118,6 +119,7 @@ export default function ComposeScreen() {
   const [showSaveTemplateModal, setShowSaveTemplateModal] = useState(false);
   const [templateName, setTemplateName] = useState('');
   const [templateSearch, setTemplateSearch] = useState('');
+  const [showFormatting, setShowFormatting] = useState(false);
   const [, setPendingUndoSend] = useAtom(pendingUndoSendAtom);
   const [undoComposePrefill, setUndoComposePrefill] = useAtom(undoComposePrefillAtom);
   const pendingUndoPayloadRef = useRef<{
@@ -279,7 +281,7 @@ export default function ComposeScreen() {
       editor.injectCSS(editorCss, 'compose-editor-css');
       appliedEditorCssRef.current = editorCss;
     }
-    editor.setPlaceholder('Write your message...');
+    editor.setPlaceholder('Send a message');
   }, [editor, editorCss, editorState.isReady]);
 
   // If replying/forwarding, fetch thread data to prefill fields
@@ -812,6 +814,7 @@ export default function ComposeScreen() {
   const scheduleLabel = scheduleAt ? formatScheduleLabel(scheduleAt) : 'Send later';
   const isReplying = params.mode === 'reply' || params.mode === 'replyAll';
   const title = isReplying ? 'Reply' : params.mode === 'forward' ? 'Forward' : 'New Message';
+  const headerTitle = title === 'New Message' ? 'New\nMessage' : title;
 
   return (
     <KeyboardAvoidingView
@@ -829,24 +832,35 @@ export default function ComposeScreen() {
         ]}
       >
         <View style={styles.headerRow}>
-          <View style={styles.headerSideStart}>
-            <Pressable
-              style={[
-                styles.cancelButton,
-                { backgroundColor: ui.surface, borderColor: ui.borderSubtle },
-              ]}
-              onPress={() => router.back()}
-            >
-              <Text style={[styles.cancelText, { color: colors.foreground }]}>Cancel</Text>
-            </Pressable>
-          </View>
+          <Pressable
+            style={[
+              styles.headerIconButton,
+              { backgroundColor: ui.surface, borderColor: ui.borderSubtle },
+            ]}
+            onPress={() => router.back()}
+          >
+            <X size={26} color={colors.foreground} strokeWidth={2.1} />
+          </Pressable>
           <View style={styles.headerCenter}>
-            <Text style={[styles.headerTitle, { color: colors.foreground }]}>{title}</Text>
+            <Text style={[styles.headerTitle, { color: colors.foreground }]}>{headerTitle}</Text>
           </View>
           <View style={styles.headerSideEnd}>
             <Pressable
               style={[
-                styles.headerSecondaryButton,
+                styles.headerIconButton,
+                {
+                  borderColor: ui.borderSubtle,
+                  backgroundColor: ui.surface,
+                },
+              ]}
+              onPress={pickAttachments}
+              disabled={sendMutation.isPending}
+            >
+              <Paperclip size={22} color={colors.foreground} strokeWidth={2} />
+            </Pressable>
+            <Pressable
+              style={[
+                styles.headerIconButton,
                 {
                   borderColor: ui.borderSubtle,
                   backgroundColor: ui.surface,
@@ -855,13 +869,13 @@ export default function ComposeScreen() {
               onPress={openSchedulePicker}
               disabled={sendMutation.isPending}
             >
-              <Text style={[styles.headerSecondaryText, { color: colors.foreground }]}>Later</Text>
+              <Clock3 size={22} color={colors.foreground} strokeWidth={2} />
             </Pressable>
             <Pressable
               style={[
                 styles.sendButton,
                 {
-                  backgroundColor: sendMutation.isPending ? ui.surfaceInset : colors.primary,
+                  backgroundColor: sendMutation.isPending ? ui.surfaceInset : colors.foreground,
                   shadowColor: ui.shadow,
                 },
               ]}
@@ -872,29 +886,30 @@ export default function ComposeScreen() {
                 style={[
                   styles.sendText,
                   {
-                    color: sendMutation.isPending
-                      ? colors.mutedForeground
-                      : colors.primaryForeground,
+                    color: sendMutation.isPending ? colors.mutedForeground : ui.canvas,
                   },
                 ]}
               >
-                {sendMutation.isPending ? 'Sending...' : scheduleAt ? 'Schedule' : 'Send'}
+                {sendMutation.isPending ? 'Sending...' : 'Send'}
               </Text>
             </Pressable>
           </View>
         </View>
       </View>
 
-      <View style={[styles.form, { backgroundColor: ui.surfaceRaised }]}>
+      <View style={[styles.form, { backgroundColor: ui.canvas }]}>
         <View
-          style={[styles.fieldsCard, { borderColor: ui.borderSubtle, backgroundColor: ui.surface }]}
+          style={[
+            styles.composeShell,
+            { borderColor: ui.borderSubtle, backgroundColor: ui.surface },
+          ]}
         >
           <View style={[styles.fieldRow, { borderBottomColor: ui.borderSubtle }]}>
             <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>To:</Text>
             <TextInput
               style={[styles.fieldInput, { color: colors.foreground }]}
               placeholderTextColor={colors.mutedForeground}
-              placeholder="Recipients"
+              placeholder="Add an email"
               value={to}
               onChangeText={setTo}
               keyboardType="email-address"
@@ -921,7 +936,7 @@ export default function ComposeScreen() {
                 <TextInput
                   style={[styles.fieldInput, { color: colors.foreground }]}
                   placeholderTextColor={colors.mutedForeground}
-                  placeholder="CC recipients"
+                  placeholder="Cc"
                   value={cc}
                   onChangeText={setCc}
                   keyboardType="email-address"
@@ -934,7 +949,7 @@ export default function ComposeScreen() {
                 <TextInput
                   style={[styles.fieldInput, { color: colors.foreground }]}
                   placeholderTextColor={colors.mutedForeground}
-                  placeholder="BCC recipients"
+                  placeholder="Bcc"
                   value={bcc}
                   onChangeText={setBcc}
                   keyboardType="email-address"
@@ -956,98 +971,108 @@ export default function ComposeScreen() {
             />
           </View>
 
-          <View style={[styles.attachmentRow, { borderBottomColor: ui.borderSubtle }]}>
-            <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>When:</Text>
-            <Pressable
-              style={[
-                styles.inlineButton,
-                { borderColor: ui.borderSubtle, backgroundColor: ui.surfaceInset },
-              ]}
-              onPress={openSchedulePicker}
-            >
-              <Text style={[styles.inlineButtonText, { color: colors.foreground }]}>
-                {scheduleLabel}
-              </Text>
-            </Pressable>
-            {scheduleAt && (
+          {scheduleAt ? (
+            <View style={[styles.metaRow, { borderBottomColor: ui.borderSubtle }]}>
+              <Pressable
+                style={[
+                  styles.metaChip,
+                  { borderColor: ui.borderSubtle, backgroundColor: ui.surfaceInset },
+                ]}
+                onPress={openSchedulePicker}
+              >
+                <Clock3 size={14} color={colors.foreground} strokeWidth={2} />
+                <Text style={[styles.metaChipText, { color: colors.foreground }]}>
+                  {scheduleLabel}
+                </Text>
+              </Pressable>
               <Pressable onPress={clearSchedule}>
                 <Text style={styles.clearInlineText}>Clear</Text>
               </Pressable>
-            )}
-          </View>
-
-          <View style={[styles.attachmentRow, { borderBottomColor: ui.borderSubtle }]}>
-            <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>Template:</Text>
-            <View style={styles.inlineActions}>
-              <Pressable
-                style={[
-                  styles.inlineButton,
-                  { borderColor: ui.borderSubtle, backgroundColor: ui.surfaceInset },
-                ]}
-                onPress={() => setShowTemplatesModal(true)}
-              >
-                <Text style={[styles.inlineButtonText, { color: colors.foreground }]}>Use</Text>
-              </Pressable>
-              <Pressable
-                style={[
-                  styles.inlineButton,
-                  { borderColor: ui.borderSubtle, backgroundColor: ui.surfaceInset },
-                ]}
-                onPress={() => setShowSaveTemplateModal(true)}
-              >
-                <Text style={[styles.inlineButtonText, { color: colors.foreground }]}>Save</Text>
-              </Pressable>
             </View>
-          </View>
-
-          <View style={[styles.attachmentRow, { borderBottomColor: ui.borderSubtle }]}>
-            <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>Attach:</Text>
-            <Pressable
-              style={[styles.attachmentButton, { backgroundColor: ui.surfaceInset }]}
-              onPress={pickAttachments}
-            >
-              <Text style={[styles.attachmentButtonText, { color: colors.foreground }]}>
-                Add File
-              </Text>
-            </Pressable>
-          </View>
+          ) : null}
 
           {attachments.length > 0 && (
-            <View style={[styles.attachmentsList, { borderBottomColor: ui.borderSubtle }]}>
-              {attachments.map((attachment, index) => (
-                <View key={`${attachment.name}-${index}`} style={styles.attachmentItem}>
-                  <View style={styles.attachmentMeta}>
-                    <Text style={[styles.attachmentName, { color: colors.foreground }]}>
+            <View style={[styles.attachmentsTray, { borderBottomColor: ui.borderSubtle }]}>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.attachmentsTrayContent}
+              >
+                {attachments.map((attachment, index) => (
+                  <View
+                    key={`${attachment.name}-${index}`}
+                    style={[
+                      styles.attachmentChip,
+                      { backgroundColor: ui.surfaceInset, borderColor: ui.borderSubtle },
+                    ]}
+                  >
+                    <Paperclip size={13} color={colors.mutedForeground} strokeWidth={2} />
+                    <Text
+                      numberOfLines={1}
+                      style={[styles.attachmentChipText, { color: colors.foreground }]}
+                    >
                       {attachment.name}
                     </Text>
-                    <Text style={[styles.attachmentSize, { color: colors.mutedForeground }]}>
-                      {Math.max(1, Math.round(attachment.size / 1024))} KB
-                    </Text>
+                    <Pressable onPress={() => removeAttachment(attachment.name, index)}>
+                      <X size={14} color={colors.mutedForeground} strokeWidth={2.2} />
+                    </Pressable>
                   </View>
-                  <Pressable onPress={() => removeAttachment(attachment.name, index)}>
-                    <Text style={styles.clearInlineText}>Remove</Text>
-                  </Pressable>
-                </View>
-              ))}
+                ))}
+              </ScrollView>
             </View>
           )}
+
+          <View style={styles.bodyContainer}>
+            <RichText
+              editor={editor}
+              style={[
+                styles.richText,
+                {
+                  backgroundColor: 'transparent',
+                  borderColor: 'transparent',
+                },
+              ]}
+            />
+          </View>
+
+          <View style={[styles.utilityBar, { borderTopColor: ui.borderSubtle }]}>
+            <View style={styles.utilityBarLeft}>
+              <Pressable
+                style={styles.utilityButton}
+                onPress={() => setShowFormatting((current) => !current)}
+              >
+                <Text style={[styles.utilityAaText, { color: colors.foreground }]}>Aa</Text>
+              </Pressable>
+              <Pressable style={styles.utilityButton} onPress={() => setShowTemplatesModal(true)}>
+                <FileText size={18} color={colors.foreground} strokeWidth={2} />
+              </Pressable>
+              <Pressable
+                style={styles.utilityButton}
+                onPress={() => setShowSaveTemplateModal(true)}
+              >
+                <Text style={[styles.utilityLabel, { color: colors.foreground }]}>Save</Text>
+              </Pressable>
+            </View>
+            {showFormatting ? (
+              <Pressable style={styles.utilityButton} onPress={() => setShowFormatting(false)}>
+                <Keyboard size={18} color={colors.foreground} strokeWidth={2} />
+              </Pressable>
+            ) : (
+              <View style={styles.utilitySpacer} />
+            )}
+          </View>
         </View>
 
-        <View style={styles.bodyContainer}>
-          <RichText
-            editor={editor}
+        {showFormatting ? (
+          <View
             style={[
-              styles.richText,
-              {
-                backgroundColor: ui.surface,
-                borderColor: ui.borderSubtle,
-              },
+              styles.toolbarContainer,
+              { borderColor: ui.borderSubtle, backgroundColor: ui.surface },
             ]}
-          />
-        </View>
-        <View style={[styles.toolbarContainer, { borderTopColor: ui.borderSubtle }]}>
-          <Toolbar editor={editor} />
-        </View>
+          >
+            <Toolbar editor={editor} />
+          </View>
+        ) : null}
       </View>
 
       {Platform.OS === 'android' && androidPickerMode ? (
@@ -1381,151 +1406,119 @@ const styles = StyleSheet.create({
   },
   header: {
     paddingHorizontal: 16,
-    paddingBottom: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingBottom: 8,
   },
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    minHeight: 44,
-  },
-  headerSideStart: {
-    width: 96,
-    alignItems: 'flex-start',
-    justifyContent: 'center',
+    gap: 12,
   },
   headerCenter: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 8,
+    minHeight: 64,
   },
   headerSideEnd: {
-    width: 188,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-end',
     gap: 8,
   },
-  cancelButton: {
-    minHeight: 36,
+  headerIconButton: {
+    height: 48,
+    width: 48,
     justifyContent: 'center',
-    paddingHorizontal: 12,
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 12,
-  },
-  cancelText: {
-    fontSize: 13,
-    fontWeight: '500',
+    borderRadius: 24,
+    alignItems: 'center',
   },
   headerTitle: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: '700',
-    letterSpacing: -0.2,
-  },
-  headerSecondaryButton: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 12,
-    minHeight: 36,
-    minWidth: 72,
-    paddingHorizontal: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerSecondaryText: {
-    fontSize: 13,
-    fontWeight: '600',
+    letterSpacing: -0.5,
+    lineHeight: 22,
+    textAlign: 'center',
   },
   sendButton: {
-    minHeight: 36,
+    minHeight: 48,
     minWidth: 96,
-    paddingHorizontal: 16,
+    paddingHorizontal: 22,
     paddingVertical: 8,
-    borderRadius: 12,
+    borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
     shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.12,
-    shadowRadius: 18,
+    shadowOpacity: 0.1,
+    shadowRadius: 24,
     elevation: 4,
   },
   sendText: {
-    fontSize: 13,
+    fontSize: 16,
     fontWeight: '700',
   },
   form: {
     flex: 1,
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+    gap: 10,
   },
-  fieldsCard: {
-    marginHorizontal: 12,
-    marginTop: 12,
+  composeShell: {
+    flex: 1,
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 22,
+    borderRadius: 28,
     overflow: 'hidden',
   },
   fieldRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    minHeight: 52,
-    paddingHorizontal: 16,
-    paddingVertical: 11,
+    minHeight: 58,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   fieldLabel: {
-    fontSize: 13,
-    width: 78,
-    minWidth: 78,
+    fontSize: 15,
+    width: 72,
+    minWidth: 72,
     flexShrink: 0,
     fontWeight: '500',
   },
   fieldInput: {
     flex: 1,
-    fontSize: 14,
-    lineHeight: 19,
+    fontSize: 15,
+    lineHeight: 20,
     paddingVertical: 4,
     paddingHorizontal: 0,
   },
   ccToggleButton: {
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  ccToggle: {
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  attachmentRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    minHeight: 50,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    gap: 8,
-  },
-  attachmentButton: {
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-  },
-  attachmentButtonText: {
-    fontWeight: '600',
-    fontSize: 12,
-  },
-  inlineActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    flexWrap: 'wrap',
-  },
-  inlineButton: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
-  inlineButtonText: {
+  ccToggle: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    gap: 10,
+  },
+  metaChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  metaChipText: {
     fontWeight: '500',
     fontSize: 12,
   },
@@ -1534,45 +1527,72 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontSize: 12,
   },
-  attachmentsList: {
+  attachmentsTray: {
     borderBottomWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingVertical: 12,
+  },
+  attachmentsTrayContent: {
+    paddingHorizontal: 18,
     gap: 8,
   },
-  attachmentItem: {
+  attachmentChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     gap: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 999,
+    paddingLeft: 12,
+    paddingRight: 10,
+    paddingVertical: 9,
+    maxWidth: 240,
   },
-  attachmentMeta: {
-    flex: 1,
-    gap: 2,
-  },
-  attachmentName: {
-    fontSize: 13,
+  attachmentChipText: {
+    flexShrink: 1,
+    fontSize: 12,
     fontWeight: '500',
-  },
-  attachmentSize: {
-    fontSize: 11,
   },
   bodyContainer: {
     flex: 1,
-    paddingHorizontal: 12,
-    paddingTop: 12,
-    paddingBottom: 8,
+    paddingTop: 6,
   },
   richText: {
     flex: 1,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 22,
     overflow: 'hidden',
   },
-  toolbarContainer: {
+  utilityBar: {
+    minHeight: 56,
+    paddingHorizontal: 18,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     borderTopWidth: StyleSheet.hairlineWidth,
-    paddingTop: 0,
-    paddingBottom: 0,
+  },
+  utilityBarLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 18,
+  },
+  utilityButton: {
+    minHeight: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  utilityAaText: {
+    fontSize: 18,
+    fontWeight: '500',
+    letterSpacing: -0.2,
+  },
+  utilityLabel: {
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  utilitySpacer: {
+    width: 18,
+  },
+  toolbarContainer: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 24,
+    overflow: 'hidden',
   },
   modalScrim: {
     flex: 1,

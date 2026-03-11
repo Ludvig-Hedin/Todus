@@ -14,6 +14,7 @@ export default function SettingsLayout() {
         headerStyle: { backgroundColor: ui.canvas },
         headerTintColor: colors.foreground,
         statusBarStyle: isDark ? 'light' : 'dark',
+        headerBackButtonDisplayMode: 'minimal',
         headerShadowVisible: false,
         headerTitleStyle: {
           fontSize: typography.size.md,

@@ -29,8 +29,9 @@ import { ShardRegistry, ZeroAgent, ZeroDriver } from './routes/agent';
 import { ThreadSyncWorker } from './routes/agent/sync-worker';
 import { oAuthDiscoveryMetadata } from 'better-auth/plugins';
 import { EProviders, type IEmailSendBatch } from './types';
-import { eq, and, desc, asc, inArray } from 'drizzle-orm';
+import { eq, and, desc, asc, inArray, gt } from 'drizzle-orm';
 import { ThinkingMCP } from './lib/sequential-thinking';
+import { serializeSignedCookie } from 'better-call';
 
 import { contextStorage } from 'hono/context-storage';
 import { defaultUserSettings } from './lib/schemas';
@@ -747,6 +748,77 @@ const api = new Hono<HonoContext>()
 <script>window.location.href=${JSON.stringify(deepLink)};</script>
 </body>
 </html>`);
+  })
+  .post('/auth/native-link-social', async (c) => {
+    const auth = c.var.auth;
+    const sessionUser = c.var.sessionUser;
+    const authHeader = c.req.header('Authorization');
+
+    if (!sessionUser?.id || !authHeader?.startsWith('Bearer ')) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
+    const rawToken = authHeader.slice('Bearer '.length).trim();
+    if (!rawToken) {
+      return c.json({ error: 'Missing bearer token' }, 401);
+    }
+
+    const { provider, callbackURL, disableRedirect, errorCallbackURL, scopes, requestSignUp } =
+      await c.req.json<{
+        provider: string;
+        callbackURL?: string;
+        disableRedirect?: boolean;
+        errorCallbackURL?: string;
+        scopes?: string[];
+        requestSignUp?: boolean;
+      }>();
+
+    const { db } = createDb(env.HYPERDRIVE.connectionString);
+    const [activeSession] = await db
+      .select({ token: session.token })
+      .from(session)
+      .where(and(eq(session.userId, sessionUser.id), gt(session.expiresAt, new Date())))
+      .orderBy(desc(session.updatedAt), desc(session.createdAt))
+      .limit(1);
+
+    if (!activeSession?.token) {
+      return c.json(
+        { error: 'No active Better Auth session found for account linking.' },
+        401,
+      );
+    }
+
+    const cookiePrefix = env.NODE_ENV === 'development' ? 'better-auth-dev' : 'better-auth';
+    const signedSessionToken = (
+      await serializeSignedCookie('', activeSession.token, env.BETTER_AUTH_SECRET)
+    ).replace('=', '');
+
+    const forwardedHeaders = new Headers(c.req.raw.headers);
+    forwardedHeaders.delete('authorization');
+    forwardedHeaders.set(
+      'cookie',
+      `${cookiePrefix}.session_token=${encodeURIComponent(signedSessionToken)}`,
+    );
+    forwardedHeaders.set('content-type', 'application/json');
+
+    const forwardedRequest = new Request(
+      new URL('/api/auth/link-social', c.req.url).toString(),
+      {
+        method: 'POST',
+        headers: forwardedHeaders,
+        body: JSON.stringify({
+          provider,
+          callbackURL,
+          disableRedirect,
+          errorCallbackURL,
+          scopes,
+          requestSignUp,
+        }),
+        redirect: 'manual',
+      },
+    );
+
+    return await auth.handler(forwardedRequest);
   })
   .on(['GET', 'POST', 'OPTIONS'], '/auth/*', async (c) => {
     try {

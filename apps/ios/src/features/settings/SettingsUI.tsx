@@ -23,9 +23,7 @@ export function SettingsCard({ children }: { children: ReactNode }) {
       style={[
         styles.card,
         {
-          backgroundColor: ui.surfaceRaised,
           borderColor: ui.borderSubtle,
-          shadowColor: ui.shadow,
         },
       ]}
     >
@@ -69,7 +67,7 @@ export function SettingsTextInput({
         styles.input,
         {
           color: colors.foreground,
-          backgroundColor: ui.surface,
+          backgroundColor: ui.surfaceMuted,
           borderColor: ui.borderStrong,
         },
       ]}
@@ -91,8 +89,8 @@ export function SettingsToggle({
       value={value}
       onValueChange={onValueChange}
       ios_backgroundColor={ui.surfaceMuted}
-      trackColor={{ false: ui.surfaceMuted, true: colors.foreground }}
-      thumbColor={value ? ui.surface : colors.foreground}
+      trackColor={{ false: ui.surfaceMuted, true: ui.accent }}
+      thumbColor={value ? '#f3f1ec' : '#d9d5cf'}
     />
   );
 }
@@ -115,7 +113,7 @@ export function SettingsSwitchRow({
         styles.row,
         {
           borderColor: value ? ui.borderStrong : ui.borderSubtle,
-          backgroundColor: value ? ui.surface : ui.surfaceInset,
+          backgroundColor: value ? ui.surfaceMuted : 'transparent',
         },
       ]}
     >
@@ -132,15 +130,15 @@ export function SettingsSwitchRow({
           style={[
             styles.stateBadge,
             {
-              backgroundColor: value ? colors.foreground : ui.surfaceMuted,
-              borderColor: value ? colors.foreground : ui.borderSubtle,
+              backgroundColor: value ? ui.accentSoft : ui.surfaceMuted,
+              borderColor: value ? ui.accent : ui.borderSubtle,
             },
           ]}
         >
           <Text
             style={[
               styles.stateBadgeText,
-              { color: value ? colors.background : colors.mutedForeground },
+              { color: value ? colors.foreground : colors.mutedForeground },
             ]}
           >
             {value ? 'On' : 'Off'}
@@ -169,7 +167,7 @@ export function SettingsOptionGroup<T extends string>({
         styles.optionGroup,
         {
           borderColor: ui.borderSubtle,
-          backgroundColor: ui.surfaceMuted,
+          backgroundColor: 'transparent',
         },
       ]}
     >
@@ -182,8 +180,8 @@ export function SettingsOptionGroup<T extends string>({
             style={[
               styles.optionRow,
               {
-                backgroundColor: selected ? colors.foreground : ui.surface,
-                borderColor: selected ? colors.foreground : ui.borderSubtle,
+                backgroundColor: selected ? ui.accentSoft : ui.surfaceMuted,
+                borderColor: selected ? ui.accent : ui.borderSubtle,
                 marginBottom: isLast ? 0 : 6,
               },
             ]}
@@ -191,27 +189,18 @@ export function SettingsOptionGroup<T extends string>({
             accessibilityRole="radio"
             accessibilityState={{ selected }}
           >
-            <Text
-              style={[
-                styles.optionLabel,
-                { color: selected ? colors.background : colors.foreground },
-              ]}
-            >
-              {option.label}
-            </Text>
+            <Text style={[styles.optionLabel, { color: colors.foreground }]}>{option.label}</Text>
             <View
               style={[
                 styles.optionIndicator,
                 {
-                  backgroundColor: selected ? colors.background : 'transparent',
-                  borderColor: selected ? colors.background : ui.borderStrong,
+                  backgroundColor: selected ? ui.accent : 'transparent',
+                  borderColor: selected ? ui.accent : ui.borderStrong,
                 },
               ]}
             >
               {selected ? (
-                <View
-                  style={[styles.optionIndicatorInner, { backgroundColor: colors.foreground }]}
-                />
+                <View style={[styles.optionIndicatorInner, { backgroundColor: '#f3f1ec' }]} />
               ) : null}
             </View>
           </Pressable>
@@ -233,18 +222,18 @@ export function SettingsButton({
   disabled?: boolean;
 }) {
   const { colors, ui } = useTheme();
-  const backgroundColor =
-    variant === 'primary'
-      ? colors.foreground
-      : variant === 'destructive'
-        ? colors.destructive
-        : ui.surface;
-  const textColor =
-    variant === 'primary'
-      ? colors.background
-      : variant === 'destructive'
-        ? colors.destructiveForeground
-        : colors.foreground;
+  const isPrimary = variant === 'primary';
+  const isDestructive = variant === 'destructive';
+  const backgroundColor = isPrimary
+    ? colors.primary
+    : isDestructive
+      ? colors.destructive
+      : ui.surfaceMuted;
+  const textColor = isPrimary
+    ? colors.primaryForeground
+    : isDestructive
+      ? colors.destructiveForeground
+      : colors.foreground;
 
   return (
     <Pressable
@@ -255,14 +244,13 @@ export function SettingsButton({
         {
           backgroundColor:
             pressed && !disabled
-              ? variant === 'primary'
-                ? colors.mutedForeground
-                : variant === 'destructive'
+              ? isPrimary
+                ? ui.accent
+                : isDestructive
                   ? colors.destructive
-                  : ui.surfaceInset
+                  : ui.pressed
               : backgroundColor,
-          borderColor:
-            variant === 'primary' || variant === 'destructive' ? backgroundColor : ui.borderStrong,
+          borderColor: isPrimary || isDestructive ? backgroundColor : ui.borderSubtle,
           opacity: disabled ? 0.5 : 1,
         },
       ]}
@@ -275,45 +263,41 @@ export function SettingsButton({
 const styles = StyleSheet.create({
   container: { flex: 1 },
   content: {
-    padding: 16,
-    gap: 14,
+    paddingHorizontal: 20,
+    paddingTop: 14,
+    gap: 24,
   },
   card: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 22,
-    padding: 16,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingBottom: 20,
     gap: 12,
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.06,
-    shadowRadius: 18,
-    elevation: 2,
   },
   sectionTitle: {
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: '700',
     textTransform: 'uppercase',
-    letterSpacing: 0.6,
+    letterSpacing: 0.2,
   },
   description: {
-    fontSize: 12,
-    lineHeight: 17,
+    fontSize: 13,
+    lineHeight: 19,
   },
   fieldLabel: {
     fontSize: 13,
-    fontWeight: '500',
+    fontWeight: '600',
   },
   input: {
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    borderRadius: 15,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
     fontSize: 14,
   },
   row: {
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 11,
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -321,7 +305,7 @@ const styles = StyleSheet.create({
   },
   rowText: {
     flex: 1,
-    gap: 4,
+    gap: 3,
   },
   rowTrailing: {
     flexDirection: 'row',
@@ -330,37 +314,37 @@ const styles = StyleSheet.create({
   },
   rowLabel: {
     fontSize: 14,
-    fontWeight: '500',
+    fontWeight: '600',
   },
   rowDescription: {
     fontSize: 12,
-    lineHeight: 16,
+    lineHeight: 15,
   },
   stateBadge: {
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 999,
     paddingHorizontal: 10,
-    paddingVertical: 5,
+    paddingVertical: 4,
     minWidth: 42,
     alignItems: 'center',
   },
   stateBadgeText: {
     fontSize: 11,
     fontWeight: '700',
-    letterSpacing: 0.2,
+    letterSpacing: 0.1,
     textTransform: 'uppercase',
   },
   optionGroup: {
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 18,
-    padding: 6,
+    borderRadius: 20,
+    padding: 0,
+    overflow: 'hidden',
   },
   optionRow: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 14,
-    minHeight: 52,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    minHeight: 54,
+    paddingHorizontal: 16,
+    paddingVertical: 13,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -371,22 +355,22 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   optionIndicator: {
-    width: 20,
-    height: 20,
+    width: 18,
+    height: 18,
     borderRadius: 999,
     borderWidth: 1.5,
     alignItems: 'center',
     justifyContent: 'center',
   },
   optionIndicatorInner: {
-    width: 8,
-    height: 8,
+    width: 6,
+    height: 6,
     borderRadius: 999,
   },
   button: {
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 16,
-    paddingHorizontal: 14,
+    paddingHorizontal: 15,
     paddingVertical: 12,
     alignItems: 'center',
     justifyContent: 'center',

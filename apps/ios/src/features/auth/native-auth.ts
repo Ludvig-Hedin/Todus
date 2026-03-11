@@ -85,6 +85,54 @@ export async function getSocialAuthUrl(
   return data.url;
 }
 
+/** Calls the native bridge for better-auth link-social to attach another provider account. */
+export async function getLinkSocialAuthUrl(
+  backendUrl: string,
+  webUrl: string,
+  token: string,
+  provider: string,
+  callbackUrl: string,
+): Promise<string> {
+  const normalizedBackend = backendUrl.replace(/\/$/, '');
+  const normalizedWeb = webUrl.replace(/\/$/, '');
+
+  const response = await fetch(`${normalizedBackend}/api/auth/native-link-social`, {
+    method: 'POST',
+    redirect: 'manual',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      Origin: normalizedWeb,
+    },
+    body: JSON.stringify({
+      provider,
+      callbackURL: callbackUrl,
+      disableRedirect: true,
+    }),
+  });
+
+  if (response.status >= 300 && response.status < 400) {
+    const location = response.headers.get('Location');
+    if (location) {
+      return location;
+    }
+    throw new Error('Redirect response without Location header');
+  }
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => '');
+    throw new Error(`Link-social request failed (${response.status}): ${body}`);
+  }
+
+  const data = (await response.json()) as { url?: string };
+
+  if (!data.url) {
+    throw new Error('No link-social URL returned from server');
+  }
+
+  return data.url;
+}
+
 /** Returns the web app login URL as fallback when direct API call fails. */
 export function getWebLoginUrl(webUrl: string): string {
   return `${webUrl.replace(/\/$/, '')}/login`;

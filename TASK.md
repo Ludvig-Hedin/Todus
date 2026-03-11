@@ -300,12 +300,16 @@ All marked DONE — these are WebView-based, not truly native.
 - Login/auth flow remains untouched in this stream per ownership constraint.
 - `N3-09` and `N5-06` are now complete in iOS scope with native unit coverage; workspace-level server/packages type instability still exists but no longer blocks M3/M5 native parity tests.
 - 2026-03-11 follow-up: fixed the iOS mail read/unread optimistic rollback implementation in `apps/ios/src/features/mail/SwipeableThreadRow.tsx` and `apps/ios/src/features/mail/ThreadDetailPane.tsx` so the new gesture/header actions no longer introduce native TypeScript errors.
+- 2026-03-11 follow-up: removed the inbox gesture tip banner, replaced the inbox compose `+` with a pencil icon, neutralized the remaining blue/slate tint in the native mail surface tokens, and switched sender avatar fallbacks to domain-logo lookups with `fallback=false` so missing logos drop to initials instead of the generic person placeholder. User-facing change in `apps/ios/app/(app)/(mail)/[folder].tsx`, `apps/ios/src/shared/theme/ThemeContext.tsx`, and `apps/ios/src/features/mail/SenderAvatar.tsx`.
+- 2026-03-11 follow-up: reshaped the iOS inbox from card rows into a cleaner divided list, increased row hierarchy to match the provided reference, and redesigned the inbox header around identity and status by showing the signed-in account avatar plus a live unread count. Search and compose were preserved in a secondary action row below the new header. User-facing change in `apps/ios/src/features/mail/ThreadListItem.tsx` and `apps/ios/app/(app)/(mail)/[folder].tsx`.
 
 ### Test / Build Status
 
 - Workspace TypeScript checks remain blocked by pre-existing cross-package errors outside iOS scope (not introduced by this stream).
 - Screenshot coverage check passes for iOS scope (`46/46`) using `parity_screenshots/manifest.json` (`web` + `ios`).
 - iOS targeted unit tests pass via `pnpm --filter @zero/ios run test:unit` (39/39 passing).
+- 2026-03-11 targeted verification: `pnpm --dir apps/ios test:unit` passes after the inbox avatar/theme/header cleanup, and narrowed `tsc --noEmit` output shows no errors for `ThemeContext.tsx`, `SenderAvatar.tsx`, or `apps/ios/app/(app)/(mail)/[folder].tsx`.
+- 2026-03-11 targeted verification: `pnpm --dir apps/ios test:unit` still passes after the inbox list/header redesign, and narrowed `tsc --noEmit` output shows no errors for `ThreadListItem.tsx`, `SenderAvatar.tsx`, `ThemeContext.tsx`, or `apps/ios/app/(app)/(mail)/[folder].tsx`.
 - Targeted formatting checks pass on all files touched in this session.
 
 ---

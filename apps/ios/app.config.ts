@@ -37,6 +37,7 @@ const config: ExpoConfig = {
     infoPlist: {
       NSMicrophoneUsageDescription:
         'Todus uses your microphone to transcribe voice prompts in the assistant.',
+      UIViewControllerBasedStatusBarAppearance: true,
     },
   },
   android: {

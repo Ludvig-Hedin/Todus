@@ -46,7 +46,7 @@ export default function AppLayout() {
             swipeEnabled: !isWideLayout,
             drawerStyle: {
               backgroundColor: ui.canvas,
-              width: 292,
+              width: 296,
             },
             sceneStyle: {
               backgroundColor: ui.canvas,

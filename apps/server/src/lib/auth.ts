@@ -89,6 +89,13 @@ const scheduleCampaign = (userInfo: { address: string; name: string }) =>
   });
 
 const connectionHandlerHook = async (account: Account) => {
+  // Apple is an identity-only provider (used for authentication via native
+  // Sign in with Apple). It doesn't grant email access tokens like Google does,
+  // so we skip the connection setup which requires OAuth access/refresh tokens.
+  if (account.providerId === 'apple') {
+    return;
+  }
+
   if (!account.accessToken || !account.refreshToken) {
     console.error('Missing Access/Refresh Tokens', { account });
     throw new APIError('EXPECTATION_FAILED', {

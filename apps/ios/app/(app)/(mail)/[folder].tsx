@@ -14,13 +14,12 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   getThreadListSnapshots,
   removeThreadIdsFromThreadListCaches,
   restoreThreadListSnapshots,
 } from '../../../src/features/mail/optimisticThreadCache';
-import { Archive, CheckCheck, Menu, Plus, Search, Trash2, X } from 'lucide-react-native';
+import { Archive, CheckCheck, Inbox, Pencil, Search, Trash2, X } from 'lucide-react-native';
 import { SwipeableThreadRow } from '../../../src/features/mail/SwipeableThreadRow';
 import { ThreadDetailPane } from '../../../src/features/mail/ThreadDetailPane';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -36,6 +35,7 @@ import { getNativeEnv } from '../../../src/shared/config/env';
 import { haptics } from '../../../src/shared/utils/haptics';
 import { FlashList } from '@shopify/flash-list';
 import { useAtomValue } from 'jotai';
+import { Image } from 'expo-image';
 
 type MailCategory = {
   id: string;
@@ -45,7 +45,11 @@ type MailCategory = {
   isDefault?: boolean;
 };
 
-const INBOX_DISCOVERY_HINT_KEY = 'mail.inbox.discovery_hint.dismissed.v1';
+function getAvatarInitial(value?: string | null) {
+  if (!value) return '?';
+  const match = value.trim().match(/[A-Za-z0-9]/);
+  return match ? match[0]!.toUpperCase() : '?';
+}
 
 export default function MailFolderScreen() {
   const { folder, threadId } = useLocalSearchParams<{ folder: string; threadId?: string }>();
@@ -68,13 +72,36 @@ export default function MailFolderScreen() {
   );
   const [selectedThreadIds, setSelectedThreadIds] = useState<string[]>([]);
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
-  const [showDiscoveryHint, setShowDiscoveryHint] = useState(false);
 
   const settingsQuery = useQuery({
     ...trpc.settings.get.queryOptions(),
     enabled: !env.authBypassEnabled,
   });
+  const defaultConnectionQuery = useQuery({
+    ...trpc.connections.getDefault.queryOptions(),
+    enabled: !!session && !env.authBypassEnabled,
+    staleTime: 60_000,
+    gcTime: 5 * 60_000,
+  });
+  const connectionsQuery = useQuery({
+    ...trpc.connections.list.queryOptions(),
+    enabled: !!session && !env.authBypassEnabled && !defaultConnectionQuery.data,
+    staleTime: 60_000,
+    gcTime: 5 * 60_000,
+  });
   const categoryDefaultsQuery = useQuery(trpc.categories.defaults.queryOptions());
+  const unreadCountQuery = useQuery({
+    ...trpc.mail.listThreads.queryOptions({
+      folder: 'inbox',
+      q: 'UNREAD',
+      maxResults: 100,
+    }),
+    enabled: !!session,
+    staleTime: 30_000,
+    gcTime: 5 * 60_000,
+    refetchOnMount: false,
+    refetchOnReconnect: false,
+  });
 
   const categoryOptions = useMemo(() => {
     const settingsCategories = settingsQuery.data?.settings?.categories as
@@ -104,25 +131,6 @@ export default function MailFolderScreen() {
       return defaultCategoryId;
     });
   }, [activeFolder, categoryOptions, defaultCategoryId]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    AsyncStorage.getItem(INBOX_DISCOVERY_HINT_KEY)
-      .then((value) => {
-        if (cancelled) return;
-        setShowDiscoveryHint(value !== '1');
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setShowDiscoveryHint(true);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   const selectedCategory = useMemo(
     () => categoryOptions.find((category) => category.id === selectedCategoryId) ?? null,
@@ -192,6 +200,16 @@ export default function MailFolderScreen() {
   const isSelectionMode = selectedThreadIds.length > 0;
   const allVisibleThreadsSelected =
     threads.length > 0 && selectedThreadIds.length === threads.length;
+  const activeConnection = useMemo(
+    () => defaultConnectionQuery.data ?? connectionsQuery.data?.connections?.[0] ?? null,
+    [connectionsQuery.data?.connections, defaultConnectionQuery.data],
+  );
+  const unreadCountLabel = useMemo(() => {
+    if (unreadCountQuery.isLoading) return '...';
+    const unreadCount = unreadCountQuery.data?.threads.length ?? 0;
+    if (unreadCountQuery.data?.nextPageToken || unreadCount > 99) return '99+';
+    return String(unreadCount);
+  }, [unreadCountQuery.data?.nextPageToken, unreadCountQuery.data?.threads.length, unreadCountQuery.isLoading]);
   const headerSubtitle = useMemo(() => {
     if (isSelectionMode) {
       return `${selectedThreadIds.length} conversation${selectedThreadIds.length === 1 ? '' : 's'} selected`;
@@ -241,6 +259,10 @@ export default function MailFolderScreen() {
     () => activeFolder.charAt(0).toUpperCase() + activeFolder.slice(1),
     [activeFolder],
   );
+  const headerAvatarUri = activeConnection?.picture?.trim() ?? '';
+  const headerIdentityLabel =
+    activeConnection?.name?.trim() || activeConnection?.email?.trim() || 'Account';
+  const headerAvatarInitial = getAvatarInitial(headerIdentityLabel);
 
   const onRefresh = useCallback(() => {
     refetch();
@@ -357,7 +379,7 @@ export default function MailFolderScreen() {
     return (
       <FlashList
         data={threads}
-        {...({ estimatedItemSize: 78, drawDistance: 320 } as any)}
+        {...({ estimatedItemSize: 94, drawDistance: 320 } as any)}
         keyExtractor={(item: any) => item.id}
         contentContainerStyle={styles.listContent}
         renderItem={({ item }: { item: any }) => {
@@ -453,29 +475,35 @@ export default function MailFolderScreen() {
             </>
           ) : (
             <>
-              {!isSplitLayout && (
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.iconButton,
-                    styles.controlButton,
-                    {
-                      backgroundColor: pressed ? ui.pressed : ui.surface,
-                      borderColor: ui.borderSubtle,
-                    },
-                  ]}
-                  onPress={openDrawer}
-                  accessibilityRole="button"
-                  accessibilityLabel="Open mail menu"
-                >
-                  <Menu color={colors.foreground} size={18} />
-                </Pressable>
-              )}
+              <Pressable
+                style={({ pressed }) => [
+                  styles.headerBrandButton,
+                  {
+                    backgroundColor: pressed ? ui.pressed : ui.surface,
+                    borderColor: ui.borderSubtle,
+                  },
+                ]}
+                onPress={openDrawer}
+                accessibilityRole="button"
+                accessibilityLabel="Open mail menu"
+              >
+                <Inbox color={colors.foreground} size={18} />
+              </Pressable>
               <View style={styles.headerTitleGroup}>
-                <Text style={[styles.headerTitle, { color: colors.foreground }]}>
-                  {folderLabel}
-                </Text>
+                <View style={styles.headerTitleRow}>
+                  <Text style={[styles.headerTitle, { color: colors.foreground }]}>
+                    {folderLabel}
+                  </Text>
+                  {activeFolder === 'inbox' && (
+                    <Text style={[styles.headerCount, { color: colors.mutedForeground }]}>
+                      {unreadCountLabel}
+                    </Text>
+                  )}
+                </View>
                 <Text style={[styles.headerSubtitle, { color: colors.mutedForeground }]}>
-                  {headerSubtitle}
+                  {activeFolder === 'inbox'
+                    ? `${selectedCategory?.name ?? 'All Mail'}`
+                    : headerSubtitle}
                 </Text>
               </View>
             </>
@@ -536,43 +564,73 @@ export default function MailFolderScreen() {
               </Pressable>
             </>
           ) : (
-            <>
-              <Pressable
-                style={({ pressed }) => [
-                  styles.commandPaletteButton,
-                  {
-                    backgroundColor: pressed ? ui.pressed : ui.surfaceRaised,
-                    borderColor: ui.borderSubtle,
-                  },
-                ]}
-                onPress={() => router.push('/search')}
-                accessibilityRole="button"
-                accessibilityLabel="Open search and command palette"
-              >
-                <Search color={colors.mutedForeground} size={16} />
-                <Text style={[styles.commandPaletteLabel, { color: colors.mutedForeground }]}>
-                  Search
-                </Text>
-              </Pressable>
-              <Pressable
-                style={[
-                  styles.composeButton,
-                  {
-                    backgroundColor: ui.surfaceRaised,
-                    borderColor: ui.borderStrong,
-                    shadowColor: ui.shadow,
-                  },
-                ]}
-                onPress={() => router.push('/compose')}
-                accessibilityRole="button"
-                accessibilityLabel="Compose new email"
-              >
-                <Plus color={ui.accent} size={18} />
-              </Pressable>
-            </>
+            <Pressable
+              style={({ pressed }) => [
+                styles.headerAvatarButton,
+                {
+                  backgroundColor: pressed ? ui.pressed : ui.surfaceRaised,
+                  borderColor: ui.borderStrong,
+                },
+              ]}
+              onPress={() => router.push('/(app)/settings')}
+              accessibilityRole="button"
+              accessibilityLabel="Open account settings"
+            >
+              {headerAvatarUri ? (
+                <Image source={{ uri: headerAvatarUri }} style={styles.headerAvatarImage} />
+              ) : (
+                <View style={[styles.headerAvatarFallback, { backgroundColor: ui.avatar }]}>
+                  <Text style={[styles.headerAvatarText, { color: ui.avatarText }]}>
+                    {headerAvatarInitial}
+                  </Text>
+                </View>
+              )}
+            </Pressable>
           )}
         </View>
       </View>
+
+      {!isSelectionMode && (
+        <View
+          style={[
+            styles.headerActions,
+            { backgroundColor: ui.canvas, borderBottomColor: ui.borderSubtle },
+          ]}
+        >
+          <Pressable
+            style={({ pressed }) => [
+              styles.commandPaletteButton,
+              {
+                backgroundColor: pressed ? ui.pressed : ui.surfaceRaised,
+                borderColor: ui.borderSubtle,
+              },
+            ]}
+            onPress={() => router.push('/search')}
+            accessibilityRole="button"
+            accessibilityLabel="Open search and command palette"
+          >
+            <Search color={colors.mutedForeground} size={16} />
+            <Text style={[styles.commandPaletteLabel, { color: colors.mutedForeground }]}>
+              Search emails
+            </Text>
+          </Pressable>
+          <Pressable
+            style={[
+              styles.composeButton,
+              {
+                backgroundColor: ui.surfaceRaised,
+                borderColor: ui.borderStrong,
+                shadowColor: ui.shadow,
+              },
+            ]}
+            onPress={() => router.push('/compose')}
+            accessibilityRole="button"
+            accessibilityLabel="Compose new email"
+          >
+            <Pencil color={ui.accent} size={17} />
+          </Pressable>
+        </View>
+      )}
 
       {activeFolder === 'inbox' && categoryOptions.length > 0 && !isSelectionMode && (
         <View
@@ -627,35 +685,6 @@ export default function MailFolderScreen() {
         </View>
       )}
 
-      {showDiscoveryHint && activeFolder === 'inbox' && !isSelectionMode && !isSplitLayout && threads.length > 0 && (
-        <View style={styles.discoveryHintWrap}>
-          <View
-            style={[
-              styles.discoveryHint,
-              {
-                backgroundColor: ui.surfaceRaised,
-                borderColor: ui.borderSubtle,
-              },
-            ]}
-          >
-            <Text style={[styles.discoveryHintText, { color: colors.mutedForeground }]}>
-              Swipe a thread for quick actions. Long press to select multiple conversations.
-            </Text>
-            <Pressable
-              onPress={() => {
-                setShowDiscoveryHint(false);
-                AsyncStorage.setItem(INBOX_DISCOVERY_HINT_KEY, '1').catch(() => {});
-              }}
-              hitSlop={8}
-              accessibilityRole="button"
-              accessibilityLabel="Dismiss inbox tips"
-            >
-              <X color={colors.mutedForeground} size={14} />
-            </Pressable>
-          </View>
-        </View>
-      )}
-
       {isSplitLayout ? (
         <View style={styles.splitContent}>
           <View style={[styles.listPane, { borderRightColor: ui.borderSubtle }]}>
@@ -682,23 +711,31 @@ const styles = StyleSheet.create({
   },
   header: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
+    alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: spacing[4],
-    paddingBottom: 12,
+    paddingBottom: 14,
     borderBottomWidth: StyleSheet.hairlineWidth,
     gap: spacing[3],
   },
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 12,
     flex: 1,
   },
   headerRight: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing[2],
+  },
+  headerBrandButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   iconButton: {
     width: 36,
@@ -711,8 +748,9 @@ const styles = StyleSheet.create({
     borderRadius: 16,
   },
   commandPaletteButton: {
+    flex: 1,
     minHeight: 38,
-    borderRadius: 16,
+    borderRadius: 19,
     borderWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: spacing[3],
     flexDirection: 'row',
@@ -721,33 +759,79 @@ const styles = StyleSheet.create({
   },
   headerTitleGroup: {
     gap: 2,
+    flex: 1,
+  },
+  headerTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 8,
   },
   commandPaletteLabel: {
-    fontSize: 12,
-    lineHeight: 14,
+    fontSize: 13,
+    lineHeight: 15,
     fontWeight: '500',
-    letterSpacing: -0.08,
+    letterSpacing: -0.12,
   },
   headerTitle: {
-    fontSize: 23,
-    lineHeight: 26,
+    fontSize: 24,
+    lineHeight: 28,
     fontWeight: '700',
-    letterSpacing: -0.5,
+    letterSpacing: -0.56,
+  },
+  headerCount: {
+    fontSize: 23,
+    lineHeight: 27,
+    fontWeight: '500',
+    letterSpacing: -0.4,
   },
   headerSubtitle: {
-    fontSize: 11,
-    lineHeight: 14,
-    letterSpacing: -0.06,
+    fontSize: 12,
+    lineHeight: 15,
+    letterSpacing: -0.08,
   },
   selectionTitle: {
     fontSize: 17,
     fontWeight: '700',
     letterSpacing: -0.3,
   },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[2],
+    paddingHorizontal: spacing[4],
+    paddingTop: 10,
+    paddingBottom: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  headerAvatarButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  headerAvatarImage: {
+    width: '100%',
+    height: '100%',
+  },
+  headerAvatarFallback: {
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerAvatarText: {
+    fontSize: 14,
+    lineHeight: 16,
+    fontWeight: '700',
+    letterSpacing: -0.16,
+  },
   composeButton: {
     width: 38,
     height: 38,
-    borderRadius: 16,
+    borderRadius: 19,
     borderWidth: StyleSheet.hairlineWidth,
     alignItems: 'center',
     justifyContent: 'center',
@@ -758,23 +842,23 @@ const styles = StyleSheet.create({
   },
   categoryTabsContainer: {
     paddingTop: 10,
-    paddingBottom: 8,
-    paddingHorizontal: spacing[3],
+    paddingBottom: 10,
+    paddingHorizontal: spacing[4],
   },
   categoryTabsTrack: {
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 20,
+    borderRadius: 18,
   },
   categoryTabsContent: {
-    paddingHorizontal: 5,
-    paddingVertical: 5,
+    paddingHorizontal: 4,
+    paddingVertical: 4,
     gap: 4,
   },
   categoryTabChip: {
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 999,
     paddingHorizontal: 14,
-    paddingVertical: 8,
+    paddingVertical: 7,
   },
   categoryTabText: {
     fontSize: 11,
@@ -785,27 +869,8 @@ const styles = StyleSheet.create({
   listContainer: {
     flex: 1,
   },
-  discoveryHintWrap: {
-    paddingHorizontal: spacing[3],
-    paddingTop: spacing[2],
-  },
-  discoveryHint: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 18,
-    paddingHorizontal: spacing[3],
-    paddingVertical: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing[2],
-  },
-  discoveryHintText: {
-    flex: 1,
-    fontSize: 11,
-    lineHeight: 15,
-    letterSpacing: -0.06,
-  },
   listContent: {
-    paddingTop: 8,
+    paddingTop: 0,
     paddingBottom: 24,
   },
   splitContent: {

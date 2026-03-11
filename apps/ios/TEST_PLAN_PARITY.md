@@ -1,6 +1,6 @@
 # iOS Native Parity Test Plan
 
-Last updated: 2026-03-02
+Last updated: 2026-03-11
 
 ## Automated Test Layers
 
@@ -39,7 +39,8 @@ Auth flow is managed by a separate stream. For parity RC runs, use an authentica
      - Drawer `Search` row.
 2. Compose route parity:
    - Open compose from plus button.
-   - Validate send, schedule send, templates, and undo-send banner.
+   - Validate send, schedule send, templates, attachments, and undo-send banner.
+   - Verify the compose chrome is a single neutral surface: icon close, compact attach/schedule actions, no inline template/attach rows, and a minimal utility bar above formatting.
 3. Route alias parity:
    - Open `/create` route in app navigation context and verify redirect to compose with prefill params.
    - Open under-construction route and verify both `Go Back` and `Go to Inbox`.

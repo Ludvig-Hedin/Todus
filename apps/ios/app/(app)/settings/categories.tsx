@@ -121,17 +121,46 @@ export default function CategoriesSettings() {
         <SettingsDescription>
           Configure tab names, label filters, ordering, and default selection for inbox categories.
         </SettingsDescription>
-        <SettingsButton label="Add Category" onPress={addCategory} variant="secondary" />
+        <View style={styles.topActions}>
+          <View style={styles.topActionButton}>
+            <SettingsButton label="Add Category" onPress={addCategory} variant="secondary" />
+          </View>
+        </View>
         {categories.map((category, index) => (
           <View
             key={category.id}
             style={[
-              styles.categoryCard,
-              { borderColor: ui.borderSubtle, backgroundColor: ui.surfaceInset },
+              styles.categoryItem,
+              index < categories.length - 1 && {
+                borderBottomWidth: StyleSheet.hairlineWidth,
+                borderBottomColor: ui.borderSubtle,
+              },
             ]}
           >
-            <SettingsFieldLabel>ID</SettingsFieldLabel>
-            <Text style={[styles.idText, { color: colors.mutedForeground }]}>{category.id}</Text>
+            <View style={styles.headerRow}>
+              <View style={styles.headerCopy}>
+                <Text style={[styles.eyebrow, { color: colors.mutedForeground }]}>Category ID</Text>
+                <Text style={[styles.idText, { color: colors.foreground }]}>{category.id}</Text>
+              </View>
+              <View
+                style={[
+                  styles.defaultPill,
+                  {
+                    backgroundColor: category.isDefault ? ui.accentSoft : ui.surfaceMuted,
+                    borderColor: category.isDefault ? ui.accent : ui.borderSubtle,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.defaultPillText,
+                    { color: category.isDefault ? colors.foreground : colors.mutedForeground },
+                  ]}
+                >
+                  {category.isDefault ? 'Default tab' : 'Optional'}
+                </Text>
+              </View>
+            </View>
 
             <SettingsFieldLabel>Name</SettingsFieldLabel>
             <SettingsTextInput
@@ -152,32 +181,40 @@ export default function CategoriesSettings() {
                   value={!!category.isDefault}
                   onValueChange={() => setDefaultCategory(category.id)}
                 />
-                <Text style={[styles.rowLabel, { color: colors.foreground }]}>Default</Text>
+                <Text style={[styles.rowLabel, { color: colors.foreground }]}>Set as default</Text>
               </View>
               <View style={styles.actions}>
                 <Pressable
                   style={[
                     styles.smallAction,
-                    { borderColor: ui.borderStrong, backgroundColor: ui.surface },
+                    { borderColor: ui.borderSubtle, backgroundColor: ui.surfaceMuted },
                   ]}
                   onPress={() => moveCategory(index, 'up')}
                 >
-                  <Text style={{ color: colors.foreground }}>Up</Text>
+                  <Text style={[styles.smallActionText, { color: colors.foreground }]}>Up</Text>
                 </Pressable>
                 <Pressable
                   style={[
                     styles.smallAction,
-                    { borderColor: ui.borderStrong, backgroundColor: ui.surface },
+                    { borderColor: ui.borderSubtle, backgroundColor: ui.surfaceMuted },
                   ]}
                   onPress={() => moveCategory(index, 'down')}
                 >
-                  <Text style={{ color: colors.foreground }}>Down</Text>
+                  <Text style={[styles.smallActionText, { color: colors.foreground }]}>Down</Text>
                 </Pressable>
                 <Pressable
-                  style={[styles.smallAction, { borderColor: colors.destructive }]}
+                  style={[
+                    styles.smallAction,
+                    {
+                      borderColor: colors.destructive,
+                      backgroundColor: 'transparent',
+                    },
+                  ]}
                   onPress={() => deleteCategory(category.id)}
                 >
-                  <Text style={{ color: colors.destructive }}>Delete</Text>
+                  <Text style={[styles.smallActionText, { color: colors.destructive }]}>
+                    Delete
+                  </Text>
                 </Pressable>
               </View>
             </View>
@@ -209,19 +246,57 @@ const styles = StyleSheet.create({
     padding: 12,
     gap: 8,
   },
-  idText: {
+  topActions: {
+    marginTop: 4,
+    marginBottom: 4,
+  },
+  topActionButton: {
+    width: 170,
+  },
+  categoryItem: {
+    paddingVertical: 14,
+    gap: 10,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  headerCopy: {
+    gap: 3,
+    flex: 1,
+  },
+  eyebrow: {
     fontSize: typography.size.xs,
-    marginBottom: 2,
+    fontWeight: '600',
+    letterSpacing: 0.2,
+    textTransform: 'uppercase',
+  },
+  idText: {
+    fontSize: typography.size.sm,
+    fontWeight: '600',
+  },
+  defaultPill: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  defaultPillText: {
+    fontSize: typography.size.xs,
+    fontWeight: '600',
   },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 8,
+    flexWrap: 'wrap',
   },
   rowLabel: {
     fontSize: typography.size.sm,
-    fontWeight: '500',
+    fontWeight: '600',
   },
   defaultRow: {
     flexDirection: 'row',
@@ -232,12 +307,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
   },
   smallAction: {
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  smallActionText: {
+    fontSize: typography.size.sm,
+    fontWeight: '600',
   },
   footerActions: {
     gap: 10,

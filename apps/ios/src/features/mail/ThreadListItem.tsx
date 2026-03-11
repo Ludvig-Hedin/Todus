@@ -62,15 +62,13 @@ function ThreadListItemComponent({
       <View
         style={[
           styles.container,
-          styles.skeletonCard,
           {
-            backgroundColor: ui.surface,
-            borderColor: ui.borderSubtle,
+            backgroundColor: ui.canvas,
           },
         ]}
       >
         <View style={[styles.avatarSkeleton, { backgroundColor: ui.surfaceInset }]} />
-        <View style={styles.content}>
+        <View style={[styles.content, styles.contentShell, { borderBottomColor: ui.borderSubtle }]}>
           <View style={styles.topRow}>
             <View style={[styles.skeleton, { backgroundColor: ui.surfaceInset, width: '42%' }]} />
             <View style={[styles.skeleton, { backgroundColor: ui.surfaceInset, width: 44 }]} />
@@ -102,8 +100,7 @@ function ThreadListItemComponent({
       style={({ pressed }) => [
         styles.container,
         {
-          backgroundColor: selected ? ui.pressed : pressed ? ui.surfaceRaised : ui.surface,
-          borderColor: selected ? ui.borderStrong : ui.borderSubtle,
+          backgroundColor: selected ? ui.pressed : pressed ? ui.surfaceMuted : ui.canvas,
         },
       ]}
       onPress={() => onPress(uiThread.id)}
@@ -129,11 +126,11 @@ function ThreadListItemComponent({
             {selected && <Check size={12} color={colors.primaryForeground} />}
           </View>
         ) : (
-          <SenderAvatar email={uiThread.senderEmail} name={uiThread.sender} size={34} />
+          <SenderAvatar email={uiThread.senderEmail} name={uiThread.sender} size={38} />
         )}
       </View>
 
-      <View style={styles.content}>
+      <View style={[styles.content, styles.contentShell, { borderBottomColor: ui.borderSubtle }]}>
         <View style={styles.topRow}>
           <View style={styles.senderRow}>
             <Text
@@ -240,27 +237,20 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    marginHorizontal: spacing[3],
-    marginBottom: spacing[2],
-    paddingVertical: spacing[3],
     paddingHorizontal: spacing[4],
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 18,
-  },
-  skeletonCard: {
-    alignItems: 'center',
+    paddingTop: 14,
+    minHeight: 92,
   },
   leadingSlot: {
-    width: 40,
-    marginRight: 10,
+    width: 44,
+    marginRight: 12,
     alignItems: 'center',
-    paddingTop: 1,
+    paddingTop: 2,
   },
   avatarSkeleton: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    marginRight: 10,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
   },
   selectionBadge: {
     width: 22,
@@ -273,6 +263,10 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
+  },
+  contentShell: {
+    paddingBottom: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   topRow: {
     flexDirection: 'row',
@@ -291,14 +285,14 @@ const styles = StyleSheet.create({
   },
   sender: {
     fontSize: 14,
-    lineHeight: 17,
+    lineHeight: 18,
     flexShrink: 1,
-    letterSpacing: -0.18,
+    letterSpacing: -0.22,
   },
   inlineUnreadDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 3.5,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
     flexShrink: 0,
   },
   replyCount: {
@@ -317,23 +311,23 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 5,
+    marginBottom: 6,
     gap: spacing[2],
   },
   subject: {
-    fontSize: 13,
-    lineHeight: 16,
+    fontSize: 15,
+    lineHeight: 19,
     flex: 1,
     paddingRight: 6,
-    letterSpacing: -0.16,
+    letterSpacing: -0.24,
   },
   star: {
     marginLeft: 2,
   },
   snippet: {
-    fontSize: 12,
-    lineHeight: 16,
-    letterSpacing: -0.08,
+    fontSize: 13,
+    lineHeight: 18,
+    letterSpacing: -0.12,
   },
   unreadText: {
     fontWeight: '600',

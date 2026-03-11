@@ -88,6 +88,7 @@ pnpm submit:ios
 - OAuth login opens Google consent screen directly in a WebView (no intermediate web login page).
 - Bearer token stored in iOS Keychain via `expo-secure-store`.
 - TRPC queries use Bearer auth header for API calls.
+- Drawer account linking now goes through the backend native link-social bridge so add-account works from the iOS sidebar without opening web settings first.
 - Login screen uses the symbol-only Todus mark above the heading, centered copy, and 48px rounded auth buttons.
 
 ## Native UI language
@@ -101,7 +102,7 @@ The native app styling is intentionally aligned to the web app in `apps/mail/`.
 Primary surfaces using this system:
 
 - Mail list, thread detail, compose, assistant, search, and settings
-- Drawer/sidebar navigation and undo-send banner
+- Drawer/sidebar navigation, including the account switcher, compose CTA, add-account entry point, and undo-send banner
 - Login/auth entry screen
 
 When adjusting the iOS visual language, prefer updating the shared native theme helpers first, then apply those tokens across screens rather than introducing one-off shades or spacing values.
