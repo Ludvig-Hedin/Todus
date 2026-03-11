@@ -44,6 +44,8 @@ export const authProviders = (env: Record<string, string>): ProviderConfig[] => 
       scope: [
         'https://mail.google.com/',
         'https://www.googleapis.com/auth/gmail.modify',
+        'https://www.googleapis.com/auth/contacts.readonly',
+        'https://www.googleapis.com/auth/contacts.other.readonly',
         'https://www.googleapis.com/auth/userinfo.profile',
         'https://www.googleapis.com/auth/userinfo.email',
       ],

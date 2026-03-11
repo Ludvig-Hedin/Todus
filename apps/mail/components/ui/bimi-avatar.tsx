@@ -1,9 +1,10 @@
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Avatar, AvatarFallback, AvatarImage } from './avatar';
-import { useState, useCallback, useMemo } from 'react';
 import { useTRPC } from '@/providers/query-provider';
 import { useQuery } from '@tanstack/react-query';
-import { getEmailLogo } from '@/lib/utils';
 import DOMPurify from 'dompurify';
+
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export const getFirstLetterCharacter = (name?: string) => {
   if (!name) return '';
@@ -27,23 +28,34 @@ export const BimiAvatar = ({
   onImageError,
 }: BimiAvatarProps) => {
   const trpc = useTRPC();
-  const [useDefaultFallback, setUseDefaultFallback] = useState(false);
+  const [imageIndex, setImageIndex] = useState(0);
+  const normalizedEmail = email?.trim().toLowerCase() ?? '';
+  const hasValidEmail = EMAIL_PATTERN.test(normalizedEmail);
 
-  const { data: bimiData, isLoading } = useQuery({
-    ...trpc.bimi.getByEmail.queryOptions({ email: email || '' }),
-    enabled: !!email && !useDefaultFallback,
+  const { data: avatarData, isLoading } = useQuery({
+    ...trpc.avatar.getByEmail.queryOptions({ email: normalizedEmail, name }),
+    enabled: hasValidEmail,
     staleTime: 1000 * 60 * 60 * 24, // Cache for 24 hours
     gcTime: 1000 * 60 * 60 * 24 * 7, // Keep in cache for 7 days
   });
 
-  const fallbackImageSrc = useMemo(() => {
-    if (useDefaultFallback || !email) return '';
-    return getEmailLogo(email);
-  }, [email, useDefaultFallback]);
+  useEffect(() => {
+    setImageIndex(0);
+  }, [normalizedEmail]);
+
+  const imageUrls = useMemo(() => {
+    const urls = [avatarData?.primary?.url, ...(avatarData?.fallbackUrls ?? [])].filter(
+      (value): value is string => Boolean(value),
+    );
+
+    return Array.from(new Set(urls));
+  }, [avatarData?.fallbackUrls, avatarData?.primary?.url]);
+
+  const activeImageUrl = imageUrls[imageIndex] ?? '';
 
   const handleFallbackImageError = useCallback(
     (e: React.SyntheticEvent<HTMLImageElement>) => {
-      setUseDefaultFallback(true);
+      setImageIndex((currentIndex) => currentIndex + 1);
       if (onImageError) {
         onImageError(e);
       }
@@ -51,9 +63,9 @@ export const BimiAvatar = ({
     [onImageError],
   );
 
-  const firstLetter = getFirstLetterCharacter(name || email);
+  const firstLetter = getFirstLetterCharacter(name || normalizedEmail);
 
-  if (!email) {
+  if (!hasValidEmail) {
     return (
       <Avatar className={className}>
         <AvatarFallback className={fallbackClassName}>{firstLetter}</AvatarFallback>
@@ -63,23 +75,16 @@ export const BimiAvatar = ({
 
   return (
     <Avatar className={className}>
-      {bimiData?.logo?.svgContent && !isLoading ? (
+      {avatarData?.primary?.svgContent && !isLoading ? (
         <div
           className="flex h-full w-full items-center justify-center overflow-hidden rounded-full bg-white dark:bg-[#373737]"
-          dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(bimiData.logo.svgContent) }}
+          dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(avatarData.primary.svgContent) }}
         />
-      ) : fallbackImageSrc && !useDefaultFallback ? (
+      ) : activeImageUrl ? (
         <AvatarImage
           className="rounded-full bg-[#FFFFFF] dark:bg-[#373737]"
-          src={fallbackImageSrc}
-          alt={name || email}
-          onError={handleFallbackImageError}
-        />
-      ) : getEmailLogo(email) ? (
-        <AvatarImage
-          className="rounded-full bg-[#FFFFFF] dark:bg-[#373737]"
-          src={getEmailLogo(email)}
-          alt={name || email}
+          src={activeImageUrl}
+          alt={name || normalizedEmail}
           onError={handleFallbackImageError}
         />
       ) : (

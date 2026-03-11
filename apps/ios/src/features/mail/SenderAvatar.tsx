@@ -1,11 +1,10 @@
 import { View, Text, StyleSheet, type StyleProp, type ViewStyle } from 'react-native';
 import { useTRPC } from '../../providers/QueryTrpcProvider';
 import { useTheme } from '../../shared/theme/ThemeContext';
-import { getNativeEnv } from '../../shared/config/env';
-import { Image } from 'expo-image';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { SvgXml } from 'react-native-svg';
-import { useMemo, useState } from 'react';
+import { Image } from 'expo-image';
 
 type SenderAvatarProps = {
   email?: string;
@@ -22,30 +21,33 @@ function getFirstLetterCharacter(value?: string) {
   return match ? match[0].toUpperCase() : '';
 }
 
-function getEmailLogo(email: string, imageApiUrl: string) {
-  if (!imageApiUrl) return '';
-  return `${imageApiUrl}${email}`;
-}
-
 export function SenderAvatar({ email, name, size = 32, style }: SenderAvatarProps) {
   const trpc = useTRPC();
-  const env = getNativeEnv();
   const { ui } = useTheme();
-  const [useDefaultFallback, setUseDefaultFallback] = useState(false);
-  const normalizedEmail = email?.trim() ?? '';
+  const [imageIndex, setImageIndex] = useState(0);
+  const normalizedEmail = email?.trim().toLowerCase() ?? '';
   const hasValidEmail = EMAIL_PATTERN.test(normalizedEmail);
 
-  const { data: bimiData, isLoading } = useQuery({
-    ...trpc.bimi.getByEmail.queryOptions({ email: normalizedEmail }),
-    enabled: hasValidEmail && !useDefaultFallback,
+  const { data: avatarData, isLoading } = useQuery({
+    ...trpc.avatar.getByEmail.queryOptions({ email: normalizedEmail, name }),
+    enabled: hasValidEmail,
     staleTime: 1000 * 60 * 60 * 24,
     gcTime: 1000 * 60 * 60 * 24 * 7,
   });
 
-  const fallbackImageSrc = useMemo(() => {
-    if (!hasValidEmail || useDefaultFallback) return '';
-    return getEmailLogo(normalizedEmail, env.imageApiUrl);
-  }, [env.imageApiUrl, hasValidEmail, normalizedEmail, useDefaultFallback]);
+  useEffect(() => {
+    setImageIndex(0);
+  }, [normalizedEmail]);
+
+  const imageUrls = useMemo(() => {
+    const urls = [avatarData?.primary?.url, ...(avatarData?.fallbackUrls ?? [])].filter(
+      (value): value is string => Boolean(value),
+    );
+
+    return Array.from(new Set(urls));
+  }, [avatarData?.fallbackUrls, avatarData?.primary?.url]);
+
+  const activeImageUrl = imageUrls[imageIndex] ?? '';
 
   const firstLetter = getFirstLetterCharacter(name || normalizedEmail) || '?';
   const containerStyle = {
@@ -57,17 +59,16 @@ export function SenderAvatar({ email, name, size = 32, style }: SenderAvatarProp
 
   return (
     <View style={[styles.container, containerStyle, style]}>
-      {bimiData?.logo?.svgContent && !isLoading ? (
-        <SvgXml xml={bimiData.logo.svgContent} width={size} height={size} />
-      ) : fallbackImageSrc ? (
+      {avatarData?.primary?.svgContent && !isLoading ? (
+        <SvgXml xml={avatarData.primary.svgContent} width={size} height={size} />
+      ) : activeImageUrl ? (
         <Image
-          source={{ uri: fallbackImageSrc }}
+          source={{ uri: activeImageUrl }}
           style={styles.image}
           contentFit="cover"
           transition={120}
-          onError={(e) => {
-            console.log('SenderAvatar load error:', e.error);
-            setUseDefaultFallback(true);
+          onError={() => {
+            setImageIndex((currentIndex) => currentIndex + 1);
           }}
         />
       ) : (
