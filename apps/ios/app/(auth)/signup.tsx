@@ -10,7 +10,6 @@ import {
   StyleSheet,
   Text,
   View,
-  useColorScheme,
   Image,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
@@ -19,7 +18,9 @@ import { useRouter } from 'expo-router';
 import { getNativeEnv } from '../../src/shared/config/env';
 import { setBearerSessionAtom } from '../../src/shared/state/session';
 import { getSocialAuthUrl } from '../../src/features/auth/native-auth';
-import { GoogleColored } from '../../src/shared/components/icons';
+import { AppleLogo, GoogleColored } from '../../src/shared/components/icons';
+import { useTheme } from '../../src/shared/theme/ThemeContext';
+import { Button } from '@zero/ui-native';
 
 // Required for expo-web-browser redirect handling
 WebBrowser.maybeCompleteAuthSession();
@@ -27,8 +28,7 @@ WebBrowser.maybeCompleteAuthSession();
 export default function SignupScreen() {
   const env = getNativeEnv();
   const router = useRouter();
-  const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
+  const { colors, ui, isDark, spacing, radius } = useTheme();
   const setBearerSession = useSetAtom(setBearerSessionAtom);
 
   const [loading, setLoading] = useState(false);
@@ -159,82 +159,74 @@ export default function SignupScreen() {
     }
   }
 
-  const themeStyles = isDark ? darkStyles : lightStyles;
-
   return (
-    <SafeAreaView style={[styles.safeArea, themeStyles.container]}>
+    <SafeAreaView style={[styles.safeArea, { backgroundColor: ui.canvas }]}>
       <StatusBar style={isDark ? 'light' : 'dark'} />
-      <View style={styles.topHeader}>
+      <View style={[styles.topHeader, { paddingTop: spacing[4], paddingHorizontal: spacing[8], gap: spacing[2] }]}>
         <Image
           source={require('../../assets/brand-logo.png')}
-          style={[styles.smallLogo, themeStyles.logo]}
+          style={[styles.smallLogo, { tintColor: colors.foreground }]}
           resizeMode="contain"
         />
-        <Text style={[styles.brandName, themeStyles.title]}>Todus</Text>
+        <Text style={[styles.brandName, { color: colors.foreground }]}>Todus</Text>
       </View>
 
       <View style={styles.content}>
-        <View style={styles.headerContainer}>
-          <Text style={[styles.title, themeStyles.title]}>Signup to Todus</Text>
-          <Text style={[styles.subtitle, themeStyles.subtitle]}>Your AI agent for emails</Text>
-          <Text style={[styles.description, themeStyles.description]}>Sign up for free with your email</Text>
+        <View style={[styles.headerContainer, { marginBottom: spacing[8] }]}>
+          <Text style={[styles.title, { color: colors.foreground }]}>Signup to Todus</Text>
+          <Text style={[styles.subtitle, { color: colors.mutedForeground, marginBottom: spacing[4] }]}>Your AI agent for emails</Text>
+          <Text style={[styles.description, { color: colors.mutedForeground }]}>Sign up for free with your email</Text>
         </View>
 
         {errorMessage && (
-          <View style={styles.errorBox}>
-            <Text style={styles.errorTitle}>Error</Text>
-            <Text style={styles.errorText}>{errorMessage}</Text>
+          <View style={[styles.errorBox, { backgroundColor: `${colors.destructive}1A`, borderColor: `${colors.destructive}33` }]}>
+            <Text style={[styles.errorTitle, { color: colors.destructive }]}>Sign-up Failed</Text>
+            <Text style={[styles.errorText, { color: colors.destructive }]}>{errorMessage}</Text>
           </View>
         )}
 
-        <View style={styles.providersContainer}>
-          <Pressable
+        <View style={[styles.providersContainer, { gap: spacing[4] }]}>
+          <Button
+            tone="outline"
+            colorMode={isDark ? 'dark' : 'light'}
             onPress={handleGoogleSignIn}
+            isLoading={loading}
             disabled={loading}
-            style={({ pressed }) => [
-              styles.providerButton,
-              themeStyles.providerButton,
-              pressed && themeStyles.providerButtonPressed,
-              loading && styles.providerButtonDisabled,
-            ]}
+            icon={<GoogleColored width={20} height={20} />}
+            textStyle={{ color: colors.foreground }}
+            style={{ borderRadius: radius.xl, height: 48 }}
           >
-            {loading ? (
-              <ActivityIndicator size="small" color={isDark ? '#ffffff' : '#111111'} style={styles.icon} />
-            ) : (
-              <GoogleColored width={20} height={20} style={styles.icon} />
-            )}
-            <Text style={[styles.providerButtonText, themeStyles.providerButtonText]}>
-              {loading ? 'Signing up...' : 'Continue with Google'}
-            </Text>
-          </Pressable>
+            Continue with Google
+          </Button>
 
           {Platform.OS === 'ios' && (
-            <AppleAuthentication.AppleAuthenticationButton
-              buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
-              buttonStyle={
-                isDark
-                  ? AppleAuthentication.AppleAuthenticationButtonStyle.WHITE
-                  : AppleAuthentication.AppleAuthenticationButtonStyle.BLACK
-              }
-              cornerRadius={8}
-              style={{ width: '100%', height: 40, marginTop: 12 }}
+            <Button
+              tone="primary"
+              colorMode={isDark ? 'dark' : 'light'}
               onPress={handleAppleSignUp}
-            />
+              isLoading={loading}
+              disabled={loading}
+              icon={<AppleLogo width={20} height={20} color={colors.primaryForeground} />}
+              textStyle={{ color: colors.primaryForeground }}
+              style={{ borderRadius: radius.xl, height: 48 }}
+            >
+              Continue with Apple
+            </Button>
           )}
         </View>
 
-        <View style={styles.bottomCta}>
-          <Text style={[styles.bottomCtaText, themeStyles.footerLinkText]}>Already have an account?</Text>
+        <View style={[styles.bottomCta, { marginTop: spacing[4], gap: spacing[1] }]}>
+          <Text style={[styles.bottomCtaText, { color: colors.mutedForeground }]}>Already have an account?</Text>
           <Pressable onPress={() => router.push('/(auth)/login')}>
-            <Text style={[styles.bottomCtaLink, themeStyles.title]}>Login</Text>
+            <Text style={[styles.bottomCtaLink, { color: colors.foreground }]}>Login</Text>
           </Pressable>
         </View>
       </View>
 
-      <View style={styles.footer}>
-        <Text style={[styles.footerLinkText, themeStyles.footerLinkText]}>Terms of Service</Text>
-        <View style={[styles.dot, themeStyles.dot]} />
-        <Text style={[styles.footerLinkText, themeStyles.footerLinkText]}>Privacy Policy</Text>
+      <View style={[styles.footer, { paddingVertical: spacing[6], paddingHorizontal: spacing[6] }]}>
+        <Text style={[styles.footerLinkText, { color: colors.mutedForeground }]}>Terms of Service</Text>
+        <View style={[styles.dot, { backgroundColor: ui.borderStrong }]} />
+        <Text style={[styles.footerLinkText, { color: colors.mutedForeground }]}>Privacy Policy</Text>
       </View>
     </SafeAreaView>
   );
@@ -261,9 +253,6 @@ const styles = StyleSheet.create({
   topHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 32,
-    paddingTop: 16,
-    gap: 8,
   },
   smallLogo: {
     width: 32,
@@ -284,7 +273,6 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
   },
   headerContainer: {
-    marginBottom: 32,
     alignItems: 'flex-start',
     width: '100%',
   },
@@ -311,51 +299,25 @@ const styles = StyleSheet.create({
   },
   errorBox: {
     width: '100%',
-    backgroundColor: 'rgba(239, 68, 68, 0.1)',
-    borderColor: 'rgba(239, 68, 68, 0.2)',
     borderWidth: 1,
     borderRadius: 12,
     padding: 16,
-    marginBottom: 24,
   },
   errorTitle: {
-    color: '#ef4444',
     fontWeight: '600',
     fontSize: 14,
     marginBottom: 4,
   },
   errorText: {
-    color: '#ef4444',
     fontSize: 14,
     opacity: 0.8,
   },
   providersContainer: {
     width: '100%',
-    gap: 12,
-  },
-  providerButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    height: 40,
-    borderRadius: 8,
-    borderWidth: 1,
-  },
-  providerButtonDisabled: {
-    opacity: 0.7,
-  },
-  providerButtonText: {
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  icon: {
-    marginRight: 8,
   },
   bottomCta: {
-    marginTop: 18,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
   },
   bottomCtaText: {
     fontSize: 13,
@@ -368,8 +330,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: 24,
-    paddingHorizontal: 24,
     width: '100%',
   },
   footerLinkText: {
@@ -384,70 +344,3 @@ const styles = StyleSheet.create({
   },
 });
 
-const lightStyles = StyleSheet.create({
-  container: {
-    backgroundColor: '#fdfdfd',
-  },
-  title: {
-    color: '#111111',
-  },
-  subtitle: {
-    color: '#111111',
-  },
-  description: {
-    color: '#111111',
-  },
-  providerButton: {
-    backgroundColor: '#fdfdfd',
-    borderColor: '#e5e5e5',
-  },
-  providerButtonPressed: {
-    backgroundColor: '#f5f5f5',
-  },
-  providerButtonText: {
-    color: '#111111',
-  },
-  footerLinkText: {
-    color: '#686868',
-  },
-  dot: {
-    backgroundColor: '#d9d9d9',
-  },
-  logo: {
-    tintColor: '#111111',
-  },
-});
-
-const darkStyles = StyleSheet.create({
-  container: {
-    backgroundColor: '#0b0b0b',
-  },
-  title: {
-    color: '#f5f5f5',
-  },
-  subtitle: {
-    color: '#f5f5f5',
-  },
-  description: {
-    color: '#f5f5f5',
-  },
-  providerButton: {
-    backgroundColor: '#0b0b0b',
-    borderColor: '#2a2a2a',
-  },
-  providerButtonPressed: {
-    backgroundColor: '#171717',
-  },
-  providerButtonText: {
-    color: '#f5f5f5',
-  },
-  footerLinkText: {
-    color: '#8a8a8a',
-  },
-  dot: {
-    backgroundColor: '#333333',
-  },
-  logo: {
-    tintColor: '#f5f5f5',
-  },
-});

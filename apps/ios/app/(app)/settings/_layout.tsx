@@ -1,18 +1,25 @@
 /**
  * Settings group layout — stack navigator for settings hub and individual pages.
  */
-import { Stack } from 'expo-router';
 import { useTheme } from '../../../src/shared/theme/ThemeContext';
+import { typography } from '@zero/design-tokens';
+import { Stack } from 'expo-router';
 
 export default function SettingsLayout() {
-  const { colors } = useTheme();
+  const { colors, ui, isDark } = useTheme();
 
   return (
     <Stack
       screenOptions={{
-        headerStyle: { backgroundColor: colors.background },
+        headerStyle: { backgroundColor: ui.canvas },
         headerTintColor: colors.foreground,
-        contentStyle: { backgroundColor: colors.background },
+        statusBarStyle: isDark ? 'light' : 'dark',
+        headerShadowVisible: false,
+        headerTitleStyle: {
+          fontSize: typography.size.md,
+          fontWeight: '700',
+        },
+        contentStyle: { backgroundColor: ui.canvas },
       }}
     >
       <Stack.Screen name="index" options={{ headerShown: false }} />

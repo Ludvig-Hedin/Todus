@@ -354,6 +354,8 @@ const createAuthConfig = () => {
         toOrigin(env.VITE_PUBLIC_APP_URL),
         toOrigin(env.VITE_PUBLIC_BACKEND_URL),
         'todus://auth-callback',
+        // Required for Apple Sign-in ID token validation flows
+        'https://appleid.apple.com',
       ].filter(Boolean),
     ),
   );

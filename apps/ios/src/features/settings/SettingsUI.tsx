@@ -4,11 +4,11 @@ import { useTheme } from '../../shared/theme/ThemeContext';
 import { ReactNode } from 'react';
 
 export function SettingsScreenContainer({ children }: { children: ReactNode }) {
-  const { colors } = useTheme();
+  const { ui } = useTheme();
   const insets = useSafeAreaInsets();
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <View style={[styles.container, { backgroundColor: ui.canvas }]}>
       <ScrollView contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 24 }]}>
         {children}
       </ScrollView>
@@ -17,9 +17,18 @@ export function SettingsScreenContainer({ children }: { children: ReactNode }) {
 }
 
 export function SettingsCard({ children }: { children: ReactNode }) {
-  const { colors } = useTheme();
+  const { ui } = useTheme();
   return (
-    <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+    <View
+      style={[
+        styles.card,
+        {
+          backgroundColor: ui.surfaceRaised,
+          borderColor: ui.borderSubtle,
+          shadowColor: ui.shadow,
+        },
+      ]}
+    >
       {children}
     </View>
   );
@@ -49,7 +58,7 @@ export function SettingsTextInput({
   onChangeText: (value: string) => void;
   placeholder?: string;
 }) {
-  const { colors } = useTheme();
+  const { colors, ui } = useTheme();
   return (
     <TextInput
       value={value}
@@ -60,10 +69,30 @@ export function SettingsTextInput({
         styles.input,
         {
           color: colors.foreground,
-          backgroundColor: colors.background,
-          borderColor: colors.border,
+          backgroundColor: ui.surface,
+          borderColor: ui.borderStrong,
         },
       ]}
+    />
+  );
+}
+
+export function SettingsToggle({
+  value,
+  onValueChange,
+}: {
+  value: boolean;
+  onValueChange: (value: boolean) => void;
+}) {
+  const { colors, ui } = useTheme();
+
+  return (
+    <Switch
+      value={value}
+      onValueChange={onValueChange}
+      ios_backgroundColor={ui.surfaceMuted}
+      trackColor={{ false: ui.surfaceMuted, true: colors.foreground }}
+      thumbColor={value ? ui.surface : colors.foreground}
     />
   );
 }
@@ -79,9 +108,17 @@ export function SettingsSwitchRow({
   value: boolean;
   onValueChange: (value: boolean) => void;
 }) {
-  const { colors } = useTheme();
+  const { colors, ui } = useTheme();
   return (
-    <View style={[styles.row, { borderColor: colors.border }]}>
+    <View
+      style={[
+        styles.row,
+        {
+          borderColor: value ? ui.borderStrong : ui.borderSubtle,
+          backgroundColor: value ? ui.surface : ui.surfaceInset,
+        },
+      ]}
+    >
       <View style={styles.rowText}>
         <Text style={[styles.rowLabel, { color: colors.foreground }]}>{label}</Text>
         {description ? (
@@ -90,7 +127,27 @@ export function SettingsSwitchRow({
           </Text>
         ) : null}
       </View>
-      <Switch value={value} onValueChange={onValueChange} />
+      <View style={styles.rowTrailing}>
+        <View
+          style={[
+            styles.stateBadge,
+            {
+              backgroundColor: value ? colors.foreground : ui.surfaceMuted,
+              borderColor: value ? colors.foreground : ui.borderSubtle,
+            },
+          ]}
+        >
+          <Text
+            style={[
+              styles.stateBadgeText,
+              { color: value ? colors.background : colors.mutedForeground },
+            ]}
+          >
+            {value ? 'On' : 'Off'}
+          </Text>
+        </View>
+        <SettingsToggle value={value} onValueChange={onValueChange} />
+      </View>
     </View>
   );
 }
@@ -104,10 +161,18 @@ export function SettingsOptionGroup<T extends string>({
   options: Array<{ label: string; value: T }>;
   onSelect: (value: T) => void;
 }) {
-  const { colors } = useTheme();
+  const { colors, ui } = useTheme();
 
   return (
-    <View style={[styles.optionGroup, { borderColor: colors.border }]}>
+    <View
+      style={[
+        styles.optionGroup,
+        {
+          borderColor: ui.borderSubtle,
+          backgroundColor: ui.surfaceMuted,
+        },
+      ]}
+    >
       {options.map((option, index) => {
         const selected = option.value === value;
         const isLast = index === options.length - 1;
@@ -116,15 +181,39 @@ export function SettingsOptionGroup<T extends string>({
             key={option.value}
             style={[
               styles.optionRow,
-              !isLast && {
-                borderBottomWidth: StyleSheet.hairlineWidth,
-                borderBottomColor: colors.border,
+              {
+                backgroundColor: selected ? colors.foreground : ui.surface,
+                borderColor: selected ? colors.foreground : ui.borderSubtle,
+                marginBottom: isLast ? 0 : 6,
               },
-              selected && { backgroundColor: colors.secondary },
             ]}
             onPress={() => onSelect(option.value)}
+            accessibilityRole="radio"
+            accessibilityState={{ selected }}
           >
-            <Text style={[styles.optionLabel, { color: colors.foreground }]}>{option.label}</Text>
+            <Text
+              style={[
+                styles.optionLabel,
+                { color: selected ? colors.background : colors.foreground },
+              ]}
+            >
+              {option.label}
+            </Text>
+            <View
+              style={[
+                styles.optionIndicator,
+                {
+                  backgroundColor: selected ? colors.background : 'transparent',
+                  borderColor: selected ? colors.background : ui.borderStrong,
+                },
+              ]}
+            >
+              {selected ? (
+                <View
+                  style={[styles.optionIndicatorInner, { backgroundColor: colors.foreground }]}
+                />
+              ) : null}
+            </View>
           </Pressable>
         );
       })}
@@ -143,25 +232,40 @@ export function SettingsButton({
   variant?: 'primary' | 'secondary' | 'destructive';
   disabled?: boolean;
 }) {
-  const { colors } = useTheme();
+  const { colors, ui } = useTheme();
   const backgroundColor =
     variant === 'primary'
-      ? colors.primary
+      ? colors.foreground
       : variant === 'destructive'
         ? colors.destructive
-        : colors.secondary;
+        : ui.surface;
   const textColor =
     variant === 'primary'
-      ? colors.primaryForeground
+      ? colors.background
       : variant === 'destructive'
         ? colors.destructiveForeground
-        : colors.secondaryForeground;
+        : colors.foreground;
 
   return (
     <Pressable
       onPress={onPress}
       disabled={disabled}
-      style={[styles.button, { backgroundColor, opacity: disabled ? 0.5 : 1 }]}
+      style={({ pressed }) => [
+        styles.button,
+        {
+          backgroundColor:
+            pressed && !disabled
+              ? variant === 'primary'
+                ? colors.mutedForeground
+                : variant === 'destructive'
+                  ? colors.destructive
+                  : ui.surfaceInset
+              : backgroundColor,
+          borderColor:
+            variant === 'primary' || variant === 'destructive' ? backgroundColor : ui.borderStrong,
+          opacity: disabled ? 0.5 : 1,
+        },
+      ]}
     >
       <Text style={[styles.buttonText, { color: textColor }]}>{label}</Text>
     </Pressable>
@@ -172,40 +276,44 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   content: {
     padding: 16,
-    gap: 16,
+    gap: 14,
   },
   card: {
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 12,
+    borderRadius: 22,
     padding: 16,
     gap: 12,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.06,
+    shadowRadius: 18,
+    elevation: 2,
   },
   sectionTitle: {
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: '600',
     textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    letterSpacing: 0.6,
   },
   description: {
-    fontSize: 13,
-    lineHeight: 18,
+    fontSize: 12,
+    lineHeight: 17,
   },
   fieldLabel: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '500',
   },
   input: {
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 8,
+    borderRadius: 14,
     paddingHorizontal: 12,
     paddingVertical: 10,
-    fontSize: 15,
+    fontSize: 14,
   },
   row: {
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 10,
+    borderRadius: 16,
     paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingVertical: 11,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -215,36 +323,76 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: 4,
   },
+  rowTrailing: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
   rowLabel: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '500',
   },
   rowDescription: {
     fontSize: 12,
     lineHeight: 16,
   },
+  stateBadge: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    minWidth: 42,
+    alignItems: 'center',
+  },
+  stateBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.2,
+    textTransform: 'uppercase',
+  },
   optionGroup: {
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 10,
-    overflow: 'hidden',
+    borderRadius: 18,
+    padding: 6,
   },
   optionRow: {
-    paddingHorizontal: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 14,
+    minHeight: 52,
+    paddingHorizontal: 14,
     paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
   },
   optionLabel: {
-    fontSize: 15,
-    fontWeight: '500',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  optionIndicator: {
+    width: 20,
+    height: 20,
+    borderRadius: 999,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  optionIndicatorInner: {
+    width: 8,
+    height: 8,
+    borderRadius: 999,
   },
   button: {
-    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 16,
     paddingHorizontal: 14,
     paddingVertical: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
   buttonText: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '600',
   },
 });

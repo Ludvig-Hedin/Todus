@@ -99,7 +99,7 @@ export default function ComposeScreen() {
     subject?: string | string[];
     body?: string | string[];
   }>();
-  const { colors } = useTheme();
+  const { colors, ui } = useTheme();
   const insets = useSafeAreaInsets();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -815,22 +815,28 @@ export default function ComposeScreen() {
 
   return (
     <KeyboardAvoidingView
-      style={[styles.container, { backgroundColor: colors.background }]}
+      style={[styles.container, { backgroundColor: ui.canvas }]}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      {/* Header */}
       <View
         style={[
           styles.header,
           {
             paddingTop: Platform.OS === 'ios' ? 12 : insets.top + 8,
-            borderBottomColor: colors.border,
+            borderBottomColor: ui.borderSubtle,
+            backgroundColor: ui.canvas,
           },
         ]}
       >
         <View style={styles.headerRow}>
           <View style={styles.headerSideStart}>
-            <Pressable style={styles.cancelButton} onPress={() => router.back()}>
+            <Pressable
+              style={[
+                styles.cancelButton,
+                { backgroundColor: ui.surface, borderColor: ui.borderSubtle },
+              ]}
+              onPress={() => router.back()}
+            >
               <Text style={[styles.cancelText, { color: colors.foreground }]}>Cancel</Text>
             </Pressable>
           </View>
@@ -842,8 +848,8 @@ export default function ComposeScreen() {
               style={[
                 styles.headerSecondaryButton,
                 {
-                  borderColor: colors.border,
-                  backgroundColor: colors.background,
+                  borderColor: ui.borderSubtle,
+                  backgroundColor: ui.surface,
                 },
               ]}
               onPress={openSchedulePicker}
@@ -854,12 +860,24 @@ export default function ComposeScreen() {
             <Pressable
               style={[
                 styles.sendButton,
-                { backgroundColor: sendMutation.isPending ? colors.secondary : colors.primary },
+                {
+                  backgroundColor: sendMutation.isPending ? ui.surfaceInset : colors.primary,
+                  shadowColor: ui.shadow,
+                },
               ]}
               onPress={handleSend}
               disabled={sendMutation.isPending}
             >
-              <Text style={[styles.sendText, { color: colors.primaryForeground }]}>
+              <Text
+                style={[
+                  styles.sendText,
+                  {
+                    color: sendMutation.isPending
+                      ? colors.mutedForeground
+                      : colors.primaryForeground,
+                  },
+                ]}
+              >
                 {sendMutation.isPending ? 'Sending...' : scheduleAt ? 'Schedule' : 'Send'}
               </Text>
             </Pressable>
@@ -867,158 +885,167 @@ export default function ComposeScreen() {
         </View>
       </View>
 
-      {/* Compose form */}
-      <View style={styles.form}>
-        {/* To field */}
-        <View style={[styles.fieldRow, { borderBottomColor: colors.border }]}>
-          <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>To:</Text>
-          <TextInput
-            style={[styles.fieldInput, { color: colors.foreground }]}
-            placeholderTextColor={colors.mutedForeground}
-            placeholder="Recipients"
-            value={to}
-            onChangeText={setTo}
-            keyboardType="email-address"
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-          {!showCcBcc && (
-            <Pressable onPress={() => setShowCcBcc(true)}>
-              <Text style={[styles.ccToggle, { color: colors.mutedForeground }]}>Cc/Bcc</Text>
-            </Pressable>
-          )}
-        </View>
-
-        {/* CC/BCC fields (optional) */}
-        {showCcBcc && (
-          <>
-            <View style={[styles.fieldRow, { borderBottomColor: colors.border }]}>
-              <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>Cc:</Text>
-              <TextInput
-                style={[styles.fieldInput, { color: colors.foreground }]}
-                placeholderTextColor={colors.mutedForeground}
-                placeholder="CC recipients"
-                value={cc}
-                onChangeText={setCc}
-                keyboardType="email-address"
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
-            </View>
-            <View style={[styles.fieldRow, { borderBottomColor: colors.border }]}>
-              <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>Bcc:</Text>
-              <TextInput
-                style={[styles.fieldInput, { color: colors.foreground }]}
-                placeholderTextColor={colors.mutedForeground}
-                placeholder="BCC recipients"
-                value={bcc}
-                onChangeText={setBcc}
-                keyboardType="email-address"
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
-            </View>
-          </>
-        )}
-
-        {/* Subject field */}
-        <View style={[styles.fieldRow, { borderBottomColor: colors.border }]}>
-          <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>Subject:</Text>
-          <TextInput
-            style={[styles.fieldInput, { color: colors.foreground }]}
-            placeholderTextColor={colors.mutedForeground}
-            placeholder="Subject"
-            value={subject}
-            onChangeText={setSubject}
-          />
-        </View>
-
-        <View style={[styles.attachmentRow, { borderBottomColor: colors.border }]}>
-          <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>When:</Text>
-          <Pressable
-            style={[
-              styles.inlineButton,
-              { borderColor: colors.border, backgroundColor: colors.background },
-            ]}
-            onPress={openSchedulePicker}
-          >
-            <Text style={{ color: colors.foreground, fontWeight: '500' }}>{scheduleLabel}</Text>
-          </Pressable>
-          {scheduleAt && (
-            <Pressable onPress={clearSchedule}>
-              <Text style={{ color: colors.destructive, fontWeight: '600' }}>Clear</Text>
-            </Pressable>
-          )}
-        </View>
-
-        <View style={[styles.attachmentRow, { borderBottomColor: colors.border }]}>
-          <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>Template:</Text>
-          <View style={styles.inlineActions}>
-            <Pressable
-              style={[
-                styles.inlineButton,
-                { borderColor: colors.border, backgroundColor: colors.background },
-              ]}
-              onPress={() => setShowTemplatesModal(true)}
-            >
-              <Text style={{ color: colors.foreground, fontWeight: '500' }}>Use</Text>
-            </Pressable>
-            <Pressable
-              style={[
-                styles.inlineButton,
-                { borderColor: colors.border, backgroundColor: colors.background },
-              ]}
-              onPress={() => setShowSaveTemplateModal(true)}
-            >
-              <Text style={{ color: colors.foreground, fontWeight: '500' }}>Save</Text>
-            </Pressable>
+      <View style={[styles.form, { backgroundColor: ui.surfaceRaised }]}>
+        <View
+          style={[styles.fieldsCard, { borderColor: ui.borderSubtle, backgroundColor: ui.surface }]}
+        >
+          <View style={[styles.fieldRow, { borderBottomColor: ui.borderSubtle }]}>
+            <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>To:</Text>
+            <TextInput
+              style={[styles.fieldInput, { color: colors.foreground }]}
+              placeholderTextColor={colors.mutedForeground}
+              placeholder="Recipients"
+              value={to}
+              onChangeText={setTo}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            {!showCcBcc && (
+              <Pressable
+                style={[
+                  styles.ccToggleButton,
+                  { backgroundColor: ui.surfaceInset, borderColor: ui.borderSubtle },
+                ]}
+                onPress={() => setShowCcBcc(true)}
+              >
+                <Text style={[styles.ccToggle, { color: colors.mutedForeground }]}>Cc/Bcc</Text>
+              </Pressable>
+            )}
           </View>
-        </View>
 
-        <View style={[styles.attachmentRow, { borderBottomColor: colors.border }]}>
-          <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>Attach:</Text>
-          <Pressable
-            style={[styles.attachmentButton, { backgroundColor: colors.secondary }]}
-            onPress={pickAttachments}
-          >
-            <Text style={{ color: colors.secondaryForeground, fontWeight: '600' }}>Add File</Text>
-          </Pressable>
-        </View>
-
-        {attachments.length > 0 && (
-          <View style={[styles.attachmentsList, { borderBottomColor: colors.border }]}>
-            {attachments.map((attachment, index) => (
-              <View key={`${attachment.name}-${index}`} style={styles.attachmentItem}>
-                <View style={styles.attachmentMeta}>
-                  <Text style={[styles.attachmentName, { color: colors.foreground }]}>
-                    {attachment.name}
-                  </Text>
-                  <Text style={[styles.attachmentSize, { color: colors.mutedForeground }]}>
-                    {Math.max(1, Math.round(attachment.size / 1024))} KB
-                  </Text>
-                </View>
-                <Pressable onPress={() => removeAttachment(attachment.name, index)}>
-                  <Text style={{ color: colors.destructive, fontWeight: '600' }}>Remove</Text>
-                </Pressable>
+          {showCcBcc && (
+            <>
+              <View style={[styles.fieldRow, { borderBottomColor: ui.borderSubtle }]}>
+                <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>Cc:</Text>
+                <TextInput
+                  style={[styles.fieldInput, { color: colors.foreground }]}
+                  placeholderTextColor={colors.mutedForeground}
+                  placeholder="CC recipients"
+                  value={cc}
+                  onChangeText={setCc}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
               </View>
-            ))}
-          </View>
-        )}
+              <View style={[styles.fieldRow, { borderBottomColor: ui.borderSubtle }]}>
+                <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>Bcc:</Text>
+                <TextInput
+                  style={[styles.fieldInput, { color: colors.foreground }]}
+                  placeholderTextColor={colors.mutedForeground}
+                  placeholder="BCC recipients"
+                  value={bcc}
+                  onChangeText={setBcc}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+              </View>
+            </>
+          )}
 
-        {/* Body */}
+          <View style={[styles.fieldRow, { borderBottomColor: ui.borderSubtle }]}>
+            <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>Subject:</Text>
+            <TextInput
+              style={[styles.fieldInput, { color: colors.foreground }]}
+              placeholderTextColor={colors.mutedForeground}
+              placeholder="Subject"
+              value={subject}
+              onChangeText={setSubject}
+            />
+          </View>
+
+          <View style={[styles.attachmentRow, { borderBottomColor: ui.borderSubtle }]}>
+            <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>When:</Text>
+            <Pressable
+              style={[
+                styles.inlineButton,
+                { borderColor: ui.borderSubtle, backgroundColor: ui.surfaceInset },
+              ]}
+              onPress={openSchedulePicker}
+            >
+              <Text style={[styles.inlineButtonText, { color: colors.foreground }]}>
+                {scheduleLabel}
+              </Text>
+            </Pressable>
+            {scheduleAt && (
+              <Pressable onPress={clearSchedule}>
+                <Text style={styles.clearInlineText}>Clear</Text>
+              </Pressable>
+            )}
+          </View>
+
+          <View style={[styles.attachmentRow, { borderBottomColor: ui.borderSubtle }]}>
+            <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>Template:</Text>
+            <View style={styles.inlineActions}>
+              <Pressable
+                style={[
+                  styles.inlineButton,
+                  { borderColor: ui.borderSubtle, backgroundColor: ui.surfaceInset },
+                ]}
+                onPress={() => setShowTemplatesModal(true)}
+              >
+                <Text style={[styles.inlineButtonText, { color: colors.foreground }]}>Use</Text>
+              </Pressable>
+              <Pressable
+                style={[
+                  styles.inlineButton,
+                  { borderColor: ui.borderSubtle, backgroundColor: ui.surfaceInset },
+                ]}
+                onPress={() => setShowSaveTemplateModal(true)}
+              >
+                <Text style={[styles.inlineButtonText, { color: colors.foreground }]}>Save</Text>
+              </Pressable>
+            </View>
+          </View>
+
+          <View style={[styles.attachmentRow, { borderBottomColor: ui.borderSubtle }]}>
+            <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>Attach:</Text>
+            <Pressable
+              style={[styles.attachmentButton, { backgroundColor: ui.surfaceInset }]}
+              onPress={pickAttachments}
+            >
+              <Text style={[styles.attachmentButtonText, { color: colors.foreground }]}>
+                Add File
+              </Text>
+            </Pressable>
+          </View>
+
+          {attachments.length > 0 && (
+            <View style={[styles.attachmentsList, { borderBottomColor: ui.borderSubtle }]}>
+              {attachments.map((attachment, index) => (
+                <View key={`${attachment.name}-${index}`} style={styles.attachmentItem}>
+                  <View style={styles.attachmentMeta}>
+                    <Text style={[styles.attachmentName, { color: colors.foreground }]}>
+                      {attachment.name}
+                    </Text>
+                    <Text style={[styles.attachmentSize, { color: colors.mutedForeground }]}>
+                      {Math.max(1, Math.round(attachment.size / 1024))} KB
+                    </Text>
+                  </View>
+                  <Pressable onPress={() => removeAttachment(attachment.name, index)}>
+                    <Text style={styles.clearInlineText}>Remove</Text>
+                  </Pressable>
+                </View>
+              ))}
+            </View>
+          )}
+        </View>
+
         <View style={styles.bodyContainer}>
           <RichText
             editor={editor}
             style={[
               styles.richText,
               {
-                backgroundColor: colors.card,
-                borderColor: colors.border,
+                backgroundColor: ui.surface,
+                borderColor: ui.borderSubtle,
               },
             ]}
           />
         </View>
-        <View style={[styles.toolbarContainer, { borderTopColor: colors.border }]}>
+        <View style={[styles.toolbarContainer, { borderTopColor: ui.borderSubtle }]}>
           <Toolbar editor={editor} />
         </View>
       </View>
@@ -1043,8 +1070,8 @@ export default function ComposeScreen() {
             style={[
               styles.modalCard,
               {
-                backgroundColor: colors.card,
-                borderColor: colors.border,
+                backgroundColor: ui.surfaceRaised,
+                borderColor: ui.borderSubtle,
               },
             ]}
           >
@@ -1060,7 +1087,10 @@ export default function ComposeScreen() {
             />
             <View style={styles.modalActions}>
               <Pressable
-                style={[styles.modalButton, { borderColor: colors.border }]}
+                style={[
+                  styles.modalButton,
+                  { borderColor: ui.borderSubtle, backgroundColor: ui.surface },
+                ]}
                 onPress={() => setScheduleModalVisible(false)}
               >
                 <Text style={{ color: colors.foreground, fontWeight: '600' }}>Cancel</Text>
@@ -1081,14 +1111,19 @@ export default function ComposeScreen() {
         animationType="slide"
         onRequestClose={() => setShowTemplatesModal(false)}
       >
-        <View style={[styles.modalPage, { backgroundColor: colors.background }]}>
-          <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
+        <View style={[styles.modalPage, { backgroundColor: ui.canvas }]}>
+          <View style={[styles.modalHeader, { borderBottomColor: ui.borderSubtle }]}>
             <Text style={[styles.modalTitle, { color: colors.foreground }]}>Templates</Text>
             <Pressable onPress={() => setShowTemplatesModal(false)}>
-              <Text style={{ color: colors.primary, fontWeight: '600' }}>Close</Text>
+              <Text style={{ color: colors.foreground, fontWeight: '600' }}>Close</Text>
             </Pressable>
           </View>
-          <View style={[styles.searchRow, { borderColor: colors.border }]}>
+          <View
+            style={[
+              styles.searchRow,
+              { borderColor: ui.borderSubtle, backgroundColor: ui.surface },
+            ]}
+          >
             <TextInput
               value={templateSearch}
               onChangeText={setTemplateSearch}
@@ -1115,7 +1150,7 @@ export default function ComposeScreen() {
             {filteredTemplates.map((template) => (
               <View
                 key={template.id}
-                style={[styles.templateRow, { borderBottomColor: colors.border }]}
+                style={[styles.templateRow, { borderBottomColor: ui.borderSubtle }]}
               >
                 <Pressable style={styles.templateText} onPress={() => applyTemplate(template)}>
                   <Text style={[styles.templateName, { color: colors.foreground }]}>
@@ -1147,8 +1182,8 @@ export default function ComposeScreen() {
             style={[
               styles.modalCard,
               {
-                backgroundColor: colors.card,
-                borderColor: colors.border,
+                backgroundColor: ui.surfaceRaised,
+                borderColor: ui.borderSubtle,
               },
             ]}
           >
@@ -1161,14 +1196,18 @@ export default function ComposeScreen() {
               style={[
                 styles.templateNameInput,
                 {
-                  borderColor: colors.border,
+                  borderColor: ui.borderSubtle,
                   color: colors.foreground,
+                  backgroundColor: ui.surfaceInset,
                 },
               ]}
             />
             <View style={styles.modalActions}>
               <Pressable
-                style={[styles.modalButton, { borderColor: colors.border }]}
+                style={[
+                  styles.modalButton,
+                  { borderColor: ui.borderSubtle, backgroundColor: ui.surface },
+                ]}
                 onPress={() => {
                   setShowSaveTemplateModal(false);
                   setTemplateName('');
@@ -1181,7 +1220,7 @@ export default function ComposeScreen() {
                   styles.modalButton,
                   {
                     backgroundColor: createTemplateMutation.isPending
-                      ? colors.secondary
+                      ? ui.surfaceInset
                       : colors.primary,
                   },
                 ]}
@@ -1190,7 +1229,14 @@ export default function ComposeScreen() {
                   void saveTemplate();
                 }}
               >
-                <Text style={{ color: colors.primaryForeground, fontWeight: '700' }}>
+                <Text
+                  style={{
+                    color: createTemplateMutation.isPending
+                      ? colors.mutedForeground
+                      : colors.primaryForeground,
+                    fontWeight: '700',
+                  }}
+                >
                   {createTemplateMutation.isPending ? 'Saving...' : 'Save'}
                 </Text>
               </Pressable>
@@ -1334,7 +1380,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   header: {
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     paddingBottom: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
@@ -1344,7 +1390,7 @@ const styles = StyleSheet.create({
     minHeight: 44,
   },
   headerSideStart: {
-    width: 92,
+    width: 96,
     alignItems: 'flex-start',
     justifyContent: 'center',
   },
@@ -1355,92 +1401,117 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
   },
   headerSideEnd: {
-    width: 190,
+    width: 188,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-end',
     gap: 8,
   },
   cancelButton: {
-    minHeight: 40,
+    minHeight: 36,
     justifyContent: 'center',
-    paddingRight: 4,
+    paddingHorizontal: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 12,
   },
   cancelText: {
-    fontSize: 16,
+    fontSize: 13,
     fontWeight: '500',
   },
   headerTitle: {
-    fontSize: 17,
+    fontSize: 16,
     fontWeight: '700',
+    letterSpacing: -0.2,
   },
   headerSecondaryButton: {
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 12,
-    minHeight: 40,
-    minWidth: 74,
-    paddingHorizontal: 14,
+    minHeight: 36,
+    minWidth: 72,
+    paddingHorizontal: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
   headerSecondaryText: {
-    fontSize: 15,
+    fontSize: 13,
     fontWeight: '600',
   },
   sendButton: {
-    minHeight: 40,
-    minWidth: 98,
-    paddingHorizontal: 18,
-    paddingVertical: 9,
+    minHeight: 36,
+    minWidth: 96,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.12,
+    shadowRadius: 18,
+    elevation: 4,
   },
   sendText: {
-    fontSize: 15,
+    fontSize: 13,
     fontWeight: '700',
   },
   form: {
     flex: 1,
   },
+  fieldsCard: {
+    marginHorizontal: 12,
+    marginTop: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 22,
+    overflow: 'hidden',
+  },
   fieldRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    minHeight: 56,
-    paddingHorizontal: 20,
-    paddingVertical: 13,
+    minHeight: 52,
+    paddingHorizontal: 16,
+    paddingVertical: 11,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   fieldLabel: {
-    fontSize: 15,
-    width: 88,
-    minWidth: 88,
+    fontSize: 13,
+    width: 78,
+    minWidth: 78,
     flexShrink: 0,
+    fontWeight: '500',
   },
   fieldInput: {
     flex: 1,
-    fontSize: 16,
-    lineHeight: 22,
+    fontSize: 14,
+    lineHeight: 19,
     paddingVertical: 4,
     paddingHorizontal: 0,
   },
+  ccToggleButton: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
   ccToggle: {
-    fontSize: 15,
-    paddingLeft: 10,
+    fontSize: 11,
+    fontWeight: '600',
   },
   attachmentRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    minHeight: 56,
-    paddingHorizontal: 20,
+    minHeight: 50,
+    paddingHorizontal: 16,
     paddingVertical: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
     gap: 8,
   },
   attachmentButton: {
-    borderRadius: 10,
+    borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 9,
+  },
+  attachmentButtonText: {
+    fontWeight: '600',
+    fontSize: 12,
   },
   inlineActions: {
     flexDirection: 'row',
@@ -1450,13 +1521,22 @@ const styles = StyleSheet.create({
   },
   inlineButton: {
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 10,
-    paddingHorizontal: 14,
+    borderRadius: 12,
+    paddingHorizontal: 12,
     paddingVertical: 8,
+  },
+  inlineButtonText: {
+    fontWeight: '500',
+    fontSize: 12,
+  },
+  clearInlineText: {
+    color: '#d93036',
+    fontWeight: '600',
+    fontSize: 12,
   },
   attachmentsList: {
     borderBottomWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     paddingVertical: 10,
     gap: 8,
   },
@@ -1471,22 +1551,22 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   attachmentName: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '500',
   },
   attachmentSize: {
-    fontSize: 12,
+    fontSize: 11,
   },
   bodyContainer: {
     flex: 1,
-    paddingHorizontal: 16,
+    paddingHorizontal: 12,
     paddingTop: 12,
     paddingBottom: 8,
   },
   richText: {
     flex: 1,
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 14,
+    borderRadius: 22,
     overflow: 'hidden',
   },
   toolbarContainer: {
@@ -1496,13 +1576,13 @@ const styles = StyleSheet.create({
   },
   modalScrim: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+    backgroundColor: 'rgba(15, 23, 42, 0.24)',
     justifyContent: 'center',
     paddingHorizontal: 20,
   },
   modalCard: {
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 14,
+    borderRadius: 22,
     padding: 16,
     gap: 12,
   },
@@ -1518,7 +1598,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   modalTitle: {
-    fontSize: 17,
+    fontSize: 16,
     fontWeight: '700',
   },
   modalActions: {
@@ -1528,19 +1608,19 @@ const styles = StyleSheet.create({
   },
   modalButton: {
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 10,
+    borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 8,
   },
   searchRow: {
     margin: 16,
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 10,
+    borderRadius: 16,
     paddingHorizontal: 10,
   },
   searchInput: {
     height: 40,
-    fontSize: 15,
+    fontSize: 14,
   },
   templateList: {
     flex: 1,
@@ -1562,16 +1642,16 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   templateName: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '600',
   },
   templateMeta: {
-    fontSize: 13,
+    fontSize: 12,
   },
   templateNameInput: {
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 10,
-    fontSize: 15,
+    borderRadius: 14,
+    fontSize: 14,
     paddingHorizontal: 12,
     paddingVertical: 10,
   },

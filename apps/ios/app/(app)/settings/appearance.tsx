@@ -18,7 +18,7 @@ import { useEffect, useState } from 'react';
 type ThemePreference = 'light' | 'dark' | 'system';
 
 export default function AppearanceSettings() {
-  const { colors, colorMode } = useTheme();
+  const { colors, ui, colorMode } = useTheme();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const settingsQuery = useQuery(trpc.settings.get.queryOptions());
@@ -53,8 +53,8 @@ export default function AppearanceSettings() {
 
   if (settingsQuery.isLoading) {
     return (
-      <View style={[styles.loading, { backgroundColor: colors.background }]}>
-        <ActivityIndicator color={colors.primary} />
+      <View style={[styles.loading, { backgroundColor: ui.canvas }]}>
+        <ActivityIndicator color={colors.foreground} />
       </View>
     );
   }

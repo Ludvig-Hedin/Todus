@@ -1,10 +1,6 @@
 /**
  * Settings hub — lists all settings sections with navigation to detail pages.
  */
-import { useNavigation, useRouter } from 'expo-router';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useTheme } from '../../../src/shared/theme/ThemeContext';
 import {
   Settings,
   Palette,
@@ -19,6 +15,11 @@ import {
   Menu,
   Banknote,
 } from 'lucide-react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTheme } from '../../../src/shared/theme/ThemeContext';
+import { typography } from '@zero/design-tokens';
+import { useNavigation, useRouter } from 'expo-router';
 
 const SETTINGS_ITEMS = [
   { key: 'general', label: 'General', description: 'Account preferences', icon: Settings },
@@ -33,9 +34,19 @@ const SETTINGS_ITEMS = [
     description: 'Email notification preferences',
     icon: Bell,
   },
-  { key: 'privacy', label: 'Privacy', description: 'Image loading and trusted senders', icon: Lock },
+  {
+    key: 'privacy',
+    label: 'Privacy',
+    description: 'Image loading and trusted senders',
+    icon: Lock,
+  },
   { key: 'security', label: 'Security', description: 'Account protection options', icon: Lock },
-  { key: 'shortcuts', label: 'Shortcuts', description: 'Keyboard shortcut reference', icon: Keyboard },
+  {
+    key: 'shortcuts',
+    label: 'Shortcuts',
+    description: 'Keyboard shortcut reference',
+    icon: Keyboard,
+  },
   {
     key: 'danger-zone',
     label: 'Danger Zone',
@@ -47,7 +58,7 @@ const SETTINGS_ITEMS = [
 export default function SettingsIndex() {
   const router = useRouter();
   const navigation = useNavigation();
-  const { colors } = useTheme();
+  const { colors, ui } = useTheme();
   const insets = useSafeAreaInsets();
 
   const goBackToMail = () => {
@@ -59,11 +70,19 @@ export default function SettingsIndex() {
   };
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <ScrollView contentContainerStyle={[styles.content, { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 16 }]}>
+    <View style={[styles.container, { backgroundColor: ui.canvas }]}>
+      <ScrollView
+        contentContainerStyle={[
+          styles.content,
+          { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 16 },
+        ]}
+      >
         <View style={styles.topActions}>
           <Pressable
-            style={[styles.topActionButton, { borderColor: colors.border }]}
+            style={[
+              styles.topActionButton,
+              { borderColor: ui.borderSubtle, backgroundColor: ui.surface },
+            ]}
             onPress={goBackToMail}
             accessibilityRole="button"
             accessibilityLabel="Back to mail"
@@ -72,8 +91,13 @@ export default function SettingsIndex() {
             <Text style={[styles.topActionText, { color: colors.foreground }]}>Mail</Text>
           </Pressable>
           <Pressable
-            style={[styles.topActionButton, { borderColor: colors.border }]}
-            onPress={() => ((navigation as any).openDrawer?.() ?? navigation.dispatch({ type: 'OPEN_DRAWER' }))}
+            style={[
+              styles.topActionButton,
+              { borderColor: ui.borderSubtle, backgroundColor: ui.surface },
+            ]}
+            onPress={() =>
+              (navigation as any).openDrawer?.() ?? navigation.dispatch({ type: 'OPEN_DRAWER' })
+            }
             accessibilityRole="button"
             accessibilityLabel="Open app menu"
           >
@@ -82,9 +106,25 @@ export default function SettingsIndex() {
           </Pressable>
         </View>
 
-        <Text style={[styles.title, { color: colors.foreground }]}>Settings</Text>
+        <View
+          style={[
+            styles.heroCard,
+            { backgroundColor: ui.surfaceRaised, borderColor: ui.borderSubtle },
+          ]}
+        >
+          <Text style={[styles.eyebrow, { color: colors.mutedForeground }]}>Preferences</Text>
+          <Text style={[styles.title, { color: colors.foreground }]}>Settings</Text>
+          <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>
+            Tune appearance, controls, and account behavior.
+          </Text>
+        </View>
 
-        <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        <View
+          style={[
+            styles.section,
+            { backgroundColor: ui.surfaceRaised, borderColor: ui.borderSubtle },
+          ]}
+        >
           {SETTINGS_ITEMS.map((item, index) => {
             const isLast = index === SETTINGS_ITEMS.length - 1;
             const Icon = item.icon;
@@ -93,7 +133,10 @@ export default function SettingsIndex() {
                 key={item.key}
                 style={[
                   styles.settingsItem,
-                  !isLast && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
+                  !isLast && {
+                    borderBottomWidth: StyleSheet.hairlineWidth,
+                    borderBottomColor: ui.borderSubtle,
+                  },
                 ]}
                 onPress={() => router.push(`/(app)/settings/${item.key}` as any)}
                 accessibilityRole="button"
@@ -135,24 +178,40 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 999,
     paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingVertical: 7,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
   },
   topActionText: {
-    fontSize: 13,
+    fontSize: typography.size.xs,
     fontWeight: '600',
   },
+  heroCard: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 24,
+    paddingHorizontal: 16,
+    paddingVertical: 18,
+    marginBottom: 16,
+    gap: 2,
+  },
+  eyebrow: {
+    fontSize: typography.size.xs,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+  },
   title: {
-    fontSize: 28,
-    fontWeight: '800',
-    letterSpacing: -0.5,
-    marginBottom: 20,
-    marginTop: 8,
+    fontSize: typography.size['2xl'],
+    fontWeight: '700',
+    letterSpacing: -0.6,
+  },
+  subtitle: {
+    fontSize: typography.size.xs,
+    lineHeight: 17,
   },
   section: {
-    borderRadius: 12,
+    borderRadius: 22,
     borderWidth: StyleSheet.hairlineWidth,
     overflow: 'hidden',
   },
@@ -160,7 +219,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingVertical: 14,
+    paddingVertical: 15,
     gap: 12,
   },
   settingsItemContent: {
@@ -168,14 +227,15 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   settingsItemLabel: {
-    fontSize: 16,
+    fontSize: typography.size.sm,
     fontWeight: '500',
   },
   settingsItemDescription: {
-    fontSize: 13,
+    fontSize: typography.size.xs,
+    lineHeight: 16,
   },
   chevron: {
-    fontSize: 22,
+    fontSize: typography.size.xl,
     fontWeight: '300',
     marginLeft: 8,
   },

@@ -1,15 +1,15 @@
+import { pendingUndoSendAtom, undoComposePrefillAtom } from '../state/undoSend';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
-import { useMutation } from '@tanstack/react-query';
-import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTRPC } from '../../providers/QueryTrpcProvider';
-import { useTheme } from '../theme/ThemeContext';
-import { useAtom } from 'jotai';
 import { useEffect, useMemo, useState } from 'react';
-import { pendingUndoSendAtom, undoComposePrefillAtom } from '../state/undoSend';
+import { useMutation } from '@tanstack/react-query';
+import { useTheme } from '../theme/ThemeContext';
+import { useRouter } from 'expo-router';
+import { useAtom } from 'jotai';
 
 export function UndoSendBanner() {
-  const { colors } = useTheme();
+  const { colors, ui } = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const trpc = useTRPC();
@@ -70,8 +70,9 @@ export function UndoSendBanner() {
         styles.container,
         {
           bottom: insets.bottom + 12,
-          backgroundColor: colors.card,
-          borderColor: colors.border,
+          backgroundColor: ui.surfaceRaised,
+          borderColor: ui.borderSubtle,
+          shadowColor: ui.shadow,
         },
       ]}
     >
@@ -98,34 +99,34 @@ const styles = StyleSheet.create({
     left: 12,
     right: 12,
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 14,
+    borderRadius: 18,
     paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingVertical: 11,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.12,
+    shadowRadius: 22,
+    elevation: 4,
   },
   label: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
     flex: 1,
+    letterSpacing: -0.1,
   },
   timer: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '500',
   },
   undoButton: {
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    borderRadius: 10,
+    paddingHorizontal: 11,
+    paddingVertical: 7,
   },
   undoText: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '700',
   },
 });

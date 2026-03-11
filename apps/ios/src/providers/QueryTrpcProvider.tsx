@@ -15,7 +15,6 @@ import { getNativeEnv } from '../shared/config/env';
 
 const CACHE_BUSTER = 'native-expo-router-v1';
 
-// @ts-expect-error TypeScript version mismatch between workspace packages (5.8.3 vs 5.9.3)
 export const { TRPCProvider, useTRPC, useTRPCClient } = createTRPCContext<AppRouter>();
 
 export function QueryTrpcProvider({ children }: PropsWithChildren) {

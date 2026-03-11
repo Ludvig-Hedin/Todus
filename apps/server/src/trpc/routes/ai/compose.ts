@@ -9,8 +9,8 @@ import { activeConnectionProcedure } from '../../trpc';
 import { getPrompt } from '../../../lib/brain';
 import { stripHtml } from 'string-strip-html';
 import { EPrompts } from '../../../types';
-import { env } from '../../../env';
 import { openai } from '@ai-sdk/openai';
+import { env } from '../../../env';
 import { generateText } from 'ai';
 import { z } from 'zod';
 
@@ -85,8 +85,9 @@ export async function composeEmail(input: ComposeEmailInput) {
           },
         ];
 
+  const composeModelId = env.OPENAI_MINI_MODEL || 'gpt-4o-mini';
   const { text } = await generateText({
-    model: openai(env.OPENAI_MINI_MODEL || 'gpt-4o-mini'),
+    model: openai(composeModelId),
     messages: [
       {
         role: 'system',
@@ -99,8 +100,8 @@ export async function composeEmail(input: ComposeEmailInput) {
       },
     ],
     maxSteps: 10,
-    maxTokens: 2_000,
-    temperature: 0.35,
+    ...getOpenAITextGenerationLimit(composeModelId, 2_000),
+    ...getOpenAITemperatureSetting(composeModelId, 0.35),
     frequencyPenalty: 0.2,
     presencePenalty: 0.1,
     maxRetries: 1,
@@ -266,8 +267,9 @@ const generateSubject = async (message: string, styleProfile?: WritingStyleMatri
     'Generate a concise, clear subject line that summarizes the main point of the email. The subject should be professional and under 100 characters.',
   );
 
+  const subjectModelId = env.OPENAI_MODEL || 'gpt-4o';
   const { text } = await generateText({
-    model: openai(env.OPENAI_MODEL || 'gpt-4o'),
+    model: openai(subjectModelId),
     messages: [
       {
         role: 'system',
@@ -279,8 +281,8 @@ const generateSubject = async (message: string, styleProfile?: WritingStyleMatri
         content: parts.join('\n\n'),
       },
     ],
-    maxTokens: 50,
-    temperature: 0.3,
+    ...getOpenAITextGenerationLimit(subjectModelId, 50),
+    ...getOpenAITemperatureSetting(subjectModelId, 0.3),
     frequencyPenalty: 0.1,
     presencePenalty: 0.1,
     maxRetries: 1,
@@ -288,3 +290,27 @@ const generateSubject = async (message: string, styleProfile?: WritingStyleMatri
 
   return text.trim();
 };
+
+const getOpenAITextGenerationLimit = (modelId: string, maxTokens: number) => {
+  if (usesMaxCompletionTokens(modelId)) {
+    return {
+      providerOptions: {
+        openai: {
+          maxCompletionTokens: maxTokens,
+        },
+      },
+    };
+  }
+
+  return { maxTokens };
+};
+
+const getOpenAITemperatureSetting = (modelId: string, temperature: number) => {
+  if (usesMaxCompletionTokens(modelId)) {
+    return {};
+  }
+
+  return { temperature };
+};
+
+const usesMaxCompletionTokens = (modelId: string) => modelId.startsWith('gpt-5');

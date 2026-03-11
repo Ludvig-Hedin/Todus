@@ -5,6 +5,7 @@ import {
   SettingsSectionTitle,
 } from '../../../src/features/settings/SettingsUI';
 import { useTheme } from '../../../src/shared/theme/ThemeContext';
+import { typography } from '@zero/design-tokens';
 import { StyleSheet, Text, View } from 'react-native';
 
 const SHORTCUTS_BY_SCOPE = {
@@ -83,7 +84,7 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   actionLabel: {
-    fontSize: 14,
+    fontSize: typography.size.sm,
     fontWeight: '500',
     flex: 1,
   },
@@ -100,7 +101,7 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   keyText: {
-    fontSize: 12,
+    fontSize: typography.size.xs,
     fontWeight: '600',
   },
 });

@@ -199,12 +199,13 @@ export default function SignupTodus() {
 
       {/* Right Column - Image Showcase */}
       <div className="hidden lg:flex w-1/2 p-4 xl:p-6">
-        <div className="relative flex h-full w-full items-center justify-center overflow-hidden rounded-[2.5rem] bg-[#0F0F0F] border border-[#2A2A2A] px-12 xl:px-20">
-          <div className="relative w-full">
+        <div className="relative flex h-full w-full items-center justify-center overflow-hidden rounded-[2.5rem] bg-[#0F0F0F] border border-[#2A2A2A]">
+          <div className="relative w-full h-full">
             <img
               src="/email-preview.png"
               alt="Todus Interface"
-              className="rounded-xl border border-[#252525] shadow-[0_0_50px_-12px_rgba(0,0,0,0.5)] object-cover w-full h-auto"
+              className="rounded-xl border border-[#252525] shadow-[0_0_50px_-12px_rgba(0,0,0,0.5)] object-cover w-full h-full"
+              style={{ objectPosition: 'left center', transformOrigin: 'center left' }}
             />
           </div>
         </div>

@@ -18,10 +18,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../../src/shared/theme/ThemeContext';
 import { getNativeEnv } from '../../../src/shared/config/env';
 import { haptics } from '../../../src/shared/utils/haptics';
+import { typography } from '@zero/design-tokens';
 import { useMemo } from 'react';
 
 export default function ConnectionsSettings() {
-  const { colors } = useTheme();
+  const { colors, ui } = useTheme();
   const insets = useSafeAreaInsets();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -90,17 +91,17 @@ export default function ConnectionsSettings() {
   };
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <View style={[styles.container, { backgroundColor: ui.canvas }]}>
       <ScrollView contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 16 }]}>
         <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Connected Accounts</Text>
 
         {isLoading ? (
-          <ActivityIndicator color={colors.primary} style={{ marginVertical: 24 }} />
+          <ActivityIndicator color={colors.foreground} style={{ marginVertical: 24 }} />
         ) : connections.length === 0 ? (
           <View
             style={[
               styles.emptyState,
-              { backgroundColor: colors.card, borderColor: colors.border },
+              { backgroundColor: ui.surfaceRaised, borderColor: ui.borderSubtle },
             ]}
           >
             <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>
@@ -109,7 +110,10 @@ export default function ConnectionsSettings() {
           </View>
         ) : (
           <View
-            style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}
+            style={[
+              styles.section,
+              { backgroundColor: ui.surfaceRaised, borderColor: ui.borderSubtle },
+            ]}
           >
             {connections.map((conn: any, index: number) => (
               <View
@@ -118,7 +122,7 @@ export default function ConnectionsSettings() {
                   styles.connectionItem,
                   index < connections.length - 1 && {
                     borderBottomWidth: StyleSheet.hairlineWidth,
-                    borderBottomColor: colors.border,
+                    borderBottomColor: ui.borderSubtle,
                   },
                 ]}
               >
@@ -132,33 +136,68 @@ export default function ConnectionsSettings() {
                       {conn.providerId || 'Email'}
                     </Text>
                     {defaultConnectionId === conn.id && (
-                      <Text style={[styles.badge, { color: colors.primary }]}>Default</Text>
+                      <View
+                        style={[
+                          styles.badge,
+                          { backgroundColor: colors.foreground, borderColor: colors.foreground },
+                        ]}
+                      >
+                        <Text style={[styles.badgeText, { color: colors.background }]}>
+                          Default
+                        </Text>
+                      </View>
                     )}
                     {disconnectedIds.has(conn.id) && (
-                      <Text style={[styles.badge, { color: colors.destructive }]}>
-                        Disconnected
-                      </Text>
+                      <View
+                        style={[
+                          styles.badge,
+                          { backgroundColor: ui.surface, borderColor: colors.destructive },
+                        ]}
+                      >
+                        <Text style={[styles.badgeText, { color: colors.destructive }]}>
+                          Disconnected
+                        </Text>
+                      </View>
                     )}
                   </View>
                 </View>
                 <View style={styles.actions}>
                   <Pressable
-                    style={[styles.iconButton, { borderColor: colors.border }]}
+                    style={[
+                      styles.iconButton,
+                      {
+                        borderColor:
+                          defaultConnectionId === conn.id ? colors.foreground : ui.borderStrong,
+                        backgroundColor:
+                          defaultConnectionId === conn.id ? colors.foreground : ui.surface,
+                      },
+                    ]}
                     onPress={() => setDefaultConnection(conn.id)}
                     disabled={setDefaultMutation.isPending}
                   >
-                    <Star size={16} color={colors.primary} />
+                    <Star
+                      size={16}
+                      color={
+                        defaultConnectionId === conn.id ? colors.background : colors.mutedForeground
+                      }
+                    />
                   </Pressable>
                   {disconnectedIds.has(conn.id) ? (
                     <Pressable
-                      style={[styles.iconButton, { borderColor: colors.border }]}
+                      style={[
+                        styles.iconButton,
+                        { borderColor: ui.borderStrong, backgroundColor: ui.surface },
+                      ]}
                       onPress={openConnectionsOnWeb}
                     >
                       <Unplug size={16} color={colors.foreground} />
                     </Pressable>
                   ) : (
                     <Pressable
-                      style={[styles.iconButton, { borderColor: colors.border }]}
+                      style={[
+                        styles.iconButton,
+                        { borderColor: ui.borderStrong, backgroundColor: ui.surface },
+                      ]}
                       onPress={() => disconnectConnection(conn.id)}
                       disabled={connections.length <= 1 || deleteMutation.isPending}
                     >
@@ -172,7 +211,10 @@ export default function ConnectionsSettings() {
         )}
 
         <Pressable
-          style={[styles.addButton, { borderColor: colors.border, backgroundColor: colors.card }]}
+          style={[
+            styles.addButton,
+            { borderColor: ui.borderStrong, backgroundColor: ui.surfaceRaised },
+          ]}
           onPress={openConnectionsOnWeb}
         >
           <Plus size={16} color={colors.foreground} />
@@ -189,7 +231,7 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   content: { padding: 16 },
   sectionTitle: {
-    fontSize: 14,
+    fontSize: typography.size.sm,
     fontWeight: '600',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
@@ -209,9 +251,15 @@ const styles = StyleSheet.create({
   },
   connectionInfo: { flex: 1, gap: 2 },
   metaRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  connectionEmail: { fontSize: 16, fontWeight: '500' },
-  connectionProvider: { fontSize: 13 },
-  badge: { fontSize: 12, fontWeight: '600' },
+  connectionEmail: { fontSize: typography.size.md, fontWeight: '500' },
+  connectionProvider: { fontSize: typography.size.sm },
+  badge: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  badgeText: { fontSize: typography.size.xs, fontWeight: '700' },
   actions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   iconButton: {
     borderWidth: StyleSheet.hairlineWidth,
@@ -227,7 +275,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     alignItems: 'center',
   },
-  emptyText: { fontSize: 14 },
+  emptyText: { fontSize: typography.size.sm },
   addButton: {
     marginTop: 12,
     borderWidth: StyleSheet.hairlineWidth,
@@ -239,5 +287,5 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 8,
   },
-  addButtonLabel: { fontSize: 14, fontWeight: '600' },
+  addButtonLabel: { fontSize: typography.size.sm, fontWeight: '600' },
 });

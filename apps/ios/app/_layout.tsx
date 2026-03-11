@@ -9,6 +9,7 @@ import { captureScreen } from '../src/shared/telemetry/posthog';
 import { getNativeEnv } from '../src/shared/config/env';
 import { AppProviders } from '../src/providers/AppProviders';
 import { authStatusAtom } from '../src/shared/state/session';
+import { useTheme } from '../src/shared/theme/ThemeContext';
 import { semanticColors } from '@zero/design-tokens';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useRef } from 'react';
@@ -76,17 +77,20 @@ function AuthGuard() {
 }
 
 function RootLayout() {
-  const systemColorScheme = useColorScheme();
-  const isDark = systemColorScheme === 'dark';
-
   return (
     <ErrorBoundary>
       <AppProviders>
-        <StatusBar style={isDark ? 'light' : 'dark'} />
+        <AppStatusBar />
         <AuthGuard />
       </AppProviders>
     </ErrorBoundary>
   );
+}
+
+function AppStatusBar() {
+  const { isDark } = useTheme();
+
+  return <StatusBar style={isDark ? 'light' : 'dark'} animated />;
 }
 
 export default RootLayout;

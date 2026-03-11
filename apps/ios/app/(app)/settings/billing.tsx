@@ -6,20 +6,21 @@ import {
   SettingsScreenContainer,
   SettingsSectionTitle,
 } from '../../../src/features/settings/SettingsUI';
-import { ActivityIndicator, Alert, Linking, StyleSheet, Text, View } from 'react-native';
-import { useMutation, useQuery } from '@tanstack/react-query';
-import { getNativeEnv } from '../../../src/shared/config/env';
-import { captureEvent } from '../../../src/shared/telemetry/posthog';
-import { sessionAtom } from '../../../src/shared/state/session';
-import { useTheme } from '../../../src/shared/theme/ThemeContext';
-import { useAtomValue } from 'jotai';
 import {
   fetchAutumnCustomer,
   hasAutumnProAccess,
   openAutumnBillingPortal,
   startAutumnCheckout,
 } from '../../../src/shared/integrations/autumn';
+import { ActivityIndicator, Alert, Linking, StyleSheet, Text, View } from 'react-native';
+import { captureEvent } from '../../../src/shared/telemetry/posthog';
+import { useTheme } from '../../../src/shared/theme/ThemeContext';
+import { sessionAtom } from '../../../src/shared/state/session';
+import { getNativeEnv } from '../../../src/shared/config/env';
+import { useMutation, useQuery } from '@tanstack/react-query';
+import { typography } from '@zero/design-tokens';
 import { useMemo, useState } from 'react';
+import { useAtomValue } from 'jotai';
 
 type BillingCycle = 'monthly' | 'annual';
 
@@ -61,7 +62,7 @@ function formatFeatureBalance(feature: {
 }
 
 export default function BillingSettings() {
-  const { colors } = useTheme();
+  const { colors, ui } = useTheme();
   const env = getNativeEnv();
   const session = useAtomValue(sessionAtom);
   const [cycle, setCycle] = useState<BillingCycle>('monthly');
@@ -159,10 +160,7 @@ export default function BillingSettings() {
             {(customerQuery.error as Error | undefined)?.message ??
               'Could not load billing details from the server.'}
           </SettingsDescription>
-          <SettingsButton
-            label="Retry Billing Sync"
-            onPress={() => customerQuery.refetch()}
-          />
+          <SettingsButton label="Retry Billing Sync" onPress={() => customerQuery.refetch()} />
           <SettingsButton
             variant="secondary"
             label="Open Billing on Web"
@@ -173,7 +171,7 @@ export default function BillingSettings() {
         </SettingsCard>
       ) : customerQuery.isLoading ? (
         <View style={styles.loadingContainer}>
-          <ActivityIndicator color={colors.primary} />
+          <ActivityIndicator color={colors.foreground} />
         </View>
       ) : (
         <>
@@ -186,7 +184,7 @@ export default function BillingSettings() {
               {isPro ? 'Pro plan active' : 'Free plan'}
             </Text>
             {featureRows.length > 0 ? (
-              <View style={[styles.featureList, { borderColor: colors.border }]}>
+              <View style={[styles.featureList, { borderColor: ui.borderSubtle }]}>
                 {featureRows.map((feature, index) => (
                   <View
                     key={feature.id}
@@ -194,7 +192,7 @@ export default function BillingSettings() {
                       styles.featureRow,
                       index < featureRows.length - 1 && {
                         borderBottomWidth: StyleSheet.hairlineWidth,
-                        borderBottomColor: colors.border,
+                        borderBottomColor: ui.borderSubtle,
                       },
                     ]}
                   >
@@ -261,7 +259,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   planStatus: {
-    fontSize: 16,
+    fontSize: typography.size.md,
     fontWeight: '600',
   },
   featureList: {
@@ -278,14 +276,14 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   featureLabel: {
-    fontSize: 14,
+    fontSize: typography.size.sm,
     fontWeight: '500',
     textTransform: 'capitalize',
   },
   featureValue: {
-    fontSize: 13,
+    fontSize: typography.size.sm,
   },
   emptyFeatures: {
-    fontSize: 13,
+    fontSize: typography.size.sm,
   },
 });

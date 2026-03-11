@@ -10,12 +10,13 @@ import {
   Pressable,
   Alert,
 } from 'react-native';
-import { SettingsTextInput } from '../../../src/features/settings/SettingsUI';
+import { SettingsButton, SettingsTextInput } from '../../../src/features/settings/SettingsUI';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Check, Tag, Plus, Pencil, Trash2 } from 'lucide-react-native';
 import { useTRPC } from '../../../src/providers/QueryTrpcProvider';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../../src/shared/theme/ThemeContext';
-import { Tag, Plus, Pencil, Trash2 } from 'lucide-react-native';
+import { typography } from '@zero/design-tokens';
 import { useMemo, useState } from 'react';
 
 const LABEL_COLORS = [
@@ -30,7 +31,7 @@ const LABEL_COLORS = [
 type LabelColor = (typeof LABEL_COLORS)[number];
 
 export default function LabelsSettings() {
-  const { colors } = useTheme();
+  const { colors, ui } = useTheme();
   const insets = useSafeAreaInsets();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -124,17 +125,25 @@ export default function LabelsSettings() {
   };
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <View style={[styles.container, { backgroundColor: ui.canvas }]}>
       <ScrollView contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 16 }]}>
         <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Labels</Text>
 
-        <View style={[styles.editor, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        <View
+          style={[
+            styles.editor,
+            { backgroundColor: ui.surfaceRaised, borderColor: ui.borderSubtle },
+          ]}
+        >
           <View style={styles.editorHeader}>
             <Text style={[styles.editorTitle, { color: colors.foreground }]}>
               {editingLabel ? 'Edit Label' : 'Create Label'}
             </Text>
             <Pressable
-              style={[styles.actionButton, { borderColor: colors.border }]}
+              style={[
+                styles.actionButton,
+                { borderColor: ui.borderStrong, backgroundColor: ui.surface },
+              ]}
               onPress={openCreate}
             >
               <Plus size={16} color={colors.foreground} />
@@ -153,36 +162,40 @@ export default function LabelsSettings() {
                     styles.colorChip,
                     {
                       backgroundColor: color.backgroundColor,
-                      borderColor: selected ? colors.primary : 'transparent',
+                      borderColor: selected ? colors.foreground : ui.borderStrong,
                     },
                   ]}
                   onPress={() => setSelectedColor(color)}
-                />
+                >
+                  {selected ? (
+                    <View style={[styles.colorChipBadge, { backgroundColor: colors.foreground }]}>
+                      <Check size={10} color={colors.background} />
+                    </View>
+                  ) : null}
+                </Pressable>
               );
             })}
           </View>
-          <Pressable
-            style={[styles.saveButton, { backgroundColor: colors.primary }]}
-            onPress={saveLabel}
-            disabled={createLabelMutation.isPending || updateLabelMutation.isPending}
-          >
-            <Text style={{ color: colors.primaryForeground, fontWeight: '600' }}>
-              {createLabelMutation.isPending || updateLabelMutation.isPending
+          <SettingsButton
+            label={
+              createLabelMutation.isPending || updateLabelMutation.isPending
                 ? 'Saving...'
                 : editingLabel
                   ? 'Save Changes'
-                  : 'Create Label'}
-            </Text>
-          </Pressable>
+                  : 'Create Label'
+            }
+            onPress={saveLabel}
+            disabled={createLabelMutation.isPending || updateLabelMutation.isPending}
+          />
         </View>
 
         {isLoading ? (
-          <ActivityIndicator color={colors.primary} style={{ marginVertical: 24 }} />
+          <ActivityIndicator color={colors.foreground} style={{ marginVertical: 24 }} />
         ) : labels.length === 0 ? (
           <View
             style={[
               styles.emptyState,
-              { backgroundColor: colors.card, borderColor: colors.border },
+              { backgroundColor: ui.surfaceRaised, borderColor: ui.borderSubtle },
             ]}
           >
             <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>
@@ -191,7 +204,10 @@ export default function LabelsSettings() {
           </View>
         ) : (
           <View
-            style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}
+            style={[
+              styles.section,
+              { backgroundColor: ui.surfaceRaised, borderColor: ui.borderSubtle },
+            ]}
           >
             {labels.map((label: any, index: number) => (
               <View
@@ -200,7 +216,7 @@ export default function LabelsSettings() {
                   styles.labelItem,
                   index < labels.length - 1 && {
                     borderBottomWidth: StyleSheet.hairlineWidth,
-                    borderBottomColor: colors.border,
+                    borderBottomColor: ui.borderSubtle,
                   },
                 ]}
               >
@@ -220,13 +236,19 @@ export default function LabelsSettings() {
                 </View>
                 <View style={styles.labelActions}>
                   <Pressable
-                    style={[styles.actionButton, { borderColor: colors.border }]}
+                    style={[
+                      styles.actionButton,
+                      { borderColor: ui.borderStrong, backgroundColor: ui.surface },
+                    ]}
                     onPress={() => openEdit(label)}
                   >
                     <Pencil size={14} color={colors.foreground} />
                   </Pressable>
                   <Pressable
-                    style={[styles.actionButton, { borderColor: colors.border }]}
+                    style={[
+                      styles.actionButton,
+                      { borderColor: ui.borderStrong, backgroundColor: ui.surface },
+                    ]}
                     onPress={() => deleteLabel(label.id)}
                   >
                     <Trash2 size={14} color={colors.destructive} />
@@ -245,7 +267,7 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   content: { padding: 16 },
   sectionTitle: {
-    fontSize: 14,
+    fontSize: typography.size.sm,
     fontWeight: '600',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
@@ -269,7 +291,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   editorTitle: {
-    fontSize: 15,
+    fontSize: typography.size.md,
     fontWeight: '600',
   },
   colorRow: {
@@ -282,10 +304,13 @@ const styles = StyleSheet.create({
     height: 30,
     borderRadius: 15,
     borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  saveButton: {
-    borderRadius: 8,
-    paddingVertical: 10,
+  colorChipBadge: {
+    width: 18,
+    height: 18,
+    borderRadius: 999,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -303,7 +328,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   labelName: {
-    fontSize: 14,
+    fontSize: typography.size.sm,
     fontWeight: '600',
     paddingHorizontal: 8,
     paddingVertical: 4,
@@ -328,5 +353,5 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     alignItems: 'center',
   },
-  emptyText: { fontSize: 14 },
+  emptyText: { fontSize: typography.size.sm },
 });

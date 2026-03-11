@@ -84,6 +84,9 @@ export const authProviders = (env: Record<string, string>): ProviderConfig[] => 
     requiredEnvVars: ['APPLE_CLIENT_ID', 'APPLE_TEAM_ID', 'APPLE_KEY_ID', 'APPLE_PRIVATE_KEY'],
     config: {
       clientId: env.APPLE_CLIENT_ID,
+      // Native iOS Apple Sign-in tokens use the app's Bundle ID as the audience
+      // claim, not the Service ID. Better Auth needs this to validate native tokens.
+      appBundleIdentifier: env.APPLE_APP_BUNDLE_ID || 'com.ludvighedin.todus',
       clientSecret: {
         teamId: env.APPLE_TEAM_ID,
         keyId: env.APPLE_KEY_ID,

@@ -88,7 +88,7 @@ const ExampleQueries = ({ onQueryClick }: { onQueryClick: (query: string) => voi
             <button
               key={query}
               onClick={() => onQueryClick(query)}
-              className="shrink-0 whitespace-nowrap rounded-md bg-[#f0f0f0] p-1 px-2 text-sm text-[#555555] dark:bg-[#262626] dark:text-[#929292]"
+              className="shrink-0 rounded-md bg-[#f0f0f0] p-1 px-2 text-sm whitespace-nowrap text-[#555555] dark:bg-[#262626] dark:text-[#929292]"
             >
               {query}
             </button>
@@ -102,7 +102,7 @@ const ExampleQueries = ({ onQueryClick }: { onQueryClick: (query: string) => voi
             <button
               key={query}
               onClick={() => onQueryClick(query)}
-              className="shrink-0 whitespace-nowrap rounded-md bg-[#f0f0f0] p-1 px-2 text-sm text-[#555555] dark:bg-[#262626] dark:text-[#929292]"
+              className="shrink-0 rounded-md bg-[#f0f0f0] p-1 px-2 text-sm whitespace-nowrap text-[#555555] dark:bg-[#262626] dark:text-[#929292]"
             >
               {query}
             </button>
@@ -110,9 +110,9 @@ const ExampleQueries = ({ onQueryClick }: { onQueryClick: (query: string) => voi
         </div>
       </div>
       {/* Left mask */}
-      <div className="from-panelLight dark:from-panelDark bg-linear-to-r pointer-events-none absolute bottom-0 left-0 top-0 w-12 to-transparent"></div>
+      <div className="from-panelLight dark:from-panelDark pointer-events-none absolute top-0 bottom-0 left-0 w-12 bg-linear-to-r to-transparent"></div>
       {/* Right mask */}
-      <div className="from-panelLight dark:from-panelDark bg-linear-to-l pointer-events-none absolute bottom-0 right-0 top-0 w-12 to-transparent"></div>
+      <div className="from-panelLight dark:from-panelDark pointer-events-none absolute top-0 right-0 bottom-0 w-12 bg-linear-to-l to-transparent"></div>
     </div>
   );
 };
@@ -209,6 +209,7 @@ export function AIChat({
   const [, setPricingDialog] = useQueryState('pricingDialog');
   const [aiSidebarOpen] = useQueryState('aiSidebar');
   const { toggleOpen } = useAISidebar();
+  const isChatEnabled = chatMessages.enabled;
 
   const scrollToBottom = useCallback(() => {
     if (messagesEndRef.current) {
@@ -231,6 +232,12 @@ export function AIChat({
       }
 
       if (event.key === 'Enter' && !event.metaKey && !event.shiftKey) {
+        if (!isChatEnabled) {
+          event.preventDefault();
+          void setPricingDialog('true');
+          return;
+        }
+
         onSubmit(event as unknown as React.FormEvent<HTMLFormElement>);
       }
     },
@@ -238,6 +245,12 @@ export function AIChat({
 
   const onSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+
+    if (!isChatEnabled) {
+      void setPricingDialog('true');
+      return;
+    }
+
     handleSubmit(e);
     editor.commands.clearContent(true);
     setTimeout(() => {
@@ -261,14 +274,14 @@ export function AIChat({
     <div className={cn('flex h-full flex-col', isFullScreen ? 'mx-auto max-w-xl' : '')}>
       <div className="no-scrollbar flex-1 overflow-y-auto" ref={messagesContainerRef}>
         <div className="min-h-full px-2 py-4">
-          {chatMessages && !chatMessages.enabled ? (
-            <div
-              className="absolute inset-0 flex flex-col items-center justify-center"
-            >
-              <TextShimmer className="text-center text-xl font-medium">
+          {!isChatEnabled ? (
+            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center">
+              <TextShimmer className="max-w-full px-4 text-center text-xl font-medium">
                 Upgrade to Todus Pro for unlimited AI chat
               </TextShimmer>
-              <Button onClick={() => setPricingDialog('true')} className="mt-2 h-8 w-52">Start 7 day free trial</Button>
+              <Button onClick={() => setPricingDialog('true')} className="mt-2 h-8 w-52">
+                Start 7 day free trial
+              </Button>
             </div>
           ) : !messages.length ? (
             <div className="absolute inset-0 flex flex-col items-center justify-center">
@@ -276,7 +289,7 @@ export function AIChat({
                 <img src="/black-icon.svg" alt="Todus Logo" className="dark:hidden" />
                 <img src="/white-icon.svg" alt="Todus Logo" className="hidden dark:block" />
               </div>
-              <p className="mb-1 mt-2 hidden text-center text-sm font-medium text-black md:block dark:text-white">
+              <p className="mt-2 mb-1 hidden text-center text-sm font-medium text-black md:block dark:text-white">
                 Ask anything about your emails
               </p>
               <p className="mb-3 text-center text-sm text-[#8C8C8C] dark:text-[#929292]">
@@ -292,7 +305,11 @@ export function AIChat({
               const toolParts = message.parts.filter((part) => part.type === 'tool-invocation');
 
               return (
-                <div key={`${message.id}-${index}`} className="mb-2 flex flex-col" data-message-role={message.role}>
+                <div
+                  key={`${message.id}-${index}`}
+                  className="mb-2 flex flex-col"
+                  data-message-role={message.role}
+                >
                   {toolParts.map(
                     (part, index) =>
                       (part.toolInvocation as any)?.result && (
@@ -309,8 +326,8 @@ export function AIChat({
                       className={cn(
                         'flex w-fit flex-col gap-2 rounded-lg text-sm',
                         message.role === 'user'
-                          ? 'overflow-wrap-anywhere text-offsetDark dark:text-subtleWhite ml-auto break-words bg-[#f0f0f0] px-2 py-1 dark:bg-[#252525]'
-                          : 'overflow-wrap-anywhere mr-auto break-words p-2',
+                          ? 'overflow-wrap-anywhere text-offsetDark dark:text-subtleWhite ml-auto bg-[#f0f0f0] px-2 py-1 break-words dark:bg-[#252525]'
+                          : 'overflow-wrap-anywhere mr-auto p-2 break-words',
                       )}
                     >
                       {textParts.map(
@@ -375,9 +392,21 @@ export function AIChat({
                 <div className="grow self-stretch overflow-y-auto outline-white/5 dark:bg-[#202020]">
                   <div
                     onClick={() => {
+                      if (!isChatEnabled) {
+                        void setPricingDialog('true');
+                        return;
+                      }
+
                       editor.commands.focus();
                     }}
-                    className={cn('max-h-[100px] w-full')}
+                    className={cn(
+                      'max-h-[100px] w-full',
+                      '[&_.ProseMirror]:min-h-[40px] [&_.ProseMirror]:px-3 [&_.ProseMirror]:py-2 [&_.ProseMirror]:text-sm [&_.ProseMirror]:outline-none',
+                      '[&_.ProseMirror_p.is-editor-empty:first-child]:relative [&_.ProseMirror_p.is-editor-empty:first-child]:before:pointer-events-none',
+                      '[&_.ProseMirror_p.is-editor-empty:first-child]:before:absolute [&_.ProseMirror_p.is-editor-empty:first-child]:before:top-0 [&_.ProseMirror_p.is-editor-empty:first-child]:before:left-0',
+                      '[&_.ProseMirror_p.is-editor-empty:first-child]:before:text-[#8C8C8C] [&_.ProseMirror_p.is-editor-empty:first-child]:before:content-[attr(data-placeholder)] dark:[&_.ProseMirror_p.is-editor-empty:first-child]:before:text-[#929292]',
+                      !isChatEnabled && 'cursor-pointer opacity-70',
+                    )}
                   >
                     <EditorContent editor={editor} className="h-full w-full" />
                   </div>
@@ -393,7 +422,7 @@ export function AIChat({
                   form="ai-chat-form"
                   type="submit"
                   className="inline-flex cursor-pointer gap-1.5 rounded-lg"
-                  disabled={!chatMessages.enabled}
+                  disabled={!isChatEnabled}
                 >
                   <div className="dark:bg[#141414] flex h-7 items-center justify-center gap-1 rounded-sm bg-[#262626] px-2 pr-1">
                     <CurvedArrow className="mt-1.5 h-4 w-4 fill-white dark:fill-[#929292]" />
@@ -479,6 +508,6 @@ export function AIChat({
         </div>
         </div> */}
       </div>
-    </div >
+    </div>
   );
 }

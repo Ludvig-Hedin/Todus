@@ -5,8 +5,10 @@
 import { View, Text, StyleSheet, Pressable } from 'react-native';
 import { useTRPC } from '../../providers/QueryTrpcProvider';
 import { useTheme } from '../../shared/theme/ThemeContext';
-import { useQuery } from '@tanstack/react-query';
+import { typography, spacing } from '@zero/design-tokens';
 import { Check, Star } from 'lucide-react-native';
+import { SenderAvatar } from './SenderAvatar';
+import { useQuery } from '@tanstack/react-query';
 import React, { useMemo } from 'react';
 
 interface ThreadListItemProps {
@@ -24,7 +26,7 @@ function ThreadListItemComponent({
   selected = false,
   selectionMode = false,
 }: ThreadListItemProps) {
-  const { colors } = useTheme();
+  const { colors, ui } = useTheme();
   const trpc = useTRPC();
   const { data: threadData, isLoading } = useQuery({
     ...trpc.mail.get.queryOptions({ id: threadId }),
@@ -45,35 +47,44 @@ function ThreadListItemComponent({
     return {
       id: threadId,
       sender: latest.sender?.name || latest.sender?.email || 'Unknown',
+      senderEmail: latest.sender?.email ?? '',
       subject: latest.subject || '(no subject)',
-      snippet: latest.body?.replace(/<[^>]*>/g, '').slice(0, 120) || '',
+      snippet: buildSnippetText(latest.processedHtml || latest.body || latest.decodedBody || ''),
       date: latest.receivedOn ? formatDate(new Date(latest.receivedOn)) : '',
       isRead: !threadData.hasUnread,
       isStarred,
+      totalReplies: threadData.totalReplies,
     };
   }, [threadData, threadId]);
 
   if (isLoading) {
     return (
-      <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <View
+        style={[
+          styles.container,
+          styles.skeletonCard,
+          {
+            backgroundColor: ui.surface,
+            borderColor: ui.borderSubtle,
+          },
+        ]}
+      >
+        <View style={[styles.avatarSkeleton, { backgroundColor: ui.surfaceInset }]} />
         <View style={styles.content}>
-          {/* Row 1: sender + date skeleton */}
           <View style={styles.topRow}>
-            <View style={[styles.skeleton, { backgroundColor: colors.secondary, width: '40%' }]} />
-            <View style={[styles.skeleton, { backgroundColor: colors.secondary, width: 50 }]} />
+            <View style={[styles.skeleton, { backgroundColor: ui.surfaceInset, width: '42%' }]} />
+            <View style={[styles.skeleton, { backgroundColor: ui.surfaceInset, width: 44 }]} />
           </View>
-          {/* Row 2: subject skeleton */}
           <View
             style={[
               styles.skeleton,
-              { backgroundColor: colors.secondary, width: '70%', marginBottom: 6 },
+              { backgroundColor: ui.surfaceInset, width: '68%', marginBottom: 5 },
             ]}
           />
-          {/* Row 3: snippet skeleton */}
           <View
             style={[
               styles.skeleton,
-              { backgroundColor: colors.secondary, width: '90%', height: 12 },
+              { backgroundColor: ui.surfaceInset, width: '88%', height: 11 },
             ]}
           />
         </View>
@@ -83,15 +94,16 @@ function ThreadListItemComponent({
 
   if (!uiThread) return null;
 
-  const accessibilityLabel = `${uiThread.isRead ? 'Read' : 'Unread'} thread from ${uiThread.sender}. Subject: ${uiThread.subject}. ${uiThread.snippet}`.trim();
+  const accessibilityLabel =
+    `${uiThread.isRead ? 'Read' : 'Unread'} thread from ${uiThread.sender}. Subject: ${uiThread.subject}. ${uiThread.snippet}`.trim();
 
   return (
     <Pressable
       style={({ pressed }) => [
         styles.container,
         {
-          backgroundColor: selected || pressed ? colors.secondary : colors.background,
-          borderBottomColor: colors.border,
+          backgroundColor: selected ? ui.pressed : pressed ? ui.surfaceRaised : ui.surface,
+          borderColor: selected ? ui.borderStrong : ui.borderSubtle,
         },
       ]}
       onPress={() => onPress(uiThread.id)}
@@ -103,47 +115,53 @@ function ThreadListItemComponent({
       }
       accessibilityState={{ selected }}
     >
-      {/* Unread indicator dot */}
-      {!uiThread.isRead && <View style={[styles.unreadDot, { backgroundColor: colors.primary }]} />}
-      {selectionMode && (
-        <View
-          style={[
-            styles.selectionBadge,
-            {
-              borderColor: selected ? colors.primary : colors.border,
-              backgroundColor: selected ? colors.primary : 'transparent',
-            },
-          ]}
-        >
-          {selected && <Check size={12} color={colors.primaryForeground} />}
-        </View>
-      )}
+      <View style={styles.leadingSlot}>
+        {selectionMode ? (
+          <View
+            style={[
+              styles.selectionBadge,
+              {
+                borderColor: selected ? ui.accent : ui.borderStrong,
+                backgroundColor: selected ? ui.accent : 'transparent',
+              },
+            ]}
+          >
+            {selected && <Check size={12} color={colors.primaryForeground} />}
+          </View>
+        ) : (
+          <SenderAvatar email={uiThread.senderEmail} name={uiThread.sender} size={34} />
+        )}
+      </View>
 
       <View style={styles.content}>
-        {/* Top row: Sender + Date */}
         <View style={styles.topRow}>
+          <View style={styles.senderRow}>
+            <Text
+              style={[
+                styles.sender,
+                { color: colors.foreground },
+                !uiThread.isRead && styles.unreadText,
+              ]}
+              numberOfLines={1}
+            >
+              {uiThread.sender}
+            </Text>
+            {!uiThread.isRead && (
+              <View style={[styles.inlineUnreadDot, { backgroundColor: ui.accent }]} />
+            )}
+            {uiThread.totalReplies > 1 && (
+              <Text style={[styles.replyCount, { color: colors.mutedForeground }]}>
+                [{uiThread.totalReplies}]
+              </Text>
+            )}
+          </View>
           <Text
-            style={[
-              styles.sender,
-              { color: uiThread.isRead ? colors.mutedForeground : colors.foreground },
-              !uiThread.isRead && styles.unreadText,
-            ]}
-            numberOfLines={1}
-          >
-            {uiThread.sender}
-          </Text>
-          <Text
-            style={[
-              styles.date,
-              { color: uiThread.isRead ? colors.mutedForeground : colors.primary },
-              !uiThread.isRead && styles.unreadText,
-            ]}
+            style={[styles.date, { color: colors.mutedForeground }]}
           >
             {uiThread.date}
           </Text>
         </View>
 
-        {/* Subject + Star */}
         <View style={styles.middleRow}>
           <Text
             style={[
@@ -156,11 +174,10 @@ function ThreadListItemComponent({
             {uiThread.subject}
           </Text>
           {uiThread.isStarred && (
-            <Star size={14} color="#f59e0b" fill="#f59e0b" style={styles.star} />
+            <Star size={14} color={ui.warning} fill={ui.warning} style={styles.star} />
           )}
         </View>
 
-        {/* Snippet preview */}
         <Text style={[styles.snippet, { color: colors.mutedForeground }]} numberOfLines={2}>
           {uiThread.snippet}
         </Text>
@@ -200,80 +217,131 @@ function formatDate(date: Date): string {
   return date.toLocaleDateString([], { month: 'short', day: 'numeric', year: '2-digit' });
 }
 
+function buildSnippetText(value: string): string {
+  return value
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<head\b[^>]*>[\s\S]*?<\/head>/gi, ' ')
+    .replace(/<svg\b[^>]*>[\s\S]*?<\/svg>/gi, ' ')
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/@\w[\w-]*\s*\{[^}]*\}/g, ' ')
+    .replace(/[.#:]?[\w-]+(?:\s+[.#:]?[\w-]+)*\s*\{[^}]*\}/g, ' ')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 120);
+}
+
 const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    alignItems: 'flex-start',
+    marginHorizontal: spacing[3],
+    marginBottom: spacing[2],
+    paddingVertical: spacing[3],
+    paddingHorizontal: spacing[4],
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 18,
   },
-  unreadDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    position: 'absolute',
-    left: 4,
-    top: 18,
+  skeletonCard: {
+    alignItems: 'center',
+  },
+  leadingSlot: {
+    width: 40,
+    marginRight: 10,
+    alignItems: 'center',
+    paddingTop: 1,
+  },
+  avatarSkeleton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    marginRight: 10,
   },
   selectionBadge: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
     borderWidth: 1.5,
     alignItems: 'center',
     justifyContent: 'center',
-    position: 'absolute',
-    left: 10,
-    top: 12,
+    marginTop: 5,
   },
   content: {
     flex: 1,
-    paddingLeft: 4,
   },
   topRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'baseline',
-    marginBottom: 2,
+    alignItems: 'flex-start',
+    marginBottom: 3,
+    gap: 10,
+  },
+  senderRow: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[1] * 1.5,
+    minWidth: 0,
+    paddingRight: spacing[2],
   },
   sender: {
-    fontSize: 15,
-    flex: 1,
-    paddingRight: 8,
+    fontSize: 14,
+    lineHeight: 17,
+    flexShrink: 1,
+    letterSpacing: -0.18,
+  },
+  inlineUnreadDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+    flexShrink: 0,
+  },
+  replyCount: {
+    fontSize: typography.size.xs,
+    fontWeight: '500',
+    letterSpacing: -0.1,
   },
   date: {
-    fontSize: 13,
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: '500',
+    letterSpacing: -0.08,
+    paddingTop: 1,
   },
   middleRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 4,
+    marginBottom: 5,
+    gap: spacing[2],
   },
   subject: {
-    fontSize: 14,
+    fontSize: 13,
+    lineHeight: 16,
     flex: 1,
-    paddingRight: 8,
+    paddingRight: 6,
+    letterSpacing: -0.16,
   },
   star: {
-    marginLeft: 4,
+    marginLeft: 2,
   },
   snippet: {
-    fontSize: 14,
-    lineHeight: 18,
+    fontSize: 12,
+    lineHeight: 16,
+    letterSpacing: -0.08,
   },
   unreadText: {
-    fontWeight: '700',
+    fontWeight: '600',
   },
   skeleton: {
-    height: 16,
-    borderRadius: 4,
+    height: 10,
+    borderRadius: 999,
     width: '60%',
-    marginBottom: 8,
-  },
-  skeletonSmall: {
-    height: 14,
-    borderRadius: 4,
-    width: '80%',
+    marginBottom: 7,
   },
 });

@@ -22,6 +22,7 @@ import {
 import { WebView } from 'react-native-webview';
 import type { WebViewSourceUri } from 'react-native-webview/lib/WebViewTypes';
 import { getNativeEnv } from '../../src/shared/config/env';
+import { useTheme } from '../../src/shared/theme/ThemeContext';
 import {
   setBearerSessionAtom,
   setCurrentPathAtom,
@@ -87,6 +88,7 @@ export default function WebAuthScreen() {
   }>();
   const router = useRouter();
   const env = getNativeEnv();
+  const { colors, ui } = useTheme();
   const setWebCookieSession = useSetAtom(setWebCookieSessionAtom);
   const setBearerSession = useSetAtom(setBearerSessionAtom);
   const setCurrentPath = useSetAtom(setCurrentPathAtom);
@@ -194,8 +196,8 @@ export default function WebAuthScreen() {
 
   if (!url && !provider) {
     return (
-      <View style={styles.container}>
-        <Text style={styles.errorText}>No auth URL or provider specified</Text>
+      <View style={[styles.container, { backgroundColor: ui.canvas }]}>
+        <Text style={[styles.errorText, { color: colors.destructive }]}>No auth URL or provider specified</Text>
       </View>
     );
   }
@@ -203,23 +205,23 @@ export default function WebAuthScreen() {
   // Show loading screen while resolving OAuth URL (provider mode)
   if (!source) {
     return (
-      <View style={styles.container}>
-        <View style={styles.topBar}>
-          <Pressable style={styles.backButton} onPress={() => router.back()}>
-            <Text style={styles.backButtonText}>Back</Text>
+      <View style={[styles.container, { backgroundColor: ui.canvas }]}>
+        <View style={[styles.topBar, { backgroundColor: colors.background, borderColor: ui.borderSubtle }]}>
+          <Pressable style={[styles.backButton, { backgroundColor: colors.primary }]} onPress={() => router.back()}>
+            <Text style={[styles.backButtonText, { color: colors.primaryForeground }]}>Back</Text>
           </Pressable>
-          <Text style={styles.topBarTitle}>Sign in</Text>
+          <Text style={[styles.topBarTitle, { color: colors.foreground }]}>Sign in</Text>
         </View>
-        <View style={styles.loadingPill}>
-          <ActivityIndicator size="small" color="#111827" />
-          <Text style={styles.loadingText}>Connecting to provider...</Text>
+        <View style={[styles.loadingPill, { backgroundColor: colors.background, borderColor: ui.borderSubtle }]}>
+          <ActivityIndicator size="small" color={colors.foreground} />
+          <Text style={[styles.loadingText, { color: colors.foreground }]}>Connecting to provider...</Text>
         </View>
       </View>
     );
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: ui.canvas }]}>
       <WebView
         ref={webViewRef}
         source={source}
@@ -295,23 +297,23 @@ export default function WebAuthScreen() {
       />
 
       {/* Top bar with back button */}
-      <View style={styles.topBar}>
-        <Pressable style={styles.backButton} onPress={() => router.back()}>
-          <Text style={styles.backButtonText}>Back</Text>
+      <View style={[styles.topBar, { backgroundColor: colors.background, borderColor: ui.borderSubtle }]}>
+        <Pressable style={[styles.backButton, { backgroundColor: colors.primary }]} onPress={() => router.back()}>
+          <Text style={[styles.backButtonText, { color: colors.primaryForeground }]}>Back</Text>
         </Pressable>
-        <Text style={styles.topBarTitle}>Sign in</Text>
+        <Text style={[styles.topBarTitle, { color: colors.foreground }]}>Sign in</Text>
       </View>
 
       {isLoading && (
-        <View style={styles.loadingPill}>
-          <ActivityIndicator size="small" color="#111827" />
-          <Text style={styles.loadingText}>Completing sign-in...</Text>
+        <View style={[styles.loadingPill, { backgroundColor: colors.background, borderColor: ui.borderSubtle }]}>
+          <ActivityIndicator size="small" color={colors.foreground} />
+          <Text style={[styles.loadingText, { color: colors.foreground }]}>Completing sign-in...</Text>
         </View>
       )}
 
       {errorMessage && (
-        <View style={styles.errorPill}>
-          <Text style={styles.errorPillText}>{errorMessage}</Text>
+        <View style={[styles.errorPill, { backgroundColor: `${colors.destructive}1A`, borderColor: `${colors.destructive}33` }]}>
+          <Text style={[styles.errorPillText, { color: colors.destructive }]}>{errorMessage}</Text>
         </View>
       )}
     </View>
@@ -321,7 +323,6 @@ export default function WebAuthScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f4f4f5',
   },
   topBar: {
     position: 'absolute',
@@ -334,23 +335,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: '#d4d4d8',
   },
   topBarTitle: {
     fontSize: 13,
-    color: '#374151',
     fontWeight: '500',
   },
   backButton: {
     borderRadius: 8,
-    backgroundColor: '#111827',
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
   backButtonText: {
-    color: '#ffffff',
     fontWeight: '600',
     fontSize: 13,
   },
@@ -362,14 +358,11 @@ const styles = StyleSheet.create({
     gap: 8,
     alignItems: 'center',
     borderRadius: 999,
-    backgroundColor: '#ffffff',
     borderWidth: 1,
-    borderColor: '#d4d4d8',
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
   loadingText: {
-    color: '#111827',
     fontSize: 13,
     fontWeight: '500',
   },
@@ -380,17 +373,13 @@ const styles = StyleSheet.create({
     right: 14,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#fecaca',
-    backgroundColor: '#fef2f2',
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
   errorPillText: {
-    color: '#991b1b',
     fontSize: 13,
   },
   errorText: {
-    color: '#991b1b',
     fontSize: 16,
     textAlign: 'center',
     padding: 20,

@@ -3,11 +3,6 @@
  * Equivalent to /mail/:folder on web (inbox, sent, draft, archive, etc.)
  */
 import {
-  getThreadListSnapshots,
-  removeThreadIdsFromThreadListCaches,
-  restoreThreadListSnapshots,
-} from '../../../src/features/mail/optimisticThreadCache';
-import {
   ActivityIndicator,
   Alert,
   Platform,
@@ -19,6 +14,13 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+  getThreadListSnapshots,
+  removeThreadIdsFromThreadListCaches,
+  restoreThreadListSnapshots,
+} from '../../../src/features/mail/optimisticThreadCache';
+import { Archive, CheckCheck, Menu, Plus, Search, Trash2, X } from 'lucide-react-native';
 import { SwipeableThreadRow } from '../../../src/features/mail/SwipeableThreadRow';
 import { ThreadDetailPane } from '../../../src/features/mail/ThreadDetailPane';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -28,10 +30,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTRPC } from '../../../src/providers/QueryTrpcProvider';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../../src/shared/theme/ThemeContext';
-import { getNativeEnv } from '../../../src/shared/config/env';
+import { spacing } from '@zero/design-tokens';
 import { sessionAtom } from '../../../src/shared/state/session';
+import { getNativeEnv } from '../../../src/shared/config/env';
 import { haptics } from '../../../src/shared/utils/haptics';
-import { Archive, CheckCheck, Menu, Plus, Search, Trash2, X } from 'lucide-react-native';
 import { FlashList } from '@shopify/flash-list';
 import { useAtomValue } from 'jotai';
 
@@ -43,21 +45,21 @@ type MailCategory = {
   isDefault?: boolean;
 };
 
+const INBOX_DISCOVERY_HINT_KEY = 'mail.inbox.discovery_hint.dismissed.v1';
+
 export default function MailFolderScreen() {
   const { folder, threadId } = useLocalSearchParams<{ folder: string; threadId?: string }>();
   const router = useRouter();
   const navigation = useNavigation();
   const { width } = useWindowDimensions();
   const env = getNativeEnv();
-  const { colors } = useTheme();
+  const { colors, ui } = useTheme();
   const insets = useSafeAreaInsets();
   const session = useAtomValue(sessionAtom);
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const activeFolder = folder ?? 'inbox';
   const isSplitLayout = Platform.OS === 'macos' || width >= 768;
-  const showCommandPaletteHint = Platform.OS === 'macos' || width >= 390;
-  const commandPaletteHint = Platform.OS === 'ios' || Platform.OS === 'macos' ? 'Cmd+K' : 'Ctrl+K';
   const listThreadsKey = trpc.mail.listThreads.queryKey();
   const archiveSnapshotsRef = useRef<ReturnType<typeof getThreadListSnapshots>>([]);
   const deleteSnapshotsRef = useRef<ReturnType<typeof getThreadListSnapshots>>([]);
@@ -66,6 +68,7 @@ export default function MailFolderScreen() {
   );
   const [selectedThreadIds, setSelectedThreadIds] = useState<string[]>([]);
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
+  const [showDiscoveryHint, setShowDiscoveryHint] = useState(false);
 
   const settingsQuery = useQuery({
     ...trpc.settings.get.queryOptions(),
@@ -74,9 +77,11 @@ export default function MailFolderScreen() {
   const categoryDefaultsQuery = useQuery(trpc.categories.defaults.queryOptions());
 
   const categoryOptions = useMemo(() => {
-    const settingsCategories = settingsQuery.data?.settings?.categories as MailCategory[] | undefined;
+    const settingsCategories = settingsQuery.data?.settings?.categories as
+      | MailCategory[]
+      | undefined;
     const fallbackCategories = categoryDefaultsQuery.data as MailCategory[] | undefined;
-    const source = settingsCategories?.length ? settingsCategories : fallbackCategories ?? [];
+    const source = settingsCategories?.length ? settingsCategories : (fallbackCategories ?? []);
     return [...source].sort((a, b) => a.order - b.order);
   }, [categoryDefaultsQuery.data, settingsQuery.data?.settings?.categories]);
 
@@ -100,13 +105,32 @@ export default function MailFolderScreen() {
     });
   }, [activeFolder, categoryOptions, defaultCategoryId]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    AsyncStorage.getItem(INBOX_DISCOVERY_HINT_KEY)
+      .then((value) => {
+        if (cancelled) return;
+        setShowDiscoveryHint(value !== '1');
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setShowDiscoveryHint(true);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const selectedCategory = useMemo(
     () => categoryOptions.find((category) => category.id === selectedCategoryId) ?? null,
     [categoryOptions, selectedCategoryId],
   );
 
   const listThreadsInput = useMemo(() => {
-    const query = activeFolder === 'inbox' ? selectedCategory?.searchValue?.trim() ?? '' : '';
+    const query = activeFolder === 'inbox' ? (selectedCategory?.searchValue?.trim() ?? '') : '';
     return {
       folder: activeFolder,
       ...(query ? { q: query } : {}),
@@ -168,6 +192,18 @@ export default function MailFolderScreen() {
   const isSelectionMode = selectedThreadIds.length > 0;
   const allVisibleThreadsSelected =
     threads.length > 0 && selectedThreadIds.length === threads.length;
+  const headerSubtitle = useMemo(() => {
+    if (isSelectionMode) {
+      return `${selectedThreadIds.length} conversation${selectedThreadIds.length === 1 ? '' : 's'} selected`;
+    }
+    if (activeFolder === 'inbox' && selectedCategory) {
+      return selectedCategory.name;
+    }
+    if (threads.length === 0) {
+      return 'No conversations';
+    }
+    return `${threads.length} conversation${threads.length === 1 ? '' : 's'}`;
+  }, [activeFolder, isSelectionMode, selectedCategory, selectedThreadIds.length, threads.length]);
 
   useEffect(() => {
     setSelectedThreadIds((current) =>
@@ -321,8 +357,9 @@ export default function MailFolderScreen() {
     return (
       <FlashList
         data={threads}
-        {...({ estimatedItemSize: 88, drawDistance: 320 } as any)}
+        {...({ estimatedItemSize: 78, drawDistance: 320 } as any)}
         keyExtractor={(item: any) => item.id}
+        contentContainerStyle={styles.listContent}
         renderItem={({ item }: { item: any }) => {
           const isRowSelected = isSelectionMode
             ? selectedThreadIds.includes(item.id)
@@ -330,6 +367,7 @@ export default function MailFolderScreen() {
 
           return (
             <SwipeableThreadRow
+              threadId={item.id}
               onArchive={() => handleArchive(item.id)}
               onDelete={() => handleDelete(item.id)}
               disabled={isSelectionMode}
@@ -353,12 +391,22 @@ export default function MailFolderScreen() {
         }
         removeClippedSubviews
         ListEmptyComponent={
-          <View style={styles.emptyState}>
+          <View
+            style={[
+              styles.emptyState,
+              {
+                backgroundColor: ui.surface,
+                borderColor: ui.borderSubtle,
+              },
+            ]}
+          >
             <Text style={[styles.emptyTitle, { color: colors.foreground }]}>
-              Nothing to see here
+              {activeFolder === 'inbox' ? 'You are all caught up' : `No messages in ${folderLabel}`}
             </Text>
             <Text style={[styles.emptySubtitle, { color: colors.mutedForeground }]}>
-              This folder is empty.
+              {activeFolder === 'inbox'
+                ? 'Try another inbox category or pull to refresh.'
+                : 'Pull to refresh or switch folders to keep triaging.'}
             </Text>
           </View>
         }
@@ -367,15 +415,14 @@ export default function MailFolderScreen() {
   };
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
-      {/* Header with hamburger menu, title, search, and compose */}
+    <View style={[styles.container, { backgroundColor: ui.canvas }]}>
       <View
         style={[
           styles.header,
           {
             paddingTop: insets.top + 8,
-            backgroundColor: colors.background,
-            borderBottomColor: colors.border,
+            backgroundColor: ui.canvas,
+            borderBottomColor: ui.borderSubtle,
           },
         ]}
       >
@@ -383,30 +430,54 @@ export default function MailFolderScreen() {
           {isSelectionMode ? (
             <>
               <Pressable
-                style={({ pressed }) => [styles.iconButton, pressed && { opacity: 0.7 }]}
+                style={({ pressed }) => [
+                  styles.iconButton,
+                  styles.controlButton,
+                  {
+                    backgroundColor: pressed ? ui.pressed : ui.surface,
+                    borderColor: ui.borderSubtle,
+                  },
+                ]}
                 onPress={clearSelection}
                 accessibilityRole="button"
                 accessibilityLabel="Clear thread selection"
               >
-                <X color={colors.foreground} size={22} />
+                <X color={colors.foreground} size={18} />
               </Pressable>
-              <Text style={[styles.selectionTitle, { color: colors.foreground }]}>
-                {selectedThreadIds.length} selected
-              </Text>
+              <View style={styles.headerTitleGroup}>
+                <Text style={[styles.selectionTitle, { color: colors.foreground }]}>Selection</Text>
+                <Text style={[styles.headerSubtitle, { color: colors.mutedForeground }]}>
+                  {headerSubtitle}
+                </Text>
+              </View>
             </>
           ) : (
             <>
               {!isSplitLayout && (
                 <Pressable
-                  style={({ pressed }) => [styles.iconButton, pressed && { opacity: 0.7 }]}
+                  style={({ pressed }) => [
+                    styles.iconButton,
+                    styles.controlButton,
+                    {
+                      backgroundColor: pressed ? ui.pressed : ui.surface,
+                      borderColor: ui.borderSubtle,
+                    },
+                  ]}
                   onPress={openDrawer}
                   accessibilityRole="button"
                   accessibilityLabel="Open mail menu"
                 >
-                  <Menu color={colors.foreground} size={24} />
+                  <Menu color={colors.foreground} size={18} />
                 </Pressable>
               )}
-              <Text style={[styles.headerTitle, { color: colors.foreground }]}>{folderLabel}</Text>
+              <View style={styles.headerTitleGroup}>
+                <Text style={[styles.headerTitle, { color: colors.foreground }]}>
+                  {folderLabel}
+                </Text>
+                <Text style={[styles.headerSubtitle, { color: colors.mutedForeground }]}>
+                  {headerSubtitle}
+                </Text>
+              </View>
             </>
           )}
         </View>
@@ -416,31 +487,52 @@ export default function MailFolderScreen() {
             <>
               {!allVisibleThreadsSelected && threads.length > 0 && (
                 <Pressable
-                  style={({ pressed }) => [styles.iconButton, pressed && { opacity: 0.7 }]}
+                  style={({ pressed }) => [
+                    styles.iconButton,
+                    styles.controlButton,
+                    {
+                      backgroundColor: pressed ? ui.pressed : ui.surface,
+                      borderColor: ui.borderSubtle,
+                    },
+                  ]}
                   onPress={selectAllVisibleThreads}
                   accessibilityRole="button"
                   accessibilityLabel="Select all visible threads"
                 >
-                  <CheckCheck color={colors.foreground} size={20} />
+                  <CheckCheck color={colors.foreground} size={18} />
                 </Pressable>
               )}
               <Pressable
-                style={({ pressed }) => [styles.iconButton, pressed && { opacity: 0.7 }]}
+                style={({ pressed }) => [
+                  styles.iconButton,
+                  styles.controlButton,
+                  {
+                    backgroundColor: pressed ? ui.pressed : ui.surface,
+                    borderColor: ui.borderSubtle,
+                  },
+                ]}
                 onPress={handleBulkArchive}
                 disabled={archiveMutation.isPending || deleteMutation.isPending}
                 accessibilityRole="button"
                 accessibilityLabel="Archive selected threads"
               >
-                <Archive color={colors.foreground} size={20} />
+                <Archive color={colors.foreground} size={18} />
               </Pressable>
               <Pressable
-                style={({ pressed }) => [styles.iconButton, pressed && { opacity: 0.7 }]}
+                style={({ pressed }) => [
+                  styles.iconButton,
+                  styles.controlButton,
+                  {
+                    backgroundColor: pressed ? ui.pressed : ui.surface,
+                    borderColor: ui.borderSubtle,
+                  },
+                ]}
                 onPress={handleBulkDelete}
                 disabled={archiveMutation.isPending || deleteMutation.isPending}
                 accessibilityRole="button"
                 accessibilityLabel="Delete selected threads"
               >
-                <Trash2 color={colors.destructive} size={20} />
+                <Trash2 color={colors.destructive} size={18} />
               </Pressable>
             </>
           ) : (
@@ -449,41 +541,33 @@ export default function MailFolderScreen() {
                 style={({ pressed }) => [
                   styles.commandPaletteButton,
                   {
-                    backgroundColor: colors.secondary,
-                    borderColor: colors.border,
-                    opacity: pressed ? 0.7 : 1,
+                    backgroundColor: pressed ? ui.pressed : ui.surfaceRaised,
+                    borderColor: ui.borderSubtle,
                   },
                 ]}
                 onPress={() => router.push('/search')}
                 accessibilityRole="button"
                 accessibilityLabel="Open search and command palette"
               >
-                <Search color={colors.mutedForeground} size={18} />
+                <Search color={colors.mutedForeground} size={16} />
                 <Text style={[styles.commandPaletteLabel, { color: colors.mutedForeground }]}>
                   Search
                 </Text>
-                {showCommandPaletteHint && (
-                  <View
-                    style={[
-                      styles.commandPaletteHintChip,
-                      { backgroundColor: colors.background, borderColor: colors.border },
-                    ]}
-                  >
-                    <Text
-                      style={[styles.commandPaletteHintText, { color: colors.mutedForeground }]}
-                    >
-                      {commandPaletteHint}
-                    </Text>
-                  </View>
-                )}
               </Pressable>
               <Pressable
-                style={[styles.composeButton, { backgroundColor: colors.primary }]}
+                style={[
+                  styles.composeButton,
+                  {
+                    backgroundColor: ui.surfaceRaised,
+                    borderColor: ui.borderStrong,
+                    shadowColor: ui.shadow,
+                  },
+                ]}
                 onPress={() => router.push('/compose')}
                 accessibilityRole="button"
                 accessibilityLabel="Compose new email"
               >
-                <Plus color={colors.primaryForeground} size={20} />
+                <Plus color={ui.accent} size={18} />
               </Pressable>
             </>
           )}
@@ -494,51 +578,87 @@ export default function MailFolderScreen() {
         <View
           style={[
             styles.categoryTabsContainer,
-            { borderBottomColor: colors.border, backgroundColor: colors.background },
+            { borderBottomColor: ui.borderSubtle, backgroundColor: ui.canvas },
           ]}
         >
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.categoryTabsContent}
+          <View
+            style={[
+              styles.categoryTabsTrack,
+              { backgroundColor: ui.surface, borderColor: ui.borderSubtle },
+            ]}
           >
-            {categoryOptions.map((category) => {
-              const isActive = selectedCategoryId === category.id;
-              return (
-                <Pressable
-                  key={category.id}
-                  style={[
-                    styles.categoryTabChip,
-                    {
-                      backgroundColor: isActive ? colors.primary : colors.secondary,
-                      borderColor: isActive ? colors.primary : colors.border,
-                    },
-                  ]}
-                  onPress={() => setSelectedCategoryId(category.id)}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Filter by ${category.name}`}
-                  accessibilityState={{ selected: isActive }}
-                >
-                  <Text
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.categoryTabsContent}
+            >
+              {categoryOptions.map((category) => {
+                const isActive = selectedCategoryId === category.id;
+                return (
+                  <Pressable
+                    key={category.id}
                     style={[
-                      styles.categoryTabText,
+                      styles.categoryTabChip,
                       {
-                        color: isActive ? colors.primaryForeground : colors.foreground,
+                        backgroundColor: isActive ? ui.accentSoft : 'transparent',
+                        borderColor: isActive ? ui.accentMuted : 'transparent',
                       },
                     ]}
+                    onPress={() => setSelectedCategoryId(category.id)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Filter by ${category.name}`}
+                    accessibilityState={{ selected: isActive }}
                   >
-                    {category.name}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
+                    <Text
+                      style={[
+                        styles.categoryTabText,
+                        {
+                          color: isActive ? colors.foreground : colors.mutedForeground,
+                        },
+                      ]}
+                    >
+                      {category.name}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </View>
+        </View>
+      )}
+
+      {showDiscoveryHint && activeFolder === 'inbox' && !isSelectionMode && !isSplitLayout && threads.length > 0 && (
+        <View style={styles.discoveryHintWrap}>
+          <View
+            style={[
+              styles.discoveryHint,
+              {
+                backgroundColor: ui.surfaceRaised,
+                borderColor: ui.borderSubtle,
+              },
+            ]}
+          >
+            <Text style={[styles.discoveryHintText, { color: colors.mutedForeground }]}>
+              Swipe a thread for quick actions. Long press to select multiple conversations.
+            </Text>
+            <Pressable
+              onPress={() => {
+                setShowDiscoveryHint(false);
+                AsyncStorage.setItem(INBOX_DISCOVERY_HINT_KEY, '1').catch(() => {});
+              }}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Dismiss inbox tips"
+            >
+              <X color={colors.mutedForeground} size={14} />
+            </Pressable>
+          </View>
         </View>
       )}
 
       {isSplitLayout ? (
         <View style={styles.splitContent}>
-          <View style={[styles.listPane, { borderRightColor: colors.border }]}>
+          <View style={[styles.listPane, { borderRightColor: ui.borderSubtle }]}>
             {renderThreadList()}
           </View>
           <View style={styles.detailPane}>
@@ -562,85 +682,131 @@ const styles = StyleSheet.create({
   },
   header: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-end',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
+    paddingHorizontal: spacing[4],
     paddingBottom: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
+    gap: spacing[3],
   },
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 10,
+    flex: 1,
   },
   headerRight: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: spacing[2],
   },
   iconButton: {
-    padding: 4,
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  controlButton: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 16,
   },
   commandPaletteButton: {
-    minHeight: 36,
-    borderRadius: 10,
+    minHeight: 38,
+    borderRadius: 16,
     borderWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 10,
+    paddingHorizontal: spacing[3],
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
   },
+  headerTitleGroup: {
+    gap: 2,
+  },
   commandPaletteLabel: {
-    fontSize: 14,
+    fontSize: 12,
+    lineHeight: 14,
     fontWeight: '500',
-  },
-  commandPaletteHintChip: {
-    borderRadius: 999,
-    borderWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-  },
-  commandPaletteHintText: {
-    fontSize: 11,
-    fontWeight: '600',
+    letterSpacing: -0.08,
   },
   headerTitle: {
-    fontSize: 28,
-    fontWeight: '800',
+    fontSize: 23,
+    lineHeight: 26,
+    fontWeight: '700',
     letterSpacing: -0.5,
   },
+  headerSubtitle: {
+    fontSize: 11,
+    lineHeight: 14,
+    letterSpacing: -0.06,
+  },
   selectionTitle: {
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: '700',
-    letterSpacing: -0.2,
+    letterSpacing: -0.3,
   },
   composeButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 38,
+    height: 38,
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
     alignItems: 'center',
     justifyContent: 'center',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.08,
+    shadowRadius: 14,
+    elevation: 3,
   },
   categoryTabsContainer: {
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    paddingVertical: 10,
+    paddingTop: 10,
+    paddingBottom: 8,
+    paddingHorizontal: spacing[3],
+  },
+  categoryTabsTrack: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 20,
   },
   categoryTabsContent: {
-    paddingHorizontal: 12,
-    gap: 8,
+    paddingHorizontal: 5,
+    paddingVertical: 5,
+    gap: 4,
   },
   categoryTabChip: {
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
   },
   categoryTabText: {
-    fontSize: 13,
+    fontSize: 11,
+    lineHeight: 13,
     fontWeight: '600',
+    letterSpacing: -0.06,
   },
   listContainer: {
     flex: 1,
+  },
+  discoveryHintWrap: {
+    paddingHorizontal: spacing[3],
+    paddingTop: spacing[2],
+  },
+  discoveryHint: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 18,
+    paddingHorizontal: spacing[3],
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[2],
+  },
+  discoveryHintText: {
+    flex: 1,
+    fontSize: 11,
+    lineHeight: 15,
+    letterSpacing: -0.06,
+  },
+  listContent: {
+    paddingTop: 8,
+    paddingBottom: 24,
   },
   splitContent: {
     flex: 1,
@@ -654,20 +820,27 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   emptyState: {
-    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 64,
-    paddingHorizontal: 24,
-    gap: 8,
+    marginHorizontal: spacing[3],
+    marginTop: 18,
+    paddingVertical: 40,
+    paddingHorizontal: spacing[5],
+    gap: 6,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 24,
   },
   emptyTitle: {
-    fontSize: 17,
+    fontSize: 15,
+    lineHeight: 19,
     fontWeight: '600',
+    letterSpacing: -0.18,
   },
   emptySubtitle: {
-    fontSize: 14,
+    fontSize: 12,
     textAlign: 'center',
+    lineHeight: 17,
+    letterSpacing: -0.06,
   },
   loadingContainer: {
     flex: 1,

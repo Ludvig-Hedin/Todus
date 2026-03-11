@@ -158,6 +158,29 @@ All marked DONE — these are WebView-based, not truly native.
 - Production analytics/Intercom/Sentry DSNs/keys
 - See `MANUAL_INPUTS_GUIDE.md` for details
 
+## Session Notes (2026-03-10)
+
+- Inbox UX polish pass completed in `apps/ios` for faster first-read comprehension:
+  - Replaced the placeholder thread-detail ellipsis dialog with real thread actions (`mark read/unread`, `move to spam`).
+  - Moved notes below the message content and collapsed them by default so reading the email stays primary.
+  - Hid low-value system labels in thread detail and mapped category labels to friendlier names.
+  - Added an inbox hint teaching swipe and long-press actions, plus clearer empty-state copy.
+  - Improved search with active filter summary, a `Clear all` reset action, and more helpful guidance/no-result copy.
+  - Improved inbox row snippets by falling back to `decodedBody` when the short body payload is empty.
+  - Replaced the previous blanket dark-mode email text override with contrast-aware message HTML normalization so native thread content stays readable when sender markup includes pale backgrounds.
+  - Added direct read/unread controls to both the inbox swipe menu and the thread header, including a guard so manual `mark unread` does not get auto-reverted by the thread auto-read effect.
+  - Increased spacing and tap target size for the thread header action buttons so the top-row controls are easier to hit on device.
+  - Rounded the rendered email body container so message content feels consistent with the rest of the card-based thread UI.
+  - Reworked the mail visual system toward a more mature, restrained product look: softer non-black dark neutrals, tighter typography, reduced accent saturation, stronger grouping of controls, and more refined card treatment across inbox, search, and thread detail.
+  - Fixed inbox message previews so they strip `<style>`, `<script>`, `<head>`, and inline CSS blocks before building the snippet, preventing raw HTML/CSS from showing under the subject line.
+- Verification completed for this update:
+  - `pnpm --dir apps/ios test:unit` passes (39/39).
+  - Narrowed `pnpm --dir apps/ios exec tsc --noEmit --pretty false` check reports no errors in the edited inbox/search files.
+  - Narrowed `pnpm --dir apps/ios exec tsc --noEmit --pretty false` check reports no errors in `apps/ios/src/features/mail/MessageCard.tsx`.
+  - Narrowed `pnpm --dir apps/ios exec tsc --noEmit --pretty false` check reports no errors in the updated unread-action files.
+  - Narrowed `pnpm --dir apps/ios exec tsc --noEmit --pretty false` check reports no errors in the broader mail UI refinement files.
+  - Workspace-wide TypeScript still fails in unrelated `apps/server` and dependency files outside this iOS inbox scope.
+
 ## Session Notes (2026-03-03)
 
 - iOS archive/build stability fix for Expo Router:
@@ -276,6 +299,7 @@ All marked DONE — these are WebView-based, not truly native.
 - `N8-04` completed with repository-native release automation (`.github/workflows/native-release.yml`) and operator documentation (`apps/ios/RELEASE_PIPELINE.md`), while keeping signing/store credentials as manual external dependencies.
 - Login/auth flow remains untouched in this stream per ownership constraint.
 - `N3-09` and `N5-06` are now complete in iOS scope with native unit coverage; workspace-level server/packages type instability still exists but no longer blocks M3/M5 native parity tests.
+- 2026-03-11 follow-up: fixed the iOS mail read/unread optimistic rollback implementation in `apps/ios/src/features/mail/SwipeableThreadRow.tsx` and `apps/ios/src/features/mail/ThreadDetailPane.tsx` so the new gesture/header actions no longer introduce native TypeScript errors.
 
 ### Test / Build Status
 

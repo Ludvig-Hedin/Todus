@@ -2,14 +2,6 @@
  * MailSidebar — drawer content showing mail folders, settings link, and logout.
  * Replaces the React Navigation drawer content with Expo Router navigation.
  */
-import React from 'react';
-import { View, Text, StyleSheet, Pressable, ScrollView } from 'react-native';
-import { DrawerContentComponentProps } from '@react-navigation/drawer';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter, useGlobalSearchParams } from 'expo-router';
-import { useTheme } from '../../shared/theme/ThemeContext';
-import { useAtomValue, useSetAtom } from 'jotai';
-import { sessionAtom, clearSessionAtom } from '../../shared/state/session';
 import {
   Inbox,
   Send,
@@ -21,8 +13,17 @@ import {
   AlertTriangle,
   Search,
   Settings,
+  Sparkles,
   LogOut,
 } from 'lucide-react-native';
+import { View, Text, StyleSheet, Pressable, ScrollView } from 'react-native';
+import { useRouter, useGlobalSearchParams, usePathname } from 'expo-router';
+import { sessionAtom, clearSessionAtom } from '../../shared/state/session';
+import { DrawerContentComponentProps } from '@react-navigation/drawer';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTheme } from '../../shared/theme/ThemeContext';
+import { useAtomValue, useSetAtom } from 'jotai';
+import React from 'react';
 
 type FolderDef = {
   id: string;
@@ -42,16 +43,25 @@ const FOLDERS: FolderDef[] = [
 ];
 
 export function MailSidebar(props: DrawerContentComponentProps) {
-  const { colors } = useTheme();
+  const { colors, ui } = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const pathname = usePathname();
   const session = useAtomValue(sessionAtom);
   const clearSession = useSetAtom(clearSessionAtom);
   const globalParams = useGlobalSearchParams();
   const activeFolder = (globalParams.folder as string) ?? 'inbox';
+  const assistantActive = pathname.includes('/assistant');
+  const settingsActive = pathname.includes('/settings');
+  const searchActive = pathname === '/search';
 
   const navigateToFolder = (folderId: string) => {
     router.push(`/(app)/(mail)/${folderId}` as any);
+    props.navigation.closeDrawer();
+  };
+
+  const navigateToRoute = (pathname: '/search' | '/(app)/assistant' | '/(app)/settings') => {
+    router.push(pathname as any);
     props.navigation.closeDrawer();
   };
 
@@ -60,13 +70,23 @@ export function MailSidebar(props: DrawerContentComponentProps) {
   };
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background, paddingTop: insets.top }]}>
-      {/* Header */}
-      <View style={styles.header}>
+    <View style={[styles.container, { backgroundColor: ui.canvas, paddingTop: insets.top }]}>
+      <View
+        style={[
+          styles.header,
+          {
+            backgroundColor: ui.surfaceRaised,
+            borderColor: ui.borderSubtle,
+          },
+        ]}
+      >
+        <Text style={[styles.headerEyebrow, { color: colors.mutedForeground }]}>Todus</Text>
         <Text style={[styles.headerText, { color: colors.foreground }]}>Mail</Text>
+        <Text style={[styles.headerSubtext, { color: colors.mutedForeground }]}>
+          Clean triage, threaded focus, quick actions.
+        </Text>
       </View>
 
-      {/* Folder list */}
       <ScrollView style={styles.scrollContainer} contentContainerStyle={styles.scrollContent}>
         {FOLDERS.map((folder) => {
           const isActive = activeFolder === folder.id;
@@ -75,7 +95,10 @@ export function MailSidebar(props: DrawerContentComponentProps) {
               key={folder.id}
               style={[
                 styles.folderRow,
-                { backgroundColor: isActive ? colors.secondary : 'transparent' },
+                {
+                  backgroundColor: isActive ? ui.surfaceRaised : 'transparent',
+                  borderColor: isActive ? ui.borderStrong : 'transparent',
+                },
               ]}
               onPress={() => navigateToFolder(folder.id)}
               accessibilityRole="button"
@@ -98,16 +121,17 @@ export function MailSidebar(props: DrawerContentComponentProps) {
           );
         })}
 
-        {/* Divider */}
-        <View style={[styles.divider, { backgroundColor: colors.border }]} />
+        <View style={[styles.sectionDivider, { backgroundColor: ui.borderSubtle }]} />
 
-        {/* Settings */}
         <Pressable
-          style={styles.folderRow}
-          onPress={() => {
-            router.push('/search');
-            props.navigation.closeDrawer();
-          }}
+          style={[
+            styles.folderRow,
+            {
+              backgroundColor: searchActive ? ui.surfaceRaised : 'transparent',
+              borderColor: searchActive ? ui.borderStrong : 'transparent',
+            },
+          ]}
+          onPress={() => navigateToRoute('/search')}
           accessibilityRole="button"
           accessibilityLabel="Open search"
         >
@@ -116,11 +140,30 @@ export function MailSidebar(props: DrawerContentComponentProps) {
         </Pressable>
 
         <Pressable
-          style={styles.folderRow}
-          onPress={() => {
-            router.push('/(app)/settings' as any);
-            props.navigation.closeDrawer();
-          }}
+          style={[
+            styles.folderRow,
+            {
+              backgroundColor: assistantActive ? ui.surfaceRaised : 'transparent',
+              borderColor: assistantActive ? ui.borderStrong : 'transparent',
+            },
+          ]}
+          onPress={() => navigateToRoute('/(app)/assistant')}
+          accessibilityRole="button"
+          accessibilityLabel="Open assistant"
+        >
+          <Sparkles width={20} height={20} color={colors.mutedForeground} />
+          <Text style={[styles.folderLabel, { color: colors.mutedForeground }]}>Assistant</Text>
+        </Pressable>
+
+        <Pressable
+          style={[
+            styles.folderRow,
+            {
+              backgroundColor: settingsActive ? ui.surfaceRaised : 'transparent',
+              borderColor: settingsActive ? ui.borderStrong : 'transparent',
+            },
+          ]}
+          onPress={() => navigateToRoute('/(app)/settings')}
           accessibilityRole="button"
           accessibilityLabel="Open settings"
         >
@@ -129,11 +172,13 @@ export function MailSidebar(props: DrawerContentComponentProps) {
         </Pressable>
       </ScrollView>
 
-      {/* Footer with logout */}
       {session && (
-        <View style={[styles.footer, { borderTopColor: colors.border }]}>
+        <View style={[styles.footer, { borderTopColor: ui.borderSubtle }]}>
           <Pressable
-            style={styles.logoutRow}
+            style={[
+              styles.logoutRow,
+              { backgroundColor: ui.surfaceRaised, borderColor: ui.borderSubtle },
+            ]}
             onPress={handleLogout}
             accessibilityRole="button"
             accessibilityLabel="Sign out"
@@ -152,51 +197,72 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   header: {
-    paddingHorizontal: 20,
+    marginHorizontal: 14,
+    marginTop: 10,
+    marginBottom: 12,
+    paddingHorizontal: 16,
     paddingVertical: 16,
-    marginBottom: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 24,
+    gap: 2,
+  },
+  headerEyebrow: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
   },
   headerText: {
     fontSize: 24,
     fontWeight: '700',
+    letterSpacing: -0.6,
+  },
+  headerSubtext: {
+    fontSize: 12,
+    lineHeight: 17,
   },
   scrollContainer: {
     flex: 1,
   },
   scrollContent: {
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
+    paddingBottom: 16,
   },
   folderRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingVertical: 11,
+    paddingHorizontal: 14,
+    borderRadius: 16,
     marginBottom: 4,
   },
   folderLabel: {
-    fontSize: 16,
-    marginLeft: 16,
+    fontSize: 14,
+    lineHeight: 18,
+    marginLeft: 14,
     flex: 1,
   },
-  divider: {
+  sectionDivider: {
     height: StyleSheet.hairlineWidth,
-    marginVertical: 12,
+    marginVertical: 14,
     marginHorizontal: 16,
   },
   footer: {
-    padding: 16,
+    padding: 14,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
   logoutRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 16,
     gap: 12,
-    paddingVertical: 8,
-    paddingHorizontal: 4,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
   },
   logoutText: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '500',
   },
 });

@@ -12,9 +12,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTRPC } from '../../../src/providers/QueryTrpcProvider';
 import { useTheme } from '../../../src/shared/theme/ThemeContext';
 import { useEffect, useMemo, useState } from 'react';
+import { typography } from '@zero/design-tokens';
 
 export default function PrivacySettings() {
-  const { colors } = useTheme();
+  const { colors, ui } = useTheme();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const settingsQuery = useQuery(trpc.settings.get.queryOptions());
@@ -68,8 +69,8 @@ export default function PrivacySettings() {
 
   if (settingsQuery.isLoading) {
     return (
-      <View style={[styles.loading, { backgroundColor: colors.background }]}>
-        <ActivityIndicator color={colors.primary} />
+      <View style={[styles.loading, { backgroundColor: ui.canvas }]}>
+        <ActivityIndicator color={colors.foreground} />
       </View>
     );
   }
@@ -112,7 +113,13 @@ export default function PrivacySettings() {
           </Text>
         ) : (
           trustedSenders.map((sender) => (
-            <View key={sender} style={[styles.senderRow, { borderColor: colors.border }]}>
+            <View
+              key={sender}
+              style={[
+                styles.senderRow,
+                { borderColor: ui.borderSubtle, backgroundColor: ui.surface },
+              ]}
+            >
               <Text style={[styles.senderText, { color: colors.foreground }]}>{sender}</Text>
               <Pressable onPress={() => removeTrustedSender(sender)}>
                 <Text style={{ color: colors.destructive, fontWeight: '600' }}>Remove</Text>
@@ -149,7 +156,7 @@ const styles = StyleSheet.create({
     width: 90,
   },
   emptyText: {
-    fontSize: 13,
+    fontSize: typography.size.sm,
   },
   senderRow: {
     borderWidth: StyleSheet.hairlineWidth,
@@ -162,7 +169,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   senderText: {
-    fontSize: 14,
+    fontSize: typography.size.sm,
     flex: 1,
   },
 });

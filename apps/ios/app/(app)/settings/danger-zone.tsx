@@ -9,6 +9,7 @@ import {
 import { clearSessionAtom } from '../../../src/shared/state/session';
 import { useTRPC } from '../../../src/providers/QueryTrpcProvider';
 import { useTheme } from '../../../src/shared/theme/ThemeContext';
+import { typography } from '@zero/design-tokens';
 import { Alert, StyleSheet, Text, View } from 'react-native';
 import { useMutation } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
@@ -96,7 +97,7 @@ const styles = StyleSheet.create({
     padding: 10,
   },
   warningText: {
-    fontSize: 13,
+    fontSize: typography.size.sm,
     fontWeight: '600',
   },
 });

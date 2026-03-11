@@ -8,6 +8,8 @@ import {
   Text,
   TextInput,
   View,
+  type TextStyle,
+  type ViewStyle,
 } from 'react-native';
 import {
   authBypassVoiceUnavailableMessage,
@@ -16,12 +18,12 @@ import {
 import { extractResponseText, nextStreamCursor } from '../../src/features/assistant/assistantUtils';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { getNativeEnv } from '../../src/shared/config/env';
 import { captureEvent } from '../../src/shared/telemetry/posthog';
 import { useTRPC } from '../../src/providers/QueryTrpcProvider';
-import { Mic, Square, Volume2 } from 'lucide-react-native';
-import * as FileSystemLegacy from 'expo-file-system/legacy';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
+import * as FileSystemLegacy from 'expo-file-system/legacy';
+import { getNativeEnv } from '../../src/shared/config/env';
+import { Mic, Square, Volume2 } from 'lucide-react-native';
 import { useMutation } from '@tanstack/react-query';
 import * as Speech from 'expo-speech';
 import type { Audio } from 'expo-av';
@@ -40,7 +42,7 @@ const QUICK_PROMPTS = [
 
 export default function AssistantScreen() {
   const env = getNativeEnv();
-  const { colors } = useTheme();
+  const { colors, ui } = useTheme();
   const insets = useSafeAreaInsets();
   const trpc = useTRPC();
   const scrollRef = useRef<ScrollView>(null);
@@ -181,33 +183,36 @@ export default function AssistantScreen() {
     setIsVoicePlaying(false);
   }, []);
 
-  const speakAssistantText = useCallback((text: string, mode: 'manual' | 'auto') => {
-    const trimmed = text.trim();
-    if (!trimmed) return;
+  const speakAssistantText = useCallback(
+    (text: string, mode: 'manual' | 'auto') => {
+      const trimmed = text.trim();
+      if (!trimmed) return;
 
-    Speech.stop();
-    setIsVoicePlaying(true);
-    captureEvent('AI Voice Play', {
-      mode,
-      length: trimmed.length,
-    });
+      Speech.stop();
+      setIsVoicePlaying(true);
+      captureEvent('AI Voice Play', {
+        mode,
+        length: trimmed.length,
+      });
 
-    const stopVoice = () => {
-      if (mode === 'auto' && handsFreeMode) {
-        resumeConversationRef.current = true;
-      }
-      setIsVoicePlaying(false);
-    };
+      const stopVoice = () => {
+        if (mode === 'auto' && handsFreeMode) {
+          resumeConversationRef.current = true;
+        }
+        setIsVoicePlaying(false);
+      };
 
-    Speech.speak(trimmed, {
-      language: 'en-US',
-      rate: 0.96,
-      pitch: 1.0,
-      onDone: stopVoice,
-      onStopped: stopVoice,
-      onError: stopVoice,
-    });
-  }, [handsFreeMode]);
+      Speech.speak(trimmed, {
+        language: 'en-US',
+        rate: 0.96,
+        pitch: 1.0,
+        onDone: stopVoice,
+        onStopped: stopVoice,
+        onError: stopVoice,
+      });
+    },
+    [handsFreeMode],
+  );
 
   useEffect(() => {
     return () => {
@@ -321,7 +326,9 @@ export default function AssistantScreen() {
       }).catch(() => undefined);
 
       if (recordingUri) {
-        await FileSystemLegacy.deleteAsync(recordingUri, { idempotent: true }).catch(() => undefined);
+        await FileSystemLegacy.deleteAsync(recordingUri, { idempotent: true }).catch(
+          () => undefined,
+        );
       }
     }
   }, [handsFreeMode, loadAudioModule, transcribeMutation]);
@@ -384,12 +391,25 @@ export default function AssistantScreen() {
   }, [handsFreeMode, isRecording, isVoicePlaying, pending, startVoiceRecording]);
 
   const emptyState = (
-    <View style={styles.emptyState}>
+    <View
+      style={[
+        styles.emptyState,
+        {
+          backgroundColor: ui.surface,
+          borderColor: ui.borderSubtle,
+        },
+      ]}
+    >
       <Text style={[styles.emptyTitle, { color: colors.foreground }]}>Inbox assistant</Text>
       <Text style={[styles.emptyBody, { color: colors.mutedForeground }]}>
         Ask for summaries, draft ideas, and quick rewrites.
       </Text>
-      <View style={[styles.quickPromptGroup, { borderColor: colors.border, backgroundColor: colors.card }]}>
+      <View
+        style={[
+          styles.quickPromptGroup,
+          { borderColor: ui.borderSubtle, backgroundColor: ui.surfaceInset },
+        ]}
+      >
         {QUICK_PROMPTS.map((prompt, index) => (
           <Pressable
             key={prompt}
@@ -397,7 +417,7 @@ export default function AssistantScreen() {
               styles.quickPrompt,
               {
                 borderBottomWidth: index < QUICK_PROMPTS.length - 1 ? StyleSheet.hairlineWidth : 0,
-                borderBottomColor: colors.border,
+                borderBottomColor: ui.borderSubtle,
               },
             ]}
             onPress={() => sendPrompt(prompt)}
@@ -411,7 +431,7 @@ export default function AssistantScreen() {
 
   return (
     <KeyboardAvoidingView
-      style={[styles.container, { backgroundColor: colors.background }]}
+      style={[styles.container, { backgroundColor: ui.canvas }]}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <View
@@ -419,8 +439,8 @@ export default function AssistantScreen() {
           styles.header,
           {
             paddingTop: insets.top + 8,
-            borderBottomColor: colors.border,
-            backgroundColor: colors.background,
+            borderBottomColor: ui.borderSubtle,
+            backgroundColor: ui.canvas,
           },
         ]}
       >
@@ -431,7 +451,10 @@ export default function AssistantScreen() {
           </Text>
         </View>
         <Pressable
-          style={[styles.clearButton, { borderColor: colors.border, backgroundColor: colors.card }]}
+          style={[
+            styles.clearButton,
+            { borderColor: ui.borderSubtle, backgroundColor: ui.surface },
+          ]}
           onPress={() => setMessages([])}
           disabled={pending || messages.length === 0}
         >
@@ -451,7 +474,7 @@ export default function AssistantScreen() {
 
       <ScrollView
         ref={scrollRef}
-        style={[styles.messageList, { backgroundColor: colors.background }]}
+        style={[styles.messageList, { backgroundColor: ui.canvas }]}
         contentContainerStyle={styles.messageContent}
         keyboardShouldPersistTaps="handled"
       >
@@ -468,13 +491,13 @@ export default function AssistantScreen() {
                     ? [
                         styles.userBubble,
                         {
-                          backgroundColor: colors.secondary,
-                          borderColor: colors.border,
+                          backgroundColor: colors.primary,
+                          borderColor: colors.primary,
                         },
                       ]
                     : [
                         styles.assistantBubble,
-                        { backgroundColor: colors.card, borderColor: colors.border },
+                        { backgroundColor: ui.surface, borderColor: ui.borderSubtle },
                       ],
                 ]}
               >
@@ -482,7 +505,7 @@ export default function AssistantScreen() {
                   style={[
                     styles.messageText,
                     {
-                      color: message.role === 'user' ? colors.foreground : colors.foreground,
+                      color: message.role === 'user' ? colors.primaryForeground : colors.foreground,
                     },
                   ]}
                 >
@@ -504,13 +527,13 @@ export default function AssistantScreen() {
           styles.composer,
           {
             paddingBottom: insets.bottom + 8,
-            borderTopColor: colors.border,
-            backgroundColor: colors.background,
+            borderTopColor: ui.borderSubtle,
+            backgroundColor: ui.canvas,
           },
         ]}
       >
         <View
-          style={[styles.voicePanel, { borderColor: colors.border, backgroundColor: colors.card }]}
+          style={[styles.voicePanel, { borderColor: ui.borderSubtle, backgroundColor: ui.surface }]}
         >
           <View style={styles.voicePanelLeft}>
             <View style={styles.voiceActionsRow}>
@@ -518,8 +541,8 @@ export default function AssistantScreen() {
                 style={[
                   styles.voiceAction,
                   {
-                    borderColor: colors.border,
-                    backgroundColor: isVoicePlaying ? colors.secondary : colors.card,
+                    borderColor: ui.borderSubtle,
+                    backgroundColor: isVoicePlaying ? ui.surfaceInset : ui.surfaceRaised,
                   },
                 ]}
                 onPress={() => {
@@ -545,8 +568,8 @@ export default function AssistantScreen() {
                 style={[
                   styles.voiceAction,
                   {
-                    borderColor: colors.border,
-                    backgroundColor: isRecording ? colors.secondary : colors.card,
+                    borderColor: ui.borderSubtle,
+                    backgroundColor: isRecording ? ui.surfaceInset : ui.surfaceRaised,
                   },
                 ]}
                 onPress={isRecording ? stopVoiceRecording : startVoiceRecording}
@@ -558,7 +581,11 @@ export default function AssistantScreen() {
                   <Mic size={14} color={colors.foreground} />
                 )}
                 <Text style={[styles.voiceActionText, { color: colors.foreground }]}>
-                  {isRecording ? 'Stop rec' : transcribeMutation.isPending ? 'Transcribing' : 'Dictate'}
+                  {isRecording
+                    ? 'Stop rec'
+                    : transcribeMutation.isPending
+                      ? 'Transcribing'
+                      : 'Dictate'}
                 </Text>
               </Pressable>
             </View>
@@ -576,8 +603,8 @@ export default function AssistantScreen() {
                     stopVoicePlayback();
                   }
                 }}
-                trackColor={{ false: colors.border, true: colors.mutedForeground }}
-                thumbColor={autoSpeak ? colors.foreground : colors.background}
+                trackColor={{ false: ui.surfaceInset, true: ui.accentSoft }}
+                thumbColor={autoSpeak ? colors.foreground : ui.surfaceRaised}
               />
             </View>
             <View style={styles.voiceToggleRow}>
@@ -601,8 +628,8 @@ export default function AssistantScreen() {
                     captureEvent('AI Voice HandsFree Disabled');
                   }
                 }}
-                trackColor={{ false: colors.border, true: colors.mutedForeground }}
-                thumbColor={handsFreeMode ? colors.foreground : colors.background}
+                trackColor={{ false: ui.surfaceInset, true: ui.accentSoft }}
+                thumbColor={handsFreeMode ? colors.foreground : ui.surfaceRaised}
               />
             </View>
           </View>
@@ -617,9 +644,9 @@ export default function AssistantScreen() {
             style={[
               styles.composerInput,
               {
-                borderColor: colors.border,
+                borderColor: ui.borderSubtle,
                 color: colors.foreground,
-                backgroundColor: colors.card,
+                backgroundColor: ui.surface,
               },
             ]}
             multiline
@@ -629,8 +656,8 @@ export default function AssistantScreen() {
             style={[
               styles.sendButton,
               {
-                backgroundColor: canSend ? colors.foreground : colors.card,
-                borderColor: colors.border,
+                backgroundColor: canSend ? colors.foreground : ui.surface,
+                borderColor: canSend ? colors.foreground : ui.borderSubtle,
               },
             ]}
             onPress={() => sendPrompt()}
@@ -651,7 +678,41 @@ export default function AssistantScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = StyleSheet.create<{
+  container: ViewStyle;
+  header: ViewStyle;
+  headerTitleWrap: ViewStyle;
+  headerTitle: TextStyle;
+  headerSubtitle: TextStyle;
+  clearButton: ViewStyle;
+  clearButtonText: TextStyle;
+  messageList: ViewStyle;
+  messageContent: ViewStyle;
+  emptyState: ViewStyle;
+  emptyTitle: TextStyle;
+  emptyBody: TextStyle;
+  quickPromptGroup: ViewStyle;
+  quickPrompt: ViewStyle;
+  quickPromptText: TextStyle;
+  messageBubble: ViewStyle;
+  userBubble: ViewStyle;
+  assistantBubble: ViewStyle;
+  messageText: TextStyle;
+  pendingText: TextStyle;
+  composer: ViewStyle;
+  voicePanel: ViewStyle;
+  voicePanelLeft: ViewStyle;
+  voiceActionsRow: ViewStyle;
+  voiceAction: ViewStyle;
+  voiceActionText: TextStyle;
+  voicePanelRight: ViewStyle;
+  voiceToggleRow: ViewStyle;
+  autoSpeakLabel: TextStyle;
+  composerRow: ViewStyle;
+  composerInput: TextStyle;
+  sendButton: ViewStyle;
+  sendText: TextStyle;
+}>({
   container: {
     flex: 1,
   },
@@ -669,19 +730,19 @@ const styles = StyleSheet.create({
     gap: 1,
   },
   headerTitle: {
-    fontSize: 18,
-    fontWeight: '650',
+    fontSize: 17,
+    fontWeight: '600',
     letterSpacing: 0,
   },
   headerSubtitle: {
     fontSize: 12,
-    lineHeight: 16,
+    lineHeight: 15,
     letterSpacing: 0,
   },
   clearButton: {
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 10,
-    paddingHorizontal: 10,
+    borderRadius: 12,
+    paddingHorizontal: 11,
     paddingVertical: 6,
   },
   clearButtonText: {
@@ -694,45 +755,49 @@ const styles = StyleSheet.create({
   },
   messageContent: {
     paddingHorizontal: 12,
-    paddingTop: 10,
+    paddingTop: 12,
     paddingBottom: 14,
-    gap: 8,
+    gap: 10,
   },
   emptyState: {
-    paddingTop: 14,
-    gap: 6,
+    marginTop: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 16,
+    gap: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 22,
   },
   emptyTitle: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '700',
-    lineHeight: 22,
+    lineHeight: 20,
     letterSpacing: 0,
   },
   emptyBody: {
-    fontSize: 13,
-    lineHeight: 18,
+    fontSize: 12,
+    lineHeight: 17,
     letterSpacing: 0,
   },
   quickPromptGroup: {
     marginTop: 8,
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 12,
+    borderRadius: 16,
     overflow: 'hidden',
   },
   quickPrompt: {
     paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingVertical: 11,
   },
   quickPromptText: {
-    fontSize: 13,
-    lineHeight: 18,
+    fontSize: 12,
+    lineHeight: 17,
     letterSpacing: 0,
   },
   messageBubble: {
     maxWidth: '88%',
-    borderRadius: 12,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    borderRadius: 18,
+    paddingHorizontal: 11,
+    paddingVertical: 9,
     borderWidth: StyleSheet.hairlineWidth,
   },
   userBubble: {
@@ -742,8 +807,8 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
   },
   messageText: {
-    fontSize: 13,
-    lineHeight: 18,
+    fontSize: 12,
+    lineHeight: 17,
     letterSpacing: 0,
   },
   pendingText: {
@@ -761,9 +826,9 @@ const styles = StyleSheet.create({
   },
   voicePanel: {
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 10,
-    paddingHorizontal: 8,
-    paddingVertical: 6,
+    borderRadius: 18,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -780,16 +845,16 @@ const styles = StyleSheet.create({
   },
   voiceAction: {
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 9,
-    minHeight: 30,
-    paddingHorizontal: 9,
-    paddingVertical: 5,
+    borderRadius: 12,
+    minHeight: 32,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
   },
   voiceActionText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
     letterSpacing: 0,
   },
@@ -814,23 +879,23 @@ const styles = StyleSheet.create({
   },
   composerInput: {
     flex: 1,
-    minHeight: 38,
+    minHeight: 40,
     maxHeight: 112,
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     fontSize: 13,
     lineHeight: 17,
     letterSpacing: 0,
   },
   sendButton: {
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 10,
-    minHeight: 38,
+    borderRadius: 16,
+    minHeight: 40,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 12,
+    paddingHorizontal: 13,
     paddingVertical: 8,
     alignSelf: 'flex-end',
   },

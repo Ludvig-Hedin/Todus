@@ -14,16 +14,18 @@ import {
   SettingsFieldLabel,
   SettingsScreenContainer,
   SettingsSectionTitle,
+  SettingsToggle,
   SettingsTextInput,
 } from '../../../src/features/settings/SettingsUI';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTRPC } from '../../../src/providers/QueryTrpcProvider';
 import { useTheme } from '../../../src/shared/theme/ThemeContext';
 import { useEffect, useMemo, useState } from 'react';
+import { typography } from '@zero/design-tokens';
 
 export default function CategoriesSettings() {
-  const { colors } = useTheme();
+  const { colors, ui } = useTheme();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const settingsQuery = useQuery(trpc.settings.get.queryOptions());
@@ -106,8 +108,8 @@ export default function CategoriesSettings() {
 
   if (settingsQuery.isLoading) {
     return (
-      <View style={[styles.loading, { backgroundColor: colors.background }]}>
-        <ActivityIndicator color={colors.primary} />
+      <View style={[styles.loading, { backgroundColor: ui.canvas }]}>
+        <ActivityIndicator color={colors.foreground} />
       </View>
     );
   }
@@ -121,7 +123,13 @@ export default function CategoriesSettings() {
         </SettingsDescription>
         <SettingsButton label="Add Category" onPress={addCategory} variant="secondary" />
         {categories.map((category, index) => (
-          <View key={category.id} style={[styles.categoryCard, { borderColor: colors.border }]}>
+          <View
+            key={category.id}
+            style={[
+              styles.categoryCard,
+              { borderColor: ui.borderSubtle, backgroundColor: ui.surfaceInset },
+            ]}
+          >
             <SettingsFieldLabel>ID</SettingsFieldLabel>
             <Text style={[styles.idText, { color: colors.mutedForeground }]}>{category.id}</Text>
 
@@ -140,7 +148,7 @@ export default function CategoriesSettings() {
 
             <View style={styles.row}>
               <View style={styles.defaultRow}>
-                <Switch
+                <SettingsToggle
                   value={!!category.isDefault}
                   onValueChange={() => setDefaultCategory(category.id)}
                 />
@@ -148,13 +156,19 @@ export default function CategoriesSettings() {
               </View>
               <View style={styles.actions}>
                 <Pressable
-                  style={[styles.smallAction, { borderColor: colors.border }]}
+                  style={[
+                    styles.smallAction,
+                    { borderColor: ui.borderStrong, backgroundColor: ui.surface },
+                  ]}
                   onPress={() => moveCategory(index, 'up')}
                 >
                   <Text style={{ color: colors.foreground }}>Up</Text>
                 </Pressable>
                 <Pressable
-                  style={[styles.smallAction, { borderColor: colors.border }]}
+                  style={[
+                    styles.smallAction,
+                    { borderColor: ui.borderStrong, backgroundColor: ui.surface },
+                  ]}
                   onPress={() => moveCategory(index, 'down')}
                 >
                   <Text style={{ color: colors.foreground }}>Down</Text>
@@ -196,7 +210,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   idText: {
-    fontSize: 12,
+    fontSize: typography.size.xs,
     marginBottom: 2,
   },
   row: {
@@ -206,7 +220,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   rowLabel: {
-    fontSize: 14,
+    fontSize: typography.size.sm,
     fontWeight: '500',
   },
   defaultRow: {

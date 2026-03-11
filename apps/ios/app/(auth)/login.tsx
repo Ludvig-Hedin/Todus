@@ -4,28 +4,27 @@ import * as Linking from 'expo-linking';
 import { useSetAtom } from 'jotai';
 import { useEffect, useState } from 'react';
 import {
-  ActivityIndicator,
+  Image,
   Platform,
-  Pressable,
   StyleSheet,
   Text,
   View,
-  useColorScheme,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getNativeEnv } from '../../src/shared/config/env';
 import { setBearerSessionAtom } from '../../src/shared/state/session';
 import { getSocialAuthUrl } from '../../src/features/auth/native-auth';
-import { GoogleColored, LogoVector } from '../../src/shared/components/icons';
+import { AppleLogo, GoogleColored } from '../../src/shared/components/icons';
+import { useTheme } from '../../src/shared/theme/ThemeContext';
+import { Button } from '@zero/ui-native';
 
 // Required for expo-web-browser redirect handling
 WebBrowser.maybeCompleteAuthSession();
 
 export default function LoginScreen() {
   const env = getNativeEnv();
-  const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
+  const { colors, ui, isDark, spacing, radius } = useTheme();
   const setBearerSession = useSetAtom(setBearerSessionAtom);
 
   const [loadingGoogle, setLoadingGoogle] = useState(false);
@@ -142,6 +141,7 @@ export default function LoginScreen() {
     setErrorMessage(null);
 
     try {
+      console.log('[AppleSignIn] Starting Apple authentication...');
       const credential = await AppleAuthentication.signInAsync({
         requestedScopes: [
           AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
@@ -149,15 +149,22 @@ export default function LoginScreen() {
         ],
       });
 
-      if (__DEV__) console.log('[AppleSignIn] credential received');
+      console.log('[AppleSignIn] credential received:', {
+        identityToken: credential.identityToken ? 'present' : 'missing',
+        user: credential.user,
+        email: credential.email,
+        fullName: credential.fullName,
+      });
 
       if (credential.identityToken) {
-        // Send the identityToken to better-auth
-        // We use the same backend bridge as Google but direct for Apple native
+        // Better Auth uses /sign-in/social with idToken as an object { token }
+        // for native ID token sign-in (not a raw string). This is different from
+        // the redirect-based OAuth flow which takes { provider, callbackURL }.
         const backendBase = env.backendUrl.replace(/\/$/, '');
         const authUrl = `${backendBase}/api/auth/sign-in/social`;
 
-        if (__DEV__) console.log('[AppleSignIn] sending idToken to:', authUrl);
+        console.log('[AppleSignIn] sending idToken to:', authUrl);
+        console.log('[AppleSignIn] idToken length:', credential.identityToken.length);
 
         const response = await fetch(authUrl, {
           method: 'POST',
@@ -166,39 +173,70 @@ export default function LoginScreen() {
           },
           body: JSON.stringify({
             provider: 'apple',
-            idToken: credential.identityToken,
+            idToken: {
+              token: credential.identityToken,
+            },
             callbackURL: 'todus://auth-callback',
           }),
         });
 
-        // CR-006: Check response status before parsing JSON
+        console.log('[AppleSignIn] fetch response status:', response.status);
+
         if (!response.ok) {
+          const errorText = await response.text();
+          console.error('[AppleSignIn] server error response:', errorText);
           setErrorMessage(`Apple Sign-in server error (${response.status}). Please try again.`);
           return;
         }
 
         const result = await response.json();
-        if (__DEV__) console.log('[AppleSignIn] response status:', response.status);
+        console.log('[AppleSignIn] response body:', JSON.stringify(result));
 
-        if (result.url) {
-          // Better-auth returns a redirect URL that includes the token
+        // Better Auth returns bearer token in set-auth-token header and/or
+        // session data in the response body for ID token sign-in.
+        const bearerToken =
+          response.headers.get('set-auth-token') ??
+          result?.token ??
+          result?.session?.token ??
+          null;
+
+        if (bearerToken) {
+          console.log('[AppleSignIn] bearer token received, length:', bearerToken.length);
+          await setBearerSession({ token: bearerToken, expiresAt: null });
+        } else if (result.url) {
+          // Fallback: some flows return a redirect URL with token
+          console.log('[AppleSignIn] received redirect URL:', result.url);
           const token = extractTokenFromUrl(result.url);
           if (token) {
             await setBearerSession({ token, expiresAt: null });
           } else {
+            console.error('[AppleSignIn] failed to extract token from URL:', result.url);
             setErrorMessage('Failed to extract token from Apple login response.');
           }
         } else if (result.error) {
+          console.error('[AppleSignIn] server returned error:', result.error);
           setErrorMessage(result.error.message || 'Apple Sign-in failed on server.');
+        } else {
+          console.error('[AppleSignIn] unexpected response format:', result);
+          setErrorMessage('Unexpected response from server.');
         }
       } else {
-        // CR-007: identityToken can be null on subsequent Apple sign-ins
         setErrorMessage('Apple did not provide an identity token. Please try again.');
       }
     } catch (e: any) {
-      if (e.code === 'ERR_CANCELED' || e.code === 'ERR_REQUEST_CANCELED' || (e.message && e.message.includes('canceled'))) {
-        // User cancelled
+      console.error('[AppleSignIn] catch block error:', {
+        code: e.code,
+        message: e.message,
+        stack: e.stack,
+      });
+      if (
+        e.code === 'ERR_CANCELED' ||
+        e.code === 'ERR_REQUEST_CANCELED' ||
+        (e.message && e.message.includes('canceled'))
+      ) {
+        console.log('[AppleSignIn] user cancelled');
       } else {
+        console.error('[AppleSignIn] unexpected error:', e);
         setErrorMessage(e.message || 'Failed to sign in with Apple');
       }
     } finally {
@@ -206,78 +244,68 @@ export default function LoginScreen() {
     }
   }
 
-  const themeStyles = isDark ? darkStyles : lightStyles;
-
   return (
-    <SafeAreaView style={[styles.safeArea, themeStyles.container]}>
+    <SafeAreaView style={[styles.safeArea, { backgroundColor: ui.canvas }]}>
       <StatusBar style={isDark ? 'light' : 'dark'} />
       <View style={styles.content}>
-        <View style={styles.headerContainer}>
-          <LogoVector width={17} height={17} style={[styles.symbolLogo, themeStyles.logo]} />
-          <Text style={[styles.title, themeStyles.title]}>Welcome to Todus</Text>
-          <Text style={[styles.subtitle, themeStyles.subtitle]}>Your AI agent for emails</Text>
-          <Text style={[styles.description, themeStyles.description]}>Sign up for free with your email</Text>
+        <View style={[styles.headerContainer, { marginBottom: spacing[8] }]}>
+          <Image
+            source={require('../../assets/brand-logo.png')}
+            style={[styles.symbolLogo, { tintColor: colors.foreground, marginBottom: spacing[3] }]}
+            resizeMode="contain"
+          />
+          <Text style={[styles.title, { color: colors.foreground }]}>Welcome to Todus</Text>
+          <Text style={[styles.subtitle, { color: colors.mutedForeground, marginBottom: spacing[4] }]}>Your AI agent for emails</Text>
+          <Text style={[styles.description, { color: colors.mutedForeground }]}>
+            Sign up for free with your email
+          </Text>
         </View>
 
         {errorMessage && (
-          <View style={styles.errorBox}>
-            <Text style={styles.errorTitle}>Error</Text>
-            <Text style={styles.errorText}>{errorMessage}</Text>
+          <View style={[styles.errorBox, { backgroundColor: `${colors.destructive}1A`, borderColor: `${colors.destructive}33` }]}>
+            <Text style={[styles.errorTitle, { color: colors.destructive }]}>Sign-in Failed</Text>
+            <Text style={[styles.errorText, { color: colors.destructive }]}>{errorMessage || 'An unexpected error occurred. Please try again.'}</Text>
           </View>
         )}
 
-        <View style={styles.providersContainer}>
-          <Pressable
+        <View style={[styles.providersContainer, { gap: spacing[4] }]}>
+          <Button
+            tone="outline"
+            colorMode={isDark ? 'dark' : 'light'}
             onPress={handleGoogleSignIn}
+            isLoading={loadingGoogle}
             disabled={loadingGoogle || loadingApple}
-            style={({ pressed }) => [
-              styles.providerButton,
-              themeStyles.providerButton,
-              pressed && themeStyles.providerButtonPressed,
-              (loadingGoogle || loadingApple) && styles.providerButtonDisabled,
-            ]}
+            icon={<GoogleColored width={20} height={20} />}
+            textStyle={{ color: colors.foreground }}
           >
-            {loadingGoogle ? (
-              <ActivityIndicator size="small" color={isDark ? '#ffffff' : '#000000'} style={styles.icon} />
-            ) : (
-              <GoogleColored width={20} height={20} style={styles.icon} />
-            )}
-            <Text style={[styles.providerButtonText, themeStyles.providerButtonText]}>
-              {loadingGoogle ? 'Signing in...' : 'Continue with Google'}
-            </Text>
-          </Pressable>
+            Continue with Google
+          </Button>
 
           {Platform.OS === 'ios' && (
-            <View
-              style={{ opacity: loadingGoogle || loadingApple ? 0.7 : 1, width: '100%' }}
-              pointerEvents={loadingGoogle || loadingApple ? 'none' : 'auto'}
+            <Button
+              tone="primary"
+              colorMode={isDark ? 'dark' : 'light'}
+              onPress={handleAppleSignIn}
+              isLoading={loadingApple}
+              disabled={loadingGoogle || loadingApple}
+              icon={<AppleLogo width={20} height={20} color={colors.primaryForeground} />}
+              textStyle={{ color: colors.primaryForeground }}
             >
-              <AppleAuthentication.AppleAuthenticationButton
-                buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
-                buttonStyle={
-                  isDark
-                    ? AppleAuthentication.AppleAuthenticationButtonStyle.WHITE
-                    : AppleAuthentication.AppleAuthenticationButtonStyle.BLACK
-                }
-                cornerRadius={24}
-                style={{ width: '100%', height: 48 }}
-                onPress={handleAppleSignIn}
-              />
-            </View>
+              Continue with Apple
+            </Button>
           )}
         </View>
       </View>
 
-      <View style={styles.footer}>
-        <Text style={[styles.footerLinkText, themeStyles.footerLinkText]}>Terms of Service</Text>
-        <View style={[styles.dot, themeStyles.dot]} />
-        <Text style={[styles.footerLinkText, themeStyles.footerLinkText]}>Privacy Policy</Text>
+      <View style={[styles.footer, { paddingVertical: spacing[6], paddingHorizontal: spacing[6] }]}>
+        <Text style={[styles.footerLinkText, { color: colors.mutedForeground }]}>Terms of Service</Text>
+        <View style={[styles.dot, { backgroundColor: ui.borderStrong }]} />
+        <Text style={[styles.footerLinkText, { color: colors.mutedForeground }]}>Privacy Policy</Text>
       </View>
     </SafeAreaView>
   );
 }
 
-/** Extracts the bearer token from a todus:// deep link URL */
 function extractTokenFromUrl(rawUrl: string): string | null {
   try {
     const url = new URL(rawUrl);
@@ -311,6 +339,8 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   symbolLogo: {
+    width: 24,
+    height: 24,
     marginBottom: 12,
   },
   title: {
@@ -345,46 +375,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   errorTitle: {
-    color: '#ef4444',
     fontWeight: '600',
     fontSize: 14,
     marginBottom: 4,
     textAlign: 'center',
   },
   errorText: {
-    color: '#ef4444',
     fontSize: 14,
     opacity: 0.8,
     textAlign: 'center',
   },
   providersContainer: {
     width: '100%',
-    gap: 16,
-  },
-  providerButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    height: 48,
-    borderRadius: 24,
-    borderWidth: 1,
-  },
-  providerButtonDisabled: {
-    opacity: 0.7,
-  },
-  providerButtonText: {
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  icon: {
-    marginRight: 8,
   },
   footer: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: 24,
-    paddingHorizontal: 24,
     width: '100%',
   },
   footerLinkText: {
@@ -400,70 +407,3 @@ const styles = StyleSheet.create({
   },
 });
 
-const lightStyles = StyleSheet.create({
-  container: {
-    backgroundColor: '#FFFFFF',
-  },
-  title: {
-    color: '#000000',
-  },
-  subtitle: {
-    color: '#000000',
-  },
-  description: {
-    color: '#000000',
-  },
-  providerButton: {
-    backgroundColor: '#FFFFFF',
-    borderColor: '#E5E5E5',
-  },
-  providerButtonPressed: {
-    backgroundColor: '#F8F8F8',
-  },
-  providerButtonText: {
-    color: '#000000',
-  },
-  footerLinkText: {
-    color: '#666666',
-  },
-  dot: {
-    backgroundColor: '#DDDDDD',
-  },
-  logo: {
-    tintColor: '#000000',
-  },
-});
-
-const darkStyles = StyleSheet.create({
-  container: {
-    backgroundColor: '#0A0A0A',
-  },
-  title: {
-    color: '#FFFFFF',
-  },
-  subtitle: {
-    color: '#FFFFFF',
-  },
-  description: {
-    color: '#FFFFFF',
-  },
-  providerButton: {
-    backgroundColor: '#0A0A0A',
-    borderColor: '#2A2A2A',
-  },
-  providerButtonPressed: {
-    backgroundColor: '#1A1A1A',
-  },
-  providerButtonText: {
-    color: '#FFFFFF',
-  },
-  footerLinkText: {
-    color: '#888888',
-  },
-  dot: {
-    backgroundColor: '#333333',
-  },
-  logo: {
-    tintColor: '#FFFFFF',
-  },
-});

@@ -1,5 +1,18 @@
 # Project Changelog
 
+## [2026-03-08] AI Chat Billing Gate UX Fix
+
+### Fixed
+
+- **AI Chat Placeholder**: Restored visible placeholder text in the web AI chat composer by adding explicit Tiptap placeholder rendering styles.
+- **Billing Gate Submit Guard**: Prevented `Enter` from submitting AI chat requests when `chat-messages` billing is disabled, so free/blocked states now open the pricing dialog instead of throwing a generic `useChat` error.
+
+## [2026-03-08] Composer AI GPT-5 Compatibility
+
+### Fixed
+
+- **Email Composer AI**: Updated the server-side composer and subject-generation OpenAI calls to use GPT-5-compatible completion token options, fixing 500 errors when generating subjects or drafting content from the email composer.
+
 ## [2026-03-05] Login Refinement & Email Connection Guard
 
 ### Added
@@ -136,7 +149,7 @@
 
 ### Changed
 
-- **Global Branding**: Renamed "Zero" to "Todus" across configuration, internationalization files (*.json), static pages, and the footer.
+- **Global Branding**: Renamed "Zero" to "Todus" across configuration, internationalization files (\*.json), static pages, and the footer.
 - **Brand Assets**: Updated logo asset URLs, onboarding vide links, and the GitHub repository link to point to Todus domains.
 - **Code Settings**: Refactored the signature field from `zeroSignature` to `todusSignature` on both the frontend and the database schema.
 - **SEO Elements**: Updated title tags, meta descriptions, and application headers to index correctly for "Todus".
@@ -245,6 +258,26 @@
 - Resend API key is NOT required for local development (email sending is mocked)
 - Redis uses `upstash-local-token` which matches the Docker proxy setup
 
-[2026-02-21] [Feature] Integrated real TRPC data for the native Thread list (N3-05) via useQuery hook on MailFolderScreen and ThreadListItem (apps/native/src/features/mail/*).
+[2026-02-21] [Feature] Integrated real TRPC data for the native Thread list (N3-05) via useQuery hook on MailFolderScreen and ThreadListItem (apps/native/src/features/mail/\*).
 
 [2026-03-01] [Fix] Fixed chat modal opacity overlay, restricted pricing dialog trigger area to primary CTA button, and resolved chat connection Error code 400 by adjusting unsupported gpt-5 model name configuration to gpt-4o. (apps/mail/components/ui/ai-sidebar.tsx, apps/mail/components/create/ai-chat.tsx, apps/server/.dev.vars).
+
+[2026-03-09] [Fix] Added native sender avatars for the iOS mail experience by mirroring the web app's BIMI and domain-logo fallbacks, then tightened inbox row spacing and unread metadata so the mobile inbox reads closer to the web list. User-facing change. (apps/ios/src/features/mail/SenderAvatar.tsx, apps/ios/src/features/mail/ThreadListItem.tsx, apps/ios/src/features/mail/MessageCard.tsx, apps/ios/src/shared/config/env.ts, apps/ios/app/(app)/(mail)/[folder].tsx).
+
+[2026-03-09] [Fix] Restored native thread body rendering by reading `decodedBody` in the message detail card when the server payload does not populate `processedHtml` or `body`. User-facing change. (apps/ios/src/features/mail/MessageCard.tsx).
+
+[2026-03-10] [Fix] Resolved mobile Thread View UI issues including dark mode text, email clipping, large floating actions, and missing sender avatars (apps/ios/src/features/mail/MessageCard.tsx, apps/ios/src/features/mail/ThreadDetailPane.tsx, apps/ios/.env).
+
+[2026-03-10] [Refactor] Flattened Thread View by removing nested cards and backgrounds around emails and notes in iOS app (apps/ios/src/features/mail/MessageCard.tsx, apps/ios/src/features/mail/ThreadDetailPane.tsx).
+
+[2026-03-10] [UI Fix] Replicating web app Thread Layout in iOS. Added missing Reply All icon, matching exact header actions. Shifted floating action pills downwards. Fixed WebView horizontal overflow.
+
+[2026-03-10] [UX Fix] Improved the native iOS inbox flow by replacing the placeholder ellipsis alert with real thread actions, moving notes below message content, hiding raw system labels behind friendlier names, adding inbox gesture discovery guidance, improving empty-state copy, and adding clearer search filter state with reset affordances. User-facing change. (apps/ios/src/features/mail/ThreadDetailPane.tsx, apps/ios/src/features/mail/ThreadListItem.tsx, apps/ios/app/(app)/(mail)/[folder].tsx, apps/ios/app/search.tsx).
+
+[2026-03-10] [Fix] Normalized low-contrast message HTML in the native iOS thread view so dark mode no longer forces white text onto pale email backgrounds. The WebView now removes only broken light backgrounds or low-contrast text combinations instead of applying a blanket dark-mode text override. User-facing change. (apps/ios/src/features/mail/MessageCard.tsx).
+
+[2026-03-10] [UX Fix] Added direct read-state controls to the native iOS mail triage flow: the inbox swipe menu now includes a read/unread action, and the thread header now exposes a dedicated mark read/unread button with optimistic state updates. User-facing change. (apps/ios/src/features/mail/SwipeableThreadRow.tsx, apps/ios/src/features/mail/ThreadDetailPane.tsx, apps/ios/app/(app)/(mail)/[folder].tsx).
+
+[2026-03-10] [UI Polish] Refined the native iOS mail surfaces with a softer monochrome palette, denser typography, cleaner grouping, subtler accent usage, and more card-like hierarchy across inbox, search, and thread detail. User-facing change. (apps/ios/src/shared/theme/ThemeContext.tsx, apps/ios/src/features/mail/ThreadListItem.tsx, apps/ios/src/features/mail/MessageCard.tsx, apps/ios/src/features/mail/ThreadDetailPane.tsx, apps/ios/src/features/mail/SwipeableThreadRow.tsx, apps/ios/src/features/mail/SenderAvatar.tsx, apps/ios/app/(app)/(mail)/[folder].tsx, apps/ios/app/search.tsx).
+
+[2026-03-11] [Fix] Corrected the optimistic read/unread rollback wiring in the native iOS swipe and thread-detail mutations so the new triage controls compile cleanly without changing their behavior. Architectural safety fix. (apps/ios/src/features/mail/SwipeableThreadRow.tsx, apps/ios/src/features/mail/ThreadDetailPane.tsx).

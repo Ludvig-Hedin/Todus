@@ -39,7 +39,7 @@ const DEFAULT_FORM_STATE: GeneralFormState = {
 };
 
 export default function GeneralSettings() {
-  const { colors } = useTheme();
+  const { colors, ui } = useTheme();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const [form, setForm] = useState<GeneralFormState>(DEFAULT_FORM_STATE);
@@ -102,8 +102,8 @@ export default function GeneralSettings() {
 
   if (settingsQuery.isLoading) {
     return (
-      <View style={[styles.loading, { backgroundColor: colors.background }]}>
-        <ActivityIndicator color={colors.primary} />
+      <View style={[styles.loading, { backgroundColor: ui.canvas }]}>
+        <ActivityIndicator color={colors.foreground} />
       </View>
     );
   }

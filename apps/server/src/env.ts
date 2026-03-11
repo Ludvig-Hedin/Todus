@@ -111,8 +111,16 @@ export type ZeroEnv = {
   APPLE_PRIVATE_KEY: string;
 };
 
-export let env = _env as ZeroEnv;
+export const env = new Proxy(_env as ZeroEnv, {
+  get(target, prop: string) {
+    const globalEnv = (globalThis as any).__ZERO_ENV__;
+    if (globalEnv && prop in globalEnv) {
+      return globalEnv[prop as keyof ZeroEnv];
+    }
+    return target[prop as keyof ZeroEnv];
+  }
+});
 
 export function setEnv(newEnv: ZeroEnv) {
-  env = newEnv;
+  (globalThis as any).__ZERO_ENV__ = newEnv;
 }

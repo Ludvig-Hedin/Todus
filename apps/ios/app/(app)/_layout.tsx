@@ -2,20 +2,20 @@
  * App group layout — Gmail-style drawer navigation.
  * The drawer sidebar shows mail folders and settings link.
  */
+import { UndoSendBanner } from '../../src/shared/components/UndoSendBanner';
 import { Platform, StyleSheet, useWindowDimensions } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { identifyPostHog } from '../../src/shared/telemetry/posthog';
 import { MailSidebar } from '../../src/features/mail/MailSidebar';
-import { getNativeEnv } from '../../src/shared/config/env';
 import { useTRPC } from '../../src/providers/QueryTrpcProvider';
-import { UndoSendBanner } from '../../src/shared/components/UndoSendBanner';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
+import { getNativeEnv } from '../../src/shared/config/env';
 import { useQuery } from '@tanstack/react-query';
 import { Drawer } from 'expo-router/drawer';
 import { useEffect } from 'react';
 
 export default function AppLayout() {
-  const { colors } = useTheme();
+  const { ui } = useTheme();
   const { width } = useWindowDimensions();
   const isWideLayout = Platform.OS === 'macos' || width >= 768;
   const env = getNativeEnv();
@@ -45,11 +45,11 @@ export default function AppLayout() {
             drawerType: isWideLayout ? 'permanent' : 'front',
             swipeEnabled: !isWideLayout,
             drawerStyle: {
-              backgroundColor: colors.background,
-              width: 280,
+              backgroundColor: ui.canvas,
+              width: 292,
             },
             sceneStyle: {
-              backgroundColor: colors.background,
+              backgroundColor: ui.canvas,
             },
           }}
         >

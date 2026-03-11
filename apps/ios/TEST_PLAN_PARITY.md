@@ -35,7 +35,7 @@ Auth flow is managed by a separate stream. For parity RC runs, use an authentica
    - Verify category tabs appear for Inbox and filter results correctly.
    - Long-press thread -> selection mode, select all, archive/delete bulk actions.
    - Verify search entry points:
-     - Header search trigger (`Search`, shortcut hint).
+     - Header search trigger (`Search` label only on iOS native).
      - Drawer `Search` row.
 2. Compose route parity:
    - Open compose from plus button.
@@ -45,6 +45,7 @@ Auth flow is managed by a separate stream. For parity RC runs, use an authentica
    - Open under-construction route and verify both `Go Back` and `Go to Inbox`.
 4. Settings parity:
    - Confirm all settings sections open and save.
+   - Verify option groups and toggles show an obvious selected state with neutral grayscale styling only.
    - Open Billing settings and verify:
      - Customer fetch (when bearer session exists).
      - Upgrade checkout opens external URL.

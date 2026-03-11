@@ -2,8 +2,6 @@
  * Search screen — modal for searching across all emails.
  * Uses mail.listThreads with q parameter and debounced input.
  */
-import { useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -13,13 +11,15 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ThreadListItem } from '../src/features/mail/ThreadListItem';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTRPC } from '../src/providers/QueryTrpcProvider';
+import { useTheme } from '../src/shared/theme/ThemeContext';
+import { useQuery } from '@tanstack/react-query';
 import { FlashList } from '@shopify/flash-list';
 import { X } from 'lucide-react-native';
-import { useQuery } from '@tanstack/react-query';
-import { useTheme } from '../src/shared/theme/ThemeContext';
-import { useTRPC } from '../src/providers/QueryTrpcProvider';
-import { ThreadListItem } from '../src/features/mail/ThreadListItem';
+import { useRouter } from 'expo-router';
 
 const FOLDERS = [
   { id: 'inbox', label: 'Inbox' },
@@ -32,7 +32,7 @@ const FOLDERS = [
 
 export default function SearchScreen() {
   const router = useRouter();
-  const { colors } = useTheme();
+  const { colors, ui } = useTheme();
   const insets = useSafeAreaInsets();
   const trpc = useTRPC();
   const [query, setQuery] = useState('');
@@ -84,6 +84,30 @@ export default function SearchScreen() {
   });
 
   const threads = useMemo(() => data?.threads ?? [], [data?.threads]);
+  const activeFilterCount =
+    (query.trim().length > 0 ? 1 : 0) +
+    (folder !== 'inbox' ? 1 : 0) +
+    (unreadOnly ? 1 : 0) +
+    (starredOnly ? 1 : 0) +
+    (hasAttachment ? 1 : 0);
+  const activeFilterSummary = [
+    query.trim().length > 0 ? `Query: ${query.trim()}` : null,
+    folder !== 'inbox' ? `Folder: ${FOLDERS.find((item) => item.id === folder)?.label}` : null,
+    unreadOnly ? 'Unread' : null,
+    starredOnly ? 'Starred' : null,
+    hasAttachment ? 'Attachment' : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+
+  const clearAllFilters = useCallback(() => {
+    setQuery('');
+    setDebouncedQuery('');
+    setFolder('inbox');
+    setUnreadOnly(false);
+    setStarredOnly(false);
+    setHasAttachment(false);
+  }, []);
 
   const handleThreadPress = useCallback(
     (threadId: string) => {
@@ -96,10 +120,19 @@ export default function SearchScreen() {
   );
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
-      {/* Search header */}
-      <View style={[styles.header, { paddingTop: insets.top + 8, borderBottomColor: colors.border }]}>
-        <View style={[styles.searchBar, { backgroundColor: colors.secondary }]}>
+    <View style={[styles.container, { backgroundColor: ui.canvas }]}>
+      <View
+        style={[styles.header, { paddingTop: insets.top + 8, borderBottomColor: ui.borderSubtle }]}
+      >
+        <View
+          style={[
+            styles.searchBar,
+            {
+              backgroundColor: ui.surfaceRaised,
+              borderColor: ui.borderSubtle,
+            },
+          ]}
+        >
           <TextInput
             style={[styles.searchInput, { color: colors.foreground }]}
             placeholder="Search emails..."
@@ -122,8 +155,14 @@ export default function SearchScreen() {
             </Pressable>
           )}
         </View>
-        <Pressable onPress={() => router.back()}>
-          <Text style={[styles.cancelText, { color: colors.primary }]}>Cancel</Text>
+        <Pressable
+          style={[
+            styles.cancelButton,
+            { backgroundColor: ui.surfaceRaised, borderColor: ui.borderSubtle },
+          ]}
+          onPress={() => router.back()}
+        >
+          <Text style={[styles.cancelText, { color: colors.foreground }]}>Close</Text>
         </Pressable>
       </View>
 
@@ -141,8 +180,8 @@ export default function SearchScreen() {
                 style={[
                   styles.filterChip,
                   {
-                    backgroundColor: isActive ? colors.primary : colors.secondary,
-                    borderColor: isActive ? colors.primary : colors.border,
+                    backgroundColor: isActive ? ui.accentSoft : ui.surface,
+                    borderColor: isActive ? ui.accentMuted : ui.borderSubtle,
                   },
                 ]}
                 onPress={() => setFolder(folderOption.id)}
@@ -150,7 +189,7 @@ export default function SearchScreen() {
                 <Text
                   style={[
                     styles.filterChipText,
-                    { color: isActive ? colors.primaryForeground : colors.foreground },
+                    { color: isActive ? colors.foreground : colors.foreground },
                   ]}
                 >
                   {folderOption.label}
@@ -169,8 +208,8 @@ export default function SearchScreen() {
             style={[
               styles.quickFilterChip,
               {
-                backgroundColor: unreadOnly ? colors.primary : colors.secondary,
-                borderColor: unreadOnly ? colors.primary : colors.border,
+                backgroundColor: unreadOnly ? ui.accentSoft : ui.surface,
+                borderColor: unreadOnly ? ui.accentMuted : ui.borderSubtle,
               },
             ]}
             onPress={() => setUnreadOnly((prev) => !prev)}
@@ -178,7 +217,7 @@ export default function SearchScreen() {
             <Text
               style={[
                 styles.quickFilterText,
-                { color: unreadOnly ? colors.primaryForeground : colors.foreground },
+                { color: unreadOnly ? colors.foreground : colors.foreground },
               ]}
             >
               Unread
@@ -188,8 +227,8 @@ export default function SearchScreen() {
             style={[
               styles.quickFilterChip,
               {
-                backgroundColor: starredOnly ? colors.primary : colors.secondary,
-                borderColor: starredOnly ? colors.primary : colors.border,
+                backgroundColor: starredOnly ? ui.accentSoft : ui.surface,
+                borderColor: starredOnly ? ui.accentMuted : ui.borderSubtle,
               },
             ]}
             onPress={() => setStarredOnly((prev) => !prev)}
@@ -197,7 +236,7 @@ export default function SearchScreen() {
             <Text
               style={[
                 styles.quickFilterText,
-                { color: starredOnly ? colors.primaryForeground : colors.foreground },
+                { color: starredOnly ? colors.foreground : colors.foreground },
               ]}
             >
               Starred
@@ -207,8 +246,8 @@ export default function SearchScreen() {
             style={[
               styles.quickFilterChip,
               {
-                backgroundColor: hasAttachment ? colors.primary : colors.secondary,
-                borderColor: hasAttachment ? colors.primary : colors.border,
+                backgroundColor: hasAttachment ? ui.accentSoft : ui.surface,
+                borderColor: hasAttachment ? ui.accentMuted : ui.borderSubtle,
               },
             ]}
             onPress={() => setHasAttachment((prev) => !prev)}
@@ -216,7 +255,7 @@ export default function SearchScreen() {
             <Text
               style={[
                 styles.quickFilterText,
-                { color: hasAttachment ? colors.primaryForeground : colors.foreground },
+                { color: hasAttachment ? colors.foreground : colors.foreground },
               ]}
             >
               Attachment
@@ -225,12 +264,42 @@ export default function SearchScreen() {
         </ScrollView>
       </View>
 
+      {activeFilterCount > 0 && (
+        <View style={styles.activeFiltersWrap}>
+          <View
+            style={[
+              styles.activeFiltersCard,
+              {
+                backgroundColor: ui.surface,
+                borderColor: ui.borderSubtle,
+              },
+            ]}
+          >
+            <Text style={[styles.activeFiltersText, { color: colors.mutedForeground }]}>
+              {activeFilterSummary}
+            </Text>
+            <Pressable onPress={clearAllFilters}>
+              <Text style={[styles.clearFiltersText, { color: ui.accent }]}>Clear all</Text>
+            </Pressable>
+          </View>
+        </View>
+      )}
+
       {/* Results */}
       <View style={styles.results}>
         {!canSearch ? (
-          <View style={styles.hintContainer}>
+          <View
+            style={[
+              styles.infoCard,
+              {
+                backgroundColor: ui.surface,
+                borderColor: ui.borderSubtle,
+              },
+            ]}
+          >
             <Text style={[styles.hintText, { color: colors.mutedForeground }]}>
-              Type at least 2 characters or select a filter to search
+              Search by sender, subject, or message text. You can also start with a filter if you
+              are narrowing inbox triage.
             </Text>
           </View>
         ) : isLoading ? (
@@ -246,11 +315,19 @@ export default function SearchScreen() {
               <ThreadListItem threadId={item.id} onPress={handleThreadPress} />
             )}
             ListEmptyComponent={
-              <View style={styles.emptyContainer}>
+              <View
+                style={[
+                  styles.infoCard,
+                  {
+                    backgroundColor: ui.surface,
+                    borderColor: ui.borderSubtle,
+                  },
+                ]}
+              >
                 <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>
                   {debouncedQuery.trim().length > 0
-                    ? `No results found for "${debouncedQuery.trim()}"`
-                    : 'No results found with current filters'}
+                    ? `No results matched "${debouncedQuery.trim()}". Try a broader phrase or clear a filter.`
+                    : 'No results matched the current filters. Clear filters or switch folders.'}
                 </Text>
               </View>
             }
@@ -277,20 +354,57 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    height: 40,
+    borderRadius: 18,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 14,
+    height: 44,
   },
   searchInput: {
     flex: 1,
-    fontSize: 16,
+    fontSize: 14,
+    lineHeight: 18,
+    letterSpacing: -0.12,
     padding: 0,
   },
+  cancelButton: {
+    height: 38,
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   cancelText: {
-    fontSize: 16,
+    fontSize: 12,
+    fontWeight: '600',
+    letterSpacing: -0.08,
   },
   results: {
     flex: 1,
+  },
+  activeFiltersWrap: {
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+  },
+  activeFiltersCard: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 18,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  activeFiltersText: {
+    flex: 1,
+    fontSize: 11,
+    lineHeight: 15,
+    letterSpacing: -0.06,
+  },
+  clearFiltersText: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: -0.06,
   },
   filtersContainer: {
     gap: 8,
@@ -307,32 +421,43 @@ const styles = StyleSheet.create({
   },
   filterChip: {
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
+    borderRadius: 999,
+    paddingHorizontal: 13,
+    paddingVertical: 8,
   },
   filterChipText: {
-    fontSize: 13,
+    fontSize: 11,
+    lineHeight: 13,
     fontWeight: '600',
+    letterSpacing: -0.06,
   },
   quickFilterChip: {
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
+    borderRadius: 999,
+    paddingHorizontal: 13,
+    paddingVertical: 8,
   },
   quickFilterText: {
-    fontSize: 13,
+    fontSize: 11,
+    lineHeight: 13,
     fontWeight: '600',
+    letterSpacing: -0.06,
   },
-  hintContainer: {
-    flex: 1,
+  infoCard: {
+    marginHorizontal: 16,
+    marginTop: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 48,
+    paddingVertical: 38,
+    paddingHorizontal: 22,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 24,
   },
   hintText: {
-    fontSize: 15,
+    fontSize: 13,
+    lineHeight: 18,
+    letterSpacing: -0.08,
+    textAlign: 'center',
   },
   loadingContainer: {
     flex: 1,
@@ -340,13 +465,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: 48,
   },
-  emptyContainer: {
-    alignItems: 'center',
-    paddingVertical: 48,
-    paddingHorizontal: 24,
-  },
   emptyText: {
-    fontSize: 15,
+    fontSize: 13,
+    lineHeight: 18,
+    letterSpacing: -0.08,
     textAlign: 'center',
   },
 });
