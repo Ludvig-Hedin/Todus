@@ -956,9 +956,21 @@ export const MailList = memo(
           )}
         >
           <>
-            {isLoading ? (
-              <div className="flex h-32 w-full items-center justify-center">
-                <div className="h-4 w-4 animate-spin rounded-full border-2 border-neutral-900 border-t-transparent dark:border-white dark:border-t-transparent" />
+            {isLoading || (isFetching && items.length === 0) ? (
+              // Show skeleton rows while loading so user sees structure, not "It's empty here"
+              <div className="flex flex-1 flex-col gap-0.5 px-1 pt-2">
+                {Array.from({ length: 9 }).map((_, i) => (
+                  <div key={i} className="flex items-center gap-3 rounded-lg px-3 py-3">
+                    <Skeleton className="h-9 w-9 flex-shrink-0 rounded-full" />
+                    <div className="flex flex-1 flex-col gap-2">
+                      <div className="flex justify-between">
+                        <Skeleton className="h-3.5 w-32 rounded" />
+                        <Skeleton className="h-3 w-10 rounded" />
+                      </div>
+                      <Skeleton className={`h-3 rounded ${i % 3 === 0 ? 'w-48' : i % 3 === 1 ? 'w-40' : 'w-52'}`} />
+                    </div>
+                  </div>
+                ))}
               </div>
             ) : !items || items.length === 0 ? (
               <div className="flex w-full items-center justify-center">

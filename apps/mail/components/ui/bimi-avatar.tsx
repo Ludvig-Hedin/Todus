@@ -7,6 +7,41 @@ import DOMPurify from 'dompurify';
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MAX_FAVICON_URLS = 6;
 
+// Palette of pleasant bg/text pairs for initials avatars — deterministic per seed
+const AVATAR_COLOR_PALETTE = [
+  { bg: '#DBEAFE', text: '#1D4ED8' }, // blue
+  { bg: '#D1FAE5', text: '#065F46' }, // emerald
+  { bg: '#EDE9FE', text: '#5B21B6' }, // violet
+  { bg: '#FCE7F3', text: '#9D174D' }, // pink
+  { bg: '#FEF3C7', text: '#92400E' }, // amber
+  { bg: '#FFEDD5', text: '#9A3412' }, // orange
+  { bg: '#FEE2E2', text: '#991B1B' }, // red
+  { bg: '#F0FDF4', text: '#166534' }, // green
+  { bg: '#E0E7FF', text: '#3730A3' }, // indigo
+  { bg: '#FDF4FF', text: '#7E22CE' }, // fuchsia
+];
+
+const AVATAR_COLOR_PALETTE_DARK = [
+  { bg: '#1E3A5F', text: '#93C5FD' },
+  { bg: '#064E3B', text: '#6EE7B7' },
+  { bg: '#2E1065', text: '#C4B5FD' },
+  { bg: '#500724', text: '#F9A8D4' },
+  { bg: '#451A03', text: '#FDE68A' },
+  { bg: '#431407', text: '#FDBA74' },
+  { bg: '#450A0A', text: '#FCA5A5' },
+  { bg: '#052E16', text: '#86EFAC' },
+  { bg: '#1E1B4B', text: '#A5B4FC' },
+  { bg: '#3B0764', text: '#E879F9' },
+];
+
+function getAvatarColorIndex(seed: string): number {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) {
+    hash = seed.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return Math.abs(hash) % AVATAR_COLOR_PALETTE.length;
+}
+
 function extractDomain(email: string) {
   const [, domain = ''] = email.split('@');
   return domain.trim().toLowerCase();
@@ -66,7 +101,6 @@ export const BimiAvatar = ({
   email,
   name,
   className = 'h-8 w-8 rounded-full border dark:border-none',
-  fallbackClassName = 'rounded-full bg-[#FFFFFF] font-bold text-[#9F9F9F] dark:bg-[#373737]',
   onImageError,
 }: BimiAvatarProps) => {
   const trpc = useTRPC();
@@ -132,10 +166,33 @@ export const BimiAvatar = ({
 
   const firstLetter = getFirstLetterCharacter(name || normalizedEmail);
 
+  // Deterministic color based on email so the same sender always gets the same color
+  const colorIndex = getAvatarColorIndex(normalizedEmail || name || '');
+  const lightColor = AVATAR_COLOR_PALETTE[colorIndex]!;
+  const darkColor = AVATAR_COLOR_PALETTE_DARK[colorIndex]!;
+
+  // Two spans layered via Tailwind dark-mode classes — one for light, one for dark
+  const InitialsFallback = (
+    <>
+      <span
+        className="dark:hidden flex h-full w-full items-center justify-center rounded-full font-bold text-sm"
+        style={{ background: lightColor.bg, color: lightColor.text }}
+      >
+        {firstLetter}
+      </span>
+      <span
+        className="hidden dark:flex h-full w-full items-center justify-center rounded-full font-bold text-sm"
+        style={{ background: darkColor.bg, color: darkColor.text }}
+      >
+        {firstLetter}
+      </span>
+    </>
+  );
+
   if (!hasValidEmail) {
     return (
       <Avatar className={className}>
-        <AvatarFallback className={fallbackClassName}>{firstLetter}</AvatarFallback>
+        <AvatarFallback className="rounded-full p-0">{InitialsFallback}</AvatarFallback>
       </Avatar>
     );
   }
@@ -160,7 +217,7 @@ export const BimiAvatar = ({
           onError={handleFallbackImageError}
         />
       ) : (
-        <AvatarFallback className={fallbackClassName}>{firstLetter}</AvatarFallback>
+        <AvatarFallback className="rounded-full p-0">{InitialsFallback}</AvatarFallback>
       )}
     </Avatar>
   );
