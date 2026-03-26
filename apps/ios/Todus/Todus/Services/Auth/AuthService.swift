@@ -145,7 +145,9 @@ request.setValue("https://todus.app", forHTTPHeaderField: "Origin")
                 return
             }
 
-            authLog.info("Apple sign-in response: status=\(http.statusCode)")
+            let bodyString = String(data: data, encoding: .utf8) ?? "(empty)"
+            let allHeaders = http.allHeaderFields.map { "\($0.key): \($0.value)" }.joined(separator: ", ")
+            authLog.info("Apple sign-in response: status=\(http.statusCode), headers=[\(allHeaders)], body=\(bodyString.prefix(500))")
 
             // For 3xx redirects, check the Location header for a token URL
             if (300..<400).contains(http.statusCode),
@@ -160,11 +162,16 @@ request.setValue("https://todus.app", forHTTPHeaderField: "Origin")
             else if (200..<300).contains(http.statusCode),
                     extractToken(from: data, response: http, email: credential.email) {
                 authLog.info("Apple sign-in: authenticated successfully")
+            }
+            // For 3xx without token in Location — the redirect itself may contain cookie-based session.
+            // Try to extract token from Set-Cookie or body.
+            else if (300..<400).contains(http.statusCode),
+                    extractToken(from: data, response: http, email: credential.email) {
+                authLog.info("Apple sign-in: token extracted from redirect response")
             } else {
-                // Log the response for debugging
-                let bodyString = String(data: data, encoding: .utf8) ?? "(empty)"
-                authLog.error("Apple sign-in: failed to extract token. Status=\(http.statusCode), body=\(bodyString)")
-                lastErrorMessage = "Apple Sign In failed. Please try again."
+                authLog.error("Apple sign-in: failed to extract token. Status=\(http.statusCode)")
+                // Show actual response for debugging
+                lastErrorMessage = "Apple Sign In: no token in response (HTTP \(http.statusCode)). Check debug logs."
                 authState = .guest
             }
 
@@ -471,11 +478,31 @@ request.setValue("https://todus.app", forHTTPHeaderField: "Origin")
     private func extractToken(from data: Data, response: HTTPURLResponse, email: String?) -> Bool {
         // 1. Check for set-auth-token header (Better-Auth bearer plugin)
         if let headerToken = response.value(forHTTPHeaderField: "set-auth-token"), !headerToken.isEmpty {
+            authLog.info("extractToken: found set-auth-token header")
             completeAuthentication(token: headerToken, email: email)
             return true
         }
 
-        // 2. Check for token in JSON response body
+        // 2. Check Set-Cookie for better-auth session token (fallback when bearer plugin
+        //    doesn't return the header — e.g. when the response is a redirect with cookies)
+        if let cookies = response.allHeaderFields["Set-Cookie"] as? String {
+            // Better-Auth cookie name: better-auth.session_token or better-auth-dev.session_token
+            let patterns = ["better-auth.session_token=", "better-auth-dev.session_token="]
+            for pattern in patterns {
+                if let range = cookies.range(of: pattern) {
+                    let afterPrefix = cookies[range.upperBound...]
+                    let tokenEnd = afterPrefix.firstIndex(of: ";") ?? afterPrefix.endIndex
+                    let token = String(afterPrefix[..<tokenEnd])
+                    if !token.isEmpty && token != "deleted" {
+                        authLog.info("extractToken: found session token in Set-Cookie")
+                        completeAuthentication(token: token, email: email)
+                        return true
+                    }
+                }
+            }
+        }
+
+        // 3. Check for token in JSON response body
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return false
         }
