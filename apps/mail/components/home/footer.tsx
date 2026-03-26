@@ -86,7 +86,7 @@ export default function Footer() {
           <div className="inline-flex flex-col items-start justify-between gap-4 mb-10 md:mb-0 self-stretch">
             <div className="inline-flex w-8 items-center justify-start gap-3">
               <a href="/">
-                <img src="/logo.png" alt="logo" width={100} height={100} />
+                <img src="/brand-logo.png" alt="logo" width={100} height={100} />
               </a>
             </div>
             <div className="inline-flex items-center justify-start gap-4">
@@ -103,22 +103,6 @@ export default function Footer() {
                   </div>
                 </a>
               ))}
-            </div>
-            <div className="flex items-center justify-start gap-3">
-              <div className="justify-start text-base font-normal leading-none text-white opacity-80">
-                Backed by
-              </div>
-              <a href="https://www.ycombinator.com" target="_blank" rel="noopener noreferrer">
-                <div className="relative w-36 overflow-hidden">
-                  <img
-                    src="/yc.svg"
-                    className="bg-transparent"
-                    alt="logo"
-                    width={100}
-                    height={100}
-                  />
-                </div>
-              </a>
             </div>
           </div>
           <div className="flex flex-1 items-start justify-end gap-5 md:gap-10 ">

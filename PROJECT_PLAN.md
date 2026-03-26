@@ -1,4 +1,4 @@
-# Zero Email - Project Plan
+# Todus - Project Plan
 
 > **Goal**: Deploy a fully functional email client accessible via **Web**, **iOS (TestFlight)**, and **macOS (TestFlight)**.
 

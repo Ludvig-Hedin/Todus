@@ -5,18 +5,18 @@
   </picture>
 </p>
 
-# Zero
+# Todus
 
 An Open-Source Gmail Alternative for the Future of Email
 
-## What is Zero?
+## What is Todus?
 
-Zero is an open-source AI email solution that gives users the power to **self-host** their own email app while also integrating external services like Gmail and other email providers. Our goal is to modernize and improve emails through AI agents to truly modernize emails.
+Todus is an open-source AI email solution that gives users the power to **self-host** their own email app while also integrating external services like Gmail and other email providers. Our goal is to modernize and improve emails through AI agents to truly modernize emails.
 
-## Why Zero?
+## Why Todus?
 
 Most email services today are either **closed-source**, **data-hungry**, or **too complex to self-host**.
-0.email is different:
+Todus is different:
 
 - ✅ **Open-Source** – No hidden agendas, fully transparent.
 - 🦾 **AI Driven** - Enhance your emails with Agents & LLMs.
@@ -28,7 +28,7 @@ Most email services today are either **closed-source**, **data-hungry**, or **to
 
 ## Tech Stack
 
-Zero is built with modern and reliable technologies:
+Todus is built with modern and reliable technologies:
 
 - **Frontend**: Next.js, React, TypeScript, TailwindCSS, Shadcn UI
 - **Backend**: Node.js, Drizzle ORM
@@ -71,8 +71,8 @@ You can set up Zero in two ways:
 
    ```bash
    # Clone the repository
-   git clone https://github.com/Mail-0/Zero.git
-   cd Zero
+   git clone https://github.com/todus-app/todus.git
+   cd todus
 
    # Install dependencies
    pnpm install
@@ -108,8 +108,8 @@ You can set up Zero in two ways:
 
    ```bash
    # Clone the repository
-   git clone https://github.com/Mail-0/Zero.git
-   cd Zero
+   git clone https://github.com/todus-app/todus.git
+   cd todus
    ```
 
    Then open the code in devcontainer and install the dependencies:
@@ -304,4 +304,4 @@ If you'd like to help with translating Zero to other languages, check out our [t
 
 ## 🤍 The team
 
-Curious who makes Zero? Here are our [contributors and maintainers](https://0.email/contributors)
+Curious who makes Todus? Here are our [contributors and maintainers](https://todus.app/contributors)
