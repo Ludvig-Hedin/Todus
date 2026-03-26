@@ -221,6 +221,8 @@ request.setValue("https://todus.app", forHTTPHeaderField: "Origin")
                 }
                 // Share cookies with Safari so /auth/mobile-token can read the session cookie
                 session.prefersEphemeralWebBrowserSession = false
+                // Provide the key window as presentation anchor — required by ASWebAuthenticationSession
+                session.presentationContextProvider = self
                 // Hold a strong reference so the session isn't deallocated mid-flow
                 self.webAuthSession = session
                 session.start()
@@ -309,8 +311,8 @@ request.setValue("https://todus.app", forHTTPHeaderField: "Origin")
         isLoading = false
     }
 
-    /// Verifies the 6-digit OTP code and completes authentication.
-    /// Backend: POST /api/auth/email-otp/verify-email { email, otp }
+    /// Verifies the 6-digit OTP code and signs in.
+    /// Better-Auth's sign-in/email-otp endpoint verifies the code AND creates a session in one call.
     func verifyEmailOTP(code: String) async {
         guard case .otpPending(let email) = authState else { return }
         let trimmedCode = code.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -322,14 +324,14 @@ request.setValue("https://todus.app", forHTTPHeaderField: "Origin")
         isLoading = true
         lastErrorMessage = nil
 
-        let url = backendURL.appending(path: "api/auth/email-otp/verify-email")
+        // Use /sign-in/email-otp which verifies OTP + creates session in one step
+        let url = backendURL.appending(path: "api/auth/sign-in/email-otp")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        // Origin must match a trustedOrigin with a valid hostname — the CORS middleware
-// parses the hostname and checks against allowed domains (todus.app, localhost).
-// Using the web app URL ensures it passes both CORS and Better-Auth CSRF checks.
-request.setValue("https://todus.app", forHTTPHeaderField: "Origin")
+        // Origin must match a trustedOrigin with a valid hostname — CORS middleware
+        // parses hostname and checks against allowed domains (todus.app, localhost).
+        request.setValue("https://todus.app", forHTTPHeaderField: "Origin")
 
         let body: [String: String] = ["email": email, "otp": trimmedCode]
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
@@ -472,6 +474,25 @@ request.setValue("https://todus.app", forHTTPHeaderField: "Origin")
     enum AuthError: Error {
         case cancelled
         case invalidResponse
+    }
+}
+
+// MARK: - ASWebAuthenticationPresentationContextProviding
+
+/// Provides the key window for ASWebAuthenticationSession to present the browser overlay.
+/// Without this, the session fails with error 2 (presentationContextNotProvided).
+extension AuthService: ASWebAuthenticationPresentationContextProviding {
+    func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
+        // Find the key window from the active scene
+        guard let scene = UIApplication.shared.connectedScenes.first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene,
+              let window = scene.windows.first(where: { $0.isKeyWindow }) else {
+            // Fallback: return the first window available
+            return UIApplication.shared.connectedScenes
+                .compactMap { $0 as? UIWindowScene }
+                .flatMap { $0.windows }
+                .first ?? ASPresentationAnchor()
+        }
+        return window
     }
 }
 

@@ -238,22 +238,24 @@ struct AuthView: View {
             }
             .padding(.vertical, 4)
 
-            // Apple Sign In — primary filled (white pill on dark)
-            Button {
-                Task { await authService.signInWithApple() }
-            } label: {
-                HStack(spacing: 10) {
-                    Image(systemName: "apple.logo")
-                        .font(.system(size: 18, weight: .semibold))
-                    Text("Continue with Apple")
-                        .font(.system(size: 16, weight: .semibold))
-                }
-                .frame(maxWidth: .infinity)
-                .frame(height: 48)
-                .background(.primary, in: Capsule())
-                .foregroundStyle(AppTheme.backgroundTop)
+            // Apple Sign In — uses native SignInWithAppleButton for guaranteed visibility.
+            // An invisible overlay intercepts taps and routes to AuthService's Apple flow
+            // (which uses ASAuthorizationAppleIDProvider for token extraction).
+            SignInWithAppleButton(.signIn) { request in
+                request.requestedScopes = [.email, .fullName]
+            } onCompletion: { _ in }
+            .signInWithAppleButtonStyle(.white)
+            .frame(maxWidth: .infinity)
+            .frame(height: 48)
+            .clipShape(Capsule())
+            .allowsHitTesting(false) // Disable built-in tap — our overlay handles it
+            .overlay {
+                Color.clear
+                    .contentShape(Capsule())
+                    .onTapGesture {
+                        Task { await authService.signInWithApple() }
+                    }
             }
-            .buttonStyle(.plain)
 
             // Google Sign In — outline style
             Button {
