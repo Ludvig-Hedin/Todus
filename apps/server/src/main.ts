@@ -27,9 +27,9 @@ import { getZeroAgent, getZeroDB, verifyToken } from './lib/server-utils';
 import { SyncThreadsWorkflow } from './workflows/sync-threads-workflow';
 import { ShardRegistry, ZeroAgent, ZeroDriver } from './routes/agent';
 import { ThreadSyncWorker } from './routes/agent/sync-worker';
+import { eq, and, desc, asc, inArray, gt } from 'drizzle-orm';
 import { oAuthDiscoveryMetadata } from 'better-auth/plugins';
 import { EProviders, type IEmailSendBatch } from './types';
-import { eq, and, desc, asc, inArray, gt } from 'drizzle-orm';
 import { ThinkingMCP } from './lib/sequential-thinking';
 import { serializeSignedCookie } from 'better-call';
 
@@ -37,6 +37,7 @@ import { contextStorage } from 'hono/context-storage';
 import { defaultUserSettings } from './lib/schemas';
 import { createLocalJWKSet, jwtVerify } from 'jose';
 import { enableBrainFunction } from './lib/brain';
+import { env, setEnv, type ZeroEnv } from './env';
 import { trpcServer } from '@hono/trpc-server';
 import { agentsMiddleware } from 'hono-agents';
 import { ZeroMCP } from './routes/agent/mcp';
@@ -44,7 +45,6 @@ import { publicRouter } from './routes/auth';
 import { WorkflowRunner } from './pipelines';
 import { autumnApi } from './routes/autumn';
 import { initTracing } from './lib/tracing';
-import { env, setEnv, type ZeroEnv } from './env';
 import type { HonoContext } from './ctx';
 import { createDb, type DB } from './db';
 import { createAuth } from './lib/auth';
@@ -577,7 +577,7 @@ function hashIpAddress(ip: string | undefined): string | undefined {
 
   for (let i = 0; i < str.length; i++) {
     const char = str.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
+    hash = (hash << 5) - hash + char;
     hash = hash & hash; // Convert to 32bit integer
   }
 
@@ -617,13 +617,18 @@ const api = new Hono<HonoContext>()
     });
 
     // Start authentication span
-    const authSpan = TraceContext.startSpan(traceId, 'authentication', {
-      method: c.req.method,
-      url: c.req.url,
-      hasAuthHeader: !!c.req.header('Authorization'),
-    }, {
-      'auth.method': c.req.header('Authorization') ? 'bearer_token' : 'session_cookie'
-    });
+    const authSpan = TraceContext.startSpan(
+      traceId,
+      'authentication',
+      {
+        method: c.req.method,
+        url: c.req.url,
+        hasAuthHeader: !!c.req.header('Authorization'),
+      },
+      {
+        'auth.method': c.req.header('Authorization') ? 'bearer_token' : 'session_cookie',
+      },
+    );
 
     const auth = createAuth();
     c.set('auth', auth);
@@ -632,11 +637,16 @@ const api = new Hono<HonoContext>()
 
     if (c.req.header('Authorization') && !session?.user) {
       // Start token verification span
-      const tokenSpan = TraceContext.startSpan(traceId, 'token_verification', {
-        tokenPresent: true,
-      }, {
-        'auth.token_type': 'jwt'
-      });
+      const tokenSpan = TraceContext.startSpan(
+        traceId,
+        'token_verification',
+        {
+          tokenPresent: true,
+        },
+        {
+          'auth.token_type': 'jwt',
+        },
+      );
 
       const token = c.req.header('Authorization')?.split(' ')[1];
 
@@ -664,10 +674,15 @@ const api = new Hono<HonoContext>()
             });
           }
         } catch (error) {
-          TraceContext.completeSpan(traceId, tokenSpan.id, {
-            success: false,
-            reason: 'token_verification_failed',
-          }, error instanceof Error ? error.message : 'Unknown token error');
+          TraceContext.completeSpan(
+            traceId,
+            tokenSpan.id,
+            {
+              success: false,
+              reason: 'token_verification_failed',
+            },
+            error instanceof Error ? error.message : 'Unknown token error',
+          );
         }
       } else {
         TraceContext.completeSpan(traceId, tokenSpan.id, {
@@ -681,7 +696,7 @@ const api = new Hono<HonoContext>()
     TraceContext.completeSpan(traceId, authSpan.id, {
       authenticated: !!c.var.sessionUser,
       userId: c.var.sessionUser?.id,
-      authMethod: session?.user ? 'session' : (c.req.header('Authorization') ? 'token' : 'none'),
+      authMethod: session?.user ? 'session' : c.req.header('Authorization') ? 'token' : 'none',
     });
 
     // Update trace metadata with user info
@@ -698,11 +713,16 @@ const api = new Hono<HonoContext>()
       await next();
       // Don't complete the request span here - let TRPC middleware handle it
     } catch (error) {
-      TraceContext.completeSpan(traceId, requestSpan.id, {
-        success: false,
+      TraceContext.completeSpan(
+        traceId,
+        requestSpan.id,
+        {
+          success: false,
 
-        statusCode: c.res.status,
-      }, error instanceof Error ? error.message : 'Unknown request error');
+          statusCode: c.res.status,
+        },
+        error instanceof Error ? error.message : 'Unknown request error',
+      );
       throw error;
     }
     // Note: Trace will be completed by TRPC middleware after logging
@@ -782,10 +802,7 @@ const api = new Hono<HonoContext>()
       .limit(1);
 
     if (!activeSession?.token) {
-      return c.json(
-        { error: 'No active Better Auth session found for account linking.' },
-        401,
-      );
+      return c.json({ error: 'No active Better Auth session found for account linking.' }, 401);
     }
 
     const cookiePrefix = env.NODE_ENV === 'development' ? 'better-auth-dev' : 'better-auth';
@@ -795,28 +812,28 @@ const api = new Hono<HonoContext>()
 
     const forwardedHeaders = new Headers(c.req.raw.headers);
     forwardedHeaders.delete('authorization');
+    const existingCookies = forwardedHeaders.get('cookie');
     forwardedHeaders.set(
       'cookie',
-      `${cookiePrefix}.session_token=${encodeURIComponent(signedSessionToken)}`,
+      existingCookies
+        ? `${existingCookies}; ${cookiePrefix}.session_token=${signedSessionToken}`
+        : `${cookiePrefix}.session_token=${signedSessionToken}`,
     );
     forwardedHeaders.set('content-type', 'application/json');
 
-    const forwardedRequest = new Request(
-      new URL('/api/auth/link-social', c.req.url).toString(),
-      {
-        method: 'POST',
-        headers: forwardedHeaders,
-        body: JSON.stringify({
-          provider,
-          callbackURL,
-          disableRedirect,
-          errorCallbackURL,
-          scopes,
-          requestSignUp,
-        }),
-        redirect: 'manual',
-      },
-    );
+    const forwardedRequest = new Request(new URL('/api/auth/link-social', c.req.url).toString(), {
+      method: 'POST',
+      headers: forwardedHeaders,
+      body: JSON.stringify({
+        provider,
+        callbackURL,
+        disableRedirect,
+        errorCallbackURL,
+        scopes,
+        requestSignUp,
+      }),
+      redirect: 'manual',
+    });
 
     return await auth.handler(forwardedRequest);
   })
@@ -827,7 +844,10 @@ const api = new Hono<HonoContext>()
       // better-auth throws Response objects on errors (CSRF, validation, etc.)
       // Log the details so we can debug instead of returning empty 500s
       if (err instanceof Response) {
-        const body = await err.clone().text().catch(() => '');
+        const body = await err
+          .clone()
+          .text()
+          .catch(() => '');
         console.error('[auth] better-auth threw Response:', err.status, body);
         return err;
       }
