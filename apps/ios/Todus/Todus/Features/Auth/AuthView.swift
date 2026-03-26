@@ -1,17 +1,19 @@
 import SwiftUI
 import AuthenticationServices
 
-/// Sign-in screen — matches the todo app's auth flow.
+/// Sign-in screen — matches the RN app's auth flow.
 /// Stage 1: Email input + social buttons (Apple, Google).
-/// Stage 2: 6-digit OTP code entry with auto-submit.
+/// Stage 2: 6-digit OTP code entry with resend + auto-submit.
 struct AuthView: View {
     @Environment(AppServices.self) private var services
+    @Environment(\.colorScheme) private var colorScheme
 
     private var authService: AuthService { services.authService }
 
     @State private var email = ""
     @State private var code = ""
-    @FocusState private var isInputFocused: Bool
+    @FocusState private var isEmailFocused: Bool
+    @FocusState private var isCodeFocused: Bool
 
     /// Blue accent used for primary action buttons (matches todo app)
     private let accentBlue = Color(red: 0.25, green: 0.48, blue: 1.0)
@@ -19,8 +21,7 @@ struct AuthView: View {
     private let expectedCodeLength = 6
 
     private var isValidEmail: Bool {
-        let regex = #"^[^\s@]+@[^\s@]+\.[^\s@]+$"#
-        return NSPredicate(format: "SELF MATCHES %@", regex).evaluate(with: email)
+        email.contains("@") && email.contains(".") && email.count >= 5
     }
 
     var body: some View {
@@ -65,32 +66,17 @@ struct AuthView: View {
                     } else {
                         emailInputView
                         socialButtons
+                        footer
                     }
                 }
                 .padding(.horizontal, 24)
-                .padding(.bottom, 20)
-
-                // Footer
-                VStack(spacing: 14) {
-                    Button {
-                        authService.continueAsGuest()
-                    } label: {
-                        Text("Continue without account")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
-
-                    HStack(spacing: 8) {
-                        Text("Terms of Service")
-                        Circle().fill(.secondary.opacity(0.5)).frame(width: 3, height: 3)
-                        Text("Privacy Policy")
-                    }
-                    .font(.system(size: 13, weight: .regular))
-                    .foregroundStyle(.secondary.opacity(0.7))
-                }
                 .padding(.bottom, 40)
             }
+        }
+        // Dismiss keyboard on tap outside any input field
+        .onTapGesture {
+            isEmailFocused = false
+            isCodeFocused = false
         }
         .animation(.snappy(duration: 0.25), value: otpPendingEmail)
         .animation(.snappy(duration: 0.3), value: authService.lastErrorMessage != nil)
@@ -107,30 +93,30 @@ struct AuthView: View {
     private var emailInputView: some View {
         VStack(spacing: 10) {
             TextField("Email", text: $email)
-                .textContentType(.emailAddress)
                 .keyboardType(.emailAddress)
                 .autocorrectionDisabled()
                 .textInputAutocapitalization(.never)
-                .focused($isInputFocused)
+                .focused($isEmailFocused)
                 .font(.system(size: 16, weight: .medium))
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .padding(.horizontal, 20)
+                .padding(.vertical, 14)
+                .background(AppTheme.surfaceSecondary, in: Capsule())
                 .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(AppTheme.cardBorder, lineWidth: 1)
+                    Capsule()
+                        .stroke(AppTheme.strongBorder, lineWidth: 1)
                 )
 
-            // Send code button — only visible when email is valid
+            // Send code button — only visible when email looks valid
             if isValidEmail {
                 Button {
+                    isEmailFocused = false
                     Task { await authService.sendEmailOTP(email: email) }
                 } label: {
                     Text("Send code")
                         .font(.system(size: 16, weight: .semibold))
                         .frame(maxWidth: .infinity)
                         .frame(height: 48)
-                        .background(accentBlue, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .background(accentBlue, in: Capsule())
                         .foregroundStyle(.white)
                 }
                 .buttonStyle(.plain)
@@ -152,43 +138,56 @@ struct AuthView: View {
             TextField("Verification code", text: $code)
                 .textContentType(.oneTimeCode)
                 .keyboardType(.numberPad)
-                .focused($isInputFocused)
+                .focused($isCodeFocused)
                 .font(.system(size: 16, weight: .medium))
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .padding(.horizontal, 20)
+                .padding(.vertical, 14)
+                .background(AppTheme.surfaceSecondary, in: Capsule())
                 .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(AppTheme.cardBorder, lineWidth: 1)
+                    Capsule()
+                        .stroke(AppTheme.strongBorder, lineWidth: 1)
                 )
                 .onChange(of: code) { _, newValue in
-                    // Auto-submit when 6 digits are entered
                     if newValue.count >= expectedCodeLength {
+                        isCodeFocused = false
                         Task { await authService.verifyEmailOTP(code: newValue) }
                     }
                 }
                 .onAppear {
-                    isInputFocused = true
+                    isCodeFocused = true
                 }
 
-            // Verify button
-            Button {
-                Task { await authService.verifyEmailOTP(code: code) }
-            } label: {
-                Text("Verify code")
-                    .font(.system(size: 16, weight: .semibold))
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 48)
-                    .background(
-                        code.count >= expectedCodeLength ? accentBlue : Color.secondary.opacity(0.3),
-                        in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    )
-                    .foregroundStyle(code.count >= expectedCodeLength ? Color.white : Color.secondary)
+            // Show Verify when code is complete, Resend when not
+            if code.count >= expectedCodeLength {
+                Button {
+                    isCodeFocused = false
+                    Task { await authService.verifyEmailOTP(code: code) }
+                } label: {
+                    Text("Verify code")
+                        .font(.system(size: 16, weight: .semibold))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 48)
+                        .background(accentBlue, in: Capsule())
+                        .foregroundStyle(.white)
+                }
+                .buttonStyle(.plain)
+                .disabled(authService.isLoading)
+            } else {
+                Button {
+                    Task { await authService.sendEmailOTP(email: email) }
+                } label: {
+                    Text("Resend code")
+                        .font(.system(size: 16, weight: .semibold))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 48)
+                        .background(AppTheme.surfaceSecondary, in: Capsule())
+                        .overlay(Capsule().stroke(AppTheme.strongBorder, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .disabled(authService.isLoading)
             }
-            .buttonStyle(.plain)
-            .disabled(code.count < expectedCodeLength || authService.isLoading)
 
-            // Open email app button
+            // Open email app
             Button {
                 openEmailApp()
             } label: {
@@ -196,21 +195,18 @@ struct AuthView: View {
                     .font(.system(size: 16, weight: .semibold))
                     .frame(maxWidth: .infinity)
                     .frame(height: 48)
-                    .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .stroke(AppTheme.cardBorder, lineWidth: 1)
-                    )
+                    .background(AppTheme.surfaceSecondary, in: Capsule())
+                    .overlay(Capsule().stroke(AppTheme.strongBorder, lineWidth: 1))
             }
             .buttonStyle(.plain)
 
-            // Use another email
+            // Back button — returns to main login screen
             Button {
                 code = ""
                 authService.returnToLogin()
             } label: {
-                Text("Use another email")
-                    .font(.system(size: 13, weight: .medium))
+                Text("Back")
+                    .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
@@ -228,27 +224,26 @@ struct AuthView: View {
 
     private var socialButtons: some View {
         VStack(spacing: 10) {
-            // Divider with "or"
-            HStack {
-                Rectangle().fill(AppTheme.cardBorder).frame(height: 1)
+            // Divider with "or" — visible styling
+            HStack(spacing: 12) {
+                Rectangle().fill(AppTheme.strongBorder).frame(height: 0.5)
                 Text("or")
-                    .font(.system(size: 13, weight: .regular))
+                    .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(.secondary)
-                Rectangle().fill(AppTheme.cardBorder).frame(height: 1)
+                Rectangle().fill(AppTheme.strongBorder).frame(height: 0.5)
             }
-            .padding(.vertical, 4)
+            .padding(.vertical, 6)
 
-            // Apple Sign In — uses native SignInWithAppleButton for guaranteed visibility.
-            // An invisible overlay intercepts taps and routes to AuthService's Apple flow
-            // (which uses ASAuthorizationAppleIDProvider for token extraction).
+            // Apple Sign In — uses native button for guaranteed correct rendering.
+            // Black on light mode, white on dark mode (Apple's standard).
             SignInWithAppleButton(.signIn) { request in
                 request.requestedScopes = [.email, .fullName]
             } onCompletion: { _ in }
-            .signInWithAppleButtonStyle(.white)
+            .signInWithAppleButtonStyle(colorScheme == .dark ? .white : .black)
             .frame(maxWidth: .infinity)
             .frame(height: 48)
             .clipShape(Capsule())
-            .allowsHitTesting(false) // Disable built-in tap — our overlay handles it
+            .allowsHitTesting(false)
             .overlay {
                 Color.clear
                     .contentShape(Capsule())
@@ -257,7 +252,7 @@ struct AuthView: View {
                     }
             }
 
-            // Google Sign In — outline style
+            // Google Sign In — outline pill with proper Google "G" SVG-style logo
             Button {
                 Task { await authService.signInWithGoogle() }
             } label: {
@@ -269,7 +264,7 @@ struct AuthView: View {
                 }
                 .frame(maxWidth: .infinity)
                 .frame(height: 48)
-                .background(AppTheme.surfacePrimary, in: Capsule())
+                .background(AppTheme.surfaceSecondary, in: Capsule())
                 .overlay(Capsule().stroke(AppTheme.strongBorder, lineWidth: 1))
             }
             .buttonStyle(.plain)
@@ -282,6 +277,30 @@ struct AuthView: View {
                     .tint(.primary)
             }
         }
+    }
+
+    // MARK: - Footer (only on main login page, hidden on OTP page)
+
+    private var footer: some View {
+        VStack(spacing: 14) {
+            Button {
+                authService.continueAsGuest()
+            } label: {
+                Text("Continue without account")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+
+            HStack(spacing: 8) {
+                Text("Terms of Service")
+                Circle().fill(.secondary.opacity(0.5)).frame(width: 3, height: 3)
+                Text("Privacy Policy")
+            }
+            .font(.system(size: 13, weight: .regular))
+            .foregroundStyle(.secondary.opacity(0.7))
+        }
+        .padding(.top, 8)
     }
 
     // MARK: - Error Banner
@@ -309,66 +328,63 @@ struct AuthView: View {
 
     // MARK: - Open Email App
 
-    /// Opens the user's preferred email app — tries Gmail, Outlook, Spark, then Apple Mail.
+    /// Opens the user's default email app via mailto: which respects the iOS default mail app setting.
     private func openEmailApp() {
-        let emailApps: [(scheme: String, name: String)] = [
-            ("googlegmail:///", "Gmail"),
-            ("ms-outlook://inbox", "Outlook"),
-            ("readdle-spark://", "Spark"),
-            ("message://", "Apple Mail"),
-        ]
-        for app in emailApps {
-            if let url = URL(string: app.scheme), UIApplication.shared.canOpenURL(url) {
-                UIApplication.shared.open(url)
-                return
-            }
-        }
-        // Fallback — opens whatever handles mailto
+        // mailto: opens the user's configured default email app (Gmail, Outlook, etc.)
         if let url = URL(string: "mailto:") {
             UIApplication.shared.open(url)
         }
     }
 }
 
-// MARK: - Google Logo
+// MARK: - Google Logo (proper "G" shape)
 
-/// Multi-color Google "G" logo matching the RN SVG icon
+/// Accurate multi-color Google "G" logo using SVG-path-style drawing
 private struct GoogleLogoView: View {
     var body: some View {
         Canvas { context, size in
-            let center = CGPoint(x: size.width / 2, y: size.height / 2)
-            let radius = min(size.width, size.height) / 2 - 1
+            let w = size.width
+            let h = size.height
+            let cx = w / 2
+            let cy = h / 2
+            let r = min(w, h) / 2 * 0.9 // Outer radius
 
-            drawArc(in: &context, center: center, radius: radius,
-                     startAngle: .degrees(-45), endAngle: .degrees(45),
+            // Google "G" is a circle with a gap on the right + a horizontal bar
+            // Colors: top-right = blue, bottom-right = red, bottom-left = yellow, top-left = green
+
+            // Blue arc (right side, from -30° to 90° clockwise = top-right quadrant)
+            drawArc(in: &context, center: CGPoint(x: cx, y: cy), radius: r,
+                     startAngle: .degrees(-30), endAngle: .degrees(70),
                      color: Color(red: 0.26, green: 0.52, blue: 0.96))
-            drawArc(in: &context, center: center, radius: radius,
-                     startAngle: .degrees(45), endAngle: .degrees(135),
+
+            // Green arc (bottom-right)
+            drawArc(in: &context, center: CGPoint(x: cx, y: cy), radius: r,
+                     startAngle: .degrees(70), endAngle: .degrees(160),
                      color: Color(red: 0.20, green: 0.66, blue: 0.33))
-            drawArc(in: &context, center: center, radius: radius,
-                     startAngle: .degrees(135), endAngle: .degrees(225),
+
+            // Yellow arc (bottom-left)
+            drawArc(in: &context, center: CGPoint(x: cx, y: cy), radius: r,
+                     startAngle: .degrees(160), endAngle: .degrees(250),
                      color: Color(red: 0.98, green: 0.74, blue: 0.02))
-            drawArc(in: &context, center: center, radius: radius,
-                     startAngle: .degrees(225), endAngle: .degrees(315),
+
+            // Red arc (top-left to top)
+            drawArc(in: &context, center: CGPoint(x: cx, y: cy), radius: r,
+                     startAngle: .degrees(250), endAngle: .degrees(330),
                      color: Color(red: 0.92, green: 0.26, blue: 0.21))
 
-            let innerRadius = radius * 0.55
-            let innerRect = CGRect(
-                x: center.x - innerRadius, y: center.y - innerRadius,
-                width: innerRadius * 2, height: innerRadius * 2
-            )
-            context.fill(Circle().path(in: innerRect), with: .color(AppTheme.surfacePrimary))
+            // Inner circle cutout (creates the "C" shape)
+            let innerR = r * 0.6
+            let innerRect = CGRect(x: cx - innerR, y: cy - innerR,
+                                    width: innerR * 2, height: innerR * 2)
+            context.fill(Circle().path(in: innerRect),
+                         with: .color(AppTheme.surfaceSecondary))
 
-            let barWidth = radius * 0.9
-            let barHeight = radius * 0.35
-            let barRect = CGRect(
-                x: center.x - barWidth * 0.1,
-                y: center.y - barHeight / 2,
-                width: barWidth,
-                height: barHeight
-            )
+            // Horizontal bar (the "dash" in the G, extending right from center)
+            let barH = r * 0.28
+            let barRect = CGRect(x: cx - r * 0.05, y: cy - barH / 2,
+                                  width: r * 0.95, height: barH)
             context.fill(
-                RoundedRectangle(cornerRadius: 1).path(in: barRect),
+                RoundedRectangle(cornerRadius: barH * 0.15).path(in: barRect),
                 with: .color(Color(red: 0.26, green: 0.52, blue: 0.96))
             )
         }

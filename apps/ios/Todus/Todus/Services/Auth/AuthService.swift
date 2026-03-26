@@ -184,32 +184,76 @@ request.setValue("https://todus.app", forHTTPHeaderField: "Origin")
 
     // MARK: - Google Sign In (Web-based OAuth)
 
-    /// Opens the backend's Google OAuth flow via ASWebAuthenticationSession.
-    /// Flow: Browser → Google OAuth → backend callback → /auth/mobile-token → todus://auth-callback?token=JWT
+    /// Two-step Google OAuth flow:
+    /// 1. POST to backend to get the Google OAuth redirect URL
+    /// 2. Open that URL in ASWebAuthenticationSession (system browser)
+    /// 3. After Google consent, backend creates session + redirects to /auth/mobile-token
+    /// 4. /auth/mobile-token converts session cookie → JWT, redirects to todus://auth-callback?token=JWT
     func signInWithGoogle() async {
         isLoading = true
         lastErrorMessage = nil
         authState = .authenticating
 
-        // Build the OAuth initiation URL. Better-Auth handles GET requests for social sign-in
-        // by redirecting to the OAuth provider. After Google consent, Better-Auth creates the
-        // session and redirects to callbackURL (/auth/mobile-token), which converts the session
-        // cookie into a JWT and redirects via JS to todus://auth-callback?token=JWT.
-        let callbackScheme = "todus"
-        let authURL = backendURL
-            .appending(path: "api/auth/sign-in/social")
-            .appending(queryItems: [
-                URLQueryItem(name: "provider", value: "google"),
-                URLQueryItem(name: "callbackURL", value: "/auth/mobile-token"),
-            ])
-
-        authLog.info("Starting Google OAuth: \(authURL.absoluteString)")
-
         do {
+            // Step 1: POST to get the Google OAuth redirect URL from Better-Auth.
+            // Better-Auth's social sign-in is POST-only — returns { url: "https://accounts.google.com/..." }
+            let signInURL = backendURL.appending(path: "api/auth/sign-in/social")
+            var request = URLRequest(url: signInURL)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue("https://todus.app", forHTTPHeaderField: "Origin")
+
+            let body: [String: Any] = [
+                "provider": "google",
+                "callbackURL": "/auth/mobile-token",
+            ]
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+            // Use no-redirect delegate to catch the redirect URL instead of following it
+            let config = URLSessionConfiguration.default
+            let session = URLSession(configuration: config, delegate: NoRedirectDelegate.shared, delegateQueue: nil)
+            let (data, response) = try await session.data(for: request)
+
+            guard let http = response as? HTTPURLResponse else {
+                throw AuthError.invalidResponse
+            }
+
+            authLog.info("Google social sign-in POST response: status=\(http.statusCode)")
+
+            // Better-Auth returns either:
+            // - 200 with { url: "..." } (the Google OAuth URL)
+            // - 302 redirect to the Google OAuth URL
+            var googleAuthURL: URL?
+
+            if (300..<400).contains(http.statusCode),
+               let location = http.value(forHTTPHeaderField: "Location"),
+               let url = URL(string: location) {
+                googleAuthURL = url
+            } else if (200..<300).contains(http.statusCode),
+                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let urlString = json["url"] as? String,
+                      let url = URL(string: urlString) {
+                googleAuthURL = url
+            }
+
+            guard let oauthURL = googleAuthURL else {
+                let bodyStr = String(data: data, encoding: .utf8) ?? "(empty)"
+                authLog.error("Google sign-in: no redirect URL. status=\(http.statusCode), body=\(bodyStr)")
+                lastErrorMessage = "Google Sign In failed (HTTP \(http.statusCode))."
+                authState = .guest
+                isLoading = false
+                return
+            }
+
+            authLog.info("Opening Google OAuth URL: \(oauthURL.absoluteString.prefix(80))...")
+
+            // Step 2: Open the Google OAuth URL in ASWebAuthenticationSession.
+            // The browser handles the full OAuth flow: Google consent → backend callback →
+            // /auth/mobile-token → JS redirect to todus://auth-callback?token=JWT
             let callbackURL = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<URL, Error>) in
-                let session = ASWebAuthenticationSession(
-                    url: authURL,
-                    callbackURLScheme: callbackScheme
+                let webSession = ASWebAuthenticationSession(
+                    url: oauthURL,
+                    callbackURLScheme: "todus"
                 ) { url, error in
                     if let error {
                         continuation.resume(throwing: error)
@@ -220,28 +264,22 @@ request.setValue("https://todus.app", forHTTPHeaderField: "Origin")
                     }
                 }
                 // Share cookies with Safari so /auth/mobile-token can read the session cookie
-                session.prefersEphemeralWebBrowserSession = false
-                // Provide the key window as presentation anchor — required by ASWebAuthenticationSession
-                session.presentationContextProvider = self
-                // Hold a strong reference so the session isn't deallocated mid-flow
-                self.webAuthSession = session
-                session.start()
+                webSession.prefersEphemeralWebBrowserSession = false
+                webSession.presentationContextProvider = self
+                self.webAuthSession = webSession
+                webSession.start()
             }
 
             authLog.info("Google OAuth callback received: \(callbackURL.absoluteString)")
-
-            // Parse token from callback URL: todus://auth-callback?token=...
             handleAuthCallback(url: callbackURL)
 
         } catch {
             let nsError = error as NSError
             if nsError.domain == ASWebAuthenticationSessionError.errorDomain,
                nsError.code == ASWebAuthenticationSessionError.canceledLogin.rawValue {
-                // User cancelled — no error message
                 authLog.info("Google sign-in cancelled by user")
             } else {
                 authLog.error("Google sign-in error: domain=\(nsError.domain) code=\(nsError.code) desc=\(error.localizedDescription)")
-                // Show descriptive error for debugging
                 lastErrorMessage = "Google Sign In failed: \(error.localizedDescription)"
             }
             if !isAuthenticated {

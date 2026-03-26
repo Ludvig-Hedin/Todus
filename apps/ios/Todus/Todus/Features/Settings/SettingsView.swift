@@ -37,33 +37,25 @@ struct SettingsView: View {
 
     private var accountSection: some View {
         Section {
-            if let email = services.authStore.accountEmail {
+            // Show email from new auth service (Better-Auth), fallback to legacy
+            if let email = services.authService.userEmail ?? services.authStore.accountEmail {
                 LabeledContent("Email", value: email)
             } else {
                 LabeledContent("Email", value: "Not signed in")
             }
 
-            LabeledContent("Status", value: accountStatusTitle)
+            LabeledContent("Status", value: services.authService.isAuthenticated ? "Signed in" : "Not signed in")
 
-            Button(accountButtonTitle) {
-                services.authStore.markOnboardingVisible()
-                dismiss()
-            }
-
-            if case .authenticated = services.authStore.authState {
+            // Log out — signs out from both new and legacy auth
+            if services.authService.isAuthenticated {
                 Button("Log out", role: .destructive) {
+                    services.authService.signOut()
                     services.authStore.signOutToGuest()
                     dismiss()
                 }
             }
         } header: {
             Text("Account")
-        } footer: {
-            if case .guest = services.authStore.authState {
-                Text("You can keep using the app as a guest and sign in later when you want sync tied to your email.")
-            } else if case .magicLinkPending = services.authStore.authState {
-                Text("Your email is saved. Finish verification from the login page to complete sign-in.")
-            }
         }
     }
 
@@ -185,28 +177,6 @@ struct SettingsView: View {
             Text("Developer")
         } footer: {
             Text("Local backend connects to http://localhost:8787 (run `pnpm dev` in apps/server). Restart the app after toggling.")
-        }
-    }
-
-    private var accountStatusTitle: String {
-        switch services.authStore.authState {
-        case .guest:
-            return "Guest"
-        case .magicLinkPending:
-            return "Verification pending"
-        case .authenticated:
-            return "Signed in"
-        }
-    }
-
-    private var accountButtonTitle: String {
-        switch services.authStore.authState {
-        case .guest:
-            return "Open login page"
-        case .magicLinkPending:
-            return "Continue login"
-        case .authenticated:
-            return "Switch account"
         }
     }
 
