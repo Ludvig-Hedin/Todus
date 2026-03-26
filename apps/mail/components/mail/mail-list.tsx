@@ -18,7 +18,7 @@ import {
 import { useOptimisticThreadState } from '@/components/mail/optimistic-thread-state';
 import { focusedIndexAtom, useMailNavigation } from '@/hooks/use-mail-navigation';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { useIsFetching, type UseQueryResult } from '@tanstack/react-query';
+import { useIsFetching, useQuery, useInfiniteQuery, type UseQueryResult } from '@tanstack/react-query';
 import type { MailSelectMode, ParsedMessage, ThreadProps } from '@/types';
 import type { ParsedDraft } from '../../../server/src/lib/driver/types';
 import { ThreadContextMenu } from '@/components/context/thread-context';
@@ -39,7 +39,7 @@ import { BimiAvatar } from '../ui/bimi-avatar';
 import { RenderLabels } from './render-labels';
 import { Badge } from '@/components/ui/badge';
 import { useDraft } from '@/hooks/use-drafts';
-import { Check, Star } from 'lucide-react';
+import { Check, Star, ChevronRight, ChevronLeft, Users } from 'lucide-react';
 import { Skeleton } from '../ui/skeleton';
 import { m } from '@/paraglide/messages';
 import { useParams } from 'react-router';
@@ -703,6 +703,236 @@ const Draft = memo(({ message, index }: { message: { id: string }; index: number
 
 Draft.displayName = 'Draft';
 
+// ─── People View ─────────────────────────────────────────────────────────────
+
+interface SenderEntry {
+  email: string;
+  name: string | null;
+  threadCount: number;
+  latestDate: string | null;
+  latestSubject: string | null;
+}
+
+/** A single sender row in the People list */
+const PersonRow = memo(function PersonRow({
+  sender,
+  onClick,
+}: {
+  sender: SenderEntry;
+  onClick: () => void;
+}) {
+  const displayName = sender.name || sender.email;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="hover:bg-offsetLight dark:hover:bg-primary/5 mx-1 flex w-[calc(100%-8px)] cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors"
+    >
+      <BimiAvatar
+        email={sender.email}
+        name={sender.name ?? undefined}
+        className="h-10 w-10 flex-shrink-0 rounded-full border dark:border-none"
+      />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center justify-between gap-2">
+          <span className="truncate text-sm font-semibold">{displayName}</span>
+          <span className="text-muted-foreground shrink-0 text-xs">
+            {sender.latestDate ? formatDate(sender.latestDate) : ''}
+          </span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="text-muted-foreground line-clamp-1 text-sm">
+            {sender.latestSubject || sender.email}
+          </span>
+          {sender.threadCount > 1 && (
+            <span className="text-muted-foreground shrink-0 text-xs">[{sender.threadCount}]</span>
+          )}
+        </div>
+      </div>
+      <ChevronRight className="text-muted-foreground h-4 w-4 shrink-0" />
+    </button>
+  );
+});
+
+/** Full People list — groups inbox threads by sender */
+const PeopleList = memo(function PeopleList({
+  onSelectPerson,
+}: {
+  onSelectPerson: (email: string) => void;
+}) {
+  const { folder } = useParams<{ folder: string }>();
+  const trpc = useTRPC();
+
+  const { data: senders, isLoading } = useQuery(
+    trpc.mail.listSenders.queryOptions(
+      { folder: folder ?? 'inbox' },
+      { staleTime: 60 * 1000, refetchOnWindowFocus: false },
+    ),
+  );
+
+  if (isLoading) {
+    return (
+      <div className="flex flex-1 flex-col gap-0.5 px-1 pt-2">
+        {Array.from({ length: 9 }).map((_, i) => (
+          <div key={i} className="flex items-center gap-3 rounded-lg px-3 py-3">
+            <Skeleton className="h-10 w-10 flex-shrink-0 rounded-full" />
+            <div className="flex flex-1 flex-col gap-2">
+              <div className="flex justify-between">
+                <Skeleton className="h-3.5 w-28 rounded" />
+                <Skeleton className="h-3 w-10 rounded" />
+              </div>
+              <Skeleton className={`h-3 rounded ${i % 3 === 0 ? 'w-44' : i % 3 === 1 ? 'w-36' : 'w-52'}`} />
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (!senders || senders.length === 0) {
+    return (
+      <div className="flex h-full w-full items-center justify-center">
+        <div className="flex flex-col items-center gap-2 text-center">
+          <Users className="text-muted-foreground h-12 w-12 opacity-30" />
+          <p className="text-muted-foreground text-sm">No senders found</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="scrollbar-none flex flex-1 flex-col overflow-y-auto py-1">
+      {senders.map((sender) => (
+        <PersonRow
+          key={sender.email}
+          sender={sender}
+          onClick={() => onSelectPerson(sender.email)}
+        />
+      ))}
+    </div>
+  );
+});
+
+/** Shows all threads from a specific sender with a back button */
+const PersonThreadsView = memo(function PersonThreadsView({
+  email,
+  name,
+  onBack,
+}: {
+  email: string;
+  name?: string | null;
+  onBack: () => void;
+}) {
+  const trpc = useTRPC();
+  const { folder } = useParams<{ folder: string }>();
+  const [, setThreadId] = useQueryState('threadId');
+  const [, setDraftId] = useQueryState('draftId');
+
+  const { data, isLoading, isFetchingNextPage, fetchNextPage, hasNextPage } = useInfiniteQuery(
+    trpc.mail.listThreads.infiniteQueryOptions(
+      { q: `from:${email}`, folder: folder ?? 'inbox' },
+      {
+        initialCursor: '',
+        getNextPageParam: (lastPage) => lastPage?.nextPageToken ?? null,
+        staleTime: 60 * 1000,
+      },
+    ),
+  );
+
+  const threads = useMemo(
+    () => data?.pages.flatMap((p) => p.threads).filter(Boolean) ?? [],
+    [data],
+  );
+
+  const vListRef = useRef<VListHandle>(null);
+  const displayName = name || email;
+
+  return (
+    <div className="flex h-full flex-col">
+      {/* Back header */}
+      <div className="flex items-center gap-2 px-3 py-2">
+        <button
+          type="button"
+          onClick={onBack}
+          className="hover:bg-accent/50 flex items-center gap-1 rounded-md px-2 py-1.5 text-sm transition-colors"
+        >
+          <ChevronLeft className="h-4 w-4" />
+          <span>People</span>
+        </button>
+        <div className="flex items-center gap-2">
+          <BimiAvatar
+            email={email}
+            name={displayName}
+            className="h-6 w-6 rounded-full border dark:border-none"
+          />
+          <span className="truncate text-sm font-medium">{displayName}</span>
+        </div>
+      </div>
+
+      {/* Thread list for this person */}
+      {isLoading ? (
+        <div className="flex flex-1 flex-col gap-0.5 px-1 pt-1">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="flex items-center gap-3 rounded-lg px-3 py-3">
+              <Skeleton className="h-9 w-9 flex-shrink-0 rounded-full" />
+              <div className="flex flex-1 flex-col gap-2">
+                <div className="flex justify-between">
+                  <Skeleton className="h-3.5 w-28 rounded" />
+                  <Skeleton className="h-3 w-10 rounded" />
+                </div>
+                <Skeleton className="h-3 w-44 rounded" />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : threads.length === 0 ? (
+        <div className="flex flex-1 items-center justify-center">
+          <p className="text-muted-foreground text-sm">No threads found</p>
+        </div>
+      ) : (
+        <div className="flex flex-1 flex-col overflow-hidden">
+          <VList
+            ref={vListRef}
+            count={threads.length}
+            overscan={5}
+            itemSize={100}
+            className="scrollbar-none flex-1 overflow-x-hidden"
+            onScroll={() => {
+              if (!vListRef.current) return;
+              const endIndex = vListRef.current.findEndIndex();
+              if (Math.abs(threads.length - 1 - endIndex) < 5 && !isFetchingNextPage && hasNextPage) {
+                void fetchNextPage();
+              }
+            }}
+          >
+            {(index) => {
+              const item = threads[index];
+              return item ? (
+                <Thread
+                  key={item.id}
+                  message={item}
+                  isKeyboardFocused={false}
+                  index={index}
+                  onClick={(msg) => async () => {
+                    const id = msg.threadId ?? msg.id;
+                    setThreadId(id);
+                    setDraftId(null);
+                  }}
+                />
+              ) : <></>;
+            }}
+          </VList>
+          {isFetchingNextPage && (
+            <div className="flex w-full justify-center py-3">
+              <div className="h-4 w-4 animate-spin rounded-full border-2 border-neutral-900 border-t-transparent dark:border-white dark:border-t-transparent" />
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+});
+
 export const MailList = memo(
   function MailList() {
     const { folder } = useParams<{ folder: string }>();
@@ -711,6 +941,14 @@ export const MailList = memo(
     const [, setDraftId] = useQueryState('draftId');
     const [searchValue, setSearchValue] = useSearchValue();
     const [anchorIndex, setAnchorIndex] = useState<number | null>(null);
+
+    // People view state — persisted in URL so refresh preserves position
+    const [viewMode, setViewMode] = useQueryState('viewMode');
+    const [personEmail, setPersonEmail] = useQueryState('personEmail');
+    const isPeopleView = viewMode === 'people';
+
+    // Only show the toggle for inbox (meaningful to group by sender)
+    const showViewToggle = !folder || folder === 'inbox';
 
     useEffect(() => {
       const handleKeyDown = (event: KeyboardEvent) => {
@@ -948,10 +1186,61 @@ export const MailList = memo(
 
     return (
       <>
+        {/* View toggle pill — Threads vs People. Only shown in inbox. */}
+        {showViewToggle && (
+          <div className="flex items-center px-3 pt-2 pb-1">
+            <div className="bg-muted flex items-center gap-0.5 rounded-lg p-1">
+              <button
+                type="button"
+                className={cn(
+                  'rounded-md px-3 py-1 text-xs font-medium transition-colors',
+                  !isPeopleView
+                    ? 'bg-background text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground',
+                )}
+                onClick={() => { void setViewMode(null); void setPersonEmail(null); }}
+              >
+                Threads
+              </button>
+              <button
+                type="button"
+                className={cn(
+                  'rounded-md px-3 py-1 text-xs font-medium transition-colors',
+                  isPeopleView
+                    ? 'bg-background text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground',
+                )}
+                onClick={() => { void setViewMode('people'); void setPersonEmail(null); }}
+              >
+                People
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* People view — sender list or drill-down into a person's threads */}
+        {isPeopleView && (
+          <div className="flex h-[calc(100%-44px)] flex-col">
+            {personEmail ? (
+              <PersonThreadsView
+                email={personEmail}
+                onBack={() => setPersonEmail(null)}
+              />
+            ) : (
+              <PeopleList onSelectPerson={(email) => setPersonEmail(email)} />
+            )}
+          </div>
+        )}
+
+        {/* Standard threads view */}
+        {!isPeopleView && (
+        <>
         <div
           ref={parentRef}
           className={cn(
-            'hide-link-indicator flex h-full w-full',
+            'hide-link-indicator flex w-full',
+            // Reserve space for the toggle pill only when it's visible
+            showViewToggle ? 'h-[calc(100%-44px)]' : 'h-full',
             getSelectMode() === 'range' && 'select-none',
           )}
         >
@@ -1025,6 +1314,8 @@ export const MailList = memo(
             <div className="h-2" />
           )}
         </div>
+        </>
+        )}
       </>
     );
   },

@@ -55,6 +55,29 @@ export const mailRouter = router({
 
       return await agent.suggestRecipients(input.query, input.limit);
     }),
+  listSenders: activeDriverProcedure
+    .input(
+      z.object({
+        folder: z.string().optional().default('inbox'),
+      }),
+    )
+    .output(
+      z.array(
+        z.object({
+          email: z.string(),
+          name: z.string().nullable(),
+          threadCount: z.number(),
+          latestDate: z.string().nullable(),
+          latestSubject: z.string().nullable(),
+        }),
+      ),
+    )
+    .query(async ({ ctx, input }) => {
+      const { activeConnection } = ctx;
+      const executionCtx = getContext<HonoContext>().executionCtx;
+      const { stub: agent } = await getZeroAgent(activeConnection.id, executionCtx);
+      return await agent.listSenders({ folder: input.folder });
+    }),
   forceSync: activeDriverProcedure.mutation(async ({ ctx }) => {
     const { activeConnection } = ctx;
     return await forceReSync(activeConnection.id);

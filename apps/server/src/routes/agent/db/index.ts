@@ -504,3 +504,80 @@ export async function findThreadsByFolderWithPagination(
 
   return { threads: threadResults, nextPageToken };
 }
+
+export interface SenderEntry {
+  email: string;
+  name: string | null;
+  threadCount: number;
+  latestDate: string | null;
+  latestSubject: string | null;
+}
+
+/**
+ * Groups inbox threads by sender email for the People view.
+ * Queries threads filtered by the given folder label, then groups in memory.
+ */
+export async function listSendersForFolder(
+  db: DB,
+  folder: string,
+  maxThreads = 500,
+): Promise<SenderEntry[]> {
+  // Label IDs are stored uppercase (INBOX, SPAM, etc.)
+  const labelId = folder.toUpperCase();
+
+  const rows = await db
+    .select({
+      latestSender: threads.latestSender,
+      latestReceivedOn: threads.latestReceivedOn,
+      latestSubject: threads.latestSubject,
+    })
+    .from(threads)
+    .innerJoin(threadLabels, eq(threads.id, threadLabels.threadId))
+    .where(eq(threadLabels.labelId, labelId))
+    .orderBy(desc(threads.latestReceivedOn))
+    .limit(maxThreads);
+
+  // Group by sender email in memory
+  const map = new Map<string, SenderEntry>();
+
+  for (const row of rows) {
+    if (!row.latestSender) continue;
+
+    const sender =
+      typeof row.latestSender === 'string'
+        ? (JSON.parse(row.latestSender) as { email?: string; name?: string })
+        : (row.latestSender as { email?: string; name?: string });
+
+    if (!sender?.email) continue;
+
+    const key = sender.email.toLowerCase();
+
+    if (!map.has(key)) {
+      map.set(key, {
+        email: sender.email,
+        name: sender.name ?? null,
+        threadCount: 1,
+        latestDate: row.latestReceivedOn ?? null,
+        latestSubject: row.latestSubject ?? null,
+      });
+    } else {
+      const entry = map.get(key)!;
+      entry.threadCount += 1;
+      // Keep the most recent date/subject
+      if (
+        row.latestReceivedOn &&
+        (!entry.latestDate || row.latestReceivedOn > entry.latestDate)
+      ) {
+        entry.latestDate = row.latestReceivedOn;
+        entry.latestSubject = row.latestSubject ?? null;
+      }
+    }
+  }
+
+  // Return sorted by most recent email first
+  return Array.from(map.values()).sort((a, b) => {
+    const da = a.latestDate ?? '';
+    const db_ = b.latestDate ?? '';
+    return db_ > da ? 1 : db_ < da ? -1 : 0;
+  });
+}

@@ -1516,6 +1516,16 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
     return await this.getThreadFromDB(id);
   }
 
+  /**
+   * Returns inbox senders grouped by email for the People view.
+   * Scoped to the given folder (defaults to inbox).
+   */
+  async listSenders(params: { folder?: string } = {}) {
+    const { folder = 'inbox' } = params;
+    const { listSendersForFolder } = await import('./db');
+    return await listSendersForFolder(this.db, folder);
+  }
+
   async suggestRecipients(query: string = '', limit: number = 10) {
     const lower = query.toLowerCase();
 
