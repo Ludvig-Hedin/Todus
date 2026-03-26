@@ -18,7 +18,7 @@ import {
 import { useOptimisticThreadState } from '@/components/mail/optimistic-thread-state';
 import { focusedIndexAtom, useMailNavigation } from '@/hooks/use-mail-navigation';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { useIsFetching, useQuery, useInfiniteQuery, type UseQueryResult } from '@tanstack/react-query';
+import { useIsFetching, useIsRestoring, useQuery, useInfiniteQuery, type UseQueryResult } from '@tanstack/react-query';
 import type { MailSelectMode, ParsedMessage, ThreadProps } from '@/types';
 import type { ParsedDraft } from '../../../server/src/lib/driver/types';
 import { ThreadContextMenu } from '@/components/context/thread-context';
@@ -967,6 +967,10 @@ export const MailList = memo(
     const [{ refetch, isLoading, isFetching, isFetchingNextPage, hasNextPage }, items, , loadMore] =
       useThreads();
     const trpc = useTRPC();
+    // True while PersistQueryClientProvider is restoring the IDB cache — during this window
+    // the query is paused (isFetching=false, isLoading=false) but items is still empty,
+    // so we must treat it like loading to avoid flashing "It's empty here".
+    const isRestoring = useIsRestoring();
     const isFetchingMail = useIsFetching({ queryKey: trpc.mail.get.queryKey() }) > 0;
     const itemsRef = useRef(items);
     const parentRef = useRef<HTMLDivElement>(null);
@@ -1245,8 +1249,8 @@ export const MailList = memo(
           )}
         >
           <>
-            {isLoading || (isFetching && items.length === 0) ? (
-              // Show skeleton rows while loading so user sees structure, not "It's empty here"
+            {isLoading || isRestoring || (isFetching && items.length === 0) ? (
+              // Show skeleton rows while loading/restoring IDB cache so user sees structure, not "It's empty here"
               <div className="flex flex-1 flex-col gap-0.5 px-1 pt-2">
                 {Array.from({ length: 9 }).map((_, i) => (
                   <div key={i} className="flex items-center gap-3 rounded-lg px-3 py-3">

@@ -1,0 +1,60 @@
+name: Todus
+options:
+  bundleIdPrefix: com.ludvighedin
+  deploymentTarget:
+    iOS: "18.0"
+  xcodeVersion: "16.0"
+  generateEmptyDirectories: true
+  groupSortPosition: top
+
+settings:
+  base:
+    DEVELOPMENT_TEAM: XDBG7P4V96
+    MARKETING_VERSION: "1.1"
+    CURRENT_PROJECT_VERSION: 3
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    CODE_SIGN_STYLE: Automatic
+
+packages:
+  CalendarKit:
+    url: https://github.com/richardtop/CalendarKit
+    exactVersion: "1.1.7"
+
+targets:
+  Todus:
+    type: application
+    platform: iOS
+    sources:
+      - path: Todus
+        excludes:
+          - "**/*.md"
+    resources:
+      - path: Todus/Resources/Assets.xcassets
+      - path: Todus/Resources/Info.plist
+        buildPhase: none
+      - path: Todus/Resources/TodosConfig.plist
+      - path: Todus/Resources/PrivacyInfo.xcprivacy
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.ludvighedin.todus
+        INFOPLIST_FILE: Todus/Resources/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Todus/Resources/Todus.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        TARGETED_DEVICE_FAMILY: "1,2"
+        ENABLE_PREVIEWS: YES
+    dependencies:
+      - package: CalendarKit
+    entitlements:
+      path: Todus/Resources/Todus.entitlements
+      properties:
+        com.apple.developer.applesignin:
+          - Default
+
+  TodusTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: TodusTests
+    dependencies:
+      - target: Todus

@@ -7,7 +7,7 @@ import {
   SuperSearchEmail,
   WelcomeEmail,
 } from './react-emails/email-sequences';
-import { createAuthMiddleware, phoneNumber, jwt, bearer, mcp } from 'better-auth/plugins';
+import { createAuthMiddleware, phoneNumber, jwt, bearer, mcp, emailOTP } from 'better-auth/plugins';
 import { type Account, betterAuth, type BetterAuthOptions } from 'better-auth';
 import { getBrowserTimezone, isValidTimezone } from './timezones';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
@@ -191,6 +191,27 @@ export const createAuth = () => {
                 message: `Failed to send OTP, ${error.message}`,
               });
             });
+        },
+      }),
+      // Email OTP — sends a 6-digit code via Resend for native app sign-in.
+      // Endpoints: POST /api/auth/email-otp/send-verification-otp, POST /api/auth/email-otp/verify-email
+      emailOTP({
+        otpLength: 6,
+        expiresIn: 300, // 5 minutes
+        sendVerificationOTP: async ({ email, otp, type }) => {
+          await resend().emails.send({
+            from: 'Todus <onboarding@todus.app>',
+            to: email,
+            subject: `Your Todus verification code: ${otp}`,
+            html: `
+              <div style="font-family: system-ui, -apple-system, sans-serif; max-width: 400px; margin: 0 auto; padding: 40px 20px;">
+                <h2 style="font-size: 24px; font-weight: 600; margin-bottom: 8px;">Your verification code</h2>
+                <p style="color: #666; margin-bottom: 24px;">Enter this code in the Todus app to ${type === 'sign-in' ? 'sign in' : 'verify your email'}.</p>
+                <div style="background: #f5f5f5; border-radius: 12px; padding: 20px; text-align: center; font-size: 32px; font-weight: 700; letter-spacing: 8px; font-family: monospace;">${otp}</div>
+                <p style="color: #999; font-size: 13px; margin-top: 24px;">This code expires in 5 minutes. If you didn't request this, you can safely ignore it.</p>
+              </div>
+            `,
+          });
         },
       }),
     ],

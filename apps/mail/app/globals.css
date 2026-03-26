@@ -59,8 +59,8 @@
   --panel: hsl(0 0% 100%);
   --icon-color: currentColor;
 
-  /* Radius */
-  --radius: 0.5rem;
+  /* Radius — increased for Apple-like rounded aesthetic */
+  --radius: 0.75rem;
 
   /* Static colors */
   --darkBackground: #141414;

@@ -301,6 +301,50 @@ export const oauthConsent = createTable(
   ],
 );
 
+// ─── Task Management Tables ────────────────────────────────────────────
+// Used by the unified iOS/macOS app for task + folder sync.
+
+export const taskFolder = createTable(
+  'task_folder',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    index('task_folder_user_id_idx').on(t.userId),
+  ],
+);
+
+export const task = createTable(
+  'task',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    title: text('title').notNull(),
+    description: text('description').default(''),
+    status: text('status').$type<'todo' | 'doing' | 'done'>().notNull().default('todo'),
+    priority: text('priority').$type<'none' | 'low' | 'medium' | 'high'>().notNull().default('none'),
+    dueDate: timestamp('due_date'),
+    folderId: text('folder_id').references(() => taskFolder.id, { onDelete: 'set null' }),
+    reminderIdentifier: text('reminder_identifier'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (t) => [
+    index('task_user_id_idx').on(t.userId),
+    index('task_folder_id_idx').on(t.folderId),
+    index('task_status_idx').on(t.status),
+    index('task_due_date_idx').on(t.dueDate),
+    index('task_user_status_idx').on(t.userId, t.status),
+  ],
+);
+
 export const emailTemplate = createTable(
   'email_template',
   {
