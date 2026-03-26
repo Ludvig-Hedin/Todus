@@ -14,6 +14,22 @@ struct AppConfiguration: Sendable {
     let primaryModel: String
     let fallbackModels: [String]
 
+    /// Whether to use the local dev backend (http://localhost:8787) instead of production.
+    /// Set via TodosConfig.plist USE_LOCAL_BACKEND = true, or toggle in Settings → Developer.
+    /// When enabled, the app talks to your local Wrangler dev server for hot reload during development.
+    static var useLocalBackend: Bool {
+        get { UserDefaults.standard.bool(forKey: "Todus.useLocalBackend") }
+        set { UserDefaults.standard.set(newValue, forKey: "Todus.useLocalBackend") }
+    }
+
+    /// Returns the effective backend URL, respecting the local dev override
+    var effectiveBackendURL: URL {
+        if AppConfiguration.useLocalBackend {
+            return URL(string: "http://localhost:8787")!
+        }
+        return backendURL ?? URL(string: "https://api.todus.app")!
+    }
+
     static func load(bundle: Bundle = .main) -> AppConfiguration {
         // Try new TodosConfig.plist first, fall back to TaskAppConfig.plist
         let url = bundle.url(forResource: "TodosConfig", withExtension: "plist")

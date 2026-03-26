@@ -1,8 +1,5 @@
-import OSLog
 import SwiftUI
 import SwiftData
-
-private let startupLog = Logger(subsystem: "com.todus.startup", category: "app")
 
 @main
 struct TodosApp: App {
@@ -10,16 +7,11 @@ struct TodosApp: App {
     private let modelContainer: ModelContainer
 
     init() {
-        let t0 = Date()
-        startupLog.info("⏱ TodosApp.init() begin")
-        AppLogger.shared.log("⏱ TodosApp.init() begin")
-
         let schema = Schema([
             TaskRecord.self,
             FolderRecord.self
         ])
 
-        let t1 = Date()
         do {
             modelContainer = try ModelContainer(for: schema)
         } catch {
@@ -31,12 +23,6 @@ struct TodosApp: App {
                 fatalError("Failed to create model container: \(error)")
             }
         }
-        let containerTime = Date().timeIntervalSince(t1) * 1000
-        startupLog.info("⏱ ModelContainer: \(containerTime, format: .fixed(precision: 1))ms")
-        AppLogger.shared.log("⏱ ModelContainer: \(String(format: "%.1f", containerTime))ms")
-        let totalTime = Date().timeIntervalSince(t0) * 1000
-        startupLog.info("⏱ TodosApp.init() TOTAL: \(totalTime, format: .fixed(precision: 1))ms")
-        AppLogger.shared.log("⏱ TodosApp.init() TOTAL: \(String(format: "%.1f", totalTime))ms")
     }
 
     var body: some Scene {

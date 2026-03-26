@@ -119,7 +119,10 @@ final class AuthService: NSObject {
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             // Origin header required by Better-Auth CSRF check (must match trustedOrigins)
-            request.setValue("todus://auth-callback", forHTTPHeaderField: "Origin")
+            // Origin must match a trustedOrigin with a valid hostname — the CORS middleware
+// parses the hostname and checks against allowed domains (todus.app, localhost).
+// Using the web app URL ensures it passes both CORS and Better-Auth CSRF checks.
+request.setValue("https://todus.app", forHTTPHeaderField: "Origin")
 
             // Better-Auth expects idToken as { token: "..." } for native Apple sign-in
             let body: [String: Any] = [
@@ -235,8 +238,9 @@ final class AuthService: NSObject {
                 // User cancelled — no error message
                 authLog.info("Google sign-in cancelled by user")
             } else {
-                authLog.error("Google sign-in error: \(error.localizedDescription)")
-                lastErrorMessage = "Google Sign In failed. Please try again."
+                authLog.error("Google sign-in error: domain=\(nsError.domain) code=\(nsError.code) desc=\(error.localizedDescription)")
+                // Show descriptive error for debugging
+                lastErrorMessage = "Google Sign In failed: \(error.localizedDescription)"
             }
             if !isAuthenticated {
                 authState = .guest
@@ -265,7 +269,10 @@ final class AuthService: NSObject {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("todus://auth-callback", forHTTPHeaderField: "Origin")
+        // Origin must match a trustedOrigin with a valid hostname — the CORS middleware
+// parses the hostname and checks against allowed domains (todus.app, localhost).
+// Using the web app URL ensures it passes both CORS and Better-Auth CSRF checks.
+request.setValue("https://todus.app", forHTTPHeaderField: "Origin")
 
         let body: [String: String] = ["email": trimmed, "type": "sign-in"]
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
@@ -278,7 +285,8 @@ final class AuthService: NSObject {
                 return
             }
 
-            authLog.info("Email OTP send response: status=\(http.statusCode)")
+            let bodyStr = String(data: data, encoding: .utf8) ?? "(empty)"
+            authLog.info("Email OTP send response: status=\(http.statusCode), body=\(bodyStr)")
 
             if (200..<300).contains(http.statusCode) {
                 authState = .otpPending(email: trimmed)
@@ -288,8 +296,10 @@ final class AuthService: NSObject {
                 case 429:
                     lastErrorMessage = "Too many attempts. Try again later."
                 default:
-                    lastErrorMessage = errorMsg ?? "Failed to send code. Try again."
+                    // Show the actual backend error for debugging
+                    lastErrorMessage = errorMsg ?? "Failed to send code (HTTP \(http.statusCode))."
                 }
+                authLog.error("Email OTP send failed: status=\(http.statusCode), error=\(errorMsg ?? "unknown"), body=\(bodyStr)")
             }
         } catch {
             authLog.error("Email OTP send error: \(error.localizedDescription)")
@@ -316,7 +326,10 @@ final class AuthService: NSObject {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("todus://auth-callback", forHTTPHeaderField: "Origin")
+        // Origin must match a trustedOrigin with a valid hostname — the CORS middleware
+// parses the hostname and checks against allowed domains (todus.app, localhost).
+// Using the web app URL ensures it passes both CORS and Better-Auth CSRF checks.
+request.setValue("https://todus.app", forHTTPHeaderField: "Origin")
 
         let body: [String: String] = ["email": email, "otp": trimmedCode]
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)

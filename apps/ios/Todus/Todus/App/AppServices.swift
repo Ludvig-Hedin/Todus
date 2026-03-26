@@ -1,11 +1,7 @@
 import Foundation
 import Observation
-import OSLog
 import SwiftData
 import SwiftUI
-
-// Startup timing logger — visible in Xcode console and Console.app (subsystem: com.todus.startup)
-private let startupLog = Logger(subsystem: "com.todus.startup", category: "init")
 
 enum AppAppearancePreference: String, CaseIterable, Identifiable, Sendable {
     case system
@@ -104,15 +100,12 @@ final class AppServices {
     }
 
     init(configuration: AppConfiguration = .load(), defaults: UserDefaults = .standard) {
-        let t0 = Date()
-        startupLog.info("⏱ AppServices.init() begin")
-        AppLogger.shared.log("⏱ AppServices.init() begin")
-
         self.configuration = configuration
         self.defaults = defaults
 
-        // New unified services
-        let backendURL = configuration.backendURL ?? URL(string: "https://api.todus.app")!
+        // New unified services — Better-Auth backend
+        // Uses local dev server (localhost:8787) when useLocalBackend is enabled
+        let backendURL = configuration.effectiveBackendURL
         let authService = AuthService(backendURL: backendURL)
         self.authService = authService
         let apiClient = TodosAPIClient(baseURL: backendURL, authService: authService)
@@ -121,26 +114,11 @@ final class AppServices {
         self.calendarService = CalendarService()
 
         // Legacy services — still used for task sync during migration
-        let t1 = Date()
         self.authStore = AuthSessionStore(configuration: configuration)
-        let authTime = Date().timeIntervalSince(t1) * 1000
-        startupLog.info("⏱ AuthSessionStore: \(authTime, format: .fixed(precision: 1))ms")
-        AppLogger.shared.log("⏱ AuthSessionStore: \(String(format: "%.1f", authTime))ms")
-
-        let t2 = Date()
         self.syncService = SupabaseSyncService(configuration: configuration, authStore: authStore)
-        let syncTime = Date().timeIntervalSince(t2) * 1000
-        startupLog.info("⏱ SupabaseSyncService: \(syncTime, format: .fixed(precision: 1))ms")
-        AppLogger.shared.log("⏱ SupabaseSyncService: \(String(format: "%.1f", syncTime))ms")
-
-        let t3 = Date()
         self.remindersSyncService = AppleRemindersSyncService()
         self.remindersSyncState = RemindersSyncState()
-        let remindersTime = Date().timeIntervalSince(t3) * 1000
-        startupLog.info("⏱ AppleRemindersSyncService: \(remindersTime, format: .fixed(precision: 1))ms")
-        AppLogger.shared.log("⏱ AppleRemindersSyncService: \(String(format: "%.1f", remindersTime))ms")
 
-        let t4 = Date()
         let captureService = TaskCaptureService(
             parser: RemoteFirstTaskParsingService(configuration: configuration),
             syncService: syncService,
@@ -149,18 +127,10 @@ final class AppServices {
             remindersSyncState: remindersSyncState
         )
         self.captureService = captureService
-        let captureTime = Date().timeIntervalSince(t4) * 1000
-        startupLog.info("⏱ TaskCaptureService: \(captureTime, format: .fixed(precision: 1))ms")
-        AppLogger.shared.log("⏱ TaskCaptureService: \(String(format: "%.1f", captureTime))ms")
-
-        let t5 = Date()
         self.aiChatService = AIChatService(
             configuration: configuration,
             captureService: captureService
         )
-        let aiTime = Date().timeIntervalSince(t5) * 1000
-        startupLog.info("⏱ AIChatService: \(aiTime, format: .fixed(precision: 1))ms")
-        AppLogger.shared.log("⏱ AIChatService: \(String(format: "%.1f", aiTime))ms")
 
         let storedAppearance = defaults.string(forKey: Keys.appearancePreference)
             .flatMap(AppAppearancePreference.init(rawValue:))
@@ -176,10 +146,6 @@ final class AppServices {
         self.hasConfiguredRemindersPrompt = defaults.bool(forKey: Keys.hasConfiguredRemindersPrompt)
         self.selectedViewMode = storedStartView
         self.remindersSyncState.isEnabled = self.remindersSyncEnabled
-
-        let totalTime = Date().timeIntervalSince(t0) * 1000
-        startupLog.info("⏱ AppServices.init() TOTAL: \(totalTime, format: .fixed(precision: 1))ms")
-        AppLogger.shared.log("⏱ AppServices.init() TOTAL: \(String(format: "%.1f", totalTime))ms")
     }
 
     func selectFolder(_ folder: FolderRecord?) {

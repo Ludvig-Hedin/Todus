@@ -30,26 +30,25 @@ struct AuthView: View {
             VStack(spacing: 0) {
                 Spacer()
 
-                // Brand logo + title
-                VStack(spacing: 8) {
+                // Brand logo + title — compact spacing to match RN app
+                VStack(spacing: 4) {
                     Image("BrandLogo")
                         .resizable()
                         .renderingMode(.template)
                         .foregroundStyle(.primary)
                         .frame(width: 48, height: 48)
-                        .padding(.bottom, 8)
+                        .padding(.bottom, 6)
 
                     Text("Welcome to Todus")
                         .font(.system(size: 24, weight: .semibold))
 
                     Text("Your AI agent for emails")
-                        .font(.system(size: 20, weight: .regular))
+                        .font(.system(size: 17, weight: .regular))
                         .foregroundStyle(.primary.opacity(0.5))
 
                     Text(otpPendingEmail == nil ? "Sign in to get started" : "Enter the code sent to your email")
                         .font(.system(size: 14, weight: .regular))
                         .foregroundStyle(.primary.opacity(0.4))
-                        .padding(.top, 2)
                 }
 
                 Spacer()
@@ -127,7 +126,7 @@ struct AuthView: View {
                 Button {
                     Task { await authService.sendEmailOTP(email: email) }
                 } label: {
-                    Text("Send magic link")
+                    Text("Send code")
                         .font(.system(size: 16, weight: .semibold))
                         .frame(maxWidth: .infinity)
                         .frame(height: 48)
@@ -169,10 +168,7 @@ struct AuthView: View {
                     }
                 }
                 .onAppear {
-                    // Auto-focus the code input
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                        isInputFocused = true
-                    }
+                    isInputFocused = true
                 }
 
             // Verify button

@@ -150,11 +150,19 @@ struct SettingsView: View {
         }
     }
 
+    @State private var useLocalBackend = AppConfiguration.useLocalBackend
+
     private var developerSection: some View {
         Section {
+            // Local backend toggle — connects to localhost:8787 for dev with hot reload
+            Toggle("Use Local Backend", isOn: $useLocalBackend)
+                .onChange(of: useLocalBackend) { _, newValue in
+                    AppConfiguration.useLocalBackend = newValue
+                }
+
+            LabeledContent("Backend URL", value: services.configuration.effectiveBackendURL.absoluteString)
             LabeledContent("Install ID", value: services.authStore.installID)
             LabeledContent("Anonymous ID", value: services.authStore.anonymousID)
-            LabeledContent("Supabase configured", value: services.configuration.hasRemoteBackend ? "Yes" : "No")
             LabeledContent("Model chain", value: services.configuration.preferredModels.joined(separator: " -> "))
 
             Button("Retry account upgrade") {
@@ -163,8 +171,6 @@ struct SettingsView: View {
                 }
             }
 
-            // Share the app.log file — useful for sharing startup timing and auth flow
-            // logs with a developer or AI assistant for analysis
             ShareLink(
                 item: AppLogger.shared.logFileURL,
                 preview: SharePreview("app.log", image: Image(systemName: "doc.text"))
@@ -178,7 +184,7 @@ struct SettingsView: View {
         } header: {
             Text("Developer")
         } footer: {
-            Text("Developer mode exposes backend and identity details. Share logs to send the app.log file to a developer for analysis.")
+            Text("Local backend connects to http://localhost:8787 (run `pnpm dev` in apps/server). Restart the app after toggling.")
         }
     }
 
