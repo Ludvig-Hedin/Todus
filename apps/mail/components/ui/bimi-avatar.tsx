@@ -200,6 +200,7 @@ export const BimiAvatar = ({
   return (
     <Avatar className={className}>
       {avatarData?.primary?.svgContent && !isLoading ? (
+        // BIMI/profile SVG — highest priority, renders directly
         <div
           className="flex h-full w-full items-center justify-center overflow-hidden rounded-full bg-white dark:bg-[#373737]"
           dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(avatarData.primary.svgContent) }}
@@ -209,15 +210,22 @@ export const BimiAvatar = ({
           className="flex h-full w-full items-center justify-center overflow-hidden rounded-full bg-white dark:bg-[#373737]"
           dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(bimiData.logo.svgContent) }}
         />
-      ) : activeImageUrl ? (
-        <AvatarImage
-          className="rounded-full bg-[#FFFFFF] dark:bg-[#373737]"
-          src={activeImageUrl}
-          alt={name || normalizedEmail}
-          onError={handleFallbackImageError}
-        />
       ) : (
-        <AvatarFallback className="rounded-full p-0">{InitialsFallback}</AvatarFallback>
+        // Image (favicon chain) + always-present fallback as Radix siblings.
+        // Radix needs AvatarFallback as a sibling to AvatarImage so it can
+        // show the initials while the image is loading or after it fails.
+        // Without the sibling, Radix renders nothing during loading → blank avatar.
+        <>
+          {activeImageUrl && (
+            <AvatarImage
+              className="rounded-full bg-[#FFFFFF] dark:bg-[#373737]"
+              src={activeImageUrl}
+              alt={name || normalizedEmail}
+              onError={handleFallbackImageError}
+            />
+          )}
+          <AvatarFallback className="rounded-full p-0">{InitialsFallback}</AvatarFallback>
+        </>
       )}
     </Avatar>
   );

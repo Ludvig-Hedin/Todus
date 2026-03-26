@@ -514,17 +514,17 @@ export interface SenderEntry {
 }
 
 /**
- * Groups inbox threads by sender email for the People view.
- * Queries threads filtered by the given folder label, then groups in memory.
+ * Groups threads by sender email for the People view.
+ * Intentionally queries ALL threads (no folder filter) to match the same shard
+ * access pattern as suggestRecipients — which is guaranteed to have data.
+ * The folder filter via threadLabels can be re-enabled once label storage is
+ * confirmed to be consistent across shards.
  */
 export async function listSendersForFolder(
   db: DB,
-  folder: string,
+  _folder: string,
   maxThreads = 500,
 ): Promise<SenderEntry[]> {
-  // Label IDs are stored uppercase (INBOX, SPAM, etc.)
-  const labelId = folder.toUpperCase();
-
   const rows = await db
     .select({
       latestSender: threads.latestSender,
@@ -532,8 +532,7 @@ export async function listSendersForFolder(
       latestSubject: threads.latestSubject,
     })
     .from(threads)
-    .innerJoin(threadLabels, eq(threads.id, threadLabels.threadId))
-    .where(eq(threadLabels.labelId, labelId))
+    .where(sql`${threads.latestSender} IS NOT NULL`)
     .orderBy(desc(threads.latestReceivedOn))
     .limit(maxThreads);
 
