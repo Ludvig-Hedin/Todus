@@ -12,6 +12,7 @@ import {
   Trash,
   X,
 } from '../icons/icons';
+import { APP_NAME } from '@/lib/branding';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -277,13 +278,17 @@ export function ThreadDisplay() {
 
       document.body.appendChild(printFrame);
 
+      // HTML-escape to prevent XSS in the print iframe (e.g. malicious email subjects)
+      const escapeHtml = (str: string) =>
+        str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
       // Generate clean, simple HTML content for printing
       const printContent = `
       <!DOCTYPE html>
       <html>
         <head>
           <meta charset="utf-8">
-          <title>Print Thread - ${emailData?.latest?.subject || 'No Subject'}</title>
+          <title>Print Thread - ${escapeHtml(emailData?.latest?.subject || 'No Subject')}</title>
           <style>
             * {
               margin: 0;
@@ -714,7 +719,7 @@ export function ThreadDisplay() {
     >
       <div
         className={cn(
-          'bg-panelLight dark:bg-panelDark relative flex flex-col overflow-hidden rounded-xl duration-300',
+          'bg-card relative flex flex-col overflow-hidden rounded-xl transition-all duration-200',
           isMobile ? 'h-full' : 'h-full',
           !isMobile && !isFullscreen && 'rounded-r-lg',
           isFullscreen ? 'fixed inset-0 z-50' : '',
@@ -725,32 +730,32 @@ export function ThreadDisplay() {
             <div className="flex flex-col items-center justify-center gap-2 text-center">
               <EmptyStateIcon width={200} height={200} />
               <div className="mt-4">
-                <p className="text-lg">It's empty here</p>
-                <p className="text-md text-muted-foreground dark:text-white/50">
-                  Choose an email to view details
+                {/* "Select a conversation" is clearer than "It's empty here" — the latter implies
+                    something is missing/broken rather than communicating that nothing is selected yet */}
+                <p className="text-base font-medium text-foreground">Select a conversation</p>
+                <p className="text-[13px] text-muted-foreground mt-1">
+                  Choose a thread from the list to read, reply, or archive it
                 </p>
                 <div className="mt-4 grid grid-cols-1 gap-2 xl:grid-cols-2">
-                  <button
-                    onClick={toggleAISidebar}
-                    className="inline-flex h-7 items-center justify-center gap-0.5 overflow-hidden rounded-lg border bg-white px-2 dark:border-none dark:bg-[#313131] hover:bg-gray-100 dark:hover:bg-[#404040] transition-colors cursor-pointer"
-                  >
-                    <Sparkles className="mr-1 h-3.5 w-3.5 fill-[#959595]" />
-                    <div className="flex items-center justify-center gap-2.5 px-0.5">
-                      <div className="text-base-gray-950 justify-start text-sm leading-none">
-                        Todus chat
-                      </div>
-                    </div>
-                  </button>
+                  {/* Compose is the primary action in an empty thread pane; AI is secondary */}
                   <button
                     onClick={() => setIsComposeOpen('true')}
-                    className="inline-flex h-7 items-center justify-center gap-0.5 overflow-hidden rounded-lg border bg-white px-2 dark:border-none dark:bg-[#313131] hover:bg-gray-100 dark:hover:bg-[#404040] transition-colors cursor-pointer"
+                    className="inline-flex h-7 items-center justify-center gap-1 overflow-hidden rounded-lg border bg-card px-2.5 hover:bg-accent transition-colors duration-100 cursor-pointer"
                   >
-                    <Mail className="mr-1 h-3.5 w-3.5 fill-[#959595]" />
-                    <div className="flex items-center justify-center gap-2.5 px-0.5">
-                      <div className="dark:text-base-gray-950 justify-start text-sm leading-none">
-                        Send email
-                      </div>
-                    </div>
+                    <Mail className="h-3.5 w-3.5 fill-muted-foreground/50" />
+                    <span className="text-[13px] leading-none text-foreground">
+                      Compose email
+                    </span>
+                  </button>
+                  <button
+                    onClick={toggleAISidebar}
+                    className="inline-flex h-7 items-center justify-center gap-1 overflow-hidden rounded-lg border bg-card px-2.5 hover:bg-accent transition-colors duration-100 cursor-pointer"
+                  >
+                    <Sparkles className="h-3.5 w-3.5 fill-muted-foreground/50" />
+                    {/* Use APP_NAME for consistency across the product rather than hardcoded "Todus chat" */}
+                    <span className="text-[13px] leading-none text-foreground">
+                      {APP_NAME} AI
+                    </span>
                   </button>
                 </div>
               </div>
@@ -769,21 +774,21 @@ export function ThreadDisplay() {
             <div
               className={cn(
                 'flex shrink-0 items-center px-1 pb-[10px] md:px-3 md:pb-[11px] md:pt-[12px]',
-                isMobile && 'bg-panelLight dark:bg-panelDark sticky top-0 z-10 mt-2',
+                isMobile && 'bg-card sticky top-0 z-10 mt-2',
               )}
             >
-              <div className="flex flex-1 items-center gap-2">
+              <div className="flex flex-1 items-center gap-1.5">
                 <TooltipProvider delayDuration={0}>
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
                         onClick={handleClose}
-                        className="inline-flex h-7 w-7 items-center justify-center gap-1 overflow-hidden rounded-md hover:bg-white md:hidden dark:hover:bg-[#313131]"
+                        className="inline-flex h-7 w-7 items-center justify-center gap-1 overflow-hidden rounded-md hover:bg-accent md:hidden transition-colors duration-100"
                       >
                         <X className="fill-iconLight dark:fill-iconDark h-3.5 w-3.5" />
                       </button>
                     </TooltipTrigger>
-                    <TooltipContent side="bottom" className="bg-white dark:bg-[#313131]">
+                    <TooltipContent side="bottom">
                       {m['common.actions.close']()}
                     </TooltipContent>
                   </Tooltip>
@@ -802,14 +807,12 @@ export function ThreadDisplay() {
                     setMode('replyAll');
                     setActiveReplyId(emailData?.latest?.id ?? '');
                   }}
-                  className="inline-flex h-7 items-center justify-center gap-1 overflow-hidden rounded-lg border bg-white px-1.5 dark:border-none dark:bg-[#313131] hover:bg-gray-100 dark:hover:bg-[#404040] transition-colors cursor-pointer"
+                  className="inline-flex h-7 items-center justify-center gap-1 overflow-hidden rounded-lg border bg-card px-2 hover:bg-accent transition-colors duration-100 cursor-pointer"
                 >
-                  <Reply className="fill-muted-foreground dark:fill-[#9B9B9B]" />
-                  <div className="flex items-center justify-center gap-2.5 pl-0.5 pr-1">
-                    <div className="justify-start whitespace-nowrap text-sm leading-none text-black dark:text-white">
-                      {m['common.threadDisplay.replyAll']()}
-                    </div>
-                  </div>
+                  <Reply className="fill-muted-foreground" />
+                  <span className="whitespace-nowrap text-[13px] leading-none text-foreground pl-0.5 pr-0.5">
+                    {m['common.threadDisplay.replyAll']()}
+                  </span>
                 </button>
                 <NotesPanel threadId={id} />
                 <TooltipProvider delayDuration={0}>
@@ -817,7 +820,7 @@ export function ThreadDisplay() {
                     <TooltipTrigger asChild>
                       <button
                         onClick={handleToggleStar}
-                        className="inline-flex h-7 w-7 items-center justify-center gap-1 overflow-hidden rounded-lg bg-white dark:bg-[#313131] hover:bg-gray-100 dark:hover:bg-[#404040] transition-colors cursor-pointer"
+                        className="inline-flex h-7 w-7 items-center justify-center gap-1 overflow-hidden rounded-lg border bg-card hover:bg-accent transition-colors duration-100 cursor-pointer"
                       >
                         <Star
                           className={cn(
@@ -829,7 +832,7 @@ export function ThreadDisplay() {
                         />
                       </button>
                     </TooltipTrigger>
-                    <TooltipContent side="bottom" className="bg-white dark:bg-[#313131]">
+                    <TooltipContent side="bottom" className="bg-card">
                       {isStarred
                         ? m['common.threadDisplay.unstar']()
                         : m['common.threadDisplay.star']()}
@@ -842,12 +845,12 @@ export function ThreadDisplay() {
                     <TooltipTrigger asChild>
                       <button
                         onClick={() => moveThreadTo('archive')}
-                        className="inline-flex h-7 w-7 items-center justify-center gap-1 overflow-hidden rounded-lg bg-white dark:bg-[#313131] hover:bg-gray-100 dark:hover:bg-[#404040] transition-colors cursor-pointer"
+                        className="inline-flex h-7 w-7 items-center justify-center gap-1 overflow-hidden rounded-lg bg-card hover:bg-accent transition-colors cursor-pointer"
                       >
                         <Archive className="fill-iconLight dark:fill-iconDark" />
                       </button>
                     </TooltipTrigger>
-                    <TooltipContent side="bottom" className="bg-white dark:bg-[#313131]">
+                    <TooltipContent side="bottom" className="bg-card">
                       {m['common.threadDisplay.archive']()}
                     </TooltipContent>
                   </Tooltip>
@@ -864,7 +867,7 @@ export function ThreadDisplay() {
                           <Trash className="fill-[#F43F5E]" />
                         </button>
                       </TooltipTrigger>
-                      <TooltipContent side="bottom" className="bg-white dark:bg-[#313131]">
+                      <TooltipContent side="bottom" className="bg-card">
                         {m['common.mail.moveToBin']()}
                       </TooltipContent>
                     </Tooltip>
@@ -877,7 +880,7 @@ export function ThreadDisplay() {
                       <ThreeDots className="fill-iconLight dark:fill-iconDark" />
                     </button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="bg-white dark:bg-[#313131]">
+                  <DropdownMenuContent align="end" className="bg-card">
                     {/* <DropdownMenuItem onClick={() => setIsFullscreen(!isFullscreen)}>
                       <Expand className="fill-iconLight dark:fill-iconDark mr-2" />
                       <span>

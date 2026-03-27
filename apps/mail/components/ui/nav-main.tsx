@@ -52,7 +52,7 @@ type IconRefType = SVGSVGElement & {
 export function NavMain({ items }: NavMainProps) {
   const location = useLocation();
   const pathname = location.pathname;
-  const searchParams = new URLSearchParams();
+  const searchParams = new URLSearchParams(location.search);
 
 
   const trpc = useTRPC();
@@ -197,12 +197,12 @@ export function NavMain({ items }: NavMainProps) {
             <SidebarMenuItem>
               {state !== 'collapsed' ? (
                 section.title ? (
-                  <p className="text-muted-foreground mx-2 mb-2 text-[13px] dark:text-[#898989]">
+                  <p className="text-muted-foreground mx-2 mb-1.5 text-[11px] font-medium uppercase tracking-wide">
                     {section.title}
                   </p>
                 ) : null
               ) : (
-                <div className="bg-muted-foreground/50 mx-2 mb-4 mt-2 h-[0.5px] dark:bg-[#262626]" />
+                <div className="bg-border mx-2 mb-3 mt-1.5 h-px" />
               )}
               <div className="z-20 space-y-1 pb-2">
                 {section.items.map((item) => (
@@ -223,7 +223,7 @@ export function NavMain({ items }: NavMainProps) {
           <Collapsible defaultOpen={true} className="group/collapsible flex-col">
             <SidebarMenuItem className="mb-4" style={{ height: 'auto' }}>
               <div className="mx-2 mb-4 flex items-center justify-between">
-                <span className="text-muted-foreground text-[13px] dark:text-[#898989]">
+                <span className="text-muted-foreground text-[11px] font-medium uppercase tracking-wide">
                   {activeAccount?.providerId === 'google' ? 'Labels' : 'Folders'}
                 </span>
                 {activeAccount?.providerId === 'google' ? (
@@ -234,7 +234,7 @@ export function NavMain({ items }: NavMainProps) {
                         size="icon"
                         className="mr-1 h-4 w-4 p-0 hover:bg-transparent"
                       >
-                        <Plus className="text-muted-foreground h-3 w-3 dark:text-[#898989]" />
+                        <Plus className="text-muted-foreground h-3 w-3" />
                       </Button>
                     }
                     onSubmit={onSubmit}
@@ -285,8 +285,8 @@ function NavItem(item: NavItemProps & { href: string }) {
           asChild
           tooltip={state === 'collapsed' ? item.title : undefined}
           className={cn(
-            'hover:bg-subtleWhite flex items-center dark:hover:bg-[#202020]',
-            item.isActive && 'bg-subtleWhite text-accent-foreground dark:bg-[#202020]',
+            'hover:bg-accent flex items-center transition-colors duration-100',
+            item.isActive && 'bg-accent text-accent-foreground',
           )}
           onClick={handleClick}
         >

@@ -202,7 +202,7 @@ export function NavUser() {
                 </div>
               </DropdownMenuTrigger>
               <DropdownMenuContent
-                className="w-(--radix-dropdown-menu-trigger-width) ml-3 min-w-56 bg-white font-medium dark:bg-[#131313]"
+                className="w-(--radix-dropdown-menu-trigger-width) ml-3 min-w-56 bg-popover font-medium"
                 align="end"
                 side={'bottom'}
                 sideOffset={8}
@@ -235,7 +235,7 @@ export function NavUser() {
                           {activeAccount.name || session.user.name || 'User'}
                           {isPro && (
                             <BadgeCheck
-                              className="h-4 w-4 text-white dark:text-[#141414]"
+                              className="h-4 w-4 text-background"
                               fill="#1D9BF0"
                             />
                           )}
@@ -303,13 +303,9 @@ export function NavUser() {
                 </div>
                 <>
                   <DropdownMenuSeparator className="mt-1" />
-                  <p className="text-muted-foreground px-2 py-1 text-[11px] font-medium">Debug</p>
-                  <DropdownMenuItem onClick={handleCopyConnectionId}>
-                    <div className="flex items-center gap-2">
-                      <CopyCheckIcon size={16} className="opacity-60" />
-                      <p className="text-[13px] opacity-60">Copy Connection ID</p>
-                    </div>
-                  </DropdownMenuItem>
+                  {/* Sync actions are user-facing (cache/re-sync help with stuck inboxes);
+                      raw dev metrics (Connection ID, Shards) are only shown in dev mode */}
+                  <p className="text-muted-foreground px-2 py-1 text-[11px] font-medium">Sync</p>
                   <DropdownMenuItem onClick={handleClearCache}>
                     <div className="flex items-center gap-2">
                       <Trash2 size={16} className="opacity-60" />
@@ -327,11 +323,22 @@ export function NavUser() {
                     storageSize={storageSize}
                     syncingFolders={syncingFolders}
                   />
-                  <DropdownMenuItem>
-                    <div className="flex items-center gap-2">
-                      <p className="text-[13px] opacity-60">Shards: {shards}</p>
-                    </div>
-                  </DropdownMenuItem>
+                  {/* Dev-only: raw connection diagnostics — hidden in production to reduce noise */}
+                  {import.meta.env.DEV && (
+                    <>
+                      <DropdownMenuItem onClick={handleCopyConnectionId}>
+                        <div className="flex items-center gap-2">
+                          <CopyCheckIcon size={16} className="opacity-60" />
+                          <p className="text-[13px] opacity-60">Copy Connection ID</p>
+                        </div>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem>
+                        <div className="flex items-center gap-2">
+                          <p className="text-[13px] opacity-60">Shards: {shards}</p>
+                        </div>
+                      </DropdownMenuItem>
+                    </>
+                  )}
                   <DropdownMenuSeparator className="mt-1" />
                   <DropdownMenuItem onSelect={() => handleThemeToggle()} className="cursor-pointer">
                     <div className="flex w-full items-center gap-2">
@@ -408,7 +415,7 @@ export function NavUser() {
                       </AvatarFallback>
                     </Avatar>
                     {activeAccount.id === activeConnection?.id && data.connections.length > 1 && (
-                      <CircleCheck className="fill-mainBlue absolute -bottom-2 -right-2 size-4 rounded-full bg-white dark:bg-[#141414]" />
+                      <CircleCheck className="fill-mainBlue absolute -bottom-2 -right-2 size-4 rounded-full bg-background" />
                     )}
                   </div>
                 </div>
@@ -447,7 +454,7 @@ export function NavUser() {
                           </AvatarFallback>
                         </Avatar>
                         {connection.id === activeConnection?.id && otherConnections.length > 1 && (
-                          <CircleCheck className="fill-mainBlue absolute -bottom-2 -right-2 size-4 rounded-full bg-white dark:bg-black" />
+                          <CircleCheck className="fill-mainBlue absolute -bottom-2 -right-2 size-4 rounded-full bg-white dark:bg-background" />
                         )}
                       </div>
                     </div>
@@ -466,7 +473,7 @@ export function NavUser() {
                     </button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent
-                    className="ml-3 min-w-56 bg-white font-medium dark:bg-[#131313]"
+                    className="ml-3 min-w-56 bg-popover font-medium"
                     align="end"
                     side={'bottom'}
                     sideOffset={8}
@@ -510,7 +517,7 @@ export function NavUser() {
 
               {isPro ? (
                 <AddConnectionDialog>
-                  <Button className="hover:bg-offsetLight/80 dark:hover:bg-offsetDark/80 flex h-7 w-7 cursor-pointer items-center justify-center rounded-[5px] border border-dashed bg-transparent px-0 text-black dark:bg-[#262626] dark:text-[#929292]">
+                  <Button className="hover:bg-accent flex h-7 w-7 cursor-pointer items-center justify-center rounded-[5px] border border-dashed bg-transparent px-0 text-foreground/60 transition-colors">
                     <Plus className="size-4" />
                   </Button>
                 </AddConnectionDialog>
@@ -518,7 +525,7 @@ export function NavUser() {
                 <>
                   <Button
                     onClick={() => setPricingDialog('true')}
-                    className="hover:bg-offsetLight/80 dark:hover:bg-offsetDark/80 flex h-7 w-7 cursor-pointer items-center justify-center rounded-[5px] border border-dashed bg-transparent px-0 text-black dark:bg-[#262626] dark:text-[#929292]"
+                    className="hover:bg-accent flex h-7 w-7 cursor-pointer items-center justify-center rounded-[5px] border border-dashed bg-transparent px-0 text-foreground/60 transition-colors"
                   >
                     <Plus className="size-4" />
                   </Button>
@@ -539,7 +546,7 @@ export function NavUser() {
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent
-                  className="ml-3 min-w-56 bg-white font-medium dark:bg-[#131313]"
+                  className="ml-3 min-w-56 bg-popover font-medium"
                   align="end"
                   side={'bottom'}
                   sideOffset={8}
@@ -554,35 +561,39 @@ export function NavUser() {
                       </DropdownMenuItem>
                     ) : null}
                   </div>
-                  <p className="text-muted-foreground px-2 py-1 text-[11px] font-medium">Debug</p>
-                  <DropdownMenuItem onClick={handleCopyConnectionId}>
-                    <div className="flex items-center gap-2">
-                      <CopyCheckIcon size={16} className="opacity-60" />
-                      <p className="text-[13px] opacity-60">Copy Connection ID</p>
-                    </div>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={handleClearCache}>
-                    <div className="flex items-center gap-2">
-                      <Trash2 size={16} className="opacity-60" />
-                      <p className="text-[13px] opacity-60">Clear Local Cache</p>
-                    </div>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => handleForceSync()}>
-                    <div className="flex items-center gap-2">
-                      <RefreshCcw size={16} className="opacity-60" />
-                      <p className="text-[13px] opacity-60">Force re-sync</p>
-                    </div>
-                  </DropdownMenuItem>
-                  <SyncingStatusIndicator
-                    isSyncing={isSyncing}
-                    storageSize={storageSize}
-                    syncingFolders={syncingFolders}
-                  />
-                  <DropdownMenuItem>
-                    <div className="flex items-center gap-2">
-                      <p className="text-[13px] opacity-60">Shards: {shards}</p>
-                    </div>
-                  </DropdownMenuItem>
+                  {import.meta.env.DEV && (
+                    <>
+                      <p className="text-muted-foreground px-2 py-1 text-[11px] font-medium">Debug</p>
+                      <DropdownMenuItem onClick={handleCopyConnectionId}>
+                        <div className="flex items-center gap-2">
+                          <CopyCheckIcon size={16} className="opacity-60" />
+                          <p className="text-[13px] opacity-60">Copy Connection ID</p>
+                        </div>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={handleClearCache}>
+                        <div className="flex items-center gap-2">
+                          <Trash2 size={16} className="opacity-60" />
+                          <p className="text-[13px] opacity-60">Clear Local Cache</p>
+                        </div>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => handleForceSync()}>
+                        <div className="flex items-center gap-2">
+                          <RefreshCcw size={16} className="opacity-60" />
+                          <p className="text-[13px] opacity-60">Force re-sync</p>
+                        </div>
+                      </DropdownMenuItem>
+                      <SyncingStatusIndicator
+                        isSyncing={isSyncing}
+                        storageSize={storageSize}
+                        syncingFolders={syncingFolders}
+                      />
+                      <DropdownMenuItem>
+                        <div className="flex items-center gap-2">
+                          <p className="text-[13px] opacity-60">Shards: {shards}</p>
+                        </div>
+                      </DropdownMenuItem>
+                    </>
+                  )}
                   <DropdownMenuSeparator className="mt-1" />
                   <DropdownMenuItem onClick={handleThemeToggle} className="cursor-pointer">
                     <div className="flex w-full items-center gap-2">
@@ -598,7 +609,7 @@ export function NavUser() {
                     <a
                       href="https://discord.gg/mail0"
                       target="_blank"
-                      rel="noreferrer"
+                      rel="noopener noreferrer"
                       className="w-full"
                     >
                       <div className="flex items-center gap-2">
@@ -633,26 +644,26 @@ export function NavUser() {
       </div>
 
       {state !== 'collapsed' && (
-        <div className="mt-2 flex items-center justify-between gap-2">
-          <div className="mt-[2px] flex flex-col items-start gap-1 space-y-1">
-            <div className="flex items-center gap-1 text-[13px] leading-none text-black dark:text-white">
+        <div className="mt-1.5 flex items-center justify-between gap-2">
+          <div className="mt-px flex flex-col items-start gap-0.5 space-y-0.5">
+            <div className="flex items-center gap-1 text-[13px] leading-none text-foreground">
               <p className={cn('max-w-[14.5ch] truncate text-[13px]')}>
                 {activeAccount?.name || session.user.name || 'User'}
               </p>
               {isPro ? (
-                <BadgeCheck className="h-4 w-4 text-white dark:text-[#141414]" fill="#1D9BF0" />
+                <BadgeCheck className="h-4 w-4 text-background" fill="#1D9BF0" />
               ) : null}
             </div>
-            <div className="h-5 max-w-[200px] overflow-hidden truncate text-xs font-normal leading-none text-[#898989]">
+            <div className="h-5 max-w-[200px] overflow-hidden truncate text-xs font-normal leading-none text-muted-foreground">
               {activeAccount?.email || session.user.email}
             </div>
             {!isPro && (
               <button
                 onClick={() => setPricingDialog('true')}
-                className="flex h-5 items-center gap-1 rounded-full border px-1 pr-1.5 hover:bg-transparent"
+                className="flex h-5 items-center gap-1 rounded-full border px-1 pr-1.5 transition-colors hover:bg-accent"
               >
-                <BadgeCheck className="h-4 w-4 text-white dark:text-[#141414]" fill="#1D9BF0" />
-                <span className="text-muted-foreground text-[10px] uppercase">Get verified</span>
+                <BadgeCheck className="h-3.5 w-3.5 text-background" fill="#1D9BF0" />
+                <span className="text-muted-foreground text-[10px] uppercase tracking-wide">Get verified</span>
               </button>
             )}
           </div>

@@ -200,7 +200,27 @@ Maintained by the automated code-review agent. Updated on each review session.
 - **Suggested approach:** Keep the tracked target file aligned with the implementation used by `MainTabView`, or move the source of truth into one location and update the Xcode project accordingly.
 - **Status:** `auto-fixed` — Replaced the tracked target file with the intended glass-pill implementation and verified the build (2026-03-27).
 
-### CR-020: Voice permission API uses deprecated recorder permission call
+### CR-020: Voice secret sent from client bundle undermines server auth
+- **Area/Scope:** `web/ai`, `server/ai`
+- **Type:** security
+- **Impact:** user-facing
+- **Risk:** medium
+- **Files:** `apps/mail/lib/server-tool.ts`, `apps/server/src/routes/ai.ts`
+- **Summary:** `VITE_PUBLIC_VOICE_SECRET` is sent as `X-Voice-Secret` header from the browser. Since `VITE_PUBLIC_*` vars are bundled into client JS, anyone can extract the secret and call `/api/ai/do/:action` directly. The server treats this header as an auth gate.
+- **Suggested approach:** Replace with Bearer token auth (user's session token) for client-initiated AI tool calls. Currently `VOICE_SECRET` is empty string for local dev, so risk depends on production config.
+- **Status:** `open`
+
+### CR-021: Wildcard CORS on `/api/ai/do/*` routes
+- **Area/Scope:** `server/ai`
+- **Type:** security
+- **Impact:** user-facing
+- **Risk:** medium
+- **Files:** `apps/server/src/routes/ai.ts:174`
+- **Summary:** `Access-Control-Allow-Origin: *` on `/do/*` routes combined with weak `X-Voice-Secret` auth allows any website to call tool execution endpoints.
+- **Suggested approach:** Restrict CORS to known origins (reuse the trusted origins list from auth config).
+- **Status:** `open`
+
+### CR-020b: Voice permission API uses deprecated recorder permission call
 - **Area/Scope:** `ios/voice`
 - **Type:** DX
 - **Impact:** internal
