@@ -10,26 +10,34 @@ struct RootView: View {
     var body: some View {
         Group {
             if services.authService.showsOnboarding {
-                // Not authenticated and hasn't dismissed onboarding → show sign in
+                // Step 0: Not authenticated → sign in
                 AuthView()
                     .transition(.opacity.combined(with: .move(edge: .trailing)))
+            } else if !services.hasConfiguredGmailPrompt {
+                // Step 1: Gmail first — email is the primary value proposition,
+                // so users should connect it before being asked about Reminders.
+                GmailOnboardingView()
+                    .transition(.opacity.combined(with: .move(edge: .trailing)))
             } else if !services.hasConfiguredRemindersPrompt {
-                // Shown once after sign-up — lets the user opt in to Reminders sync
+                // Step 2: Reminders sync — secondary power-user feature after core email setup.
                 RemindersOnboardingView()
                     .transition(.opacity.combined(with: .move(edge: .trailing)))
             } else {
-                // Authenticated or skipped → show the unified tab shell
+                // All onboarding done → show the main app
                 MainTabView()
                     .transition(.opacity.combined(with: .move(edge: .leading)))
             }
         }
         .animation(.snappy(duration: 0.3), value: services.authService.showsOnboarding)
         .animation(.snappy(duration: 0.3), value: services.hasConfiguredRemindersPrompt)
+        .animation(.snappy(duration: 0.3), value: services.hasConfiguredGmailPrompt)
         .animation(.snappy(duration: 0.3), value: services.authService.isAuthenticated)
         .task {
-            // Legacy auth upgrade — runs in background, doesn't block UI
+            // Legacy auth upgrade — runs in background, doesn't block reminders setup
             await services.completeAuthUpgradeIfNeeded(in: modelContext)
-
+        }
+        .task {
+            // Reminders setup — runs concurrently with auth upgrade via separate .task
             if await services.requestRemindersPermissionIfNeeded() {
                 services.syncExistingTasksToReminders(in: modelContext)
                 await services.importFromReminders(in: modelContext)

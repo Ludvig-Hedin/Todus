@@ -3,6 +3,9 @@ import Observation
 
 /// Email service that wraps TodosAPIClient for email-specific TRPC calls.
 /// Manages inbox state, thread loading, and email actions (send, archive, read/unread).
+///
+/// The backend `mail.listThreads` only returns thread IDs (not sender/subject/snippet).
+/// To get full thread details, we call `mail.get` for each thread — same approach as the web app.
 @MainActor
 @Observable
 final class EmailService {
@@ -27,6 +30,7 @@ final class EmailService {
     // MARK: - Inbox
 
     /// Fetches threads for a given folder (default: inbox).
+    /// Two-step process: get thread IDs from listThreads, then enrich each with mail.get.
     func loadThreads(folder: String = "inbox", query: String? = nil, refresh: Bool = false) async {
         if refresh { nextPageToken = nil }
         isLoadingThreads = true
@@ -39,39 +43,88 @@ final class EmailService {
                 maxResults: 30,
                 cursor: refresh ? nil : nextPageToken
             )
+            // Step 1: Get thread IDs from backend
             let response: ListThreadsResponse = try await api.trpcQuery("mail.listThreads", input: input)
 
-            // The backend returns minimal thread objects — we need to enrich with snippet/from/date.
-            // For MVP, map the raw thread data into our EmailThread model.
-            let newThreads = response.threads.map { raw in
-                EmailThread(
-                    id: raw.id,
-                    subject: raw.subject ?? "",
-                    snippet: raw.snippet ?? "",
-                    from: EmailSender(
-                        name: raw.senderName ?? raw.senderEmail ?? "Unknown",
-                        email: raw.senderEmail ?? ""
-                    ),
-                    date: raw.date ?? Date(),
-                    unread: raw.unread ?? false,
-                    messageCount: raw.messageCount ?? 1,
-                    labels: raw.labels ?? []
-                )
-            }
+            // Step 2: Fetch full details for each thread in parallel
+            let threadIds = response.threads.map(\.id)
+            let enrichedThreads = await fetchThreadDetails(ids: threadIds)
 
             if refresh {
-                threads = newThreads
+                threads = enrichedThreads
             } else {
-                threads.append(contentsOf: newThreads)
+                threads.append(contentsOf: enrichedThreads)
             }
             nextPageToken = response.nextPageToken
         } catch let error as APIError where error.errorDescription?.contains("Session expired") == true {
             hasConnection = false
         } catch {
             errorMessage = "Failed to load emails."
+            AppLogger.shared.log("[EmailService] loadThreads error: \(error)")
         }
 
         isLoadingThreads = false
+    }
+
+    /// Fetches full details for multiple threads in parallel via mail.get.
+    /// Returns EmailThread summary objects built from each thread's latest message.
+    /// Batches requests into groups of 8 to reduce connection contention and memory pressure.
+    /// Previously all 30 requests fired simultaneously, causing URLSession connection saturation.
+    private func fetchThreadDetails(ids: [String]) async -> [EmailThread] {
+        let batchSize = 8
+        var allResults = [(Int, EmailThread?)]()
+        allResults.reserveCapacity(ids.count)
+
+        // Process in batches to avoid overwhelming URLSession with 30+ concurrent requests
+        for batchStart in stride(from: 0, to: ids.count, by: batchSize) {
+            let batchEnd = min(batchStart + batchSize, ids.count)
+            let batchIds = Array(ids[batchStart..<batchEnd])
+
+            let batchResults: [(Int, EmailThread?)] = await withTaskGroup(of: (Int, EmailThread?).self) { group in
+                for (localIndex, id) in batchIds.enumerated() {
+                    let globalIndex = batchStart + localIndex
+                    group.addTask {
+                        await self.fetchSingleThread(id: id, index: globalIndex)
+                    }
+                }
+                var collected = [(Int, EmailThread?)]()
+                for await result in group {
+                    collected.append(result)
+                }
+                return collected
+            }
+            allResults.append(contentsOf: batchResults)
+        }
+
+        return allResults.sorted { $0.0 < $1.0 }.compactMap(\.1)
+    }
+
+    /// Fetches a single thread's details and builds an EmailThread summary from the latest message.
+    private func fetchSingleThread(id: String, index: Int) async -> (Int, EmailThread?) {
+        do {
+            let input = GetThreadInput(id: id)
+            let detail: GetThreadResponse = try await api.trpcQuery("mail.get", input: input)
+
+            // Use the latest non-draft message for the thread summary
+            guard let latest = detail.latest ?? detail.messages.last else {
+                return (index, nil)
+            }
+
+            let thread = EmailThread(
+                id: id,
+                subject: latest.subject,
+                snippet: latest.plainText ?? "",
+                from: latest.from,
+                date: latest.date,
+                unread: detail.hasUnread ?? false,
+                messageCount: detail.totalReplies ?? detail.messages.count,
+                labels: detail.labels?.map(\.name) ?? []
+            )
+            return (index, thread)
+        } catch {
+            AppLogger.shared.log("[EmailService] Failed to fetch thread \(id): \(error)")
+            return (index, nil)
+        }
     }
 
     /// Fetches a single thread with all messages.
@@ -208,29 +261,31 @@ private struct SendEmailInput: Encodable {
 
 // Response types
 
+/// Backend listThreads returns minimal thread objects — just IDs, no sender/subject.
 struct ListThreadsResponse: Decodable {
     let threads: [RawThread]
     let nextPageToken: String?
 }
 
-/// Raw thread from the backend — fields may be sparse depending on provider.
+/// Minimal thread from listThreads — only has id and historyId.
 struct RawThread: Decodable {
     let id: String
-    let subject: String?
-    let snippet: String?
-    let senderName: String?
-    let senderEmail: String?
-    let date: Date?
-    let unread: Bool?
-    let messageCount: Int?
-    let labels: [String]?
+    let historyId: String?
 }
 
-/// Full thread detail with messages, returned by mail.get
+/// Full thread detail with messages, returned by mail.get.
+/// Matches IGetThreadResponseSchema from the backend.
 struct GetThreadResponse: Decodable {
     let messages: [EmailMessage]
+    let latest: EmailMessage?
     let hasUnread: Bool?
     let totalReplies: Int?
+    let labels: [ThreadLabel]?
+
+    struct ThreadLabel: Decodable {
+        let id: String
+        let name: String
+    }
 }
 
 /// Alias for readability in thread detail views

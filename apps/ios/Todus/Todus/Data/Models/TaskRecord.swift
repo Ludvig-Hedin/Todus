@@ -12,6 +12,10 @@ final class TaskRecord: Identifiable {
     var priorityRawValue: String
     var attachmentNamesRawValue: String
     var reminderIdentifier: String?
+    /// Gmail thread ID — links this task to an email conversation (nullable)
+    var emailThreadId: String?
+    /// EKEvent identifier — links this task to a calendar event (nullable)
+    var eventId: String?
     var createdAt: Date
     var updatedAt: Date
     var dueDate: Date?

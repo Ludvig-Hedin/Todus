@@ -36,6 +36,26 @@ actor CalendarService {
         EKEventStore.authorizationStatus(for: .event)
     }
 
+    /// Whether the app can read calendar events for list/detail UI.
+    nonisolated func canReadEvents() -> Bool {
+        let status = authorizationStatus()
+        if #available(iOS 17.0, *) {
+            return status == .fullAccess
+        } else {
+            return status == .authorized
+        }
+    }
+
+    /// Whether the app can create events. On iOS 17+, write-only access is enough.
+    nonisolated func canCreateEvents() -> Bool {
+        let status = authorizationStatus()
+        if #available(iOS 17.0, *) {
+            return status == .fullAccess || status == .writeOnly
+        } else {
+            return status == .authorized
+        }
+    }
+
     /// Fetch events for a given date range, returned as sendable CalendarEvent structs.
     func events(from startDate: Date, to endDate: Date) -> [CalendarEvent] {
         let predicate = eventStore.predicateForEvents(withStart: startDate, end: endDate, calendars: nil)

@@ -19,19 +19,9 @@ struct RemindersOnboardingView: View {
             VStack(spacing: 0) {
                 Spacer()
 
-                // Icon
-                ZStack {
-                    Circle()
-                        .fill(AppTheme.surfacePrimary)
-                        .frame(width: 80, height: 80)
-                        .overlay(
-                            Circle()
-                                .stroke(AppTheme.cardBorder, lineWidth: 1)
-                        )
-                    Image(systemName: "bell.badge")
-                        .font(.system(size: 32, weight: .semibold))
-                        .foregroundStyle(AppTheme.accent)
-                }
+                AppleRemindersIconView(size: 88)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Apple Reminders icon")
 
                 Spacer().frame(height: 24)
 
@@ -56,6 +46,7 @@ struct RemindersOnboardingView: View {
                         Task { await connect() }
                     } label: {
                         HStack(spacing: 8) {
+                            AppleRemindersIconView(size: 20)
                             if isConnecting {
                                 ProgressView()
                                     .tint(.white)
@@ -120,13 +111,48 @@ struct RemindersSetupView: View {
     var body: some View {
         List {
             Section {
-                Toggle("Sync with Apple Reminders", isOn: $isEnabled)
-                    .font(.system(size: 14, weight: .medium))
-                    .tint(Color.blue)
+                Toggle(isOn: $isEnabled) {
+                    Label("Sync with Reminders", systemImage: "arrow.triangle.2.circlepath")
+                }
+                .font(.system(size: 14, weight: .medium))
+                .tint(Color.blue)
             } footer: {
-                Text("When enabled, tasks are synced bidirectionally with Apple Reminders.")
+                Text("Keep your tasks in sync with Apple Reminders.")
                     .font(.system(size: 12))
                     .foregroundStyle(AppTheme.mutedText)
+            }
+
+            // Sync direction picker — only shown when sync is enabled
+            if isEnabled {
+                Section {
+                    Picker(selection: Binding(
+                        get: { services.remindersSyncDirection },
+                        set: { services.remindersSyncDirection = $0 }
+                    )) {
+                        ForEach(RemindersSyncDirection.allCases) { direction in
+                            Label {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(direction.title)
+                                    Text(direction.subtitle)
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(.secondary)
+                                }
+                            } icon: {
+                                Image(systemName: direction.icon)
+                            }
+                            .tag(direction)
+                        }
+                    } label: {
+                        Label("Sync Direction", systemImage: "arrow.left.arrow.right")
+                    }
+                    .pickerStyle(.inline)
+                } header: {
+                    Text("Sync Direction")
+                } footer: {
+                    Text(services.remindersSyncDirection.subtitle)
+                        .font(.system(size: 12))
+                        .foregroundStyle(AppTheme.mutedText)
+                }
             }
 
             if permissionDenied {
@@ -134,7 +160,7 @@ struct RemindersSetupView: View {
                     Label("Permission denied. Please enable Reminders access in iOS Settings.", systemImage: "exclamationmark.triangle.fill")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(AppTheme.danger)
-                } 
+                }
             }
         }
         .scrollContentBackground(.hidden)
@@ -150,7 +176,6 @@ struct RemindersSetupView: View {
                 Task {
                     let granted = await services.requestRemindersPermissionIfNeeded()
                     if granted {
-                        // Import any existing Apple Reminders that aren't yet in the app
                         await services.importFromReminders(in: modelContext)
                     } else {
                         permissionDenied = true

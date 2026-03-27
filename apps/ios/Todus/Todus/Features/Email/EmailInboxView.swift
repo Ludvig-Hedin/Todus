@@ -6,6 +6,9 @@ struct EmailInboxView: View {
 
     @State private var searchText = ""
     @State private var selectedThreadId: String?
+    @State private var filteredThreads: [EmailThread] = []
+    /// Debounce task for server-side search — cancelled on each new keystroke.
+    @State private var searchDebounceTask: Task<Void, Never>?
 
     private var emailService: EmailService { services.emailService }
 
@@ -31,6 +34,23 @@ struct EmailInboxView: View {
         .navigationDestination(item: $selectedThreadId) { threadId in
             EmailThreadView(threadId: threadId)
         }
+        .onAppear { recomputeFilteredThreads() }
+        .onChange(of: emailService.threads) { recomputeFilteredThreads() }
+        .onChange(of: searchText) {
+            // Instant local filtering for immediate visual feedback
+            recomputeFilteredThreads()
+            // Debounced server search — waits 500ms after last keystroke so we don't
+            // spam the API on every character, but still search automatically.
+            searchDebounceTask?.cancel()
+            searchDebounceTask = Task {
+                try? await Task.sleep(for: .milliseconds(500))
+                guard !Task.isCancelled else { return }
+                await emailService.loadThreads(
+                    query: searchText.isEmpty ? nil : searchText,
+                    refresh: true
+                )
+            }
+        }
     }
 
     // MARK: - Thread List
@@ -38,19 +58,27 @@ struct EmailInboxView: View {
     private var threadList: some View {
         VStack(spacing: 0) {
             // Header
-            HStack {
-                Text("Inbox")
-                    .font(.system(size: 28, weight: .bold))
-                Spacer()
+            VStack(alignment: .leading, spacing: 6) {
+                AppTopHeader(title: "Inbox")
+                if emailService.isLoadingThreads {
+                    HStack(spacing: 6) {
+                        ProgressView().scaleEffect(0.65)
+                        Text("Refreshing")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(AppTheme.mutedText)
+                    }
+                }
             }
             .padding(.horizontal, 16)
             .padding(.top, 12)
-            .padding(.bottom, 4)
+            .padding(.bottom, 6)
 
             // Search bar
             searchBar
                 .padding(.horizontal, 16)
-                .padding(.bottom, 8)
+                .padding(.bottom, 10)
+
+            Divider().foregroundStyle(AppTheme.divider)
 
             // Thread list
             List {
@@ -58,10 +86,9 @@ struct EmailInboxView: View {
                     EmailRowView(thread: thread)
                         .listRowInsets(EdgeInsets())
                         .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
-                        .onTapGesture {
-                            selectedThreadId = thread.id
-                        }
+                        .listRowSeparator(.visible)
+                        .listRowSeparatorTint(AppTheme.divider)
+                        .onTapGesture { selectedThreadId = thread.id }
                         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                             Button(role: .destructive) {
                                 Task { await emailService.archiveThreads(ids: [thread.id]) }
@@ -102,15 +129,12 @@ struct EmailInboxView: View {
                         }
                 }
 
-                // Load more trigger
                 if emailService.nextPageToken != nil {
                     ProgressView()
                         .frame(maxWidth: .infinity)
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
-                        .onAppear {
-                            Task { await emailService.loadThreads() }
-                        }
+                        .onAppear { Task { await emailService.loadThreads() } }
                 }
             }
             .listStyle(.plain)
@@ -121,21 +145,20 @@ struct EmailInboxView: View {
                     refresh: true
                 )
             }
-            // Extra bottom padding so content isn't hidden behind custom tab bar
-            .contentMargins(.bottom, 90, for: .scrollContent)
+            .contentMargins(.bottom, 16, for: .scrollContent)
         }
     }
 
-    // MARK: - Search
+    // MARK: - Search Bar
 
     private var searchBar: some View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 14, weight: .semibold))
+                .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(AppTheme.mutedText)
 
-            TextField("Search emails\u{2026}", text: $searchText)
-                .font(.system(size: 14, weight: .medium))
+            TextField("Search…", text: $searchText)
+                .font(.system(size: 14))
                 .autocorrectionDisabled()
                 .textInputAutocapitalization(.never)
                 .onSubmit {
@@ -161,46 +184,66 @@ struct EmailInboxView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
-        .background(
-            AppTheme.surfaceSecondary.opacity(0.55),
-            in: RoundedRectangle(cornerRadius: 16, style: .continuous)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(AppTheme.cardBorder, lineWidth: 1)
-        )
+        // Glass effect on iOS 26; subtle surface card on older iOS
+        .background {
+            if #available(iOS 26.0, *) {
+                // glassEffect is applied below via modifier
+                Color.clear
+            } else {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(AppTheme.surfaceSecondary.opacity(0.6))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(AppTheme.cardBorder, lineWidth: 0.5)
+                    )
+            }
+        }
+        .modifier(SearchBarGlassModifier())
     }
 
     // MARK: - Empty State
 
     private var emptyState: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 12) {
             Image(systemName: "tray")
-                .font(.system(size: 48, weight: .light))
+                .font(.system(size: 44, weight: .light))
                 .foregroundStyle(AppTheme.mutedText)
-
-            Text("No emails yet")
-                .font(.system(size: 18, weight: .semibold))
-
-            Text("Pull down to refresh")
-                .font(.system(size: 14, weight: .medium))
+            Text("Your inbox is empty")
+                .font(.system(size: 17, weight: .semibold))
+            // Removed the ambiguous "Pull down to refresh" — users couldn't tell if
+            // the inbox was genuinely empty or if loading failed.
+            Text("New emails will appear here")
+                .font(.system(size: 14))
                 .foregroundStyle(AppTheme.subtleText)
         }
     }
 
     // MARK: - Filtering
 
-    /// Client-side filter while user is typing (before submit triggers server search)
-    private var filteredThreads: [EmailThread] {
-        if searchText.isEmpty {
-            return emailService.threads
+    private func recomputeFilteredThreads() {
+        guard !searchText.isEmpty else {
+            filteredThreads = emailService.threads
+            return
         }
         let query = searchText.lowercased()
-        return emailService.threads.filter {
+        filteredThreads = emailService.threads.filter {
             $0.subject.lowercased().contains(query)
             || $0.from.name.lowercased().contains(query)
             || $0.from.email.lowercased().contains(query)
             || $0.snippet.lowercased().contains(query)
+        }
+    }
+}
+
+// MARK: - Search Bar Glass Modifier
+
+/// Applies `.glassEffect` on iOS 26, no-op on older iOS (background already applied inline).
+private struct SearchBarGlassModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content.glassEffect(in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        } else {
+            content
         }
     }
 }

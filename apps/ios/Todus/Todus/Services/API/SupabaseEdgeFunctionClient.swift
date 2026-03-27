@@ -60,7 +60,8 @@ struct SupabaseEdgeFunctionClient: Sendable {
     }
 }
 
-struct EmptyResponse: Codable, Sendable {}
+// Note: EmptyResponse is also defined in TodosAPIClient — use that one for new code.
+private struct SupabaseEmptyResponse: Codable, Sendable {}
 
 enum JSONEncoderFactory {}
 

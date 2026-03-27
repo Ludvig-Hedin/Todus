@@ -5,6 +5,16 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Environment(AppServices.self) private var services
+    @State private var showsLogoutConfirmation = false
+    @State private var showsDeleteConfirmation = false
+    @State private var showsDeleteAlert = false
+    @State private var deleteConfirmText = ""
+    @State private var isDeletingAccount = false
+    @State private var showsDisconnectGmail = false
+
+    private var calendarAccessGranted: Bool {
+        services.calendarService.canReadEvents()
+    }
 
     var body: some View {
         NavigationStack {
@@ -12,15 +22,17 @@ struct SettingsView: View {
                 accountSection
                 connectedServicesSection
                 appearanceSection
-                notificationsSection
+                emailSection
+                aiSection
                 preferencesSection
+                notificationsSection
+                privacySection
 
                 if services.developerModeEnabled {
                     developerSection
                 }
 
                 aboutSection
-                signOutSection
             }
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
@@ -29,62 +41,150 @@ struct SettingsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") {
-                        dismiss()
-                    }
+                    Button("Done") { dismiss() }
+                        .fontWeight(.semibold)
                 }
             }
         }
         .presentationDragIndicator(.visible)
+        .task {
+            // Refresh profile data (name, avatar) when settings opens
+            await services.authService.fetchUserProfile()
+        }
+        .task {
+            await services.emailService.checkConnection()
+        }
+        .confirmationDialog(
+            "Are you sure you want to log out?",
+            isPresented: $showsLogoutConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Log out", role: .destructive) {
+                performLogout()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("You can sign back in anytime.")
+        }
+        // Delete account — first confirmation step
+        .confirmationDialog(
+            "Delete your account?",
+            isPresented: $showsDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete Everything", role: .destructive) {
+                showsDeleteAlert = true
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This will permanently delete your account, tasks, email connections, and all data. This cannot be undone.")
+        }
+        // Delete account — second confirmation: type "DELETE"
+        .alert("Type DELETE to confirm", isPresented: $showsDeleteAlert) {
+            TextField("DELETE", text: $deleteConfirmText)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.characters)
+            Button("Delete Account", role: .destructive) {
+                guard deleteConfirmText == "DELETE" else { return }
+                Task { await performDeleteAccount() }
+            }
+            Button("Cancel", role: .cancel) {
+                deleteConfirmText = ""
+            }
+        } message: {
+            Text("This action is irreversible. Type DELETE to proceed.")
+        }
+        // Disconnect Gmail confirmation
+        .confirmationDialog(
+            "Disconnect Gmail?",
+            isPresented: $showsDisconnectGmail,
+            titleVisibility: .visible
+        ) {
+            Button("Disconnect", role: .destructive) {
+                Task { await performDisconnectGmail() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("You'll stop receiving emails in Todus. You can reconnect anytime.")
+        }
     }
 
     // MARK: - Account
 
     private var accountSection: some View {
         Section {
-            // Email — from new auth service, fallback to legacy
-            HStack {
-                Label {
-                    Text("Email")
-                } icon: {
-                    Image(systemName: "envelope")
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                if let email = services.authService.userEmail ?? services.authStore.accountEmail {
-                    Text(email)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+            // Profile row — avatar, name, email
+            HStack(spacing: 12) {
+                // Avatar — Google profile image or letter initial fallback
+                if let imageURLString = services.authService.userImage,
+                   let imageURL = URL(string: imageURLString) {
+                    AsyncImage(url: imageURL) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .scaledToFill()
+                                .frame(width: 48, height: 48)
+                                .clipShape(Circle())
+                        default:
+                            avatarFallback
+                        }
+                    }
                 } else {
-                    Text("Not signed in")
-                        .foregroundStyle(.tertiary)
+                    avatarFallback
                 }
-            }
 
-            // Auth status
-            HStack {
-                Label {
-                    Text("Status")
-                } icon: {
-                    Image(systemName: services.authService.isAuthenticated ? "checkmark.shield.fill" : "xmark.shield")
-                        .foregroundStyle(services.authService.isAuthenticated ? .green : .secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    // Display name from Google profile, or "Account" fallback
+                    if let name = services.authService.userName, !name.isEmpty {
+                        Text(name)
+                            .font(.system(size: 16, weight: .semibold))
+                            .lineLimit(1)
+                    } else {
+                        Text("Account")
+                            .font(.system(size: 16, weight: .semibold))
+                    }
+
+                    // Email address shown below the name
+                    if let email = services.authService.userEmail ?? services.authStore.accountEmail {
+                        Text(email)
+                            .font(.system(size: 13))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                 }
                 Spacer()
-                Text(services.authService.isAuthenticated ? "Signed in" : "Not signed in")
-                    .foregroundStyle(services.authService.isAuthenticated ? .primary : .tertiary)
             }
+            .padding(.vertical, 4)
 
-            // If not signed in, show a sign in button
+            // Sign in button — only when not authenticated
             if !services.authService.isAuthenticated {
                 Button {
-                    // Return to login screen by clearing onboarding flag
+                    services.authService.hasSeenOnboarding = false
                     services.authService.signOut()
                     services.authStore.signOutToGuest()
-                    UserDefaults.standard.set(false, forKey: "Todus.hasSeenOnboarding")
-                    UserDefaults.standard.set(false, forKey: "TaskApp.hasSeenOnboarding")
                     dismiss()
                 } label: {
-                    Label("Sign in", systemImage: "person.crop.circle.badge.plus")
+                    Label("Sign in to your account", systemImage: "person.crop.circle.badge.plus")
+                        .foregroundStyle(.blue)
+                }
+            }
+
+            // Log out button — inside the account card
+            if services.authService.isAuthenticated {
+                Button(role: .destructive) {
+                    showsLogoutConfirmation = true
+                } label: {
+                    Label("Log out", systemImage: "rectangle.portrait.and.arrow.right")
+                        .foregroundStyle(.red)
+                }
+
+                // Delete account — double confirmation required
+                Button(role: .destructive) {
+                    showsDeleteConfirmation = true
+                } label: {
+                    Label("Delete account", systemImage: "trash")
+                        .foregroundStyle(.red.opacity(0.7))
                 }
             }
         } header: {
@@ -92,54 +192,95 @@ struct SettingsView: View {
         }
     }
 
+    /// Fallback avatar with first-letter initial
+    private var avatarFallback: some View {
+        ZStack {
+            Circle()
+                .fill(services.authService.isAuthenticated
+                      ? Color.blue.opacity(0.15)
+                      : Color.secondary.opacity(0.12))
+                .frame(width: 48, height: 48)
+            if let email = services.authService.userEmail ?? services.authStore.accountEmail,
+               let first = email.first {
+                Text(String(first).uppercased())
+                    .font(.system(size: 20, weight: .semibold, design: .rounded))
+                    .foregroundStyle(services.authService.isAuthenticated ? .blue : .secondary)
+            } else {
+                Image(systemName: "person.fill")
+                    .font(.system(size: 18))
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
     // MARK: - Connected Services
 
     private var connectedServicesSection: some View {
         Section {
-            // Email provider connection
-            HStack {
-                Label {
+            // Gmail
+            HStack(spacing: 12) {
+                GmailIconView(size: 30)
+                VStack(alignment: .leading, spacing: 2) {
                     Text("Gmail")
-                } icon: {
-                    Image(systemName: "envelope.fill")
-                        .foregroundStyle(.red)
+                        .font(.system(size: 15))
+                    Text(services.emailService.hasConnection ? "Connected" : "Not connected")
+                        .font(.system(size: 12))
+                        .foregroundStyle(services.emailService.hasConnection ? .green : .secondary)
                 }
                 Spacer()
-                // TODO: Check actual connection status from email service
-                Text(services.authService.isAuthenticated ? "Connected" : "Not connected")
-                    .foregroundStyle(.secondary)
-                    .font(.system(size: 14))
+                if services.emailService.hasConnection {
+                    Button(role: .destructive) {
+                        showsDisconnectGmail = true
+                    } label: {
+                        Text("Disconnect")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(.red.opacity(0.8))
+                    }
+                }
             }
+            .padding(.vertical, 2)
 
-            HStack {
-                Label {
+            // Apple Calendar
+            HStack(spacing: 12) {
+                AppleCalendarIconView(size: 30)
+                VStack(alignment: .leading, spacing: 2) {
                     Text("Apple Calendar")
-                } icon: {
-                    Image(systemName: "calendar")
-                        .foregroundStyle(.red)
+                        .font(.system(size: 15))
+                    Text(calendarAccessGranted ? "Connected" : "Not connected")
+                        .font(.system(size: 12))
+                        .foregroundStyle(calendarAccessGranted ? .green : .secondary)
                 }
                 Spacer()
-                Text(services.remindersSyncEnabled ? "Connected" : "Not connected")
-                    .foregroundStyle(.secondary)
-                    .font(.system(size: 14))
+                if calendarAccessGranted {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                        .font(.system(size: 16))
+                } else {
+                    Button("Connect") {
+                        Task { await services.calendarService.requestAccess() }
+                    }
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.blue)
+                }
             }
+            .padding(.vertical, 2)
 
             // Apple Reminders
             NavigationLink {
                 RemindersSetupView()
             } label: {
-                HStack {
-                    Label {
+                HStack(spacing: 12) {
+                    AppleRemindersIconView(size: 30)
+                    VStack(alignment: .leading, spacing: 2) {
                         Text("Apple Reminders")
-                    } icon: {
-                        Image(systemName: "checklist")
-                            .foregroundStyle(.blue)
+                            .font(.system(size: 15))
+                        Text(services.remindersSyncEnabled ? "Sync enabled" : "Not connected")
+                            .font(.system(size: 12))
+                            .foregroundStyle(services.remindersSyncEnabled ? .green : .secondary)
                     }
                     Spacer()
-                    Text(services.remindersSyncEnabled ? "On" : "Off")
-                        .foregroundStyle(.secondary)
-                        .font(.system(size: 14))
                 }
+                .padding(.vertical, 2)
             }
         } header: {
             Text("Connected Services")
@@ -150,39 +291,177 @@ struct SettingsView: View {
 
     private var appearanceSection: some View {
         Section {
-            Picker("Theme", selection: Binding(
-                get: { services.appearancePreference },
-                set: { services.appearancePreference = $0 }
-            )) {
-                ForEach(AppAppearancePreference.allCases) { preference in
-                    Text(preference.title).tag(preference)
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Theme")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+
+                HStack(spacing: 10) {
+                    ForEach(AppAppearancePreference.allCases) { preference in
+                        appearanceOption(preference)
+                    }
                 }
             }
-            .pickerStyle(.segmented)
+            .padding(.vertical, 6)
         } header: {
             Text("Appearance")
         }
     }
 
-    // MARK: - Notifications
+    @ViewBuilder
+    private func appearanceOption(_ preference: AppAppearancePreference) -> some View {
+        let isSelected = services.appearancePreference == preference
 
-    private var notificationsSection: some View {
-        Section {
-            // Placeholder for future notification settings
-            HStack {
-                Label("Push Notifications", systemImage: "bell.badge")
-                Spacer()
-                Text("System Settings")
-                    .foregroundStyle(.secondary)
-                    .font(.system(size: 14))
-            }
-            .onTapGesture {
-                if let url = URL(string: UIApplication.openNotificationSettingsURLString) {
-                    UIApplication.shared.open(url)
+        Button {
+            services.appearancePreference = preference
+        } label: {
+            VStack(spacing: 8) {
+                // Mini preview swatch
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(previewBackground(for: preference))
+                        .frame(height: 52)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .strokeBorder(
+                                    isSelected ? Color.blue : Color(UIColor.separator).opacity(0.4),
+                                    lineWidth: isSelected ? 2 : 1
+                                )
+                        )
+
+                    VStack(spacing: 4) {
+                        Capsule()
+                            .fill(previewAccent(for: preference).opacity(0.3))
+                            .frame(width: 28, height: 5)
+                        Capsule()
+                            .fill(previewAccent(for: preference).opacity(0.15))
+                            .frame(width: 38, height: 4)
+                        Capsule()
+                            .fill(previewAccent(for: preference).opacity(0.10))
+                            .frame(width: 30, height: 4)
+                    }
+
+                    if isSelected {
+                        VStack {
+                            HStack {
+                                Spacer()
+                                Image(systemName: "checkmark.circle.fill")
+                                    .font(.system(size: 14))
+                                    .foregroundStyle(.blue)
+                                    .padding(4)
+                            }
+                            Spacer()
+                        }
+                    }
+                }
+
+                HStack(spacing: 4) {
+                    Image(systemName: preferenceIcon(preference))
+                        .font(.system(size: 10))
+                        .foregroundStyle(isSelected ? .blue : .secondary)
+                    Text(preference.title)
+                        .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
+                        .foregroundStyle(isSelected ? .blue : .primary)
                 }
             }
+        }
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity)
+    }
+
+    private func previewBackground(for preference: AppAppearancePreference) -> Color {
+        switch preference {
+        case .system:
+            return Color(UIColor.systemBackground)
+        case .light:
+            return Color(UIColor(white: 0.98, alpha: 1))
+        case .dark:
+            return Color(UIColor(white: 0.08, alpha: 1))
+        }
+    }
+
+    private func previewAccent(for preference: AppAppearancePreference) -> Color {
+        preference == .dark ? .white : .black
+    }
+
+    private func preferenceIcon(_ preference: AppAppearancePreference) -> String {
+        switch preference {
+        case .system: return "iphone"
+        case .light:  return "sun.max"
+        case .dark:   return "moon"
+        }
+    }
+
+    // MARK: - Email
+
+    private var emailSection: some View {
+        Section {
+            // Swipe gestures toggle — functional
+            Toggle(isOn: Binding(
+                get: { services.swipeGesturesEnabled },
+                set: { services.swipeGesturesEnabled = $0 }
+            )) {
+                Label("Swipe Gestures", systemImage: "hand.draw")
+            }
+            .tint(.blue)
+
+            // Signatures — navigates to full management sub-page
+            NavigationLink {
+                SignaturesView()
+            } label: {
+                HStack {
+                    Label("Signatures", systemImage: "signature")
+                    Spacer()
+                    // Show the active signature name or "Off" as a value hint
+                    Text(services.activeSignature?.name ?? "Off")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            // Thread grouping toggle — functional
+            Toggle(isOn: Binding(
+                get: { services.threadGroupingEnabled },
+                set: { services.threadGroupingEnabled = $0 }
+            )) {
+                Label("Group by Thread", systemImage: "text.bubble")
+            }
+            .tint(.blue)
         } header: {
-            Text("Notifications")
+            Text("Email")
+        }
+    }
+
+    // MARK: - AI
+
+    private var aiSection: some View {
+        @Bindable var ai = services.aiChatService
+        return Section {
+            Toggle(isOn: $ai.aiCanReadTasks) {
+                Label("Read my tasks", systemImage: "eye")
+            }
+            .tint(.blue)
+            Toggle(isOn: $ai.aiCanWriteTasks) {
+                Label("Create & edit tasks", systemImage: "pencil")
+            }
+            .tint(.blue)
+
+            // AI response tone — injected into the system prompt
+            Picker(selection: Binding(
+                get: { services.aiTonePreference },
+                set: { services.aiTonePreference = $0 }
+            )) {
+                ForEach(AITonePreference.allCases) { tone in
+                    Text(tone.title).tag(tone)
+                }
+            } label: {
+                Label("Response Tone", systemImage: "text.quote")
+            }
+            .pickerStyle(.menu)
+        } header: {
+            Text("AI Assistant")
+        } footer: {
+            Text("Controls what the AI can access and modify in your task list.")
         }
     }
 
@@ -190,7 +469,7 @@ struct SettingsView: View {
 
     private var preferencesSection: some View {
         Section {
-            Picker("Default view", selection: Binding(
+            Picker(selection: Binding(
                 get: { services.preferredStartViewMode },
                 set: {
                     services.preferredStartViewMode = $0
@@ -200,8 +479,10 @@ struct SettingsView: View {
                 ForEach(TaskViewMode.allCases) { mode in
                     Text(mode.title).tag(mode)
                 }
+            } label: {
+                Label("Default View", systemImage: "square.grid.2x2")
             }
-            .pickerStyle(.segmented)
+            .pickerStyle(.menu)
 
             NavigationLink {
                 FolderManagementView()
@@ -209,13 +490,89 @@ struct SettingsView: View {
                 Label("Manage Folders", systemImage: "folder")
             }
 
-            Toggle("Developer mode", isOn: Binding(
+            Toggle(isOn: Binding(
                 get: { services.developerModeEnabled },
                 set: { services.developerModeEnabled = $0 }
-            ))
-            .tint(.blue)
+            )) {
+                Label("Developer Mode", systemImage: "wrench.and.screwdriver")
+            }
+            .tint(.orange)
         } header: {
             Text("Preferences")
+        }
+    }
+
+    // MARK: - Notifications
+
+    private var notificationsSection: some View {
+        Section {
+            // In-app toggles for local notification categories
+            Toggle(isOn: Binding(
+                get: { services.taskRemindersEnabled },
+                set: { services.taskRemindersEnabled = $0 }
+            )) {
+                Label("Task Due Reminders", systemImage: "checklist")
+            }
+            .tint(.blue)
+
+            Toggle(isOn: Binding(
+                get: { services.calendarRemindersEnabled },
+                set: { services.calendarRemindersEnabled = $0 }
+            )) {
+                Label("Calendar Reminders", systemImage: "calendar.badge.clock")
+            }
+            .tint(.blue)
+
+            // System settings link — secondary option for OS-level control
+            Button {
+                if let url = URL(string: UIApplication.openNotificationSettingsURLString) {
+                    UIApplication.shared.open(url)
+                }
+            } label: {
+                HStack {
+                    Label("System Settings", systemImage: "bell.badge")
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    Image(systemName: "arrow.up.right.square")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+            }
+        } header: {
+            Text("Notifications")
+        } footer: {
+            Text("Task and calendar reminders are delivered as local notifications.")
+        }
+    }
+
+    // MARK: - Privacy
+
+    private var privacySection: some View {
+        Section {
+            Button {
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    UIApplication.shared.open(url)
+                }
+            } label: {
+                HStack {
+                    Label("App Permissions", systemImage: "hand.raised")
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    Image(systemName: "arrow.up.right.square")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            HStack {
+                Label("Data Sync", systemImage: "lock.shield")
+                Spacer()
+                Text("End-to-end")
+                    .font(.system(size: 14))
+                    .foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("Privacy & Security")
         }
     }
 
@@ -224,7 +581,8 @@ struct SettingsView: View {
     @State private var useLocalBackend = AppConfiguration.useLocalBackend
 
     private var developerSection: some View {
-        Section {
+        @Bindable var ai = services.aiChatService
+        return Section {
             Toggle("Local Backend", isOn: $useLocalBackend)
                 .onChange(of: useLocalBackend) { _, newValue in
                     AppConfiguration.useLocalBackend = newValue
@@ -233,8 +591,17 @@ struct SettingsView: View {
 
             LabeledContent("Backend", value: services.configuration.effectiveBackendURL.host ?? "unknown")
             LabeledContent("Auth state", value: authStateLabel)
-            LabeledContent("Bearer token", value: services.authService.bearerToken != nil ? "Present (\(services.authService.bearerToken!.prefix(8))...)" : "None")
-            LabeledContent("Model", value: simplifiedModelName(services.configuration.primaryModel))
+            LabeledContent("Bearer token", value: services.authService.bearerToken != nil
+                           ? "Present (\(services.authService.bearerToken!.prefix(8))...)" : "None")
+
+            Picker("AI Model", selection: $ai.selectedModel) {
+                ForEach(services.configuration.preferredModels, id: \.self) { model in
+                    Text(simplifiedModelName(model))
+                        .tag(model)
+                }
+            }
+            .pickerStyle(.menu)
+
             LabeledContent("Install ID", value: String(services.authStore.installID.prefix(12)) + "...")
 
             ShareLink(
@@ -258,33 +625,20 @@ struct SettingsView: View {
 
     private var aboutSection: some View {
         Section {
-            LabeledContent("Version", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—")
-            LabeledContent("Build", value: Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "—")
+            HStack {
+                Label("Version", systemImage: "info.circle")
+                Spacer()
+                Text(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—")
+                    .foregroundStyle(.secondary)
+            }
+            HStack {
+                Label("Build", systemImage: "hammer")
+                Spacer()
+                Text(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "—")
+                    .foregroundStyle(.secondary)
+            }
         } header: {
             Text("About")
-        }
-    }
-
-    // MARK: - Sign Out (always visible)
-
-    private var signOutSection: some View {
-        Section {
-            Button(role: .destructive) {
-                // Sign out from both auth systems and return to login
-                services.authService.signOut()
-                services.authStore.signOutToGuest()
-                // Reset onboarding flag so the login screen shows
-                UserDefaults.standard.set(false, forKey: "Todus.hasSeenOnboarding")
-                UserDefaults.standard.set(false, forKey: "TaskApp.hasSeenOnboarding")
-                dismiss()
-            } label: {
-                HStack {
-                    Spacer()
-                    Text(services.authService.isAuthenticated ? "Log out" : "Return to Login")
-                        .font(.system(size: 16, weight: .semibold))
-                    Spacer()
-                }
-            }
         }
     }
 
@@ -292,14 +646,59 @@ struct SettingsView: View {
 
     private var authStateLabel: String {
         switch services.authService.authState {
-        case .guest: return "Guest"
+        case .guest:          return "Guest"
         case .authenticating: return "Authenticating..."
-        case .otpPending: return "OTP Pending"
-        case .authenticated: return "Authenticated"
+        case .otpPending:     return "OTP Pending"
+        case .authenticated:  return "Authenticated"
         }
     }
 
     private func simplifiedModelName(_ model: String) -> String {
         model.split(separator: "/").last.map(String.init) ?? model
     }
+
+    private func performLogout() {
+        services.authService.hasSeenOnboarding = false
+        services.authService.signOut()
+        services.authStore.signOutToGuest()
+        dismiss()
+    }
+
+    /// Deletes the user's account on the backend, clears local auth state, and dismisses settings.
+    private func performDeleteAccount() async {
+        isDeletingAccount = true
+        defer { isDeletingAccount = false }
+
+        do {
+            // Call backend to delete account and all associated data
+            try await services.apiClient.deleteAccount()
+        } catch {
+            // Even if the backend call fails, sign out locally so the user isn't stuck
+            AppLogger.shared.log("Delete account failed: \(error.localizedDescription)")
+        }
+
+        // Clear local state — Keychain token, auth flags, SwiftData
+        deleteConfirmText = ""
+        services.authService.hasSeenOnboarding = false
+        services.authService.signOut()
+        services.authStore.signOutToGuest()
+
+        // Wipe all local SwiftData records (tasks + folders)
+        try? modelContext.delete(model: TaskRecord.self)
+        try? modelContext.delete(model: FolderRecord.self)
+        try? modelContext.save()
+
+        dismiss()
+    }
+
+    /// Disconnects Gmail by removing the email connection on the backend.
+    private func performDisconnectGmail() async {
+        do {
+            try await services.apiClient.disconnectEmail()
+            await services.emailService.checkConnection()
+        } catch {
+            AppLogger.shared.log("Disconnect Gmail failed: \(error.localizedDescription)")
+        }
+    }
 }
+

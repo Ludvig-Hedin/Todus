@@ -21,7 +21,11 @@ struct CalendarTaskView: View {
         let tasks: [TaskRecord]
     }
 
-    private var buckets: [DateBucket] {
+    // Cached buckets — recomputed only when inputs change, not on every body evaluation.
+    // Previously this was a computed property that re-ran during animations and scrolling.
+    @State private var buckets: [DateBucket] = []
+
+    private func recomputeBuckets() {
         let cal = Calendar.current
         let now = Date()
         let todayStart = cal.startOfDay(for: now)
@@ -63,51 +67,57 @@ struct CalendarTaskView: View {
         if !thisWeek.isEmpty  { result.append(DateBucket(id: "week",     label: "This Week", tasks: thisWeek)) }
         if !later.isEmpty     { result.append(DateBucket(id: "later",    label: "Later",     tasks: later)) }
         if !noDate.isEmpty    { result.append(DateBucket(id: "nodate",   label: "No Date",   tasks: noDate)) }
-        return result
+        buckets = result
     }
 
     // MARK: - Body
 
     var body: some View {
-        if buckets.isEmpty {
-            emptyState
-        } else {
-            List {
-                ForEach(buckets) { bucket in
-                    Section {
-                        ForEach(bucket.tasks) { task in
-                            TaskRowView(task: task) {
-                                taskPendingMove = task
-                            } onOpenDetails: {
-                                selectedTask = task
+        Group {
+            if buckets.isEmpty {
+                emptyState
+            } else {
+                List {
+                    ForEach(buckets) { bucket in
+                        Section {
+                            ForEach(bucket.tasks) { task in
+                                TaskRowView(task: task) {
+                                    taskPendingMove = task
+                                } onOpenDetails: {
+                                    selectedTask = task
+                                }
+                                .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+                                .listRowBackground(Color.clear)
+                                .listRowSeparator(.hidden)
                             }
-                            .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
-                            .listRowBackground(Color.clear)
-                            .listRowSeparator(.hidden)
+                        } header: {
+                            Text(bucket.label)
+                                .font(.system(size: 12, weight: .semibold))
+                                .tracking(-0.1)
+                                .textCase(nil)
+                                .foregroundStyle(AppTheme.mutedText)
                         }
-                    } header: {
-                        Text(bucket.label)
-                            .font(.system(size: 12, weight: .semibold))
-                            .tracking(-0.1)
-                            .textCase(nil)
-                            .foregroundStyle(AppTheme.mutedText)
                     }
                 }
-            }
-            .listStyle(.plain)
-            .scrollContentBackground(.hidden)
-            .scrollDismissesKeyboard(.interactively)
-            .sheet(item: $taskPendingMove) { task in 
-                MoveToFolderSheet(task: task)
-                    .presentationDragIndicator(.visible)
-                    .presentationBackground(AppTheme.backgroundTop)
-            }
-            .sheet(item: $selectedTask) { task in 
-                TaskDetailSheet(task: task)
-                    .presentationDragIndicator(.visible)
-                    .presentationBackground(AppTheme.backgroundTop)
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .scrollDismissesKeyboard(.interactively)
+                .sheet(item: $taskPendingMove) { task in
+                    MoveToFolderSheet(task: task)
+                        .presentationDragIndicator(.visible)
+                        .presentationBackground(AppTheme.backgroundTop)
+                }
+                .sheet(item: $selectedTask) { task in
+                    TaskDetailSheet(task: task)
+                        .presentationDragIndicator(.visible)
+                        .presentationBackground(AppTheme.backgroundTop)
+                }
             }
         }
+        .onAppear { recomputeBuckets() }
+        .onChange(of: allTasks) { recomputeBuckets() }
+        .onChange(of: searchText) { recomputeBuckets() }
+        .onChange(of: services.selectedFolderID) { recomputeBuckets() }
     }
 
     // MARK: - Helpers

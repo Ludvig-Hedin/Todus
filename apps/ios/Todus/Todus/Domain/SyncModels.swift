@@ -1,5 +1,39 @@
 import Foundation
 
+/// Controls the direction of sync between Todus and Apple Reminders.
+/// Stored in UserDefaults via AppServices.remindersSyncDirection.
+enum RemindersSyncDirection: String, CaseIterable, Identifiable, Sendable {
+    case twoWay      // Both directions — default
+    case toReminders // Todus → Apple Reminders only
+    case fromReminders // Apple Reminders → Todus only
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .twoWay: return "Two-way"
+        case .toReminders: return "To Reminders"
+        case .fromReminders: return "From Reminders"
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .twoWay: return "Changes sync both ways"
+        case .toReminders: return "Todus tasks push to Reminders"
+        case .fromReminders: return "Reminders pull into Todus"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .twoWay: return "arrow.left.arrow.right"
+        case .toReminders: return "arrow.right"
+        case .fromReminders: return "arrow.left"
+        }
+    }
+}
+
 enum SyncMutationAction: String, Codable, Sendable {
     case upsert
     case delete

@@ -16,9 +16,13 @@ struct TasksTabView: View {
         ZStack {
             AppTheme.backgroundTop
                 .ignoresSafeArea()
-                .onTapGesture { dismissKeyboard() }
+                .onTapGesture { self.dismissKeyboard() }
 
             VStack(spacing: 12) {
+                AppTopHeader(title: "Tasks")
+                    .padding(.horizontal, 16)
+                    .padding(.top, 4)
+
                 header
                     .padding(.horizontal, 16)
 
@@ -38,8 +42,8 @@ struct TasksTabView: View {
                     case .board:
                         BoardView()
                     case .table:
+                        // Padding is managed internally via listRowInsets — no outer horizontal padding
                         TaskTableView()
-                            .padding(.horizontal, 16)
                     case .calendar:
                         CalendarTaskView(searchText: searchText)
                             .padding(.horizontal, 16)
@@ -66,7 +70,7 @@ struct TasksTabView: View {
             }
             .padding(.horizontal, 12)
             .padding(.top, 8)
-            .padding(.bottom, 60) // Extra space for the custom tab bar
+            .padding(.bottom, 8) // Breathing room above tab bar (system handles safe area)
             .background(.clear)
         }
     }
@@ -76,21 +80,6 @@ struct TasksTabView: View {
     private var header: some View {
         HStack(spacing: 8) {
             viewModePicker
-
-            Button {
-                services.showsSettings = true
-            } label: {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.primary)
-                    .frame(width: 36, height: 36)
-                    .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .stroke(AppTheme.cardBorder, lineWidth: 1)
-                    )
-            }
-            .buttonStyle(.plain)
         }
         .padding(.vertical, 12)
     }
@@ -223,9 +212,4 @@ struct TasksTabView: View {
             .padding(.vertical, 2)
         }
     }
-}
-
-/// Helper to dismiss keyboard from any view
-private func dismissKeyboard() {
-    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
 }

@@ -221,10 +221,15 @@ final class AppleRemindersSyncService {
 
             // Mark as `parsed` (title already set — no AI enrichment needed) and
             // `synced` (originated in Reminders, nothing to push back right now).
+            // Only store notes as description if it's non-empty and differs from the title.
+            // When upsert() syncs a title-only task to Reminders, it writes rawInput into the
+            // notes field — causing a round-trip where notes == title, producing visible
+            // duplication in TaskRowView. Clearing it here prevents that.
+            let derivedDescription = (reminder.notes.isEmpty || reminder.notes == reminder.title) ? "" : reminder.notes
             let task = TaskRecord(
                 rawInput: reminder.title,
                 title: reminder.title,
-                taskDescription: reminder.notes,
+                taskDescription: derivedDescription,
                 reminderIdentifier: reminder.identifier,
                 dueDate: reminder.dueDate,
                 parseState: .parsed,

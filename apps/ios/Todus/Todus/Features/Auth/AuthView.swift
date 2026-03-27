@@ -1,5 +1,4 @@
 import SwiftUI
-import AuthenticationServices
 
 /// Sign-in screen — matches the RN app's auth flow.
 /// Stage 1: Email input + social buttons (Apple, Google).
@@ -94,8 +93,10 @@ struct AuthView: View {
         VStack(spacing: 10) {
             TextField("Email", text: $email)
                 .keyboardType(.emailAddress)
+                .textContentType(.emailAddress)
                 .autocorrectionDisabled()
                 .textInputAutocapitalization(.never)
+                .submitLabel(.continue)
                 .focused($isEmailFocused)
                 .font(.system(size: 16, weight: .medium))
                 .padding(.horizontal, 20)
@@ -105,6 +106,11 @@ struct AuthView: View {
                     Capsule()
                         .stroke(AppTheme.strongBorder, lineWidth: 1)
                 )
+                .onSubmit {
+                    guard isValidEmail else { return }
+                    isEmailFocused = false
+                    Task { await authService.sendEmailOTP(email: email) }
+                }
 
             // Send code button — only visible when email looks valid
             if isValidEmail {
@@ -138,6 +144,7 @@ struct AuthView: View {
             TextField("Verification code", text: $code)
                 .textContentType(.oneTimeCode)
                 .keyboardType(.numberPad)
+                .submitLabel(.done)
                 .focused($isCodeFocused)
                 .font(.system(size: 16, weight: .medium))
                 .padding(.horizontal, 20)
@@ -234,25 +241,26 @@ struct AuthView: View {
             }
             .padding(.vertical, 6)
 
-            // Apple Sign In — uses native button for guaranteed correct rendering.
-            // Black on light mode, white on dark mode (Apple's standard).
-            SignInWithAppleButton(.signIn) { request in
-                request.requestedScopes = [.email, .fullName]
-            } onCompletion: { _ in }
-            .signInWithAppleButtonStyle(colorScheme == .dark ? .white : .black)
-            .frame(maxWidth: .infinity)
-            .frame(height: 48)
-            .clipShape(Capsule())
-            .allowsHitTesting(false)
-            .overlay {
-                Color.clear
-                    .contentShape(Capsule())
-                    .onTapGesture {
-                        Task { await authService.signInWithApple() }
-                    }
+            // Apple Sign In — custom button so logo size and label match Google exactly.
+            // Taps invoke the native Sign In with Apple flow via authService.
+            Button {
+                Task { await authService.signInWithApple() }
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "apple.logo")
+                        .font(.system(size: 18, weight: .medium))
+                        .frame(width: 20, height: 20)
+                    Text("Continue with Apple")
+                        .font(.system(size: 16, weight: .semibold))
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: 48)
+                .background(colorScheme == .dark ? Color.white : Color.black, in: Capsule())
+                .foregroundStyle(colorScheme == .dark ? Color.black : Color.white)
             }
+            .buttonStyle(.plain)
 
-            // Google Sign In — outline pill with proper Google "G" SVG-style logo
+            // Google Sign In — outline pill with accurate multi-color Google SVG logo
             Button {
                 Task { await authService.signInWithGoogle() }
             } label: {
@@ -282,7 +290,8 @@ struct AuthView: View {
     // MARK: - Footer (only on main login page, hidden on OTP page)
 
     private var footer: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: 0) {
+            // Extra breathing room between Google button and this row
             Button {
                 authService.continueAsGuest()
             } label: {
@@ -291,7 +300,9 @@ struct AuthView: View {
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
+            .padding(.top, 20)
 
+            // Terms / Privacy pushed further down with generous top padding
             HStack(spacing: 8) {
                 Text("Terms of Service")
                 Circle().fill(.secondary.opacity(0.5)).frame(width: 3, height: 3)
@@ -299,8 +310,8 @@ struct AuthView: View {
             }
             .font(.system(size: 13, weight: .regular))
             .foregroundStyle(.secondary.opacity(0.7))
+            .padding(.top, 28)
         }
-        .padding(.top, 8)
     }
 
     // MARK: - Error Banner
@@ -337,66 +348,90 @@ struct AuthView: View {
     }
 }
 
-// MARK: - Google Logo (proper "G" shape)
+// MARK: - Google Logo
 
-/// Accurate multi-color Google "G" logo using SVG-path-style drawing
+/// Pixel-accurate Google "G" logo — paths converted 1:1 from the official Google SVG
+/// (viewBox 0 0 24 24). Scaled proportionally to whatever frame is applied.
 private struct GoogleLogoView: View {
     var body: some View {
         Canvas { context, size in
-            let w = size.width
-            let h = size.height
-            let cx = w / 2
-            let cy = h / 2
-            let r = min(w, h) / 2 * 0.9 // Outer radius
+            // Scale all SVG coordinates (24×24 viewBox) to the rendered frame
+            let s = size.width / 24.0
+            func pt(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: x * s, y: y * s) }
 
-            // Google "G" is a circle with a gap on the right + a horizontal bar
-            // Colors: top-right = blue, bottom-right = red, bottom-left = yellow, top-left = green
+            // Blue #4285F4
+            // M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z
+            var blue = Path()
+            blue.move(to: pt(22.56, 12.25))
+            blue.addCurve(to: pt(22.36, 10.00),
+                          control1: pt(22.56, 11.47), control2: pt(22.49, 10.72))
+            blue.addLine(to: pt(12.00, 10.00))
+            blue.addLine(to: pt(12.00, 14.26))
+            blue.addLine(to: pt(17.92, 14.26))
+            blue.addCurve(to: pt(15.71, 17.57),
+                          control1: pt(17.66, 15.63), control2: pt(16.88, 16.79))
+            blue.addLine(to: pt(15.71, 20.34))
+            blue.addLine(to: pt(19.28, 20.34))
+            blue.addCurve(to: pt(22.56, 12.25),
+                          control1: pt(21.36, 18.42), control2: pt(22.56, 15.60))
+            blue.closeSubpath()
+            context.fill(blue, with: .color(Color(red: 0.259, green: 0.522, blue: 0.957)))
 
-            // Blue arc (right side, from -30° to 90° clockwise = top-right quadrant)
-            drawArc(in: &context, center: CGPoint(x: cx, y: cy), radius: r,
-                     startAngle: .degrees(-30), endAngle: .degrees(70),
-                     color: Color(red: 0.26, green: 0.52, blue: 0.96))
+            // Green #34A853
+            // M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z
+            var green = Path()
+            green.move(to: pt(12.00, 23.00))
+            green.addCurve(to: pt(19.28, 20.34),
+                           control1: pt(14.97, 23.00), control2: pt(17.46, 22.02))
+            green.addLine(to: pt(15.71, 17.57))
+            green.addCurve(to: pt(12.00, 18.63),
+                           control1: pt(14.73, 18.23), control2: pt(13.48, 18.63))
+            green.addCurve(to: pt(5.84, 14.10),
+                           control1: pt(9.14, 18.63), control2: pt(6.71, 16.70))
+            green.addLine(to: pt(2.18, 14.10))
+            green.addLine(to: pt(2.18, 16.94))
+            green.addCurve(to: pt(12.00, 23.00),
+                           control1: pt(3.99, 20.53), control2: pt(7.70, 23.00))
+            green.closeSubpath()
+            context.fill(green, with: .color(Color(red: 0.204, green: 0.659, blue: 0.325)))
 
-            // Green arc (bottom-right)
-            drawArc(in: &context, center: CGPoint(x: cx, y: cy), radius: r,
-                     startAngle: .degrees(70), endAngle: .degrees(160),
-                     color: Color(red: 0.20, green: 0.66, blue: 0.33))
+            // Yellow #FBBC05
+            // M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z
+            var yellow = Path()
+            yellow.move(to: pt(5.84, 14.09))
+            yellow.addCurve(to: pt(5.49, 12.00),
+                            control1: pt(5.62, 13.43), control2: pt(5.49, 12.73))
+            // Smooth cubic (S): reflected cp1 from previous cp2
+            yellow.addCurve(to: pt(5.84, 9.91),
+                            control1: pt(5.49, 11.27), control2: pt(5.62, 10.57))
+            yellow.addLine(to: pt(5.84, 7.07))
+            yellow.addLine(to: pt(2.18, 7.07))
+            yellow.addCurve(to: pt(1.00, 12.00),
+                            control1: pt(1.43, 8.55), control2: pt(1.00, 10.22))
+            // Smooth cubic S: reflected cp1 from previous cp2 (1, 10.22) → (1, 13.78)
+            yellow.addCurve(to: pt(2.18, 16.93),
+                            control1: pt(1.00, 13.78), control2: pt(1.43, 15.45))
+            yellow.addLine(to: pt(5.03, 14.71))
+            yellow.addLine(to: pt(5.84, 14.09))
+            yellow.closeSubpath()
+            context.fill(yellow, with: .color(Color(red: 0.980, green: 0.737, blue: 0.020)))
 
-            // Yellow arc (bottom-left)
-            drawArc(in: &context, center: CGPoint(x: cx, y: cy), radius: r,
-                     startAngle: .degrees(160), endAngle: .degrees(250),
-                     color: Color(red: 0.98, green: 0.74, blue: 0.02))
-
-            // Red arc (top-left to top)
-            drawArc(in: &context, center: CGPoint(x: cx, y: cy), radius: r,
-                     startAngle: .degrees(250), endAngle: .degrees(330),
-                     color: Color(red: 0.92, green: 0.26, blue: 0.21))
-
-            // Inner circle cutout (creates the "C" shape)
-            let innerR = r * 0.6
-            let innerRect = CGRect(x: cx - innerR, y: cy - innerR,
-                                    width: innerR * 2, height: innerR * 2)
-            context.fill(Circle().path(in: innerRect),
-                         with: .color(AppTheme.surfaceSecondary))
-
-            // Horizontal bar (the "dash" in the G, extending right from center)
-            let barH = r * 0.28
-            let barRect = CGRect(x: cx - r * 0.05, y: cy - barH / 2,
-                                  width: r * 0.95, height: barH)
-            context.fill(
-                RoundedRectangle(cornerRadius: barH * 0.15).path(in: barRect),
-                with: .color(Color(red: 0.26, green: 0.52, blue: 0.96))
-            )
+            // Red #EA4335
+            // M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z
+            var red = Path()
+            red.move(to: pt(12.00, 5.38))
+            red.addCurve(to: pt(16.21, 7.02),
+                         control1: pt(13.62, 5.38), control2: pt(15.06, 5.94))
+            red.addLine(to: pt(19.36, 3.87))
+            red.addCurve(to: pt(12.00, 1.00),
+                         control1: pt(17.45, 2.09), control2: pt(14.97, 1.00))
+            red.addCurve(to: pt(2.18, 7.07),
+                         control1: pt(7.70, 1.00), control2: pt(3.99, 3.47))
+            red.addLine(to: pt(5.84, 9.91))
+            red.addCurve(to: pt(12.00, 5.38),
+                         control1: pt(6.71, 7.31), control2: pt(9.14, 5.38))
+            red.closeSubpath()
+            context.fill(red, with: .color(Color(red: 0.918, green: 0.263, blue: 0.208)))
         }
-    }
-
-    private func drawArc(in context: inout GraphicsContext, center: CGPoint, radius: CGFloat,
-                          startAngle: Angle, endAngle: Angle, color: Color) {
-        var path = Path()
-        path.move(to: center)
-        path.addArc(center: center, radius: radius,
-                     startAngle: startAngle, endAngle: endAngle, clockwise: false)
-        path.closeSubpath()
-        context.fill(path, with: .color(color))
     }
 }
