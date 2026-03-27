@@ -231,17 +231,18 @@ const Thread = memo(
             data-thread-id={idToUse}
             key={idToUse}
             className={cn(
-              'hover:bg-offsetLight dark:hover:bg-primary/5 group relative mx-1 flex cursor-pointer flex-col items-start rounded-lg py-2 text-left text-sm hover:opacity-100',
+              'hover:bg-accent/60 group relative mx-1 flex cursor-pointer flex-col items-start rounded-lg py-2 text-left text-[13px] transition-colors duration-100',
               (isMailSelected || isMailBulkSelected || isKeyboardFocused) &&
-                'border-border bg-primary/5 opacity-100',
-              isKeyboardFocused && 'ring-primary/50',
-              'relative',
-              'group',
+                'bg-accent/70 opacity-100',
+              isKeyboardFocused && 'ring-2 ring-ring/30',
             )}
           >
             <div
               className={cn(
-                'dark:bg-panelDark z-25 absolute right-2 flex -translate-y-1/2 items-center gap-1 rounded-xl border bg-white p-1 opacity-0 shadow-sm group-hover:opacity-100',
+                'z-25 absolute right-2 flex -translate-y-1/2 items-center gap-0.5 rounded-lg border bg-popover p-0.5 shadow-[0_2px_8px_rgba(0,0,0,0.06)] transition-opacity duration-100',
+                // Visible on hover (pointer devices) and when thread is selected/focused (touch devices)
+                'opacity-0 group-hover:opacity-100 focus-within:opacity-100',
+                (isMailSelected || isKeyboardFocused) && 'opacity-100',
                 index === 0 ? 'top-4' : 'top-[-1px]',
               )}
             >
@@ -265,7 +266,7 @@ const Thread = memo(
                 </TooltipTrigger>
                 <TooltipContent
                   side={index === 0 ? 'bottom' : 'top'}
-                  className="mb-1 bg-white dark:bg-[#1A1A1A]"
+                  className="mb-1"
                 >
                   {displayStarred
                     ? m['common.threadDisplay.unstar']()
@@ -290,7 +291,7 @@ const Thread = memo(
                 </TooltipTrigger>
                 <TooltipContent
                   side={index === 0 ? 'bottom' : 'top'}
-                  className="dark:bg-panelDark mb-1 bg-white"
+                  className="mb-1"
                 >
                   {m['common.mail.toggleImportant']()}
                 </TooltipContent>
@@ -311,7 +312,7 @@ const Thread = memo(
                 </TooltipTrigger>
                 <TooltipContent
                   side={index === 0 ? 'bottom' : 'top'}
-                  className="dark:bg-panelDark mb-1 bg-white"
+                  className="mb-1"
                 >
                   {m['common.threadDisplay.archive']()}
                 </TooltipContent>
@@ -322,7 +323,7 @@ const Thread = memo(
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="h-6 w-6 hover:bg-[#FDE4E9] dark:hover:bg-[#411D23] [&_svg]:size-3.5"
+                      className="h-6 w-6 hover:bg-destructive/10 [&_svg]:size-3.5"
                       onClick={(e: React.MouseEvent) => {
                         e.stopPropagation();
                         moveThreadTo('bin');
@@ -333,7 +334,7 @@ const Thread = memo(
                   </TooltipTrigger>
                   <TooltipContent
                     side={index === 0 ? 'bottom' : 'top'}
-                    className="dark:bg-panelDark mb-1 bg-white"
+                    className="mb-1"
                   >
                     {m['common.actions.Bin']()}
                   </TooltipContent>
@@ -353,7 +354,7 @@ const Thread = memo(
                     )}
                   >
                     <div
-                      className="flex h-full w-full items-center justify-center rounded-full bg-[#006FFE] p-2 dark:bg-[#006FFE]"
+                      className="flex h-full w-full items-center justify-center rounded-full bg-mainBlue p-2"
                       onClick={(e: React.MouseEvent) => {
                         e.stopPropagation();
                         setMail((prev: Config) => ({
@@ -372,7 +373,7 @@ const Thread = memo(
                       displayUnread && !isMailSelected && !isFolderSent ? '' : 'border',
                     )}
                   >
-                    <div className="flex h-full w-full items-center justify-center rounded-full bg-[#FFFFFF] p-2 dark:bg-[#373737]">
+                    <div className="flex h-full w-full items-center justify-center rounded-full bg-secondary p-2">
                       <GroupPeople className="h-4 w-4" />
                     </div>
                   </Avatar>
@@ -422,7 +423,7 @@ const Thread = memo(
                             </span>
                             {displayUnread && !isMailSelected && !isFolderSent ? (
                               <>
-                                <span className="ml-0.5 size-2 rounded-full bg-[#006FFE]" />
+                                <span className="ml-0.5 size-1.5 rounded-full bg-mainBlue" />
                               </>
                             ) : null}
                           </div>
@@ -465,7 +466,7 @@ const Thread = memo(
                     {latestMessage.receivedOn ? (
                       <p
                         className={cn(
-                          'text-muted-foreground text-nowrap text-xs font-normal opacity-70 transition-opacity group-hover:opacity-100 dark:text-[#8C8C8C]',
+                          'text-muted-foreground text-nowrap text-[11px] font-normal opacity-70 transition-opacity group-hover:opacity-100',
                           isMailSelected && 'opacity-100',
                         )}
                       >
@@ -477,7 +478,7 @@ const Thread = memo(
                     {isFolderSent ? (
                       <p
                         className={cn(
-                          'mt-1 line-clamp-1 max-w-[50ch] overflow-hidden text-sm text-[#8C8C8C] md:max-w-[25ch]',
+                          'mt-1 line-clamp-1 max-w-[50ch] overflow-hidden text-[13px] text-muted-foreground md:max-w-[25ch]',
                         )}
                       >
                         {latestMessage.to.map((e) => e.email).join(', ')}
@@ -485,7 +486,7 @@ const Thread = memo(
                     ) : (
                       <p
                         className={cn(
-                          'mt-1 line-clamp-1 w-[95%] min-w-0 overflow-hidden text-sm text-[#8C8C8C]',
+                          'mt-1 line-clamp-1 w-[95%] min-w-0 overflow-hidden text-[13px] text-muted-foreground',
                         )}
                       >
                         {highlightText(latestMessage.subject, searchValue.highlight)}
@@ -502,7 +503,7 @@ const Thread = memo(
                     )}
                   </div>
                   {emailContent && (
-                    <div className="text-muted-foreground mt-2 line-clamp-2 text-xs">
+                    <div className="text-muted-foreground mt-1.5 line-clamp-2 text-[12px] leading-relaxed">
                       {highlightText(emailContent, searchValue.highlight)}
                     </div>
                   )}
@@ -632,7 +633,7 @@ const Draft = memo(({ message, index }: { message: { id: string }; index: number
       >
         <div
           className={cn(
-            'dark:bg-panelDark shadow-xs absolute right-2 z-20 flex -translate-y-1/2 items-center gap-1 rounded-xl border bg-white p-1 opacity-0 group-hover:opacity-100',
+            'shadow-xs absolute right-2 z-20 flex -translate-y-1/2 items-center gap-1 rounded-xl border bg-popover p-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100',
             index === 0 ? 'top-4' : 'top-[-1px]',
           )}
           aria-busy={optimisticState.isRemoving}
@@ -652,7 +653,7 @@ const Draft = memo(({ message, index }: { message: { id: string }; index: number
             </TooltipTrigger>
             <TooltipContent
               side={index === 0 ? 'bottom' : 'top'}
-              className="dark:bg-panelDark mb-1 bg-white"
+              className="mb-1"
             >
               {m['common.actions.Bin']()}
             </TooltipContent>
@@ -677,7 +678,7 @@ const Draft = memo(({ message, index }: { message: { id: string }; index: number
                 {draft.rawMessage?.internalDate && (
                   <p
                     className={cn(
-                      'text-muted-foreground text-nowrap text-xs font-normal opacity-70 transition-opacity group-hover:opacity-100 dark:text-[#8C8C8C]',
+                      'text-muted-foreground text-nowrap text-[11px] font-normal opacity-70 transition-opacity group-hover:opacity-100',
                     )}
                   >
                     {formatDate(Number(draft.rawMessage?.internalDate))}
@@ -687,7 +688,7 @@ const Draft = memo(({ message, index }: { message: { id: string }; index: number
               <div className="flex justify-between">
                 <p
                   className={cn(
-                    'mt-1 line-clamp-1 max-w-[50ch] text-sm text-[#8C8C8C] md:max-w-[30ch]',
+                    'mt-1 line-clamp-1 max-w-[50ch] text-[13px] text-muted-foreground md:max-w-[30ch]',
                   )}
                 >
                   {draft?.subject}
@@ -1270,12 +1271,20 @@ export const MailList = memo(
                 <div className="flex flex-col items-center justify-center gap-2 text-center">
                   <EmptyStateIcon width={200} height={200} />
                   <div className="mt-5">
-                    <p className="text-lg">It's empty here</p>
-                    <p className="text-md text-muted-foreground dark:text-white/50">
-                      Search for another email or{' '}
-                      <button type="button" className="underline cursor-pointer" onClick={clearFilters}>
-                        clear filters
-                      </button>
+                    <p className="text-base font-medium">
+                      {isFiltering ? 'No results found' : 'It\u2019s empty here'}
+                    </p>
+                    <p className="mt-1 text-[13px] text-muted-foreground">
+                      {isFiltering ? (
+                        <>
+                          Try a different search or{' '}
+                          <button type="button" className="underline cursor-pointer" onClick={clearFilters}>
+                            clear filters
+                          </button>
+                        </>
+                      ) : (
+                        'No emails in this folder yet'
+                      )}
                     </p>
                   </div>
                 </div>

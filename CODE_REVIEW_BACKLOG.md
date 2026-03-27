@@ -169,3 +169,43 @@ Maintained by the automated code-review agent. Updated on each review session.
 - **Summary:** `allowedDomains` includes `localhost` as a fallback. Low risk since CORS from localhost requires local attacker, but not ideal for production.
 - **Suggested approach:** Gate `localhost` behind a development environment check.
 - **Status:** `open`
+
+### CR-017: AuthService logs sensitive auth response data
+- **Area/Scope:** `ios/auth`
+- **Type:** security
+- **Impact:** internal
+- **Risk:** medium
+- **Files:** `apps/ios/Todus/Todus/Services/Auth/AuthService.swift`
+- **Summary:** Recent Apple and Google auth debugging logged raw response metadata and callback URLs. On affected paths, that can expose session cookies or callback tokens in device logs.
+- **Suggested approach:** Remove or redact the sensitive fields and keep any detailed logging behind `#if DEBUG` with non-secret summaries only.
+- **Status:** `auto-fixed` — Replaced sensitive logs with debug-only status/scheme logging in `AuthService.swift` (2026-03-27).
+
+### CR-018: Todus Xcode target missing locally referenced source files
+- **Area/Scope:** `ios/build`
+- **Type:** bug
+- **Impact:** user-facing
+- **Risk:** medium
+- **Files:** `apps/ios/Todus/Todus.xcodeproj/project.pbxproj`, `apps/ios/Todus/Todus/Services/NetworkMonitor.swift`, `apps/ios/Todus/Todus/Features/Calendar/CalendarPermissionView.swift`
+- **Summary:** The app referenced `NetworkMonitor` and `CalendarPermissionView`, but neither source file had been added to the Xcode target, causing simulator builds to fail despite the files existing on disk.
+- **Suggested approach:** Add the missing file references and source build entries to the Xcode project whenever new Swift files are introduced outside Xcode.
+- **Status:** `auto-fixed` — Added both files to the Todus target in `project.pbxproj` and verified the simulator build succeeds (2026-03-27).
+
+### CR-019: Tracked CustomTabBar implementation drifted from intended UI
+- **Area/Scope:** `ios/navigation`
+- **Type:** bug
+- **Impact:** user-facing
+- **Risk:** medium
+- **Files:** `apps/ios/Todus/Todus/Features/Tasks/CustomTabBar.swift`
+- **Summary:** The tracked `CustomTabBar.swift` in the target had diverged from the intended implementation and no longer type-checked, while a newer untracked copy existed elsewhere. That left the app building the wrong file.
+- **Suggested approach:** Keep the tracked target file aligned with the implementation used by `MainTabView`, or move the source of truth into one location and update the Xcode project accordingly.
+- **Status:** `auto-fixed` — Replaced the tracked target file with the intended glass-pill implementation and verified the build (2026-03-27).
+
+### CR-020: Voice permission API uses deprecated recorder permission call
+- **Area/Scope:** `ios/voice`
+- **Type:** DX
+- **Impact:** internal
+- **Risk:** low
+- **Files:** `apps/ios/Todus/Todus/Features/AI/AIChatView.swift`, `apps/ios/Todus/Todus/Features/Voice/VoiceInputButton.swift`
+- **Summary:** The build still emits deprecation warnings for `requestRecordPermission`. This is low-risk, but it should be migrated to `AVAudioApplication.requestRecordPermission` to stay aligned with the current iOS API surface.
+- **Suggested approach:** Update both call sites to the iOS 17+ API with a compatibility branch for older OS versions if needed.
+- **Status:** `open`

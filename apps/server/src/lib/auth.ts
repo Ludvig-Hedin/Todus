@@ -194,24 +194,66 @@ export const createAuth = () => {
         },
       }),
       // Email OTP — sends a 6-digit code via Resend for native app sign-in.
-      // Endpoints: POST /api/auth/email-otp/send-verification-otp, POST /api/auth/email-otp/verify-email
+      // Endpoints: POST /api/auth/email-otp/send-verification-otp, POST /api/auth/sign-in/email-otp
       emailOTP({
         otpLength: 6,
         expiresIn: 300, // 5 minutes
         sendVerificationOTP: async ({ email, otp, type }) => {
-          await resend().emails.send({
-            from: 'Todus <onboarding@todus.app>',
-            to: email,
-            subject: `Your Todus verification code: ${otp}`,
-            html: `
-              <div style="font-family: system-ui, -apple-system, sans-serif; max-width: 400px; margin: 0 auto; padding: 40px 20px;">
-                <h2 style="font-size: 24px; font-weight: 600; margin-bottom: 8px;">Your verification code</h2>
-                <p style="color: #666; margin-bottom: 24px;">Enter this code in the Todus app to ${type === 'sign-in' ? 'sign in' : 'verify your email'}.</p>
-                <div style="background: #f5f5f5; border-radius: 12px; padding: 20px; text-align: center; font-size: 32px; font-weight: 700; letter-spacing: 8px; font-family: monospace;">${otp}</div>
-                <p style="color: #999; font-size: 13px; margin-top: 24px;">This code expires in 5 minutes. If you didn't request this, you can safely ignore it.</p>
-              </div>
-            `,
-          });
+          // Mask email PII in logs: show first char + domain only
+          const maskedEmail = email.replace(/^(.).*@/, '$1***@');
+          console.log(`[EMAIL_OTP] Sending OTP to ${maskedEmail}, type=${type}, code length=${otp.length}`);
+          const resendClient = resend();
+          const otpHtml = `
+            <div style="font-family: system-ui, -apple-system, sans-serif; max-width: 400px; margin: 0 auto; padding: 40px 20px;">
+              <h2 style="font-size: 24px; font-weight: 600; margin-bottom: 8px;">Your verification code</h2>
+              <p style="color: #666; margin-bottom: 24px;">Enter this code in the Todus app to ${type === 'sign-in' ? 'sign in' : 'verify your email'}.</p>
+              <div style="background: #f5f5f5; border-radius: 12px; padding: 20px; text-align: center; font-size: 32px; font-weight: 700; letter-spacing: 8px; font-family: monospace;">${otp}</div>
+              <p style="color: #999; font-size: 13px; margin-top: 24px;">This code expires in 5 minutes. If you didn't request this, you can safely ignore it.</p>
+            </div>
+          `;
+
+          // Try primary sender (todus.app domain) first
+          try {
+            const result = await resendClient.emails.send({
+              from: 'Todus <onboarding@todus.app>',
+              to: email,
+              subject: 'Your Todus verification code',
+              html: otpHtml,
+            });
+            console.log(`[EMAIL_OTP] Email sent successfully via todus.app to ${maskedEmail}`, JSON.stringify(result));
+            return;
+          } catch (primaryError) {
+            const msg = primaryError instanceof Error ? primaryError.message : String(primaryError);
+            // Fall through to test domain if todus.app domain is not yet verified
+            console.warn(`[EMAIL_OTP] Primary sender failed (todus.app), attempting fallback. Error: ${msg}`);
+          }
+
+          const canUseDevFallback =
+            env.NODE_ENV !== 'production' && email.toLowerCase() === 'ludvighedin15@gmail.com';
+
+          if (!canUseDevFallback) {
+            throw new APIError('INTERNAL_SERVER_ERROR', {
+              message: 'Failed to send verification email from the verified sender.',
+            });
+          }
+
+          // Fallback: use Resend's test domain only for the owner mailbox during local/dev
+          // verification. Resend blocks arbitrary recipients on resend.dev.
+          try {
+            const result = await resendClient.emails.send({
+              from: 'Todus <onboarding@resend.dev>',
+              to: email,
+              subject: 'Your Todus verification code',
+              html: otpHtml,
+            });
+            console.log(`[EMAIL_OTP] Email sent via resend.dev fallback to ${maskedEmail}`, JSON.stringify(result));
+          } catch (fallbackError) {
+            const msg = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
+            console.error(`[EMAIL_OTP] Both senders failed for ${maskedEmail}. Fallback error: ${msg}`);
+            throw new APIError('INTERNAL_SERVER_ERROR', {
+              message: 'Failed to send verification email. Please try again later.',
+            });
+          }
         },
       }),
     ],

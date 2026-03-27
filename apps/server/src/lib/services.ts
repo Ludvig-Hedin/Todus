@@ -2,10 +2,21 @@ import { env } from '../env';
 import { Redis } from '@upstash/redis';
 import { Resend } from 'resend';
 
-export const resend = () =>
-  env.RESEND_API_KEY
-    ? new Resend(env.RESEND_API_KEY)
-    : { emails: { send: async (...args: unknown[]) => console.log(args) } };
+export const resend = () => {
+  if (!env.RESEND_API_KEY) {
+    console.error('[RESEND] RESEND_API_KEY is NOT set — emails will NOT be sent');
+    return {
+      emails: {
+        send: async (..._args: unknown[]) => {
+          // Do not log args — they may contain PII (recipient email, OTP codes)
+          console.error('[RESEND:MOCK] Email send called but RESEND_API_KEY is missing');
+          throw new Error('Email sending is not configured — RESEND_API_KEY is missing');
+        },
+      },
+    };
+  }
+  return new Resend(env.RESEND_API_KEY);
+};
 
 export const redis = () => new Redis({ url: env.REDIS_URL, token: env.REDIS_TOKEN });
 
