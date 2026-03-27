@@ -45,7 +45,7 @@
 
 #### iOS — Email Enhancements
 - [ ] **IOS-047** — Add email section to HomeView (unread count + recent threads)
-- [ ] **IOS-048** — Wire "Email" type in CreateSheet → opens EmailComposeView
+- [x] **IOS-048** — Wire "Email" type in CreateSheet → opens EmailComposeView
 
 #### iOS — AI Expansion
 - [ ] **IOS-050** — Add `create_event` tool call to AIChatService
@@ -133,6 +133,10 @@
 - [x] **IOS-044** — Build EmailHTMLView (WKWebView wrapper for HTML bodies)
 - [x] **IOS-045** — Build EmailThreadView.swift (message list + HTML rendering + reply)
 - [x] **IOS-046** — Build EmailComposeView.swift (To, Subject, Body, Send + reply mode)
+- [x] **IOS-075** — Preserve CreateSheet text when opening email compose
+- [x] **IOS-076** — Respect Reminders sync direction for bootstrap + live edits
+- [x] **IOS-077** — Treat Calendar `fullAccess` as connected in Settings
+- [x] **IOS-078** — Refresh Gmail connection state after connect flow
 
 ---
 
@@ -143,7 +147,7 @@
 - RootView has a `dismissKeyboard()` function — duplicated in TasksTabView, should be a shared utility
 - AppConfiguration.swift now loads from `TodosConfig.plist` first, falls back to `TaskAppConfig.plist` ✅ Fixed
 - The existing AuthSessionStore stores tokens in UserDefaults — new AuthService uses Keychain instead
-- EmailService response DTOs (RawThread, GetThreadResponse) may need adjustment once tested against real backend responses
+- EmailService response DTOs (RawThread, GetThreadResponse) may need adjustment once tested against real backend responses ✅ Fixed — listThreads only returns IDs, now enriching via mail.get per thread (same as web app)
 
 ---
 

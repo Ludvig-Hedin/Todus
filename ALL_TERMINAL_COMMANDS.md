@@ -63,6 +63,15 @@ PORT=3100 npm run dev
 
 ## Mobile
 
+### Deploy Backend
+
+cd apps/server
+pnpm run deploy
+
+Or from root:
+
+pnpm run deploy:backend
+
 ### Run on iOS simulator with bypass authentication
 
 EXPO_PUBLIC_AUTH_BYPASS=1 pnpm ios
