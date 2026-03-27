@@ -6,10 +6,16 @@ import Security
 
 private let authLog = Logger(subsystem: "com.todus.auth", category: "AuthService")
 
+private func debugAuthLog(_ message: String) {
+#if DEBUG
+    authLog.debug("\(message)")
+#endif
+}
+
 /// Unified auth service for the Todus app.
 /// Talks to the Better-Auth backend (Cloudflare Workers) and supports:
 /// - Apple Sign In (native ASAuthorizationAppleIDProvider → backend validates ID token)
-/// - Google Sign In (ASWebAuthenticationSession → Google OAuth → /auth/mobile-token → deep link)
+/// - Google Sign In (ASWebAuthenticationSession → Google OAuth → /api/auth/mobile-token → deep link)
 ///
 /// Replaces the old Supabase-based AuthSessionStore.
 @MainActor
@@ -29,6 +35,10 @@ final class AuthService: NSObject {
     var lastErrorMessage: String?
     var isLoading = false
 
+    /// Set by TodosAPIClient when a 401 is received and silent refresh fails.
+    /// MainTabView shows a "Session expired" banner when true.
+    var isSessionExpired = false
+
     /// Whether the onboarding screen should be shown
     var showsOnboarding: Bool {
         !hasSeenOnboarding && !isAuthenticated
@@ -43,9 +53,25 @@ final class AuthService: NSObject {
         KeychainHelper.read(key: Keys.userEmail)
     }
 
-    private var hasSeenOnboarding: Bool {
-        get { UserDefaults.standard.bool(forKey: Keys.hasSeenOnboarding) }
-        set { UserDefaults.standard.set(newValue, forKey: Keys.hasSeenOnboarding) }
+    /// User's display name from Google / Better Auth profile.
+    /// Stored property so SwiftUI observation triggers re-renders when updated.
+    var userName: String? {
+        didSet { if let userName { KeychainHelper.save(key: Keys.userName, value: userName) }
+                 else { KeychainHelper.delete(key: Keys.userName) } }
+    }
+
+    /// User's avatar URL string from Google profile.
+    /// Stored property so SwiftUI observation triggers re-renders when updated.
+    var userImage: String? {
+        didSet { if let userImage { KeychainHelper.save(key: Keys.userImage, value: userImage) }
+                 else { KeychainHelper.delete(key: Keys.userImage) } }
+    }
+
+    /// Stored as an @Observable property so SwiftUI detects changes and RootView re-renders.
+    var hasSeenOnboarding: Bool {
+        didSet {
+            UserDefaults.standard.set(hasSeenOnboarding, forKey: Keys.hasSeenOnboarding)
+        }
     }
 
     // MARK: - Keys
@@ -53,6 +79,8 @@ final class AuthService: NSObject {
     private enum Keys {
         static let bearerToken = "com.todus.auth.bearerToken"
         static let userEmail = "com.todus.auth.userEmail"
+        static let userName = "com.todus.auth.userName"
+        static let userImage = "com.todus.auth.userImage"
         static let hasSeenOnboarding = "Todus.hasSeenOnboarding"
     }
 
@@ -73,6 +101,10 @@ final class AuthService: NSObject {
 
     init(backendURL: URL) {
         self.backendURL = backendURL
+        // Initialize stored properties from persisted state before super.init()
+        self.hasSeenOnboarding = UserDefaults.standard.bool(forKey: Keys.hasSeenOnboarding)
+        self.userName = KeychainHelper.read(key: Keys.userName)
+        self.userImage = KeychainHelper.read(key: Keys.userImage)
         super.init()
 
         // Restore auth state from Keychain
@@ -145,9 +177,7 @@ request.setValue("https://todus.app", forHTTPHeaderField: "Origin")
                 return
             }
 
-            let bodyString = String(data: data, encoding: .utf8) ?? "(empty)"
-            let allHeaders = http.allHeaderFields.map { "\($0.key): \($0.value)" }.joined(separator: ", ")
-            authLog.info("Apple sign-in response: status=\(http.statusCode), headers=[\(allHeaders)], body=\(bodyString.prefix(500))")
+            debugAuthLog("Apple sign-in response status=\(http.statusCode)")
 
             // For 3xx redirects, check the Location header for a token URL
             if (300..<400).contains(http.statusCode),
@@ -194,8 +224,8 @@ request.setValue("https://todus.app", forHTTPHeaderField: "Origin")
     /// Two-step Google OAuth flow:
     /// 1. POST to backend to get the Google OAuth redirect URL
     /// 2. Open that URL in ASWebAuthenticationSession (system browser)
-    /// 3. After Google consent, backend creates session + redirects to /auth/mobile-token
-    /// 4. /auth/mobile-token converts session cookie → JWT, redirects to todus://auth-callback?token=JWT
+    /// 3. After Google consent, backend creates session + redirects to /api/auth/mobile-token
+    /// 4. /api/auth/mobile-token converts session cookie → JWT, redirects to todus://auth-callback?token=JWT
     func signInWithGoogle() async {
         isLoading = true
         lastErrorMessage = nil
@@ -210,9 +240,13 @@ request.setValue("https://todus.app", forHTTPHeaderField: "Origin")
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.setValue("https://todus.app", forHTTPHeaderField: "Origin")
 
+            // callbackURL must be the FULL path including /api prefix because:
+            // 1. Better-Auth stores and redirects to callbackURL as-is (no resolution)
+            // 2. The mobile-token route is inside the Hono `api` sub-router mounted at /api
+            // 3. So the full route is /api/auth/mobile-token, not /auth/mobile-token
             let body: [String: Any] = [
                 "provider": "google",
-                "callbackURL": "/auth/mobile-token",
+                "callbackURL": "/api/auth/mobile-token",
             ]
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
@@ -277,7 +311,7 @@ request.setValue("https://todus.app", forHTTPHeaderField: "Origin")
                 webSession.start()
             }
 
-            authLog.info("Google OAuth callback received: \(callbackURL.absoluteString)")
+            debugAuthLog("Google OAuth callback received for scheme \(callbackURL.scheme ?? "unknown")")
             handleAuthCallback(url: callbackURL)
 
         } catch {
@@ -449,15 +483,72 @@ request.setValue("https://todus.app", forHTTPHeaderField: "Origin")
 
     // MARK: - Sign Out
 
+    /// Attempt a silent session refresh by calling get-session with the current token.
+    /// Returns true if the session is still valid, false if it's expired.
+    func attemptSilentRefresh() async -> Bool {
+        guard let token = bearerToken else { return false }
+        let url = backendURL.appendingPathComponent("api/auth/get-session")
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            if let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) {
+                isSessionExpired = false
+                return true
+            }
+        } catch {
+            // Network error — don't mark as expired, might just be offline
+        }
+        return false
+    }
+
     func signOut() {
         KeychainHelper.delete(key: Keys.bearerToken)
         KeychainHelper.delete(key: Keys.userEmail)
+        // Clear stored properties — didSet handles Keychain deletion
+        userName = nil
+        userImage = nil
         authState = .guest
         lastErrorMessage = nil
     }
 
+    /// Fetches the current user's profile from Better Auth's get-session endpoint.
+    /// Stores name and image URL in Keychain so they persist across app launches.
+    /// Safe to call multiple times — silently no-ops if not authenticated.
+    func fetchUserProfile() async {
+        guard let token = bearerToken else { return }
+        let url = backendURL.appendingPathComponent("api/auth/get-session")
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            // Check HTTP status before attempting to parse — avoids treating error pages as profiles
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                authLog.warning("fetchUserProfile: non-2xx response, skipping parse")
+                return
+            }
+            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let user = json["user"] as? [String: Any] else { return }
+
+            if let name = user["name"] as? String, !name.isEmpty {
+                self.userName = name
+            }
+            if let image = user["image"] as? String, !image.isEmpty {
+                self.userImage = image
+            }
+            if let email = user["email"] as? String, !email.isEmpty {
+                KeychainHelper.save(key: Keys.userEmail, value: email)
+            }
+        } catch {
+            // Non-critical — settings will just show email or initials as fallback
+            authLog.warning("fetchUserProfile failed: \(error.localizedDescription)")
+        }
+    }
+
     func continueAsGuest() {
-        hasSeenOnboarding = true
+        hasSeenOnboarding = true  // triggers @Observable observation → RootView re-renders
     }
 
     // MARK: - Private Helpers
@@ -467,8 +558,11 @@ request.setValue("https://todus.app", forHTTPHeaderField: "Origin")
         if let email {
             KeychainHelper.save(key: Keys.userEmail, value: email)
         }
-        hasSeenOnboarding = true
-        authState = .authenticated
+        hasSeenOnboarding = true   // stored property → triggers SwiftUI observation
+        authState = .authenticated // triggers SwiftUI observation → RootView switches to main
+
+        // Fetch full profile (name, avatar) in background — non-blocking
+        Task { await fetchUserProfile() }
     }
 
     /// Attempts to extract a Bearer token from the backend response.

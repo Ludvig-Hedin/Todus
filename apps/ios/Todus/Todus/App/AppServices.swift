@@ -3,6 +3,32 @@ import Observation
 import SwiftData
 import SwiftUI
 
+/// AI response tone preference — injected into the system prompt.
+enum AITonePreference: String, CaseIterable, Identifiable, Sendable {
+    case professional
+    case casual
+    case concise
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .professional: return "Professional"
+        case .casual: return "Casual"
+        case .concise: return "Concise"
+        }
+    }
+
+    /// Instruction appended to the AI system prompt to set the response tone.
+    var systemPromptInstruction: String {
+        switch self {
+        case .professional: return "Respond in a professional, clear tone."
+        case .casual: return "Respond in a friendly, casual tone."
+        case .concise: return "Respond as concisely as possible. Use short sentences and bullet points."
+        }
+    }
+}
+
 enum AppAppearancePreference: String, CaseIterable, Identifiable, Sendable {
     case system
     case light
@@ -41,9 +67,20 @@ final class AppServices {
         static let developerModeEnabled = "TaskApp.developerModeEnabled"
         static let preferredStartViewMode = "TaskApp.preferredStartViewMode"
         static let remindersSyncEnabled = "TaskApp.remindersSyncEnabled"
-        // Tracks whether the user has seen the "Connect Apple Reminders" onboarding prompt.
-        // Defaults to false so new installs see the prompt after sign-up.
         static let hasConfiguredRemindersPrompt = "TaskApp.hasConfiguredRemindersPrompt"
+        static let hasConfiguredGmailPrompt = "TaskApp.hasConfiguredGmailPrompt"
+        static let remindersSyncDirection = "TaskApp.remindersSyncDirection"
+        // Legacy keys — kept for migration only (v1 had a single text field)
+        static let signatureEnabled = "TaskApp.signatureEnabled"
+        static let signatureText = "TaskApp.signatureText"
+        // New keys (v2 — array of signatures + selected ID)
+        static let emailSignatures = "TaskApp.emailSignatures"
+        static let selectedSignatureID = "TaskApp.selectedSignatureID"
+        static let swipeGesturesEnabled = "TaskApp.swipeGesturesEnabled"
+        static let threadGroupingEnabled = "TaskApp.threadGroupingEnabled"
+        static let aiTonePreference = "TaskApp.aiTonePreference"
+        static let taskRemindersEnabled = "TaskApp.taskRemindersEnabled"
+        static let calendarRemindersEnabled = "TaskApp.calendarRemindersEnabled"
     }
 
     let configuration: AppConfiguration
@@ -56,6 +93,10 @@ final class AppServices {
     let emailService: EmailService
     // Calendar service — shared EKEventStore access
     let calendarService: CalendarService
+    // Network connectivity monitor — views show offline banner when !isConnected
+    let networkMonitor: NetworkMonitor
+    // Local notification scheduling for task due dates
+    let notificationService: NotificationService
 
     // Legacy services — kept during migration, will be removed once task sync is fully on new backend
     let authStore: AuthSessionStore
@@ -70,6 +111,17 @@ final class AppServices {
     var selectedViewMode: TaskViewMode
     var selectedFolderID: UUID?
     var showsSettings = false
+
+    /// Current tab — updated by MainTabView so AI suggestions can be context-aware.
+    var currentTab: AppTab = .home
+
+    /// Set this to navigate the tab bar from any view (e.g. HomeView → tasks tab).
+    /// MainTabView observes this and resets it to nil after switching.
+    var navigateTo: AppTab? = nil
+
+    /// Set true to trigger the global email compose sheet from MainTabView.
+    var showsComposeEmail = false
+    var composeEmailSeedBody: String? = nil
     var appearancePreference: AppAppearancePreference {
         didSet {
             defaults.set(appearancePreference.rawValue, forKey: Keys.appearancePreference)
@@ -91,12 +143,79 @@ final class AppServices {
             defaults.set(remindersSyncEnabled, forKey: Keys.remindersSyncEnabled)
         }
     }
-    /// Whether the user has dismissed the "Connect Apple Reminders" onboarding prompt
-    /// (either by connecting or skipping). False on fresh installs → prompt is shown once.
+    /// Whether the user has dismissed the "Connect Apple Reminders" onboarding prompt.
     var hasConfiguredRemindersPrompt: Bool {
+        didSet { defaults.set(hasConfiguredRemindersPrompt, forKey: Keys.hasConfiguredRemindersPrompt) }
+    }
+
+    /// Whether the user has been shown the "Connect Gmail" onboarding step (after Reminders).
+    var hasConfiguredGmailPrompt: Bool {
+        didSet { defaults.set(hasConfiguredGmailPrompt, forKey: Keys.hasConfiguredGmailPrompt) }
+    }
+
+    /// Reminders sync direction: "twoWay" (default), "toReminders", "fromReminders"
+    var remindersSyncDirection: RemindersSyncDirection {
         didSet {
-            defaults.set(hasConfiguredRemindersPrompt, forKey: Keys.hasConfiguredRemindersPrompt)
+            remindersSyncState.direction = remindersSyncDirection
+            defaults.set(remindersSyncDirection.rawValue, forKey: Keys.remindersSyncDirection)
         }
+    }
+
+    /// All user-created signatures, persisted as JSON.
+    var signatures: [EmailSignature] {
+        didSet {
+            do {
+                let data = try JSONEncoder().encode(signatures)
+                defaults.set(data, forKey: Keys.emailSignatures)
+            } catch {
+                // Log encoding failure so we can diagnose signature persistence issues
+                print("[AppServices] Failed to encode signatures: \(error)")
+            }
+        }
+    }
+
+    /// ID of the currently active signature (nil = no signature).
+    var selectedSignatureID: UUID? {
+        didSet {
+            defaults.set(selectedSignatureID?.uuidString, forKey: Keys.selectedSignatureID)
+        }
+    }
+
+    /// The currently active signature, if any. Used by the email composer.
+    var activeSignature: EmailSignature? {
+        signatures.first { $0.id == selectedSignatureID }
+    }
+
+    /// Backward-compat computed: true when any signature is selected.
+    var signatureEnabled: Bool { selectedSignatureID != nil }
+
+    var swipeGesturesEnabled: Bool {
+        didSet { defaults.set(swipeGesturesEnabled, forKey: Keys.swipeGesturesEnabled) }
+    }
+
+    var threadGroupingEnabled: Bool {
+        didSet { defaults.set(threadGroupingEnabled, forKey: Keys.threadGroupingEnabled) }
+    }
+
+    /// AI response tone — injected into the AI system prompt
+    var aiTonePreference: AITonePreference {
+        didSet {
+            defaults.set(aiTonePreference.rawValue, forKey: Keys.aiTonePreference)
+            aiChatService.toneInstruction = aiTonePreference.systemPromptInstruction
+        }
+    }
+
+    /// Whether local notifications are scheduled for task due dates
+    var taskRemindersEnabled: Bool {
+        didSet {
+            defaults.set(taskRemindersEnabled, forKey: Keys.taskRemindersEnabled)
+            captureService.taskRemindersEnabled = taskRemindersEnabled
+        }
+    }
+
+    /// Whether local notifications are scheduled for calendar events
+    var calendarRemindersEnabled: Bool {
+        didSet { defaults.set(calendarRemindersEnabled, forKey: Keys.calendarRemindersEnabled) }
     }
 
     init(configuration: AppConfiguration = .load(), defaults: UserDefaults = .standard) {
@@ -112,6 +231,8 @@ final class AppServices {
         self.apiClient = apiClient
         self.emailService = EmailService(api: apiClient)
         self.calendarService = CalendarService()
+        self.networkMonitor = NetworkMonitor()
+        self.notificationService = NotificationService()
 
         // Legacy services — still used for task sync during migration
         self.authStore = AuthSessionStore(configuration: configuration)
@@ -127,9 +248,14 @@ final class AppServices {
             remindersSyncState: remindersSyncState
         )
         self.captureService = captureService
+        // Wire notification service into capture service for task due date reminders
+        captureService.notificationService = self.notificationService
         self.aiChatService = AIChatService(
             configuration: configuration,
-            captureService: captureService
+            captureService: captureService,
+            authService: authService,
+            calendarService: calendarService,
+            emailService: emailService
         )
 
         let storedAppearance = defaults.string(forKey: Keys.appearancePreference)
@@ -144,8 +270,55 @@ final class AppServices {
         self.preferredStartViewMode = storedStartView
         self.remindersSyncEnabled = defaults.object(forKey: Keys.remindersSyncEnabled) as? Bool ?? false
         self.hasConfiguredRemindersPrompt = defaults.bool(forKey: Keys.hasConfiguredRemindersPrompt)
+        self.hasConfiguredGmailPrompt = defaults.bool(forKey: Keys.hasConfiguredGmailPrompt)
+        self.remindersSyncDirection = defaults.string(forKey: Keys.remindersSyncDirection)
+            .flatMap(RemindersSyncDirection.init(rawValue:)) ?? .twoWay
+        // Initialize selectedViewMode early — needed before self can be used in signature migration below
         self.selectedViewMode = storedStartView
+        self.swipeGesturesEnabled = defaults.object(forKey: Keys.swipeGesturesEnabled) as? Bool ?? true
+        self.threadGroupingEnabled = defaults.object(forKey: Keys.threadGroupingEnabled) as? Bool ?? true
+        self.aiTonePreference = defaults.string(forKey: Keys.aiTonePreference)
+            .flatMap(AITonePreference.init(rawValue:)) ?? .professional
+        self.taskRemindersEnabled = defaults.object(forKey: Keys.taskRemindersEnabled) as? Bool ?? true
+        self.calendarRemindersEnabled = defaults.object(forKey: Keys.calendarRemindersEnabled) as? Bool ?? true
+        // Load signatures — migrate from old single-text format if no v2 data exists
+        if let data = defaults.data(forKey: Keys.emailSignatures),
+           let saved = try? JSONDecoder().decode([EmailSignature].self, from: data) {
+            self.signatures = saved
+        } else {
+            let oldText = defaults.string(forKey: Keys.signatureText) ?? ""
+            let oldEnabled = defaults.bool(forKey: Keys.signatureEnabled)
+            if oldEnabled && !oldText.isEmpty {
+                let migrated = [EmailSignature(name: "Default", body: oldText)]
+                self.signatures = migrated
+                // Persist migrated signatures so we don't re-run migration on next launch
+                if let data = try? JSONEncoder().encode(migrated) {
+                    defaults.set(data, forKey: Keys.emailSignatures)
+                }
+            } else {
+                self.signatures = []
+            }
+        }
+        // Load selected signature ID — migrate from old signatureEnabled if needed
+        if let uuidStr = defaults.string(forKey: Keys.selectedSignatureID),
+           let uuid = UUID(uuidString: uuidStr) {
+            self.selectedSignatureID = uuid
+        } else {
+            let oldEnabled = defaults.bool(forKey: Keys.signatureEnabled)
+            let migratedID = (oldEnabled && !self.signatures.isEmpty) ? self.signatures.first?.id : nil
+            self.selectedSignatureID = migratedID
+            // Persist migrated selected ID so we don't re-run migration on next launch
+            if let migratedID {
+                defaults.set(migratedID.uuidString, forKey: Keys.selectedSignatureID)
+            }
+        }
         self.remindersSyncState.isEnabled = self.remindersSyncEnabled
+        self.remindersSyncState.direction = self.remindersSyncDirection
+        self.aiChatService.loadSavedPrompts()
+
+        // Sync initial preferences to services
+        self.aiChatService.toneInstruction = self.aiTonePreference.systemPromptInstruction
+        self.captureService.taskRemindersEnabled = self.taskRemindersEnabled
     }
 
     func selectFolder(_ folder: FolderRecord?) {
@@ -173,6 +346,7 @@ final class AppServices {
 
     func syncExistingTasksToReminders(in context: ModelContext) {
         guard remindersSyncEnabled else { return }
+        guard remindersSyncDirection != .fromReminders else { return }
         let descriptor = FetchDescriptor<TaskRecord>()
         let tasks = (try? context.fetch(descriptor)) ?? []
         remindersSyncService.syncAllTasks(tasks, in: context)
@@ -182,6 +356,7 @@ final class AppServices {
     /// Safe to call multiple times — skips reminders already linked via reminderIdentifier.
     func importFromReminders(in context: ModelContext) async {
         guard remindersSyncEnabled else { return }
+        guard remindersSyncDirection != .toReminders else { return }
         await remindersSyncService.importFromReminders(in: context)
     }
 }

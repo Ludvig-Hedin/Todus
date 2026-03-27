@@ -9,6 +9,12 @@ final class TaskCaptureService {
     private let remindersSyncService: AppleRemindersSyncService
     private let remindersSyncState: RemindersSyncState
 
+    /// Optional notification service — set after init by AppServices.
+    /// Schedules local reminders when tasks have due dates.
+    var notificationService: NotificationService?
+    /// Whether task reminders are enabled — read from AppServices at schedule time.
+    var taskRemindersEnabled: Bool = true
+
     init(
         parser: TaskParsingService,
         syncService: SyncService,
@@ -64,6 +70,7 @@ final class TaskCaptureService {
             )
             context.insert(task)
             syncReminder(task, in: context)
+            scheduleNotificationIfNeeded(task)
             mutations.append(SyncMutation(action: .upsert, task: task.asPayload(), taskID: task.id))
             queueEnrichment(for: task.id, rawInput: line, locale: locale, timeZone: timeZone, in: context)
         }
@@ -86,6 +93,13 @@ final class TaskCaptureService {
         task.syncState = .pendingUpload
         persist(task: task, in: context)
         syncReminder(task, in: context)
+        if status == .done {
+            // Cancel notification when task is completed
+            notificationService?.cancelTaskReminder(taskID: task.id.uuidString)
+        } else if status == .todo {
+            // Reschedule notification when task transitions back to .todo with a future due date
+            scheduleNotificationIfNeeded(task)
+        }
     }
 
     func updateTitle(_ task: TaskRecord, title: String, in context: ModelContext) {
@@ -126,6 +140,12 @@ final class TaskCaptureService {
         task.syncState = .pendingUpload
         persist(task: task, in: context)
         syncReminder(task, in: context)
+        // Cancel notification when marking done via detail sheet, then reschedule if still active
+        if status == .done {
+            notificationService?.cancelTaskReminder(taskID: task.id.uuidString)
+        } else {
+            scheduleNotificationIfNeeded(task)
+        }
     }
 
     func move(_ task: TaskRecord, to folder: FolderRecord?, in context: ModelContext) {
@@ -139,6 +159,7 @@ final class TaskCaptureService {
     func delete(_ task: TaskRecord, in context: ModelContext) {
         let mutation = SyncMutation(action: .delete, task: nil, taskID: task.id)
         deleteReminder(task)
+        notificationService?.cancelTaskReminder(taskID: task.id.uuidString)
         context.delete(task)
         try? context.save()
 
@@ -233,14 +254,22 @@ final class TaskCaptureService {
 
             task.title = parsed.title
             // Only apply AI-parsed date if user didn't manually set one in the composer
+            let appliedNewDueDate: Bool
             if task.dueDate == nil, let parsedDate = parsed.dueDate {
                 task.dueDate = parsedDate
+                appliedNewDueDate = true
+            } else {
+                appliedNewDueDate = false
             }
             task.parseState = .parsed
             task.updatedAt = .now
             task.syncState = .pendingUpload
             try? context.save()
             syncReminder(task, in: context)
+            // Schedule notification if enrichment applied a new due date
+            if appliedNewDueDate {
+                scheduleNotificationIfNeeded(task)
+            }
 
             let mutation = SyncMutation(action: .upsert, task: task.asPayload(), taskID: task.id)
             await syncService.enqueue([mutation], in: context)
@@ -249,11 +278,23 @@ final class TaskCaptureService {
 
     private func syncReminder(_ task: TaskRecord, in context: ModelContext) {
         guard remindersSyncState.isEnabled else { return }
+        guard remindersSyncState.direction != .fromReminders else { return }
         remindersSyncService.upsert(task, in: context)
     }
 
     private func deleteReminder(_ task: TaskRecord) {
         guard remindersSyncState.isEnabled else { return }
+        guard remindersSyncState.direction != .fromReminders else { return }
         remindersSyncService.delete(task)
+    }
+
+    /// Schedule a local notification for a task if it has a due date and reminders are enabled.
+    private func scheduleNotificationIfNeeded(_ task: TaskRecord) {
+        guard taskRemindersEnabled, let dueDate = task.dueDate, !task.completed else { return }
+        notificationService?.scheduleTaskReminder(
+            taskID: task.id.uuidString,
+            title: task.title,
+            dueDate: dueDate
+        )
     }
 }

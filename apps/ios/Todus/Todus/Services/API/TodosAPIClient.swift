@@ -52,8 +52,12 @@ final class TodosAPIClient {
         }
 
         if http.statusCode == 401 {
-            // Token expired or invalid — sign out
-            authService.signOut()
+            // Try silent refresh then retry the request once with the new token
+            let refreshed = await authService.attemptSilentRefresh()
+            if refreshed {
+                return try await retryRequest(path: path, method: method, body: body)
+            }
+            authService.isSessionExpired = true
             throw APIError.unauthorized
         }
 
@@ -62,6 +66,42 @@ final class TodosAPIClient {
         }
 
         return try JSONDecoder.apiDecoder.decode(T.self, from: data)
+    }
+
+    /// Retries a raw HTTP request after a successful token refresh — no further refresh attempts.
+    private func retryRequest<T: Decodable>(
+        path: String,
+        method: String,
+        body: Encodable?
+    ) async throws -> T {
+        let url = baseURL.appending(path: path)
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let token = authService.bearerToken {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        if let body {
+            request.httpBody = try JSONEncoder().encode(body)
+        }
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
+        guard (200..<300).contains(http.statusCode) else {
+            throw APIError.httpError(statusCode: http.statusCode, body: String(data: data, encoding: .utf8))
+        }
+        return try JSONDecoder.apiDecoder.decode(T.self, from: data)
+    }
+
+    // MARK: - Account
+
+    /// Delete the current user's account and all associated data on the backend.
+    func deleteAccount() async throws {
+        let _: EmptyResponse = try await request(path: "api/auth/delete-user", method: "POST")
+    }
+
+    /// Disconnect the user's Gmail connection on the backend.
+    func disconnectEmail() async throws {
+        let _: EmptyResponse = try await trpcMutation("connections.delete")
     }
 
     // MARK: - Private
@@ -99,7 +139,12 @@ final class TodosAPIClient {
         }
 
         if http.statusCode == 401 {
-            authService.signOut()
+            // Try silent refresh then retry the TRPC request once with the new token
+            let refreshed = await authService.attemptSilentRefresh()
+            if refreshed {
+                return try await retryTrpcRequest(procedure, input: input)
+            }
+            authService.isSessionExpired = true
             throw APIError.unauthorized
         }
 
@@ -119,7 +164,45 @@ final class TodosAPIClient {
         // Fallback: try decoding the whole response
         return try JSONDecoder.apiDecoder.decode(T.self, from: data)
     }
+
+    /// Retries a TRPC request after a successful token refresh — no further refresh attempts.
+    private func retryTrpcRequest<T: Decodable>(
+        _ procedure: String,
+        input: Encodable?
+    ) async throws -> T {
+        let url = baseURL.appending(path: "api/trpc/\(procedure)")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let token = authService.bearerToken {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        if let input {
+            let inputData = try JSONEncoder().encode(input)
+            let inputJSON = try JSONSerialization.jsonObject(with: inputData)
+            let wrapped: [String: Any] = ["json": inputJSON]
+            request.httpBody = try JSONSerialization.data(withJSONObject: wrapped)
+        } else {
+            request.httpBody = try JSONSerialization.data(withJSONObject: ["json": [:] as [String: Any]])
+        }
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
+        guard (200..<300).contains(http.statusCode) else {
+            throw APIError.httpError(statusCode: http.statusCode, body: String(data: data, encoding: .utf8))
+        }
+        let trpcResponse = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        if let result = trpcResponse?["result"] as? [String: Any],
+           let dataObj = result["data"] as? [String: Any],
+           let json = dataObj["json"] {
+            let jsonData = try JSONSerialization.data(withJSONObject: json)
+            return try JSONDecoder.apiDecoder.decode(T.self, from: jsonData)
+        }
+        return try JSONDecoder.apiDecoder.decode(T.self, from: data)
+    }
 }
+
+/// Empty response placeholder for API calls that don't return meaningful data.
+struct EmptyResponse: Decodable {}
 
 // MARK: - API Error
 
