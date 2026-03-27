@@ -1,3 +1,4 @@
+import { KeyboardShortcutsDialog } from '@/components/shortcuts/keyboard-shortcuts-dialog';
 import { ThreadDisplayHotkeys } from '@/lib/hotkeys/thread-display-hotkeys';
 import { NavigationHotkeys } from '@/lib/hotkeys/navigation-hotkeys';
 import { MailListHotkeys } from '@/lib/hotkeys/mail-list-hotkeys';
@@ -18,6 +19,7 @@ export function HotkeyProviderWrapper({ children }: HotkeyProviderWrapperProps) 
       <MailListHotkeys />
       <ThreadDisplayHotkeys />
       <ComposeHotkeys />
+      <KeyboardShortcutsDialog />
       {children}
     </HotkeysProvider>
   );

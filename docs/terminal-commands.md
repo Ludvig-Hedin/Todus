@@ -41,10 +41,21 @@ pnpm macos
 ```
 
 ## Deploy your web frontend + backend to Cloudflare
+Run from repo root (and do NOT append inline `# ...` text after the command, since that can be forwarded as real CLI args).
 
 ```bash
-pnpm deploy:frontend
-pnpm deploy:backend
+pnpm run build:frontend
+
+# NOTE: `wrangler` is not installed globally in this repo.
+# Use `pnpm --filter=... exec wrangler ...` to run the correct local CLI version.
+
+# Deploy staging
+pnpm --filter=@zero/server exec wrangler deploy -e staging
+pnpm --filter=@zero/mail exec wrangler deploy -e staging
+
+# Deploy production
+pnpm --filter=@zero/server exec wrangler deploy -e production
+pnpm --filter=@zero/mail exec wrangler deploy -e production
 ```
 
 ## Build iOS for TestFlight

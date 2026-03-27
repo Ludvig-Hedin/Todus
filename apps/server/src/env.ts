@@ -31,8 +31,9 @@ export type ZeroEnv = {
   connection_labels: KVNamespace;
   prompts_storage: KVNamespace;
   NODE_ENV: 'local' | 'development' | 'production';
-  JWT_SECRET: 'secret';
-  ELEVENLABS_API_KEY: '1234567890';
+  /** Local dev default from wrangler `vars`; production uses secrets / dashboard. */
+  JWT_SECRET: string;
+  ELEVENLABS_API_KEY: string;
   DISABLE_CALLS: 'true' | '';
   DROP_AGENT_TABLES: 'false';
   THREAD_SYNC_MAX_COUNT: '5' | '20' | '10';

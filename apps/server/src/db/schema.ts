@@ -333,6 +333,9 @@ export const task = createTable(
     dueDate: timestamp('due_date'),
     folderId: text('folder_id').references(() => taskFolder.id, { onDelete: 'set null' }),
     reminderIdentifier: text('reminder_identifier'),
+    // Cross-entity links — nullable, no FK (email threads and calendar events are external)
+    emailThreadId: text('email_thread_id'),
+    eventId: text('event_id'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
@@ -342,6 +345,8 @@ export const task = createTable(
     index('task_status_idx').on(t.status),
     index('task_due_date_idx').on(t.dueDate),
     index('task_user_status_idx').on(t.userId, t.status),
+    index('task_email_thread_id_idx').on(t.emailThreadId),
+    index('task_event_id_idx').on(t.eventId),
   ],
 );
 

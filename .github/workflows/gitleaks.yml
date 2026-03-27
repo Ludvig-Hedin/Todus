@@ -1,0 +1,23 @@
+# Blocks PRs that add high-confidence secrets (API keys, tokens, private keys).
+name: Secret scan
+
+# PRs only: full-repo scans on every push can flag historical noise; fix leaks in PRs going forward.
+on:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gitleaks:
+    name: Gitleaks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

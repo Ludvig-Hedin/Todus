@@ -8,6 +8,7 @@ import {
 import { Sidebar, SidebarContent, SidebarFooter, SidebarHeader } from '@/components/ui/sidebar';
 import { navigationConfig, bottomNavItems } from '@/config/navigation';
 // import { useTRPC } from '@/providers/query-provider';
+import { APP_NAME } from '@/lib/branding';
 import { useSidebar } from '@/components/ui/sidebar';
 import { CreateEmail } from '../create/create-email';
 // import { useMutation } from '@tanstack/react-query';
@@ -95,10 +96,10 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         <Sidebar
           collapsible="icon"
           {...props}
-          className={`bg-sidebar dark:bg-sidebar flex h-screen select-none flex-col items-center ${state === 'collapsed' ? '' : ''} pb-2`}
+          className={`bg-sidebar dark:bg-sidebar flex h-screen select-none flex-col items-center pb-2`}
         >
           <SidebarHeader
-            className={`relative top-2.5 flex flex-col gap-2 ${state === 'collapsed' ? 'px-2' : 'md:px-4'}`}
+            className={`relative top-2 flex flex-col gap-2 ${state === 'collapsed' ? 'px-2' : 'md:px-3'}`}
           >
             {session && <NavUser />}
 
@@ -119,7 +120,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             )}
           </SidebarHeader>
           <SidebarContent
-            className={`scrollbar scrollbar-w-1 scrollbar-thumb-accent/40 scrollbar-track-transparent hover:scrollbar-thumb-accent scrollbar-thumb-rounded-full overflow-x-hidden py-0 pt-0 ${state !== 'collapsed' ? 'mt-5 md:px-4' : 'px-2'}`}
+            className={`scrollbar scrollbar-w-1 scrollbar-thumb-accent/40 scrollbar-track-transparent hover:scrollbar-thumb-accent scrollbar-thumb-rounded-full overflow-x-hidden py-0 pt-0 ${state !== 'collapsed' ? 'mt-4 md:px-3' : 'px-2'}`}
           >
             <div className="flex-1 py-0">
               <NavMain items={navItems} />
@@ -127,44 +128,41 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           </SidebarContent>
 
           {!isLoading && !isPro && showUpgrade && state !== 'collapsed' && (
-            <div className="relative top-3 mx-3 mb-4 rounded-lg border bg-white px-4 py-4 backdrop-blur-sm dark:bg-[#1C1C1C]">
+            <div className="relative mx-3 mb-3 mt-2 rounded-lg border bg-white px-3.5 py-3.5 dark:border-[#252527] dark:bg-[#1C1C1E]">
               <Button
                 variant="ghost"
                 size="icon"
-                className="absolute right-2 top-2 h-6 w-6 rounded-full hover:bg-white/10 [&>svg]:h-2.5 [&>svg]:w-2.5"
+                className="absolute right-1.5 top-1.5 h-5 w-5 rounded-full opacity-40 hover:opacity-70 [&>svg]:h-2.5 [&>svg]:w-2.5"
                 onClick={() => {
                   setShowUpgrade(false);
                   localStorage.setItem('hideUpgradeCard', 'true');
                 }}
               >
-                <X className="h-2.5 w-2.5 fill-black dark:fill-white/50" />
+                <X className="h-2.5 w-2.5 fill-current" />
               </Button>
               <div className="flex items-start gap-2">
-                <div className="flex-1 space-y-1">
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-sm font-semibold text-black dark:text-white/90">
-                      Get Todus Pro
-                    </h3>
-                  </div>
-                  <p className="text-[13px] leading-snug text-black dark:text-white/50">
-                    Get unlimited AI chats, auto-labeling, writing assistant, and more.
+                <div className="flex-1 space-y-0.5">
+                  {/* Use APP_NAME from branding.ts — avoids hardcoded "Todus" diverging from branding source */}
+                  <h3 className="text-[13px] font-semibold text-foreground">
+                    Get {APP_NAME} Pro
+                  </h3>
+                  <p className="text-[12px] leading-snug text-muted-foreground">
+                    Unlimited AI chats, auto-labeling, writing assistant, and more.
                   </p>
                 </div>
               </div>
               <button
                 onClick={() => setPricingDialog('true')}
-                className="mt-3 inline-flex h-7 w-full items-center justify-center gap-0.5 overflow-hidden rounded-lg bg-[#8B5CF6] px-2"
+                className="mt-2.5 inline-flex h-7 w-full items-center justify-center gap-0.5 overflow-hidden rounded-lg bg-mainBlue px-2 transition-colors hover:bg-mainBlue/90"
               >
-                <div className="flex items-center justify-center gap-2.5 px-0.5">
-                  <div className="justify-start whitespace-nowrap text-xs leading-none text-white md:text-sm">
-                    Start 7 day free trial
-                  </div>
-                </div>
+                <span className="whitespace-nowrap text-[12px] font-medium leading-none text-white">
+                  Start 7 day free trial
+                </span>
               </button>
             </div>
           )}
 
-          <SidebarFooter className={`px-0 pb-0 ${state === 'collapsed' ? 'md:px-2' : 'md:px-4'}`}>
+          <SidebarFooter className={`px-0 pb-0 ${state === 'collapsed' ? 'md:px-2' : 'md:px-3'}`}>
             <NavMain items={bottomNavItems} />
           </SidebarFooter>
         </Sidebar>
@@ -200,7 +198,7 @@ function ComposeButton() {
       <DialogDescription></DialogDescription>
 
       <DialogTrigger asChild>
-        <button type="button" className="relative mb-1.5 inline-flex h-8 w-full items-center justify-center gap-1 self-stretch overflow-hidden rounded-lg border border-gray-200 bg-[#006FFE] text-black dark:border-none dark:text-white cursor-pointer hover:bg-[#0056CC] dark:hover:bg-[#0056CC] transition-colors">
+        <button type="button" className="relative mb-1 inline-flex h-8 w-full items-center justify-center gap-1 self-stretch overflow-hidden rounded-lg bg-mainBlue dark:border-none cursor-pointer hover:bg-mainBlue/90 transition-all duration-150">
           {state === 'collapsed' && !isMobile ? (
             <PencilCompose className="mt-0.5 fill-white text-black" />
           ) : (
@@ -214,7 +212,7 @@ function ComposeButton() {
         </button>
       </DialogTrigger>
 
-      <DialogContent className="h-screen w-screen max-w-none border-none bg-[#FAFAFA] p-0 shadow-none dark:bg-[#141414]">
+      <DialogContent className="h-screen w-screen max-w-none border-none bg-background p-0 shadow-none">
         <CreateEmail />
       </DialogContent>
     </Dialog>

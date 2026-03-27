@@ -23,97 +23,97 @@
   --font-geist-sans: 'Geist Variable', 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   --font-geist-mono: 'Geist Mono Variable', 'Geist Mono', ui-monospace, SFMono-Regular, 'SF Mono', Consolas, 'Liberation Mono', Menlo, monospace;
 
-  /* Theme colors (light mode: default) */
-  --background: hsl(0 0% 100%);
-  --foreground: hsl(240 10% 3.9%);
+  /* Theme colors (light mode: default) — softened blacks, warm neutrals */
+  --background: hsl(0 0% 99%);
+  --foreground: hsl(240 6% 13%);
   --card: hsl(0 0% 100%);
-  --card-foreground: hsl(240 10% 3.9%);
+  --card-foreground: hsl(240 6% 13%);
   --popover: hsl(0 0% 100%);
-  --popover-foreground: hsl(240 10% 3.9%);
-  --primary: hsl(240 5.9% 10%);
+  --popover-foreground: hsl(240 6% 13%);
+  --primary: hsl(240 5% 13%);
   --primary-foreground: hsl(0 0% 98%);
-  --secondary: hsl(240 4.8% 95.9%);
-  --secondary-foreground: hsl(240 5.9% 10%);
-  --muted: hsl(240 4.8% 95.9%);
-  --muted-foreground: hsl(240 3.8% 46.1%);
-  --accent: hsl(240 4.8% 95.9%);
-  --accent-foreground: hsl(240 5.9% 10%);
-  --destructive: hsl(0 84.2% 60.2%);
+  --secondary: hsl(240 4% 96%);
+  --secondary-foreground: hsl(240 5% 13%);
+  --muted: hsl(240 4% 96%);
+  --muted-foreground: hsl(240 3% 50%);
+  --accent: hsl(240 4% 96%);
+  --accent-foreground: hsl(240 5% 13%);
+  --destructive: hsl(0 72% 55%);
   --destructive-foreground: hsl(0 0% 98%);
-  --border: hsl(240 5.9% 90%);
-  --input: hsl(240 5.9% 90%);
-  --ring: hsl(240 10% 3.9%);
+  --border: hsl(240 5% 91%);
+  --input: hsl(240 5% 91%);
+  --ring: hsl(240 5% 50%);
   --chart-1: hsl(12 76% 61%);
   --chart-2: hsl(173 58% 39%);
   --chart-3: hsl(197 37% 24%);
   --chart-4: hsl(43 74% 66%);
   --chart-5: hsl(27 87% 67%);
-  --sidebar-background: hsl(0 0% 98%);
-  --sidebar-foreground: hsl(240 5.3% 26.1%);
-  --sidebar-primary: hsl(240 5.9% 10%);
+  --sidebar-background: hsl(0 0% 98.5%);
+  --sidebar-foreground: hsl(240 4% 30%);
+  --sidebar-primary: hsl(240 5% 13%);
   --sidebar-primary-foreground: hsl(0 0% 98%);
-  --sidebar-accent: hsl(240 4.8% 95.9%);
-  --sidebar-accent-foreground: hsl(240 5.9% 10%);
-  --sidebar-border: hsl(220 13% 91%);
-  --sidebar-ring: hsl(217.2 91.2% 59.8%);
+  --sidebar-accent: hsl(240 4% 96%);
+  --sidebar-accent-foreground: hsl(240 5% 13%);
+  --sidebar-border: hsl(220 10% 92%);
+  --sidebar-ring: hsl(217 70% 55%);
   --panel: hsl(0 0% 100%);
   --icon-color: currentColor;
 
   /* Radius — increased for Apple-like rounded aesthetic */
   --radius: 0.75rem;
 
-  /* Static colors */
-  --darkBackground: #141414;
-  --lightBackground: #FFFFFF;
-  --offsetDark: #0A0A0A;
-  --offsetLight: #F5F5F5;
-  --panelDark: #1A1A1A;
+  /* Static colors — softer palette, no pure black */
+  --darkBackground: #161618;
+  --lightBackground: #FCFCFC;
+  --offsetDark: #0E0E10;
+  --offsetLight: #F6F6F7;
+  --panelDark: #1C1C1E;
   --panelLight: #FFFFFF;
-  --iconDark: #898989;
-  --iconLight: #6D6D6D;
+  --iconDark: #8A8A8E;
+  --iconLight: #737378;
   --logout: #D93036;
   --mainBlue: #437DFB;
-  --subtleWhite: #EAEAEA;
-  --subtleBlack: #1F1F1F;
+  --subtleWhite: #EBEBED;
+  --subtleBlack: #222224;
   --skyBlue: #0066FF;
-  --shinyGray: #A1A1A1;
+  --shinyGray: #A1A1A6;
 }
 
 .dark {
-  /* Theme colors (dark mode) */
-  --background: hsl(240 3.9% 7%);
-  --foreground: hsl(0 0% 98%);
-  --card: hsl(240 5.9% 10%);
-  --card-foreground: hsl(0 0% 98%);
-  --popover: hsl(240 3.4% 8%);
-  --popover-foreground: hsl(0 0% 99%);
-  --primary: hsl(0 0% 98%);
-  --primary-foreground: hsl(240 5.9% 10%);
-  --secondary: hsl(240 3.7% 15.9%);
-  --secondary-foreground: hsl(0 0% 98%);
-  --muted: hsl(240 3.7% 15.9%);
-  --muted-foreground: hsl(240 5% 64.9%);
-  --accent: hsl(240 3.7% 15.9%);
-  --accent-foreground: hsl(0 0% 98%);
-  --destructive: hsl(0 62.8% 30.6%);
-  --destructive-foreground: hsl(0 0% 98%);
-  --border: hsl(240 3.7% 20%);
-  --input: hsl(240 3.7% 15.9%);
-  --ring: hsl(240 4.9% 83.9%);
+  /* Theme colors (dark mode) — softer contrasts, no pure black */
+  --background: hsl(240 4% 7.5%);
+  --foreground: hsl(0 0% 93%);
+  --card: hsl(240 4% 10%);
+  --card-foreground: hsl(0 0% 93%);
+  --popover: hsl(240 4% 9%);
+  --popover-foreground: hsl(0 0% 95%);
+  --primary: hsl(0 0% 93%);
+  --primary-foreground: hsl(240 4% 10%);
+  --secondary: hsl(240 3% 15%);
+  --secondary-foreground: hsl(0 0% 93%);
+  --muted: hsl(240 3% 15%);
+  --muted-foreground: hsl(240 4% 58%);
+  --accent: hsl(240 3% 15%);
+  --accent-foreground: hsl(0 0% 93%);
+  --destructive: hsl(0 60% 38%);
+  --destructive-foreground: hsl(0 0% 93%);
+  --border: hsl(240 3% 18%);
+  --input: hsl(240 3% 15%);
+  --ring: hsl(240 4% 70%);
   --chart-1: hsl(220 70% 50%);
   --chart-2: hsl(160 60% 45%);
   --chart-3: hsl(30 80% 55%);
   --chart-4: hsl(280 65% 60%);
   --chart-5: hsl(340 75% 55%);
-  --sidebar-background: hsl(240 3.9% 7%);
-  --sidebar-foreground: hsl(240 4.8% 96.9%);
-  --sidebar-primary: hsl(224.3 76.3% 48%);
+  --sidebar-background: hsl(240 4% 7.5%);
+  --sidebar-foreground: hsl(240 3% 88%);
+  --sidebar-primary: hsl(217 70% 55%);
   --sidebar-primary-foreground: hsl(0 0% 100%);
-  --sidebar-accent: hsl(240 3.7% 15.9%);
-  --sidebar-accent-foreground: hsl(240 4.8% 95.9%);
-  --sidebar-border: hsl(240 3.7% 15.9%);
-  --sidebar-ring: hsl(217.2 91.2% 59.8%);
-  --panel: hsl(240 3.7% 10.2%);
+  --sidebar-accent: hsl(240 3% 15%);
+  --sidebar-accent-foreground: hsl(240 3% 92%);
+  --sidebar-border: hsl(240 3% 15%);
+  --sidebar-ring: hsl(217 70% 55%);
+  --panel: hsl(240 3% 10%);
 }
 
 @theme inline {
@@ -280,6 +280,30 @@
   }
   body {
     @apply bg-background text-foreground font-sans overscroll-none style-scrollbar;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    letter-spacing: -0.011em;
+    line-height: 1.5;
+  }
+  /* Tighter headings */
+  h1, h2, h3, h4, h5, h6 {
+    letter-spacing: -0.02em;
+    line-height: 1.2;
+  }
+  /* Tighter labels and small text */
+  label, .text-xs, .text-sm {
+    letter-spacing: -0.006em;
+  }
+
+  /* Touch devices: show thread action toolbars without hover.
+     On coarse-pointer devices (phones, tablets), the hover state
+     never fires, so we make the toolbar visible when the parent
+     group has bg-accent (selected/focused state). */
+  @media (pointer: coarse) {
+    .group:active > .group-hover\:opacity-100,
+    .group.bg-accent\/70 > .group-hover\:opacity-100 {
+      opacity: 1;
+    }
   }
 }
 

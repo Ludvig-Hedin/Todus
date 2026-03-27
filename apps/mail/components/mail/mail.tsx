@@ -708,7 +708,7 @@ export const Categories = () => {
             />
           ),
           colors:
-            'border-0 bg-[#006FFE] text-white dark:bg-[#006FFE] dark:text-white dark:hover:bg-[#006FFE]/90',
+            'border-0 bg-mainBlue text-white hover:bg-mainBlue/90',
         };
       case 'Personal':
         return {
@@ -846,7 +846,7 @@ function CategoryDropdown({ isMultiSelectMode }: CategoryDropdownProps) {
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent
-        className="border-border/50 bg-muted w-48 rounded-xl border p-2 dark:bg-[#232323]"
+        className="border-border/50 bg-popover w-48 rounded-xl border p-2"
         align="start"
         role="menu"
         aria-label="Label filter options"

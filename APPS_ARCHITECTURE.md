@@ -1,41 +1,44 @@
 # Apps Architecture Overview
 
+> Last updated: March 27, 2026
+
 ## Canonical Runtime Targets
 
 ### iPhone
-- App: `apps/ios`
-- Stack: Expo + React Native + Expo Router
-- Status: active, only supported iOS implementation
-
-### Desktop (macOS)
-- App: `apps/macos`
-- Stack: Electron WebView wrapper
-- Status: active, only supported desktop wrapper
+- **App:** `apps/ios/Todus`
+- **Stack:** Native SwiftUI (Xcode, Swift 6, iOS 18+)
+- **Bundle ID:** `com.ludvighedin.todus`
+- **Status:** Active — unified app with Tasks, Email, Calendar, AI, Home dashboard
 
 ### Web
-- App: `apps/mail`
-- Stack: Next.js
-- Status: active
+- **App:** `apps/mail`
+- **Stack:** React Router v7 + Vite + Cloudflare Workers
+- **URL:** todus.app
+- **Status:** Active
 
 ### Backend
-- App: `apps/server`
-- Stack: Cloudflare Worker (Hono + tRPC)
-- Status: active
+- **App:** `apps/server`
+- **Stack:** Cloudflare Worker (Hono + tRPC + Durable Objects + PostgreSQL)
+- **Status:** Active
+
+### Desktop (macOS)
+- **App:** `apps/macos`
+- **Stack:** Electron WebView wrapping `apps/mail`
+- **Status:** Active
 
 ## Archived Implementations
 
-To remove platform duplication and double-build confusion, legacy apps were archived:
+Legacy apps moved to `apps/archived/` for reference only:
 
-- `apps/archived/native` (old RN CLI iOS/macOS/Android app)
-- `apps/archived/webview-swift` (old SwiftUI WebView wrapper)
-- `apps/archived/apple` (stale project remnants)
+- `apps/archived/native` — old React Native CLI iOS/macOS/Android app
+- `apps/archived/webview-swift` — old SwiftUI WebView wrapper
+- `apps/archived/apple` — stale project remnants
 
-Archived apps are for reference only and are not part of the active app surface.
+**Do not use** archived code in new development.
 
 ## Build Entry Points
 
-- iOS: `pnpm ios`, `pnpm ios:simulator`, `pnpm ios:build:*`
-- macOS: `pnpm macos`
-- Web/backend: standard `pnpm dev`, `pnpm deploy:*`
-
-`native:*` root scripts were removed to enforce a single active iOS and desktop path.
+- **iOS:** Open `apps/ios/Todus/Todus.xcodeproj` in Xcode, or `pnpm ios:simulator`
+- **macOS:** `pnpm macos`
+- **Web + Backend:** `pnpm dev` (Turborepo), `pnpm deploy:frontend`, `pnpm deploy:backend`
+- **Database:** `pnpm docker:db:up`, `pnpm db:generate`, `pnpm db:migrate`

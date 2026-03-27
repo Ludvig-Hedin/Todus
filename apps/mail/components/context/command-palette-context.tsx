@@ -396,7 +396,10 @@ export function CommandPalette({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (pathname && activeFilters.length) {
+    // Only clear filters when navigating away from the mail section entirely (e.g. to /settings).
+    // Within /mail/*, filters should persist across folder switches — clearing them on every
+    // folder change breaks continuity and makes search feel unreliable.
+    if (!pathname.startsWith('/mail') && activeFilters.length) {
       clearAllFilters();
     }
   }, [pathname]);

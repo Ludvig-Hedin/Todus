@@ -632,20 +632,32 @@ export function EmailComposer({
               />
             </div>
 
-            <div className="flex gap-2">
+            <div className="flex gap-1">
               <button
                 tabIndex={-1}
-                className="flex h-full items-center gap-2 text-sm font-medium text-[#8C8C8C] hover:text-[#A8A8A8] hover:bg-gray-50 dark:hover:bg-[#404040] transition-colors cursor-pointer rounded-sm px-1 py-0.5"
+                type="button"
+                className={cn(
+                  'flex h-6 items-center rounded-md border px-1.5 text-[12px] font-medium transition-colors cursor-pointer',
+                  showCc
+                    ? 'border-mainBlue/30 bg-mainBlue/10 text-mainBlue'
+                    : 'border-transparent text-muted-foreground hover:bg-accent hover:text-foreground',
+                )}
                 onClick={() => setShowCc(!showCc)}
               >
-                <span>Cc</span>
+                Cc
               </button>
               <button
                 tabIndex={-1}
-                className="flex h-full items-center gap-2 text-sm font-medium text-[#8C8C8C] hover:text-[#A8A8A8] hover:bg-gray-50 dark:hover:bg-[#404040] transition-colors cursor-pointer rounded-sm px-1 py-0.5"
+                type="button"
+                className={cn(
+                  'flex h-6 items-center rounded-md border px-1.5 text-[12px] font-medium transition-colors cursor-pointer',
+                  showBcc
+                    ? 'border-mainBlue/30 bg-mainBlue/10 text-mainBlue'
+                    : 'border-transparent text-muted-foreground hover:bg-accent hover:text-foreground',
+                )}
                 onClick={() => setShowBcc(!showBcc)}
               >
-                <span>Bcc</span>
+                Bcc
               </button>
               {onClose && (
                 <button

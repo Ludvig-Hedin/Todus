@@ -13,7 +13,8 @@ export function NavigationHotkeys() {
     goToArchive: () => navigate('/mail/archive'),
     goToBin: () => navigate('/mail/bin'),
     goToSettings: () => navigate('/settings'),
-    helpWithShortcuts: () => navigate('/settings/shortcuts'),
+    // helpWithShortcuts is now handled by the KeyboardShortcutsDialog component
+    helpWithShortcuts: () => {},
   };
 
   const globalShortcuts = enhancedKeyboardShortcuts.filter((shortcut) => shortcut.scope === scope);

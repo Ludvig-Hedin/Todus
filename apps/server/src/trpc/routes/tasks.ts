@@ -70,6 +70,8 @@ export const tasksRouter = router({
         dueDate: z.string().datetime().optional().nullable(),
         folderId: z.string().optional().nullable(),
         reminderIdentifier: z.string().optional().nullable(),
+        emailThreadId: z.string().optional().nullable(),
+        eventId: z.string().optional().nullable(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -90,6 +92,8 @@ export const tasksRouter = router({
             dueDate: input.dueDate ? new Date(input.dueDate) : null,
             folderId: input.folderId ?? null,
             reminderIdentifier: input.reminderIdentifier ?? null,
+            emailThreadId: input.emailThreadId ?? null,
+            eventId: input.eventId ?? null,
             createdAt: now,
             updatedAt: now,
           })
@@ -113,6 +117,8 @@ export const tasksRouter = router({
           dueDate: z.string().datetime().optional().nullable(),
           folderId: z.string().optional().nullable(),
           reminderIdentifier: z.string().optional().nullable(),
+          emailThreadId: z.string().optional().nullable(),
+          eventId: z.string().optional().nullable(),
         }),
       }),
     )
@@ -128,6 +134,8 @@ export const tasksRouter = router({
         if (input.data.dueDate !== undefined) updateData.dueDate = input.data.dueDate ? new Date(input.data.dueDate) : null;
         if (input.data.folderId !== undefined) updateData.folderId = input.data.folderId;
         if (input.data.reminderIdentifier !== undefined) updateData.reminderIdentifier = input.data.reminderIdentifier;
+        if (input.data.emailThreadId !== undefined) updateData.emailThreadId = input.data.emailThreadId;
+        if (input.data.eventId !== undefined) updateData.eventId = input.data.eventId;
 
         const [updated] = await db
           .update(task)
@@ -176,6 +184,8 @@ export const tasksRouter = router({
               dueDate: z.string().datetime().optional().nullable(),
               folderId: z.string().optional().nullable(),
               reminderIdentifier: z.string().optional().nullable(),
+              emailThreadId: z.string().optional().nullable(),
+              eventId: z.string().optional().nullable(),
             }).optional(),
           }),
         ),
@@ -206,6 +216,8 @@ export const tasksRouter = router({
                 dueDate: mutation.payload.dueDate ? new Date(mutation.payload.dueDate) : null,
                 folderId: mutation.payload.folderId ?? null,
                 reminderIdentifier: mutation.payload.reminderIdentifier ?? null,
+                emailThreadId: mutation.payload.emailThreadId ?? null,
+                eventId: mutation.payload.eventId ?? null,
                 createdAt: now,
                 updatedAt: now,
               })
@@ -219,6 +231,8 @@ export const tasksRouter = router({
                   dueDate: sql`EXCLUDED.due_date`,
                   folderId: sql`EXCLUDED.folder_id`,
                   reminderIdentifier: sql`EXCLUDED.reminder_identifier`,
+                  emailThreadId: sql`EXCLUDED.email_thread_id`,
+                  eventId: sql`EXCLUDED.event_id`,
                   updatedAt: now,
                 },
               });

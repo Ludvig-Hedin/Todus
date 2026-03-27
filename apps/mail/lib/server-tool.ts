@@ -1,3 +1,5 @@
+// Voice secret is loaded from Vite env — it is bundled into the client. Prefer a
+// server-only check for anything that must stay confidential (see SECURITY.md).
 export async function callServerTool(action: string, payload: unknown, caller: string) {
   const base = import.meta.env.VITE_PUBLIC_SERVER_URL;
   const voiceSecret = import.meta.env.VITE_PUBLIC_VOICE_SECRET;

@@ -40,6 +40,12 @@ bun-debug.log*
 !.env.example
 .dev.vars
 
+# Secrets & local credentials (never commit)
+*.pem
+*credentials*.json
+google-service-account*.json
+*-firebase-adminsdk*.json
+
 # vercel
 .vercel
 
