@@ -49,7 +49,7 @@ struct TaskDetailSheet: View {
             }
             .scrollContentBackground(.hidden)
             .background(AppTheme.backgroundTop)
-            .navigationTitle("Task")
+            .navigationTitle("Edit Task")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -162,8 +162,9 @@ struct TaskDetailSheet: View {
     }
 
     private var organizationSection: some View {
-        Section("Folder") {
-            Picker("Folder", selection: Binding(
+        Section {
+            // Pick an existing folder
+            Picker("Move to folder", selection: Binding(
                 get: { selectedFolderID?.uuidString ?? "" },
                 set: { newValue in
                     selectedFolderID = UUID(uuidString: newValue)
@@ -175,16 +176,35 @@ struct TaskDetailSheet: View {
                 }
             }
 
-            TextField("New folder", text: $newFolderName)
+            // Create a new folder inline — type a name then tap the + button
+            HStack(spacing: 8) {
+                Image(systemName: "folder.badge.plus")
+                    .font(.system(size: 14))
+                    .foregroundStyle(AppTheme.mutedText)
 
-            Button("Create folder") {
-                guard let folder = services.captureService.createFolder(named: newFolderName, in: modelContext) else {
-                    return
+                TextField("New folder name…", text: $newFolderName)
+                    .autocorrectionDisabled()
+
+                if !newFolderName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Button {
+                        let trimmedName = newFolderName.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard let folder = services.captureService.createFolder(named: trimmedName, in: modelContext) else { return }
+                        selectedFolderID = folder.id
+                        newFolderName = ""
+                    } label: {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.system(size: 20))
+                            .foregroundStyle(AppTheme.accent)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Create folder")
                 }
-                selectedFolderID = folder.id
-                newFolderName = ""
             }
-            .disabled(newFolderName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        } header: {
+            Text("Folder")
+        } footer: {
+            Text("Type a name above and tap \(Image(systemName: "plus.circle.fill")) to create a new folder.")
+                .font(.system(size: 12))
         }
     }
 

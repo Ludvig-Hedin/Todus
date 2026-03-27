@@ -12,29 +12,36 @@ import EventKitUI
 
 final class CalendarViewController: DayViewController {
     private var eventStore = EKEventStore()
-    
+
+    /// Cached events keyed by the start-of-day Date. `eventsForDate(_:)` returns cached
+    /// data instantly (no main-thread XPC) and triggers a background fetch on cache miss.
+    private var cachedEvents: [Date: [EventDescriptor]] = [:]
+
+    /// Background queue for EventKit XPC calls — keeps the main thread free.
+    private let backgroundQueue = DispatchQueue(label: "calendar.events", qos: .userInitiated)
+
+    /// Tracks dates with in-flight background fetches to prevent duplicate concurrent requests
+    /// for the same day (e.g. when CalendarKit calls eventsForDate multiple times during scroll).
+    private var inFlightDates: Set<Date> = []
+
+    /// Debounce work item for EKEventStoreChanged notifications.
+    private var debounceWorkItem: DispatchWorkItem?
+
     override func viewDidLoad() {
         super.viewDidLoad()
         title = "Calendar"
-        // The app must have access to the user's calendar to show the events on the timeline
         requestAccessToCalendar()
-        // Subscribe to notifications to reload the UI when 
         subscribeToNotifications()
     }
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        // Need to set toolbar hidden, as it might be displayed in black due to EventKitUI / EditingViewController setting it
         navigationController?.setToolbarHidden(true, animated: false)
     }
-    
+
     private func requestAccessToCalendar() {
-        // Code to handle the response to the request.
-        // We create the completion handler first, as we need to ask for a permission differently in iOS 17
-        let completionHandler: EKEventStoreRequestAccessCompletionHandler =  { [weak self] granted, error in
-            // Looks like starting iOS 17 completion handler is not executed on the main thread by default.
-            // iOS 17 error?
-            DispatchQueue.main.async {
+        let completionHandler: EKEventStoreRequestAccessCompletionHandler = { _, _ in
+            Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.initializeStore()
                 self.subscribeToNotifications()
@@ -42,8 +49,6 @@ final class CalendarViewController: DayViewController {
             }
         }
 
-        // Request access to the events
-        // More info: https://developer.apple.com/documentation/technotes/tn3152-migrating-to-the-latest-calendar-access-levels
         if #available(iOS 17.0, *) {
             eventStore.requestFullAccessToEvents(completion: completionHandler)
         } else {
@@ -61,30 +66,63 @@ final class CalendarViewController: DayViewController {
     private func initializeStore() {
         eventStore = EKEventStore()
     }
-    
+
+    /// Debounced handler for EKEventStoreChanged — avoids rapid-fire reloads when
+    /// multiple calendar changes arrive in quick succession.
     @objc private func storeChanged(_ notification: Notification) {
-        reloadData()
+        debounceWorkItem?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.cachedEvents.removeAll()
+            self?.inFlightDates.removeAll()
+            self?.reloadData()
+        }
+        debounceWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
     }
-    
+
     // MARK: - DayViewDataSource
-    
-    // This is the `DayViewDataSource` method that the client app has to implement in order to display events with CalendarKit
+
+    /// Returns cached events instantly (no main-thread blocking). On cache miss, returns
+    /// an empty array and kicks off a background EventKit fetch that triggers `reloadData()`
+    /// when complete. This eliminates the 100-500ms+ synchronous XPC calls that were
+    /// blocking the main thread on every tab switch and calendar scroll.
     override func eventsForDate(_ date: Date) -> [EventDescriptor] {
-        // The `date` always has it's Time components set to 00:00:00 of the day requested
-        let startDate = date
-        var oneDayComponents = DateComponents()
-        oneDayComponents.day = 1
-        // By adding one full `day` to the `startDate`, we're getting to the 00:00:00 of the *next* day
-        let endDate = calendar.date(byAdding: oneDayComponents, to: startDate)!
-        
-        let predicate = eventStore.predicateForEvents(withStart: startDate, // Start of the current day
-                                                      end: endDate, // Start of the next day
-                                                      calendars: nil) // Search in all calendars
-        
-        let eventKitEvents = eventStore.events(matching: predicate) // All events happening on a given day
-        let calendarKitEvents = eventKitEvents.map(EKWrapper.init)
-        
-        return calendarKitEvents
+        let key = Calendar.current.startOfDay(for: date)
+        if let cached = cachedEvents[key] {
+            return cached
+        }
+        // Cache miss — fetch on background queue, return empty for now.
+        // Skip if a fetch for this date is already in flight to avoid duplicate XPC calls.
+        guard !inFlightDates.contains(key) else { return [] }
+        fetchEvents(for: date)
+        return []
+    }
+
+    /// Fetches EventKit events on a background queue and updates the cache + UI on main.
+    /// Captures `eventStore` locally to avoid accessing @MainActor-isolated self from
+    /// the background queue (EKEventStore is thread-safe for read operations).
+    private func fetchEvents(for date: Date) {
+        let key = Calendar.current.startOfDay(for: date)
+        inFlightDates.insert(key)
+        let store = self.eventStore
+        backgroundQueue.async { [weak self] in
+            let startDate = date
+            var oneDayComponents = DateComponents()
+            oneDayComponents.day = 1
+            guard let endDate = Calendar.current.date(byAdding: oneDayComponents, to: startDate) else { return }
+
+            let predicate = store.predicateForEvents(withStart: startDate, end: endDate, calendars: nil)
+            let eventKitEvents = store.events(matching: predicate)
+            let calendarKitEvents = eventKitEvents.map(EKWrapper.init)
+
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                let key = Calendar.current.startOfDay(for: date)
+                self.inFlightDates.remove(key)
+                self.cachedEvents[key] = calendarKitEvents
+                self.reloadData()
+            }
+        }
     }
     
     // MARK: - DayViewDelegate
@@ -172,7 +210,11 @@ final class CalendarViewController: DayViewController {
     }
     
     override func dayView(dayView: DayView, didTapTimelineAt date: Date) {
+        // Single tap on an empty timeline slot should create an event immediately.
+        // This matches native-feeling quick scheduling behavior and avoids requiring long press.
         endEventEditing()
+        let newEKWrapper = createNewEvent(at: date)
+        create(event: newEKWrapper, animated: true)
     }
     
     override func dayViewDidBeginDragging(dayView: DayView) {

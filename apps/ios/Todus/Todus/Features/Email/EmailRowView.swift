@@ -1,26 +1,8 @@
 import SwiftUI
 
-/// A single email thread row — sender avatar, subject, snippet, time, unread indicator.
-/// Designed for swipe actions in EmailInboxView.
+/// A single email thread row — avatar, sender, subject, snippet, time, unread indicator.
 struct EmailRowView: View {
     let thread: EmailThread
-
-    /// Colored initials avatar background based on sender name hash
-    private var avatarColor: Color {
-        let colors: [Color] = [
-            .blue, .purple, .orange, .pink, .teal, .indigo, .mint, .cyan, .brown, .green
-        ]
-        let hash = abs(thread.from.name.hashValue)
-        return colors[hash % colors.count]
-    }
-
-    private var initials: String {
-        let parts = thread.from.name.split(separator: " ")
-        if parts.count >= 2 {
-            return String(parts[0].prefix(1) + parts[1].prefix(1)).uppercased()
-        }
-        return String(thread.from.name.prefix(2)).uppercased()
-    }
 
     private var timeString: String {
         let calendar = Calendar.current
@@ -37,48 +19,44 @@ struct EmailRowView: View {
 
     var body: some View {
         HStack(spacing: 12) {
+            // Unread accent bar — uses theme accent for visual consistency
+            RoundedRectangle(cornerRadius: 2)
+                .fill(thread.unread ? AppTheme.accentBlue : Color.clear)
+                .frame(width: 3, height: 40)
+
             // Avatar
-            Text(initials)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: 40, height: 40)
-                .background(avatarColor, in: Circle())
+            SenderAvatarView(email: thread.from.email, name: thread.from.name)
 
             // Content
-            VStack(alignment: .leading, spacing: 3) {
-                HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(alignment: .firstTextBaseline) {
                     Text(thread.from.name)
-                        .font(.system(size: 15, weight: thread.unread ? .semibold : .medium))
+                        .font(.system(size: 15, weight: thread.unread ? .semibold : .regular))
                         .foregroundStyle(.primary)
                         .lineLimit(1)
 
-                    Spacer()
+                    Spacer(minLength: 8)
 
                     Text(timeString)
-                        .font(.system(size: 12, weight: .regular))
+                        .font(.system(size: 12))
                         .foregroundStyle(AppTheme.mutedText)
                 }
 
                 Text(thread.subject)
                     .font(.system(size: 14, weight: thread.unread ? .semibold : .regular))
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(thread.unread ? .primary : AppTheme.subtleText)
                     .lineLimit(1)
 
                 Text(thread.snippet)
-                    .font(.system(size: 13, weight: .regular))
-                    .foregroundStyle(AppTheme.subtleText)
+                    .font(.system(size: 13))
+                    .foregroundStyle(AppTheme.mutedText)
                     .lineLimit(1)
             }
-
-            // Unread dot
-            if thread.unread {
-                Circle()
-                    .fill(.blue)
-                    .frame(width: 8, height: 8)
-            }
         }
-        .padding(.vertical, 10)
-        .padding(.horizontal, 16)
+        .padding(.vertical, 11)
+        .padding(.trailing, 16)
         .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(thread.unread ? "Unread, " : "")From \(thread.from.name), \(thread.subject), \(timeString)")
     }
 }

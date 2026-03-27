@@ -1,12 +1,13 @@
 import Foundation
 import SwiftData
 import Observation
+import EventKit
 
 // MARK: - AIChatService
 
-/// Manages the AI chat conversation, streaming responses from the chatAI Supabase edge function.
-/// Maintains message history, drives real-time token streaming, and applies task mutations
-/// returned by the AI as tool calls.
+/// Manages the AI chat conversation, streaming responses via the backend /ai/chat SSE endpoint.
+/// Maintains message history, drives real-time token streaming, and applies task/calendar/email
+/// mutations returned by the AI as tool calls.
 @MainActor
 @Observable
 final class AIChatService {
@@ -35,8 +36,17 @@ final class AIChatService {
     /// Chronologically ordered list of saved conversations (newest first).
     var savedConversations: [AIChatConversation] = []
 
+    /// Tone instruction injected from AppServices.aiTonePreference — appended to the system prompt.
+    var toneInstruction: String = ""
+
     private let configuration: AppConfiguration
     private let captureService: TaskCaptureService
+    /// Auth service provides the Bearer token for backend API calls
+    private weak var authService: AuthService?
+    /// Calendar service for creating/reading EventKit events
+    private var calendarService: CalendarService?
+    /// Email service for reading threads and sending emails
+    private weak var emailService: EmailService?
     private var streamingTask: Task<Void, Never>?
 
     // MARK: - Token batching
@@ -49,9 +59,21 @@ final class AIChatService {
     // auto-save on sheet-dismiss without creating duplicate entries.
     private var isConversationSaved = true
 
-    init(configuration: AppConfiguration, captureService: TaskCaptureService) {
+    // Cached calendar context string — fetched async before each stream so buildPayload stays sync.
+    private var calendarSnapshot: String? = nil
+
+    init(
+        configuration: AppConfiguration,
+        captureService: TaskCaptureService,
+        authService: AuthService? = nil,
+        calendarService: CalendarService? = nil,
+        emailService: EmailService? = nil
+    ) {
         self.configuration = configuration
         self.captureService = captureService
+        self.authService = authService
+        self.calendarService = calendarService
+        self.emailService = emailService
 
         // Restore persisted preferences
         self.selectedModel = UserDefaults.standard.string(forKey: "ai_selected_model")
@@ -62,7 +84,11 @@ final class AIChatService {
         if UserDefaults.standard.object(forKey: "ai_can_write_tasks") != nil {
             self.aiCanWriteTasks = UserDefaults.standard.bool(forKey: "ai_can_write_tasks")
         }
-        loadPersistedConversations()
+        // Defer conversation history loading — JSON deserialization from UserDefaults
+        // can be slow with many saved conversations and blocks the main thread during startup.
+        Task { @MainActor in
+            loadPersistedConversations()
+        }
     }
 
     // MARK: - Public API
@@ -101,6 +127,27 @@ final class AIChatService {
                 modelContext: modelContext
             )
         }
+    }
+
+    /// Retry the last user message (used when the backend was unreachable).
+    /// Removes any failed assistant placeholder and re-sends the last user message.
+    func retry(allTasks: [TaskRecord], modelContext: ModelContext) {
+        guard !isStreaming else { return }
+        // Find the last user message to replay
+        guard let lastUserMessage = messages.last(where: { $0.role == .user })?.content else {
+            errorMessage = nil
+            return
+        }
+        // Remove the failed assistant placeholder if present
+        if let lastMsg = messages.last, lastMsg.role == .assistant {
+            messages.removeLast()
+        }
+        // Remove the user message too — send() will re-append it
+        if let lastMsg = messages.last, lastMsg.role == .user {
+            messages.removeLast()
+        }
+        errorMessage = nil
+        send(userMessage: lastUserMessage, allTasks: allTasks, modelContext: modelContext)
     }
 
     /// Cancel an in-progress stream.
@@ -158,24 +205,19 @@ final class AIChatService {
     ) async {
         defer { finaliseStream() }
 
-        guard
-            let baseURL = configuration.supabaseURL,
-            !configuration.supabaseAnonKey.isEmpty
-        else {
-            appendError("Backend not configured.", to: assistantMessageID)
-            return
-        }
+        // Pre-fetch calendar events async so buildPayload stays sync
+        await refreshCalendarSnapshot()
 
-        let url = baseURL
-            .appending(path: "functions")
-            .appending(path: "v1")
-            .appending(path: configuration.chatFunctionPath)
+        // Route through the main backend's /ai/chat endpoint with Bearer auth
+        let baseURL = configuration.effectiveBackendURL
+        let url = baseURL.appending(path: "ai/chat")
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue(configuration.supabaseAnonKey, forHTTPHeaderField: "apikey")
-        request.setValue("Bearer \(configuration.supabaseAnonKey)", forHTTPHeaderField: "Authorization")
+        if let token = authService?.bearerToken {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
 
         let payload = buildPayload(allTasks: allTasks)
         guard let body = try? JSONEncoder().encode(payload) else {
@@ -224,7 +266,7 @@ final class AIChatService {
     // MARK: - Payload Building
 
     private func buildPayload(allTasks: [TaskRecord]) -> ChatRequest {
-        // Inject task context only if the user has granted read access
+        // ── Tasks ──────────────────────────────────────────────────────────────
         let taskSummaries: [TaskSummaryPayload] = aiCanReadTasks
             ? allTasks.prefix(100).map { task in
                 TaskSummaryPayload(
@@ -239,27 +281,62 @@ final class AIChatService {
             : []
 
         let taskContext = aiCanReadTasks
-            ? "The user has \(taskSummaries.count) tasks:\n\(Self.tasksToJSON(taskSummaries))"
+            ? "## Tasks (\(taskSummaries.count) total)\n\(Self.tasksToJSON(taskSummaries))"
             : "Task access is disabled by the user."
 
-        let writeNote = aiCanWriteTasks
-            ? "When the user asks you to create, edit, or delete tasks, call the appropriate tool function."
-            : "You cannot modify the user's tasks — read access only."
+        let taskWriteNote = aiCanWriteTasks
+            ? "You CAN create, update, and delete tasks via tool calls."
+            : "You cannot modify tasks (read-only)."
 
+        // ── Calendar — fetched async before this call, cached in calendarSnapshot ──
+        let calendarContext: String
+        if let snap = calendarSnapshot {
+            calendarContext = snap
+        } else {
+            calendarContext = "## Calendar\nCalendar access not granted or not yet loaded."
+        }
+
+        // ── Email ──────────────────────────────────────────────────────────────
+        let emailContext: String
+        if let email = emailService, !email.threads.isEmpty {
+            let recent = email.threads.prefix(10).map { t in
+                "- [\(t.id)] \(t.unread ? "UNREAD" : "read") from \(t.from.name.isEmpty ? t.from.email : t.from.name): \"\(t.subject)\""
+            }.joined(separator: "\n")
+            emailContext = """
+            ## Recent Emails (inbox)
+            \(recent)
+            You CAN send emails via the send_email tool.
+            """
+        } else {
+            emailContext = "## Email\nNo email threads loaded or email not connected."
+        }
+
+        // ── System prompt ──────────────────────────────────────────────────────
+        let toneLine = toneInstruction.isEmpty ? "" : "\n\(toneInstruction)"
         let systemPrompt = """
-        You are a smart task assistant embedded in a personal task manager app.
-        Today is \(Self.formattedDate(Date())).
+        You are a powerful personal assistant embedded in Todus — a task manager, email client, and calendar app.
+        Today is \(Self.formattedDate(Date())).\(toneLine)
+
+        You have full access to the user's tasks, calendar, and email:
 
         \(taskContext)
+        \(taskWriteNote)
 
-        \(writeNote)
+        \(calendarContext)
+
+        \(emailContext)
+
+        CAPABILITIES — you can:
+        • Read, create, update, and delete tasks (use create_task, update_task, delete_task tools)
+        • Read calendar events and create new ones (use create_calendar_event tool)
+        • Read email threads and send new emails or replies (use send_email tool)
 
         FORMATTING RULES — follow these exactly:
-        • NEVER use markdown tables (no | separators). Always use bullet lists (- item) for rows of data.
-        • When you reference a specific task from the user's list, write [task:THAT_TASKS_UUID] on its own line. The app will render it as a native card the user can tap.
-        • Use ## for section headings, **text** for bold emphasis, and - for bullet list items.
+        • NEVER use markdown tables. Always use bullet lists (- item) for tabular data.
+        • When referencing a task, write [task:UUID] on its own line — the app renders it as a native card.
+        • Use ## for section headings, **bold** for emphasis, - for bullets.
         • Leave a blank line between sections and after bullet lists.
-        • Keep responses concise, action-oriented, and well-structured. Speak naturally.
+        • Be concise, action-oriented, and natural. Don't over-explain.
         """
 
         var apiMessages: [ChatMessage] = [ChatMessage(role: "system", content: systemPrompt)]
@@ -268,16 +345,11 @@ final class AIChatService {
             let role = msg.role == .user ? "user" : "assistant"
             return ChatMessage(role: role, content: msg.content)
         }
-        // Remove the last empty streaming placeholder before sending
         if apiMessages.last?.role == "assistant" && apiMessages.last?.content.isEmpty == true {
             apiMessages.removeLast()
         }
 
-        return ChatRequest(
-            messages: apiMessages,
-            tasks: Array(taskSummaries),
-            model: selectedModel
-        )
+        return ChatRequest(messages: apiMessages, tasks: Array(taskSummaries), model: selectedModel)
     }
 
     // MARK: - Tool Call Processing
@@ -316,6 +388,33 @@ final class AIChatService {
                    let taskID = UUID(uuidString: args.id) {
                     applyDeleteTask(taskID: taskID, modelContext: modelContext)
                     let mutation = AIChatTaskMutation(action: .delete, taskID: taskID)
+                    appendMutation(mutation, to: assistantMessageID)
+                }
+
+            case "create_calendar_event":
+                if let args = try? JSONDecoder().decode(CreateCalendarEventArgs.self, from: argsData) {
+                    let iso = ISO8601DateFormatter()
+                    if let startDate = iso.date(from: args.startDate),
+                       let cal = calendarService, cal.canCreateEvents() {
+                        let endDate = args.endDate.flatMap { iso.date(from: $0) }
+                        // CalendarService is actor-isolated — call with await
+                        try? await cal.createEvent(title: args.title, startDate: startDate, endDate: endDate)
+                        let mutation = AIChatTaskMutation(action: .create, title: "📅 \(args.title)")
+                        appendMutation(mutation, to: assistantMessageID)
+                    }
+                }
+
+            case "send_email":
+                if let args = try? JSONDecoder().decode(SendEmailArgs.self, from: argsData),
+                   let email = emailService {
+                    let draft = EmailDraft(
+                        to: args.to,
+                        subject: args.subject,
+                        body: args.body,
+                        replyToThreadId: args.threadId
+                    )
+                    Task { await email.sendEmail(draft) }
+                    let mutation = AIChatTaskMutation(action: .create, title: "✉️ Sent: \(args.subject)")
                     appendMutation(mutation, to: assistantMessageID)
                 }
 
@@ -429,11 +528,84 @@ final class AIChatService {
         savedConversations = convs
     }
 
+    // MARK: - Calendar Context
+
+    /// Fetches today's and this week's events from the actor-isolated CalendarService.
+    /// Stores the result in `calendarSnapshot` so `buildPayload` (sync) can use it.
+    private func refreshCalendarSnapshot() async {
+        guard let cal = calendarService, cal.canReadEvents() else {
+            calendarSnapshot = "## Calendar\nCalendar access not granted."
+            return
+        }
+        let today = await cal.todaysEvents()
+        let cal7 = Calendar.current
+        let weekEnd = cal7.date(byAdding: .day, value: 7, to: Date()) ?? Date()
+        let weekEvents = await cal.events(from: Date(), to: weekEnd)
+
+        let todayStr = today.isEmpty ? "No events today." : today.map {
+            "- \($0.title) (\(Self.shortTime($0.startDate)) – \(Self.shortTime($0.endDate)))"
+        }.joined(separator: "\n")
+        let weekStr = weekEvents.isEmpty ? "No events this week." : weekEvents.prefix(20).map {
+            "- \($0.title) on \(Self.shortDate($0.startDate))"
+        }.joined(separator: "\n")
+
+        calendarSnapshot = """
+        ## Calendar
+        Today:
+        \(todayStr)
+        This week:
+        \(weekStr)
+        You CAN create calendar events via the create_calendar_event tool.
+        """
+    }
+
+    // MARK: - Saved Prompts
+
+    /// User-saved prompts, persisted to UserDefaults.
+    var savedPrompts: [SavedPrompt] = [] {
+        didSet { persistSavedPrompts() }
+    }
+
+    func loadSavedPrompts() {
+        guard
+            let data = UserDefaults.standard.data(forKey: "ai_saved_prompts"),
+            let prompts = try? JSONDecoder().decode([SavedPrompt].self, from: data)
+        else { return }
+        savedPrompts = prompts
+    }
+
+    func addSavedPrompt(_ prompt: SavedPrompt) {
+        savedPrompts.insert(prompt, at: 0)
+    }
+
+    func deleteSavedPrompt(_ prompt: SavedPrompt) {
+        savedPrompts.removeAll { $0.id == prompt.id }
+    }
+
+    private func persistSavedPrompts() {
+        if let data = try? JSONEncoder().encode(savedPrompts) {
+            UserDefaults.standard.set(data, forKey: "ai_saved_prompts")
+        }
+    }
+
     // MARK: - Utilities
 
     private static func formattedDate(_ date: Date) -> String {
         let f = DateFormatter()
         f.dateStyle = .long
+        return f.string(from: date)
+    }
+
+    private static func shortTime(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.timeStyle = .short
+        f.dateStyle = .none
+        return f.string(from: date)
+    }
+
+    private static func shortDate(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "EEE MMM d, h:mm a"
         return f.string(from: date)
     }
 
@@ -517,4 +689,102 @@ private struct UpdateTaskArgs: Decodable {
 
 private struct DeleteTaskArgs: Decodable {
     let id: String
+}
+
+private struct CreateCalendarEventArgs: Decodable {
+    let title: String
+    let startDate: String      // ISO 8601
+    let endDate: String?
+    let notes: String?
+}
+
+private struct SendEmailArgs: Decodable {
+    let to: [String]           // array of email address strings
+    let subject: String
+    let body: String
+    let threadId: String?      // nil for new thread, set for reply
+}
+
+// MARK: - SavedPrompt
+
+/// A user-saved or built-in prompt shown in the Prompt Library.
+struct SavedPrompt: Identifiable, Codable {
+    let id: UUID
+    var title: String          // short display label
+    var text: String           // the full prompt text sent to the AI
+    var icon: String           // SF Symbol name
+    var category: String       // for grouping in the library
+    var isPreset: Bool         // presets can't be deleted
+
+    init(id: UUID = UUID(), title: String, text: String, icon: String, category: String, isPreset: Bool = false) {
+        self.id = id
+        self.title = title
+        self.text = text
+        self.icon = icon
+        self.category = category
+        self.isPreset = isPreset
+    }
+
+    // MARK: Presets
+
+    static let presets: [SavedPrompt] = [
+        // ── Tasks ──────────────────────────────────────────────────────────────
+        SavedPrompt(title: "Plan my week",
+                    text: "Help me plan my week. Review my tasks and calendar, then suggest a realistic daily schedule including time blocks for deep work.",
+                    icon: "calendar.badge.checkmark", category: "Tasks", isPreset: true),
+        SavedPrompt(title: "Morning briefing",
+                    text: "Give me a morning briefing. Summarize my tasks for today, any calendar events, and highlight anything urgent or overdue.",
+                    icon: "sun.max", category: "Tasks", isPreset: true),
+        SavedPrompt(title: "Top 3 priorities",
+                    text: "What are my top 3 priorities right now? Consider deadlines, priority levels, and what would have the most impact.",
+                    icon: "flag.fill", category: "Tasks", isPreset: true),
+        SavedPrompt(title: "Break down a task",
+                    text: "Take my most complex task and break it down into smaller, actionable subtasks I can complete in under 30 minutes each.",
+                    icon: "list.bullet.indent", category: "Tasks", isPreset: true),
+        SavedPrompt(title: "Clear overdue tasks",
+                    text: "Show me all my overdue tasks and help me decide which to reschedule, delegate, or delete.",
+                    icon: "exclamationmark.circle", category: "Tasks", isPreset: true),
+        SavedPrompt(title: "End-of-day review",
+                    text: "Let's do an end-of-day review. What did I complete today, what's left, and what should I prioritize tomorrow?",
+                    icon: "moon.stars", category: "Tasks", isPreset: true),
+
+        // ── Calendar ───────────────────────────────────────────────────────────
+        SavedPrompt(title: "Find free time",
+                    text: "Look at my calendar this week and find 2-hour blocks where I have no meetings or events. I want to schedule deep focus time.",
+                    icon: "clock.badge.checkmark", category: "Calendar", isPreset: true),
+        SavedPrompt(title: "Schedule a meeting",
+                    text: "Help me prepare for my next meeting. Who's it with, what should I review beforehand, and what do I want to accomplish?",
+                    icon: "person.2.fill", category: "Calendar", isPreset: true),
+        SavedPrompt(title: "Create focus blocks",
+                    text: "Create 2-hour focus time blocks on my calendar for tomorrow morning and the day after. Label them 'Deep Work'.",
+                    icon: "brain.head.profile", category: "Calendar", isPreset: true),
+        SavedPrompt(title: "Weekly overview",
+                    text: "What does my week look like? Give me an overview of all my events and flag any days that look too packed.",
+                    icon: "calendar", category: "Calendar", isPreset: true),
+
+        // ── Email ──────────────────────────────────────────────────────────────
+        SavedPrompt(title: "Triage inbox",
+                    text: "Help me triage my inbox. Go through my recent emails and tell me which need urgent replies, which I can defer, and which can be archived.",
+                    icon: "tray.and.arrow.down", category: "Email", isPreset: true),
+        SavedPrompt(title: "Draft a reply",
+                    text: "Help me draft a reply to the most recent unread email in my inbox. Keep it professional and concise.",
+                    icon: "arrowshape.turn.up.left.fill", category: "Email", isPreset: true),
+        SavedPrompt(title: "Summarize emails",
+                    text: "Summarize the key points from my most recent emails. What actions do I need to take?",
+                    icon: "doc.text.magnifyingglass", category: "Email", isPreset: true),
+        SavedPrompt(title: "Write cold outreach",
+                    text: "Help me write a cold outreach email introducing myself and my product to a potential customer. Keep it short, personal, and value-focused.",
+                    icon: "envelope.badge.person.crop", category: "Email", isPreset: true),
+
+        // ── Cross-app ──────────────────────────────────────────────────────────
+        SavedPrompt(title: "Full day triage",
+                    text: "Give me a complete picture of my day: tasks due, calendar events, and any emails that need attention. Then suggest what to tackle first.",
+                    icon: "sparkles", category: "Cross-app", isPreset: true),
+        SavedPrompt(title: "Weekly retrospective",
+                    text: "Help me do a weekly retrospective. What did I accomplish this week across tasks, meetings, and emails? What should I improve next week?",
+                    icon: "chart.line.uptrend.xyaxis", category: "Cross-app", isPreset: true),
+        SavedPrompt(title: "Project kickoff",
+                    text: "I'm starting a new project. Help me create an initial set of tasks, schedule a kickoff meeting on my calendar, and draft a brief intro email to the team.",
+                    icon: "rocket", category: "Cross-app", isPreset: true),
+    ]
 }

@@ -12,19 +12,20 @@ struct TaskRowView: View {
         Button {
             onOpenDetails()
         } label: {
-            HStack(alignment: .top, spacing: 12) {
+            HStack(alignment: .top, spacing: 10) {
                 // Checkbox has its own isolated tap target — doesn't conflict with row tap
                 Button(action: { toggleCheckbox() }) {
                     Image(systemName: task.completed ? "checkmark.circle.fill" : "circle")
-                        .font(.system(size: 20, weight: .medium))
+                        .font(.system(size: 18, weight: .medium))
                         .foregroundStyle(task.completed ? Color.blue : AppTheme.subtleText)
                 }
                 .buttonStyle(.plain)
+                // Apple HIG: minimum 44x44pt tap target for accessibility
                 .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
 
                 // Content area — entire row opens details when tapped
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 6) {
                         Text(task.title)
                             .font(.system(size: 14, weight: .medium))
@@ -42,7 +43,9 @@ struct TaskRowView: View {
                         }
                     }
 
-                    if !task.taskDescription.isEmpty {
+                    // Guard: don't render description if empty or if it duplicates the title
+                    // (can happen for Reminders-imported tasks where notes == title).
+                    if !task.taskDescription.isEmpty && task.taskDescription != task.title {
                         Text(task.taskDescription)
                             .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(AppTheme.mutedText)
@@ -68,8 +71,10 @@ struct TaskRowView: View {
 
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            // Ensure the full HStack area (including Spacer) is tappable
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .background(AppTheme.rowFill, in: RoundedRectangle(cornerRadius: 16, style: .continuous))

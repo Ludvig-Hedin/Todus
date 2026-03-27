@@ -1,9 +1,14 @@
 import SwiftUI
 
-/// Shown when the user has no email connection — prompts to connect Gmail or Outlook.
-/// For Google sign-in users, Gmail may already be connected via OAuth scopes.
+/// Shown when the user has no email connection.
+///
+/// Google sign-in gives authentication only — Gmail API access (read/send mail)
+/// requires a *separate* OAuth consent for mail scopes. This screen grants those scopes
+/// and stores the resulting connection in the backend.
 struct EmailConnectView: View {
     @Environment(AppServices.self) private var services
+    @State private var isLoading = false
+    @State private var errorMessage: String?
 
     var body: some View {
         VStack(spacing: 24) {
@@ -14,53 +19,58 @@ struct EmailConnectView: View {
                 .foregroundStyle(AppTheme.subtleText)
 
             VStack(spacing: 8) {
-                Text("Connect Your Email")
+                Text("Connect Gmail")
                     .font(.system(size: 22, weight: .bold))
 
-                Text("Link your Gmail or Outlook account\nto view and send emails.")
+                // Clarify that this is a separate step from Google sign-in
+                Text("Grant access to your Gmail inbox\nto view and send emails.")
                     .font(.system(size: 15, weight: .medium))
                     .foregroundStyle(AppTheme.subtleText)
                     .multilineTextAlignment(.center)
             }
 
-            VStack(spacing: 12) {
-                // Connect Gmail — opens the Google OAuth flow
-                Button {
-                    Task { await services.authService.signInWithGoogle() }
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "envelope.fill")
-                            .font(.system(size: 16, weight: .semibold))
-                        Text("Connect Gmail")
-                            .font(.system(size: 16, weight: .semibold))
-                    }
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 52)
-                    .background(.primary, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    .foregroundStyle(AppTheme.backgroundTop)
-                }
-                .buttonStyle(.plain)
-
-                // Connect Outlook — placeholder for future implementation
-                Button {
-                    // Outlook OAuth flow — not yet implemented
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "envelope.fill")
-                            .font(.system(size: 16, weight: .semibold))
-                        Text("Connect Outlook")
-                            .font(.system(size: 16, weight: .semibold))
-                    }
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 52)
-                    .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .stroke(AppTheme.cardBorder, lineWidth: 1)
-                    )
-                }
-                .buttonStyle(.plain)
+            // Show error if connection attempt failed
+            if let errorMessage {
+                Text(errorMessage)
+                    .font(.system(size: 13))
+                    .foregroundStyle(.red)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
             }
+
+            // Single Gmail connect button — Outlook is not supported
+            Button {
+                guard !isLoading else { return }
+                isLoading = true
+                errorMessage = nil
+                Task {
+                    do {
+                        await services.authService.signInWithGoogle()
+                        await services.emailService.checkConnection()
+                        if services.emailService.hasConnection {
+                            await services.emailService.loadThreads(refresh: true)
+                        }
+                    } catch {
+                        errorMessage = "Connection failed. Please try again."
+                    }
+                    isLoading = false
+                }
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "envelope.fill")
+                        .font(.system(size: 16, weight: .semibold))
+                    Text("Connect Gmail")
+                        .font(.system(size: 16, weight: .semibold))
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: 52)
+                // Use explicit blue so the button is always legible in both light and dark mode
+                .background(Color.blue, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .foregroundStyle(.white)
+            }
+            .buttonStyle(.plain)
+            .disabled(isLoading)
+            .opacity(isLoading ? 0.6 : 1.0)
             .padding(.horizontal, 24)
 
             Spacer()

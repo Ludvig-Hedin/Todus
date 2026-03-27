@@ -19,6 +19,15 @@ struct AIChatView: View {
     // Sheet presentation states
     @State private var showsHistory = false
     @State private var showsConfig = false
+    @State private var showsDataSheet = false
+    @State private var showsDeleteConfirm = false
+    @State private var showsRenameAlert = false
+    @State private var renameText = ""
+    @State private var showsPromptLibrary = false
+
+    // Suggestion expansion — "Show more" / "Refresh" / "Back"
+    @State private var suggestionsExpanded = false
+    @State private var suggestionSeed = 0   // changing this shuffles the extended pool
 
     // Attachment state — native confirmationDialog triggers individual system pickers
     @State private var isPickingAttachment = false
@@ -33,6 +42,20 @@ struct AIChatView: View {
     private let thinkingPhrases = ["Thinking", "Reading tasks", "Searching", "Writing"]
 
     private var chatService: AIChatService { services.aiChatService }
+
+    /// AI gradient — matches the tab bar sparkles icon exactly
+    private var aiGradient: LinearGradient {
+        LinearGradient(
+            stops: [
+                .init(color: Color(red: 0, green: 0xAA/255.0, blue: 0xF5/255.0), location: 0.087),
+                .init(color: Color(red: 0xEF/255.0, green: 0, blue: 0xC2/255.0), location: 0.269),
+                .init(color: Color(red: 1, green: 0, blue: 0x38/255.0), location: 0.580),
+                .init(color: Color(red: 0xF9/255.0, green: 0x9F/255.0, blue: 0), location: 0.913),
+            ],
+            startPoint: UnitPoint(x: 0.25, y: 0),
+            endPoint: UnitPoint(x: 0.75, y: 1)
+        )
+    }
 
     var body: some View {
         NavigationStack {
@@ -50,12 +73,28 @@ struct AIChatView: View {
                 }
 
                 if chatService.messages.isEmpty {
-                    emptyStateView
-                        .transition(.opacity)
+                    // Show error state when backend is unreachable and no conversation exists
+                    if let error = chatService.errorMessage, !chatService.isStreaming {
+                        self.aiUnreachableView(error: error)
+                            .transition(AnyTransition.opacity)
+                    } else {
+                        emptyStateView
+                            .transition(AnyTransition.opacity)
+                    }
                 } else {
                     conversationView
-                        .transition(.opacity)
+                        .transition(AnyTransition.opacity)
                 }
+            }
+            // Top gradient fade — same height as header buttons, fades content below toolbar
+            .safeAreaInset(edge: .top) {
+                LinearGradient(
+                    colors: [AppTheme.backgroundTop.opacity(0.5), AppTheme.backgroundTop.opacity(0)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(height: 12)
+                .allowsHitTesting(false)
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbarContent }
@@ -68,6 +107,39 @@ struct AIChatView: View {
         .sheet(isPresented: $showsConfig) {
             AIChatConfigSheet()
                 .presentationDragIndicator(.visible)
+        }
+        // Prompt library — presets + user-saved prompts
+        .sheet(isPresented: $showsPromptLibrary) {
+            PromptLibrarySheet(onSelect: { prompt in
+                inputText = prompt.text
+                showsPromptLibrary = false
+            })
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+            .presentationBackground(AppTheme.backgroundTop)
+        }
+        // Conversation data sheet — shows token usage, cost, message stats
+        .sheet(isPresented: $showsDataSheet) {
+            ConversationDataSheet(stats: conversationStats)
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
+                .presentationBackground(AppTheme.backgroundTop)
+        }
+        // Delete confirmation dialog
+        .confirmationDialog("Delete this conversation?", isPresented: $showsDeleteConfirm, titleVisibility: .visible) {
+            Button("Delete", role: .destructive) { deleteConversation() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This will clear all messages. This action cannot be undone.")
+        }
+        // Rename alert
+        .alert("Rename Conversation", isPresented: $showsRenameAlert) {
+            TextField("Title", text: $renameText)
+            Button("Save") {
+                let trimmed = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty { chatService.chatTitle = trimmed }
+            }
+            Button("Cancel", role: .cancel) {}
         }
         // Attachment pickers — triggered by custom panel (not system confirmationDialog)
         .photosPicker(isPresented: $isShowingPhotoPicker, selection: $selectedPhotoItem, matching: .images)
@@ -148,18 +220,119 @@ struct AIChatView: View {
                 .frame(maxWidth: 200)
         }
 
-        // New chat button — always visible
+        // New chat + options menu — trailing
         ToolbarItem(placement: .topBarTrailing) {
-            Button {
-                withAnimation(.snappy(duration: 0.2)) {
-                    chatService.clearHistory()
+            HStack(spacing: 16) {
+                // New chat button
+                Button {
+                    withAnimation(.snappy(duration: 0.2)) {
+                        chatService.clearHistory()
+                    }
+                } label: {
+                    Image(systemName: "square.and.pencil")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.primary)
                 }
+                .buttonStyle(.plain)
+
+                // Ellipsis menu — conversation actions
+                Menu {
+                    // Rename
+                    Button {
+                        renameText = chatService.chatTitle ?? ""
+                        showsRenameAlert = true
+                    } label: {
+                        Label("Rename", systemImage: "pencil")
+                    }
+
+                    // Copy conversation
+                    Button {
+                        copyConversation()
+                    } label: {
+                        Label("Copy Conversation", systemImage: "doc.on.doc")
+                    }
+
+                    // Duplicate chat
+                    Button {
+                        duplicateChat()
+                    } label: {
+                        Label("Duplicate", systemImage: "plus.square.on.square")
+                    }
+
+                    // Share
+                    Button {
+                        shareConversation()
+                    } label: {
+                        Label("Share", systemImage: "square.and.arrow.up")
+                    }
+
+                    // View data
+                    Button {
+                        showsDataSheet = true
+                    } label: {
+                        Label("View Data", systemImage: "chart.bar")
+                    }
+
+                    Divider()
+
+                    // Delete — destructive
+                    Button(role: .destructive) {
+                        showsDeleteConfirm = true
+                    } label: {
+                        Label("Delete Conversation", systemImage: "trash")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.primary)
+                }
+            }
+        }
+    }
+
+    // MARK: - AI Unreachable State
+
+    /// Shown when the backend is unreachable and no conversation exists yet.
+    private func aiUnreachableView(error: String) -> some View {
+        VStack(spacing: 24) {
+            Spacer()
+
+            Image(systemName: "wifi.exclamationmark")
+                .font(.system(size: 48, weight: .light))
+                .foregroundStyle(AppTheme.subtleText)
+
+            VStack(spacing: 8) {
+                Text("Can't reach the assistant")
+                    .font(.system(size: 20, weight: .bold))
+
+                Text("Check your connection and try again.")
+                    .font(.system(size: 15))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+
+            Button {
+                // Actually retry the last message instead of just clearing the error
+                chatService.retry(allTasks: Array(allTasks), modelContext: modelContext)
             } label: {
-                Image(systemName: "square.and.pencil")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.primary)
+                HStack(spacing: 8) {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 14, weight: .semibold))
+                    Text("Retry")
+                        .font(.system(size: 15, weight: .semibold))
+                }
+                .padding(.horizontal, 24)
+                .padding(.vertical, 12)
+                .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(AppTheme.cardBorder, lineWidth: 1)
+                )
             }
             .buttonStyle(.plain)
+
+            Spacer()
+            Spacer()
         }
     }
 
@@ -169,76 +342,186 @@ struct AIChatView: View {
         VStack(spacing: 0) {
             Spacer()
 
-            VStack(alignment: .leading, spacing: 28) {
-                VStack(alignment: .leading, spacing: 16) {
-                    ZStack {
-                        Circle()
-                            .fill(AppTheme.surfacePrimary)
-                            .frame(width: 64, height: 64)
-                            .overlay(Circle().stroke(AppTheme.cardBorder, lineWidth: 1))
-                        Image(systemName: "sparkles")
-                            .font(.system(size: 26, weight: .semibold))
-                            .foregroundStyle(.primary)
-                    }
+            VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 10) {
+                    // Sparkles icon — matches tab bar: same size, same gradient, no circle
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(aiGradient)
 
                     Text("How can I help you today?")
-                        .font(.system(size: 26, weight: .semibold))
-                        .tracking(-0.5)
-                }
-                .padding(.horizontal, 24)
-
-                // Dynamic suggestions based on task count — shows relevant prompts
-                // so users always see something immediately useful
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(contextualSuggestions, id: \.text) { suggestion in
-                        suggestionRow(icon: suggestion.icon, text: suggestion.text)
-                    }
+                        .font(.system(size: 20, weight: .semibold))
+                        .tracking(-0.3)
                 }
                 .padding(.horizontal, 16)
+
+                // Suggestions — 3 default, up to 10 when expanded
+                VStack(alignment: .leading, spacing: 0) {
+                    let pool = contextualSuggestionsPool
+                    let shown = suggestionsExpanded ? pool : Array(pool.prefix(3))
+
+                    ForEach(shown, id: \.text) { suggestion in
+                        suggestionRow(icon: suggestion.icon, text: suggestion.text)
+                    }
+
+                    // Show more / controls row
+                    if suggestionsExpanded {
+                        HStack(spacing: 16) {
+                            // Back / collapse
+                            Button {
+                                withAnimation(.snappy(duration: 0.2)) { suggestionsExpanded = false }
+                            } label: {
+                                Label("Show less", systemImage: "chevron.up")
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundStyle(AppTheme.mutedText)
+                            }
+                            .buttonStyle(.plain)
+
+                            Spacer()
+
+                            // Refresh — shuffle extended suggestions
+                            Button {
+                                withAnimation(.snappy(duration: 0.15)) { suggestionSeed += 1 }
+                            } label: {
+                                Label("Refresh", systemImage: "arrow.clockwise")
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundStyle(AppTheme.mutedText)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                    } else if pool.count > 3 {
+                        // Show more button
+                        Button {
+                            withAnimation(.snappy(duration: 0.2)) { suggestionsExpanded = true }
+                        } label: {
+                            Text("Show more")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(AppTheme.mutedText)
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                    }
+
+                    // Prompt library link
+                    Button {
+                        showsPromptLibrary = true
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "bookmark")
+                                .font(.system(size: 12, weight: .medium))
+                            Text("Prompt library")
+                                .font(.system(size: 12, weight: .medium))
+                        }
+                        .foregroundStyle(AppTheme.mutedText)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 4)
+                }
+                .padding(.horizontal, 8)
             }
 
             Spacer()
 
             inputSection
-                .padding(.horizontal, 12)
-                .padding(.bottom, 16)   // gap above keyboard on empty state
+                .padding(.horizontal, 8)
+                .padding(.bottom, 8)   // gap above keyboard on empty state
         }
     }
 
-    /// Returns 3 context-aware suggestions based on how many active tasks the user has.
-    /// Goal: always show something immediately useful, not generic placeholders.
-    private var contextualSuggestions: [(icon: String, text: String)] {
+    /// Full pool of up to 10 context-aware suggestions. First 3 are shown by default.
+    /// `suggestionSeed` drives shuffling of the extended 4–10 slots on Refresh.
+    private var contextualSuggestionsPool: [(icon: String, text: String)] {
         let activeCount = allTasks.filter { !$0.completed }.count
 
-        if activeCount == 0 {
-            // No tasks yet — guide the user to get started
-            return [
-                (icon: "plus.circle",   text: "Create my first tasks for today"),
-                (icon: "sparkle",       text: "Brainstorm ideas for what to work on"),
-                (icon: "list.bullet",   text: "Help me plan my week")
+        // First 3: always shown (pinned), context-sensitive
+        let pinned: [(icon: String, text: String)]
+        // Extended pool (slots 4-10): shuffled with seed
+        let extended: [(icon: String, text: String)]
+
+        switch services.currentTab {
+        case .email:
+            pinned = [
+                ("envelope.open",              "Summarize my recent emails"),
+                ("arrowshape.turn.up.left",    "Draft a reply to my latest email"),
+                ("tray.and.arrow.down",        "Help me triage my inbox"),
             ]
-        } else if activeCount < 6 {
-            // Few tasks — encourage building momentum
-            return [
-                (icon: "plus.circle",   text: "Add more tasks to get my list going"),
-                (icon: "sparkle",       text: "Brainstorm what I should be working on"),
-                (icon: "checklist",     text: "Review and plan my \(activeCount) tasks")
+            extended = [
+                ("doc.text.magnifyingglass",   "What emails need my attention today?"),
+                ("envelope.badge.person.crop", "Write a cold outreach email to a new lead"),
+                ("archivebox",                 "Archive everything older than a week"),
+                ("star",                       "Which emails are most important right now?"),
+                ("paperplane",                 "Draft a follow-up to my last sent email"),
+                ("flag",                       "Show me emails I've flagged or starred"),
+                ("magnifyingglass",            "Search for emails about a specific topic"),
             ]
-        } else if activeCount <= 20 {
-            // Healthy backlog — help prioritize and move forward
-            return [
-                (icon: "arrow.up.circle", text: "What should I prioritize today?"),
-                (icon: "sparkle",         text: "Brainstorm and plan"),
-                (icon: "pencil",          text: "Create a batch of tasks")
+        case .calendar:
+            pinned = [
+                ("clock",                      "What's on my calendar today?"),
+                ("calendar.badge.plus",        "Find free focus time this week"),
+                ("person.2",                   "Help me schedule a meeting"),
             ]
-        } else {
-            // Overloaded — help clear the backlog
-            return [
-                (icon: "checkmark.circle", text: "Help me clear my task backlog"),
-                (icon: "arrow.up.circle",  text: "What are my top 3 priorities?"),
-                (icon: "trash",            text: "Review and remove stale tasks")
+            extended = [
+                ("brain.head.profile",         "Create deep work blocks on my calendar tomorrow"),
+                ("calendar",                   "Give me a full overview of this week"),
+                ("moon.stars",                 "Block time tomorrow morning for planning"),
+                ("calendar.badge.exclamationmark", "Do I have any scheduling conflicts?"),
+                ("clock.badge.checkmark",      "When is my next free 2-hour window?"),
+                ("person.badge.plus",          "Help me prepare for my next meeting"),
+                ("sun.max",                    "Plan my ideal workday schedule"),
+            ]
+        case .tasks:
+            if activeCount == 0 {
+                pinned = [
+                    ("plus.circle",            "Create my first tasks for today"),
+                    ("sparkle",                "Brainstorm ideas for what to work on"),
+                    ("list.bullet",            "Help me plan my week"),
+                ]
+            } else if activeCount <= 20 {
+                pinned = [
+                    ("arrow.up.circle",        "What should I prioritize today?"),
+                    ("list.bullet.indent",     "Break down my biggest task into steps"),
+                    ("checklist",              "Review my \(activeCount) open tasks"),
+                ]
+            } else {
+                pinned = [
+                    ("checkmark.circle",       "Help me clear my task backlog"),
+                    ("arrow.up.circle",        "What are my top 3 priorities?"),
+                    ("trash",                  "Review and remove stale tasks"),
+                ]
+            }
+            extended = [
+                ("flag.fill",                  "Set priority on all my tasks"),
+                ("calendar.badge.checkmark",   "Which tasks have deadlines this week?"),
+                ("exclamationmark.circle",     "Show me all overdue tasks"),
+                ("folder.badge.plus",          "Organize my tasks into folders"),
+                ("moon.zzz",                   "Plan tomorrow and wind down my day"),
+                ("chart.bar",                  "How productive have I been this week?"),
+                ("pencil",                     "Rename or update outdated tasks"),
+            ]
+        case .home:
+            pinned = [
+                ("sun.max",                    "Give me a morning briefing"),
+                ("sparkle",                    "What should I focus on right now?"),
+                ("calendar.badge.checkmark",   "Triage my tasks and calendar for today"),
+            ]
+            extended = [
+                ("moon.stars",                 "End-of-day review — what did I accomplish?"),
+                ("chart.line.uptrend.xyaxis",  "Weekly retrospective — what went well?"),
+                ("flag",                       "What are my top priorities this week?"),
+                ("rocket",                     "Help me kick off a new project"),
+                ("envelope.open",              "Any important emails I should handle first?"),
+                ("brain.head.profile",         "Block focus time and clear my schedule"),
+                ("person.2",                   "Help me coordinate with my team today"),
             ]
         }
+
+        // Shuffle the extended pool with the current seed so Refresh shows new ones
+        let shuffled = extended.shuffled(seed: suggestionSeed)
+        return pinned + Array(shuffled.prefix(7)) // total cap of 10
     }
 
     private func suggestionRow(icon: String, text: String) -> some View {
@@ -246,18 +529,18 @@ struct AIChatView: View {
             inputText = text
             sendMessage()
         } label: {
-            HStack(spacing: 14) {
+            HStack(spacing: 12) {
                 Image(systemName: icon)
-                    .font(.system(size: 16, weight: .medium))
+                    .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(AppTheme.mutedText)
-                    .frame(width: 24)
+                    .frame(width: 20)
                 Text(text)
-                    .font(.system(size: 16, weight: .medium))
+                    .font(.system(size: 15, weight: .medium))
                     .foregroundStyle(.primary)
                 Spacer()
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, 12)
+            .padding(.vertical, 9)
         }
         .buttonStyle(.plain)
     }
@@ -288,9 +571,9 @@ struct AIChatView: View {
             // Pin input section directly above keyboard — 8 pt gap above keyboard for breathing room
             .safeAreaInset(edge: .bottom) {
                 inputSection
-                    .padding(.horizontal, 12)
+                    .padding(.horizontal, 8)
                     .padding(.top, 8)
-                    .padding(.bottom, 8)   // gap between input and keyboard
+                    .padding(.bottom, 12)   // match side spacing for consistent inset from screen edge
                     .background(AppTheme.backgroundTop.ignoresSafeArea(edges: .bottom))
             }
             .onChange(of: chatService.messages.count) { _, _ in
@@ -362,12 +645,17 @@ struct AIChatView: View {
         .animation(.snappy(duration: 0.15), value: isPickingAttachment)
     }
 
+    /// Whether the input box should show its full toolbar (config, mic, send).
+    /// Compact mode: only text field + mic, matching the height of the + button.
+    private var isInputExpanded: Bool {
+        isInputFocused || !chatService.messages.isEmpty || chatService.isStreaming
+    }
+
     private var chatInputBox: some View {
         let isEmpty = inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && pendingAttachments.isEmpty
 
         return VStack(spacing: 0) {
             // Pending attachment thumbnails live inside the input box, above the text field.
-            // This prevents cropping that occurred when they were in the outer VStack.
             if !pendingAttachments.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
@@ -381,67 +669,83 @@ struct AIChatView: View {
                 .padding(.bottom, 2)
             }
 
-            // Text field — same font/padding as CaptureComposer, no Divider below
-            TextField("Ask, search or make anything…", text: $inputText, axis: .vertical)
-                .font(.system(size: 16, weight: .medium))
-                .lineLimit(1...5)
-                .focused($isInputFocused)
-                .textFieldStyle(.plain)
-                .padding(.horizontal, 16)
-                .padding(.top, pendingAttachments.isEmpty ? 12 : 6)
-                .padding(.bottom, 8)
+            if isInputExpanded {
+                // Full input: text field + bottom toolbar
+                TextField("Ask, search or make anything…", text: $inputText, axis: .vertical)
+                    .font(.system(size: 16, weight: .medium))
+                    .lineLimit(1...5)
+                    .focused($isInputFocused)
+                    .textFieldStyle(.plain)
+                    .padding(.horizontal, 16)
+                    .padding(.top, pendingAttachments.isEmpty ? 12 : 6)
+                    .padding(.bottom, 8)
 
-            // Bottom toolbar: [config | spacer | send/stop] — no Divider, matches CaptureComposer
-            HStack(spacing: 4) {
-                // AI config button
-                Button { showsConfig = true } label: {
-                    Image(systemName: "slider.horizontal.3")
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(AppTheme.mutedText)
-                }
-                .buttonStyle(.plain)
-                .frame(width: 36, height: 36)
-                .contentShape(Rectangle())
-
-                Spacer()
-
-                // Voice transcription — muted mic idle, red stop when recording, spinner when transcribing
-                ChatVoiceInputButton(onTranscription: { transcribed in
-                    let current = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-                    inputText = current.isEmpty ? transcribed : current + " " + transcribed
-                })
-
-                // Send / Stop — uses AppPrimaryButtonStyle (blue) to match CaptureComposer send button
-                if chatService.isStreaming {
-                    Button { chatService.cancelStream() } label: {
-                        Image(systemName: "stop.fill")
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundStyle(.white)
-                            .frame(width: 30, height: 30)
+                // Bottom toolbar: [config | spacer | mic | send/stop]
+                HStack(spacing: 4) {
+                    Button { showsConfig = true } label: {
+                        Image(systemName: "slider.horizontal.3")
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundStyle(AppTheme.mutedText)
                     }
-                    .buttonStyle(AppPrimaryButtonStyle())
-                    .clipShape(Circle())
-                    .transition(.scale.combined(with: .opacity))
-                } else {
-                    Button(action: sendMessage) {
-                        Image(systemName: "arrow.up")
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundStyle(.white)
-                            .frame(width: 30, height: 30)
+                    .buttonStyle(.plain)
+                    .frame(width: 36, height: 36)
+                    .contentShape(Rectangle())
+
+                    Spacer()
+
+                    ChatVoiceInputButton(onTranscription: { transcribed in
+                        let current = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+                        inputText = current.isEmpty ? transcribed : current + " " + transcribed
+                    })
+
+                    if chatService.isStreaming {
+                        Button { chatService.cancelStream() } label: {
+                            Image(systemName: "stop.fill")
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundStyle(.white)
+                                .frame(width: 30, height: 30)
+                        }
+                        .buttonStyle(AppPrimaryButtonStyle())
+                        .clipShape(Circle())
+                        .transition(.scale.combined(with: .opacity))
+                    } else {
+                        Button(action: sendMessage) {
+                            Image(systemName: "arrow.up")
+                                .font(.system(size: 15, weight: .bold))
+                                .foregroundStyle(.white)
+                                .frame(width: 30, height: 30)
+                        }
+                        .buttonStyle(AppPrimaryButtonStyle())
+                        .clipShape(Circle())
+                        .disabled(isEmpty)
+                        .opacity(isEmpty ? 0.4 : 1)
+                        .transition(.scale.combined(with: .opacity))
                     }
-                    .buttonStyle(AppPrimaryButtonStyle())
-                    .clipShape(Circle())
-                    .disabled(isEmpty)
-                    .opacity(isEmpty ? 0.4 : 1)
-                    .transition(.scale.combined(with: .opacity))
                 }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 8)
+            } else {
+                // Compact input: single-line text field + mic, same height as the + button
+                HStack(spacing: 8) {
+                    TextField("Ask, search or make anything…", text: $inputText)
+                        .font(.system(size: 16, weight: .medium))
+                        .focused($isInputFocused)
+                        .textFieldStyle(.plain)
+                        .padding(.leading, 16)
+
+                    ChatVoiceInputButton(onTranscription: { transcribed in
+                        let current = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+                        inputText = current.isEmpty ? transcribed : current + " " + transcribed
+                    })
+                    .padding(.trailing, 6)
+                }
+                .frame(height: chatInputControlSize)
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 8)
         }
-        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(AppTheme.strongBorder, lineWidth: 1))
+        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: isInputExpanded ? 24 : chatInputControlSize / 2, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: isInputExpanded ? 24 : chatInputControlSize / 2, style: .continuous).stroke(AppTheme.strongBorder, lineWidth: 1))
         .animation(.snappy(duration: 0.18), value: chatService.isStreaming)
+        .animation(.snappy(duration: 0.2), value: isInputExpanded)
         .animation(.easeOut(duration: 0.12), value: isEmpty)
         .animation(.snappy(duration: 0.15), value: pendingAttachments.count)
     }
@@ -545,6 +849,76 @@ struct AIChatView: View {
         withAnimation(.snappy(duration: 0.25)) {
             proxy.scrollTo(lastID, anchor: .bottom)
         }
+    }
+
+    // MARK: - Conversation Actions
+
+    /// Build markdown-formatted text of the entire conversation
+    private func conversationAsMarkdown() -> String {
+        chatService.messages.map { msg in
+            let tag = msg.role == .user ? "**User**" : "**Assistant**"
+            return "\(tag)\n\(msg.content)"
+        }.joined(separator: "\n\n---\n\n")
+    }
+
+    private func copyConversation() {
+        UIPasteboard.general.string = conversationAsMarkdown()
+    }
+
+    private func duplicateChat() {
+        // Save current conversation as a new entry then clear to start fresh
+        chatService.autosave()
+        // Reload the same messages back in — effectively duplicates the conversation
+        let currentMessages = chatService.messages
+        let currentTitle = chatService.chatTitle
+        chatService.clearHistory()
+        for msg in currentMessages {
+            chatService.messages.append(AIChatMessage(role: msg.role, content: msg.content))
+        }
+        chatService.chatTitle = (currentTitle ?? "Untitled") + " (copy)"
+    }
+
+    private func deleteConversation() {
+        withAnimation(.snappy(duration: 0.2)) {
+            chatService.clearHistory()
+        }
+    }
+
+    private func shareConversation() {
+        let text = conversationAsMarkdown()
+        let av = UIActivityViewController(activityItems: [text], applicationActivities: nil)
+        if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+           let root = scene.windows.first?.rootViewController {
+            // Find the top-most presented controller to avoid presentation conflicts
+            var top = root
+            while let presented = top.presentedViewController { top = presented }
+            av.popoverPresentationController?.sourceView = top.view
+            top.present(av, animated: true)
+        }
+    }
+
+    /// Conversation stats for the "View Data" sheet
+    private var conversationStats: [(label: String, value: String)] {
+        let msgs = chatService.messages
+        let userMsgs = msgs.filter { $0.role == .user }
+        let aiMsgs = msgs.filter { $0.role == .assistant }
+        let totalChars = msgs.reduce(0) { $0 + $1.content.count }
+        let totalWords = msgs.reduce(0) { $0 + $1.content.split(separator: " ").count }
+        // Rough token estimate: ~4 chars per token for English text
+        let estimatedTokens = totalChars / 4
+        // Rough cost estimate: ~$0.15 per 1M input tokens for GPT-4.1-mini via OpenRouter
+        let estimatedCost = Double(estimatedTokens) * 0.00000015
+
+        return [
+            ("Messages", "\(msgs.count)"),
+            ("User messages", "\(userMsgs.count)"),
+            ("AI messages", "\(aiMsgs.count)"),
+            ("Total words", "\(totalWords)"),
+            ("Total characters", "\(totalChars)"),
+            ("Est. tokens", "~\(estimatedTokens)"),
+            ("Est. cost", String(format: "$%.4f", estimatedCost)),
+            ("Model", chatService.selectedModel),
+        ]
     }
 }
 
@@ -1329,3 +1703,209 @@ private struct FlowLayout: Layout {
     }
 }
 
+// MARK: - Prompt Library Sheet
+
+/// Browsable library of built-in presets and user-saved prompts.
+/// Selecting a prompt pre-fills the chat input field.
+private struct PromptLibrarySheet: View {
+    @Environment(AppServices.self) private var services
+    @Environment(\.dismiss) private var dismiss
+    let onSelect: (SavedPrompt) -> Void
+
+    @State private var selectedCategory = "All"
+    @State private var showSaveInput = false
+    @State private var newPromptTitle = ""
+    @State private var newPromptText = ""
+
+    private var chatService: AIChatService { services.aiChatService }
+
+    private var allPrompts: [SavedPrompt] {
+        SavedPrompt.presets + chatService.savedPrompts
+    }
+
+    private var categories: [String] {
+        ["All"] + Array(Set(allPrompts.map(\.category))).sorted()
+    }
+
+    private var filteredPrompts: [SavedPrompt] {
+        selectedCategory == "All" ? allPrompts : allPrompts.filter { $0.category == selectedCategory }
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                // Category filter chips
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(categories, id: \.self) { cat in
+                            Button {
+                                withAnimation(.snappy(duration: 0.15)) { selectedCategory = cat }
+                            } label: {
+                                Text(cat)
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundStyle(selectedCategory == cat ? .primary : AppTheme.mutedText)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 6)
+                                    .background(
+                                        selectedCategory == cat
+                                            ? AppTheme.surfacePrimary
+                                            : Color.clear,
+                                        in: Capsule()
+                                    )
+                                    .overlay(Capsule().stroke(AppTheme.cardBorder, lineWidth: selectedCategory == cat ? 1 : 0))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                }
+
+                Divider().opacity(0.4)
+
+                // Prompt list
+                List {
+                    ForEach(filteredPrompts) { prompt in
+                        Button {
+                            onSelect(prompt)
+                        } label: {
+                            HStack(alignment: .top, spacing: 12) {
+                                Image(systemName: prompt.icon)
+                                    .font(.system(size: 15, weight: .medium))
+                                    .foregroundStyle(AppTheme.mutedText)
+                                    .frame(width: 22)
+                                    .padding(.top, 1)
+
+                                VStack(alignment: .leading, spacing: 3) {
+                                    HStack {
+                                        Text(prompt.title)
+                                            .font(.system(size: 15, weight: .semibold))
+                                            .foregroundStyle(.primary)
+                                        Spacer()
+                                        if !prompt.isPreset {
+                                            Text("Saved")
+                                                .font(.system(size: 11, weight: .medium))
+                                                .foregroundStyle(AppTheme.mutedText)
+                                                .padding(.horizontal, 7)
+                                                .padding(.vertical, 2)
+                                                .background(AppTheme.surfaceSecondary, in: Capsule())
+                                        }
+                                    }
+                                    Text(prompt.text)
+                                        .font(.system(size: 13))
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(2)
+                                }
+                            }
+                            .padding(.vertical, 4)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            if !prompt.isPreset {
+                                Button(role: .destructive) {
+                                    chatService.deleteSavedPrompt(prompt)
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                            }
+                        }
+                    }
+                }
+                .listStyle(.plain)
+            }
+            .navigationTitle("Prompt Library")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Done") { dismiss() }
+                        .font(.system(size: 15, weight: .semibold))
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showSaveInput = true
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 15, weight: .semibold))
+                    }
+                }
+            }
+            .alert("Save Prompt", isPresented: $showSaveInput) {
+                TextField("Title (e.g. Weekly plan)", text: $newPromptTitle)
+                TextField("Prompt text", text: $newPromptText)
+                Button("Save") {
+                    let title = newPromptTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let text = newPromptText.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !title.isEmpty, !text.isEmpty else { return }
+                    chatService.addSavedPrompt(SavedPrompt(
+                        title: title, text: text,
+                        icon: "bookmark.fill", category: "Saved"
+                    ))
+                    newPromptTitle = ""; newPromptText = ""
+                }
+                Button("Cancel", role: .cancel) { newPromptTitle = ""; newPromptText = "" }
+            } message: {
+                Text("Save a custom prompt to reuse it later.")
+            }
+        }
+    }
+}
+
+// MARK: - Conversation Data Sheet
+
+/// Shows conversation stats: message counts, token estimates, cost, model info.
+private struct ConversationDataSheet: View {
+    let stats: [(label: String, value: String)]
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(stats, id: \.label) { stat in
+                    HStack {
+                        Text(stat.label)
+                            .font(.system(size: 15))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text(stat.value)
+                            .font(.system(size: 15, weight: .medium, design: .monospaced))
+                    }
+                }
+            }
+            .listStyle(.insetGrouped)
+            .navigationTitle("Conversation Data")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                        .font(.system(size: 15, weight: .semibold))
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Seeded shuffle extension
+
+private extension Array {
+    /// Shuffle using a deterministic integer seed so Refresh shows a consistent new order.
+    func shuffled(seed: Int) -> [Element] {
+        var rng = SeededRNG(seed: seed)
+        var arr = self
+        for i in stride(from: arr.count - 1, through: 1, by: -1) {
+            let j = Int(rng.next() % UInt64(i + 1))
+            arr.swapAt(i, j)
+        }
+        return arr
+    }
+}
+
+/// Simple LCG random number generator seeded with an integer — deterministic shuffle.
+private struct SeededRNG {
+    var state: UInt64
+    init(seed: Int) { state = UInt64(bitPattern: Int64(seed &* 6364136223846793005 &+ 1)) }
+    mutating func next() -> UInt64 {
+        state = state &* 6364136223846793005 &+ 1442695040888963407
+        return state
+    }
+}
