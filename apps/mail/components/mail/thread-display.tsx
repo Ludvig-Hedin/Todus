@@ -740,7 +740,7 @@ export function ThreadDisplay() {
                   {/* Compose is the primary action in an empty thread pane; AI is secondary */}
                   <button
                     onClick={() => setIsComposeOpen('true')}
-                    className="inline-flex h-7 items-center justify-center gap-1 overflow-hidden rounded-lg border bg-card px-2.5 hover:bg-accent transition-colors duration-100 cursor-pointer"
+                    className="inline-flex h-7 items-center justify-center gap-1 overflow-hidden rounded-full border bg-card px-2.5 hover:bg-accent transition-colors duration-100 cursor-pointer"
                   >
                     <Mail className="h-3.5 w-3.5 fill-muted-foreground/50" />
                     <span className="text-[13px] leading-none text-foreground">
@@ -749,7 +749,7 @@ export function ThreadDisplay() {
                   </button>
                   <button
                     onClick={toggleAISidebar}
-                    className="inline-flex h-7 items-center justify-center gap-1 overflow-hidden rounded-lg border bg-card px-2.5 hover:bg-accent transition-colors duration-100 cursor-pointer"
+                    className="inline-flex h-7 items-center justify-center gap-1 overflow-hidden rounded-full border bg-card px-2.5 hover:bg-accent transition-colors duration-100 cursor-pointer"
                   >
                     <Sparkles className="h-3.5 w-3.5 fill-muted-foreground/50" />
                     {/* Use APP_NAME for consistency across the product rather than hardcoded "Todus chat" */}
@@ -783,7 +783,7 @@ export function ThreadDisplay() {
                     <TooltipTrigger asChild>
                       <button
                         onClick={handleClose}
-                        className="inline-flex h-7 w-7 items-center justify-center gap-1 overflow-hidden rounded-md hover:bg-accent md:hidden transition-colors duration-100"
+                        className="inline-flex h-7 w-7 items-center justify-center gap-1 overflow-hidden rounded-full hover:bg-accent md:hidden transition-colors duration-100"
                       >
                         <X className="fill-iconLight dark:fill-iconDark h-3.5 w-3.5" />
                       </button>
@@ -807,7 +807,7 @@ export function ThreadDisplay() {
                     setMode('replyAll');
                     setActiveReplyId(emailData?.latest?.id ?? '');
                   }}
-                  className="inline-flex h-7 items-center justify-center gap-1 overflow-hidden rounded-lg border bg-card px-2 hover:bg-accent transition-colors duration-100 cursor-pointer"
+                  className="inline-flex h-7 items-center justify-center gap-1 overflow-hidden rounded-full border bg-card px-2 hover:bg-accent transition-colors duration-100 cursor-pointer"
                 >
                   <Reply className="fill-muted-foreground" />
                   <span className="whitespace-nowrap text-[13px] leading-none text-foreground pl-0.5 pr-0.5">
@@ -820,7 +820,7 @@ export function ThreadDisplay() {
                     <TooltipTrigger asChild>
                       <button
                         onClick={handleToggleStar}
-                        className="inline-flex h-7 w-7 items-center justify-center gap-1 overflow-hidden rounded-lg border bg-card hover:bg-accent transition-colors duration-100 cursor-pointer"
+                        className="inline-flex h-7 w-7 items-center justify-center gap-1 overflow-hidden rounded-full border bg-card hover:bg-accent transition-colors duration-100 cursor-pointer"
                       >
                         <Star
                           className={cn(
@@ -845,7 +845,7 @@ export function ThreadDisplay() {
                     <TooltipTrigger asChild>
                       <button
                         onClick={() => moveThreadTo('archive')}
-                        className="inline-flex h-7 w-7 items-center justify-center gap-1 overflow-hidden rounded-lg bg-card hover:bg-accent transition-colors cursor-pointer"
+                        className="inline-flex h-7 w-7 items-center justify-center gap-1 overflow-hidden rounded-full bg-card hover:bg-accent transition-colors cursor-pointer"
                       >
                         <Archive className="fill-iconLight dark:fill-iconDark" />
                       </button>
@@ -862,7 +862,7 @@ export function ThreadDisplay() {
                       <TooltipTrigger asChild>
                         <button
                           onClick={() => moveThreadTo('bin')}
-                          className="inline-flex h-7 w-7 items-center justify-center gap-1 overflow-hidden rounded-lg border border-[#FCCDD5] bg-[#FDE4E9] hover:bg-[#fccdd5]/70 dark:border-[#6E2532] dark:bg-[#411D23] dark:hover:bg-[#6E2532]/70 cursor-pointer transition-colors"
+                          className="inline-flex h-7 w-7 items-center justify-center gap-1 overflow-hidden rounded-full border border-[#FCCDD5] bg-[#FDE4E9] hover:bg-[#fccdd5]/70 dark:border-[#6E2532] dark:bg-[#411D23] dark:hover:bg-[#6E2532]/70 cursor-pointer transition-colors"
                         >
                           <Trash className="fill-[#F43F5E]" />
                         </button>
@@ -876,7 +876,7 @@ export function ThreadDisplay() {
 
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <button type="button" aria-label="Thread actions" aria-haspopup="menu" className="inline-flex h-7 w-7 items-center justify-center gap-1 overflow-hidden rounded-lg bg-white cursor-pointer focus:outline-hidden focus:ring-0 dark:bg-[#313131] transition-colors">
+                    <button type="button" aria-label="Thread actions" aria-haspopup="menu" className="inline-flex h-7 w-7 items-center justify-center gap-1 overflow-hidden rounded-full bg-white cursor-pointer focus:outline-hidden focus:ring-0 dark:bg-[#313131] transition-colors">
                       <ThreeDots className="fill-iconLight dark:fill-iconDark" />
                     </button>
                   </DropdownMenuTrigger>

@@ -153,7 +153,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               </div>
               <button
                 onClick={() => setPricingDialog('true')}
-                className="mt-2.5 inline-flex h-7 w-full items-center justify-center gap-0.5 overflow-hidden rounded-lg bg-mainBlue px-2 transition-colors hover:bg-mainBlue/90"
+                className="mt-2.5 inline-flex h-7 w-full items-center justify-center gap-0.5 overflow-hidden rounded-full bg-mainBlue px-2 transition-colors hover:bg-mainBlue/90"
               >
                 <span className="whitespace-nowrap text-[12px] font-medium leading-none text-white">
                   Start 7 day free trial
@@ -198,7 +198,7 @@ function ComposeButton() {
       <DialogDescription></DialogDescription>
 
       <DialogTrigger asChild>
-        <button type="button" className="relative mb-1 inline-flex h-8 w-full items-center justify-center gap-1 self-stretch overflow-hidden rounded-lg bg-mainBlue dark:border-none cursor-pointer hover:bg-mainBlue/90 transition-all duration-150">
+        <button type="button" className="relative mb-1 inline-flex h-8 w-full items-center justify-center gap-1 self-stretch overflow-hidden rounded-full bg-mainBlue dark:border-none cursor-pointer hover:bg-mainBlue/90 transition-all duration-150">
           {state === 'collapsed' && !isMobile ? (
             <PencilCompose className="mt-0.5 fill-white text-black" />
           ) : (

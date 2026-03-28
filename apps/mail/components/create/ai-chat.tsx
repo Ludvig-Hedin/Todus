@@ -18,6 +18,7 @@ import { Tools } from '../../types/tools';
 import { Button } from '../ui/button';
 import { format } from 'date-fns-tz';
 import { useQueryState } from 'nuqs';
+import { ChatSpecRenderer, extractUISpecFromMessage } from '../generative-ui';
 
 const ThreadPreview = ({ threadId }: { threadId: string }) => {
   const [, setThreadId] = useQueryState('threadId');
@@ -132,6 +133,30 @@ const ExampleQueries = ({ onQueryClick }: { onQueryClick: (query: string) => voi
 //     };
 //   }>;
 // }
+
+// Shared markdown styles for chat messages — extracted to avoid duplication
+const markdownStyles = {
+  h1: { fontSize: '1rem' },
+  h2: { fontSize: '1rem' },
+  h3: { fontSize: '1rem' },
+  h4: { fontSize: '1rem' },
+  h5: { fontSize: '1rem' },
+  h6: { fontSize: '1rem' },
+  p: { fontSize: '1rem' },
+  li: {
+    fontSize: '1rem',
+    marginBottom: '0.25rem',
+    listStyleType: 'disc' as const,
+    listStylePosition: 'inside' as const,
+  },
+  ul: { fontSize: '1rem' },
+  ol: { fontSize: '1rem' },
+  blockQuote: { fontSize: '1rem' },
+  codeBlock: { fontSize: '1rem' },
+  codeInline: { fontSize: '1rem' },
+  link: { fontSize: '1rem' },
+  image: { fontSize: '1rem' },
+};
 
 export interface AIChatProps {
   messages: AiMessage[];
@@ -330,38 +355,40 @@ export function AIChat({
                           : 'overflow-wrap-anywhere mr-auto p-2 break-words',
                       )}
                     >
-                      {textParts.map(
-                        (part) =>
-                          part.text && (
-                            <Markdown
-                              markdownCustomStyles={{
-                                h1: { fontSize: '1rem' },
-                                h2: { fontSize: '1rem' },
-                                h3: { fontSize: '1rem' },
-                                h4: { fontSize: '1rem' },
-                                h5: { fontSize: '1rem' },
-                                h6: { fontSize: '1rem' },
-                                p: { fontSize: '1rem' },
-                                li: {
-                                  fontSize: '1rem',
-                                  marginBottom: '0.25rem',
-                                  listStyleType: 'disc',
-                                  listStylePosition: 'inside',
-                                },
-                                ul: { fontSize: '1rem' },
-                                ol: { fontSize: '1rem' },
-                                blockQuote: { fontSize: '1rem' },
-                                codeBlock: { fontSize: '1rem' },
-                                codeInline: { fontSize: '1rem' },
-                                link: { fontSize: '1rem' },
-                                image: { fontSize: '1rem' },
-                              }}
-                              key={part.text}
-                            >
-                              {part.text || ' '}
-                            </Markdown>
-                          ),
-                      )}
+                      {textParts.map((part) => {
+                        if (!part.text) return null;
+
+                        // Check for embedded UI specs in assistant messages
+                        if (message.role === 'assistant') {
+                          const { textBefore, spec, textAfter } = extractUISpecFromMessage(
+                            part.text,
+                          );
+
+                          if (spec) {
+                            return (
+                              <div key={part.text} className="flex flex-col gap-2">
+                                {textBefore && (
+                                  <Markdown markdownCustomStyles={markdownStyles}>
+                                    {textBefore}
+                                  </Markdown>
+                                )}
+                                <ChatSpecRenderer spec={spec} className="my-1 w-full" />
+                                {textAfter && (
+                                  <Markdown markdownCustomStyles={markdownStyles}>
+                                    {textAfter}
+                                  </Markdown>
+                                )}
+                              </div>
+                            );
+                          }
+                        }
+
+                        return (
+                          <Markdown markdownCustomStyles={markdownStyles} key={part.text}>
+                            {part.text || ' '}
+                          </Markdown>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
