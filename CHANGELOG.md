@@ -1,5 +1,98 @@
 # Project Changelog
 
+## [2026-03-28] Web Search + Inline Citations in AI Chat
+
+### Summary
+Added web search capability to the AI chat. When a user asks a factual or time-sensitive question, the backend automatically searches the web via Perplexity, injects sources into the LLM prompt with citation instructions, and streams custom SSE events so the iOS app shows a "Searching the web…" indicator and source pills before the answer arrives.
+
+### Backend (`apps/server/src/routes/ai.ts`)
+- Added `shouldSearchWeb()` heuristic to detect queries needing web information
+- Added `performWebSearch()` using Perplexity `sonar` model (already a dependency)
+- Added `injectSearchContext()` to format sources + citation instructions into the LLM prompt
+- Modified `/ai/chat` SSE stream to write custom events (`search_status`, `sources`) before piping OpenRouter response
+- Refactored response stream from TransformStream passthrough to ReadableStream with explicit writer (supports pre-stream custom events while preserving Mem0 capture)
+
+### iOS Model (`AIChatMessage.swift`)
+- Added `WebSource` struct (url, title, snippet, domain computed property)
+- Extended `AIChatMessage` with: `sources`, `searchQueries`, `searchState` (SearchPhase enum), `reasoningContent`, `reasoningDurationMs`
+
+### iOS Service (`AIChatService.swift`)
+- Added `SSECustomEvent` and `SSESourcePayload` decode structs
+- Modified SSE parsing loop to try custom event decode before OpenRouter chunk decode (backward compatible)
+- Added `handleCustomEvent()` method to update message search/source/reasoning state
+
+### iOS UI (`AIChatView.swift`)
+- Added `SearchingIndicator` view: spinning globe + "Searching the web…" + query text
+- Added `SourceChipsView`: horizontal ScrollView of capsule pills with favicon + domain, tappable to open URL
+- Modified `assistantBubble` to render search indicator and source chips above the answer content
+- Added scroll-to-bottom trigger when sources arrive
+
+### Architecture Decision
+- Single SSE stream with custom event types (backward compatible — old clients silently skip unknown JSON)
+- Backend-orchestrated search (client doesn't need to know about search providers)
+- Heuristic-based search trigger (MVP; LLM classification planned for V2)
+
+## [2026-03-28] Comprehensive SEO Overhaul — From Zero to Indexed
+
+### Summary
+todus.app had zero Google-indexed pages. This overhaul adds all missing SEO infrastructure, creates competitor comparison pages and a blog for organic traffic, and enables pre-rendering so Google sees real HTML content.
+
+### New Files
+- `apps/mail/public/robots.txt` — Crawler directives (allow public, disallow /mail/, /settings/)
+- `apps/mail/public/sitemap.xml` — All public URLs for search engine discovery
+- `apps/mail/app/(full-width)/compare/[competitor]/page.tsx` — Data-driven comparison pages (vs Superhuman, Shortwave, Spark, Motion)
+- `apps/mail/app/(full-width)/blog/index.tsx` — Blog index page
+- `apps/mail/app/(full-width)/blog/[slug]/page.tsx` — Blog post pages with 3 initial SEO articles
+- `SEO-AUDIT.md` — Full audit findings, implementation status, and content calendar
+
+### Updated Files
+- `apps/mail/lib/site-config.ts` — New title, description, Twitter cards, JSON-LD schemas (Organization, SoftwareApplication, FAQPage), 25+ target keywords
+- `apps/mail/app/root.tsx` — Canonical URL, Twitter cards, keywords meta, robots meta, JSON-LD structured data, apple-touch-icon, preconnect/dns-prefetch
+- `apps/mail/react-router.config.ts` — Pre-render 16 public pages for SEO (static HTML at build time)
+- `apps/mail/app/routes.ts` — Added /compare/:competitor, /blog, /blog/:slug routes
+- `apps/mail/app/(full-width)/about.tsx` — Page-specific SEO meta tags
+- `apps/mail/app/(full-width)/pricing.tsx` — Page-specific SEO meta tags
+
+### SEO Elements Added
+- Title tag: "Todus — AI Email, Calendar & Tasks in One App"
+- Meta description with value prop and YC credibility
+- 25+ target keywords in meta tag
+- Canonical URL on every page
+- Open Graph tags (title, desc, image, dimensions, alt, site_name)
+- Twitter/X Cards (summary_large_image)
+- JSON-LD Organization schema
+- JSON-LD SoftwareApplication schema
+- JSON-LD FAQPage schema with 6 Q&As
+- robots.txt with crawler directives
+- sitemap.xml with all public URLs
+- Pre-rendered HTML for all 16 public pages
+
+### Verification
+- Build succeeds: `pnpm --filter mail build` completes with all 16 pages pre-rendered
+- Pre-rendered HTML verified to contain all meta tags, structured data, and visible content
+
+---
+
+## [2026-03-28] Cross-platform mentions and slash commands
+
+### New Features
+- **Shared mention model**: Added shared `MentionKind` / `MentionRef` types in `packages/shared` so web, server, and iOS use the same structured mention payload.
+- **Server mention search**: Added `mentions.search` tRPC route for task, thread, and person lookup with grouped results and stable IDs. Event mentions remain feature-gated on web until a web provider exists.
+- **AI mention context**: `/ai/chat` and the web agent route now accept optional `mentions` arrays and inject compact structured mention context into the current user turn before model execution.
+- **Web TipTap mentions and slash commands**: The active shared editor hook now supports `@` mentions, `/` commands, human-readable mention chips, and per-surface command ordering for email compose and AI chat.
+- **Web submit serialization**: Email compose now strips mention metadata to readable text before send; AI chat extracts mention refs separately and submits them as structured context.
+- **iOS rich input**: Added a reusable `UITextView`-backed rich composer input with shared slash command definitions, inline mention highlighting, and reuse across task capture, email compose, and AI chat.
+- **iOS mention-aware AI requests**: Native AI chat now collects mention refs and includes them in the backend payload alongside the visible user message.
+
+### Architectural Notes
+- **Shared slash semantics**: iOS task capture now derives slash actions from the same shared command model used by the new rich input surfaces instead of maintaining a one-off command list.
+- **Compose signature command**: Email compose now supports `/signature` using the currently active native signature.
+
+### Verification
+- `pnpm --filter @zero/mail exec tsc --noEmit --pretty false` narrowed to the edited mail files reports no errors.
+- `pnpm --filter @zero/server exec tsc --noEmit --pretty false` narrowed to the edited server files reports one pre-existing unrelated overload error in `apps/server/src/routes/agent/index.ts`.
+- `xcodebuild -project apps/ios/Todus/Todus.xcodeproj -scheme Todus -configuration Debug -sdk iphonesimulator -derivedDataPath /tmp/todus-codex-derived-data build CODE_SIGNING_ALLOWED=NO` was started to validate the edited Swift files in an isolated build directory.
+
 ## [2026-03-27] iOS — Single `NotificationService`, action IDs aligned with `TodosApp`
 
 ### Bug Fix / Architecture

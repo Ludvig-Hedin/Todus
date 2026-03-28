@@ -40,18 +40,80 @@ export const getServerTrpc = (req: Request) =>
     ],
   });
 
+/**
+ * Root meta tags — rendered on every page unless overridden by child routes.
+ * Includes: title, description, OG, Twitter Cards, canonical, keywords, and JSON-LD structured data.
+ * SEO: These are critical for search engine indexing and social sharing previews.
+ */
 export const meta: MetaFunction = () => {
   return [
+    // Core meta
     { title: siteConfig.title },
     { name: 'description', content: siteConfig.description },
-    { property: 'og:title', content: siteConfig.title },
-    { property: 'og:description', content: siteConfig.description },
+    { name: 'keywords', content: siteConfig.keywords.join(', ') },
+    { name: 'author', content: 'Todus' },
+    { name: 'robots', content: 'index, follow' },
+
+    // Canonical URL — prevents duplicate content issues
+    { tagName: 'link', rel: 'canonical', href: siteConfig.alternates.canonical },
+
+    // Open Graph (Facebook, LinkedIn, etc.)
+    { property: 'og:title', content: siteConfig.openGraph.title },
+    { property: 'og:description', content: siteConfig.openGraph.description },
     { property: 'og:image', content: siteConfig.openGraph.images[0].url },
+    { property: 'og:image:width', content: '1200' },
+    { property: 'og:image:height', content: '630' },
+    { property: 'og:image:alt', content: siteConfig.openGraph.images[0].alt },
     { property: 'og:url', content: siteConfig.alternates.canonical },
     { property: 'og:type', content: 'website' },
+    { property: 'og:site_name', content: siteConfig.openGraph.siteName },
+
+    // Twitter/X Cards — enables rich preview when shared on Twitter
+    { name: 'twitter:card', content: siteConfig.twitter.card },
+    { name: 'twitter:title', content: siteConfig.twitter.title },
+    { name: 'twitter:description', content: siteConfig.twitter.description },
+    { name: 'twitter:image', content: siteConfig.twitter.image },
+
+    // PWA manifest
     { rel: 'manifest', href: '/manifest.webmanifest' },
   ];
 };
+
+/**
+ * SEO: Renders JSON-LD structured data scripts in the document head.
+ * Uses static site config data only (no user input) — safe for inline rendering.
+ * Provides Organization, SoftwareApplication, and FAQ schemas for Google rich results.
+ */
+function StructuredDataScripts() {
+  return (
+    <>
+      <script
+        type="application/ld+json"
+        suppressHydrationWarning
+        // eslint-disable-next-line react/no-danger -- Safe: content is from our own static site-config, not user input
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify(siteConfig.structuredData.organization),
+        }}
+      />
+      <script
+        type="application/ld+json"
+        suppressHydrationWarning
+        // eslint-disable-next-line react/no-danger -- Safe: content is from our own static site-config, not user input
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify(siteConfig.structuredData.softwareApplication),
+        }}
+      />
+      <script
+        type="application/ld+json"
+        suppressHydrationWarning
+        // eslint-disable-next-line react/no-danger -- Safe: content is from our own static site-config, not user input
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify(siteConfig.structuredData.faqPage),
+        }}
+      />
+    </>
+  );
+}
 
 export function Layout({ children }: PropsWithChildren) {
   return (
@@ -62,6 +124,15 @@ export function Layout({ children }: PropsWithChildren) {
         <meta name="theme-color" content="#141414" media="(prefers-color-scheme: dark)" />
         <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
         <link rel="manifest" href="/manifest.json" />
+        {/* SEO: Apple touch icon for iOS home screen bookmarks */}
+        <link rel="apple-touch-icon" href="/icons-pwa/icon-180.png" />
+        {/* SEO: Explicit favicon for search engines and browsers */}
+        <link rel="icon" href="/favicon.ico" type="image/x-icon" />
+        {/* SEO: Preconnect to API for faster first-party requests */}
+        <link rel="preconnect" href="https://api.todus.app" />
+        <link rel="dns-prefetch" href="https://api.todus.app" />
+        {/* SEO: JSON-LD structured data for rich search results — content is from our own site-config, not user input */}
+        <StructuredDataScripts />
         <Meta />
         {import.meta.env.REACT_SCAN && (
           <script crossOrigin="anonymous" src="//unpkg.com/react-scan/dist/auto.global.js" />

@@ -13,6 +13,11 @@ export default [
     route('/privacy', '(full-width)/privacy.tsx'),
     route('/contributors', '(full-width)/contributors.tsx'),
     route('/hr', '(full-width)/hr.tsx'),
+    // SEO: Competitor comparison pages — targets "[competitor] alternative" search queries
+    route('/compare/:competitor', '(full-width)/compare/[competitor]/page.tsx'),
+    // SEO: Blog pages — content hub for organic search traffic
+    route('/blog', '(full-width)/blog/index.tsx'),
+    route('/blog/:slug', '(full-width)/blog/[slug]/page.tsx'),
   ]),
 
   route('/login', '(auth)/todus/login/page.tsx'),

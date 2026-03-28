@@ -3,6 +3,7 @@ import { Github, Mail, ArrowLeft } from 'lucide-react';
 import { Navigation } from '@/components/navigation';
 import { Button } from '@/components/ui/button';
 import Footer from '@/components/home/footer';
+import type { MetaFunction } from 'react-router';
 import React from 'react';
 
 // Type casts for Lucide icons to resolve TS2786
@@ -10,6 +11,24 @@ const GithubIcon = Github as any;
 const MailIcon = Mail as any;
 const ArrowLeftIcon = ArrowLeft as any;
 
+/** SEO: Page-specific meta tags for /about — overrides root defaults */
+export const meta: MetaFunction = () => {
+  return [
+    { title: 'About Todus — AI Email Client Built to Save You Time' },
+    {
+      name: 'description',
+      content:
+        'Learn about Todus, the AI-native email client founded to help busy professionals manage email, calendar, and tasks with AI. Open source, backed by Y Combinator.',
+    },
+    { property: 'og:title', content: 'About Todus — AI Email Client Built to Save You Time' },
+    {
+      property: 'og:description',
+      content:
+        'Learn about Todus, the AI-native email client founded to help busy professionals manage email, calendar, and tasks with AI. Open source, backed by Y Combinator.',
+    },
+    { tagName: 'link', rel: 'canonical', href: 'https://todus.app/about' },
+  ];
+};
 
 export default function AboutPage() {
   return (
