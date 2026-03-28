@@ -9,12 +9,19 @@ import Speech
 /// Full-screen chat sheet. Streams AI responses with live markdown rendering and typewriter animation.
 /// Supports task read/write via tool calls. History and model config accessible from toolbar.
 struct AIChatView: View {
+    /// The tab the user was on when they opened the AI sheet — pre-fills the context pill.
+    var currentTab: AppTab = .home
+
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
     @Environment(AppServices.self) private var services
     @Query(sort: \TaskRecord.createdAt, order: .reverse) private var allTasks: [TaskRecord]
 
     @State private var inputText = ""
     @FocusState private var isInputFocused: Bool
+
+    /// Page context pill — name + icon auto-set from currentTab, user can remove it.
+    @State private var pageContextAttached = true
 
     // Sheet presentation states
     @State private var showsHistory = false
@@ -180,6 +187,10 @@ struct AIChatView: View {
             selectedPhotoItem = nil
         }
         .animation(.snappy(duration: 0.22), value: chatService.messages.count)
+        // Live-save draft input so it survives app kills too
+        .onChange(of: inputText) { _, newValue in
+            UserDefaults.standard.set(newValue, forKey: "ai_draft_input")
+        }
         // Cycle thinking text while streaming
         .task(id: chatService.isStreaming) {
             guard chatService.isStreaming else { return }
@@ -192,6 +203,15 @@ struct AIChatView: View {
         // Auto-save conversation when the sheet is dismissed without pressing "New Chat"
         .onDisappear {
             chatService.autosave()
+            // Persist draft input across dismissals
+            UserDefaults.standard.set(inputText, forKey: "ai_draft_input")
+        }
+        .onAppear {
+            // Restore draft input
+            let draft = UserDefaults.standard.string(forKey: "ai_draft_input") ?? ""
+            if inputText.isEmpty { inputText = draft }
+            // Re-attach context pill when sheet re-opens
+            pageContextAttached = true
         }
     }
 
@@ -442,7 +462,7 @@ struct AIChatView: View {
         // Extended pool (slots 4-10): shuffled with seed
         let extended: [(icon: String, text: String)]
 
-        switch services.currentTab {
+        switch currentTab {
         case .email:
             pinned = [
                 ("envelope.open",              "Summarize my recent emails"),
@@ -552,7 +572,13 @@ struct AIChatView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 20) {
                     ForEach(chatService.messages) { message in
-                        MessageBubble(message: message, allTasks: Array(allTasks))
+                        MessageBubble(
+                            message: message,
+                            allTasks: Array(allTasks),
+                            onNavigate: { action, params in
+                                handleCardNavigation(action, params: params)
+                            }
+                        )
                             .id(message.id)
                     }
 
@@ -654,11 +680,38 @@ struct AIChatView: View {
     private var chatInputBox: some View {
         let isEmpty = inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && pendingAttachments.isEmpty
 
+        // Whether any "above-text" accessories are visible (pill or attachments)
+        let hasAccessories = pageContextAttached || !pendingAttachments.isEmpty
+
         return VStack(spacing: 0) {
-            // Pending attachment thumbnails live inside the input box, above the text field.
-            if !pendingAttachments.isEmpty {
+            // ── Above-text row: page context pill + attachment thumbnails ──────
+            if pageContextAttached || !pendingAttachments.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
+                        // Page context pill — shows which tab/page the user is on
+                        if pageContextAttached {
+                            HStack(spacing: 5) {
+                                Image(systemName: currentTab.activeIcon)
+                                    .font(.system(size: 11, weight: .semibold))
+                                Text(currentTab.title)
+                                    .font(.system(size: 12, weight: .medium))
+                                Button {
+                                    withAnimation(.snappy(duration: 0.15)) {
+                                        pageContextAttached = false
+                                    }
+                                } label: {
+                                    Image(systemName: "xmark")
+                                        .font(.system(size: 10, weight: .bold))
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            .foregroundStyle(.blue)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(Color.blue.opacity(0.12), in: Capsule())
+                        }
+
+                        // Attachment thumbnails
                         ForEach(pendingAttachments, id: \.self) { filename in
                             attachmentThumbnail(filename: filename)
                         }
@@ -677,7 +730,7 @@ struct AIChatView: View {
                     .focused($isInputFocused)
                     .textFieldStyle(.plain)
                     .padding(.horizontal, 16)
-                    .padding(.top, pendingAttachments.isEmpty ? 12 : 6)
+                    .padding(.top, hasAccessories ? 6 : 12)
                     .padding(.bottom, 8)
 
                 // Bottom toolbar: [config | spacer | mic | send/stop]
@@ -690,6 +743,7 @@ struct AIChatView: View {
                     .buttonStyle(.plain)
                     .frame(width: 36, height: 36)
                     .contentShape(Rectangle())
+                    .minTouchTarget()
 
                     Spacer()
 
@@ -707,6 +761,7 @@ struct AIChatView: View {
                         }
                         .buttonStyle(AppPrimaryButtonStyle())
                         .clipShape(Circle())
+                        .minTouchTarget()
                         .transition(.scale.combined(with: .opacity))
                     } else {
                         Button(action: sendMessage) {
@@ -717,6 +772,7 @@ struct AIChatView: View {
                         }
                         .buttonStyle(AppPrimaryButtonStyle())
                         .clipShape(Circle())
+                        .minTouchTarget()
                         .disabled(isEmpty)
                         .opacity(isEmpty ? 0.4 : 1)
                         .transition(.scale.combined(with: .opacity))
@@ -841,6 +897,10 @@ struct AIChatView: View {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         inputText = ""
+        // Clear persisted draft since the message was sent
+        UserDefaults.standard.removeObject(forKey: "ai_draft_input")
+        // Set the current page context so the AI knows where the user is
+        chatService.currentPageContext = pageContextAttached ? currentTab.title + " tab" : nil
         chatService.send(userMessage: text, allTasks: Array(allTasks), modelContext: modelContext)
     }
 
@@ -920,6 +980,46 @@ struct AIChatView: View {
             ("Model", chatService.selectedModel),
         ]
     }
+
+    // MARK: - Generative UI Card Navigation
+
+    /// Handles navigation actions from generative UI card taps.
+    /// Dismisses the AI chat sheet, switches to the correct tab, and sets
+    /// pending navigation state so the destination view can pick it up.
+    private func handleCardNavigation(_ action: String, params: [String: String]) {
+        switch action {
+        case "navigate_thread":
+            guard let threadId = params["threadId"] else { return }
+            services.pendingEmailThreadId = threadId
+            services.navigateTo = .email
+            dismiss()
+
+        case "navigate_task":
+            guard let taskIdStr = params["taskId"],
+                  let taskId = UUID(uuidString: taskIdStr) else { return }
+            services.pendingTaskId = taskId
+            services.navigateTo = .tasks
+            dismiss()
+
+        case "navigate_event":
+            if let _ = params["eventId"] {
+                // Calendar events use EventKit — switch to calendar tab.
+                // Deep-link to a specific event is not supported yet by CalendarKit.
+                services.navigateTo = .calendar
+                dismiss()
+            }
+
+        case "navigate_draft":
+            // Drafts open the compose sheet with pre-loaded content
+            if let _ = params["draftId"] {
+                services.navigateTo = .email
+                dismiss()
+            }
+
+        default:
+            print("[GenerativeUI] Unhandled action: \(action) params: \(params)")
+        }
+    }
 }
 
 // MARK: - Content Parsing
@@ -958,6 +1058,8 @@ private func parseMessageContent(_ content: String) -> [ContentPart] {
 private struct MessageBubble: View {
     let message: AIChatMessage
     let allTasks: [TaskRecord]
+    /// Callback for generative UI card actions (e.g. navigate to thread/task/event).
+    var onNavigate: ((String, [String: String]) -> Void)?
 
     @State private var showActions = false
     @State private var didCopy = false
@@ -1045,7 +1147,7 @@ private struct MessageBubble: View {
         }
     }
 
-    /// Mixed-content renderer: text runs with live markdown + [task:UUID] cards.
+    /// Mixed-content renderer: text runs with live markdown + [task:UUID] cards + generative UI specs.
     @ViewBuilder
     private var assistantContent: some View {
         let parts = parseMessageContent(message.content)
@@ -1053,7 +1155,19 @@ private struct MessageBubble: View {
             ForEach(parts.indices, id: \.self) { i in
                 contentPartView(parts[i], isLastPart: i == parts.count - 1)
             }
+            // Render generative UI spec if present (parsed after streaming completes)
+            if let spec = message.uiSpec {
+                ChatUISpecView(spec: spec) { action, params in
+                    handleSpecAction(action, params: params)
+                }
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
         }
+    }
+
+    /// Handles actions from generative UI card taps — forwards to parent via onNavigate callback.
+    private func handleSpecAction(_ action: String, params: [String: String]) {
+        onNavigate?(action, params)
     }
 
     @ViewBuilder
@@ -1303,6 +1417,7 @@ private struct ChatVoiceInputButton: View {
                 .background(Color.red, in: Circle())
                 .overlay(Circle().stroke(AppTheme.cardBorder, lineWidth: 1))
                 .buttonStyle(.plain)
+                .minTouchTarget()
             } else {
                 Button(action: startRecording) {
                     Image(systemName: "mic")
@@ -1314,6 +1429,7 @@ private struct ChatVoiceInputButton: View {
                 .background(AppTheme.surfacePrimary, in: Circle())
                 .overlay(Circle().stroke(AppTheme.cardBorder, lineWidth: 1))
                 .buttonStyle(.plain)
+                .minTouchTarget()
             }
         }
         .onDisappear { cleanup() }
@@ -1602,16 +1718,40 @@ struct AIChatConfigSheet: View {
     var body: some View {
         NavigationStack {
             List {
-                // AI Access section
+                // Tasks section
                 Section {
                     Toggle("Read tasks", isOn: Bindable(chatService).aiCanReadTasks)
                         .tint(Color.blue)
                     Toggle("Write tasks", isOn: Bindable(chatService).aiCanWriteTasks)
                         .tint(Color.blue)
                 } header: {
-                    Text("AI Access")
+                    Text("Tasks")
                 } footer: {
-                    Text("\"Read tasks\" injects your task list into the AI's context. \"Write tasks\" allows the AI to create, edit, and delete tasks.")
+                    Text("\"Read\" injects your task list into the AI's context. \"Write\" lets the AI create, edit, and delete tasks.")
+                }
+
+                // Calendar section
+                Section {
+                    Toggle("Read calendar", isOn: Bindable(chatService).aiCanReadCalendar)
+                        .tint(Color.blue)
+                    Toggle("Create events", isOn: Bindable(chatService).aiCanWriteCalendar)
+                        .tint(Color.blue)
+                } header: {
+                    Text("Calendar")
+                } footer: {
+                    Text("\"Read\" injects today's and this week's events. \"Create\" lets the AI add events to your calendar.")
+                }
+
+                // Email section
+                Section {
+                    Toggle("Read emails", isOn: Bindable(chatService).aiCanReadEmail)
+                        .tint(Color.blue)
+                    Toggle("Send emails", isOn: Bindable(chatService).aiCanSendEmail)
+                        .tint(Color.blue)
+                } header: {
+                    Text("Email")
+                } footer: {
+                    Text("\"Read\" shares your recent inbox with the AI. \"Send\" lets the AI compose and send emails on your behalf.")
                 }
 
                 // Model picker section
@@ -1636,6 +1776,9 @@ struct AIChatConfigSheet: View {
                                         .foregroundStyle(.blue)
                                 }
                             }
+                            // contentShape ensures the full row area is tappable,
+                            // required when using .buttonStyle(.plain) inside a List.
+                            .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                     }

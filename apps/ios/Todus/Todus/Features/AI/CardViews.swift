@@ -412,45 +412,50 @@ struct SearchResultCardView: View {
 
 // MARK: - Helpers
 
-private let isoFormatter: ISO8601DateFormatter = {
-    let f = ISO8601DateFormatter()
-    f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-    return f
-}()
+/// Thread-safe date formatting utilities for card views.
+/// Uses nonisolated(unsafe) because DateFormatter is not Sendable,
+/// but these are only accessed from the @MainActor UI thread.
+private enum CardDateFormatting {
+    nonisolated(unsafe) static let isoFormatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
 
-private let displayDateFormatter: DateFormatter = {
-    let f = DateFormatter()
-    f.dateFormat = "MMM d"
-    return f
-}()
+    nonisolated(unsafe) static let displayDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "MMM d"
+        return f
+    }()
 
-private let timeFormatter: DateFormatter = {
-    let f = DateFormatter()
-    f.dateFormat = "h:mm a"
-    return f
-}()
+    nonisolated(unsafe) static let timeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "h:mm a"
+        return f
+    }()
+}
 
 /// Formats an ISO 8601 string into a short display date (e.g. "Mar 27")
 private func formatDate(_ iso: String) -> String {
-    guard let date = isoFormatter.date(from: iso)
+    guard let date = CardDateFormatting.isoFormatter.date(from: iso)
             ?? ISO8601DateFormatter().date(from: iso) else {
         return iso
     }
-    return displayDateFormatter.string(from: date)
+    return CardDateFormatting.displayDateFormatter.string(from: date)
 }
 
 /// Formats a time range from two ISO strings (e.g. "10:00 AM – 11:00 AM")
 private func formatTimeRange(_ start: String, _ end: String) -> String {
-    guard let startDate = isoFormatter.date(from: start) ?? ISO8601DateFormatter().date(from: start),
-          let endDate = isoFormatter.date(from: end) ?? ISO8601DateFormatter().date(from: end) else {
+    guard let startDate = CardDateFormatting.isoFormatter.date(from: start) ?? ISO8601DateFormatter().date(from: start),
+          let endDate = CardDateFormatting.isoFormatter.date(from: end) ?? ISO8601DateFormatter().date(from: end) else {
         return "\(start) – \(end)"
     }
-    return "\(timeFormatter.string(from: startDate)) – \(timeFormatter.string(from: endDate))"
+    return "\(CardDateFormatting.timeFormatter.string(from: startDate)) – \(CardDateFormatting.timeFormatter.string(from: endDate))"
 }
 
 /// Checks if an ISO 8601 date string is in the past
 private func isDatePast(_ iso: String) -> Bool {
-    guard let date = isoFormatter.date(from: iso)
+    guard let date = CardDateFormatting.isoFormatter.date(from: iso)
             ?? ISO8601DateFormatter().date(from: iso) else { return false }
     return date < Date()
 }

@@ -33,6 +33,26 @@ final class AIChatService {
         didSet { UserDefaults.standard.set(aiCanWriteTasks, forKey: "ai_can_write_tasks") }
     }
 
+    /// Whether the AI can read calendar events (injected into system prompt context).
+    var aiCanReadCalendar: Bool = true {
+        didSet { UserDefaults.standard.set(aiCanReadCalendar, forKey: "ai_can_read_calendar") }
+    }
+
+    /// Whether the AI can create calendar events via the create_calendar_event tool.
+    var aiCanWriteCalendar: Bool = true {
+        didSet { UserDefaults.standard.set(aiCanWriteCalendar, forKey: "ai_can_write_calendar") }
+    }
+
+    /// Whether the AI can read email threads (injected into system prompt context).
+    var aiCanReadEmail: Bool = true {
+        didSet { UserDefaults.standard.set(aiCanReadEmail, forKey: "ai_can_read_email") }
+    }
+
+    /// Whether the AI can send emails via the send_email tool.
+    var aiCanSendEmail: Bool = true {
+        didSet { UserDefaults.standard.set(aiCanSendEmail, forKey: "ai_can_send_email") }
+    }
+
     /// Chronologically ordered list of saved conversations (newest first).
     var savedConversations: [AIChatConversation] = []
 
@@ -62,6 +82,9 @@ final class AIChatService {
     // Cached calendar context string — fetched async before each stream so buildPayload stays sync.
     private var calendarSnapshot: String? = nil
 
+    /// Current page/tab context injected by the view before each send — included in system prompt.
+    var currentPageContext: String? = nil
+
     init(
         configuration: AppConfiguration,
         captureService: TaskCaptureService,
@@ -83,6 +106,18 @@ final class AIChatService {
         }
         if UserDefaults.standard.object(forKey: "ai_can_write_tasks") != nil {
             self.aiCanWriteTasks = UserDefaults.standard.bool(forKey: "ai_can_write_tasks")
+        }
+        if UserDefaults.standard.object(forKey: "ai_can_read_calendar") != nil {
+            self.aiCanReadCalendar = UserDefaults.standard.bool(forKey: "ai_can_read_calendar")
+        }
+        if UserDefaults.standard.object(forKey: "ai_can_write_calendar") != nil {
+            self.aiCanWriteCalendar = UserDefaults.standard.bool(forKey: "ai_can_write_calendar")
+        }
+        if UserDefaults.standard.object(forKey: "ai_can_read_email") != nil {
+            self.aiCanReadEmail = UserDefaults.standard.bool(forKey: "ai_can_read_email")
+        }
+        if UserDefaults.standard.object(forKey: "ai_can_send_email") != nil {
+            self.aiCanSendEmail = UserDefaults.standard.bool(forKey: "ai_can_send_email")
         }
         // Defer conversation history loading — JSON deserialization from UserDefaults
         // can be slow with many saved conversations and blocks the main thread during startup.
@@ -226,10 +261,25 @@ final class AIChatService {
         }
         request.httpBody = body
 
+        // Pre-flight: no token means certain 401 — fail fast with a clear message
+        if authService?.bearerToken == nil {
+            appendError("Not signed in. Please log in and try again.", to: assistantMessageID)
+            return
+        }
+
         do {
             let (asyncBytes, response) = try await URLSession.shared.bytes(for: request)
-            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-                appendError("Server error.", to: assistantMessageID)
+            guard let http = response as? HTTPURLResponse else {
+                appendError("Invalid response from server.", to: assistantMessageID)
+                return
+            }
+            guard (200..<300).contains(http.statusCode) else {
+                switch http.statusCode {
+                case 401: appendError("Session expired. Please log out and back in.", to: assistantMessageID)
+                case 503: appendError("AI service is not configured on the server (missing OPENROUTER_API_KEY).", to: assistantMessageID)
+                case 502: appendError("AI provider error. The upstream AI service may be down.", to: assistantMessageID)
+                default:  appendError("Server error (\(http.statusCode)).", to: assistantMessageID)
+                }
                 return
             }
 
@@ -288,24 +338,33 @@ final class AIChatService {
             ? "You CAN create, update, and delete tasks via tool calls."
             : "You cannot modify tasks (read-only)."
 
-        // ── Calendar — fetched async before this call, cached in calendarSnapshot ──
+        // ── Calendar — gated by aiCanReadCalendar ─────────────────────────────
         let calendarContext: String
-        if let snap = calendarSnapshot {
+        if !aiCanReadCalendar {
+            calendarContext = "## Calendar\nCalendar access is disabled by the user."
+        } else if let snap = calendarSnapshot {
             calendarContext = snap
         } else {
             calendarContext = "## Calendar\nCalendar access not granted or not yet loaded."
         }
 
-        // ── Email ──────────────────────────────────────────────────────────────
+        let calendarWriteNote = aiCanWriteCalendar
+            ? "You CAN create calendar events via the create_calendar_event tool."
+            : "You cannot create calendar events (write access disabled by user)."
+
+        // ── Email — gated by aiCanReadEmail ──────────────────────────────────
         let emailContext: String
-        if let email = emailService, !email.threads.isEmpty {
+        if !aiCanReadEmail {
+            emailContext = "## Email\nEmail access is disabled by the user."
+        } else if let email = emailService, !email.threads.isEmpty {
             let recent = email.threads.prefix(10).map { t in
                 "- [\(t.id)] \(t.unread ? "UNREAD" : "read") from \(t.from.name.isEmpty ? t.from.email : t.from.name): \"\(t.subject)\""
             }.joined(separator: "\n")
+            let sendNote = aiCanSendEmail ? "You CAN send emails via the send_email tool." : "You cannot send emails (send access disabled by user)."
             emailContext = """
             ## Recent Emails (inbox)
             \(recent)
-            You CAN send emails via the send_email tool.
+            \(sendNote)
             """
         } else {
             emailContext = "## Email\nNo email threads loaded or email not connected."
@@ -313,9 +372,10 @@ final class AIChatService {
 
         // ── System prompt ──────────────────────────────────────────────────────
         let toneLine = toneInstruction.isEmpty ? "" : "\n\(toneInstruction)"
+        let pageContextLine = currentPageContext.map { "\nThe user is currently viewing: \($0)." } ?? ""
         let systemPrompt = """
         You are a powerful personal assistant embedded in Todus — a task manager, email client, and calendar app.
-        Today is \(Self.formattedDate(Date())).\(toneLine)
+        Today is \(Self.formattedDate(Date())).\(toneLine)\(pageContextLine)
 
         You have full access to the user's tasks, calendar, and email:
 
@@ -323,6 +383,7 @@ final class AIChatService {
         \(taskWriteNote)
 
         \(calendarContext)
+        \(calendarWriteNote)
 
         \(emailContext)
 
@@ -392,7 +453,8 @@ final class AIChatService {
                 }
 
             case "create_calendar_event":
-                if let args = try? JSONDecoder().decode(CreateCalendarEventArgs.self, from: argsData) {
+                if aiCanWriteCalendar,
+                   let args = try? JSONDecoder().decode(CreateCalendarEventArgs.self, from: argsData) {
                     let iso = ISO8601DateFormatter()
                     if let startDate = iso.date(from: args.startDate),
                        let cal = calendarService, cal.canCreateEvents() {
@@ -405,7 +467,8 @@ final class AIChatService {
                 }
 
             case "send_email":
-                if let args = try? JSONDecoder().decode(SendEmailArgs.self, from: argsData),
+                if aiCanSendEmail,
+                   let args = try? JSONDecoder().decode(SendEmailArgs.self, from: argsData),
                    let email = emailService {
                     let draft = EmailDraft(
                         to: args.to,
@@ -490,6 +553,10 @@ final class AIChatService {
                 tokenBuffer = ""
             }
             messages[idx].isStreaming = false
+            // Parse any embedded generative UI spec from the completed message.
+            // This extracts ```ui-spec JSON blocks and stores the decoded spec
+            // on the message, removing the raw JSON from the displayed content.
+            messages[idx].parseUISpec()
         }
     }
 

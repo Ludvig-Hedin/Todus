@@ -17,19 +17,39 @@ struct AIChatMessage: Identifiable {
     var isStreaming: Bool
     /// Task mutations the AI requested (create / update / delete)
     var taskMutations: [AIChatTaskMutation]
+    /// Parsed generative UI spec embedded in the message (extracted from ```ui-spec blocks)
+    var uiSpec: ChatUISpec?
 
     init(
         id: UUID = UUID(),
         role: Role,
         content: String = "",
         isStreaming: Bool = false,
-        taskMutations: [AIChatTaskMutation] = []
+        taskMutations: [AIChatTaskMutation] = [],
+        uiSpec: ChatUISpec? = nil
     ) {
         self.id = id
         self.role = role
         self.content = content
         self.isStreaming = isStreaming
         self.taskMutations = taskMutations
+        self.uiSpec = uiSpec
+    }
+
+    /// Extracts and caches the UI spec from message content.
+    /// Call this after streaming completes to parse any embedded specs.
+    mutating func parseUISpec() {
+        let result = ChatUISpecParser.parse(content)
+        if let spec = result.spec {
+            self.uiSpec = spec
+            // Replace content with just the text portions (spec block removed)
+            let cleanContent = [result.textBefore, result.textAfter]
+                .filter { !$0.isEmpty }
+                .joined(separator: "\n")
+            if !cleanContent.isEmpty {
+                self.content = cleanContent
+            }
+        }
     }
 }
 

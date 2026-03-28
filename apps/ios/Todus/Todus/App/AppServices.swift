@@ -122,6 +122,12 @@ final class AppServices {
     /// Set true to trigger the global email compose sheet from MainTabView.
     var showsComposeEmail = false
     var composeEmailSeedBody: String? = nil
+
+    // MARK: - Deep Navigation (from AI chat cards → specific items)
+    /// Set by AI chat card taps to navigate to a specific email thread after dismissing the sheet.
+    var pendingEmailThreadId: String? = nil
+    /// Set by AI chat card taps to navigate to a specific task after dismissing the sheet.
+    var pendingTaskId: UUID? = nil
     var appearancePreference: AppAppearancePreference {
         didSet {
             defaults.set(appearancePreference.rawValue, forKey: Keys.appearancePreference)
