@@ -373,6 +373,7 @@ struct HomeView: View {
                     )
             }
             .buttonStyle(.plain)
+            .minTouchTarget()
         }
     }
 

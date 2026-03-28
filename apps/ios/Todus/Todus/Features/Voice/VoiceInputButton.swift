@@ -151,6 +151,7 @@ struct VoiceInputButton: View {
             .animation(.snappy(duration: 0.18), value: controller.recordingState)
         }
         .buttonStyle(.plain)
+        .minTouchTarget()
         // Disable taps while transcribing — spinner is purely informational
         .disabled(controller.recordingState == .transcribing)
     }

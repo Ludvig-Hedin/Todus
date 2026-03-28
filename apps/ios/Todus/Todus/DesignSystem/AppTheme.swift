@@ -54,6 +54,9 @@ struct AppTopHeader: View {
 
     let title: String
 
+    @State private var showNotifications = false
+    @State private var showsGlobalSearch = false
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .center, spacing: 12) {
@@ -67,6 +70,18 @@ struct AppTopHeader: View {
                 .tracking(-0.4)
                 .foregroundStyle(.primary)
         }
+        .sheet(isPresented: $showNotifications) {
+            NotificationCenterView()
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+                .presentationBackground(AppTheme.backgroundTop)
+        }
+        .sheet(isPresented: $showsGlobalSearch) {
+            GlobalSearchView()
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+                .presentationBackground(AppTheme.backgroundTop)
+        }
     }
 
     private var avatarButton: some View {
@@ -76,6 +91,7 @@ struct AppTopHeader: View {
             avatarContent
         }
         .buttonStyle(.plain)
+        .minTouchTarget()
         .accessibilityLabel("Open settings")
     }
 
@@ -93,29 +109,23 @@ struct AppTopHeader: View {
                     initialsAvatar
                 }
             }
-            .frame(width: 40, height: 40)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(AppTheme.cardBorder, lineWidth: 1)
-            )
+            .frame(width: 34, height: 34)
+            .clipShape(Circle())
+            .overlay(Circle().stroke(AppTheme.cardBorder, lineWidth: 1))
         } else {
             initialsAvatar
-                .frame(width: 40, height: 40)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(AppTheme.cardBorder, lineWidth: 1)
-                )
+                .frame(width: 34, height: 34)
+                .clipShape(Circle())
+                .overlay(Circle().stroke(AppTheme.cardBorder, lineWidth: 1))
         }
     }
 
     private var initialsAvatar: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            Circle()
                 .fill(AppTheme.surfacePrimary)
             Text(userInitial)
-                .font(.system(size: 17, weight: .semibold))
+                .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(.primary)
         }
     }
@@ -130,10 +140,22 @@ struct AppTopHeader: View {
 
     private var actionsPill: some View {
         HStack(spacing: 0) {
+            // Global search — opens full-screen sheet to search tasks, emails, events, people
             Button {
-                if let url = URL(string: UIApplication.openNotificationSettingsURLString) {
-                    UIApplication.shared.open(url)
-                }
+                showsGlobalSearch = true
+            } label: {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .frame(width: 44, height: 40)
+            }
+            .buttonStyle(.plain)
+
+            Divider()
+                .frame(height: 20)
+
+            Button {
+                showNotifications = true
             } label: {
                 Image(systemName: "bell.badge")
                     .font(.system(size: 15, weight: .semibold))
@@ -163,6 +185,20 @@ struct AppTopHeader: View {
     }
 }
 
+// MARK: - Touch Target Helpers
+
+extension View {
+    /// Ensures a minimum 44×44 pt interactive touch area (Apple HIG requirement) without
+    /// changing the visual appearance of the view. The visible content stays the same size;
+    /// only the hit-testing region is expanded. Safe to use on buttons separated from
+    /// neighbours by a Spacer or flexible area — do NOT use in dense equal-width button rows.
+    func minTouchTarget() -> some View {
+        self
+            .frame(minWidth: 44, minHeight: 44)
+            .contentShape(Rectangle())
+    }
+}
+
 struct SurfaceCardModifier: ViewModifier {
     var cornerRadius: CGFloat = 16
     var fill: Color = AppTheme.surfacePrimary
@@ -179,31 +215,53 @@ struct SurfaceCardModifier: ViewModifier {
     }
 }
 
+/// Primary action button — pill-shaped, blue, glass tint on iOS 26.
 struct AppPrimaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .foregroundStyle(Color.white.opacity(configuration.isPressed ? 0.9 : 1))
-            .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(Color.blue.opacity(configuration.isPressed ? 0.82 : 0.96))
-            )
-            .scaleEffect(configuration.isPressed ? 0.98 : 1)
+        Group {
+            if #available(iOS 26.0, *) {
+                // iOS 26: Liquid Glass with a blue tint overlay — pill shape
+                configuration.label
+                    .foregroundStyle(Color.white.opacity(configuration.isPressed ? 0.85 : 1))
+                    .glassEffect(
+                        .regular.tint(Color.blue.opacity(configuration.isPressed ? 0.72 : 0.88)),
+                        in: Capsule()
+                    )
+            } else {
+                // Older iOS: flat blue pill
+                configuration.label
+                    .foregroundStyle(Color.white.opacity(configuration.isPressed ? 0.9 : 1))
+                    .background(
+                        Capsule()
+                            .fill(Color.blue.opacity(configuration.isPressed ? 0.82 : 0.96))
+                    )
+            }
+        }
+        .scaleEffect(configuration.isPressed ? 0.98 : 1)
+        .animation(.snappy(duration: 0.15), value: configuration.isPressed)
     }
 }
 
+/// Secondary action button — pill-shaped, glass material.
 struct AppSecondaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .foregroundStyle(Color.primary.opacity(configuration.isPressed ? 0.7 : 0.9))
-            .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(AppTheme.surfaceSecondary.opacity(configuration.isPressed ? 0.9 : 1))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(AppTheme.cardBorder, lineWidth: 1)
-            )
-            .scaleEffect(configuration.isPressed ? 0.98 : 1)
+        Group {
+            if #available(iOS 26.0, *) {
+                configuration.label
+                    .foregroundStyle(Color.primary.opacity(configuration.isPressed ? 0.7 : 0.9))
+                    .glassEffect(.regular, in: Capsule())
+            } else {
+                configuration.label
+                    .foregroundStyle(Color.primary.opacity(configuration.isPressed ? 0.7 : 0.9))
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .overlay(
+                        Capsule()
+                            .stroke(AppTheme.cardBorder, lineWidth: 1)
+                    )
+            }
+        }
+        .scaleEffect(configuration.isPressed ? 0.98 : 1)
+        .animation(.snappy(duration: 0.15), value: configuration.isPressed)
     }
 }
 
@@ -213,11 +271,8 @@ struct AppIconButtonModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .frame(width: size, height: size)
-            .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(AppTheme.cardBorder, lineWidth: 1)
-            )
+            .background(AppTheme.surfacePrimary, in: Circle())
+            .overlay(Circle().stroke(AppTheme.cardBorder, lineWidth: 1))
     }
 }
 
@@ -235,24 +290,20 @@ struct SwipeBackEnabler: UIViewControllerRepresentable {
 }
 
 /// Button style that uses iOS 26 Liquid Glass on supported devices,
-/// falling back to a surface+border card look on older iOS.
+/// falling back to ultraThinMaterial rounded rectangle on older iOS.
+/// `cornerRadius` is used for the fallback path; iOS 26 always uses Capsule glass.
 struct LiquidGlassButtonStyle: ButtonStyle {
-    var cornerRadius: CGFloat = 14
+    var cornerRadius: CGFloat = 12
+
     func makeBody(configuration: Configuration) -> some View {
         Group {
             if #available(iOS 26.0, *) {
                 configuration.label
-                    .glassEffect(in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                    .glassEffect(.regular, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             } else {
                 configuration.label
-                    .background(
-                        AppTheme.surfacePrimary,
-                        in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                            .stroke(AppTheme.cardBorder, lineWidth: 1)
-                    )
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous).stroke(AppTheme.cardBorder, lineWidth: 1))
             }
         }
         .scaleEffect(configuration.isPressed ? 0.97 : 1)

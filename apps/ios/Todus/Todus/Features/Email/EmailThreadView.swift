@@ -101,6 +101,7 @@ struct EmailThreadView: View {
                     .frame(width: 34, height: 34)
             }
             .buttonStyle(LiquidGlassButtonStyle(cornerRadius: 10))
+            .minTouchTarget()
 
             // Subject
             VStack(alignment: .leading, spacing: 1) {
@@ -131,6 +132,7 @@ struct EmailThreadView: View {
                         .frame(width: 34, height: 34)
                 }
                 .buttonStyle(LiquidGlassButtonStyle(cornerRadius: 10))
+                .minTouchTarget()
 
                 // Mark as unread
                 Button {
@@ -146,6 +148,7 @@ struct EmailThreadView: View {
                         .frame(width: 34, height: 34)
                 }
                 .buttonStyle(LiquidGlassButtonStyle(cornerRadius: 10))
+                .minTouchTarget()
 
                 // Archive
                 Button {
@@ -158,6 +161,7 @@ struct EmailThreadView: View {
                         .frame(width: 34, height: 34)
                 }
                 .buttonStyle(LiquidGlassButtonStyle(cornerRadius: 10))
+                .minTouchTarget()
 
                 // Trash — shows confirmation to prevent accidental deletion on touch
                 Button {
@@ -169,6 +173,7 @@ struct EmailThreadView: View {
                         .frame(width: 34, height: 34)
                 }
                 .buttonStyle(LiquidGlassButtonStyle(cornerRadius: 10))
+                .minTouchTarget()
             }
         }
         .padding(.horizontal, 12)
