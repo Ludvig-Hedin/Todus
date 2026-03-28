@@ -1,16 +1,59 @@
 # Project Changelog
 
-## [2026-03-28] Web Search + Inline Citations in AI Chat
+## [2026-03-28] iOS compose mention follow-up fixes
 
 ### Summary
-Added web search capability to the AI chat. When a user asks a factual or time-sensitive question, the backend automatically searches the web via Perplexity, injects sources into the LLM prompt with citation instructions, and streams custom SSE events so the iOS app shows a "Searching the web…" indicator and source pills before the answer arrives.
+Reviewed the current iOS mention/slash-command compose changes and fixed two issues that were still present in the live code: email compose body focus was no longer wired to the existing `focusedField` state, and person mention suggestions could surface a different top-10 subset between runs because they were truncated before applying a stable sort.
+
+### Updated Files
+- `apps/ios/Todus/Todus/Features/Email/EmailComposeView.swift` — restored body-editor focus by passing explicit focus state into `RichComposerInput`, and sorted grouped senders by a stable name/email key before `prefix(10)`.
+- `apps/ios/Todus/Todus/Features/Tasks/CaptureComposer.swift` — added optional focus control to `RichComposerInput` / `PasteHandlingTextInput` while preserving default auto-focus behavior for other existing callers.
+
+### User-facing impact
+- Opening compose now correctly places the keyboard in the body when `To` and `Subject` are already populated.
+- Person mention suggestions in compose now remain stable and predictable across launches and rebuilds.
+
+## [2026-03-28] Live Voice Chat — Gemini Live API Integration
+
+### Summary
+Production-quality bidirectional voice chat with AI assistant using Gemini Live API. Provider-agnostic architecture (protocol abstraction for future OpenAI Realtime support). No API keys in the iOS binary — backend mints short-lived tokens. Full tool call support (create tasks, send emails, create calendar events) during voice sessions.
+
+### Backend (`apps/server/src/routes/ai.ts`)
+- Added `POST /ai/voice-token` endpoint: returns `GOOGLE_GENERATIVE_AI_API_KEY` with 5-minute TTL and model name, gated by Bearer auth
+
+### iOS — New Files
+- `Services/Voice/VoiceProvider.swift` — Protocol + enums (`VoiceConnectionState`, `TranscriptRole`, `VoiceSessionEvent`) + `VoiceSessionConfig` struct
+- `Services/Voice/GeminiLiveProvider.swift` — WebSocket implementation using native `URLSessionWebSocketTask`, handles Gemini Live bidirectional protocol
+- `Services/Voice/VoiceTokenService.swift` — Fetches and caches tokens from backend
+- `Services/Voice/AudioPlayerManager.swift` — Plays PCM16 24kHz audio chunks via `AVAudioEngine` + `AVAudioPlayerNode`
+- `Features/Voice/VoiceChatViewModel.swift` — @Observable ViewModel: manages provider, audio capture (PCM16 16kHz), transcript state, tool call routing
+- `Features/Voice/VoiceChatModalView.swift` — Full-screen modal: transcript area, animated listening/speaking indicator, mic mute/end call controls
+
+### iOS — Modified Files
+- `AIChatService.swift` — Added `appendVoiceExchange()`, `buildSystemPromptForVoice()`, `processVoiceToolCall()`, `voiceToolDeclarations()`
+- `AIChatMessage.swift` — Added `MessageSource` enum (.text/.voice) with `source` property
+- `AIChatView.swift` — Added waveform button (AI gradient) in both expanded/compact chat input modes + `.fullScreenCover` for voice modal
+- `AppServices.swift` — Added `VoiceTokenService` registration
+
+### Architecture Notes
+- Voice transcripts stay local in the modal; only finalized exchanges are written to main chat history on disconnect
+- Tool calls route through existing `AIChatService` pipeline
+- Audio: capture PCM16 @ 16kHz via AVAudioEngine → 100ms chunks → WebSocket; playback PCM16 @ 24kHz
+
+---
+
+## [2026-03-28] Web Search + Inline Citations + Reasoning UI in AI Chat
+
+### Summary
+Full ChatGPT/Perplexity-style search + reasoning UX in the AI chat. When a user asks a factual question, the backend searches the web via Perplexity, streams sources as custom SSE events, and the iOS app renders a "Searching the web…" indicator, source pills, tappable citation superscripts, and a collapsible reasoning box. Reasoning models (deepseek-r1, o1, etc.) get a dedicated thinking UI with auto-collapse.
 
 ### Backend (`apps/server/src/routes/ai.ts`)
 - Added `shouldSearchWeb()` heuristic to detect queries needing web information
-- Added `performWebSearch()` using Perplexity `sonar` model (already a dependency)
+- Added `performWebSearch()` — Tavily primary (pure search API, 1k free/mo, real snippets), Perplexity sonar fallback (no SDK needed — raw `fetch` for both). Gracefully returns empty if neither key is configured.
 - Added `injectSearchContext()` to format sources + citation instructions into the LLM prompt
 - Modified `/ai/chat` SSE stream to write custom events (`search_status`, `sources`) before piping OpenRouter response
 - Refactored response stream from TransformStream passthrough to ReadableStream with explicit writer (supports pre-stream custom events while preserving Mem0 capture)
+- Added `TAVILY_API_KEY` to `env.ts` type definitions
 
 ### iOS Model (`AIChatMessage.swift`)
 - Added `WebSource` struct (url, title, snippet, domain computed property)
@@ -27,10 +70,24 @@ Added web search capability to the AI chat. When a user asks a factual or time-s
 - Modified `assistantBubble` to render search indicator and source chips above the answer content
 - Added scroll-to-bottom trigger when sources arrive
 
+### V2 Additions (same session)
+
+**Backend:**
+- Improved `shouldSearchWeb()` heuristic: skips task/email/calendar commands, filters short messages, two-tier check (time-sensitive vs factual questions vs own-data queries)
+- Added reasoning token extraction from OpenRouter SSE (`delta.reasoning_content` / `delta.reasoning`) for reasoning models (deepseek-r1, o1, o3-mini)
+- Re-emits reasoning tokens as custom `reasoning` events + `reasoning_done` with duration
+
+**iOS UI:**
+- `ReasoningBox`: collapsible thinking/reasoning box with pulsing brain icon, auto-expands while streaming, auto-collapses 0.8s after completion, tap header to toggle, shows "Thought for Xs"
+- `SourceDetailSheet`: tap any source chip to expand a detail sheet with full title, domain, snippet, and "Open in Safari" button. Long-press for context menu (open in Safari, copy URL)
+- Source chips now show citation number badges `[1]`, `[2]` alongside favicon + domain
+- `styleCitations()`: post-processes AttributedString to highlight `[n]` patterns as blue superscript text, linked to source URLs (works in both inline streaming and full markdown modes)
+- Citation links open directly in Safari when tapped
+
 ### Architecture Decision
 - Single SSE stream with custom event types (backward compatible — old clients silently skip unknown JSON)
 - Backend-orchestrated search (client doesn't need to know about search providers)
-- Heuristic-based search trigger (MVP; LLM classification planned for V2)
+- Smart heuristic search trigger with command filtering (skips task/email/calendar ops)
 
 ## [2026-03-28] Comprehensive SEO Overhaul — From Zero to Indexed
 

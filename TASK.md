@@ -1,6 +1,6 @@
 # Migration Backlog
 
-Last updated: 2026-03-03
+Last updated: 2026-03-28
 
 ## Current State
 
@@ -180,6 +180,19 @@ All marked DONE — these are WebView-based, not truly native.
   - Narrowed `pnpm --dir apps/ios exec tsc --noEmit --pretty false` check reports no errors in the updated unread-action files.
   - Narrowed `pnpm --dir apps/ios exec tsc --noEmit --pretty false` check reports no errors in the broader mail UI refinement files.
   - Workspace-wide TypeScript still fails in unrelated `apps/server` and dependency files outside this iOS inbox scope.
+
+## Session Notes (2026-03-28)
+
+- Cross-platform mention and slash-command work is in progress across web, backend, and iOS:
+  - Added a shared mention contract in `packages/shared` and a new server `mentions.search` route for grouped mention lookup.
+  - Wired structured `mentions` payloads into `/ai/chat` and the web agent path so AI requests can resolve references by ID instead of relying on raw `@text`.
+  - Upgraded the active web TipTap editor path with `@` mentions, `/` commands, rich mention chips, and send-time serialization rules for compose vs AI chat.
+  - Replaced the plain iOS email-compose and AI-chat inputs with a reusable `UITextView`-backed rich input that supports slash commands, mention selection, and inline mention highlighting.
+  - Reused the same command model in task capture so iOS slash semantics stay aligned across surfaces.
+  - Fixed two iOS compose regressions found during review: the email body editor now honors `focusedField == .body` again through explicit `RichComposerInput` focus plumbing, and person mention suggestions are now sorted deterministically before the top-10 cutoff so the same people appear on every run.
+- Remaining verification focus:
+  - Finish isolated `xcodebuild` validation for the edited Swift files.
+  - Run acceptance-level spot checks for email compose and AI chat mention flows once the build is confirmed.
 
 ## Session Notes (2026-03-03)
 
