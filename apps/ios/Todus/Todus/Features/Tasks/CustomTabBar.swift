@@ -15,9 +15,8 @@ struct CustomTabBar: View {
     var onAI: () -> Void
     var onCreate: () -> Void
 
-    // Figma spec: SF Pro Semibold (weight 590), 20px
-    // Note: .tracking() only works on Text views, not Image, so it's not applied to icons.
-    private let iconFont: Font = .system(size: 20, weight: .semibold)
+    // Icons: slightly smaller than Figma's 20px so the bigger button frame has breathing room.
+    private let iconFont: Font = .system(size: 17, weight: .semibold)
 
     var body: some View {
         HStack(spacing: 10) {
@@ -54,13 +53,17 @@ struct CustomTabBar: View {
             .font(iconFont)
             // Figma: active #0081FF, inactive rgba(60,60,67,0.65) = UIColor.secondaryLabel
             .foregroundStyle(isSelected ? Color(red: 0, green: 0x81/255.0, blue: 1) : Color(UIColor.secondaryLabel))
-            // Figma: each button 54×40 (px=12 py=8, icon area 30×24)
-            .frame(width: 54, height: 40)
+            // Bigger button frame (62×46) gives a more generous touch target.
+            // The active indicator circle scales with the frame automatically.
+            .frame(width: 62, height: 46)
             // Active indicator: fully round capsule, Figma light #F0F0F4 / dark #121212
             .background(
                 isSelected ? activeIndicatorColor : Color.clear,
                 in: Capsule()
             )
+            // Extra touch area — extends the tappable region 4pt beyond the visual frame
+            // on all sides so fast/edge taps still register.
+            .contentShape(Rectangle().inset(by: -4))
         }
         .buttonStyle(.plain)
     }
@@ -78,8 +81,7 @@ struct CustomTabBar: View {
                     .font(iconFont)
 
                     .foregroundStyle(aiGradient)
-                    // Figma: w=50, pl=12 pr=8 py=8
-                    .frame(width: 50, height: 40)
+                    .frame(width: 54, height: 46)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -90,8 +92,7 @@ struct CustomTabBar: View {
                     .font(iconFont)
 
                     .foregroundStyle(.primary)
-                    // Figma: w=50, pl=8 pr=12 py=8
-                    .frame(width: 50, height: 40)
+                    .frame(width: 54, height: 46)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)

@@ -18,11 +18,12 @@ struct CalendarTaskView: View {
     private struct DateBucket: Identifiable {
         let id: String
         let label: String
+        let icon: String
+        let tint: Color
         let tasks: [TaskRecord]
     }
 
     // Cached buckets — recomputed only when inputs change, not on every body evaluation.
-    // Previously this was a computed property that re-ran during animations and scrolling.
     @State private var buckets: [DateBucket] = []
 
     private func recomputeBuckets() {
@@ -62,11 +63,27 @@ struct CalendarTaskView: View {
         }
 
         var result: [DateBucket] = []
-        if !today.isEmpty     { result.append(DateBucket(id: "today",    label: "Today",     tasks: today)) }
-        if !tomorrow.isEmpty  { result.append(DateBucket(id: "tomorrow", label: "Tomorrow",  tasks: tomorrow)) }
-        if !thisWeek.isEmpty  { result.append(DateBucket(id: "week",     label: "This Week", tasks: thisWeek)) }
-        if !later.isEmpty     { result.append(DateBucket(id: "later",    label: "Later",     tasks: later)) }
-        if !noDate.isEmpty    { result.append(DateBucket(id: "nodate",   label: "No Date",   tasks: noDate)) }
+        // Bucket colors: warm red-orange for urgent → cool blue for distant → neutral for unscheduled
+        if !today.isEmpty {
+            result.append(DateBucket(id: "today", label: "Today", icon: "sun.max.fill",
+                                     tint: Color(red: 0.88, green: 0.50, blue: 0.20), tasks: today))
+        }
+        if !tomorrow.isEmpty {
+            result.append(DateBucket(id: "tomorrow", label: "Tomorrow", icon: "sunrise.fill",
+                                     tint: Color(red: 0.75, green: 0.62, blue: 0.30), tasks: tomorrow))
+        }
+        if !thisWeek.isEmpty {
+            result.append(DateBucket(id: "week", label: "This Week", icon: "calendar",
+                                     tint: Color(red: 0.40, green: 0.56, blue: 0.85), tasks: thisWeek))
+        }
+        if !later.isEmpty {
+            result.append(DateBucket(id: "later", label: "Later", icon: "calendar.badge.clock",
+                                     tint: Color(red: 0.55, green: 0.55, blue: 0.60), tasks: later))
+        }
+        if !noDate.isEmpty {
+            result.append(DateBucket(id: "nodate", label: "No Date", icon: "calendar.badge.minus",
+                                     tint: Color(red: 0.50, green: 0.50, blue: 0.52), tasks: noDate))
+        }
         buckets = result
     }
 
@@ -91,11 +108,7 @@ struct CalendarTaskView: View {
                                 .listRowSeparator(.hidden)
                             }
                         } header: {
-                            Text(bucket.label)
-                                .font(.system(size: 12, weight: .semibold))
-                                .tracking(-0.1)
-                                .textCase(nil)
-                                .foregroundStyle(AppTheme.mutedText)
+                            bucketHeader(bucket)
                         }
                     }
                 }
@@ -118,6 +131,33 @@ struct CalendarTaskView: View {
         .onChange(of: allTasks) { recomputeBuckets() }
         .onChange(of: searchText) { recomputeBuckets() }
         .onChange(of: services.selectedFolderID) { recomputeBuckets() }
+    }
+
+    // MARK: - Bucket Header
+
+    private func bucketHeader(_ bucket: DateBucket) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: bucket.icon)
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(bucket.tint)
+
+            Text(bucket.label)
+                .font(.system(size: 12, weight: .semibold))
+                .tracking(-0.1)
+                .textCase(nil)
+                .foregroundStyle(.primary.opacity(0.75))
+
+            Text("\(bucket.tasks.count)")
+                .font(.system(size: 10, weight: .medium, design: .rounded))
+                .foregroundStyle(bucket.tint.opacity(0.7))
+                .padding(.horizontal, 5)
+                .padding(.vertical, 1)
+                .background(bucket.tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+
+            Spacer()
+        }
+        .padding(.top, 16)
+        .padding(.bottom, 4)
     }
 
     // MARK: - Helpers

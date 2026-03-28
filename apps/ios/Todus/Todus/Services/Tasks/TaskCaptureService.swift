@@ -82,6 +82,42 @@ final class TaskCaptureService {
         }
     }
 
+    /// Quick-capture a single task into a specific status column (used by board view inline add)
+    func captureInStatus(
+        title: String,
+        status: TaskStatus,
+        folder: FolderRecord? = nil,
+        in context: ModelContext
+    ) {
+        let cleaned = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return }
+        let now = Date()
+        let task = TaskRecord(
+            rawInput: cleaned,
+            title: cleaned,
+            taskDescription: "",
+            completed: status == .done,
+            status: status,
+            priority: .none,
+            attachmentNames: [],
+            reminderIdentifier: nil,
+            createdAt: now,
+            updatedAt: now,
+            dueDate: nil,
+            folder: folder,
+            parseState: .parsed,
+            syncState: .pendingUpload
+        )
+        context.insert(task)
+        syncReminder(task, in: context)
+        scheduleNotificationIfNeeded(task)
+        try? context.save()
+
+        Task { @MainActor [syncService] in
+            await syncService.enqueue([SyncMutation(action: .upsert, task: task.asPayload(), taskID: task.id)], in: context)
+        }
+    }
+
     func toggleCompletion(_ task: TaskRecord, in context: ModelContext) {
         setStatus(task, status: task.completed ? .todo : .done, in: context)
     }

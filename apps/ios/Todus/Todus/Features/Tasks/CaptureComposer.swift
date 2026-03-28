@@ -232,6 +232,7 @@ struct CaptureComposer: View {
                     }
                     .buttonStyle(AppPrimaryButtonStyle())
                     .clipShape(Circle())
+                    .minTouchTarget()
                     .disabled(sendDisabled)
                     .opacity(sendDisabled ? 0.4 : 1)
                     .animation(.easeOut(duration: 0.12), value: sendDisabled)

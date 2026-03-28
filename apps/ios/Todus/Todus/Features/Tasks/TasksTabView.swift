@@ -7,10 +7,13 @@ struct TasksTabView: View {
     @Environment(AppServices.self) private var services
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \FolderRecord.createdAt) private var folders: [FolderRecord]
+    @Query(sort: \TaskRecord.createdAt, order: .reverse) private var allTasks: [TaskRecord]
 
     @State private var composerText = ""
     @State private var searchText = ""
     @State private var taskSortOrder: TaskSortOrder = .newest
+    /// Task opened via AI chat card deep navigation
+    @State private var pendingTaskRecord: TaskRecord?
 
     var body: some View {
         ZStack {
@@ -72,6 +75,23 @@ struct TasksTabView: View {
             .padding(.top, 8)
             .padding(.bottom, 8) // Breathing room above tab bar (system handles safe area)
             .background(.clear)
+        }
+        // Deep navigation from AI chat cards — open task detail sheet
+        .onAppear { consumePendingTaskNavigation() }
+        .onChange(of: services.pendingTaskId) { _, _ in consumePendingTaskNavigation() }
+        .sheet(item: $pendingTaskRecord) { task in
+            TaskDetailSheet(task: task)
+        }
+    }
+
+    /// Picks up a pending task ID set by AI chat card navigation and opens the detail sheet.
+    private func consumePendingTaskNavigation() {
+        guard let taskId = services.pendingTaskId else { return }
+        services.pendingTaskId = nil
+        if let task = allTasks.first(where: { $0.id == taskId }) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                pendingTaskRecord = task
+            }
         }
     }
 
@@ -138,6 +158,7 @@ struct TasksTabView: View {
                         .foregroundStyle(AppTheme.mutedText)
                 }
                 .buttonStyle(.plain)
+                .minTouchTarget()
             }
 
             Divider().frame(height: 16)
@@ -154,18 +175,17 @@ struct TasksTabView: View {
                 Image(systemName: "arrow.up.arrow.down")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(AppTheme.mutedText)
+                    .minTouchTarget()
             }
-            .buttonStyle(.plain)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
-        .background(
-            AppTheme.surfaceSecondary.opacity(0.55),
-            in: RoundedRectangle(cornerRadius: 16, style: .continuous)
-        )
+        // Use surfacePrimary (white in light / 0.11 in dark) so the bar is clearly
+        // visible against the backgroundTop (0.94 in light / 0.05 in dark).
+        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(AppTheme.cardBorder, lineWidth: 1)
+                .stroke(AppTheme.strongBorder, lineWidth: 1)
         )
     }
 

@@ -6,27 +6,27 @@ struct BoardView: View {
     @Query(sort: \TaskRecord.createdAt, order: .reverse) private var allTasks: [TaskRecord]
     @State private var selectedTask: TaskRecord?
 
-    // Cached tasks grouped by status — recomputed only when inputs change.
-    // Previously filteredTasks(for:) was called 4x per body evaluation (once per status column).
     @State private var tasksByStatus: [TaskStatus: [TaskRecord]] = [:]
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(alignment: .top, spacing: 16) {
+        // Both axes scroll: horizontal for columns, vertical for tall columns with many cards.
+        // .fixedSize(vertical: true) on the HStack makes columns use their natural (ideal) height
+        // instead of being clamped to the available screen height — which is what caused clipping.
+        ScrollView([.horizontal, .vertical], showsIndicators: false) {
+            HStack(alignment: .top, spacing: 10) {
                 ForEach(TaskStatus.allCases) { status in
                     BoardColumnView(status: status, tasks: tasksByStatus[status] ?? []) { task in
                         selectedTask = task
                     }
                 }
             }
+            // horizontal: false → columns can still grow horizontally as needed
+            // vertical: true   → HStack uses its ideal/natural height (tallest column drives height)
+            .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 16)
-            .padding(.vertical, 4)
+            .padding(.vertical, 8)
         }
         .scrollDismissesKeyboard(.interactively)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            dismissKeyboard()
-        }
         .sheet(item: $selectedTask) { task in
             TaskDetailSheet(task: task)
                 .presentationDragIndicator(.visible)
@@ -35,23 +35,16 @@ struct BoardView: View {
         .onAppear { recomputeTasksByStatus() }
         .onChange(of: allTasks) { recomputeTasksByStatus() }
         .onChange(of: services.selectedFolderID) { recomputeTasksByStatus() }
-        // SwiftData's @Query only triggers onChange when the array identity changes (insert/delete),
-        // not when a property like `status` changes on an existing record. This signature captures
-        // status values so the board re-groups when a task moves between columns.
         .onChange(of: taskChangeSignature) { recomputeTasksByStatus() }
     }
 
-    /// Lightweight signature that changes when any task's status or folder assignment changes.
-    /// Used to trigger recomputation even when SwiftData's @Query doesn't detect property mutations.
     private var taskChangeSignature: String {
         allTasks.map { "\($0.id)-\($0.status.rawValue)-\($0.folderID?.uuidString ?? "")" }.joined()
     }
 
     private func recomputeTasksByStatus() {
         var grouped: [TaskStatus: [TaskRecord]] = [:]
-        for status in TaskStatus.allCases {
-            grouped[status] = []
-        }
+        for status in TaskStatus.allCases { grouped[status] = [] }
         for task in allTasks {
             guard services.selectedFolderID == nil || task.folderID == services.selectedFolderID else { continue }
             grouped[task.status, default: []].append(task)

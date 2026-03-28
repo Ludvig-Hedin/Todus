@@ -245,6 +245,7 @@ struct TaskDetailSheet: View {
                             Image(systemName: "minus.circle.fill")
                         }
                         .buttonStyle(.plain)
+                        .minTouchTarget()
                     }
                 }
             }
