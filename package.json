@@ -54,6 +54,7 @@
     "@types/node": "24.3.0",
     "@zero/tsconfig": "workspace:*",
     "dotenv-cli": "^10.0.0",
+    "wrangler": "catalog:",
     "prettier": "3.6.2",
     "prettier-plugin-sort-imports": "1.8.8",
     "prettier-plugin-tailwindcss": "0.6.14",

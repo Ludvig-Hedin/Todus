@@ -1,5 +1,133 @@
 # Project Changelog
 
+## [2026-03-27] iOS — Single `NotificationService`, action IDs aligned with `TodosApp`
+
+### Bug Fix / Architecture
+- **Removed duplicate `NotificationService`**: Only `Services/Notifications/NotificationService.swift` is compiled now; the old `Resources/NotificationService.swift` copy (different `Action` string constants) is deleted. Xcode file reference moved to `Services/Notifications/`. Action identifiers remain `TASK_COMPLETE` / `TASK_SNOOZE`, matching `UNNotificationAction` registration and `AppDelegate` in `TodosApp.swift`.
+- **Merged behavior**: 1-hour-before-due scheduling, `TASK_REMINDER` category, async permission request before scheduling (from the former Resources implementation), plus `clearAll` / `cancel(withIdentifiers:)` helpers.
+
+---
+
+## [2026-03-27] iOS — Global search, task search bar visibility, touch targets, UI polish
+
+### New Features
+- **Global search sheet**: Magnifying glass button added as first item in `AppTopHeader` action pill. Opens a full-screen sheet (`GlobalSearchView`) that searches tasks (SwiftData), emails (in-memory threads), calendar events, and people — all local, no extra network calls. Tap results to deep-navigate.
+- **Touch targets expanded**: Added `minTouchTarget()` extension (`frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())`) and applied to all small buttons across the app — search clear buttons, sort menu, email thread actions, board column controls, AI chat send/stop/config, voice buttons, attachment delete. Skipped dense equal-width rows (view mode picker, tab bar) to avoid conflicts.
+
+### Bug Fixes / Visual Improvements
+- **Task search bar visibility**: Changed background from `surfaceSecondary.opacity(0.55)` (nearly invisible) to `surfacePrimary` (full opacity), and border from `cardBorder` to `strongBorder` — clearly visible in both light and dark mode.
+- **Avatar resized and made circular**: `AppTopHeader` avatar is now 34×34pt `Circle()` (was 40×40 `RoundedRectangle`), matching the height of the action pill beside it.
+- **Calendar header overlap fixed**: `CalendarContainerView` now accepts `topInset: CGFloat` and applies it via `additionalSafeAreaInsets.top` on the `CalendarViewController`, pushing CalendarKit's scroll content below the SwiftUI `AppTopHeader` overlay.
+
+### Files Changed
+- `DesignSystem/AppTheme.swift` — minTouchTarget extension, avatar → circle, global search button + sheet in actionsPill
+- `Features/Tasks/TasksTabView.swift` — search bar background/border fix + touch targets
+- `Features/Search/GlobalSearchView.swift` — **NEW** — full global search sheet
+- `Navigation/MainTabView.swift` — calendar header height measurement + topInset wiring
+- `Features/Calendar/CalendarContainerView.swift` — `topInset` param + additionalSafeAreaInsets
+- Multiple view files — `.minTouchTarget()` applied to small buttons
+
+---
+
+## [2026-03-27] iOS — AI-powered Notification Center
+
+### New Feature
+- **Notification Center sheet**: Tapping the bell icon in the app header now opens a notification center sheet (was: opened iOS system notification settings). The sheet shows an AI-generated digest of tasks due, upcoming calendar events, and important unread emails — grouped by type with priority indicators and tap-to-navigate actions.
+
+### Architecture
+- **NotificationDigestService** (`Services/Notifications/`): Sends local task/event/email data to `/ai/chat` with a specialized system prompt. Uses non-streaming mode for simpler JSON response parsing.
+- **NotificationCenterView** (`Features/Notifications/`): SwiftUI sheet with loading skeleton, error/empty states, and grouped notification cards following existing HomeView design patterns.
+
+### Files Changed
+- `AppTheme.swift` — Bell button now opens NotificationCenterView sheet instead of system settings
+- `NotificationDigestService.swift` — **NEW** — AI digest backend integration
+- `NotificationCenterView.swift` — **NEW** — Notification center sheet UI
+
+---
+
+## [2026-03-27] iOS — Fix Gmail connection persistence + Connect/Permission view consistency
+
+### Bug Fixes
+- **Gmail connection not persisting after onboarding**: `GmailOnboardingView` now calls `emailService.checkConnection()` + `loadThreads()` after OAuth, so the email tab reflects the connected state immediately.
+- **`hasConnection` default changed from `true` to `false`**: Prevents a brief flash of the thread list before `checkConnection()` runs on first load.
+
+### Visual Consistency
+- **EmailConnectView**: Rewritten to match `GmailOnboardingView` exactly — uses `GmailIconView(size: 88)` icon, `AppPrimaryButtonStyle()` button with `GmailIconView(size: 20)` inline, same spacing/typography.
+- **CalendarPermissionView**: Rewritten to match onboarding styling — uses `AppleCalendarIconView(size: 88)` instead of generic SF Symbol, `AppPrimaryButtonStyle()` buttons, same layout pattern.
+
+### Files Changed
+- `GmailOnboardingView.swift` — Added `checkConnection()` + `loadThreads()` after successful OAuth
+- `EmailConnectView.swift` — Full rewrite to match onboarding styling
+- `CalendarPermissionView.swift` — Full rewrite to match onboarding styling
+- `EmailService.swift` — `hasConnection` default changed from `true` to `false`
+
+---
+
+## [2026-03-27] iOS Tasks — Color System, Scroll Fix, Visual Overhaul
+
+### Bug Fixes
+- **Board column scroll**: Columns now have internal vertical `ScrollView` so card overflow scrolls instead of being clipped. Header stays sticky above the scroll area.
+
+### Design Overhaul — All Task Views
+- **Consistent tinted status system**: Todo = muted gray, Doing = muted blue, Done = muted green. Applied across board columns, table rows, list tags, and calendar headers.
+- **Board columns**: Each column has a very subtle tinted background (0.025 opacity) and tinted border (0.08 opacity). Drop highlight intensifies the tint. Column gap tightened (12→10). Dashed add-task button at bottom.
+- **Board cards**: Left-edge color indicator bar per status. Priority flag icons. Overdue dates in red, today in amber. Completed tasks show strikethrough with dimmed text. Thinner border (0.5px).
+- **Table view**: Status column now shows colored pills with icon + text (tinted bg + border). Checkbox uses status tint color. Priority dot indicator. Color-coded due dates. Uppercase header labels. "Move to…" context menu added.
+- **Calendar view**: Bucket headers now have colored icons (sun for Today, sunrise for Tomorrow, calendar for This Week) with tinted count badges. Each bucket has a unique warm→cool color progression.
+- **List view (TaskRowView)**: Status tags now use tinted backgrounds matching their column color. Due date tags are color-coded (red=overdue, amber=today). Priority tags use colored flag icons. All tags use consistent 5pt radius with 0.5px tinted borders. Row corner radius refined (16→14).
+
+### Files Changed
+- `BoardView.swift` — Column gap 12→10
+- `BoardColumnView.swift` — Vertical scroll for cards, sticky header, tinted column bg/border, dashed add-task button
+- `BoardTaskCard.swift` — Left-edge color bar, priority flags, due date coloring, strikethrough for completed
+- `TaskTableView.swift` — Colored status pills, priority dots, due date colors, uppercase header, "Move to…" context menu
+- `CalendarTaskView.swift` — Colored bucket headers with icons, tinted count badges, warm→cool color progression
+- `TaskRowView.swift` — Tinted status/due/priority tags, dimmed completed state, refined tag sizing
+
+## [2026-03-27] iOS Board View — Drag/Drop, Inline Add, UI Polish
+
+### Features
+- **Drag & drop tasks between columns**: Drop destination with animated status change and visual drop highlight using column tint colors.
+- **Tap column empty area to add task**: Tapping anywhere in a column's empty space opens an inline add field at the top of the card list.
+- **+ button in column headers**: Quick-add button in the top-right of each column header, tinted with the column's accent color.
+- **"Add task" button at column bottom**: Outlined button with muted column-tint border and text, matching each status's color identity.
+- **Context menu "Move to…" submenu**: Board cards now have a status-change submenu in the long-press context menu for quick column moves.
+- **`captureInStatus()` method**: New `TaskCaptureService` method for creating tasks directly into a specific status column with full sync.
+
+### UI Polish
+- **Column tint colors**: Each `TaskStatus` now has a subtle accent color (slate for Todo, blue for Doing, green for Done) and a status icon.
+- **Tighter spacing**: Reduced column width (272→264), card padding (12→10/9), card corner radius (16→10), column corner radius (16→14).
+- **Refined typography**: Smaller, denser text (13→12pt cards, 13→12pt headers), tighter tracking, softer foreground opacity.
+- **Lighter column backgrounds**: Reduced from solid fill to 55% opacity for a more breathable look.
+- **Removed heavy shadows**: Cards use clean border-only styling instead of glassCard with drop shadows.
+
+### Files Changed
+- `apps/ios/Todus/Todus/Domain/TaskStatus.swift` — Added `tintColor`, `systemImage` properties
+- `apps/ios/Todus/Todus/Services/Tasks/TaskCaptureService.swift` — Added `captureInStatus()` method
+- `apps/ios/Todus/Todus/Features/Tasks/BoardColumnView.swift` — Full rewrite with inline add, + button, add-task button, refined styling
+- `apps/ios/Todus/Todus/Features/Tasks/BoardTaskCard.swift` — Refined styling, added "Move to…" context menu
+- `apps/ios/Todus/Todus/Features/Tasks/BoardView.swift` — Tighter spacing (16→12 gap), removed tap-to-dismiss-keyboard gesture
+
+## [2026-03-27] Mem0 Integration — Persistent AI Memory
+
+### New Feature
+- **`apps/server/src/lib/mem0.ts`** (NEW): Mem0 REST API client with multi-layer caching (in-memory → KV → API). Provides `addMemories`, `searchMemories`, `getAllMemories`, `getCachedMemories`, `preloadMemories`, `invalidateMemoryCache`, and `formatMemoriesForPrompt`.
+- **`apps/server/src/env.ts`**: Added `MEM0_API_KEY` to `ZeroEnv` type. Set via Cloudflare dashboard secrets.
+- **`apps/server/src/routes/ai.ts`**: Integrated Mem0 into `/ai/chat` (iOS flow). Injects cached memories into system prompt. Captures assistant response via TransformStream tee and stores conversation in Mem0 post-stream.
+- **`apps/server/src/routes/agent/index.ts`**: Integrated Mem0 into ZeroAgent (web flow). Preloads memories on WebSocket connect (background). Injects cached memories into system prompt (0ms). Stores conversation in Mem0 after response (fire-and-forget).
+
+### Architecture
+- **Zero latency**: Memories are preloaded on WebSocket connect / KV-cached. Hot path reads are 0ms (in-memory) or <5ms (KV). No Mem0 API calls block the user.
+- **Cross-platform**: Both web and iOS share the same `user_id` (Better Auth user.id), so memories cross-pollinate.
+- **Graceful degradation**: All Mem0 calls are try/catch wrapped. If Mem0 is down or unconfigured, AI works normally without memory.
+- **No iOS changes needed**: Backend handles all Mem0 integration server-side.
+
+### Setup Required
+- Add `MEM0_API_KEY` as a Cloudflare secret (dashboard) and in `.env` for local dev.
+- Sign up at https://app.mem0.ai to get an API key.
+
+---
+
 ## [2026-03-27] Open source — secret hygiene & CI
 
 ### Security (contributor-facing)
