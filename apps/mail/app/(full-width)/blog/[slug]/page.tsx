@@ -377,10 +377,11 @@ export default function BlogPostPage() {
           <p className="mb-6 text-gray-400">
             Start free with Todus — AI-powered email, calendar, and tasks in one app.
           </p>
-          <Link to="/signup">
-            <button className="rounded-lg bg-white px-6 py-3 font-medium text-black hover:bg-gray-200">
-              Get Started for Free
-            </button>
+          <Link
+            to="/signup"
+            className="inline-block rounded-lg bg-white px-6 py-3 font-medium text-black hover:bg-gray-200"
+          >
+            Get Started for Free
           </Link>
         </div>
       </div>

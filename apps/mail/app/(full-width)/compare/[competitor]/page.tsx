@@ -198,7 +198,7 @@ export const meta: MetaFunction = ({ params }) => {
   ];
 };
 
-/** Renders a feature status icon */
+/** Renders a feature status icon — exhaustive switch with compile-time safety */
 function StatusIcon({ status }: { status: FeatureStatus }) {
   switch (status) {
     case 'yes':
@@ -209,6 +209,11 @@ function StatusIcon({ status }: { status: FeatureStatus }) {
       return <MinusIcon className="h-5 w-5 text-yellow-400" />;
     case 'paid':
       return <span className="text-xs text-yellow-400">Paid</span>;
+    default: {
+      // Exhaustiveness check — if FeatureStatus is extended, TypeScript will error here
+      const _exhaustive: never = status;
+      return <MinusIcon className="h-5 w-5 text-gray-500" />;
+    }
   }
 }
 

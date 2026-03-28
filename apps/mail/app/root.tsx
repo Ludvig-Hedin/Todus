@@ -28,6 +28,18 @@ import './globals.css';
 
 const getUrl = () => import.meta.env.VITE_PUBLIC_BACKEND_URL + '/api/trpc';
 
+/**
+ * Derive the API origin from the backend URL env var for preconnect/dns-prefetch.
+ * Falls back to production URL if env var is not set.
+ */
+const getApiOrigin = () => {
+  try {
+    return new URL(import.meta.env.VITE_PUBLIC_BACKEND_URL).origin;
+  } catch {
+    return 'https://api.todus.app';
+  }
+};
+
 export const getServerTrpc = (req: Request) =>
   createTRPCClient<AppRouter>({
     links: [
@@ -46,6 +58,8 @@ export const getServerTrpc = (req: Request) =>
  * SEO: These are critical for search engine indexing and social sharing previews.
  */
 export const meta: MetaFunction = () => {
+  const ogImage = siteConfig.openGraph.images?.[0];
+
   return [
     // Core meta
     { title: siteConfig.title },
@@ -60,10 +74,15 @@ export const meta: MetaFunction = () => {
     // Open Graph (Facebook, LinkedIn, etc.)
     { property: 'og:title', content: siteConfig.openGraph.title },
     { property: 'og:description', content: siteConfig.openGraph.description },
-    { property: 'og:image', content: siteConfig.openGraph.images[0].url },
-    { property: 'og:image:width', content: '1200' },
-    { property: 'og:image:height', content: '630' },
-    { property: 'og:image:alt', content: siteConfig.openGraph.images[0].alt },
+    // Guard against empty images array — only include OG image tags when an image is configured
+    ...(ogImage
+      ? [
+          { property: 'og:image', content: ogImage.url },
+          { property: 'og:image:width', content: String(ogImage.width) },
+          { property: 'og:image:height', content: String(ogImage.height) },
+          { property: 'og:image:alt', content: ogImage.alt },
+        ]
+      : []),
     { property: 'og:url', content: siteConfig.alternates.canonical },
     { property: 'og:type', content: 'website' },
     { property: 'og:site_name', content: siteConfig.openGraph.siteName },
@@ -74,8 +93,8 @@ export const meta: MetaFunction = () => {
     { name: 'twitter:description', content: siteConfig.twitter.description },
     { name: 'twitter:image', content: siteConfig.twitter.image },
 
-    // PWA manifest
-    { rel: 'manifest', href: '/manifest.webmanifest' },
+    // NOTE: PWA manifest is declared in Layout <head> as <link rel="manifest" href="/manifest.json" />
+    // Do not duplicate it here to avoid inconsistent manifest declarations
   ];
 };
 
@@ -128,9 +147,9 @@ export function Layout({ children }: PropsWithChildren) {
         <link rel="apple-touch-icon" href="/icons-pwa/icon-180.png" />
         {/* SEO: Explicit favicon for search engines and browsers */}
         <link rel="icon" href="/favicon.ico" type="image/x-icon" />
-        {/* SEO: Preconnect to API for faster first-party requests */}
-        <link rel="preconnect" href="https://api.todus.app" />
-        <link rel="dns-prefetch" href="https://api.todus.app" />
+        {/* SEO: Preconnect to API for faster first-party requests — derived from env var */}
+        <link rel="preconnect" href={getApiOrigin()} />
+        <link rel="dns-prefetch" href={getApiOrigin()} />
         {/* SEO: JSON-LD structured data for rich search results — content is from our own site-config, not user input */}
         <StructuredDataScripts />
         <Meta />
