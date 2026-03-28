@@ -17,7 +17,8 @@ final class EmailService {
     var isLoadingThreads = false
     var isLoadingThread = false
     var isSending = false
-    var hasConnection = true
+    // Default false — EmailInboxView calls checkConnection() on appear to verify
+    var hasConnection = false
     var errorMessage: String?
     var nextPageToken: String?
 

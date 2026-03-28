@@ -27,6 +27,11 @@ struct MainTabView: View {
     /// returns to the foreground (covers both in-app system dialog and Settings round-trips).
     @State private var calendarPermissionGranted = false
 
+    /// Measured height of the AppTopHeader overlay on the calendar tab.
+    /// Passed to CalendarContainerView as additionalSafeAreaInsets.top so CalendarKit's
+    /// scroll content starts below our header instead of sliding under it.
+    @State private var calendarHeaderHeight: CGFloat = 90
+
     // MARK: - Body
 
     var body: some View {
@@ -84,7 +89,7 @@ struct MainTabView: View {
                 }
             }
             .sheet(isPresented: $showAIChat) {
-                AIChatView()
+                AIChatView(currentTab: selectedTab)
                     .presentationDetents([.fraction(0.5), .large])
                     .presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.5)))
                     .presentationDragIndicator(.visible)
@@ -180,10 +185,24 @@ struct MainTabView: View {
         case .calendar:
             if calendarPermissionGranted {
                 ZStack(alignment: .top) {
-                    CalendarContainerView()
+                    // CalendarKit UIKit view — topInset pushes its scroll content below our header
+                    CalendarContainerView(topInset: calendarHeaderHeight)
+                    // AppTopHeader overlay — sits above CalendarKit content.
+                    // Background extends through the status-bar area so no CalendarKit
+                    // content bleeds through. onGeometryChange measures the rendered height
+                    // (including padding) and feeds it back to CalendarContainerView.
                     AppTopHeader(title: "Calendar")
                         .padding(.horizontal, 16)
                         .padding(.top, 8)
+                        .background(
+                            AppTheme.backgroundTop
+                                .ignoresSafeArea(edges: .top)
+                        )
+                        .onGeometryChange(for: CGFloat.self) { proxy in
+                            proxy.size.height
+                        } action: { height in
+                            calendarHeaderHeight = height
+                        }
                 }
                 .ignoresSafeArea(.container, edges: .bottom)
             } else {

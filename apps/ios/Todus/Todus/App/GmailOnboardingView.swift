@@ -40,6 +40,11 @@ struct GmailOnboardingView: View {
                         Task {
                             await services.authService.signInWithGoogle()
                             if services.authService.isAuthenticated {
+                                // Check Gmail API connection so EmailInboxView reflects the new state
+                                await services.emailService.checkConnection()
+                                if services.emailService.hasConnection {
+                                    await services.emailService.loadThreads(refresh: true)
+                                }
                                 services.hasConfiguredGmailPrompt = true
                             }
                             isConnecting = false

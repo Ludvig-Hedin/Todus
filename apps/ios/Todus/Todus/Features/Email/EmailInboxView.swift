@@ -34,8 +34,15 @@ struct EmailInboxView: View {
         .navigationDestination(item: $selectedThreadId) { threadId in
             EmailThreadView(threadId: threadId)
         }
-        .onAppear { recomputeFilteredThreads() }
+        .onAppear {
+            recomputeFilteredThreads()
+            consumePendingThreadNavigation()
+        }
         .onChange(of: emailService.threads) { recomputeFilteredThreads() }
+        // Deep navigation from AI chat cards — pick up pending thread ID set by AIChatView
+        .onChange(of: services.pendingEmailThreadId) { _, _ in
+            consumePendingThreadNavigation()
+        }
         .onChange(of: searchText) {
             // Instant local filtering for immediate visual feedback
             recomputeFilteredThreads()
@@ -180,6 +187,7 @@ struct EmailInboxView: View {
                         .foregroundStyle(AppTheme.mutedText)
                 }
                 .buttonStyle(.plain)
+                .minTouchTarget()
             }
         }
         .padding(.horizontal, 12)
@@ -215,6 +223,18 @@ struct EmailInboxView: View {
             Text("New emails will appear here")
                 .font(.system(size: 14))
                 .foregroundStyle(AppTheme.subtleText)
+        }
+    }
+
+    // MARK: - Deep Navigation
+
+    /// Picks up a pending thread ID set by AI chat card navigation and navigates to it.
+    private func consumePendingThreadNavigation() {
+        guard let threadId = services.pendingEmailThreadId else { return }
+        services.pendingEmailThreadId = nil
+        // Small delay to let the tab switch and view appear before pushing
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            selectedThreadId = threadId
         }
     }
 
