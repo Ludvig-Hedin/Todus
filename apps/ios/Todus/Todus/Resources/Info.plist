@@ -42,6 +42,8 @@
 	<string>Allow Todus to use Face ID for secure authentication.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Todus uses your microphone to transcribe voice prompts in the assistant.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Todus uses speech recognition to convert your voice to text in the AI assistant.</string>
 	<key>NSRemindersFullAccessUsageDescription</key>
 	<string>Todus needs full Reminders access to sync your tasks.</string>
 	<key>NSRemindersUsageDescription</key>
