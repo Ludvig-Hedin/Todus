@@ -63,6 +63,7 @@ import { connection } from '../../db/schema';
 import type { WSMessage } from 'partyserver';
 import { tools as authTools } from './tools';
 import { processToolCalls } from './utils';
+import { getCachedMemories, formatMemoriesForPrompt, addMemories, invalidateMemoryCache, preloadMemories } from '../../lib/mem0';
 import { type ZeroEnv } from '../../env';
 import { type Connection } from 'agents';
 import { openai } from '@ai-sdk/openai';
@@ -1711,6 +1712,12 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
 export class ZeroAgent extends AIChatAgent<ZeroEnv> {
   private chatMessageAbortControllers: Map<string, AbortController> = new Map();
 
+  // ── Mem0: In-memory cache for user memories ────────────────────────────────
+  // Populated on WebSocket connect (preload) so memories are ready before the
+  // user sends their first message. 0ms reads in the hot path.
+  private memoriesCache: { data: string[]; fetchedAt: number; userId: string } | null = null;
+  private memoriesUserId: string | null = null;
+
   async registerZeroMCP() {
     await this.mcp.connect(this.env.VITE_PUBLIC_BACKEND_URL + '/sse', {
       transport: {
@@ -1739,13 +1746,45 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
     this.registerThinkingMCP();
   }
 
-  async onConnect(connection: Connection): Promise<void> {
-    connection.send(
+  async onConnect(wsConnection: Connection): Promise<void> {
+    wsConnection.send(
       JSON.stringify({
         type: OutgoingMessageType.Mail_List,
         folder: 'inbox',
       }),
     );
+
+    // ── Mem0: Preload memories in background on WebSocket connect ─────────
+    // By the time the user types and sends a message, memories are already
+    // cached in-memory (0ms reads). Uses connectionId → userId lookup.
+    if (this.env.MEM0_API_KEY && this.name !== 'general') {
+      this.ctx.waitUntil(
+        (async () => {
+          try {
+            const { db, conn } = createDb(this.env.HYPERDRIVE.connectionString);
+            const connRecord = await db.query.connection.findFirst({
+              where: eq(connection.id, this.name),
+            });
+            await conn.end();
+            if (connRecord?.userId) {
+              this.memoriesUserId = connRecord.userId;
+              const memories = await preloadMemories(
+                connRecord.userId,
+                this.env.prompts_storage,
+                this.env.MEM0_API_KEY,
+              );
+              this.memoriesCache = {
+                data: memories,
+                fetchedAt: Date.now(),
+                userId: connRecord.userId,
+              };
+            }
+          } catch (error) {
+            console.warn('[Mem0] Memory preload on connect failed:', error);
+          }
+        })(),
+      );
+    }
   }
 
   async _reSyncThread({ threadId }: { threadId: string }) {
@@ -1793,20 +1832,81 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
                 ? openai(this.env.OPENAI_MODEL || 'gpt-4o')
                 : anthropic(this.env.OPENAI_MODEL || 'claude-3-7-sonnet-20250219');
 
+        // ── Mem0: Inject cached memories into the system prompt ────────────
+        // Reads from in-memory cache (0ms) populated by onConnect preload.
+        // Falls back to KV (<5ms) or API on cache miss.
+        let memoryBlock = '';
+        const userId = this.memoriesUserId;
+        if (this.env.MEM0_API_KEY && userId) {
+          try {
+            // Prefer preloaded in-memory cache (0ms)
+            const memories = this.memoriesCache?.data
+              ?? await getCachedMemories(userId, this.env.prompts_storage, this.env.MEM0_API_KEY);
+            memoryBlock = formatMemoriesForPrompt(memories);
+          } catch (error) {
+            console.warn('[Mem0] Failed to get memories for ZeroAgent prompt:', error);
+          }
+        }
+
+        // Extract the latest user message for post-response memory storage
+        const lastUserMessage = [...processedMessages]
+          .reverse()
+          .find((m) => m.role === 'user');
+
+        // Wrap onFinish to add Mem0 storage after AI response completes
+        const wrappedOnFinish: StreamTextOnFinishCallback<{}> = async (result) => {
+          // Call the original onFinish first
+          await onFinish(result);
+
+          // ── Mem0: Store conversation in background after response ───────
+          if (this.env.MEM0_API_KEY && userId && lastUserMessage && result.response?.messages?.length) {
+            const assistantText = result.text;
+            if (assistantText && assistantText.length > 10) {
+              const userContent = typeof lastUserMessage.content === 'string'
+                ? lastUserMessage.content
+                : JSON.stringify(lastUserMessage.content);
+
+              this.ctx.waitUntil(
+                (async () => {
+                  try {
+                    await addMemories(this.env.MEM0_API_KEY, userId, [
+                      { role: 'user', content: userContent },
+                      { role: 'assistant', content: assistantText },
+                    ]);
+                    // Refresh cache so next message has fresh memories
+                    await invalidateMemoryCache(userId, this.env.prompts_storage);
+                    const fresh = await preloadMemories(userId, this.env.prompts_storage, this.env.MEM0_API_KEY);
+                    this.memoriesCache = { data: fresh, fetchedAt: Date.now(), userId };
+                  } catch (error) {
+                    console.warn('[Mem0] Post-response memory storage failed:', error);
+                  }
+                })(),
+              );
+            }
+          }
+        };
+
+        const baseSystemPrompt = await getPrompt(getPromptName(connectionId, EPrompts.Chat), AiChatPrompt(), {
+          currentThreadId,
+          currentFolder,
+          currentFilter,
+        });
+
+        // Prepend memory block to system prompt if available
+        const systemPromptWithMemory = memoryBlock
+          ? memoryBlock + '\n\n' + baseSystemPrompt
+          : baseSystemPrompt;
+
         const result = streamText({
           model,
           maxSteps: 10,
           messages: processedMessages,
           tools,
-          onFinish,
+          onFinish: wrappedOnFinish,
           onError: (error) => {
             console.error('Error in streamText', error);
           },
-          system: await getPrompt(getPromptName(connectionId, EPrompts.Chat), AiChatPrompt(), {
-            currentThreadId,
-            currentFolder,
-            currentFilter,
-          }),
+          system: systemPromptWithMemory,
         });
 
         result.mergeIntoDataStream(dataStream);

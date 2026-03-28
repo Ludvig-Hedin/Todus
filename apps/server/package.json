@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "wrangler dev --show-interactive-dev-session=false --experimental-vectorize-bind-to-prod --env local",
     "build": "echo 'No build required for server, wrangler deploy handles it'",
-    "deploy": "wrangler deploy",
+    "deploy": "wrangler deploy --env production",
+    "deploy:staging": "wrangler deploy --env staging",
     "types": "wrangler types --env local",
     "lint": "eslint .",
     "db:generate": "drizzle-kit generate",
@@ -56,6 +57,7 @@
     "autumn-js": "catalog:",
     "base64-js": "1.5.1",
     "better-auth": "catalog:",
+    "better-call": "1.0.13",
     "cheerio": "1.1.0",
     "cloudflare": "4.5.0",
     "date-fns": "^4.1.0",

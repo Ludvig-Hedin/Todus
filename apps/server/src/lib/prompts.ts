@@ -1,5 +1,6 @@
 import { format } from 'date-fns';
 import { Tools } from '../types';
+import { GENERATIVE_UI_PROMPT } from './generative-ui-contract';
 import dedent from 'dedent';
 
 export const colors = [
@@ -335,7 +336,7 @@ export const AiChatPrompt = () =>
       <success_criteria>
         A correct response must:
         1. Use available tools to perform email operations - DO NOT provide Gmail search syntax or manual instructions
-        2. Use only plain text - no markdown, XML, bullets, or formatting
+        2. Use plain text for explanations. Use ui-spec cards for structured data (emails, tasks, events, labels). No raw markdown, XML, or bullets.
         3. Never expose tool responses or internal reasoning to users
         4. Confirm before affecting more than 5 threads
         5. Be concise and action-oriented
@@ -601,10 +602,12 @@ export const AiChatPrompt = () =>
          Before sending each response:
          1. Did I use the appropriate tool instead of providing manual instructions?
          2. Does it follow the success criteria?
-         3. Is it plain text only?
-         4. Am I being concise and helpful?
-         5. Did I follow safety rules / safety protocols?
-         6. Did I take action immediately rather than explaining what I could do?
+         3. Am I being concise and helpful?
+         4. Did I follow safety rules / safety protocols?
+         5. Did I take action immediately rather than explaining what I could do?
+         6. When showing structured data (emails, tasks, events), did I use a ui-spec card instead of plain text?
        </self_check>
+
+       ${GENERATIVE_UI_PROMPT}
     </system_prompt>
   `;

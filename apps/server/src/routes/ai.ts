@@ -1,3 +1,4 @@
+import { getCachedMemories, formatMemoriesForPrompt, addMemories, invalidateMemoryCache, preloadMemories } from '../lib/mem0';
 import { systemPrompt } from '../services/call-service/system-prompt';
 import { openai } from '@ai-sdk/openai';
 import { tools } from './agent/tools';
@@ -41,6 +42,35 @@ aiRouter.post('/chat', async (c) => {
 
   const model = parsed.data.model || env.DEFAULT_MODEL || 'openai/gpt-4.1-mini';
 
+  // ── Mem0: Inject cached memories into the message stream ─────────────────
+  // Reads from KV cache (<5ms) or in-memory (0ms). Mem0 API is only hit on
+  // full cache miss — preload should have warmed the cache on prior requests.
+  const mem0Key = env.MEM0_API_KEY;
+  let enrichedMessages = parsed.data.messages;
+
+  if (mem0Key && user.id) {
+    try {
+      const memories = await getCachedMemories(user.id, env.prompts_storage, mem0Key);
+      const memoryBlock = formatMemoriesForPrompt(memories);
+      if (memoryBlock) {
+        // Find the existing system message and append memory, or prepend a new one
+        const systemIdx = enrichedMessages.findIndex((m) => m.role === 'system');
+        if (systemIdx >= 0) {
+          enrichedMessages = [...enrichedMessages];
+          enrichedMessages[systemIdx] = {
+            ...enrichedMessages[systemIdx],
+            content: memoryBlock + '\n\n' + enrichedMessages[systemIdx].content,
+          };
+        } else {
+          enrichedMessages = [{ role: 'system', content: memoryBlock }, ...enrichedMessages];
+        }
+      }
+    } catch (error) {
+      // Mem0 failure must never block the AI flow
+      console.warn('[Mem0] Failed to inject memories into /ai/chat:', error);
+    }
+  }
+
   // Proxy the request to OpenRouter as SSE
   const upstreamResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
@@ -52,7 +82,7 @@ aiRouter.post('/chat', async (c) => {
     },
     body: JSON.stringify({
       model,
-      messages: parsed.data.messages,
+      messages: enrichedMessages,
       stream: true,
       // Include tool definitions for task mutations
       tools: [
@@ -158,7 +188,69 @@ aiRouter.post('/chat', async (c) => {
     return c.json({ error: `AI provider error: ${upstreamResponse.status}`, details: errorText }, 502);
   }
 
-  // Stream the SSE response through to the client
+  // ── Mem0: Tee the SSE stream to capture assistant response for memory storage ──
+  // The TransformStream passes all chunks to the client unchanged while accumulating
+  // the assistant's text content. After [DONE], fire-and-forget memory storage.
+  if (mem0Key && user.id) {
+    const lastUserMsg = parsed.data.messages.filter((m) => m.role === 'user').pop();
+    let assistantText = '';
+    const userId = user.id;
+
+    const { readable, writable } = new TransformStream({
+      transform(chunk, controller) {
+        controller.enqueue(chunk);
+
+        // Attempt to extract delta content from SSE chunks for memory storage.
+        // This runs in the passthrough — errors must not break the stream.
+        try {
+          const text = new TextDecoder().decode(chunk);
+          const lines = text.split('\n').filter((l) => l.startsWith('data: '));
+          for (const line of lines) {
+            const json = line.slice(6);
+            if (json === '[DONE]') continue;
+            const sseChunk = JSON.parse(json);
+            const delta = sseChunk?.choices?.[0]?.delta?.content;
+            if (delta) assistantText += delta;
+          }
+        } catch {
+          // Ignore parse errors — some chunks may be partial
+        }
+      },
+      flush() {
+        // After stream ends, store the conversation in Mem0 (fire-and-forget)
+        if (lastUserMsg && assistantText.length > 10) {
+          const storePromise = (async () => {
+            try {
+              await addMemories(mem0Key, userId, [
+                { role: 'user', content: lastUserMsg.content },
+                { role: 'assistant', content: assistantText },
+              ]);
+              // Refresh cache in background so next request has fresh memories
+              await invalidateMemoryCache(userId, env.prompts_storage);
+              await preloadMemories(userId, env.prompts_storage, mem0Key);
+            } catch (error) {
+              console.warn('[Mem0] Post-stream memory storage failed:', error);
+            }
+          })();
+          // Use waitUntil if available to keep the worker alive for the background task
+          c.executionCtx?.waitUntil?.(storePromise);
+        }
+      },
+    });
+
+    upstreamResponse.body.pipeTo(writable);
+
+    return new Response(readable, {
+      status: 200,
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        Connection: 'keep-alive',
+      },
+    });
+  }
+
+  // Fallback: no Mem0 key configured — pass through directly
   return new Response(upstreamResponse.body, {
     status: 200,
     headers: {

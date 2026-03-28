@@ -110,6 +110,8 @@ export type ZeroEnv = {
   APPLE_TEAM_ID: string;
   APPLE_KEY_ID: string;
   APPLE_PRIVATE_KEY: string;
+  /** Mem0 API key for persistent AI memory — set via Cloudflare secrets, never in client code */
+  MEM0_API_KEY: string;
 };
 
 export const env = new Proxy(_env as ZeroEnv, {
