@@ -1,8 +1,10 @@
 import Foundation
 import UserNotifications
 
-/// Manages local notifications for task due dates and calendar events.
-/// Wraps UNUserNotificationCenter with category registration and scheduling helpers.
+/// Manages local notifications for task due dates.
+///
+/// **Action identifiers** (`Action.complete` / `Action.snooze`) must stay in sync with
+/// `UNNotificationAction` registration below and with `AppDelegate` in `TodosApp.swift`.
 @MainActor
 @Observable
 final class NotificationService {
@@ -10,12 +12,11 @@ final class NotificationService {
 
     private let center = UNUserNotificationCenter.current()
 
-    // Notification category identifiers
     private enum Category {
         static let taskReminder = "TASK_REMINDER"
     }
 
-    // Action identifiers — handled in TodosApp.swift
+    /// Handled in `TodosApp` (`AppDelegate`); values are the `UNNotificationAction.identifier`s.
     enum Action {
         static let complete = "TASK_COMPLETE"
         static let snooze = "TASK_SNOOZE"
@@ -28,34 +29,61 @@ final class NotificationService {
 
     // MARK: - Permission
 
-    /// Request notification permission. Returns true if granted.
     func requestPermission() async -> Bool {
         do {
             let granted = try await center.requestAuthorization(options: [.alert, .sound, .badge])
-            isAuthorized = granted
+            await checkAuthorization()
             return granted
         } catch {
             return false
         }
     }
 
-    /// Check current authorization status without prompting.
+    /// Previous Resources implementation used this name; kept for call-site compatibility.
+    func requestAuthorization() async -> Bool {
+        await requestPermission()
+    }
+
     func checkAuthorization() async {
         let settings = await center.notificationSettings()
-        isAuthorized = settings.authorizationStatus == .authorized
+        switch settings.authorizationStatus {
+        case .authorized, .provisional, .ephemeral:
+            isAuthorized = true
+        default:
+            isAuthorized = false
+        }
     }
 
     // MARK: - Task Reminders
 
     /// Schedule a local notification 1 hour before a task's due date.
-    /// Silently no-ops if the task has no due date or the date is in the past.
+    /// Silently no-ops if the date is in the past or notifications are denied.
     func scheduleTaskReminder(taskID: String, title: String, dueDate: Date) {
-        // Remind 1 hour before the due instant.
+        Task { @MainActor in
+            await scheduleTaskReminderAsync(taskID: taskID, title: title, dueDate: dueDate)
+        }
+    }
+
+    private func scheduleTaskReminderAsync(taskID: String, title: String, dueDate: Date) async {
+        let settings = await center.notificationSettings()
+        switch settings.authorizationStatus {
+        case .notDetermined:
+            let granted = await requestPermission()
+            guard granted else { return }
+        case .authorized, .provisional, .ephemeral:
+            break
+        case .denied:
+            return
+        @unknown default:
+            return
+        }
+
+        await checkAuthorization()
+
         let reminderDate = dueDate.addingTimeInterval(-3600)
         enqueueTaskReminder(taskID: taskID, title: title, fireDate: reminderDate)
     }
 
-    /// Enqueues the standard task reminder notification at an absolute fire date.
     private func enqueueTaskReminder(taskID: String, title: String, fireDate: Date) {
         guard isAuthorized else { return }
         guard fireDate > Date() else { return }
@@ -82,22 +110,30 @@ final class NotificationService {
         center.add(request)
     }
 
-    /// Cancel a previously scheduled task reminder.
     func cancelTaskReminder(taskID: String) {
         center.removePendingNotificationRequests(withIdentifiers: ["task-\(taskID)"])
     }
 
     /// Reschedule a task reminder 1 hour from now (used by the "Snooze" action).
-    /// Schedules at an absolute fire time instead of a synthetic `dueDate` — clearer than
-    /// `scheduleTaskReminder(dueDate: now + 2h)`, which was equivalent but easy to misread.
     func snoozeTaskReminder(taskID: String, title: String) {
         let fireDate = Date().addingTimeInterval(3600)
         enqueueTaskReminder(taskID: taskID, title: title, fireDate: fireDate)
     }
 
-    // MARK: - Private
+    // MARK: - Utilities
 
-    /// Register notification categories with action buttons.
+    func clearAll() {
+        center.removeAllDeliveredNotifications()
+        center.removeAllPendingNotificationRequests()
+    }
+
+    func cancel(withIdentifiers identifiers: [String]) {
+        center.removePendingNotificationRequests(withIdentifiers: identifiers)
+        center.removeDeliveredNotifications(withIdentifiers: identifiers)
+    }
+
+    // MARK: - Categories
+
     private func registerCategories() {
         let completeAction = UNNotificationAction(
             identifier: Action.complete,
