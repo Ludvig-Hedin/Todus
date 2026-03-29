@@ -5,9 +5,12 @@ struct MacContentHeaderView: View {
 
     var body: some View {
         HStack(spacing: 14) {
+            HeaderPillButton(systemImage: "chevron.left") {}
+            HeaderPillButton(systemImage: "chevron.right", isDisabled: true) {}
+
             Text(title)
-                .font(.system(size: 28, weight: .semibold))
-                .foregroundStyle(.primary)
+                .font(.system(size: 24, weight: .semibold))
+                .foregroundStyle(Color.black.opacity(0.9))
 
             Spacer(minLength: 0)
 
@@ -18,23 +21,45 @@ struct MacContentHeaderView: View {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.black.opacity(0.46))
 
                 Text("Search")
                     .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.black.opacity(0.5))
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
-            .background(.thinMaterial, in: Capsule(style: .continuous))
+            .background(Color(red: 0.96, green: 0.96, blue: 0.96), in: Capsule(style: .continuous))
             .overlay(
                 Capsule(style: .continuous)
-                    .stroke(.white.opacity(0.7), lineWidth: 1)
+                    .stroke(Color.black.opacity(0.05), lineWidth: 1)
             )
         }
         .padding(.horizontal, 24)
-        .padding(.top, 20)
-        .padding(.bottom, 16)
+        .padding(.top, 18)
+        .padding(.bottom, 14)
+    }
+}
+
+private struct HeaderPillButton: View {
+    let systemImage: String
+    var isDisabled = false
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(isDisabled ? Color.black.opacity(0.25) : Color.black.opacity(0.8))
+                .frame(width: 34, height: 34)
+                .background(Color.white, in: Capsule(style: .continuous))
+                .overlay(
+                    Capsule(style: .continuous)
+                        .stroke(Color.black.opacity(0.04), lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+        .disabled(isDisabled)
     }
 }
 
@@ -46,12 +71,12 @@ private struct HeaderIconButton: View {
         Button(action: action) {
             Image(systemName: systemImage)
                 .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(.primary)
+                .foregroundStyle(Color.black.opacity(0.84))
                 .frame(width: 38, height: 38)
-                .background(.thinMaterial, in: Circle())
+                .background(Color.white, in: Circle())
                 .overlay(
                     Circle()
-                        .stroke(.white.opacity(0.72), lineWidth: 1)
+                        .stroke(Color.black.opacity(0.05), lineWidth: 1)
                 )
         }
         .buttonStyle(.plain)
@@ -66,12 +91,12 @@ private struct HeaderMenuButton: View {
         } label: {
             Image(systemName: "ellipsis")
                 .font(.system(size: 15, weight: .bold))
-                .foregroundStyle(.primary)
+                .foregroundStyle(Color.black.opacity(0.84))
                 .frame(width: 38, height: 38)
-                .background(.thinMaterial, in: Circle())
+                .background(Color.white, in: Circle())
                 .overlay(
                     Circle()
-                        .stroke(.white.opacity(0.72), lineWidth: 1)
+                        .stroke(Color.black.opacity(0.05), lineWidth: 1)
                 )
         }
         .menuStyle(.borderlessButton)

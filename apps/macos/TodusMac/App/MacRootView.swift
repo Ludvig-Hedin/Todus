@@ -37,41 +37,41 @@ struct MacRootView: View {
     @State private var isSettingsPresented = false
 
     var body: some View {
-        NavigationSplitView {
-            MacSidebarView(
-                selection: $selection,
-                isEmailExpanded: $isEmailExpanded,
-                onOpenSettings: { isSettingsPresented = true }
-            )
-            .navigationSplitViewColumnWidth(min: 244, ideal: 256, max: 280)
-            .padding(.vertical, 8)
-            .padding(.leading, 8)
-            .padding(.trailing, 4)
-        } detail: {
-            ZStack(alignment: .bottomTrailing) {
+        ZStack(alignment: .bottomTrailing) {
+            HStack(spacing: 0) {
+                MacSidebarView(
+                    selection: $selection,
+                    isEmailExpanded: $isEmailExpanded,
+                    onOpenSettings: { isSettingsPresented = true }
+                )
+                .frame(width: 250)
+                .padding(.leading, 14)
+                .padding(.vertical, 12)
+
                 VStack(spacing: 0) {
                     MacContentHeaderView(title: selection.title)
 
                     Divider()
-                        .overlay(.white.opacity(0.6))
+                        .overlay(Color.black.opacity(0.07))
 
                     // Placeholder shell content until real macOS feature views are plugged in.
                     contentView(for: selection)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(detailBackground)
-
-                AssistantButton {
-                    isAssistantPresented = true
-                }
-                .padding(.trailing, 24)
-                .padding(.bottom, 22)
             }
-            .padding(.top, 8)
-            .padding(.trailing, 8)
-            .padding(.bottom, 8)
+            .padding(.trailing, 14)
+            .padding(.vertical, 12)
         }
         .background(windowBackground.ignoresSafeArea())
+        .preferredColorScheme(.light)
+        .overlay(alignment: .bottomTrailing) {
+            AssistantButton {
+                isAssistantPresented = true
+            }
+            .padding(.trailing, 26)
+            .padding(.bottom, 22)
+        }
         .sheet(isPresented: $isAssistantPresented) {
             placeholderSheet(
                 title: "AI Assistant",
@@ -91,8 +91,8 @@ struct MacRootView: View {
     @ViewBuilder
     private func contentView(for selection: MacPrimarySelection) -> some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                Spacer(minLength: 20)
+            VStack(alignment: .leading, spacing: 22) {
+                Spacer(minLength: 8)
 
                 switch selection {
                 case .home:
@@ -105,51 +105,53 @@ struct MacRootView: View {
                     placeholderCard(title: "Calendar View")
                 }
 
-                Spacer(minLength: 0)
+                Spacer(minLength: 12)
             }
-            .padding(24)
+            .padding(.horizontal, 28)
+            .padding(.vertical, 24)
             .frame(maxWidth: .infinity, minHeight: 560, alignment: .topLeading)
         }
-        .scrollIndicators(.visible)
+        .scrollIndicators(.hidden)
     }
 
     private func placeholderCard(title: String) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(title)
-                .font(.system(size: 28, weight: .semibold))
-                .foregroundStyle(.primary)
+                .font(.system(size: 26, weight: .semibold))
+                .foregroundStyle(Color.black.opacity(0.9))
 
             Text("Feature content will plug into this shell once macOS business logic is added.")
                 .font(.system(size: 14))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.black.opacity(0.5))
         }
         .frame(maxWidth: .infinity, minHeight: 220, alignment: .leading)
         .padding(28)
         .background(
             RoundedRectangle(cornerRadius: 28, style: .continuous)
-                .fill(.white.opacity(0.72))
+                .fill(Color.white)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 28, style: .continuous)
-                .stroke(.white.opacity(0.65), lineWidth: 1)
+                .stroke(Color.black.opacity(0.04), lineWidth: 1)
         )
+        .shadow(color: Color.black.opacity(0.06), radius: 24, x: 0, y: 8)
     }
 
     private var detailBackground: some View {
-        RoundedRectangle(cornerRadius: 30, style: .continuous)
-            .fill(.white.opacity(0.84))
+        RoundedRectangle(cornerRadius: 28, style: .continuous)
+            .fill(Color.white)
             .overlay(
-                RoundedRectangle(cornerRadius: 30, style: .continuous)
-                    .stroke(.white.opacity(0.75), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 28, style: .continuous)
+                    .stroke(Color.black.opacity(0.05), lineWidth: 1)
             )
-            .shadow(color: .black.opacity(0.09), radius: 36, x: 0, y: 18)
+            .shadow(color: Color.black.opacity(0.06), radius: 28, x: 0, y: 10)
     }
 
     private var windowBackground: some View {
         LinearGradient(
             colors: [
-                Color(nsColor: .windowBackgroundColor),
-                Color.white.opacity(0.94)
+                Color(red: 0.972, green: 0.969, blue: 0.961),
+                Color(red: 0.965, green: 0.963, blue: 0.955)
             ],
             startPoint: .topLeading,
             endPoint: .bottomTrailing
@@ -160,15 +162,16 @@ struct MacRootView: View {
         VStack(alignment: .leading, spacing: 16) {
             Text(title)
                 .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(Color.black.opacity(0.9))
 
             Text(description)
                 .font(.system(size: 14))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.black.opacity(0.55))
 
             Spacer()
         }
         .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(Color.white)
     }
 }

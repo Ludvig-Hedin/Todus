@@ -10,7 +10,7 @@ struct AssistantButton: View {
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(
                         LinearGradient(
-                            colors: [.blue, .pink, .orange],
+                            colors: [Color(red: 0.23, green: 0.57, blue: 1.0), Color(red: 0.95, green: 0.28, blue: 0.55), Color(red: 1.0, green: 0.58, blue: 0.14)],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
@@ -18,16 +18,16 @@ struct AssistantButton: View {
 
                 Text("Assistant")
                     .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.black.opacity(0.55))
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
-            .background(.thinMaterial, in: Capsule(style: .continuous))
+            .background(Color.white, in: Capsule(style: .continuous))
             .overlay(
                 Capsule(style: .continuous)
-                    .stroke(.white.opacity(0.72), lineWidth: 1)
+                    .stroke(Color.black.opacity(0.05), lineWidth: 1)
             )
-            .shadow(color: .black.opacity(0.12), radius: 16, x: 0, y: 8)
+            .shadow(color: Color.black.opacity(0.08), radius: 18, x: 0, y: 8)
         }
         .buttonStyle(.plain)
     }

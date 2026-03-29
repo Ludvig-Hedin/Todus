@@ -8,6 +8,7 @@ struct TodusMacApp: App {
                 .frame(minWidth: 1100, minHeight: 720)
         }
         .defaultSize(width: 1280, height: 820)
-        .windowResizability(.contentSize)
+        .windowResizability(.contentMinSize)
+        .windowStyle(.hiddenTitleBar)
     }
 }
