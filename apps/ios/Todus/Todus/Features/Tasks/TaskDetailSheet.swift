@@ -114,6 +114,7 @@ struct TaskDetailSheet: View {
                 }
             }
             .ignoresSafeArea()
+            .preferredColorScheme(services.appearancePreference.colorScheme)
         }
         .onChange(of: selectedPhotoItem) { _, newItem in
             guard let newItem else { return }

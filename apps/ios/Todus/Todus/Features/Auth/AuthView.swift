@@ -30,7 +30,7 @@ struct AuthView: View {
             VStack(spacing: 0) {
                 Spacer()
 
-                // Brand logo + title — compact spacing to match RN app
+                // Brand logo + title
                 VStack(spacing: 4) {
                     Image("BrandLogo")
                         .resizable()
@@ -65,11 +65,15 @@ struct AuthView: View {
                     } else {
                         emailInputView
                         socialButtons
-                        footer
+                        guestLink
                     }
                 }
                 .padding(.horizontal, 24)
-                .padding(.bottom, 40)
+                .padding(.bottom, 20)
+
+                // Terms / Privacy pinned at screen bottom
+                legalLinks
+                    .padding(.bottom, 16)
             }
         }
         // Dismiss keyboard on tap outside any input field
@@ -101,10 +105,10 @@ struct AuthView: View {
                 .font(.system(size: 16, weight: .medium))
                 .padding(.horizontal, 20)
                 .padding(.vertical, 14)
-                .background(AppTheme.surfaceSecondary, in: Capsule())
+                .background(Color(UIColor.systemBackground), in: Capsule())
                 .overlay(
                     Capsule()
-                        .stroke(AppTheme.strongBorder, lineWidth: 1)
+                        .stroke(Color(UIColor.separator), lineWidth: 1)
                 )
                 .onSubmit {
                     guard isValidEmail else { return }
@@ -149,10 +153,10 @@ struct AuthView: View {
                 .font(.system(size: 16, weight: .medium))
                 .padding(.horizontal, 20)
                 .padding(.vertical, 14)
-                .background(AppTheme.surfaceSecondary, in: Capsule())
+                .background(Color(UIColor.systemBackground), in: Capsule())
                 .overlay(
                     Capsule()
-                        .stroke(AppTheme.strongBorder, lineWidth: 1)
+                        .stroke(Color(UIColor.separator), lineWidth: 1)
                 )
                 .onChange(of: code) { _, newValue in
                     if newValue.count >= expectedCodeLength {
@@ -187,8 +191,8 @@ struct AuthView: View {
                         .font(.system(size: 16, weight: .semibold))
                         .frame(maxWidth: .infinity)
                         .frame(height: 48)
-                        .background(AppTheme.surfaceSecondary, in: Capsule())
-                        .overlay(Capsule().stroke(AppTheme.strongBorder, lineWidth: 1))
+                        .background(Color(UIColor.systemBackground), in: Capsule())
+                        .overlay(Capsule().stroke(Color(UIColor.separator), lineWidth: 1))
                 }
                 .buttonStyle(.plain)
                 .disabled(authService.isLoading)
@@ -202,8 +206,8 @@ struct AuthView: View {
                     .font(.system(size: 16, weight: .semibold))
                     .frame(maxWidth: .infinity)
                     .frame(height: 48)
-                    .background(AppTheme.surfaceSecondary, in: Capsule())
-                    .overlay(Capsule().stroke(AppTheme.strongBorder, lineWidth: 1))
+                    .background(Color(UIColor.systemBackground), in: Capsule())
+                    .overlay(Capsule().stroke(Color(UIColor.separator), lineWidth: 1))
             }
             .buttonStyle(.plain)
 
@@ -231,13 +235,13 @@ struct AuthView: View {
 
     private var socialButtons: some View {
         VStack(spacing: 10) {
-            // Divider with "or" — visible styling
+            // Divider with "or"
             HStack(spacing: 12) {
-                Rectangle().fill(AppTheme.strongBorder).frame(height: 0.5)
+                Rectangle().fill(Color(UIColor.separator)).frame(height: 0.5)
                 Text("or")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(.secondary)
-                Rectangle().fill(AppTheme.strongBorder).frame(height: 0.5)
+                Rectangle().fill(Color(UIColor.separator)).frame(height: 0.5)
             }
             .padding(.vertical, 6)
 
@@ -272,8 +276,8 @@ struct AuthView: View {
                 }
                 .frame(maxWidth: .infinity)
                 .frame(height: 48)
-                .background(AppTheme.surfaceSecondary, in: Capsule())
-                .overlay(Capsule().stroke(AppTheme.strongBorder, lineWidth: 1))
+                .background(Color(UIColor.systemBackground), in: Capsule())
+                .overlay(Capsule().stroke(Color(UIColor.separator), lineWidth: 1))
             }
             .buttonStyle(.plain)
         }
@@ -287,45 +291,43 @@ struct AuthView: View {
         }
     }
 
-    // MARK: - Footer (only on main login page, hidden on OTP page)
+    // MARK: - Footer
 
-    private var footer: some View {
-        VStack(spacing: 0) {
-            // Extra breathing room between Google button and this row
-            Button {
-                authService.continueAsGuest()
-            } label: {
-                Text("Continue without account")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-            .padding(.top, 20)
-
-            // Terms / Privacy pushed further down with generous top padding
-            // Links open the respective legal pages on todus.app
-            HStack(spacing: 8) {
-                Button {
-                    if let url = URL(string: "https://todus.app/terms") {
-                        UIApplication.shared.open(url)
-                    }
-                } label: {
-                    Text("Terms of Service")
-                }
-                Circle().fill(.secondary.opacity(0.5)).frame(width: 3, height: 3)
-                Button {
-                    if let url = URL(string: "https://todus.app/privacy") {
-                        UIApplication.shared.open(url)
-                    }
-                } label: {
-                    Text("Privacy Policy")
-                }
-            }
-            .font(.system(size: 13, weight: .regular))
-            .foregroundStyle(.secondary.opacity(0.7))
-            .buttonStyle(.plain)
-            .padding(.top, 28)
+    /// "Continue without account" link — shown below Google button
+    private var guestLink: some View {
+        Button {
+            authService.continueAsGuest()
+        } label: {
+            Text("Continue without account")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(.secondary)
         }
+        .buttonStyle(.plain)
+        .padding(.top, 20)
+    }
+
+    /// Terms / Privacy links — pinned at the very bottom of the screen
+    private var legalLinks: some View {
+        HStack(spacing: 8) {
+            Button {
+                if let url = URL(string: "https://todus.app/terms") {
+                    UIApplication.shared.open(url)
+                }
+            } label: {
+                Text("Terms of Service")
+            }
+            Circle().fill(.secondary.opacity(0.5)).frame(width: 3, height: 3)
+            Button {
+                if let url = URL(string: "https://todus.app/privacy") {
+                    UIApplication.shared.open(url)
+                }
+            } label: {
+                Text("Privacy Policy")
+            }
+        }
+        .font(.system(size: 13, weight: .regular))
+        .foregroundStyle(.secondary.opacity(0.7))
+        .buttonStyle(.plain)
     }
 
     // MARK: - Error Banner

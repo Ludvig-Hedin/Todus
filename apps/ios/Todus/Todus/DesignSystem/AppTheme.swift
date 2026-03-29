@@ -46,9 +46,8 @@ enum AppTheme {
     static let shadowColor = Color.black.opacity(0.06)
 }
 
-/// Shared tab-page header:
-/// - Top row: user avatar (left) + dual action pill (right)
-/// - Second row: large page title
+/// Shared tab-page header — single row: avatar + page title (left) + action pill (right).
+/// Positioned consistently at the top of every tab with uniform padding.
 struct AppTopHeader: View {
     @Environment(AppServices.self) private var services
 
@@ -58,29 +57,31 @@ struct AppTopHeader: View {
     @State private var showsGlobalSearch = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .center, spacing: 12) {
-                avatarButton
-                Spacer()
-                actionsPill
-            }
+        HStack(alignment: .center, spacing: 10) {
+            avatarButton
 
             Text(title)
-                .font(.system(size: 22, weight: .bold))
-                .tracking(-0.4)
+                .font(.system(size: 18, weight: .bold))
+                .tracking(-0.3)
                 .foregroundStyle(.primary)
+
+            Spacer()
+
+            actionsPill
         }
         .sheet(isPresented: $showNotifications) {
             NotificationCenterView()
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
                 .presentationBackground(AppTheme.backgroundTop)
+                .preferredColorScheme(services.appearancePreference.colorScheme)
         }
         .sheet(isPresented: $showsGlobalSearch) {
             GlobalSearchView()
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
                 .presentationBackground(AppTheme.backgroundTop)
+                .preferredColorScheme(services.appearancePreference.colorScheme)
         }
     }
 
@@ -91,7 +92,6 @@ struct AppTopHeader: View {
             avatarContent
         }
         .buttonStyle(.plain)
-        .minTouchTarget()
         .accessibilityLabel("Open settings")
     }
 
@@ -138,21 +138,21 @@ struct AppTopHeader: View {
         return String(source.first(where: { $0.isLetter }) ?? "U").uppercased()
     }
 
+    /// Action buttons pill — real Liquid Glass on iOS 26, material fallback on older.
     private var actionsPill: some View {
         HStack(spacing: 0) {
-            // Global search — opens full-screen sheet to search tasks, emails, events, people
             Button {
                 showsGlobalSearch = true
             } label: {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(.primary)
-                    .frame(width: 44, height: 40)
+                    .frame(width: 40, height: 36)
             }
             .buttonStyle(.plain)
 
             Divider()
-                .frame(height: 20)
+                .frame(height: 18)
 
             Button {
                 showNotifications = true
@@ -160,12 +160,12 @@ struct AppTopHeader: View {
                 Image(systemName: "bell.badge")
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(.primary)
-                    .frame(width: 44, height: 40)
+                    .frame(width: 40, height: 36)
             }
             .buttonStyle(.plain)
 
             Divider()
-                .frame(height: 20)
+                .frame(height: 18)
 
             Button {
                 services.showsSettings = true
@@ -173,15 +173,26 @@ struct AppTopHeader: View {
                 Image(systemName: "ellipsis.circle")
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(.primary)
-                    .frame(width: 44, height: 40)
+                    .frame(width: 40, height: 36)
             }
             .buttonStyle(.plain)
         }
-        .background(AppTheme.surfacePrimary, in: Capsule())
-        .overlay(
-            Capsule()
-                .stroke(AppTheme.cardBorder, lineWidth: 1)
-        )
+        .glassActionPill()
+    }
+}
+
+private extension View {
+    /// Liquid Glass pill for the header action buttons.
+    /// iOS 26+: real system Liquid Glass. Older: ultraThinMaterial fallback.
+    @ViewBuilder
+    func glassActionPill() -> some View {
+        if #available(iOS 26, *) {
+            self.glassEffect(.regular, in: Capsule())
+        } else {
+            self
+                .background(.ultraThinMaterial, in: Capsule())
+                .overlay(Capsule().stroke(AppTheme.cardBorder, lineWidth: 1))
+        }
     }
 }
 

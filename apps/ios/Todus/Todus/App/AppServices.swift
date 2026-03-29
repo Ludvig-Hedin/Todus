@@ -3,6 +3,7 @@ import Observation
 import SwiftData
 import SwiftUI
 
+
 /// AI response tone preference — injected into the system prompt.
 enum AITonePreference: String, CaseIterable, Identifiable, Sendable {
     case professional

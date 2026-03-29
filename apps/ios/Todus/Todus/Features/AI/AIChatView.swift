@@ -115,10 +115,12 @@ struct AIChatView: View {
             ChatHistoryView()
                 .presentationDragIndicator(.visible)
                 .presentationBackground(AppTheme.backgroundTop)
+                .preferredColorScheme(services.appearancePreference.colorScheme)
         }
         .sheet(isPresented: $showsConfig) {
             AIChatConfigSheet()
                 .presentationDragIndicator(.visible)
+                .preferredColorScheme(services.appearancePreference.colorScheme)
         }
         // Prompt library — presets + user-saved prompts
         .sheet(isPresented: $showsPromptLibrary) {
@@ -129,6 +131,7 @@ struct AIChatView: View {
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
             .presentationBackground(AppTheme.backgroundTop)
+            .preferredColorScheme(services.appearancePreference.colorScheme)
         }
         // Conversation data sheet — shows token usage, cost, message stats
         .sheet(isPresented: $showsDataSheet) {
@@ -136,6 +139,7 @@ struct AIChatView: View {
                 .presentationDetents([.medium])
                 .presentationDragIndicator(.visible)
                 .presentationBackground(AppTheme.backgroundTop)
+                .preferredColorScheme(services.appearancePreference.colorScheme)
         }
         // Delete confirmation dialog
         .confirmationDialog("Delete this conversation?", isPresented: $showsDeleteConfirm, titleVisibility: .visible) {
@@ -179,6 +183,7 @@ struct AIChatView: View {
                 }
             }
             .ignoresSafeArea()
+            .preferredColorScheme(services.appearancePreference.colorScheme)
         }
         // Live voice chat modal — presented from the waveform button in the input bar
         .fullScreenCover(isPresented: $showVoiceChat) {
@@ -186,6 +191,7 @@ struct AIChatView: View {
                 chatService: chatService,
                 tokenService: services.voiceTokenService
             )
+            .preferredColorScheme(services.appearancePreference.colorScheme)
         }
         .onChange(of: selectedPhotoItem) { _, newItem in
             guard let newItem else { return }
@@ -1869,6 +1875,35 @@ private struct MiniTaskCard: View {
 
 // MARK: - ChatVoiceInputButton
 
+/// Manages SFSpeechRecognizer and AVAudioEngine as a long-lived object so they
+/// aren't recreated on every SwiftUI render (which blocks the main thread).
+/// Audio session setup runs on a background thread to avoid UI freezes.
+private final class VoiceRecorder: ObservableObject, @unchecked Sendable {
+    let speechRecognizer = SFSpeechRecognizer()
+    let audioEngine = AVAudioEngine()
+    var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
+    var recognitionTask: SFSpeechRecognitionTask?
+
+    /// Configures the audio session off the main thread to avoid blocking UI.
+    func configureAudioSession() async throws {
+        try await Task.detached(priority: .userInitiated) {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.record, mode: .measurement, options: .duckOthers)
+            try session.setActive(true, options: .notifyOthersOnDeactivation)
+        }.value
+    }
+
+    func cleanup() {
+        recognitionTask?.cancel()
+        recognitionTask = nil
+        recognitionRequest = nil
+        if audioEngine.isRunning {
+            audioEngine.stop()
+            audioEngine.inputNode.removeTap(onBus: 0)
+        }
+    }
+}
+
 private struct ChatVoiceInputButton: View {
     let onTranscription: (String) -> Void
 
@@ -1876,11 +1911,9 @@ private struct ChatVoiceInputButton: View {
     @State private var isTranscribing = false
     @State private var partialText: String = ""
 
-    // Speech / audio
-    private let speechRecognizer = SFSpeechRecognizer()
-    @State private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
-    @State private var recognitionTask: SFSpeechRecognitionTask?
-    private let audioEngine = AVAudioEngine()
+    // Speech / audio — StateObject so they persist across renders and
+    // aren't re-initialized (which blocks main thread on first access)
+    @StateObject private var recorder = VoiceRecorder()
 
     var body: some View {
         Group {
@@ -1923,36 +1956,40 @@ private struct ChatVoiceInputButton: View {
         Task { @MainActor in
             guard await requestPermissions() else { return }
             do {
-                try configureAudioSession()
+                // Audio session configured off main thread to prevent UI freeze
+                try await recorder.configureAudioSession()
+
                 let request = SFSpeechAudioBufferRecognitionRequest()
                 request.shouldReportPartialResults = true
-                self.recognitionRequest = request
+                recorder.recognitionRequest = request
 
-                let inputNode = audioEngine.inputNode
+                let inputNode = recorder.audioEngine.inputNode
                 let recordingFormat = inputNode.outputFormat(forBus: 0)
                 inputNode.removeTap(onBus: 0)
                 inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { buffer, _ in
                     request.append(buffer)
                 }
 
-                audioEngine.prepare()
-                try audioEngine.start()
+                recorder.audioEngine.prepare()
+                try recorder.audioEngine.start()
 
                 isRecording = true
                 partialText = ""
 
-                recognitionTask = speechRecognizer?.recognitionTask(with: request) { result, error in
-                    if let result = result {
-                        partialText = result.bestTranscription.formattedString
-                    }
-                    if let error = error {
-                        // Stop on error
-                        stopRecordingInternal(finalize: true)
-                        #if DEBUG
-                        print("Speech recognition error: \(error.localizedDescription)")
-                        #endif
-                    } else if result?.isFinal == true {
-                        stopRecordingInternal(finalize: true)
+                recorder.recognitionTask = recorder.speechRecognizer?.recognitionTask(with: request) { result, error in
+                    // Recognition callback fires on an arbitrary queue — dispatch to main
+                    DispatchQueue.main.async {
+                        if let result = result {
+                            partialText = result.bestTranscription.formattedString
+                        }
+                        if let error = error {
+                            stopRecordingInternal(finalize: true)
+                            #if DEBUG
+                            print("Speech recognition error: \(error.localizedDescription)")
+                            #endif
+                        } else if result?.isFinal == true {
+                            stopRecordingInternal(finalize: true)
+                        }
                     }
                 }
             } catch {
@@ -1971,9 +2008,9 @@ private struct ChatVoiceInputButton: View {
     @MainActor
     private func stopRecordingInternal(finalize: Bool) {
         guard isRecording || isTranscribing else { return }
-        audioEngine.inputNode.removeTap(onBus: 0)
-        audioEngine.stop()
-        recognitionRequest?.endAudio()
+        recorder.audioEngine.inputNode.removeTap(onBus: 0)
+        recorder.audioEngine.stop()
+        recorder.recognitionRequest?.endAudio()
         isRecording = false
         if finalize { isTranscribing = true }
 
@@ -2005,21 +2042,9 @@ private struct ChatVoiceInputButton: View {
         return micGranted
     }
 
-    private func configureAudioSession() throws {
-        let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.record, mode: .measurement, options: .duckOthers)
-        try session.setActive(true, options: .notifyOthersOnDeactivation)
-    }
-
     @MainActor
     private func cleanup() {
-        recognitionTask?.cancel()
-        recognitionTask = nil
-        recognitionRequest = nil
-        if audioEngine.isRunning {
-            audioEngine.stop()
-            audioEngine.inputNode.removeTap(onBus: 0)
-        }
+        recorder.cleanup()
         isRecording = false
         isTranscribing = false
     }

@@ -93,6 +93,7 @@ struct SignaturesView: View {
             NavigationStack {
                 SignatureEditorView(signature: nil)
             }
+            .preferredColorScheme(services.appearancePreference.colorScheme)
         }
     }
 

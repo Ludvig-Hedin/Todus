@@ -62,6 +62,7 @@ struct EmailThreadView: View {
         .sheet(isPresented: $showCompose) {
             if let lastMessage = detail?.messages.last {
                 EmailComposeView(replyTo: lastMessage, threadId: threadId)
+                    .preferredColorScheme(services.appearancePreference.colorScheme)
             }
         }
     }
