@@ -64,6 +64,8 @@ import type { WSMessage } from 'partyserver';
 import { tools as authTools } from './tools';
 import { processToolCalls } from './utils';
 import { getCachedMemories, formatMemoriesForPrompt, addMemories, invalidateMemoryCache, preloadMemories } from '../../lib/mem0';
+import { injectMentionContextIntoMessages } from '../../lib/mentions';
+import type { MentionRef } from '@zero/shared';
 import { type ZeroEnv } from '../../env';
 import { type Connection } from 'agents';
 import { openai } from '@ai-sdk/openai';
@@ -1796,6 +1798,7 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
     currentThreadId: string,
     currentFolder: string,
     currentFilter: string,
+    mentions: MentionRef[] = [],
   ) {
     const dataStreamResponse = createDataStreamResponse({
       execute: async (dataStream) => {
@@ -1819,6 +1822,7 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
           },
           {},
         );
+        const messagesWithMentions = injectMentionContextIntoMessages(processedMessages, mentions);
 
         const model =
           this.env.OPENROUTER_API_KEY
@@ -1900,7 +1904,7 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
         const result = streamText({
           model,
           maxSteps: 10,
-          messages: processedMessages,
+          messages: messagesWithMentions,
           tools,
           onFinish: wrappedOnFinish,
           onError: (error) => {
@@ -1972,13 +1976,14 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
 
           const { body } = data.init;
 
-          const { messages, threadId, currentFolder, currentFilter } = JSON.parse(
+          const { messages, threadId, currentFolder, currentFilter, mentions = [] } = JSON.parse(
             body as string,
           ) as {
             threadId: string;
             currentFolder: string;
             currentFilter: string;
             messages: Message[];
+            mentions?: MentionRef[];
           };
           this.broadcastChatMessage(
             {
@@ -2006,6 +2011,7 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
               threadId,
               currentFolder,
               currentFilter,
+              mentions,
             );
 
             if (response) {
@@ -2165,7 +2171,14 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
     currentThreadId: string,
     currentFolder: string,
     currentFilter: string,
+    mentions: MentionRef[] = [],
   ) {
-    return this.getDataStreamResponse(onFinish, currentThreadId, currentFolder, currentFilter);
+    return this.getDataStreamResponse(
+      onFinish,
+      currentThreadId,
+      currentFolder,
+      currentFilter,
+      mentions,
+    );
   }
 }

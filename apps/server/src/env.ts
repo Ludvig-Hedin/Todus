@@ -74,6 +74,7 @@ export type ZeroEnv = {
   AUTUMN_SECRET_KEY: string;
   AI_SYSTEM_PROMPT: string;
   PERPLEXITY_API_KEY: string;
+  TAVILY_API_KEY: string;
   TWILIO_ACCOUNT_SID: string;
   TWILIO_AUTH_TOKEN: string;
   TWILIO_PHONE_NUMBER: string;
