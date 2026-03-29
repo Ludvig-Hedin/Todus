@@ -58,3 +58,22 @@ targets:
       - path: TodusTests
     dependencies:
       - target: Todus
+
+schemes:
+  Todus:
+    build:
+      targets:
+        Todus: all
+        TodusTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - name: TodusTests
+    analyze:
+      config: Debug
+    archive:
+      config: Release
+    profile:
+      config: Release
