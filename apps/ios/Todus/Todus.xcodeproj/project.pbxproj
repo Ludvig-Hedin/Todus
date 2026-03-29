@@ -50,6 +50,12 @@
 		62C8FF4A57AD22A6AE28C9A1 /* TodosApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = D837D4D5B5A51B1720E6FD22 /* TodosApp.swift */; };
 		6344933A085BDE548D4D38BF /* TodosAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E9B87404CFFB558F706EFD2 /* TodosAPIClient.swift */; };
 		6643B37C1F3EAFBB576DB08E /* VoiceInputButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 668D6B7F097C9BB3D96136E5 /* VoiceInputButton.swift */; };
+		35FCBEC3308F399760150D57 /* VoiceProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C4923CF57BD275692447E56 /* VoiceProvider.swift */; };
+		4F9D2AF720AB24BC4A163587 /* GeminiLiveProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B91D5A9F5E92488DADBC63B /* GeminiLiveProvider.swift */; };
+		9D4BCBCA2E9F3CFE0FEF8FB6 /* VoiceTokenService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1E85D9EB02C7287EF9E72EA /* VoiceTokenService.swift */; };
+		E7C2904F47780FF950834EF9 /* AudioPlayerManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB15143D671E555A0BAC8FFC /* AudioPlayerManager.swift */; };
+		6EDE086B5F6BC10F5BD09601 /* VoiceChatViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 172999A066FF260345EB67FB /* VoiceChatViewModel.swift */; };
+		81EBE795BFF4023047CE7033 /* VoiceChatModalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FD2030B50E69AA5736D436F /* VoiceChatModalView.swift */; };
 		7134EE01B58A20F8DFA8E183 /* EmailThreadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8E51912B5A3BF763A7B0DF9 /* EmailThreadView.swift */; };
 		765AC63682DD4364D40B594D /* AuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83BE39B41338788839A6DE0A /* AuthService.swift */; };
 		77D47937044BC8B61B367F6E /* Formatters.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42AB13446D7F0CF43F8FE697 /* Formatters.swift */; };
@@ -152,6 +158,12 @@
 		5F6C8F87F427AAEBB5BEEDF4 /* AttachmentService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachmentService.swift; sourceTree = "<group>"; };
 		621BDB25784B86D43849D4CC /* SyncModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncModels.swift; sourceTree = "<group>"; };
 		668D6B7F097C9BB3D96136E5 /* VoiceInputButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceInputButton.swift; sourceTree = "<group>"; };
+		0C4923CF57BD275692447E56 /* VoiceProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceProvider.swift; sourceTree = "<group>"; };
+		9B91D5A9F5E92488DADBC63B /* GeminiLiveProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiLiveProvider.swift; sourceTree = "<group>"; };
+		D1E85D9EB02C7287EF9E72EA /* VoiceTokenService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTokenService.swift; sourceTree = "<group>"; };
+		BB15143D671E555A0BAC8FFC /* AudioPlayerManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioPlayerManager.swift; sourceTree = "<group>"; };
+		172999A066FF260345EB67FB /* VoiceChatViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceChatViewModel.swift; sourceTree = "<group>"; };
+		8FD2030B50E69AA5736D436F /* VoiceChatModalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceChatModalView.swift; sourceTree = "<group>"; };
 		67EBC96D933AD3FB3FFB08B7 /* TaskCaptureServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskCaptureServiceTests.swift; sourceTree = "<group>"; };
 		6D2A0F6355F3AD950310D73D /* TaskParsingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskParsingService.swift; sourceTree = "<group>"; };
 		6D4F6F5B369E9F8603154EE9 /* AppleRemindersSyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleRemindersSyncService.swift; sourceTree = "<group>"; };
@@ -410,6 +422,7 @@
 				39C814E48EF80FC8A4E3802F /* Reminders */,
 				C90647D26AC32183D277EE76 /* Tasks */,
 				CC1122334455667788990011 /* Notifications */,
+				A1B2C3D4E5F6071829304150 /* Voice */,
 				B638C89190B1EF14C896D308 /* AppLogger.swift */,
 				2D9A7B4C6E8F1029384756AC /* NetworkMonitor.swift */,
 			);
@@ -556,6 +569,19 @@
 			isa = PBXGroup;
 			children = (
 				668D6B7F097C9BB3D96136E5 /* VoiceInputButton.swift */,
+				172999A066FF260345EB67FB /* VoiceChatViewModel.swift */,
+				8FD2030B50E69AA5736D436F /* VoiceChatModalView.swift */,
+			);
+			path = Voice;
+			sourceTree = "<group>";
+		};
+		A1B2C3D4E5F6071829304150 /* Voice */ = {
+			isa = PBXGroup;
+			children = (
+				0C4923CF57BD275692447E56 /* VoiceProvider.swift */,
+				9B91D5A9F5E92488DADBC63B /* GeminiLiveProvider.swift */,
+				D1E85D9EB02C7287EF9E72EA /* VoiceTokenService.swift */,
+				BB15143D671E555A0BAC8FFC /* AudioPlayerManager.swift */,
 			);
 			path = Voice;
 			sourceTree = "<group>";
@@ -769,6 +795,12 @@
 				6344933A085BDE548D4D38BF /* TodosAPIClient.swift in Sources */,
 				62C8FF4A57AD22A6AE28C9A1 /* TodosApp.swift in Sources */,
 				6643B37C1F3EAFBB576DB08E /* VoiceInputButton.swift in Sources */,
+				35FCBEC3308F399760150D57 /* VoiceProvider.swift in Sources */,
+				4F9D2AF720AB24BC4A163587 /* GeminiLiveProvider.swift in Sources */,
+				9D4BCBCA2E9F3CFE0FEF8FB6 /* VoiceTokenService.swift in Sources */,
+				E7C2904F47780FF950834EF9 /* AudioPlayerManager.swift in Sources */,
+				6EDE086B5F6BC10F5BD09601 /* VoiceChatViewModel.swift in Sources */,
+				81EBE795BFF4023047CE7033 /* VoiceChatModalView.swift in Sources */,
 				AA11223344556677889900BB /* GlobalSearchView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
