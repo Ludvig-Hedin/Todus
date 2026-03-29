@@ -35,6 +35,18 @@ struct MacEmailComposeView: View {
         navigationTitle = "New Email"
     }
 
+    /// Optionally pre-filled from seed body (empty string = new email)
+    init(seedBody: String) {
+        if seedBody.isEmpty {
+            _draft = State(initialValue: EmailDraft())
+        } else {
+            var d = EmailDraft()
+            d.body = seedBody
+            _draft = State(initialValue: d)
+        }
+        navigationTitle = "New Email"
+    }
+
     private var canSend: Bool {
         let toAddress = draft.to.first ?? ""
         return !toAddress.isEmpty && toAddress.contains("@") && !draft.subject.isEmpty

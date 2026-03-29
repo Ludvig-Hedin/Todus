@@ -219,7 +219,22 @@ struct MacHomeView: View {
             sectionHeader(title: "RECENT EMAILS", count: services.emailService.threads.prefix(5).count)
 
             if !services.emailService.hasConnection {
-                emptyCard(message: "Connect Gmail to see your inbox", icon: "envelope")
+                // Show connect Gmail prompt with action button
+                VStack(spacing: MacTheme.spacing8) {
+                    emptyCard(message: "Connect Gmail to see your inbox", icon: "envelope")
+                    Button {
+                        Task { await services.emailService.connectGmail(authService: services.authService) }
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: "link")
+                                .font(.system(size: 11, weight: .medium))
+                            Text("Connect Gmail")
+                                .font(.system(size: 12, weight: .semibold))
+                        }
+                        .foregroundStyle(MacTheme.accent)
+                    }
+                    .buttonStyle(.plain)
+                }
             } else if services.emailService.threads.isEmpty {
                 if services.emailService.isLoadingThreads {
                     HStack(spacing: MacTheme.spacing8) {

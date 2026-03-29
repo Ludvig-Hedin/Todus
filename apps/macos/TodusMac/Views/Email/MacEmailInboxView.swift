@@ -190,9 +190,30 @@ struct MacEmailInboxView: View {
             Text("Sign in to your Google account to get started.")
                 .font(MacTheme.cardSubtitleFont())
                 .foregroundStyle(MacTheme.mutedText)
+            connectGmailButton
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// Button that initiates Gmail OAuth connection via the backend
+    private var connectGmailButton: some View {
+        Button {
+            Task { await services.emailService.connectGmail(authService: services.authService) }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "link")
+                    .font(.system(size: 12, weight: .medium))
+                Text("Connect Gmail")
+                    .font(.system(size: 13, weight: .semibold))
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, MacTheme.spacing16)
+            .padding(.vertical, MacTheme.spacing8)
+            .background(MacTheme.accent, in: RoundedRectangle(cornerRadius: MacTheme.buttonRadius))
+        }
+        .buttonStyle(.plain)
+        .padding(.top, MacTheme.spacing4)
     }
 
     private var loadingState: some View {

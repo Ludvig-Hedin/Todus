@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 
 // MARK: - Navigation Model
 
@@ -54,16 +55,21 @@ enum MacPrimarySelection: Hashable {
 struct MacRootView: View {
     @Environment(MacAppServices.self) private var services
 
+    // Live task count for sidebar badge
+    @Query(filter: #Predicate<TaskRecord> { !$0.completed }) private var incompleteTasks: [TaskRecord]
+
     @State private var selection: MacPrimarySelection = .home
     @State private var isEmailExpanded = true
     @State private var isCalendarExpanded = true
     @State private var isAssistantPresented = false
     @State private var isSettingsPresented = false
     @State private var isComposePresented = false
+    @State private var isCreatePresented = false
     @State private var isSearchPresented = false
     @State private var showNotifications = false
     @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
     @State private var calendarViewMode: String = "Week"
+    @State private var composeEmailSeedBody: String = ""
 
     var body: some View {
         Group {
@@ -101,7 +107,9 @@ struct MacRootView: View {
                 isEmailExpanded: $isEmailExpanded,
                 isCalendarExpanded: $isCalendarExpanded,
                 onOpenSettings: { isSettingsPresented = true },
-                onCompose: { isComposePresented = true }
+                onCompose: { isComposePresented = true },
+                taskCount: incompleteTasks.count,
+                onCreateItem: { isCreatePresented = true }
             )
             .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 260)
         } detail: {
@@ -150,18 +158,35 @@ struct MacRootView: View {
                     Menu {
                         Button("Preferences...") { isSettingsPresented = true }
                         Divider()
-                        Button("Share...") {}
-                        Button("Export...") {}
+                        Button {
+                            isComposePresented = true
+                        } label: {
+                            Label("New Email", systemImage: "envelope")
+                        }
+                        Button {
+                            // Reload email threads
+                            Task { await services.emailService.loadThreads(refresh: true) }
+                        } label: {
+                            Label("Refresh", systemImage: "arrow.clockwise")
+                        }
+                        Divider()
+                        Button {
+                            columnVisibility = columnVisibility == .detailOnly
+                                ? .automatic : .detailOnly
+                        } label: {
+                            Label("Toggle Sidebar", systemImage: "sidebar.left")
+                        }
                     } label: {
                         Image(systemName: "ellipsis")
                     }
 
+                    // Create button — opens universal create sheet (like iOS)
                     Button {
-                        isComposePresented = true
+                        isCreatePresented = true
                     } label: {
                         Image(systemName: "square.and.pencil")
                     }
-                    .help("Compose (⌘N)")
+                    .help("Create (⌘N)")
                     .keyboardShortcut("n", modifiers: .command)
 
                     Button {
@@ -196,12 +221,23 @@ struct MacRootView: View {
                 .frame(minWidth: 460, minHeight: 360)
         }
         .sheet(isPresented: $isComposePresented) {
-            MacEmailComposeView()
+            MacEmailComposeView(seedBody: composeEmailSeedBody)
                 .frame(minWidth: 520, minHeight: 380)
+                .onDisappear { composeEmailSeedBody = "" }
+        }
+        .sheet(isPresented: $isCreatePresented) {
+            MacCreateSheet(
+                defaultType: defaultCreateType,
+                onComposeEmail: { body in
+                    composeEmailSeedBody = body
+                    isComposePresented = true
+                }
+            )
+            .frame(minWidth: 440, minHeight: 300)
         }
         .sheet(isPresented: $isSearchPresented) {
             searchSheet
-                .frame(minWidth: 480, minHeight: 200)
+                .frame(minWidth: 480, minHeight: 360)
         }
     }
 
@@ -213,7 +249,12 @@ struct MacRootView: View {
         switch selection.category {
         case "email":
             Button {
-                // Mark all read action
+                Task {
+                    let ids = services.emailService.threads.filter(\.unread).map(\.id)
+                    if !ids.isEmpty {
+                        await services.emailService.markAsRead(ids: ids)
+                    }
+                }
             } label: {
                 Image(systemName: "envelope.open")
             }
@@ -247,7 +288,7 @@ struct MacRootView: View {
             .frame(width: 180)
 
         case "tasks":
-            Button {} label: {
+            Button { isCreatePresented = true } label: {
                 Image(systemName: "plus")
             }
             .help("New Task (⌘T)")
@@ -281,7 +322,7 @@ struct MacRootView: View {
         case .email(let section):
             MacEmailInboxView(folder: section.rawValue)
         case .calendar:
-            MacCalendarView()
+            MacCalendarView(viewMode: $calendarViewMode)
         }
     }
 
@@ -313,23 +354,17 @@ struct MacRootView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
-    private var searchSheet: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Search")
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(.primary.opacity(0.85))
-
-            TextField("Search emails, tasks, events...", text: .constant(""))
-                .textFieldStyle(.roundedBorder)
-                .font(.system(size: 13))
-
-            Text("Start typing to search across all items.")
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-
-            Spacer()
+    /// Determines default create type based on active sidebar selection
+    private var defaultCreateType: CreateItemType {
+        switch selection.category {
+        case "tasks": return .task
+        case "email": return .email
+        case "calendar": return .event
+        default: return .auto
         }
-        .padding(20)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private var searchSheet: some View {
+        MacSearchView()
     }
 }

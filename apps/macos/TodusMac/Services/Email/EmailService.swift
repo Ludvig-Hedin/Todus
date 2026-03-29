@@ -154,6 +154,16 @@ final class EmailService {
         }
     }
 
+    /// Initiates Gmail OAuth connection by re-triggering Google sign-in.
+    /// Google sign-in grants auth + mail scopes; after OAuth the connection is checked.
+    func connectGmail(authService: AuthService) async {
+        await authService.signInWithGoogle()
+        await checkConnection()
+        if hasConnection {
+            await loadThreads(refresh: true)
+        }
+    }
+
     // MARK: - Actions
 
     func sendEmail(_ draft: EmailDraft) async -> Bool {

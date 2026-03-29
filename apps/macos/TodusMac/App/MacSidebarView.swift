@@ -12,7 +12,10 @@ struct MacSidebarView: View {
     let onCompose: () -> Void
 
     private var authService: AuthService { services.authService }
-    private let taskCount = 3
+    /// Real task count from parent (SwiftData @Query)
+    var taskCount: Int = 0
+    /// Callback to open the create sheet
+    var onCreateItem: (() -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -29,7 +32,9 @@ struct MacSidebarView: View {
                     title: "Tasks",
                     systemImage: "checkmark.square",
                     isSelected: selection == .tasks,
-                    badgeCount: taskCount,
+                    badgeCount: taskCount > 0 ? taskCount : nil,
+                    showAddOnHover: true,
+                    onAdd: { onCreateItem?() },
                     action: { selection = .tasks }
                 )
 
@@ -105,8 +110,26 @@ struct MacSidebarView: View {
                 .padding(.bottom, 8)
                 .padding(.top, 10)
 
-            // User row — full width, gear pushed to trailing edge
-            HStack(spacing: 0) {
+            // User row — full width with name stretching to fill, gear icon at trailing edge
+            HStack(spacing: 6) {
+                // Avatar — show profile image if available, else initial from name
+                if let imageURLString = authService.userImage,
+                   let imageURL = URL(string: imageURLString) {
+                    AsyncImage(url: imageURL) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image.resizable().scaledToFill()
+                                .frame(width: 22, height: 22)
+                                .clipShape(Circle())
+                        default:
+                            avatarCircle
+                        }
+                    }
+                } else {
+                    avatarCircle
+                }
+
+                // Name + chevron (menu trigger) — fills available width
                 Menu {
                     Button("Profile") {}
                     Button("Settings") { onOpenSettings() }
@@ -115,17 +138,7 @@ struct MacSidebarView: View {
                         authService.signOut()
                     }
                 } label: {
-                    HStack(spacing: 6) {
-                        Circle()
-                            .fill(Color.primary.opacity(0.12))
-                            .frame(width: 22, height: 22)
-                            .overlay(
-                                Text(userInitial)
-                                    .font(.system(size: 10, weight: .semibold))
-                                    .foregroundStyle(.primary)
-                                    .opacity(0.5)
-                            )
-
+                    HStack(spacing: 4) {
                         Text(displayName)
                             .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(.primary)
@@ -133,14 +146,18 @@ struct MacSidebarView: View {
                             .lineLimit(1)
                             .truncationMode(.tail)
 
-                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 8, weight: .medium))
+                            .foregroundStyle(.tertiary)
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
                 }
                 .menuStyle(.borderlessButton)
                 .buttonStyle(.plain)
                 .pointerStyle(.link)
 
+                // Gear icon at trailing edge (directly right of chevron area)
                 Button(action: onOpenSettings) {
                     Image(systemName: "gearshape")
                         .font(.system(size: 12, weight: .regular))
@@ -263,9 +280,28 @@ struct MacSidebarView: View {
         return authService.isAuthenticated ? "User" : "Guest"
     }
 
-    /// First letter of the display name for the avatar circle
+    /// First letter of user's name (not email) for the avatar circle
     private var userInitial: String {
-        String(displayName.prefix(1)).uppercased()
+        if let name = authService.userName, !name.isEmpty {
+            return String(name.prefix(1)).uppercased()
+        }
+        if let email = authService.userEmail, !email.isEmpty {
+            return String(email.prefix(1)).uppercased()
+        }
+        return "?"
+    }
+
+    /// Small avatar circle with initial letter
+    private var avatarCircle: some View {
+        Circle()
+            .fill(Color.primary.opacity(0.12))
+            .frame(width: 22, height: 22)
+            .overlay(
+                Text(userInitial)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .opacity(0.5)
+            )
     }
 }
 
@@ -277,6 +313,8 @@ private struct SidebarItemButton: View {
     let isSelected: Bool
     var badgeCount: Int? = nil
     var trailingSystemImage: String? = nil
+    var showAddOnHover: Bool = false
+    var onAdd: (() -> Void)? = nil
     let action: () -> Void
 
     @State private var isHovered = false
@@ -295,7 +333,20 @@ private struct SidebarItemButton: View {
 
                 Spacer(minLength: 0)
 
-                if let badgeCount {
+                // Show + button on hover if enabled, otherwise show badge/chevron
+                if showAddOnHover && isHovered {
+                    Button {
+                        onAdd?()
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 18, height: 18)
+                            .background(Color.primary.opacity(0.06), in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .transition(.opacity)
+                } else if let badgeCount {
                     Text("\(badgeCount)")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(.secondary)
