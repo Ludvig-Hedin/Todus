@@ -75,10 +75,26 @@ const positionPopup = (
     return;
   }
 
+  const viewport = window.visualViewport;
+  const viewportTop = viewport?.offsetTop ?? 0;
+  const viewportHeight = viewport?.height ?? window.innerHeight;
+  const margin = 16;
+  const gap = 8;
+  const availableBelow = Math.max(0, viewportTop + viewportHeight - rect.bottom - margin);
+  const availableAbove = Math.max(0, rect.top - viewportTop - margin);
+  const measuredHeight = popup.offsetHeight || popup.scrollHeight;
+  const maxHeight = Math.max(120, Math.min(measuredHeight || 320, Math.max(availableBelow, availableAbove)));
+  const openAbove = availableBelow < measuredHeight && availableAbove > availableBelow;
+
   popup.style.position = 'fixed';
-  popup.style.left = `${rect.left}px`;
-  popup.style.top = `${rect.bottom + 8}px`;
-  popup.style.zIndex = '100000';
+  popup.style.left = `${Math.max(margin, Math.min(rect.left, window.innerWidth - popup.offsetWidth - margin))}px`;
+  popup.style.top = openAbove ? `${Math.max(margin, rect.top - maxHeight - gap)}px` : `${rect.bottom + gap}px`;
+  popup.style.maxHeight = `${maxHeight}px`;
+  popup.style.zIndex = '2147483647';
+  popup.style.overflowY = 'auto';
+  popup.style.overscrollBehavior = 'contain';
+  popup.style.setProperty('-webkit-overflow-scrolling', 'touch');
+  popup.style.touchAction = 'pan-y';
 };
 
 const createSuggestionRenderer = <T extends SuggestionMenuItem>({
@@ -89,12 +105,62 @@ const createSuggestionRenderer = <T extends SuggestionMenuItem>({
     let popup: HTMLDivElement | null = null;
     let selectedIndex = 0;
     let latestProps: SuggestionProps<T> | null = null;
+    let removeOutsideListeners: (() => void) | null = null;
+
+    const removeGlobalListeners = () => {
+      removeOutsideListeners?.();
+      removeOutsideListeners = null;
+    };
 
     const destroyPopup = () => {
+      removeGlobalListeners();
       popup?.remove();
       popup = null;
       latestProps = null;
       selectedIndex = 0;
+    };
+
+    const onPointerDown = (event: PointerEvent) => {
+      if (!popup) {
+        return;
+      }
+
+      const target = event.target;
+      if (target instanceof Node && popup.contains(target)) {
+        return;
+      }
+
+      destroyPopup();
+    };
+
+    const onFocusIn = (event: FocusEvent) => {
+      if (!popup) {
+        return;
+      }
+
+      const target = event.target;
+      if (target instanceof Node && popup.contains(target)) {
+        return;
+      }
+
+      destroyPopup();
+    };
+
+    const addGlobalListeners = () => {
+      if (removeOutsideListeners) {
+        return;
+      }
+
+      const pointerListener = (event: PointerEvent) => onPointerDown(event);
+      const focusListener = (event: FocusEvent) => onFocusIn(event);
+
+      document.addEventListener('pointerdown', pointerListener, true);
+      document.addEventListener('focusin', focusListener, true);
+
+      removeOutsideListeners = () => {
+        document.removeEventListener('pointerdown', pointerListener, true);
+        document.removeEventListener('focusin', focusListener, true);
+      };
     };
 
     const selectItem = (index: number) => {
@@ -199,6 +265,7 @@ const createSuggestionRenderer = <T extends SuggestionMenuItem>({
         latestProps = props;
         popup = ensurePopupRoot();
         document.body.appendChild(popup);
+        addGlobalListeners();
         selectedIndex = 0;
         renderPopup();
       },
@@ -297,6 +364,9 @@ export const createMentionExtension = ({
       char: '@',
       items: async ({ query }) => {
         const scopedQuery = parseScopedMentionQuery(query, availableKinds);
+        if (!scopedQuery.query.trim()) {
+          return [];
+        }
         const mentions = await searchMentions(scopedQuery.query, scopedQuery.kinds);
 
         return mentions.map(

@@ -30,6 +30,9 @@ targets:
         excludes:
           - "**/*.md"
           - "**/archived/**"
+          - "Services/Auth/AuthService.swift"
+      - path: ../../../packages/swift-auth/Sources/TodusAuth
+        group: TodusAuth
     resources:
       - path: Todus/Resources/Assets.xcassets
       - path: Todus/Resources/Info.plist

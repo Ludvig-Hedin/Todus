@@ -125,6 +125,7 @@ private func applyRichInputFormatting(_ action: RichInputCommandAction) -> Strin
 /// Redesigned with send button in a bottom toolbar row alongside folder and deadline selectors.
 /// Supports slash-menu shortcuts, markdown bullet auto-format, and image paste.
 struct CaptureComposer: View {
+    @Environment(AppServices.self) private var services
     @Binding var text: String
     /// Submit closure now receives pending attachment filenames, selected folder, and optional due date override.
     let onSubmit: (_ attachmentNames: [String], _ folder: FolderRecord?, _ dueDate: Date?) -> Void
@@ -180,6 +181,7 @@ struct CaptureComposer: View {
                 .presentationDetents([.height(420)])
                 .presentationDragIndicator(.visible)
                 .presentationBackground(AppTheme.backgroundTop)
+                .preferredColorScheme(services.appearancePreference.colorScheme)
         }
         .photosPicker(isPresented: $isShowingPhotoPicker, selection: $selectedPhotoItem, matching: .images)
         .fileImporter(
@@ -644,6 +646,7 @@ struct RichComposerInput: View {
     @State private var showsMentionMenu = false
     @State private var showsSlashMenu = false
     @State private var preferredMentionKind: RichInputMentionKind? = nil
+    @State private var suppressSuggestionReopen = false
 
     private var filteredMentions: [RichInputMentionRef] {
         let normalized = activeMentionQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -770,6 +773,17 @@ struct RichComposerInput: View {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         let components = trimmed.split(whereSeparator: \.isWhitespace)
 
+        if suppressSuggestionReopen {
+            let lastToken = components.last ?? ""
+            if lastToken.hasPrefix("@") || lastToken.hasPrefix("/") {
+                showsMentionMenu = false
+                showsSlashMenu = false
+                return
+            }
+
+            suppressSuggestionReopen = false
+        }
+
         guard let last = components.last else {
             showsMentionMenu = false
             showsSlashMenu = false
@@ -804,6 +818,7 @@ struct RichComposerInput: View {
         }
         showsMentionMenu = false
         preferredMentionKind = nil
+        suppressSuggestionReopen = true
     }
 
     private func applyCommand(_ action: RichInputCommandAction) {
@@ -886,6 +901,7 @@ struct PasteHandlingTextInput: UIViewRepresentable {
         view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         // Hug content vertically so the view shrinks to one line when empty
         view.setContentHuggingPriority(.defaultHigh, for: .vertical)
+        view.highlightTerms = highlightTerms
 
         // Show placeholder initially
         if text.isEmpty {
@@ -908,6 +924,7 @@ struct PasteHandlingTextInput: UIViewRepresentable {
 
     func updateUIView(_ uiView: PasteInterceptingTextView, context: Context) {
         context.coordinator.highlightTerms = highlightTerms
+        uiView.highlightTerms = highlightTerms
 
         if let isFocused {
             if isFocused, !uiView.isFirstResponder {
@@ -975,11 +992,7 @@ struct PasteHandlingTextInput: UIViewRepresentable {
             }
         }
 
-        func textView(
-            _ textView: UITextView,
-            shouldChangeTextIn range: NSRange,
-            replacementText replacementText: String
-        ) -> Bool {
+        func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText: String) -> Bool {
             guard textView.textColor != UIColor.placeholderText else { return true }
 
             let nsText = (textView.text ?? "") as NSString
@@ -1053,7 +1066,6 @@ struct PasteHandlingTextInput: UIViewRepresentable {
 
                     attributed.addAttributes([
                         .foregroundColor: UIColor.systemBlue,
-                        .backgroundColor: UIColor.systemBlue.withAlphaComponent(0.12),
                     ], range: found)
 
                     let nextLocation = found.location + found.length
@@ -1063,6 +1075,7 @@ struct PasteHandlingTextInput: UIViewRepresentable {
 
             textView.attributedText = attributed
             textView.selectedRange = selectedRange
+            textView.setNeedsDisplay()
         }
 
         private func mentionRangeIntersecting(_ range: NSRange, in text: NSString) -> NSRange? {
@@ -1095,6 +1108,8 @@ struct PasteHandlingTextInput: UIViewRepresentable {
 /// not from available space — keeping the composer at single-line until the user types.
 final class PasteInterceptingTextView: UITextView {
     var onPasteImage: ((UIImage) -> Void)?
+    var highlightTerms: [String] = []
+    var mentionHighlightColor: UIColor = UIColor.systemBlue.withAlphaComponent(0.14)
 
     override var intrinsicContentSize: CGSize {
         // Measure the height required for the current content
@@ -1103,6 +1118,47 @@ final class PasteInterceptingTextView: UITextView {
                    height: .greatestFiniteMagnitude)
         )
         return CGSize(width: UIView.noIntrinsicMetric, height: max(measured.height, 20))
+    }
+
+    override func draw(_ rect: CGRect) {
+        drawMentionHighlights()
+        super.draw(rect)
+    }
+
+    private func drawMentionHighlights() {
+        guard textColor != UIColor.placeholderText, !highlightTerms.isEmpty else { return }
+
+        let nsText = (text ?? "") as NSString
+        let inset = textContainerInset
+
+        mentionHighlightColor.setFill()
+
+        for term in highlightTerms where !term.isEmpty {
+            var searchRange = NSRange(location: 0, length: nsText.length)
+
+            while searchRange.location < nsText.length {
+                let found = nsText.range(of: term, options: [], range: searchRange)
+                guard found.location != NSNotFound else { break }
+
+                let glyphRange = layoutManager.glyphRange(forCharacterRange: found, actualCharacterRange: nil)
+                layoutManager.enumerateEnclosingRects(
+                    forGlyphRange: glyphRange,
+                    withinSelectedGlyphRange: NSRange(location: NSNotFound, length: 0),
+                    in: textContainer
+                ) { rect, _ in
+                    let pillRect = rect
+                        .offsetBy(dx: inset.left, dy: inset.top)
+                        .insetBy(dx: -5, dy: -2)
+                    UIBezierPath(
+                        roundedRect: pillRect,
+                        cornerRadius: pillRect.height / 2
+                    ).fill()
+                }
+
+                let nextLocation = found.location + found.length
+                searchRange = NSRange(location: nextLocation, length: nsText.length - nextLocation)
+            }
+        }
     }
 
     override func paste(_ sender: Any?) {

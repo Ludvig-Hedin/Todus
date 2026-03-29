@@ -20,9 +20,26 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>Todus shows your today's events on the home dashboard.</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.productivity</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>com.ludvighedin.todus.macos</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>todus</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>

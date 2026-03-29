@@ -48,6 +48,16 @@ struct MainTabView: View {
                     .opacity(selectedTab == tab ? 1 : 0)
                     .allowsHitTesting(selectedTab == tab)
             }
+            // Dismiss keyboard when tapping anywhere outside a text field.
+            // simultaneousGesture ensures buttons/links still receive taps.
+            .simultaneousGesture(
+                TapGesture().onEnded {
+                    UIApplication.shared.sendAction(
+                        #selector(UIResponder.resignFirstResponder),
+                        to: nil, from: nil, for: nil
+                    )
+                }
+            )
 
             // Offline banner — shown when network is unavailable
             if !services.networkMonitor.isConnected {
@@ -63,6 +73,10 @@ struct MainTabView: View {
         }
         .animation(.easeInOut(duration: 0.3), value: services.networkMonitor.isConnected)
         .animation(.easeInOut(duration: 0.3), value: services.authService.isSessionExpired)
+            // Prevent the keyboard from pushing the entire view (including tab bar) upward.
+            // Individual tab views handle keyboard avoidance internally (e.g. ScrollView scrolling,
+            // or the TasksTabView composer using KeyboardObserver to position above the keyboard).
+            .ignoresSafeArea(.keyboard)
             // Custom tab bar sits in the safe-area inset slot — content is
             // automatically pushed up so nothing hides behind the bar.
             .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -95,10 +109,12 @@ struct MainTabView: View {
                     .presentationDetents([.medium, .large])
                     .presentationBackgroundInteraction(.enabled(upThrough: .medium))
                     .presentationDragIndicator(.visible)
+                    .preferredColorScheme(services.appearancePreference.colorScheme)
             }
             .sheet(isPresented: settingsBinding) {
                 SettingsView()
                     .presentationDetents([.medium, .large])
+                    .preferredColorScheme(services.appearancePreference.colorScheme)
             }
             // Global compose sheet — triggered by HomeView email "+" button
             .sheet(isPresented: composeEmailBinding, onDismiss: {
@@ -109,10 +125,12 @@ struct MainTabView: View {
                     EmailComposeView(body: seedBody)
                         .presentationDetents([.large])
                         .presentationDragIndicator(.visible)
+                        .preferredColorScheme(services.appearancePreference.colorScheme)
                 } else {
                     EmailComposeView()
                         .presentationDetents([.large])
                         .presentationDragIndicator(.visible)
+                        .preferredColorScheme(services.appearancePreference.colorScheme)
                 }
             }
             // React to tab navigation requests from child views (e.g. HomeView).
@@ -205,9 +223,11 @@ struct MainTabView: View {
                     // (including padding) and feeds it back to CalendarContainerView.
                     AppTopHeader(title: "Calendar")
                         .padding(.horizontal, 16)
-                        .padding(.top, 8)
+                        .padding(.top, 4)
+                        .padding(.bottom, 8) // Gap between title and calendar day row
                         .background(
-                            AppTheme.backgroundTop
+                            // Match CalendarKit's white content background, not the gray app background
+                            Color(UIColor.systemBackground)
                                 .ignoresSafeArea(edges: .top)
                         )
                         .onGeometryChange(for: CGFloat.self) { proxy in

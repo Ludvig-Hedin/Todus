@@ -162,10 +162,10 @@ struct AppleCalendarIconView: View {
     var size: CGFloat = 30
     var body: some View {
         AppleCalendarLogo()
-            .frame(width: size, height: size)
+            .frame(width: size)
+            .aspectRatio(contentMode: .fit)
             .clipShape(RoundedRectangle(cornerRadius: size * 0.225, style: .continuous))
             .shadow(color: .black.opacity(0.12), radius: 2, x: 0, y: 1)
-            .aspectRatio(1, contentMode: .fit)
     }
 }
 
@@ -220,6 +220,7 @@ struct AppleRemindersIconView: View {
         AppIconContainer(size: size, background: .white) {
             AppleRemindersLogo()
         }
-        .aspectRatio(1, contentMode: .fit)
+        .frame(width: size)
+        .aspectRatio(contentMode: .fit)
     }
 }

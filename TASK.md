@@ -187,7 +187,9 @@ All marked DONE — these are WebView-based, not truly native.
   - Added a shared mention contract in `packages/shared` and a new server `mentions.search` route for grouped mention lookup.
   - Wired structured `mentions` payloads into `/ai/chat` and the web agent path so AI requests can resolve references by ID instead of relying on raw `@text`.
   - Upgraded the active web TipTap editor path with `@` mentions, `/` commands, rich mention chips, and send-time serialization rules for compose vs AI chat.
+  - Tightened the shared suggestion popup so it now dismisses on outside click/focus loss and stays scrollable above the keyboard on smaller viewports.
   - Replaced the plain iOS email-compose and AI-chat inputs with a reusable `UITextView`-backed rich input that supports slash commands, mention selection, and inline mention highlighting.
+  - Fixed the iOS mention flow so selecting a mention no longer reopens the picker immediately, and the inline mention background now renders as a rounded capsule instead of a flat blue block.
   - Reused the same command model in task capture so iOS slash semantics stay aligned across surfaces.
   - Fixed two iOS compose regressions found during review: the email body editor now honors `focusedField == .body` again through explicit `RichComposerInput` focus plumbing, and person mention suggestions are now sorted deterministically before the top-10 cutoff so the same people appear on every run.
 - Remaining verification focus:

@@ -64,37 +64,21 @@ struct TodosApp: App {
     }
 
     /// Branded splash screen shown during initialization — renders in < 1 frame.
+    /// Minimal: just the Todus logomark centered on the app background.
     private var splashView: some View {
         ZStack {
             AppTheme.backgroundTop.ignoresSafeArea()
 
-            VStack(spacing: 0) {
-                Spacer()
-
-                // App icon mark — rounded square with checklist symbol
-                ZStack {
-                    RoundedRectangle(cornerRadius: 26, style: .continuous)
-                        .fill(Color.primary)
-                        .frame(width: 96, height: 96)
-                        .shadow(color: Color.primary.opacity(0.18), radius: 28, x: 0, y: 10)
-
-                    Image(systemName: "checklist")
-                        .font(.system(size: 42, weight: .medium))
-                        .foregroundStyle(Color(UIColor.systemBackground))
-                }
-
-                Spacer().frame(height: 24)
-
-                Text("Todus")
-                    .font(.system(size: 28, weight: .bold, design: .rounded))
-                    .tracking(-0.5)
-
-                Spacer().frame(height: 56)
+            VStack(spacing: 20) {
+                Image("BrandLogo")
+                    .resizable()
+                    .renderingMode(.template)
+                    .foregroundStyle(.primary.opacity(0.8))
+                    .frame(width: 56, height: 56)
 
                 ProgressView()
-                    .tint(.secondary)
-
-                Spacer()
+                    .tint(.secondary.opacity(0.5))
+                    .controlSize(.small)
             }
         }
     }

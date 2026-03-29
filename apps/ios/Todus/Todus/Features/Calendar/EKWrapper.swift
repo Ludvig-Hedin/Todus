@@ -9,7 +9,7 @@ import UIKit
 import EventKit
 import CalendarKit
 
-final class EKWrapper: EventDescriptor {
+final class EKWrapper: EventDescriptor, @unchecked Sendable {
     public var dateInterval: DateInterval {
         get {
             DateInterval(start: ekEvent.startDate, end: ekEvent.endDate)

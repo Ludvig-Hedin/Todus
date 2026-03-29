@@ -1,21 +1,47 @@
-MIT License
+# Todus Personal Use License
 
-Copyright (c) 2025 Zero Email
+Copyright (c) 2026 Ludvig Hedin  
+All rights reserved.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+## 1. Permission
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+You are allowed to:
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+- View the source code in this repository.
+- Download and run the software for **personal, non‑commercial use only**.
+- Modify the code **for your own personal, non‑commercial use**.
+
+## 2. Restrictions
+
+You are **not** allowed to:
+
+- Use this software or any part of its code for **commercial purposes**.
+  - This includes selling it, using it in a paid product or service,
+    or using it in any business or organization activity that makes
+    or saves money.
+- Publish, redistribute, or host this software (or any modified version)
+  for others to use, whether for free or paid.
+- Use any part of this code in other projects, libraries, or products.
+- Claim authorship or ownership of this software or any part of it.
+- Remove or change the copyright notice in this file.
+
+If you want to do **anything** beyond personal, non‑commercial tinkering,
+you must get **prior written permission** from the copyright holder.
+
+## 3. No Warranty
+
+The software is provided **"AS IS"**, without warranty of any kind,
+express or implied, including but not limited to the warranties of
+merchantability, fitness for a particular purpose, and noninfringement.
+
+In no event shall the authors or copyright holders be liable for any
+claim, damages, or other liability, whether in an action of contract,
+tort, or otherwise, arising from, out of, or in connection with the
+software or the use or other dealings in the software.
+
+## 4. Summary (Non‑legal)
+
+- You can play with it on your own machine.  
+- You cannot use it for work, clients, or any money‑related thing.  
+- You cannot ship it, host it for others, or reuse parts of the code.  
+- For anything beyond that, ask first: **ludvighedin15@gmail.com**.

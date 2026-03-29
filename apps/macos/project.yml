@@ -23,15 +23,23 @@ targets:
       - path: TodusMac
         excludes:
           - "**/*.md"
+      - path: ../../packages/swift-auth/Sources/TodusAuth
+        group: TodusAuth
     resources:
+      - path: TodusMac/Resources/Assets.xcassets
       - path: TodusMac/Resources
         excludes:
           - "Info.plist"
+          - "Assets.xcassets"
+    dependencies:
+      - framework: EventKit.framework
+        embed: false
     settings:
       base:
         PRODUCT_NAME: Todus
         PRODUCT_BUNDLE_IDENTIFIER: com.ludvighedin.todus.macos
         INFOPLIST_FILE: TodusMac/Resources/Info.plist
+        CODE_SIGN_ENTITLEMENTS: TodusMac/Resources/TodusMac.entitlements
         ENABLE_PREVIEWS: YES
         MACOSX_DEPLOYMENT_TARGET: "15.0"
 

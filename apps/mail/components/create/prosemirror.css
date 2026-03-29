@@ -245,12 +245,17 @@ mark[style] > strong {
   max-height: min(320px, 60vh);
   width: min(360px, calc(100vw - 32px));
   overflow-y: auto;
+  position: fixed;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
   border: 1px solid rgba(148, 163, 184, 0.25);
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.98);
   box-shadow: 0 18px 48px rgba(15, 23, 42, 0.18);
   padding: 0.35rem;
   backdrop-filter: blur(18px);
+  z-index: 2147483647;
 }
 
 .dark .editor-suggestion-menu {

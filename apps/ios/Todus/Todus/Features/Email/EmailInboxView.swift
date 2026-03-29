@@ -64,20 +64,15 @@ struct EmailInboxView: View {
 
     private var threadList: some View {
         VStack(spacing: 0) {
-            // Header
-            VStack(alignment: .leading, spacing: 6) {
+            // Header — consistent 4pt top across all tabs
+            HStack(spacing: 6) {
                 AppTopHeader(title: "Inbox")
                 if emailService.isLoadingThreads {
-                    HStack(spacing: 6) {
-                        ProgressView().scaleEffect(0.65)
-                        Text("Refreshing")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(AppTheme.mutedText)
-                    }
+                    ProgressView().scaleEffect(0.6)
                 }
             }
             .padding(.horizontal, 16)
-            .padding(.top, 12)
+            .padding(.top, 4)
             .padding(.bottom, 6)
 
             // Search bar

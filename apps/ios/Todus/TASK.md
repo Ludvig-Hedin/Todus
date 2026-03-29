@@ -9,7 +9,7 @@
   - *Requires:* IOS-001
 - [ ] **IOS-003** — Add CalendarKit v1.1.7 as SPM dependency
   - *Requires:* IOS-001
-- [ ] **IOS-004** — Verify project compiles on iOS 18 simulator
+- [x] **IOS-004** — Verify project compiles on iOS 18 simulator
   - *Requires:* IOS-002, IOS-003
 
 ### 🟡 Ready to Start

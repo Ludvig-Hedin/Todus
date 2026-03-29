@@ -24,23 +24,29 @@ struct HomeView: View {
         ZStack {
             AppTheme.backgroundTop.ignoresSafeArea()
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    greetingSection
+            VStack(spacing: 0) {
+                // Header pinned outside the scroll for consistent position
+                AppTopHeader(title: "Home")
+                    .padding(.horizontal, 16)
+                    .padding(.top, 4)
 
-                    // When all sections are empty, show a single onboarding card
-                    // instead of three separate empty states
-                    if todaysEvents.isEmpty && tasksDueToday.isEmpty && !services.emailService.hasConnection {
-                        self.getStartedSection
-                    } else {
-                        self.eventsSection
-                        self.tasksSection
-                        self.emailSection
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 24) {
+                        greetingSection
+
+                        if todaysEvents.isEmpty && tasksDueToday.isEmpty && !services.emailService.hasConnection {
+                            self.getStartedSection
+                        } else {
+                            self.eventsSection
+                            self.tasksSection
+                            self.emailSection
+                        }
+                        Spacer(minLength: 80)
                     }
-                    Spacer(minLength: 80)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 16)
+                .scrollDismissesKeyboard(.interactively)
             }
         }
         .toolbar(.hidden, for: .navigationBar)
@@ -60,8 +66,7 @@ struct HomeView: View {
     // MARK: - Greeting
 
     private var greetingSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            AppTopHeader(title: "Home")
+        VStack(alignment: .leading, spacing: 4) {
             Text(greeting)
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(.secondary)
@@ -69,7 +74,6 @@ struct HomeView: View {
                 .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(.secondary)
         }
-        .padding(.top, 8)
     }
 
     private var greeting: String {

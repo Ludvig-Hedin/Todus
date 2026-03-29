@@ -45,6 +45,7 @@ struct CreateSheet: View {
                 .presentationDetents([.height(420)])
                 .presentationDragIndicator(.visible)
                 .presentationBackground(AppTheme.backgroundTop)
+                .preferredColorScheme(services.appearancePreference.colorScheme)
         }
     }
 
