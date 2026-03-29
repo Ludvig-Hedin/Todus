@@ -325,9 +325,14 @@ export default function GeneralPage() {
         title={m['pages.settings.general.title']()}
         description={m['pages.settings.general.description']()}
         footer={
-          <Button type="submit" form="general-form" disabled={isSaving}>
-            {isSaving ? m['common.actions.saving']() : m['common.actions.saveChanges']()}
-          </Button>
+          <div className="flex items-center gap-3">
+            {form.formState.isDirty && (
+              <span className="text-sm text-amber-500 font-medium">{m['common.actions.unsavedChanges']()}</span>
+            )}
+            <Button type="submit" form="general-form" disabled={isSaving}>
+              {isSaving ? m['common.actions.saving']() : m['common.actions.saveChanges']()}
+            </Button>
+          </div>
         }
       >
         <Form {...form}>

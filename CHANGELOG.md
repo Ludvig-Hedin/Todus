@@ -1,5 +1,98 @@
 # Project Changelog
 
+## [2026-03-29] Fix — iOS Xcode build environment reset for CalendarKit registration hangs
+
+### Summary
+Investigated repeated Xcode GUI hangs around:
+
+- `RegisterExecutionPolicyException ... CalendarKit.o`
+- `RegisterExecutionPolicyException ... CalendarKit_CalendarKit.bundle`
+
+This was not caused by CalendarKit source code itself. The package is a simple SwiftPM dependency with no nested package dependencies or binary artifacts. A clean rebuild showed the hang correlated with local Xcode/macOS environment state after manual cache cleanup.
+
+**Root cause found:**
+- Xcode had been configured to use custom build output paths:
+  - `~/XcodeDerivedData/Todus`
+  - `~/Desktop/Build/Intermediates.noindex`
+- After caches were manually deleted, those non-default locations interacted badly with execution-policy registration (`syspolicyd`) and later with a corrupted `XCBuildData/build.db`.
+
+**Fixes applied:**
+- Reset Xcode build location preferences back to default DerivedData behavior
+- Cleared Todus DerivedData and SwiftPM caches
+- Re-resolved package dependencies so CalendarKit was checked out fresh
+- Regenerated `apps/ios/Todus/Todus.xcodeproj` from `apps/ios/Todus/project.yml`
+- Excluded `**/archived/**` from the iOS target so clean builds do not pull in stale duplicate files like `Navigation/archived/CustomTabBar.swift`
+
+**What this proved:**
+- `RegisterExecutionPolicyException` for CalendarKit now completes in a clean isolated build path
+- The remaining failures after the reset were ordinary project/source issues surfaced by a true clean build, not CalendarKit registration hangs
+
+**Files changed:**
+- `apps/ios/Todus/project.yml`
+- `apps/ios/Todus/Todus.xcodeproj/project.pbxproj`
+- `apps/ios/Todus/status_ios.md`
+
+## [2026-03-29] Cross-platform code quality fixes — iOS, web, gitignore
+
+### Summary
+Batch of code quality fixes across iOS and web apps:
+
+- **`.gitignore`**: Added `.deriveddata/` and `DerivedData/` to prevent Xcode build artifacts from being committed
+- **`Info.plist`**: Added standard bundle identification keys (CFBundleIdentifier, CFBundleVersion, etc.) using build setting variables
+- **`project.pbxproj`**: Removed stale build references for deleted files (CardViews.swift, ChatUISpec.swift, ChatUISpecView.swift)
+- **`GmailOnboardingView`**: Updated copy to include explicit permission disclosure ("Grant access to...")
+- **`EmailInboxView`**: Fixed misleading empty state text — replaced "Pull down to refresh" with "Tap Refresh" since pull-to-refresh is only on the thread list
+- **`SettingsView`**: Updated Email & AI section footer to describe all controls in the section
+- **`MainTabView`**: Added `.snappy` animation to requestCreateSheet handler to match tab bar behavior
+- **`AuthService`**: Reset `isSessionExpired` in `signOut()` to prevent stale banner after sign-out
+- **`en.json`**: Added `common.actions.unsavedChanges` i18n key
+- **`general/page.tsx`**: Replaced hardcoded "Unsaved changes" with i18n call
+- **`mail.tsx`**: Added `aria-label="Compose email"` to floating compose button for screen reader accessibility
+- **`signatures/page.tsx`**: Replaced hardcoded title/description with i18n message calls
+
+**Files changed:**
+- `.gitignore`
+- `apps/ios/Todus/Todus.xcodeproj/Info.plist`
+- `apps/ios/Todus/Todus.xcodeproj/project.pbxproj`
+- `apps/ios/Todus/Todus/App/GmailOnboardingView.swift`
+- `apps/ios/Todus/Todus/Features/Email/EmailInboxView.swift`
+- `apps/ios/Todus/Todus/Features/Settings/SettingsView.swift`
+- `apps/ios/Todus/Todus/Navigation/MainTabView.swift`
+- `apps/ios/Todus/Todus/Services/Auth/AuthService.swift`
+- `apps/mail/messages/en.json`
+- `apps/mail/app/(routes)/settings/general/page.tsx`
+- `apps/mail/components/mail/mail.tsx`
+- `apps/mail/app/(routes)/settings/signatures/page.tsx`
+
+---
+
+## [2026-03-29] iOS UX Fixes — Auth links, onboarding copy, action grouping, create sheet, search indicator, empty states, send error, session confirm, AI detent, settings regrouping
+
+### Summary
+Batch of iOS UX improvements across 9 files:
+
+- **I13 AuthView**: Terms of Service and Privacy Policy are now tappable links opening todus.app/terms and todus.app/privacy
+- **I2 GmailOnboardingView**: Updated copy to be benefit-oriented ("See your inbox, reply to emails...")
+- **I3 EmailThreadView**: Added visual divider between non-destructive (star, unread) and destructive (archive, trash) action buttons
+- **I5 HomeView + AppServices + MainTabView**: Events and Tasks "+" buttons now open CreateSheet directly instead of navigating to another tab
+- **I8 EmailInboxView**: Added inline "Searching..." indicator when search is in progress
+- **I11 EmailInboxView**: Improved empty state with refresh button and better copy
+- **I10 EmailComposeView**: Added error alert when email send fails
+- **I12 MainTabView**: Session expired banner now shows confirmation dialog before signing out
+- **I15 MainTabView**: AI chat sheet uses .medium detent instead of .fraction(0.5)
+- **I9 SettingsView**: Merged 9 sections into 4 logical groups (Preferences, Email & AI, Notifications & Privacy, About)
+
+**Files changed:**
+- `apps/ios/Todus/Todus/Features/Auth/AuthView.swift`
+- `apps/ios/Todus/Todus/App/GmailOnboardingView.swift`
+- `apps/ios/Todus/Todus/Features/Email/EmailThreadView.swift`
+- `apps/ios/Todus/Todus/Features/Home/HomeView.swift`
+- `apps/ios/Todus/Todus/App/AppServices.swift`
+- `apps/ios/Todus/Todus/Navigation/MainTabView.swift`
+- `apps/ios/Todus/Todus/Features/Email/EmailInboxView.swift`
+- `apps/ios/Todus/Todus/Features/Email/EmailComposeView.swift`
+- `apps/ios/Todus/Todus/Features/Settings/SettingsView.swift`
+
 ## [2026-03-29] Fix — Buffer early WebSocket messages in voice proxy
 
 ### Summary

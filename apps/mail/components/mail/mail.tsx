@@ -5,7 +5,7 @@ import {
   DropdownMenuTrigger,
 } from '../ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { Bell, Lightning, Mail, ScanEye, Tag, User, X, Search } from '../icons/icons';
+import { Bell, Lightning, Mail, PencilCompose, ScanEye, Tag, User, X, Search } from '../icons/icons';
 import { useCategorySettings, useDefaultCategoryId } from '@/hooks/use-categories';
 import { ResizablePanel, ResizablePanelGroup, ResizableHandle } from '@/components/ui/resizable';
 import { useCommandPalette } from '../context/command-palette-context';
@@ -640,7 +640,37 @@ export function MailLayout() {
           {activeConnection?.id ? <AIToggleButton /> : null}
         </ResizablePanelGroup>
       </div>
+      {isMobile && (
+        <ComposeFloatingButton />
+      )}
     </TooltipProvider>
+  );
+}
+
+// Floating compose button for mobile — opens the compose dialog
+function ComposeFloatingButton() {
+  const [, setDialogOpen] = useQueryState('isComposeOpen');
+  const [, setDraftId] = useQueryState('draftId');
+  const [, setTo] = useQueryState('to');
+  const [, setActiveReplyId] = useQueryState('activeReplyId');
+  const [, setMode] = useQueryState('mode');
+
+  const handleCompose = async () => {
+    await setDraftId(null);
+    await setTo(null);
+    await setActiveReplyId(null);
+    await setMode(null);
+    await setDialogOpen('true');
+  };
+
+  return (
+    <button
+      onClick={handleCompose}
+      aria-label="Compose email"
+      className="fixed bottom-20 right-4 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-mainBlue shadow-lg hover:bg-mainBlue/90 transition-colors md:hidden"
+    >
+      <PencilCompose className="h-5 w-5 fill-white" aria-hidden="true" />
+    </button>
   );
 }
 

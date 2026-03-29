@@ -21,18 +21,21 @@ struct SettingsView: View {
             List {
                 accountSection
                 connectedServicesSection
-                appearanceSection
-                emailSection
-                aiSection
-                preferencesSection
-                notificationsSection
-                privacySection
+
+                // Combined: Appearance + Preferences
+                preferencesAndAppearanceSection
+
+                // Combined: Email + AI
+                emailAndAISection
+
+                // Combined: Notifications + Privacy
+                notificationsAndPrivacySection
+
+                aboutSection
 
                 if services.developerModeEnabled {
                     developerSection
                 }
-
-                aboutSection
             }
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
@@ -287,26 +290,7 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - Appearance
-
-    private var appearanceSection: some View {
-        Section {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Theme")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
-
-                HStack(spacing: 10) {
-                    ForEach(AppAppearancePreference.allCases) { preference in
-                        appearanceOption(preference)
-                    }
-                }
-            }
-            .padding(.vertical, 6)
-        } header: {
-            Text("Appearance")
-        }
-    }
+    // MARK: - Appearance Helpers
 
     @ViewBuilder
     private func appearanceOption(_ preference: AppAppearancePreference) -> some View {
@@ -392,83 +376,28 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - Email
+    // Old individual sections removed — replaced by combined sections above
+    // (preferencesAndAppearanceSection, emailAndAISection, notificationsAndPrivacySection)
 
-    private var emailSection: some View {
+    // MARK: - Combined: Preferences + Appearance
+
+    private var preferencesAndAppearanceSection: some View {
         Section {
-            // Swipe gestures toggle — functional
-            Toggle(isOn: Binding(
-                get: { services.swipeGesturesEnabled },
-                set: { services.swipeGesturesEnabled = $0 }
-            )) {
-                Label("Swipe Gestures", systemImage: "hand.draw")
-            }
-            .tint(.blue)
+            // Theme picker (from Appearance)
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Theme")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
 
-            // Signatures — navigates to full management sub-page
-            NavigationLink {
-                SignaturesView()
-            } label: {
-                HStack {
-                    Label("Signatures", systemImage: "signature")
-                    Spacer()
-                    // Show the active signature name or "Off" as a value hint
-                    Text(services.activeSignature?.name ?? "Off")
-                        .font(.system(size: 14))
-                        .foregroundStyle(.secondary)
+                HStack(spacing: 10) {
+                    ForEach(AppAppearancePreference.allCases) { preference in
+                        appearanceOption(preference)
+                    }
                 }
             }
+            .padding(.vertical, 6)
 
-            // Thread grouping toggle — functional
-            Toggle(isOn: Binding(
-                get: { services.threadGroupingEnabled },
-                set: { services.threadGroupingEnabled = $0 }
-            )) {
-                Label("Group by Thread", systemImage: "text.bubble")
-            }
-            .tint(.blue)
-        } header: {
-            Text("Email")
-        }
-    }
-
-    // MARK: - AI
-
-    private var aiSection: some View {
-        @Bindable var ai = services.aiChatService
-        return Section {
-            Toggle(isOn: $ai.aiCanReadTasks) {
-                Label("Read my tasks", systemImage: "eye")
-            }
-            .tint(.blue)
-            Toggle(isOn: $ai.aiCanWriteTasks) {
-                Label("Create & edit tasks", systemImage: "pencil")
-            }
-            .tint(.blue)
-
-            // AI response tone — injected into the system prompt
-            Picker(selection: Binding(
-                get: { services.aiTonePreference },
-                set: { services.aiTonePreference = $0 }
-            )) {
-                ForEach(AITonePreference.allCases) { tone in
-                    Text(tone.title).tag(tone)
-                }
-            } label: {
-                Label("Response Tone", systemImage: "text.quote")
-            }
-            .pickerStyle(.menu)
-        } header: {
-            Text("AI Assistant")
-        } footer: {
-            Text("Controls what the AI can access and modify in your task list.")
-        }
-    }
-
-    // MARK: - Preferences
-
-    private var preferencesSection: some View {
-        Section {
+            // Default View picker (from Preferences)
             Picker(selection: Binding(
                 get: { services.preferredStartViewMode },
                 set: {
@@ -502,11 +431,73 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - Notifications
+    // MARK: - Combined: Email + AI
 
-    private var notificationsSection: some View {
+    private var emailAndAISection: some View {
+        @Bindable var ai = services.aiChatService
+        return Section {
+            // Email toggles
+            Toggle(isOn: Binding(
+                get: { services.swipeGesturesEnabled },
+                set: { services.swipeGesturesEnabled = $0 }
+            )) {
+                Label("Swipe Gestures", systemImage: "hand.draw")
+            }
+            .tint(.blue)
+
+            NavigationLink {
+                SignaturesView()
+            } label: {
+                HStack {
+                    Label("Signatures", systemImage: "signature")
+                    Spacer()
+                    Text(services.activeSignature?.name ?? "Off")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Toggle(isOn: Binding(
+                get: { services.threadGroupingEnabled },
+                set: { services.threadGroupingEnabled = $0 }
+            )) {
+                Label("Group by Thread", systemImage: "text.bubble")
+            }
+            .tint(.blue)
+
+            // AI toggles
+            Toggle(isOn: $ai.aiCanReadTasks) {
+                Label("Read my tasks", systemImage: "eye")
+            }
+            .tint(.blue)
+            Toggle(isOn: $ai.aiCanWriteTasks) {
+                Label("Create & edit tasks", systemImage: "pencil")
+            }
+            .tint(.blue)
+
+            Picker(selection: Binding(
+                get: { services.aiTonePreference },
+                set: { services.aiTonePreference = $0 }
+            )) {
+                ForEach(AITonePreference.allCases) { tone in
+                    Text(tone.title).tag(tone)
+                }
+            } label: {
+                Label("Response Tone", systemImage: "text.quote")
+            }
+            .pickerStyle(.menu)
+        } header: {
+            Text("Email & AI")
+        } footer: {
+            Text("Controls email behaviors (swipe gestures, signatures, thread grouping) and what the AI can access and modify in your task list.")
+        }
+    }
+
+    // MARK: - Combined: Notifications + Privacy
+
+    private var notificationsAndPrivacySection: some View {
         Section {
-            // In-app toggles for local notification categories
+            // Notification toggles
             Toggle(isOn: Binding(
                 get: { services.taskRemindersEnabled },
                 set: { services.taskRemindersEnabled = $0 }
@@ -523,7 +514,7 @@ struct SettingsView: View {
             }
             .tint(.blue)
 
-            // System settings link — secondary option for OS-level control
+            // System notification settings link
             Button {
                 if let url = URL(string: UIApplication.openNotificationSettingsURLString) {
                     UIApplication.shared.open(url)
@@ -538,17 +529,8 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-        } header: {
-            Text("Notifications")
-        } footer: {
-            Text("Task and calendar reminders are delivered as local notifications.")
-        }
-    }
 
-    // MARK: - Privacy
-
-    private var privacySection: some View {
-        Section {
+            // Privacy items
             Button {
                 if let url = URL(string: UIApplication.openSettingsURLString) {
                     UIApplication.shared.open(url)
@@ -572,7 +554,7 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
         } header: {
-            Text("Privacy & Security")
+            Text("Notifications & Privacy")
         }
     }
 

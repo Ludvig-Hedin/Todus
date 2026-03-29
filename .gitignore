@@ -71,3 +71,7 @@ worker-configuration.d.ts
 tsx-0/
 
 tools.json
+
+# Xcode derived data
+.deriveddata/
+DerivedData/

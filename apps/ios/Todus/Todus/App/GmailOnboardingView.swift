@@ -26,7 +26,7 @@ struct GmailOnboardingView: View {
 
                 Spacer().frame(height: 12)
 
-                Text("Grant access to your Gmail so Todus can fetch your emails.\nYou can change this later in Settings.")
+                Text("Grant access to see your inbox, reply to emails, and let AI help manage your messages.\nYou can revoke access anytime in Settings.")
                     .font(.system(size: 15, weight: .regular))
                     .foregroundStyle(AppTheme.mutedText)
                     .multilineTextAlignment(.center)

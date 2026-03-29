@@ -82,6 +82,7 @@ final class AuthService: NSObject {
         static let userName = "com.todus.auth.userName"
         static let userImage = "com.todus.auth.userImage"
         static let hasSeenOnboarding = "Todus.hasSeenOnboarding"
+        static let hasLaunchedBefore = "Todus.hasLaunchedBefore"
     }
 
     // MARK: - Configuration
@@ -106,6 +107,11 @@ final class AuthService: NSObject {
         self.userName = KeychainHelper.read(key: Keys.userName)
         self.userImage = KeychainHelper.read(key: Keys.userImage)
         super.init()
+
+        if !UserDefaults.standard.bool(forKey: Keys.hasLaunchedBefore) {
+            clearPersistedAuthState()
+            UserDefaults.standard.set(true, forKey: Keys.hasLaunchedBefore)
+        }
 
         // Restore auth state from Keychain
         if KeychainHelper.read(key: Keys.bearerToken) != nil {
@@ -504,13 +510,22 @@ request.setValue("https://todus.app", forHTTPHeaderField: "Origin")
     }
 
     func signOut() {
+        clearPersistedAuthState()
+        authState = .guest
+        lastErrorMessage = nil
+        // Clear session-expired flag so the banner doesn't persist after sign-out
+        isSessionExpired = false
+    }
+
+    private func clearPersistedAuthState() {
         KeychainHelper.delete(key: Keys.bearerToken)
         KeychainHelper.delete(key: Keys.userEmail)
+        KeychainHelper.delete(key: Keys.userName)
+        KeychainHelper.delete(key: Keys.userImage)
         // Clear stored properties — didSet handles Keychain deletion
         userName = nil
         userImage = nil
-        authState = .guest
-        lastErrorMessage = nil
+        hasSeenOnboarding = false
     }
 
     /// Fetches the current user's profile from Better Auth's get-session endpoint.

@@ -7,7 +7,6 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		0B29D173D8F05EF44595C6D8 /* CardViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EB6BB18CCC595B4F2BD4E4A /* CardViews.swift */; };
 		0B9C47CA469C398346609253 /* TaskRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B19153FC3B672DD3354CCD7 /* TaskRecord.swift */; };
 		0D07B92D45DF2600E81ADCD7 /* LocalTaskParsingServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBCCEB4BDF41611906248F96 /* LocalTaskParsingServiceTests.swift */; };
 		0DD27FD07846B19C5470685D /* GeminiLiveProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3422CECD506994C3DF4DD70 /* GeminiLiveProvider.swift */; };
@@ -20,7 +19,6 @@
 		1C314B90EE9572DB232889DB /* AppleRemindersSyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D4F6F5B369E9F8603154EE9 /* AppleRemindersSyncService.swift */; };
 		1EDBFE00811F590615DDF800 /* VoiceProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B9C2566068B372A66395093 /* VoiceProvider.swift */; };
 		1FCB47F33D2AF7047CBE2BB8 /* TasksTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEC29F3D28A6879176EAC2F8 /* TasksTabView.swift */; };
-		219B62A5364E1715C7B7061C /* CardViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 145D2D8C51C75A3954D7A542 /* CardViews.swift */; };
 		2258CD2AFF4BBC217CD30FCA /* TaskParsingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D2A0F6355F3AD950310D73D /* TaskParsingService.swift */; };
 		25ABD811A3EAC259F20B0EFB /* MoveToFolderSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C8C4DE10C7F7D48D71A2B16 /* MoveToFolderSheet.swift */; };
 		2944DCA029C65F3789681CC2 /* ParseState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CAF89510E1151AB2BDBE9F3 /* ParseState.swift */; };
@@ -34,7 +32,6 @@
 		385A604306748425CB0DFF0C /* SupabaseSyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88350A1CC7D8CB464C62F81C /* SupabaseSyncService.swift */; };
 		3CFCA136394338FB3D0C30CF /* BoardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C47AB108DFEEFEC976A81B2 /* BoardView.swift */; };
 		3E10478313CD0789B1E28BB4 /* EmailRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7FE5B6B04C5E27C1C0835AB /* EmailRowView.swift */; };
-		41A21EDBCB77EB481DEF152B /* ChatUISpec.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6BAA4EF1044DAC8618C4555 /* ChatUISpec.swift */; };
 		45A6702CEEF806C7A8B0F9AF /* SenderAvatarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EF6281BF38039DECF857E7A /* SenderAvatarView.swift */; };
 		477FB6D690F2301E9CEDA2CB /* FolderRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2DC40CB62B3E24744966E01 /* FolderRecord.swift */; };
 		491FBA113FCBA018BD9CC82B /* RemindersSyncDirection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 734026A8312EA48B3C903595 /* RemindersSyncDirection.swift */; };
@@ -43,15 +40,14 @@
 		562F6B6238B6FD2095E557A4 /* EmailConnectView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A91B7B733819603C35DEDA5 /* EmailConnectView.swift */; };
 		5BFDE53969CC8FFB268CAFB0 /* AppTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = F53F2F03D20E3DFC82E84350 /* AppTheme.swift */; };
 		5C0CB538215740C38894DF22 /* TaskCaptureService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C4426FFB04E56E648F3B5E1 /* TaskCaptureService.swift */; };
-		5DFB3C7CCFC9D84C88722E71 /* ChatUISpecView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 122E4DC85F3E69BB382CFA1D /* ChatUISpecView.swift */; };
 		5E23A87138D76B1101D76C76 /* NotificationCenterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11622A2189A970DECE5C542C /* NotificationCenterView.swift */; };
 		62B7AF22C16D289F5DD7A168 /* TaskRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA4DC21FEF1420D4009595C4 /* TaskRowView.swift */; };
 		62C8FF4A57AD22A6AE28C9A1 /* TodosApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = D837D4D5B5A51B1720E6FD22 /* TodosApp.swift */; };
 		6344933A085BDE548D4D38BF /* TodosAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E9B87404CFFB558F706EFD2 /* TodosAPIClient.swift */; };
-		65C2E70539C3A4BC78838C4F /* ChatUISpec.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4E63434C6EBCA9F4070FB0C /* ChatUISpec.swift */; };
 		6630F6813CD04AF8F49743FA /* NotificationDigestService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 357AD85445D3C5CC3F0D2D1C /* NotificationDigestService.swift */; };
 		6643B37C1F3EAFBB576DB08E /* VoiceInputButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 668D6B7F097C9BB3D96136E5 /* VoiceInputButton.swift */; };
 		7134EE01B58A20F8DFA8E183 /* EmailThreadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8E51912B5A3BF763A7B0DF9 /* EmailThreadView.swift */; };
+		74FDFF5C0200F2A891023119 /* EmptyGmailOnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0934538127F1DC3C85B53BCC /* EmptyGmailOnboardingView.swift */; };
 		75654D27148B3E85DD3A2F4A /* SignaturesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BA23EDF5310781D095C9003 /* SignaturesView.swift */; };
 		765AC63682DD4364D40B594D /* AuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83BE39B41338788839A6DE0A /* AuthService.swift */; };
 		77D47937044BC8B61B367F6E /* Formatters.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42AB13446D7F0CF43F8FE697 /* Formatters.swift */; };
@@ -65,7 +61,6 @@
 		8A810FD52D3106C6537B4CE4 /* RemindersSyncState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01AED5101C5C6CCE90399E2A /* RemindersSyncState.swift */; };
 		8AF29C77DCA819CCEA783F08 /* TaskDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = C96CE3CD9C7618CB3B765B0C /* TaskDetailSheet.swift */; };
 		912C6F60B1F01235B46B6F46 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88E079F48D17AEC17219D96F /* RootView.swift */; };
-		946B3E913E3D3454E3A47F93 /* GmailOnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63AED923FDD0DC9233EC85CD /* GmailOnboardingView.swift */; };
 		955E2F49C18643971F31233F /* AttachmentService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F6C8F87F427AAEBB5BEEDF4 /* AttachmentService.swift */; };
 		9C36FEDD46700276B33F46A5 /* CreateItemType.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6E5CFD86815A337DFBA8ACD /* CreateItemType.swift */; };
 		9C91484B948F59486C3F5093 /* SyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7ED9B5FEADD2CD0E19882F17 /* SyncService.swift */; };
@@ -73,7 +68,6 @@
 		A55BE84F3CA4EC12C06C0A22 /* EmailComposeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50D16BFA6D994A391DD979B9 /* EmailComposeView.swift */; };
 		A5F4F724ED7D84C4AE17E773 /* RemoteFirstTaskParsingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0AB515CB0BDFF39DC9196B77 /* RemoteFirstTaskParsingService.swift */; };
 		B1156B67F0C50A276F4EE2DD /* AuthSessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 238C9C52C404130BE9D83559 /* AuthSessionStore.swift */; };
-		B3055DDD0BC5E21E1A5507D7 /* ChatUISpecView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76A558F735657405593AD572 /* ChatUISpecView.swift */; };
 		B62EF103200A90D6AFDBE367 /* TaskParserModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4585B9433A61DC172B6A4799 /* TaskParserModels.swift */; };
 		B6C7B45EF8D582B6F4E994A5 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBA6AD9D7CE05EA129C074AB /* HomeView.swift */; };
 		BCFB490AAA247E656CE2CD0F /* AIChatService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3073FEFB1EB1B1A57A7DAFAF /* AIChatService.swift */; };
@@ -99,7 +93,6 @@
 		E6E650204C7C0C45D25F70D2 /* NetworkMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2DF2AC868993365647CF6A3F /* NetworkMonitor.swift */; };
 		EB07BCA06D1284A4A41E6012 /* CaptureComposer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1497E94FCA7FCF70C1DED544 /* CaptureComposer.swift */; };
 		EDD6E03CED344F224EF71461 /* EmailModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 476EF61D6691E5C4E888E603 /* EmailModels.swift */; };
-		EEB4123A52F9FBBBA63EB4E2 /* CustomTabBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D7A9645AEAB776A4475F6E0 /* CustomTabBar.swift */; };
 		F1C9A9E9F6962024B24D4503 /* EmailInboxView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAFCADA3030BB983664623A6 /* EmailInboxView.swift */; };
 		F2C325B98C33724D0B1E1B46 /* CalendarService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 549B28FA3AA486FC8CEB08D7 /* CalendarService.swift */; };
 		F30DFCD70DBDDC4F9CB87C35 /* TaskTableView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA716E1C8C741C7BEC56217B /* TaskTableView.swift */; };
@@ -124,13 +117,12 @@
 		01AED5101C5C6CCE90399E2A /* RemindersSyncState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemindersSyncState.swift; sourceTree = "<group>"; };
 		0290541DD1C35CF9D68C47A3 /* CalendarViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarViewController.swift; sourceTree = "<group>"; };
 		056835622DB127253111B077 /* AIChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChatView.swift; sourceTree = "<group>"; };
+		0934538127F1DC3C85B53BCC /* EmptyGmailOnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmptyGmailOnboardingView.swift; sourceTree = "<group>"; };
 		0AB515CB0BDFF39DC9196B77 /* RemoteFirstTaskParsingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteFirstTaskParsingService.swift; sourceTree = "<group>"; };
 		0C0EF37FC791938CC81236A8 /* Todus.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Todus.entitlements; sourceTree = "<group>"; };
 		11622A2189A970DECE5C542C /* NotificationCenterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationCenterView.swift; sourceTree = "<group>"; };
 		11BAF286D87FA8A349E6B439 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		1229E9C510A1286935951ACA /* SyncState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncState.swift; sourceTree = "<group>"; };
-		122E4DC85F3E69BB382CFA1D /* ChatUISpecView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatUISpecView.swift; sourceTree = "<group>"; };
-		145D2D8C51C75A3954D7A542 /* CardViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CardViews.swift; sourceTree = "<group>"; };
 		1497E94FCA7FCF70C1DED544 /* CaptureComposer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureComposer.swift; sourceTree = "<group>"; };
 		238C9C52C404130BE9D83559 /* AuthSessionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthSessionStore.swift; sourceTree = "<group>"; };
 		2CAF89510E1151AB2BDBE9F3 /* ParseState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParseState.swift; sourceTree = "<group>"; };
@@ -159,7 +151,6 @@
 		5CF0758DFD583BED9A96112A /* AppServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppServices.swift; sourceTree = "<group>"; };
 		5F6C8F87F427AAEBB5BEEDF4 /* AttachmentService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachmentService.swift; sourceTree = "<group>"; };
 		621BDB25784B86D43849D4CC /* SyncModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncModels.swift; sourceTree = "<group>"; };
-		63AED923FDD0DC9233EC85CD /* GmailOnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GmailOnboardingView.swift; sourceTree = "<group>"; };
 		668D6B7F097C9BB3D96136E5 /* VoiceInputButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceInputButton.swift; sourceTree = "<group>"; };
 		67EBC96D933AD3FB3FFB08B7 /* TaskCaptureServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskCaptureServiceTests.swift; sourceTree = "<group>"; };
 		6D2A0F6355F3AD950310D73D /* TaskParsingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskParsingService.swift; sourceTree = "<group>"; };
@@ -167,7 +158,6 @@
 		72BB3E8572A4CE573A688B15 /* LocalTaskParsingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalTaskParsingService.swift; sourceTree = "<group>"; };
 		734026A8312EA48B3C903595 /* RemindersSyncDirection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemindersSyncDirection.swift; sourceTree = "<group>"; };
 		74998F446A103B901131C35A /* TaskViewMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskViewMode.swift; sourceTree = "<group>"; };
-		76A558F735657405593AD572 /* ChatUISpecView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatUISpecView.swift; sourceTree = "<group>"; };
 		7B9C2566068B372A66395093 /* VoiceProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceProvider.swift; sourceTree = "<group>"; };
 		7ED9B5FEADD2CD0E19882F17 /* SyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncService.swift; sourceTree = "<group>"; };
 		83BE39B41338788839A6DE0A /* AuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthService.swift; sourceTree = "<group>"; };
@@ -178,14 +168,11 @@
 		8B19153FC3B672DD3354CCD7 /* TaskRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskRecord.swift; sourceTree = "<group>"; };
 		8BE81EF0B7F98A23F59343C0 /* InboxView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxView.swift; sourceTree = "<group>"; };
 		8C8C4DE10C7F7D48D71A2B16 /* MoveToFolderSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoveToFolderSheet.swift; sourceTree = "<group>"; };
-		8EB6BB18CCC595B4F2BD4E4A /* CardViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CardViews.swift; sourceTree = "<group>"; };
 		99381B49D9283CE3EE880887 /* TaskSortOrder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskSortOrder.swift; sourceTree = "<group>"; };
 		9B8C4C7226F0FE95E3C83108 /* CreateSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreateSheet.swift; sourceTree = "<group>"; };
 		9BA23EDF5310781D095C9003 /* SignaturesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignaturesView.swift; sourceTree = "<group>"; };
-		9D7A9645AEAB776A4475F6E0 /* CustomTabBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomTabBar.swift; sourceTree = "<group>"; };
 		A1B77A687624786BA51D8426 /* FolderManagementView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderManagementView.swift; sourceTree = "<group>"; };
 		A37A23542A473CA73357CA7A /* VoiceTokenService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTokenService.swift; sourceTree = "<group>"; };
-		A4E63434C6EBCA9F4070FB0C /* ChatUISpec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatUISpec.swift; sourceTree = "<group>"; };
 		A586F2155CC929EDE579601A /* GmailOnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GmailOnboardingView.swift; sourceTree = "<group>"; };
 		A5BF4AE0C22D8C0028338805 /* AIChatMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChatMessage.swift; sourceTree = "<group>"; };
 		A8E51912B5A3BF763A7B0DF9 /* EmailThreadView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailThreadView.swift; sourceTree = "<group>"; };
@@ -199,7 +186,6 @@
 		BBD1AD1A9679CB8FCE4E2023 /* BoardColumnView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoardColumnView.swift; sourceTree = "<group>"; };
 		BF94ED853D64D9B8760E1476 /* EKWrapper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EKWrapper.swift; sourceTree = "<group>"; };
 		C393C0082291CAB42009E8EB /* CalendarContainerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarContainerView.swift; sourceTree = "<group>"; };
-		C6BAA4EF1044DAC8618C4555 /* ChatUISpec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatUISpec.swift; sourceTree = "<group>"; };
 		C7FE5B6B04C5E27C1C0835AB /* EmailRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailRowView.swift; sourceTree = "<group>"; };
 		C96CE3CD9C7618CB3B765B0C /* TaskDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskDetailSheet.swift; sourceTree = "<group>"; };
 		CA4DC21FEF1420D4009595C4 /* TaskRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskRowView.swift; sourceTree = "<group>"; };
@@ -361,12 +347,8 @@
 		425138C000CB1DBA949F7DD2 /* AI */ = {
 			isa = PBXGroup;
 			children = (
-				D5B92C169DE76E9911517525 /* GenerativeUI */,
 				A5BF4AE0C22D8C0028338805 /* AIChatMessage.swift */,
 				056835622DB127253111B077 /* AIChatView.swift */,
-				8EB6BB18CCC595B4F2BD4E4A /* CardViews.swift */,
-				A4E63434C6EBCA9F4070FB0C /* ChatUISpec.swift */,
-				76A558F735657405593AD572 /* ChatUISpecView.swift */,
 			);
 			path = AI;
 			sourceTree = "<group>";
@@ -396,7 +378,7 @@
 		62203F8103D2082319E66B20 /* Settings */ = {
 			isa = PBXGroup;
 			children = (
-				63AED923FDD0DC9233EC85CD /* GmailOnboardingView.swift */,
+				0934538127F1DC3C85B53BCC /* EmptyGmailOnboardingView.swift */,
 				E4791FC2084FC456FD0D1D87 /* RemindersSetupView.swift */,
 				11BAF286D87FA8A349E6B439 /* SettingsView.swift */,
 				9BA23EDF5310781D095C9003 /* SignaturesView.swift */,
@@ -407,7 +389,6 @@
 		645CE0E92EF5C6813F115795 /* Navigation */ = {
 			isa = PBXGroup;
 			children = (
-				DE90E0E9114231B1D5679DD1 /* archived */,
 				E9928F7C7A1D9CBE08AC6CAE /* AppTab.swift */,
 				9B8C4C7226F0FE95E3C83108 /* CreateSheet.swift */,
 				01A3F5BCDE946F26BADE0250 /* MainTabView.swift */,
@@ -554,16 +535,6 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
-		D5B92C169DE76E9911517525 /* GenerativeUI */ = {
-			isa = PBXGroup;
-			children = (
-				145D2D8C51C75A3954D7A542 /* CardViews.swift */,
-				C6BAA4EF1044DAC8618C4555 /* ChatUISpec.swift */,
-				122E4DC85F3E69BB382CFA1D /* ChatUISpecView.swift */,
-			);
-			path = GenerativeUI;
-			sourceTree = "<group>";
-		};
 		D6E86B62EB8790EDEF9C3419 /* Tasks */ = {
 			isa = PBXGroup;
 			children = (
@@ -589,14 +560,6 @@
 				238C9C52C404130BE9D83559 /* AuthSessionStore.swift */,
 			);
 			path = Auth;
-			sourceTree = "<group>";
-		};
-		DE90E0E9114231B1D5679DD1 /* archived */ = {
-			isa = PBXGroup;
-			children = (
-				9D7A9645AEAB776A4475F6E0 /* CustomTabBar.swift */,
-			);
-			path = archived;
 			sourceTree = "<group>";
 		};
 		E0D483928E38DB28611A685A /* Home */ = {
@@ -770,16 +733,9 @@
 				CD6B2A1E118675316352C3D8 /* CalendarTaskView.swift in Sources */,
 				891D52BCBA88FC5828B273D6 /* CalendarViewController.swift in Sources */,
 				EB07BCA06D1284A4A41E6012 /* CaptureComposer.swift in Sources */,
-				0B29D173D8F05EF44595C6D8 /* CardViews.swift in Sources */,
-				219B62A5364E1715C7B7061C /* CardViews.swift in Sources */,
-				65C2E70539C3A4BC78838C4F /* ChatUISpec.swift in Sources */,
-				41A21EDBCB77EB481DEF152B /* ChatUISpec.swift in Sources */,
-				B3055DDD0BC5E21E1A5507D7 /* ChatUISpecView.swift in Sources */,
-				5DFB3C7CCFC9D84C88722E71 /* ChatUISpecView.swift in Sources */,
 				9C36FEDD46700276B33F46A5 /* CreateItemType.swift in Sources */,
 				1ABEC124807AD4F90CECC510 /* CreateSheet.swift in Sources */,
 				C70E2AF1D5E2398A13E26BF3 /* CustomTabBar.swift in Sources */,
-				EEB4123A52F9FBBBA63EB4E2 /* CustomTabBar.swift in Sources */,
 				5416A1B05BD0808FCE042CAA /* EKWrapper.swift in Sources */,
 				A55BE84F3CA4EC12C06C0A22 /* EmailComposeView.swift in Sources */,
 				562F6B6238B6FD2095E557A4 /* EmailConnectView.swift in Sources */,
@@ -788,13 +744,13 @@
 				3E10478313CD0789B1E28BB4 /* EmailRowView.swift in Sources */,
 				2C3477BD848888F7D36F3938 /* EmailService.swift in Sources */,
 				7134EE01B58A20F8DFA8E183 /* EmailThreadView.swift in Sources */,
+				74FDFF5C0200F2A891023119 /* EmptyGmailOnboardingView.swift in Sources */,
 				CEC1EE936CD184343A4C0207 /* FolderManagementView.swift in Sources */,
 				477FB6D690F2301E9CEDA2CB /* FolderRecord.swift in Sources */,
 				77D47937044BC8B61B367F6E /* Formatters.swift in Sources */,
 				0DD27FD07846B19C5470685D /* GeminiLiveProvider.swift in Sources */,
 				E1DA55CF2FC741F957F9FCCB /* GlobalSearchView.swift in Sources */,
 				A0C59601ADC7BA62DAB24420 /* GmailOnboardingView.swift in Sources */,
-				946B3E913E3D3454E3A47F93 /* GmailOnboardingView.swift in Sources */,
 				B6C7B45EF8D582B6F4E994A5 /* HomeView.swift in Sources */,
 				FED19898AA463DD537EE507B /* InboxView.swift in Sources */,
 				C32B025058810AD5974C0372 /* LocalTaskParsingService.swift in Sources */,

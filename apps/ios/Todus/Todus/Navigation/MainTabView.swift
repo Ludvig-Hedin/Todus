@@ -22,6 +22,8 @@ struct MainTabView: View {
 
     /// Wire to EventKit / CalendarService when ready.
     @State private var hasUpcomingCalendarEvent = false
+    /// Confirmation dialog for session expired banner — prevents accidental sign-out on tap.
+    @State private var showSessionExpiredConfirm = false
 
     /// Cached calendar authorization — updated on appear and whenever the app
     /// returns to the foreground (covers both in-app system dialog and Settings round-trips).
@@ -90,8 +92,8 @@ struct MainTabView: View {
             }
             .sheet(isPresented: $showAIChat) {
                 AIChatView(currentTab: selectedTab)
-                    .presentationDetents([.fraction(0.5), .large])
-                    .presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.5)))
+                    .presentationDetents([.medium, .large])
+                    .presentationBackgroundInteraction(.enabled(upThrough: .medium))
                     .presentationDragIndicator(.visible)
             }
             .sheet(isPresented: settingsBinding) {
@@ -123,6 +125,16 @@ struct MainTabView: View {
                 if !isPresented {
                     services.composeEmailSeedBody = nil
                 }
+            }
+            // Listen for requestCreateSheet from child views (e.g. HomeView "+" buttons)
+            .onChange(of: services.requestCreateSheet) { _, requested in
+                guard let type = requested else { return }
+                createDefaultType = type
+                // Match the animation used by the tab bar's create button
+                withAnimation(.snappy(duration: 0.2)) {
+                    showCreateSheet = true
+                }
+                services.requestCreateSheet = nil
             }
             // Keep AppServices.currentTab in sync so AI suggestions are context-aware
             .onChange(of: selectedTab) { _, newTab in
@@ -234,10 +246,8 @@ struct MainTabView: View {
 
     private var sessionExpiredBanner: some View {
         Button {
-            // Re-authenticate: reset expired flag, go back to auth screen
-            services.authService.isSessionExpired = false
-            services.authService.signOut()
-            services.authStore.signOutToGuest()
+            // Show confirmation before signing out to prevent accidental taps
+            showSessionExpiredConfirm = true
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: "exclamationmark.lock.fill")
@@ -255,5 +265,13 @@ struct MainTabView: View {
         }
         .buttonStyle(.plain)
         .padding(.top, 4)
+        .confirmationDialog("Your session has expired", isPresented: $showSessionExpiredConfirm, titleVisibility: .visible) {
+            Button("Sign In Again", role: .destructive) {
+                services.authService.isSessionExpired = false
+                services.authService.signOut()
+                services.authStore.signOutToGuest()
+            }
+            Button("Cancel", role: .cancel) {}
+        }
     }
 }

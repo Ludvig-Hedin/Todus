@@ -85,6 +85,18 @@ struct EmailInboxView: View {
                 .padding(.horizontal, 16)
                 .padding(.bottom, 10)
 
+            // Inline searching indicator — shown when a search query is active and results are loading
+            if !searchText.isEmpty && emailService.isLoadingThreads {
+                HStack(spacing: 6) {
+                    ProgressView().scaleEffect(0.6)
+                    Text("Searching\u{2026}")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(AppTheme.mutedText)
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 4)
+            }
+
             Divider().foregroundStyle(AppTheme.divider)
 
             // Thread list
@@ -218,11 +230,19 @@ struct EmailInboxView: View {
                 .foregroundStyle(AppTheme.mutedText)
             Text("Your inbox is empty")
                 .font(.system(size: 17, weight: .semibold))
-            // Removed the ambiguous "Pull down to refresh" — users couldn't tell if
-            // the inbox was genuinely empty or if loading failed.
-            Text("New emails will appear here")
+            Text("Tap Refresh to check for new mail, or compose a new email")
                 .font(.system(size: 14))
                 .foregroundStyle(AppTheme.subtleText)
+            // Manual refresh button — gives a clear action when inbox appears empty
+            Button {
+                Task { await emailService.loadThreads(refresh: true) }
+            } label: {
+                Text("Refresh")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.blue)
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 4)
         }
     }
 
