@@ -30,6 +30,17 @@ final class CalendarViewController: DayViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         title = "Calendar"
+
+        // Match CalendarKit backgrounds to the white page content background
+        // so the all-day events area and timeline aren't a different gray.
+        view.backgroundColor = .systemBackground
+        dayView.backgroundColor = .systemBackground
+
+        // Customize CalendarKit event styling — slightly more rounded event pills
+        var style = CalendarStyle()
+        style.timeline.eventGap = 2
+        updateStyle(style)
+
         requestAccessToCalendar()
         subscribeToNotifications()
     }

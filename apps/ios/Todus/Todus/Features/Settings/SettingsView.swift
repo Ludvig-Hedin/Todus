@@ -11,6 +11,8 @@ struct SettingsView: View {
     @State private var deleteConfirmText = ""
     @State private var isDeletingAccount = false
     @State private var showsDisconnectGmail = false
+    @State private var isConnectingCalendar = false
+    @State private var isConnectingReminders = false
 
     private var calendarAccessGranted: Bool {
         services.calendarService.canReadEvents()
@@ -259,32 +261,64 @@ struct SettingsView: View {
                         .foregroundStyle(.green)
                         .font(.system(size: 16))
                 } else {
-                    Button("Connect") {
-                        Task { await services.calendarService.requestAccess() }
+                    Button {
+                        guard !isConnectingCalendar else { return }
+                        isConnectingCalendar = true
+                        Task {
+                            _ = await services.calendarService.requestAccess()
+                            isConnectingCalendar = false
+                        }
+                    } label: {
+                        Text(isConnectingCalendar ? "Connecting…" : "Connect")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(.blue)
                     }
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.blue)
+                    .buttonStyle(.plain)
+                    .disabled(isConnectingCalendar)
                 }
             }
             .padding(.vertical, 2)
 
             // Apple Reminders
-            NavigationLink {
-                RemindersSetupView()
-            } label: {
-                HStack(spacing: 12) {
-                    AppleRemindersIconView(size: 30)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Apple Reminders")
-                            .font(.system(size: 15))
-                        Text(services.remindersSyncEnabled ? "Sync enabled" : "Not connected")
-                            .font(.system(size: 12))
-                            .foregroundStyle(services.remindersSyncEnabled ? .green : .secondary)
-                    }
-                    Spacer()
+            HStack(spacing: 12) {
+                AppleRemindersIconView(size: 30)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Apple Reminders")
+                        .font(.system(size: 15))
+                    Text(services.remindersSyncEnabled ? "Connected" : "Not connected")
+                        .font(.system(size: 12))
+                        .foregroundStyle(services.remindersSyncEnabled ? .green : .secondary)
                 }
-                .padding(.vertical, 2)
+                Spacer()
+                if services.remindersSyncEnabled {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                        .font(.system(size: 16))
+                } else {
+                    Button {
+                        guard !isConnectingReminders else { return }
+                        isConnectingReminders = true
+                        Task {
+                            services.remindersSyncEnabled = true
+                            let granted = await services.requestRemindersPermissionIfNeeded()
+                            if granted {
+                                await services.importFromReminders(in: modelContext)
+                                services.syncExistingTasksToReminders(in: modelContext)
+                            } else {
+                                services.remindersSyncEnabled = false
+                            }
+                            isConnectingReminders = false
+                        }
+                    } label: {
+                        Text(isConnectingReminders ? "Connecting…" : "Connect")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(.blue)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isConnectingReminders)
+                }
             }
+            .padding(.vertical, 2)
         } header: {
             Text("Connected Services")
         }
@@ -683,4 +717,3 @@ struct SettingsView: View {
         }
     }
 }
-

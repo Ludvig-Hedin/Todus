@@ -15,6 +15,8 @@ struct CalendarContainerView: UIViewControllerRepresentable {
         let nav = UINavigationController(rootViewController: calendarVC)
         // Hide the UIKit nav bar — our SwiftUI AppTopHeader overlay handles the top
         nav.setNavigationBarHidden(true, animated: false)
+        // Match white content background throughout the nav controller
+        nav.view.backgroundColor = .systemBackground
         // Push CalendarKit's scroll content below the SwiftUI AppTopHeader overlay
         calendarVC.additionalSafeAreaInsets.top = topInset
         return nav

@@ -1183,3 +1183,4 @@ struct SavedPrompt: Identifiable, Codable {
                     icon: "rocket", category: "Cross-app", isPreset: true),
     ]
 }
+

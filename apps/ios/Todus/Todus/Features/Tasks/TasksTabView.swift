@@ -14,6 +14,9 @@ struct TasksTabView: View {
     @State private var taskSortOrder: TaskSortOrder = .newest
     /// Task opened via AI chat card deep navigation
     @State private var pendingTaskRecord: TaskRecord?
+    /// Keyboard height — used to lift the composer above the keyboard since
+    /// MainTabView ignores keyboard safe area (to keep the tab bar in place).
+    @StateObject private var keyboard = KeyboardObserver()
 
     var body: some View {
         ZStack {
@@ -45,7 +48,6 @@ struct TasksTabView: View {
                     case .board:
                         BoardView()
                     case .table:
-                        // Padding is managed internally via listRowInsets — no outer horizontal padding
                         TaskTableView()
                     case .calendar:
                         CalendarTaskView(searchText: searchText)
@@ -54,7 +56,6 @@ struct TasksTabView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .padding(.top, 12)
         }
         .toolbar(.hidden, for: .navigationBar)
         .safeAreaInset(edge: .bottom) {
@@ -73,7 +74,11 @@ struct TasksTabView: View {
             }
             .padding(.horizontal, 12)
             .padding(.top, 8)
-            .padding(.bottom, 8) // Breathing room above tab bar (system handles safe area)
+            // When keyboard is visible, push the composer above it.
+            // MainTabView uses .ignoresSafeArea(.keyboard) to keep the tab bar at the
+            // bottom, so we manually add keyboard height here for the composer.
+            .padding(.bottom, keyboard.isVisible ? keyboard.height : 8)
+            .animation(.easeOut(duration: 0.25), value: keyboard.height)
             .background(.clear)
         }
         // Deep navigation from AI chat cards — open task detail sheet

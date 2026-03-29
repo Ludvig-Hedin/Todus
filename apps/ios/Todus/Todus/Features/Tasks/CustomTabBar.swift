@@ -6,14 +6,19 @@ import SwiftUI
 ///   [  home | tasks | email | calendar  ]  [ AI | + ]
 ///   ←──── nav tabs pill (fill) ──────────→  ←action→
 ///
-/// • iOS 26: Liquid Glass via `.glassEffect(.regular, in: Capsule())`.
-/// • iOS 17/18: `.ultraThinMaterial` capsule + drop shadow.
-/// • Dimensions, colors, and font specs sourced from Figma design system.
+/// Features:
+/// • Sliding background plate that animates between active tabs
+/// • Subtle scale press effect on tab buttons
+/// • Glass/translucent material (iOS 26 Liquid Glass, fallback ultraThinMaterial)
+/// • Drag gesture across tab bar to preview/swap tabs
 struct CustomTabBar: View {
     @Binding var selectedTab: AppTab
     var hasUpcomingCalendarEvent: Bool = false
     var onAI: () -> Void
     var onCreate: () -> Void
+
+    /// Namespace for the matched geometry sliding indicator
+    @Namespace private var tabIndicator
 
     // Icons: slightly smaller than Figma's 20px so the bigger button frame has breathing room.
     private let iconFont: Font = .system(size: 17, weight: .semibold)
@@ -36,6 +41,25 @@ struct CustomTabBar: View {
             }
         }
         .padding(4) // Figma: 4px padding around the tab buttons
+        // Drag gesture across the tab bar to swipe between tabs
+        .gesture(
+            DragGesture(minimumDistance: 20)
+                .onEnded { value in
+                    let tabs = AppTab.allCases
+                    guard let currentIndex = tabs.firstIndex(of: selectedTab) else { return }
+                    if value.translation.width < -30, currentIndex < tabs.count - 1 {
+                        // Swipe left → next tab
+                        withAnimation(.snappy(duration: 0.25)) {
+                            selectedTab = tabs[currentIndex + 1]
+                        }
+                    } else if value.translation.width > 30, currentIndex > 0 {
+                        // Swipe right → previous tab
+                        withAnimation(.snappy(duration: 0.25)) {
+                            selectedTab = tabs[currentIndex - 1]
+                        }
+                    }
+                }
+        )
         .glassTabPill()
     }
 
@@ -43,7 +67,7 @@ struct CustomTabBar: View {
     private func tabButton(_ tab: AppTab) -> some View {
         let isSelected = selectedTab == tab
         Button {
-            withAnimation(.snappy(duration: 0.18)) { selectedTab = tab }
+            withAnimation(.snappy(duration: 0.25)) { selectedTab = tab }
         } label: {
             Image(
                 systemName: isSelected
@@ -54,18 +78,19 @@ struct CustomTabBar: View {
             // Figma: active #0081FF, inactive rgba(60,60,67,0.65) = UIColor.secondaryLabel
             .foregroundStyle(isSelected ? Color(red: 0, green: 0x81/255.0, blue: 1) : Color(UIColor.secondaryLabel))
             // Bigger button frame (62×46) gives a more generous touch target.
-            // The active indicator circle scales with the frame automatically.
             .frame(width: 62, height: 46)
-            // Active indicator: fully round capsule, Figma light #F0F0F4 / dark #121212
-            .background(
-                isSelected ? activeIndicatorColor : Color.clear,
-                in: Capsule()
-            )
+            // Sliding indicator: matchedGeometryEffect moves this capsule between tabs
+            .background {
+                if isSelected {
+                    activeIndicatorColor
+                        .clipShape(Capsule())
+                        .matchedGeometryEffect(id: "activeTab", in: tabIndicator)
+                }
+            }
             // Extra touch area — extends the tappable region 4pt beyond the visual frame
-            // on all sides so fast/edge taps still register.
             .contentShape(Rectangle().inset(by: -4))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(TabButtonStyle())
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -74,28 +99,25 @@ struct CustomTabBar: View {
 
     private var actionButtonsPill: some View {
         HStack(spacing: 0) {
-            // AI button — "sparkles" is the standard Apple AI icon (used in Apple Intelligence,
-            // Siri suggestions, etc.) — more recognizable than the previous "lasso.badge.sparkles".
+            // AI button — "sparkles" is the standard Apple AI icon
             Button { onAI() } label: {
                 Image(systemName: "sparkles")
                     .font(iconFont)
-
                     .foregroundStyle(aiGradient)
                     .frame(width: 54, height: 46)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(TabButtonStyle())
 
-            // Create button — "+" in primary text color (user requested: not muted gray)
+            // Create button — "+" in primary text color
             Button { onCreate() } label: {
                 Image(systemName: "plus")
                     .font(iconFont)
-
                     .foregroundStyle(.primary)
                     .frame(width: 54, height: 46)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(TabButtonStyle())
         }
         .padding(4) // Figma: 4px padding around action buttons
         .glassTabPill()
@@ -107,8 +129,6 @@ struct CustomTabBar: View {
 
     /// Active tab selection indicator.
     /// Figma: light #F0F0F4 with mix-blend plus-darker, dark #121212 with plus-lighter.
-    /// SwiftUI doesn't support mix-blend-mode, so we use the exact colors directly
-    /// which produce the correct visual result on the glass material.
     private var activeIndicatorColor: Color {
         Color(UIColor { traits in
             traits.userInterfaceStyle == .dark
@@ -126,10 +146,23 @@ struct CustomTabBar: View {
                 .init(color: Color(red: 1, green: 0, blue: 0x38/255.0), location: 0.580),
                 .init(color: Color(red: 0xF9/255.0, green: 0x9F/255.0, blue: 0), location: 0.913),
             ],
-            // 151° → approx top-left to bottom-right, offset
             startPoint: UnitPoint(x: 0.25, y: 0),
             endPoint: UnitPoint(x: 0.75, y: 1)
         )
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MARK: - Tab Button Style (subtle scale on press)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Provides a delicate press animation: slight scale-down + opacity reduction.
+private struct TabButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.88 : 1.0)
+            .opacity(configuration.isPressed ? 0.7 : 1.0)
+            .animation(.snappy(duration: 0.15), value: configuration.isPressed)
     }
 }
 
@@ -140,17 +173,15 @@ struct CustomTabBar: View {
 private extension View {
     /// Applies the correct glass material per OS version:
     /// • iOS 26+ → Liquid Glass capsule (system material, blur, specular highlights).
-    /// • iOS 17/18 → ultraThinMaterial capsule + subtle drop shadow.
+    /// • iOS 17/18 → ultraThinMaterial capsule + subtle drop shadow, more translucent.
     @ViewBuilder
     func glassTabPill() -> some View {
         if #available(iOS 26, *) {
-            // .regular gives the standard system glass — same material as the system tab bar.
-            // Capsule shape matches Figma rounded-[345px] ≈ fully rounded.
             self.glassEffect(.regular, in: Capsule())
         } else {
             self
                 .background(.ultraThinMaterial, in: Capsule())
-                .shadow(color: .black.opacity(0.08), radius: 10, x: 0, y: 3)
+                .shadow(color: .black.opacity(0.06), radius: 12, x: 0, y: 4)
         }
     }
 }
