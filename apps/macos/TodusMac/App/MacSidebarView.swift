@@ -12,7 +12,7 @@ struct MacSidebarView: View {
             SidebarChrome()
                 .padding(.horizontal, 12)
                 .padding(.top, 10)
-                .padding(.bottom, 16)
+                .padding(.bottom, 12)
 
             VStack(alignment: .leading, spacing: 4) {
                 SidebarItemButton(
@@ -66,7 +66,7 @@ struct MacSidebarView: View {
                 )
             }
 
-            Spacer(minLength: 12)
+            Spacer(minLength: 8)
 
             HStack(spacing: 8) {
                 Menu {
@@ -154,14 +154,6 @@ private struct SidebarChrome: View {
             }
 
             Spacer(minLength: 0)
-
-            Button(action: {}) {
-                Image(systemName: "sidebar.left")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(Color.black.opacity(0.78))
-                    .frame(width: 24, height: 24)
-            }
-            .buttonStyle(.plain)
         }
         .frame(height: 24)
     }
@@ -204,7 +196,7 @@ private struct SidebarItemButton: View {
                 if let badgeText {
                     Text(badgeText)
                         .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(isSelected ? Color.white : Color.black.opacity(0.55))
+                        .foregroundStyle(isSelected ? Color.white : Color.black.opacity(0.5))
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
                         .background(
@@ -223,14 +215,14 @@ private struct SidebarItemButton: View {
             }
             .foregroundStyle(isSelected ? Color(red: 0.14, green: 0.50, blue: 1.0) : Color.black.opacity(0.84))
             .padding(.horizontal, 12)
-            .padding(.vertical, 7)
+            .padding(.vertical, 5)
             .background(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(isSelected ? Color.white : Color.clear)
+                    .fill(isSelected ? Color.black.opacity(0.04) : Color.clear)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(isSelected ? Color.black.opacity(0.05) : Color.clear, lineWidth: 1)
+                    .stroke(isSelected ? Color.black.opacity(0.03) : Color.clear, lineWidth: 1)
             )
         }
         .buttonStyle(.plain)
@@ -258,14 +250,14 @@ private struct SidebarChildItemButton: View {
             .foregroundStyle(isSelected ? Color(red: 0.14, green: 0.50, blue: 1.0) : Color.black.opacity(0.84))
             .padding(.leading, 28)
             .padding(.trailing, 12)
-            .padding(.vertical, 6)
+            .padding(.vertical, 4)
             .background(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(isSelected ? Color.white : Color.clear)
+                    .fill(isSelected ? Color.black.opacity(0.035) : Color.clear)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(isSelected ? Color.black.opacity(0.04) : Color.clear, lineWidth: 1)
+                    .stroke(isSelected ? Color.black.opacity(0.03) : Color.clear, lineWidth: 1)
             )
         }
         .buttonStyle(.plain)

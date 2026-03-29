@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 enum EmailSection: String, CaseIterable, Hashable {
@@ -33,23 +34,35 @@ enum MacPrimarySelection: Hashable {
 struct MacRootView: View {
     @State private var selection: MacPrimarySelection = .home
     @State private var isEmailExpanded = true
+    @State private var isSidebarVisible = true
     @State private var isAssistantPresented = false
     @State private var isSettingsPresented = false
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
             HStack(spacing: 0) {
-                MacSidebarView(
-                    selection: $selection,
-                    isEmailExpanded: $isEmailExpanded,
-                    onOpenSettings: { isSettingsPresented = true }
-                )
-                .frame(width: 250)
-                .padding(.leading, 14)
-                .padding(.vertical, 12)
+                if isSidebarVisible {
+                    MacSidebarView(
+                        selection: $selection,
+                        isEmailExpanded: $isEmailExpanded,
+                        onOpenSettings: { isSettingsPresented = true }
+                    )
+                    .frame(width: 250)
+                    .padding(.leading, 14)
+                    .padding(.vertical, 12)
+                    .transition(.move(edge: .leading).combined(with: .opacity))
+                }
 
                 VStack(spacing: 0) {
-                    MacContentHeaderView(title: selection.title)
+                    MacContentHeaderView(
+                        title: selection.title,
+                        isSidebarVisible: isSidebarVisible,
+                        toggleSidebar: {
+                            withAnimation(.snappy(duration: 0.18)) {
+                                isSidebarVisible.toggle()
+                            }
+                        }
+                    )
 
                     Divider()
                         .overlay(Color.black.opacity(0.07))
@@ -65,6 +78,8 @@ struct MacRootView: View {
         }
         .background(windowBackground.ignoresSafeArea())
         .preferredColorScheme(.light)
+        .background(WindowChromeConfigurator().frame(width: 0, height: 0))
+        .animation(.snappy(duration: 0.18), value: isSidebarVisible)
         .overlay(alignment: .bottomTrailing) {
             AssistantButton {
                 isAssistantPresented = true
@@ -173,5 +188,27 @@ struct MacRootView: View {
         .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Color.white)
+    }
+}
+
+private struct WindowChromeConfigurator: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        DispatchQueue.main.async {
+            guard let window = view.window else { return }
+            window.title = ""
+            window.titleVisibility = .hidden
+            window.titlebarAppearsTransparent = true
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async {
+            guard let window = nsView.window else { return }
+            window.title = ""
+            window.titleVisibility = .hidden
+            window.titlebarAppearsTransparent = true
+        }
     }
 }

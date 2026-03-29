@@ -2,11 +2,18 @@ import SwiftUI
 
 struct MacContentHeaderView: View {
     let title: String
+    let isSidebarVisible: Bool
+    let toggleSidebar: () -> Void
 
     var body: some View {
         HStack(spacing: 14) {
-            HeaderPillButton(systemImage: "chevron.left") {}
-            HeaderPillButton(systemImage: "chevron.right", isDisabled: true) {}
+            HeaderPillButton(
+                systemImage: "sidebar.left",
+                helpText: "Toggle Sidebar (⌘B)",
+                isActive: isSidebarVisible,
+                action: toggleSidebar
+            )
+            .keyboardShortcut("b", modifiers: .command)
 
             Text(title)
                 .font(.system(size: 24, weight: .semibold))
@@ -43,14 +50,20 @@ struct MacContentHeaderView: View {
 
 private struct HeaderPillButton: View {
     let systemImage: String
+    var helpText: String? = nil
+    var isActive = false
     var isDisabled = false
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
+        let button = Button(action: action) {
             Image(systemName: systemImage)
                 .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(isDisabled ? Color.black.opacity(0.25) : Color.black.opacity(0.8))
+                .foregroundStyle(
+                    isDisabled
+                    ? Color.black.opacity(0.25)
+                    : isActive ? Color(red: 0.14, green: 0.50, blue: 1.0) : Color.black.opacity(0.8)
+                )
                 .frame(width: 34, height: 34)
                 .background(Color.white, in: Capsule(style: .continuous))
                 .overlay(
@@ -60,6 +73,12 @@ private struct HeaderPillButton: View {
         }
         .buttonStyle(.plain)
         .disabled(isDisabled)
+
+        if let helpText {
+            button.help(helpText)
+        } else {
+            button
+        }
     }
 }
 
