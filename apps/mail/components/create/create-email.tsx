@@ -88,10 +88,12 @@ export function CreateEmail({
     attachments: File[];
     fromEmail?: string;
     scheduleAt?: string;
+    includeSignature?: boolean;
   }) => {
     const fromEmail = data.fromEmail || aliases?.[0]?.email || userEmail;
 
-    const todusSignature = settings?.settings.zeroSignature
+    const shouldIncludeSignature = data.includeSignature ?? settings?.settings.todusSignature ?? true;
+    const todusSignature = shouldIncludeSignature
       ? '<p style="color: #666; font-size: 12px;">Sent via <a href="https://todus.app/" style="color: #0066cc; text-decoration: none;">Todus</a></p>'
       : '';
 

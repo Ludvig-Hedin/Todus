@@ -1,8 +1,12 @@
 import { useEditor, type KeyboardShortcutCommand, Extension, generateJSON } from '@tiptap/react';
 import { AutoComplete } from '@/components/create/editor-autocomplete';
+import { createMentionExtension, createSlashCommandExtension } from '@/lib/editor-mentions';
 import { defaultExtensions } from '@/components/create/extensions';
+import { useQueryClient } from '@tanstack/react-query';
+import { useTRPC } from '@/providers/query-provider';
 import Emoji, { gitHubEmojis } from '@tiptap/extension-emoji';
 import { FileHandler } from '@tiptap/extension-file-handler';
+import type { EditorCommandSurface, MentionKind } from '@zero/shared';
 import Placeholder from '@tiptap/extension-placeholder';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
 import { TextSelection } from 'prosemirror-state';
@@ -110,6 +114,7 @@ const useComposeEditor = ({
   isReadOnly,
   placeholder,
   onChange,
+  onTextChange,
   onLengthChange,
   onBlur,
   onFocus,
@@ -120,12 +125,16 @@ const useComposeEditor = ({
   myInfo,
   sender,
   autofocus = false,
+  surface = 'email-compose',
+  onTemplateCommand,
+  onSignatureCommand,
 }: {
   initialValue?: Record<string, unknown> | string | null;
   isReadOnly?: boolean;
   placeholder?: string;
   // Events
   onChange?: (content: Record<string, unknown>) => void | Promise<void>;
+  onTextChange?: (text: string, content: Record<string, unknown>) => void | Promise<void>;
   onAttachmentsChange?: (attachments: File[]) => void | Promise<void>;
   onLengthChange?: (length: number) => void | Promise<void>;
   onBlur?: NonNullable<Parameters<typeof useEditor>[0]>['onBlur'];
@@ -145,9 +154,34 @@ const useComposeEditor = ({
     email?: string;
   };
   autofocus?: boolean;
+  surface?: EditorCommandSurface;
+  onTemplateCommand?: () => void;
+  onSignatureCommand?: () => void;
 }) => {
+  const trpc = useTRPC();
+  const queryClient = useQueryClient();
+  const searchMentions = async (query: string, kinds?: MentionKind[]) => {
+    const result = await queryClient.fetchQuery(
+      trpc.mentions.search.queryOptions({
+        query,
+        kinds,
+        limit: 6,
+      }),
+    );
+
+    return result.groups.flatMap((group) => group.items);
+  };
+
   const extensions = [
     ...defaultExtensions,
+    createMentionExtension({
+      searchMentions,
+      availableKinds: ['task', 'thread', 'person'],
+    }),
+    createSlashCommandExtension(surface, {
+      onTemplateCommand,
+      onSignatureCommand,
+    }),
     Markdown,
     Image,
     FileHandler.configure({
@@ -248,12 +282,18 @@ const useComposeEditor = ({
       }
     },
     onUpdate: ({ editor }) => {
+      const json = editor.getJSON();
+      const content = editor.getText();
+
       if (onChange) {
-        void onChange(editor.getJSON());
+        void onChange(json);
+      }
+
+      if (onTextChange) {
+        void onTextChange(content, json);
       }
 
       if (onLengthChange) {
-        const content = editor.getText();
         void onLengthChange(content.length);
       }
     },

@@ -1,6 +1,7 @@
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
 import { ArrowsPointingIn, PanelLeftOpen, Phone } from '../icons/icons';
 import { useActiveConnection } from '@/hooks/use-connections';
+import type { MentionRef } from '@zero/shared';
 import { ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
 import { useSearchValue } from '@/hooks/use-search-value';
 import { useState, useEffect, useCallback } from 'react';
@@ -347,6 +348,7 @@ function AISidebar({ className }: AISidebarProps) {
   const { data: activeConnection } = useActiveConnection();
   const [, setDoState] = useDoState();
   const { labels } = useSearchLabels();
+  const [pendingMentions, setPendingMentions] = useState<MentionRef[]>([]);
 
   const onMessage = useCallback(
     (message: any) => {
@@ -400,6 +402,7 @@ function AISidebar({ className }: AISidebarProps) {
       threadId: threadId ?? undefined,
       currentFolder: folder ?? undefined,
       currentFilter: searchValue.value ?? undefined,
+      mentions: pendingMentions,
     },
     onError(error) {
       console.error('Error in useChat', error);
@@ -469,6 +472,7 @@ function AISidebar({ className }: AISidebarProps) {
 
   const handleNewChat = useCallback(() => {
     chatState.setMessages([]);
+    setPendingMentions([]);
   }, [chatState]);
 
   return (
@@ -502,7 +506,7 @@ function AISidebar({ className }: AISidebarProps) {
                       onNewChat={handleNewChat}
                     />
                     <div className="relative flex-1 overflow-hidden">
-                      <AIChat {...chatState} />
+                      <AIChat {...chatState} onMentionsChange={setPendingMentions} />
                     </div>
                   </div>
                 </div>
@@ -548,7 +552,7 @@ function AISidebar({ className }: AISidebarProps) {
                   onNewChat={handleNewChat}
                 />
                 <div className="relative flex-1 overflow-hidden">
-                  <AIChat {...chatState} />
+                  <AIChat {...chatState} onMentionsChange={setPendingMentions} />
                 </div>
               </div>
             </div>

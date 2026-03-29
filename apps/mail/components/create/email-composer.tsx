@@ -16,6 +16,7 @@ import {
 
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 import { Check, Command, Loader, Paperclip, Plus, Type, X as XIcon } from 'lucide-react';
+import { sanitizeMentionHtml } from '@/lib/editor-mentions';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { TextEffect } from '@/components/motion-primitives/text-effect';
 import { ScheduleSendPicker } from './schedule-send-picker';
@@ -77,6 +78,7 @@ interface EmailComposerProps {
     attachments: File[];
     fromEmail?: string;
     scheduleAt?: string;
+    includeSignature?: boolean;
   }) => Promise<void>;
   onClose?: () => void;
   className?: string;
@@ -139,6 +141,9 @@ export function EmailComposer({
   );
   const [activeReplyId] = useQueryState('activeReplyId');
   const [toggleToolbar, setToggleToolbar] = useState(false);
+  const [isTemplateMenuOpen, setIsTemplateMenuOpen] = useState(false);
+  const [includeSignature, setIncludeSignature] = useState(true);
+  const [didOverrideSignature, setDidOverrideSignature] = useState(false);
   const processAndSetAttachments = async (
     filesToProcess: File[],
     quality: ImageQuality,
@@ -223,7 +228,7 @@ export function EmailComposer({
   );
 
   const form = useForm<z.infer<typeof schema>>({
-    resolver: zodResolver(schema),
+    resolver: zodResolver(schema as never),
     defaultValues: {
       to: initialTo,
       cc: initialCc,
@@ -265,6 +270,7 @@ export function EmailComposer({
   const editor = useComposeEditor({
     initialValue: initialMessage,
     isReadOnly: isLoading,
+    surface: 'email-compose',
     onLengthChange: (length) => {
       setHasUnsavedChanges(true);
       setMessageLength(length);
@@ -278,6 +284,13 @@ export function EmailComposer({
     },
     placeholder: 'Start your email here',
     autofocus,
+    onTemplateCommand: () => {
+      setIsTemplateMenuOpen(true);
+    },
+    onSignatureCommand: () => {
+      setDidOverrideSignature(true);
+      setIncludeSignature((current) => !current);
+    },
   });
 
   // Add effect to focus editor when component mounts
@@ -359,10 +372,11 @@ export function EmailComposer({
         cc: showCc ? values.cc : undefined,
         bcc: showBcc ? values.bcc : undefined,
         subject: values.subject,
-        message: editor.getHTML(),
+        message: sanitizeMentionHtml(editor.getHTML()),
         attachments: values.attachments || [],
         fromEmail: values.fromEmail,
         scheduleAt,
+        includeSignature,
       });
       setHasUnsavedChanges(false);
       editor.commands.clearContent(true);
@@ -588,6 +602,16 @@ export function EmailComposer({
     }
   }, [settings?.settings?.defaultEmailAlias, aliases, getValues, setValue]);
 
+  useEffect(() => {
+    if (didOverrideSignature) {
+      return;
+    }
+
+    const signaturePreference =
+      settings?.settings?.todusSignature ?? true;
+    setIncludeSignature(signaturePreference);
+  }, [didOverrideSignature, settings?.settings?.todusSignature]);
+
   const handleQualityChange = async (newQuality: ImageQuality) => {
     setImageQuality(newQuality);
     await processAndSetAttachments(originalAttachments, newQuality, true);
@@ -806,6 +830,8 @@ export function EmailComposer({
             </Button>
             <TemplateButton
               editor={editor}
+              open={isTemplateMenuOpen}
+              onOpenChange={setIsTemplateMenuOpen}
               subject={subjectInput}
               setSubject={(value) => setValue('subject', value)}
               to={toEmails}
@@ -813,6 +839,18 @@ export function EmailComposer({
               bcc={bccEmails ?? []}
               setRecipients={(field, val) => setValue(field, val)}
             />
+            <Button
+              type="button"
+              variant={'secondary'}
+              size={'xs'}
+              className="bg-background border hover:bg-gray-50 dark:hover:bg-[#404040] transition-colors cursor-pointer"
+              onClick={() => {
+                setDidOverrideSignature(true);
+                setIncludeSignature((current) => !current);
+              }}
+            >
+              Signature {includeSignature ? 'on' : 'off'}
+            </Button>
             <Input
               type="file"
               id="attachment-input"

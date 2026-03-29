@@ -223,3 +223,125 @@ mark[style] > strong {
 .ProseMirror ol {
   padding-left: 1.5rem;
 }
+
+.ProseMirror .mention-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--color-blue-500) 10%, transparent);
+  color: var(--color-blue-700);
+  padding: 0.1rem 0.5rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.dark .ProseMirror .mention-chip {
+  background: rgba(96, 165, 250, 0.18);
+  color: rgb(191, 219, 254);
+}
+
+.editor-suggestion-menu {
+  max-height: min(320px, 60vh);
+  width: min(360px, calc(100vw - 32px));
+  overflow-y: auto;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.18);
+  padding: 0.35rem;
+  backdrop-filter: blur(18px);
+}
+
+.dark .editor-suggestion-menu {
+  background: rgba(24, 24, 27, 0.98);
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
+}
+
+.editor-suggestion-group {
+  padding: 0.5rem 0.6rem 0.2rem;
+  color: rgb(100, 116, 139);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.editor-suggestion-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border: 0;
+  background: transparent;
+  border-radius: 10px;
+  padding: 0.7rem 0.75rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.editor-suggestion-item[data-active='true'] {
+  background: rgba(59, 130, 246, 0.1);
+}
+
+.dark .editor-suggestion-item[data-active='true'] {
+  background: rgba(96, 165, 250, 0.15);
+}
+
+/* Keyboard focus styles for accessibility (WCAG 2.1 AA) */
+.editor-suggestion-item:focus-visible {
+  outline: 2px solid rgba(59, 130, 246, 0.7);
+  outline-offset: -2px;
+  background: rgba(59, 130, 246, 0.08);
+}
+
+.dark .editor-suggestion-item:focus-visible {
+  outline-color: rgba(96, 165, 250, 0.7);
+  background: rgba(96, 165, 250, 0.12);
+}
+
+.editor-suggestion-text {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.editor-suggestion-title {
+  color: rgb(15, 23, 42);
+  font-size: 0.92rem;
+  font-weight: 600;
+}
+
+.dark .editor-suggestion-title {
+  color: rgb(248, 250, 252);
+}
+
+.editor-suggestion-subtitle {
+  color: rgb(100, 116, 139);
+  font-size: 0.8rem;
+  line-height: 1.2;
+}
+
+.editor-suggestion-badge {
+  flex-shrink: 0;
+  border-radius: 9999px;
+  background: rgba(148, 163, 184, 0.14);
+  color: rgb(71, 85, 105);
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.2rem 0.5rem;
+}
+
+.dark .editor-suggestion-badge {
+  background: rgba(148, 163, 184, 0.16);
+  color: rgb(203, 213, 225);
+}
+
+.editor-suggestion-empty {
+  padding: 0.85rem 0.9rem;
+  color: rgb(100, 116, 139);
+  font-size: 0.85rem;
+}

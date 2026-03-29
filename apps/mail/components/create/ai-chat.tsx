@@ -1,9 +1,11 @@
 import { Avatar, AvatarFallback, AvatarImage } from '../ui/avatar';
 import { useAIFullScreen, useAISidebar } from '../ui/ai-sidebar';
+import { extractMentionRefsFromDoc } from '@/lib/editor-mentions';
 import { VoiceProvider } from '@/providers/voice-provider';
 import useComposeEditor from '@/hooks/use-compose-editor';
 import { useRef, useCallback, useEffect } from 'react';
 import type { useAgentChat } from 'agents/ai-react';
+import type { MentionRef } from '@zero/shared';
 import { Markdown } from '@react-email/components';
 import { useBilling } from '@/hooks/use-billing';
 import { TextShimmer } from '../ui/text-shimmer';
@@ -19,6 +21,7 @@ import { Button } from '../ui/button';
 import { format } from 'date-fns-tz';
 import { useQueryState } from 'nuqs';
 import { ChatSpecRenderer, extractUISpecFromMessage } from '../generative-ui';
+import './prosemirror.css';
 
 const ThreadPreview = ({ threadId }: { threadId: string }) => {
   const [, setThreadId] = useQueryState('threadId');
@@ -226,7 +229,10 @@ export function AIChat({
   error,
   handleSubmit,
   status,
-}: ReturnType<typeof useAgentChat>): React.ReactElement {
+  onMentionsChange,
+}: ReturnType<typeof useAgentChat> & {
+  onMentionsChange?: (mentions: MentionRef[]) => void;
+}): React.ReactElement {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const { chatMessages } = useBilling();
@@ -249,8 +255,12 @@ export function AIChat({
   }, [status, scrollToBottom]);
 
   const editor = useComposeEditor({
+    surface: 'ai-chat',
     placeholder: 'Ask Todus to do anything...',
-    onLengthChange: () => setInput(editor.getText()),
+    onTextChange: (text, content) => {
+      setInput(text);
+      onMentionsChange?.(extractMentionRefsFromDoc(content));
+    },
     onKeydown(event) {
       if (event.key === '0' && event.metaKey) {
         return toggleOpen();
@@ -278,6 +288,7 @@ export function AIChat({
 
     handleSubmit(e);
     editor.commands.clearContent(true);
+    onMentionsChange?.([]);
     setTimeout(() => {
       scrollToBottom();
     }, 100);
@@ -286,6 +297,7 @@ export function AIChat({
   const handleQueryClick = (query: string) => {
     editor.commands.setContent(query);
     setInput(query);
+    onMentionsChange?.([]);
     editor.commands.focus();
   };
 

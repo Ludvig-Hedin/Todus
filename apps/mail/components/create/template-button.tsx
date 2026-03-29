@@ -42,6 +42,8 @@ type RecipientField = 'to' | 'cc' | 'bcc';
 
 interface TemplateButtonProps {
   editor: Editor | null;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
   subject: string;
   setSubject: (value: string) => void;
   to: string[];
@@ -52,6 +54,8 @@ interface TemplateButtonProps {
 
 const TemplateButtonComponent: React.FC<TemplateButtonProps> = ({
   editor,
+  open,
+  onOpenChange,
   subject,
   setSubject,
   to,
@@ -65,11 +69,22 @@ const TemplateButtonComponent: React.FC<TemplateButtonProps> = ({
   
   const templates = (data?.templates ?? []) as EmailTemplate[];
 
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [internalMenuOpen, setInternalMenuOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const [templateName, setTemplateName] = useState('');
   const [search, setSearch] = useState('');
+
+  const menuOpen = open ?? internalMenuOpen;
+  const setMenuOpen = useCallback(
+    (nextOpen: boolean) => {
+      onOpenChange?.(nextOpen);
+      if (open === undefined) {
+        setInternalMenuOpen(nextOpen);
+      }
+    },
+    [onOpenChange, open],
+  );
 
   const deferredSearch = useDeferredValue(search);
 
