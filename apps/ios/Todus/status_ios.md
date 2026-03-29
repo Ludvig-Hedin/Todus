@@ -56,6 +56,7 @@
 | Connect flow | ✅ Code written | EmailConnectView.swift |
 | Gmail icon sizing | ✅ Fixed | Shared Gmail icon now preserves SVG aspect ratio in onboarding and button usage |
 | Fresh install auth reset | ✅ Fixed | First launch clears stale Keychain auth so reinstall shows login again |
+| Settings sheet theme sync | ✅ Fixed | Settings sheet now applies the active color scheme immediately on theme change |
 | Inbox list | ✅ Code written | EmailInboxView.swift with List + swipe |
 | Search | ✅ Code written | Client-side filter + server search on submit |
 | Swipe actions | ✅ Code written | Archive, delete, read/unread, star |
