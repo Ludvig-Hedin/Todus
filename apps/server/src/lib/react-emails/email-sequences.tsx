@@ -73,40 +73,36 @@ export const WelcomeEmail = ({ name }: EmailProps) => {
   return (
     <Html>
       <Head />
-      <Preview>Welcome to Mail0 👋 Your inbox just leveled up</Preview>
+      <Preview>Welcome to Todus — your inbox, calendar, tasks, and AI assistant</Preview>
       <Body style={main}>
         <Container style={container}>
           <Section style={section}>
-            <Heading style={h1}>Welcome to Mail0 👋</Heading>
+        <Heading style={h1}>Welcome to Todus</Heading>
             <Text style={text}>Hey {name ? name : 'there'},</Text>
             <Text style={text}>
-              I'm Nizzy, founder of Mail0 (aka Zero)
+              I'm Ludvig, founder of Todus. You now have a workspace that spans email, calendar, tasks, and the AI assistant chat.
             </Text>
             <Text style={text}>
-              If you've ever screamed into the void trying to find that one email thread from 6 months ago,
-              or spent 10 minutes writing "sounds good," you're in the right place 😅
+              If you've ever lost a thread, missed a meeting, or let a task fall through the cracks, this is for you.
             </Text>
-            <Text style={text}>Mail0 is built different:</Text>
-            <Text style={listItem}>• AI-native from day one</Text>
-            <Text style={listItem}>• Open-source and self-hostable</Text>
-            <Text style={listItem}>• Summarizes long threads, drafts replies, and lets you search your inbox like a conversation</Text>
-            <Text style={listItem}>• Respects your privacy and your time</Text>
+            <Text style={text}>Todus is built different:</Text>
+            <Text style={listItem}>• AI assistant that drafts replies, summarizes threads, and connects email, calendar, and tasks</Text>
+            <Text style={listItem}>• Unified inbox, calendar, and task list so nothing disappears out of sight</Text>
+            <Text style={listItem}>• Automatic labeling, shortcuts, and super search to keep you in flow</Text>
+            <Text style={listItem}>• Privacy-first, open-source tooling that stays focused on your time</Text>
             <Text style={text}>
-              It's still early. It's raw. But it's real. And it's yours 💪
-            </Text>
-            <Text style={text}>
-              Mail0 is for people like us: curious, technical, and tired of bloated tools pretending to be minimal 🙃
+              It's still early, but this playground is real. And it is yours to explore.
             </Text>
             <Text style={text}>
-              Want to chat about email and get a $20 gift card to anywhere you like?{' '}
-              <Link href="https://cal.com/team/0/chat?overlayCalendar=true" style={link}>
-                Book some time with me here
+              Ready to chat about email, calendar, or the AI roadmap?{' '}
+              <Link href="https://cal.com/ludvig-hedin-iouaiw" style={link}>
+                Book a short call
               </Link>
             </Text>
             <Text style={text}>
-              Thanks for being one of the first to join this journey 🚀
+              Thanks for joining the Todus community.
             </Text>
-            <Text style={signature}>Nizzy</Text>
+            <Text style={signature}>Ludvig</Text>
           </Section>
         </Container>
       </Body>
@@ -114,35 +110,33 @@ export const WelcomeEmail = ({ name }: EmailProps) => {
   );
 };
 
-// 2. Mail0 Pro (1 Day After Signup)
-export const Mail0ProEmail = ({ name }: EmailProps) => {
+// 2. Todus Pro (1 Day After Signup)
+export const TodusProEmail = ({ name }: EmailProps) => {
   return (
     <Html>
       <Head />
-      <Preview>Mail0 Pro is here 🚀💼</Preview>
+      <Preview>Todus Pro unlocks your unified workspace</Preview>
       <Body style={main}>
         <Container style={container}>
           <Section style={section}>
-            <Heading style={h1}>Mail0 Pro is here 🚀💼</Heading>
+        <Heading style={h1}>Todus Pro is here</Heading>
             <Text style={text}>Hey {name ? name : 'there'},</Text>
             <Text style={text}>
-              Your inbox deserves better.
+              Your workspace just got a serious upgrade.
             </Text>
             <Text style={text}>
-              Mail0 Pro unlocks everything you need to fly through email like it's nothing.
-              Built for professionals, founders, and power users who want to spend less time writing and more time doing.
+              Todus Pro brings unlimited email, calendar, tasks, and AI assistance together so you never lose context.
             </Text>
             <Text style={text}>Here's what you get:</Text>
-            <Text style={listItem}>📨 Unlimited email connections</Text>
-            <Text style={listItem}>🧠 Full AI chat with your inbox</Text>
-            <Text style={listItem}>🏷️ Auto labeling that organizes things instantly</Text>
-            <Text style={listItem}>✍️ One-click AI writing and smart replies</Text>
-            <Text style={listItem}>🪄 Instant thread summaries so you don't waste time scrolling</Text>
-            <Text style={listItem}>🙋 Priority support</Text>
-            <Text style={listItem}>💬 Private Discord community</Text>
-            <Text style={listItem}>💸 $20/month — or save 50% when billed annually</Text>
+            <Text style={listItem}>Unlimited email, calendar, and task accounts</Text>
+            <Text style={listItem}>AI assistant chat that summarizes, writes, and nudges you toward next steps</Text>
+            <Text style={listItem}>Advanced task workflows, templates, and automations</Text>
+            <Text style={listItem}>Priority inbox, calendar, and task triage</Text>
+            <Text style={listItem}>Custom labels, shortcuts, and command palette macros</Text>
+            <Text style={listItem}>Priority support and early access to new experiences</Text>
+            <Text style={listItem}>Flexible pricing with an annual option</Text>
             <Text style={text}>
-              It's the full Mail0 experience, no limits.
+              It's the full Todus workspace — email, calendar, tasks, and AI — unlocked for people who want to move with flow.
             </Text>
             <Text style={text}>
               <Link href="https://todus.app/pricing" style={link}>
@@ -150,15 +144,15 @@ export const Mail0ProEmail = ({ name }: EmailProps) => {
               </Link>
             </Text>
             <Text style={text}>
-              Have questions or want help deciding if Pro is right for you?{' '}
-              <Link href="https://cal.com/team/0/chat?overlayCalendar=true" style={link}>
-                Book a quick call and I'll send you a $20 gift card of your choice
+              Want to chat about Pro and the roadmap?{' '}
+              <Link href="https://cal.com/ludvig-hedin-iouaiw" style={link}>
+                Book a short call
               </Link>
             </Text>
             <Text style={text}>
-              Let's level up your inbox,
+              Let's make every part of your day smoother,
             </Text>
-            <Text style={signature}>Nizzy</Text>
+            <Text style={signature}>Ludvig</Text>
           </Section>
         </Container>
       </Body>
@@ -171,36 +165,32 @@ export const AutoLabelingEmail = ({ name }: EmailProps) => {
   return (
     <Html>
       <Head />
-      <Preview>New in Mail0: Auto-labeling is here 🎉📥</Preview>
+      <Preview>Auto-labeling keeps your workspace organized</Preview>
       <Body style={main}>
         <Container style={container}>
           <Section style={section}>
-            <Heading style={h1}>New in Mail0: Auto-labeling is here 🎉📥</Heading>
-            <Text style={text}>Hey {name ? name : 'there'} 👋</Text>
+        <Heading style={h1}>Auto-labeling keeps your workspace organized</Heading>
+            <Text style={text}>Hey {name ? name : 'there'},</Text>
             <Text style={text}>
-              Your inbox just got a whole lot smarter.
+              Todus now labels your email, calendar, and task entries automatically so the most important things rise to the top.
+            </Text>
+            <Text style={text}>Here’s what it does:</Text>
+            <Text style={listItem}>Sorts into categories like Newsletters, Receipts, Invites, Projects, and Tasks</Text>
+            <Text style={listItem}>Learns from your behavior so it keeps improving</Text>
+            <Text style={listItem}>Lets you rename or tweak labels from any device</Text>
+            <Text style={text}>
+              It keeps your inbox, calendar, and task list in sync without manual filters.
             </Text>
             <Text style={text}>
-              Mail0 now automatically labels your emails based on what they're about.
-              No setup, no filters, no wasted time 🙌
-            </Text>
-            <Text style={text}>Here's what it does:</Text>
-            <Text style={listItem}>📌 Sorts things into helpful categories like Newsletters, Receipts, Invites, and more</Text>
-            <Text style={listItem}>🧠 Learns from your habits to get better over time</Text>
-            <Text style={listItem}>🛠️ Lets you rename or tweak labels however you want</Text>
-            <Text style={text}>
-              It's one of those little features that quietly saves you hours every week ⏳
-            </Text>
-            <Text style={text}>
-              Curious how labeling works behind the scenes?{' '}
-              <Link href="https://cal.com/team/0/chat?overlayCalendar=true" style={link}>
-                Book a quick chat and I'll send you a $20 gift card as a thank you
+              Want me to walk you through how the AI assistant uses those labels to suggest next steps?{' '}
+              <Link href="https://cal.com/ludvig-hedin-iouaiw" style={link}>
+                Book a short call
               </Link>
             </Text>
             <Text style={text}>
               Thanks for being here,
             </Text>
-            <Text style={signature}>Nizzy</Text>
+            <Text style={signature}>Ludvig</Text>
           </Section>
         </Container>
       </Body>
@@ -213,39 +203,33 @@ export const AIWritingAssistantEmail = ({ name }: EmailProps) => {
   return (
     <Html>
       <Head />
-      <Preview>Write faster with AI ✍️✨</Preview>
+      <Preview>Write faster with the Todus AI assistant</Preview>
       <Body style={main}>
         <Container style={container}>
           <Section style={section}>
-            <Heading style={h1}>Write faster with AI ✍️✨</Heading>
-            <Text style={text}>Hey {name ? name : 'there'} 👋</Text>
+            <Heading style={h1}>Write faster with the AI assistant</Heading>
+            <Text style={text}>Hey {name ? name : 'there'},</Text>
             <Text style={text}>
-              Tired of writing the same replies over and over? Yeah, same.
-              That's why we built AI Response Assist.
+              Todus reads your email, calendar, and task context before it ever suggests a reply.
+              That way it stays on brand with your voice and the right project context.
             </Text>
-            <Text style={text}>Here's what it can do:</Text>
-            <Text style={listItem}>🤖 Reads the email you got</Text>
-            <Text style={listItem}>📝 Suggests a thoughtful reply (not a robotic one)</Text>
-            <Text style={listItem}>⚡ Lets you tweak, shorten, or send it as-is</Text>
+            <Text style={text}>Here's how it supports you:</Text>
+            <Text style={listItem}>Reads each message and summaries the thread in seconds</Text>
+            <Text style={listItem}>Suggests thoughtful replies, follow-ups, or action items</Text>
+            <Text style={listItem}>Lets you tweak the tone, extend a task, or roll it into your calendar</Text>
             <Text style={text}>
-              No need to overthink every "Sounds good" or "Thanks for following up".
-            </Text>
-            <Text style={text}>
-              It's fast. It sounds like you. And it gets smarter the more you use it.
+              Try it next time you open an email: hit "Generate" and edit as you go.
             </Text>
             <Text style={text}>
-              Next time you open an email, try hitting "Generate" and watch the magic happen ✨
-            </Text>
-            <Text style={text}>
-              Want to see it in action or share your thoughts?{' '}
-              <Link href="https://cal.com/team/0/chat?overlayCalendar=true" style={link}>
-                I'll send you a $20 gift card just for booking a quick call
+              Want a quick walkthrough or to share feedback?{' '}
+              <Link href="https://cal.com/ludvig-hedin-iouaiw" style={link}>
+                Book a short call
               </Link>
             </Text>
             <Text style={text}>
               Talk soon,
             </Text>
-            <Text style={signature}>Adam</Text>
+            <Text style={signature}>Ludvig</Text>
           </Section>
         </Container>
       </Body>
@@ -258,41 +242,36 @@ export const ShortcutsEmail = ({ name }: EmailProps) => {
   return (
     <Html>
       <Head />
-      <Preview>Fly through your inbox with shortcuts ⚡️</Preview>
+      <Preview>Fly through Todus with shortcuts</Preview>
       <Body style={main}>
         <Container style={container}>
           <Section style={section}>
-            <Heading style={h1}>Fly through your inbox with shortcuts ⚡️</Heading>
+            <Heading style={h1}>Fly through Todus with shortcuts</Heading>
             <Text style={text}>Hey {name ? name : 'there'},</Text>
             <Text style={text}>
-              You don't need to click around to get things done in Mail0.
-              We've got a full set of keyboard shortcuts built in. And yes, they're fully customizable.
+              Keyboard shortcuts keep you off the mouse and in flow across email, calendar, tasks, and the AI assistant.
             </Text>
-            <Text style={text}>Here are a few worth memorizing:</Text>
-            <Text style={listItem}>• C to start a new email</Text>
-            <Text style={listItem}>• R to reply</Text>
-            <Text style={listItem}>• E to archive a thread</Text>
-            <Text style={listItem}>• V to open the voice assistant</Text>
-            <Text style={listItem}>• Cmd + K to launch the command palette</Text>
-            <Text style={listItem}>• G + I to go to your inbox</Text>
-            <Text style={listItem}>• Cmd + Z to undo the last thing you did (life saver)</Text>
+            <Text style={text}>Here are a few worth mastering:</Text>
+            <Text style={listItem}>C to start a new email</Text>
+            <Text style={listItem}>R to reply</Text>
+            <Text style={listItem}>E to archive or file a thread</Text>
+            <Text style={listItem}>V to open the voice or AI assistant</Text>
+            <Text style={listItem}>Cmd + K to launch the command palette</Text>
+            <Text style={listItem}>G + I to go to your inbox</Text>
+            <Text style={listItem}>Cmd + T to jump to tasks and Cmd + M for meetings</Text>
             <Text style={text}>
-              Want to bulk delete, mark as important, or jump between categories?
-              We've got shortcuts for those too. Just hit ? in the app to view and edit them all.
+              Every shortcut is customizable — hit ? in the app to view or remap them instantly.
             </Text>
             <Text style={text}>
-              Once you get into the flow, it's wild how fast you move.
-            </Text>
-            <Text style={text}>
-              Got feedback or shortcut ideas?{' '}
-              <Link href="https://cal.com/team/0/chat?overlayCalendar=true" style={link}>
-                Let's talk and I'll send you a $20 gift card for your time
+              Have a shortcut idea or need help wiring a workflow?{' '}
+              <Link href="https://cal.com/ludvig-hedin-iouaiw" style={link}>
+                Book a short call
               </Link>
             </Text>
             <Text style={text}>
-              Let's make your inbox feel like second nature.
+              Let's make Todus feel like an extension of how you already work.
             </Text>
-            <Text style={signature}>Adam</Text>
+            <Text style={signature}>Ludvig</Text>
           </Section>
         </Container>
       </Body>
@@ -305,39 +284,35 @@ export const CategoriesEmail = ({ name }: EmailProps) => {
   return (
     <Html>
       <Head />
-      <Preview>Inbox chaos? We cleaned it up for you 🧼📥</Preview>
+      <Preview>Inbox clarity is live in Todus</Preview>
       <Body style={main}>
         <Container style={container}>
           <Section style={section}>
-            <Heading style={h1}>Inbox chaos? We cleaned it up for you 🧼📥</Heading>
+            <Heading style={h1}>Inbox clarity is live in Todus</Heading>
             <Text style={text}>Hey {name ? name : 'there'},</Text>
             <Text style={text}>
-              Nobody has time to dig through a messy inbox.
-              That's why Mail0 now automatically sorts your emails into smart categories right at the top of your inbox.
+              Todus now organizes your emails into smart categories right above your inbox, calendar, and tasks.
+              No manual filters, no digging.
             </Text>
-            <Text style={text}>Here's what you'll see:</Text>
-            <Text style={listItem}>⚡ Primary — real conversations, people who matter</Text>
-            <Text style={listItem}>⚠️ Warnings — account alerts and security stuff</Text>
-            <Text style={listItem}>👤 Personal — messages from friends and family</Text>
-            <Text style={listItem}>🔔 Notifications — updates, confirmations, reminders</Text>
-            <Text style={listItem}>📢 Promotions — marketing, newsletters, and the rest</Text>
+            <Text style={text}>Here is what you’ll see:</Text>
+            <Text style={listItem}>Primary — real conversations and people who matter</Text>
+            <Text style={listItem}>Alerts — security notices, invoices, and account updates</Text>
+            <Text style={listItem}>Personal — family and friends</Text>
+            <Text style={listItem}>Notifications — confirmations, reminders, and task nudges</Text>
+            <Text style={listItem}>Promotions — newsletters, ads, and lower priority chatter</Text>
             <Text style={text}>
-              Mail0 figures it out based on the content of each email. No setup required.
-              Just open your inbox and enjoy the clarity.
-            </Text>
-            <Text style={text}>
-              You can rename, hide, or reorder the categories any way you like.
+              Todus learns from what you open and complete so the categories get sharper over time.
             </Text>
             <Text style={text}>
-              Want to customize categories or suggest improvements?{' '}
-              <Link href="https://cal.com/team/0/chat?overlayCalendar=true" style={link}>
-                Book a quick chat with me and I'll send you a $20 gift card
+              Want to customize categories or share a suggestion?{' '}
+              <Link href="https://cal.com/ludvig-hedin-iouaiw" style={link}>
+                Book a short call
               </Link>
             </Text>
             <Text style={text}>
               Talk soon,
             </Text>
-            <Text style={signature}>Adam</Text>
+            <Text style={signature}>Ludvig</Text>
           </Section>
         </Container>
       </Body>
@@ -350,42 +325,34 @@ export const SuperSearchEmail = ({ name }: EmailProps) => {
   return (
     <Html>
       <Head />
-      <Preview>Search your inbox like you talk 🧠🔍</Preview>
+      <Preview>Search across email, calendar, and tasks</Preview>
       <Body style={main}>
         <Container style={container}>
           <Section style={section}>
-            <Heading style={h1}>Search your inbox like you talk 🧠🔍</Heading>
+            <Heading style={h1}>Search across email, calendar, and tasks</Heading>
             <Text style={text}>Hey {name ? name : 'there'},</Text>
             <Text style={text}>
-              Tired of guessing the exact words you used in that one email?
+              Todus's Super Search lets you use plain language to find threads, meetings, and tasks without thinking about exact words.
+            </Text>
+            <Text style={text}>Try asking for:</Text>
+            <Text style={listItem}>emails from John</Text>
+            <Text style={listItem}>threads from last week</Text>
+            <Text style={listItem}>unread reminders with attachments</Text>
+            <Text style={listItem}>calendar invites about product planning</Text>
+            <Text style={listItem}>tasks due this afternoon</Text>
+            <Text style={text}>
+              No syntax, no filters. Just type as you would tell a teammate and the AI handles the rest.
             </Text>
             <Text style={text}>
-              With Mail0's Super Search, you don't have to.
-            </Text>
-            <Text style={text}>
-              You can now search your inbox using plain language. Just type something like:
-            </Text>
-            <Text style={listItem}>➡️ emails from John</Text>
-            <Text style={listItem}>➡️ emails from last week</Text>
-            <Text style={listItem}>➡️ unread emails with attachments</Text>
-            <Text style={listItem}>➡️ emails about meeting</Text>
-            <Text style={listItem}>➡️ emails from last month</Text>
-            <Text style={text}>
-              No weird syntax or advanced filters. Just write what you're looking for and let the AI handle the rest.
-            </Text>
-            <Text style={text}>
-              It's fast, flexible, and honestly kind of magical.
-            </Text>
-            <Text style={text}>
-              Let's nerd out about how Super Search works.{' '}
-              <Link href="https://cal.com/team/0/chat?overlayCalendar=true" style={link}>
-                I'll send you a $20 gift card just for booking a time
+              Let’s chat about how Super Search fits into your workflow.{' '}
+              <Link href="https://cal.com/ludvig-hedin-iouaiw" style={link}>
+                Book a short call
               </Link>
             </Text>
             <Text style={text}>
-              See you in the future,
+              See you soon,
             </Text>
-            <Text style={signature}>Adam</Text>
+            <Text style={signature}>Ludvig</Text>
           </Section>
         </Container>
       </Body>
@@ -393,43 +360,42 @@ export const SuperSearchEmail = ({ name }: EmailProps) => {
   );
 };
 
-// Mail0 Pro Welcome Email
-export const Mail0ProWelcomeEmail = ({ name }: EmailProps) => {
+// Todus Pro Welcome Email
+export const TodusProWelcomeEmail = ({ name }: EmailProps) => {
   return (
     <Html>
       <Head />
-      <Preview>You're Pro now 😎 Welcome to the fast lane</Preview>
+      <Preview>Welcome to Todus Pro</Preview>
       <Body style={main}>
         <Container style={container}>
           <Section style={section}>
-            <Heading style={h1}>You're Pro now 😎</Heading>
+            <Heading style={h1}>You're on Todus Pro</Heading>
             <Text style={text}>Hey {name ? name : 'there'},</Text>
             <Text style={text}>
-              You just unlocked Mail0 Pro and honestly… your inbox doesn't know what's coming.
+              You just unlocked Todus Pro — unlimited email, calendar, tasks, automations, and the AI assistant.
             </Text>
             <Text style={text}>You now have access to:</Text>
-            <Text style={listItem}>🚀 Unlimited email accounts</Text>
-            <Text style={listItem}>🧠 Full AI-powered chat with your inbox</Text>
-            <Text style={listItem}>⚡ Instant thread summaries</Text>
-            <Text style={listItem}>✍️ One-click AI writing and smart replies</Text>
-            <Text style={listItem}>🏷️ Auto labeling that sorts your chaos</Text>
-            <Text style={listItem}>🙋 Priority support</Text>
-            <Text style={listItem}>💬 Access to our private community on Discord</Text>
+            <Text style={listItem}>Unlimited email and calendar accounts</Text>
+            <Text style={listItem}>Full AI-powered chat with your workspace</Text>
+            <Text style={listItem}>Instant task and meeting summaries</Text>
+            <Text style={listItem}>One-click AI writing and smart replies</Text>
+            <Text style={listItem}>Auto labeling and custom shortcuts</Text>
+            <Text style={listItem}>Priority support and early build access</Text>
             <Text style={text}>
-              You're part of a group of people who are done wasting time on email. Welcome.
+              You're part of a group who want a calm, modern workspace. Welcome.
             </Text>
             <Text style={text}>
               Need help getting the most out of Pro?{' '}
-              <Link href="https://cal.com/team/0/chat?overlayCalendar=true" style={link}>
-                I'd love to chat and send you a $20 gift card for your time
+              <Link href="https://cal.com/ludvig-hedin-iouaiw" style={link}>
+                Book a short call
               </Link>
             </Text>
             <Text style={text}>
-              Let's make this the smartest inbox you've ever used.
+              Let's make this the smartest place you manage work.
             </Text>
-            <Text style={signature}>Nizzy</Text>
+            <Text style={signature}>Ludvig</Text>
             <Text style={text}>
-              P.S. If anything feels off or confusing, just reply to this email. We're here.
+              P.S. If anything feels confusing, reply to this email. We are here to help.
             </Text>
           </Section>
         </Container>
@@ -438,40 +404,39 @@ export const Mail0ProWelcomeEmail = ({ name }: EmailProps) => {
   );
 };
 
-// Mail0 Cancellation Email
-export const Mail0CancellationEmail = ({ name }: EmailProps) => {
+// Todus Cancellation Email
+export const TodusCancellationEmail = ({ name }: EmailProps) => {
   return (
     <Html>
       <Head />
-      <Preview>You've canceled Mail0 Pro 💔</Preview>
+      <Preview>You've canceled Todus Pro</Preview>
       <Body style={main}>
         <Container style={container}>
           <Section style={section}>
-            <Heading style={h1}>You've canceled Mail0 Pro 💔</Heading>
+            <Heading style={h1}>You've canceled Todus Pro</Heading>
             <Text style={text}>Hey {name ? name : 'there'},</Text>
             <Text style={text}>
-              I saw you canceled your Mail0 Pro subscription. Totally okay.
-              Life changes, tools shift, and we get it.
+              I saw you canceled your Todus Pro subscription. Totally okay — tools evolve, as do priorities.
             </Text>
             <Text style={text}>
-              I'd love to hear what could have been better.{' '}
-              <Link href="https://cal.com/team/0/chat?overlayCalendar=true" style={link}>
-                Book a quick call and I'll send you a $20 gift card of your choice
+              I'd love to hear what we could improve.{' '}
+              <Link href="https://cal.com/ludvig-hedin-iouaiw" style={link}>
+                Book a short call
               </Link>
             </Text>
-            <Text style={text}>You'll still have access to your account under the free plan:</Text>
-            <Text style={listItem}>✅ 1 email connection</Text>
-            <Text style={listItem}>✅ Basic labeling</Text>
-            <Text style={listItem}>✅ Limited AI chat and writing</Text>
+            <Text style={text}>You'll still have access to the free plan:</Text>
+            <Text style={listItem}>1 email connection</Text>
+            <Text style={listItem}>Basic labeling</Text>
+            <Text style={listItem}>Limited AI chat and writing assistance</Text>
             <Text style={text}>
-              No hard feelings. We're always rooting for you, even if your inbox journey continues somewhere else.
+              No hard feelings. We are rooting for you, even if your workflow continues elsewhere.
             </Text>
             <Text style={text}>
-              Thanks for giving Mail0 a shot,
+              Thanks for giving Todus a shot,
             </Text>
-            <Text style={signature}>Nizzy</Text>
+            <Text style={signature}>Ludvig</Text>
             <Text style={text}>
-              P.S. If you ever want to come back, your setup will be waiting for you ⚡️
+              P.S. If you ever want to come back, your workspace will be waiting.
             </Text>
           </Section>
         </Container>
