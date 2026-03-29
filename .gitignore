@@ -75,3 +75,13 @@ tools.json
 # Xcode derived data
 .deriveddata/
 DerivedData/
+
+# Xcode user state (per-developer, not shareable)
+*.xcuserstate
+xcuserdata/
+
+# Root Xcode workspace (generated)
+Todus.xcworkspace/
+
+# Swift Package Manager build artifacts
+packages/swift-auth/.build/
