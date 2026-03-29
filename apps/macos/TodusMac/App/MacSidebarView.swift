@@ -9,12 +9,7 @@ struct MacSidebarView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SidebarChrome()
-                .padding(.horizontal, 12)
-                .padding(.top, 10)
-                .padding(.bottom, 12)
-
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 6) {
                 SidebarItemButton(
                     title: "Home",
                     systemImage: "house",
@@ -46,7 +41,7 @@ struct MacSidebarView: View {
                 )
 
                 if isEmailExpanded {
-                    VStack(alignment: .leading, spacing: 3) {
+                    VStack(alignment: .leading, spacing: 4) {
                         ForEach(EmailSection.allCases, id: \.self) { section in
                             SidebarChildItemButton(
                                 title: section.title,
@@ -66,7 +61,7 @@ struct MacSidebarView: View {
                 )
             }
 
-            Spacer(minLength: 8)
+            Spacer(minLength: 20)
 
             HStack(spacing: 8) {
                 Menu {
@@ -79,12 +74,12 @@ struct MacSidebarView: View {
                         Circle()
                             .fill(
                                 LinearGradient(
-                                    colors: [Color(red: 0.20, green: 0.55, blue: 1.0), Color(red: 0.55, green: 0.35, blue: 1.0)],
+                                    colors: [.blue.opacity(0.75), .purple.opacity(0.75)],
                                     startPoint: .topLeading,
                                     endPoint: .bottomTrailing
                                 )
                             )
-                            .frame(width: 24, height: 24)
+                            .frame(width: 26, height: 26)
                             .overlay(
                                 Text("U")
                                     .font(.system(size: 12, weight: .semibold))
@@ -92,35 +87,31 @@ struct MacSidebarView: View {
                             )
 
                         Text("Username")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(Color.black.opacity(0.88))
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundStyle(.primary)
                             .lineLimit(1)
 
                         Spacer(minLength: 0)
                     }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 6)
-                    .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                 }
                 .menuStyle(.borderlessButton)
                 .buttonStyle(.plain)
 
                 Button(action: onOpenSettings) {
                     Image(systemName: "gearshape")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(Color.black.opacity(0.55))
-                        .frame(width: 28, height: 28)
-                        .background(Color.white, in: Circle())
-                        .overlay(
-                            Circle()
-                                .stroke(Color.black.opacity(0.06), lineWidth: 1)
-                        )
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 30, height: 30)
+                        .background(.white.opacity(0.55), in: Circle())
                 }
                 .buttonStyle(.plain)
             }
-            .padding(.horizontal, 10)
-            .padding(.bottom, 10)
+            .padding(.top, 10)
         }
+        .padding(12)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(sidebarBackground)
     }
@@ -135,41 +126,12 @@ struct MacSidebarView: View {
 
     private var sidebarBackground: some View {
         RoundedRectangle(cornerRadius: 26, style: .continuous)
-            .fill(Color(red: 0.964, green: 0.961, blue: 0.955))
+            .fill(.thinMaterial)
             .overlay(
                 RoundedRectangle(cornerRadius: 26, style: .continuous)
-                    .stroke(Color.black.opacity(0.06), lineWidth: 1)
+                    .stroke(.white.opacity(0.72), lineWidth: 1)
             )
-            .shadow(color: Color.black.opacity(0.06), radius: 18, x: 0, y: 8)
-    }
-}
-
-private struct SidebarChrome: View {
-    var body: some View {
-        HStack(spacing: 0) {
-            HStack(spacing: 8) {
-                WindowDot(color: Color(red: 1.0, green: 0.33, blue: 0.29))
-                WindowDot(color: Color(red: 1.0, green: 0.75, blue: 0.18))
-                WindowDot(color: Color(red: 0.16, green: 0.78, blue: 0.34))
-            }
-
-            Spacer(minLength: 0)
-        }
-        .frame(height: 24)
-    }
-}
-
-private struct WindowDot: View {
-    let color: Color
-
-    var body: some View {
-        Circle()
-            .fill(color)
-            .frame(width: 12, height: 12)
-            .overlay(
-                Circle()
-                    .stroke(Color.black.opacity(0.08), lineWidth: 0.5)
-            )
+            .shadow(color: .black.opacity(0.08), radius: 22, x: 0, y: 14)
     }
 }
 
@@ -183,10 +145,10 @@ private struct SidebarItemButton: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 12) {
+            HStack(spacing: 10) {
                 Image(systemName: systemImage)
-                    .font(.system(size: 16, weight: .regular))
-                    .frame(width: 18)
+                    .font(.system(size: 16, weight: .medium))
+                    .frame(width: 20)
 
                 Text(title)
                     .font(.system(size: 15, weight: .medium))
@@ -196,33 +158,25 @@ private struct SidebarItemButton: View {
                 if let badgeText {
                     Text(badgeText)
                         .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(isSelected ? Color.white : Color.black.opacity(0.5))
+                        .foregroundStyle(isSelected ? Color.accentColor : .secondary)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
                         .background(
                             Capsule(style: .continuous)
-                                .fill(isSelected ? Color(red: 0.14, green: 0.50, blue: 1.0) : Color.white)
-                        )
-                        .overlay(
-                            Capsule(style: .continuous)
-                                .stroke(Color.black.opacity(0.04), lineWidth: 1)
+                                .fill(isSelected ? Color.accentColor.opacity(0.14) : Color.white.opacity(0.58))
                         )
                 } else if let trailingSystemImage {
                     Image(systemName: trailingSystemImage)
                         .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(Color.black.opacity(0.38))
+                        .foregroundStyle(.secondary)
                 }
             }
-            .foregroundStyle(isSelected ? Color(red: 0.14, green: 0.50, blue: 1.0) : Color.black.opacity(0.84))
+            .foregroundStyle(isSelected ? Color.accentColor : Color.primary.opacity(0.9))
             .padding(.horizontal, 12)
-            .padding(.vertical, 5)
+            .padding(.vertical, 10)
             .background(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(isSelected ? Color.black.opacity(0.04) : Color.clear)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(isSelected ? Color.black.opacity(0.03) : Color.clear, lineWidth: 1)
+                    .fill(isSelected ? Color.black.opacity(0.08) : Color.clear)
             )
         }
         .buttonStyle(.plain)
@@ -239,7 +193,7 @@ private struct SidebarChildItemButton: View {
             HStack(spacing: 8) {
                 Image(systemName: "chevron.right")
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Color.black.opacity(0.32))
+                    .foregroundStyle(.secondary)
                     .frame(width: 12)
 
                 Text(title)
@@ -247,17 +201,13 @@ private struct SidebarChildItemButton: View {
 
                 Spacer(minLength: 0)
             }
-            .foregroundStyle(isSelected ? Color(red: 0.14, green: 0.50, blue: 1.0) : Color.black.opacity(0.84))
+            .foregroundStyle(isSelected ? Color.accentColor : Color.primary.opacity(0.9))
             .padding(.leading, 28)
             .padding(.trailing, 12)
-            .padding(.vertical, 4)
+            .padding(.vertical, 9)
             .background(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(isSelected ? Color.black.opacity(0.035) : Color.clear)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(isSelected ? Color.black.opacity(0.03) : Color.clear, lineWidth: 1)
+                    .fill(isSelected ? Color.black.opacity(0.06) : Color.clear)
             )
         }
         .buttonStyle(.plain)

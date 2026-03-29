@@ -1,4 +1,3 @@
-import AppKit
 import SwiftUI
 
 enum EmailSection: String, CaseIterable, Hashable {
@@ -34,59 +33,45 @@ enum MacPrimarySelection: Hashable {
 struct MacRootView: View {
     @State private var selection: MacPrimarySelection = .home
     @State private var isEmailExpanded = true
-    @State private var isSidebarVisible = true
     @State private var isAssistantPresented = false
     @State private var isSettingsPresented = false
 
     var body: some View {
-        ZStack(alignment: .bottomTrailing) {
-            HStack(spacing: 0) {
-                if isSidebarVisible {
-                    MacSidebarView(
-                        selection: $selection,
-                        isEmailExpanded: $isEmailExpanded,
-                        onOpenSettings: { isSettingsPresented = true }
-                    )
-                    .frame(width: 250)
-                    .padding(.leading, 14)
-                    .padding(.vertical, 12)
-                    .transition(.move(edge: .leading).combined(with: .opacity))
-                }
-
+        NavigationSplitView {
+            MacSidebarView(
+                selection: $selection,
+                isEmailExpanded: $isEmailExpanded,
+                onOpenSettings: { isSettingsPresented = true }
+            )
+            .navigationSplitViewColumnWidth(min: 244, ideal: 256, max: 280)
+            .padding(.vertical, 8)
+            .padding(.leading, 8)
+            .padding(.trailing, 4)
+        } detail: {
+            ZStack(alignment: .bottomTrailing) {
                 VStack(spacing: 0) {
-                    MacContentHeaderView(
-                        title: selection.title,
-                        isSidebarVisible: isSidebarVisible,
-                        toggleSidebar: {
-                            withAnimation(.snappy(duration: 0.18)) {
-                                isSidebarVisible.toggle()
-                            }
-                        }
-                    )
+                    MacContentHeaderView(title: selection.title)
 
                     Divider()
-                        .overlay(Color.black.opacity(0.07))
+                        .overlay(.white.opacity(0.6))
 
                     // Placeholder shell content until real macOS feature views are plugged in.
                     contentView(for: selection)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(detailBackground)
+
+                AssistantButton {
+                    isAssistantPresented = true
+                }
+                .padding(.trailing, 24)
+                .padding(.bottom, 22)
             }
-            .padding(.trailing, 14)
-            .padding(.vertical, 12)
+            .padding(.top, 8)
+            .padding(.trailing, 8)
+            .padding(.bottom, 8)
         }
         .background(windowBackground.ignoresSafeArea())
-        .preferredColorScheme(.light)
-        .background(WindowChromeConfigurator().frame(width: 0, height: 0))
-        .animation(.snappy(duration: 0.18), value: isSidebarVisible)
-        .overlay(alignment: .bottomTrailing) {
-            AssistantButton {
-                isAssistantPresented = true
-            }
-            .padding(.trailing, 26)
-            .padding(.bottom, 22)
-        }
         .sheet(isPresented: $isAssistantPresented) {
             placeholderSheet(
                 title: "AI Assistant",
@@ -106,8 +91,8 @@ struct MacRootView: View {
     @ViewBuilder
     private func contentView(for selection: MacPrimarySelection) -> some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
-                Spacer(minLength: 8)
+            VStack(alignment: .leading, spacing: 16) {
+                Spacer(minLength: 20)
 
                 switch selection {
                 case .home:
@@ -120,53 +105,51 @@ struct MacRootView: View {
                     placeholderCard(title: "Calendar View")
                 }
 
-                Spacer(minLength: 12)
+                Spacer(minLength: 0)
             }
-            .padding(.horizontal, 28)
-            .padding(.vertical, 24)
+            .padding(24)
             .frame(maxWidth: .infinity, minHeight: 560, alignment: .topLeading)
         }
-        .scrollIndicators(.hidden)
+        .scrollIndicators(.visible)
     }
 
     private func placeholderCard(title: String) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(title)
-                .font(.system(size: 26, weight: .semibold))
-                .foregroundStyle(Color.black.opacity(0.9))
+                .font(.system(size: 28, weight: .semibold))
+                .foregroundStyle(.primary)
 
             Text("Feature content will plug into this shell once macOS business logic is added.")
                 .font(.system(size: 14))
-                .foregroundStyle(Color.black.opacity(0.5))
+                .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, minHeight: 220, alignment: .leading)
         .padding(28)
         .background(
             RoundedRectangle(cornerRadius: 28, style: .continuous)
-                .fill(Color.white)
+                .fill(.white.opacity(0.72))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 28, style: .continuous)
-                .stroke(Color.black.opacity(0.04), lineWidth: 1)
+                .stroke(.white.opacity(0.65), lineWidth: 1)
         )
-        .shadow(color: Color.black.opacity(0.06), radius: 24, x: 0, y: 8)
     }
 
     private var detailBackground: some View {
-        RoundedRectangle(cornerRadius: 28, style: .continuous)
-            .fill(Color.white)
+        RoundedRectangle(cornerRadius: 30, style: .continuous)
+            .fill(.white.opacity(0.84))
             .overlay(
-                RoundedRectangle(cornerRadius: 28, style: .continuous)
-                    .stroke(Color.black.opacity(0.05), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 30, style: .continuous)
+                    .stroke(.white.opacity(0.75), lineWidth: 1)
             )
-            .shadow(color: Color.black.opacity(0.06), radius: 28, x: 0, y: 10)
+            .shadow(color: .black.opacity(0.09), radius: 36, x: 0, y: 18)
     }
 
     private var windowBackground: some View {
         LinearGradient(
             colors: [
-                Color(red: 0.972, green: 0.969, blue: 0.961),
-                Color(red: 0.965, green: 0.963, blue: 0.955)
+                Color(nsColor: .windowBackgroundColor),
+                Color.white.opacity(0.94)
             ],
             startPoint: .topLeading,
             endPoint: .bottomTrailing
@@ -177,38 +160,15 @@ struct MacRootView: View {
         VStack(alignment: .leading, spacing: 16) {
             Text(title)
                 .font(.system(size: 22, weight: .semibold))
-                .foregroundStyle(Color.black.opacity(0.9))
 
             Text(description)
                 .font(.system(size: 14))
-                .foregroundStyle(Color.black.opacity(0.55))
+                .foregroundStyle(.secondary)
 
             Spacer()
         }
         .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Color.white)
-    }
-}
-
-private struct WindowChromeConfigurator: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView(frame: .zero)
-        DispatchQueue.main.async {
-            guard let window = view.window else { return }
-            window.title = ""
-            window.titleVisibility = .hidden
-            window.titlebarAppearsTransparent = true
-        }
-        return view
-    }
-
-    func updateNSView(_ nsView: NSView, context: Context) {
-        DispatchQueue.main.async {
-            guard let window = nsView.window else { return }
-            window.title = ""
-            window.titleVisibility = .hidden
-            window.titlebarAppearsTransparent = true
-        }
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 }
