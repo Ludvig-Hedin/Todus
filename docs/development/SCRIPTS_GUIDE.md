@@ -10,9 +10,11 @@ pnpm ios:build:preview
 pnpm ios:build:production
 ```
 
-### macOS Desktop Wrapper (`apps/macos`)
+### macOS Native App (`apps/macos`)
 ```bash
-pnpm macos
+cd apps/macos
+xcodegen generate
+open TodusMac.xcodeproj
 ```
 
 ### Web + Backend
@@ -58,7 +60,7 @@ pnpm format           # Format code
 
 ## Tech Stack
 
-- **Frontend**: Next.js, React 19, TypeScript, TailwindCSS
+- **Frontend**: React Router v7, React 19, TypeScript, TailwindCSS
 - **Backend**: Node.js, tRPC, Drizzle ORM
 - **Database**: PostgreSQL
 - **Package Manager**: pnpm
@@ -77,4 +79,4 @@ pnpm format           # Format code
 - **NEVER run project-wide `pnpm check/lint/format`** - only use on specific files
 - Use `pnpm nizzy sync` after environment changes
 - Run `pnpm db:push` after schema changes
-- Always run `pnpm check` before committing
+- Run targeted checks only for files you changed before committing

@@ -1,5 +1,45 @@
 # Project Changelog
 
+## [2026-03-29] Feature — Native macOS shell scaffold replaces Electron wrapper
+
+### Summary
+Replaced the legacy Electron-based `apps/macos` wrapper with a standalone SwiftUI macOS app scaffold driven by XcodeGen.
+
+This first native macOS pass is intentionally shell-only:
+
+- added a single-window `TodusMac` app
+- added `NavigationSplitView` shell layout with a custom sidebar
+- added placeholder panes for Home, Tasks, Email, and Calendar
+- added a SwiftUI content header with notification, menu, edit, and search affordances
+- added a floating Assistant button with a placeholder sheet
+- added placeholder account menu and Settings modal
+- updated canonical docs to describe macOS as a native SwiftUI target
+- updated macOS status tracking to reflect shell completion and the remaining Xcode license blocker for CLI build verification
+
+**Files changed:**
+- `apps/macos/README.md`
+- `apps/macos/project.yml`
+- `apps/macos/TodusMac/App/TodusMacApp.swift`
+- `apps/macos/TodusMac/App/MacRootView.swift`
+- `apps/macos/TodusMac/App/MacSidebarView.swift`
+- `apps/macos/TodusMac/App/MacContentHeaderView.swift`
+- `apps/macos/TodusMac/App/AssistantButton.swift`
+- `apps/macos/TodusMac/Resources/Info.plist`
+- `AGENTS.md`
+- `APPS_ARCHITECTURE.md`
+- `docs/architecture/README.md`
+- `docs/architecture/APPS_ARCHITECTURE.md`
+- `docs/development/SCRIPTS_GUIDE.md`
+- `docs/testflight-checklist.md`
+- `docs/guides/AGENTS.md`
+- `apps/ios/Todus/status_macos.md`
+
+## [2026-03-29] Fix — Restore GenerativeUI files to Xcode build sources
+
+ChatUISpec.swift, ChatUISpecView.swift, and CardViews.swift were removed from the Xcode project (PBXBuildFile, PBXFileReference, PBXGroup, PBXSourcesBuildPhase) during prior cleanup of the GenerativeUI subdirectory, but the files still exist at Features/AI/ and are actively referenced by AIChatMessage.swift, AIChatView.swift, and AIChatService.swift. Re-added all three files to the project to fix "Cannot find type" build errors.
+
+**Files changed:** `apps/ios/Todus/Todus.xcodeproj/project.pbxproj`
+
 ## [2026-03-29] Fix — iOS Xcode build environment reset for CalendarKit registration hangs
 
 ### Summary

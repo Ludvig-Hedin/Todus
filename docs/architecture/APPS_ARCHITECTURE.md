@@ -3,18 +3,18 @@
 ## Canonical Runtime Targets
 
 ### iPhone
-- App: `apps/ios`
-- Stack: Expo + React Native + Expo Router
+- App: `apps/ios/Todus`
+- Stack: Native SwiftUI (Xcode, Swift 6)
 - Status: active, only supported iOS implementation
 
 ### Desktop (macOS)
 - App: `apps/macos`
-- Stack: Electron WebView wrapper
-- Status: active, only supported desktop wrapper
+- Stack: Native SwiftUI shell scaffold
+- Status: active, canonical desktop implementation
 
 ### Web
 - App: `apps/mail`
-- Stack: Next.js
+- Stack: React Router v7 + Vite
 - Status: active
 
 ### Backend
@@ -35,7 +35,7 @@ Archived apps are for reference only and are not part of the active app surface.
 ## Build Entry Points
 
 - iOS: `pnpm ios`, `pnpm ios:simulator`, `pnpm ios:build:*`
-- macOS: `pnpm macos`
+- macOS: `cd apps/macos && xcodegen generate && open TodusMac.xcodeproj`
 - Web/backend: standard `pnpm dev`, `pnpm deploy:*`
 
 `native:*` root scripts were removed to enforce a single active iOS and desktop path.

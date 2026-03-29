@@ -2,8 +2,8 @@
 
 ## Active app targets
 
-- iOS app: `apps/ios` (Expo/EAS)
-- macOS desktop wrapper: `apps/macos` (Electron)
+- iOS app: `apps/ios/Todus` (SwiftUI/Xcode)
+- macOS app: `apps/macos` (SwiftUI/Xcode)
 
 Archived apps under `apps/archived/*` are not part of release flow.
 
@@ -24,14 +24,11 @@ Archived apps under `apps/archived/*` are not part of release flow.
    - `BETTER_AUTH_URL=https://api.todus.app`
    - `COOKIE_DOMAIN=todus.app`
 
-## 2. iOS TestFlight release (Expo/EAS)
+## 2. iOS TestFlight release (native SwiftUI)
 
 1. From repo root:
 
-```bash
-pnpm ios:build:production
-pnpm --filter=@zero/ios submit:ios
-```
+Open `apps/ios/Todus/Todus.xcodeproj` in Xcode, archive the `Todus` scheme, and upload the build via Organizer.
 
 2. In App Store Connect TestFlight tab:
    - wait for build processing
@@ -40,7 +37,7 @@ pnpm --filter=@zero/ios submit:ios
 
 ## 3. macOS release note
 
-`apps/macos` is an Electron wrapper and is currently distributed separately from the iOS TestFlight flow.
+`apps/macos` is now a native SwiftUI macOS app. The current shell scaffold is Xcode-run only and is not yet part of a production TestFlight flow.
 
 ## 4. Pre-invite smoke test
 

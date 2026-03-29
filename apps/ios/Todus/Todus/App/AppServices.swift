@@ -121,6 +121,10 @@ final class AppServices {
     /// MainTabView observes this and resets it to nil after switching.
     var navigateTo: AppTab? = nil
 
+    /// Set by child views (e.g. HomeView) to request opening CreateSheet with a specific type.
+    /// MainTabView observes this and resets it to nil after presenting.
+    var requestCreateSheet: CreateItemType? = nil
+
     /// Set true to trigger the global email compose sheet from MainTabView.
     var showsComposeEmail = false
     var composeEmailSeedBody: String? = nil

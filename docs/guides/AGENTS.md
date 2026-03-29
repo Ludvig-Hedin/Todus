@@ -1,15 +1,15 @@
 # Agent Configuration for Todus
 
-Todus is an open-source AI email solution built with a modern TypeScript/Next.js stack in a monorepo setup.
+Todus is a unified productivity app built in a pnpm monorepo with native Apple clients, a web client, and a backend API.
 
 ## Project Structure
 
 This is a pnpm workspace monorepo with the following structure:
 
-- `apps/mail/` - Next.js frontend email client
+- `apps/mail/` - React Router + Vite frontend
 - `apps/server/` - Backend server
-- `apps/ios/` - iOS mobile app
-- `apps/macos/` - macOS desktop wrapper
+- `apps/ios/Todus/` - iOS SwiftUI app
+- `apps/macos/` - macOS SwiftUI app
 - `packages/cli/` - CLI tools (`nizzy` command)
 - `packages/design-tokens/` - Design system
 - `packages/eslint-config/` - Shared ESLint configuration
@@ -70,7 +70,7 @@ This is a pnpm workspace monorepo with the following structure:
 
 ## Common Workflow
 
-1. Always run `pnpm check` before committing
+1. Run targeted checks only for files you changed before committing
 2. Use `pnpm nizzy sync` after environment variable changes
 3. Run `pnpm db:push` after schema changes
 4. Use `pnpm go` for quick development startup

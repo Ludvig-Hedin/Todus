@@ -13,7 +13,7 @@ Todus is a unified productivity app — email, calendar, tasks, and AI assistant
 | **Web** | `apps/mail` | React Router v7 + Vite + Cloudflare Workers | Main web product at todus.app |
 | **Backend** | `apps/server` | Cloudflare Worker (Hono + tRPC + Durable Objects) | Auth, mail APIs, AI, task sync |
 | **iOS** | `apps/ios/Todus` | Native SwiftUI (Xcode, Swift 6) | iPhone app |
-| **macOS** | `apps/macos` | Electron WebView | Desktop shell wrapping `apps/mail` |
+| **macOS** | `apps/macos` | Native SwiftUI (Xcode, Swift 6) | Desktop shell scaffold with sidebar navigation |
 
 **Do not use** anything under `apps/archived/` — reference-only legacy code.
 
@@ -27,7 +27,7 @@ pnpm go               # Start DB + all apps
 pnpm dev              # Start web + backend dev servers
 pnpm docker:db:up     # Start PostgreSQL in Docker
 pnpm ios:simulator    # iOS simulator
-pnpm macos            # macOS Electron app
+cd apps/macos && xcodegen generate && open TodusMac.xcodeproj  # macOS native app
 
 # Database (Drizzle ORM)
 pnpm db:generate      # Generate migration from schema changes

@@ -29,6 +29,7 @@ targets:
       - path: Todus
         excludes:
           - "**/*.md"
+          - "**/archived/**"
     resources:
       - path: Todus/Resources/Assets.xcassets
       - path: Todus/Resources/Info.plist

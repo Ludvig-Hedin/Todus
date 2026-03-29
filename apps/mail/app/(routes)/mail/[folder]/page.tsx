@@ -53,7 +53,7 @@ export default function MailPage() {
       if (!labelExists) {
         const timer = setTimeout(() => {
           navigate('/mail/inbox');
-        }, 2000);
+        }, 5000);
         return () => clearTimeout(timer);
       }
     } else {
@@ -63,11 +63,17 @@ export default function MailPage() {
 
   if (!isLabelValid) {
     return (
-      <div className="flex h-screen w-full flex-col items-center justify-center">
+      <div className="flex h-screen w-full flex-col items-center justify-center gap-4">
         <h2 className="text-xl font-semibold">Folder not found</h2>
         <p className="text-muted-foreground mt-2">
           The folder you're looking for doesn't exist. Redirecting to inbox...
         </p>
+        <button
+          onClick={() => navigate('/mail/inbox')}
+          className="text-sm font-medium text-blue-500 hover:text-blue-600 underline underline-offset-4"
+        >
+          Go to Inbox now
+        </button>
       </div>
     );
   }

@@ -91,7 +91,7 @@ struct HomeView: View {
                 title: "Today's Events",
                 icon: "calendar",
                 count: todaysEvents.count,
-                onAdd: { services.navigateTo = .calendar }
+                onAdd: { services.requestCreateSheet = .event }
             )
 
             if todaysEvents.isEmpty {
@@ -169,7 +169,7 @@ struct HomeView: View {
                 title: "Due Today",
                 icon: "checklist",
                 count: tasksDueToday.count,
-                onAdd: { services.navigateTo = .tasks }
+                onAdd: { services.requestCreateSheet = .task }
             )
 
             if tasksDueToday.isEmpty {

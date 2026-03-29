@@ -303,13 +303,27 @@ struct AuthView: View {
             .padding(.top, 20)
 
             // Terms / Privacy pushed further down with generous top padding
+            // Links open the respective legal pages on todus.app
             HStack(spacing: 8) {
-                Text("Terms of Service")
+                Button {
+                    if let url = URL(string: "https://todus.app/terms") {
+                        UIApplication.shared.open(url)
+                    }
+                } label: {
+                    Text("Terms of Service")
+                }
                 Circle().fill(.secondary.opacity(0.5)).frame(width: 3, height: 3)
-                Text("Privacy Policy")
+                Button {
+                    if let url = URL(string: "https://todus.app/privacy") {
+                        UIApplication.shared.open(url)
+                    }
+                } label: {
+                    Text("Privacy Policy")
+                }
             }
             .font(.system(size: 13, weight: .regular))
             .foregroundStyle(.secondary.opacity(0.7))
+            .buttonStyle(.plain)
             .padding(.top, 28)
         }
     }

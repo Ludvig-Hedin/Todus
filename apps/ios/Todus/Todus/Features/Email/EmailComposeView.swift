@@ -10,6 +10,7 @@ struct EmailComposeView: View {
     @State private var draft: EmailDraft
     @State private var bodyMentions: [RichInputMentionRef] = []
     @State private var eventMentions: [RichInputMentionRef] = []
+    @State private var showSendError = false
     @FocusState private var focusedField: Field?
 
     private enum Field: Hashable {
@@ -98,7 +99,11 @@ struct EmailComposeView: View {
                     Button {
                         Task {
                             let success = await emailService.sendEmail(draft)
-                            if success { dismiss() }
+                            if success {
+                                dismiss()
+                            } else {
+                                showSendError = true
+                            }
                         }
                     } label: {
                         if emailService.isSending {
@@ -111,6 +116,12 @@ struct EmailComposeView: View {
                     }
                     .disabled(!canSend || emailService.isSending)
                 }
+            }
+            // Alert shown when email send fails — gives the user feedback instead of silently failing
+            .alert("Failed to send", isPresented: $showSendError) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(emailService.errorMessage ?? "Please check your connection and try again.")
             }
             .navigationTitle(draft.replyToThreadId != nil ? "Reply" : "New Email")
             .navigationBarTitleDisplayMode(.inline)

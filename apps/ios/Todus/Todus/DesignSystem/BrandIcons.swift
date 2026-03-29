@@ -18,7 +18,8 @@ struct AppIconContainer<Icon: View>: View {
 
             icon()
                 // 0.62 gives ~19% breathing room on each side — icons feel airy, not cramped
-                .frame(width: size * 0.62, height: size * 0.62)
+                .frame(width: size * 0.62)
+                .aspectRatio(contentMode: .fit)
         }
         .frame(width: size, height: size)
     }
@@ -97,6 +98,7 @@ struct GmailLogo: View {
                              control2: c(52, 43.58))
             ctx.fill(darkRed, with: .color(Color(red: 0.773, green: 0.133, blue: 0.122)))
         }
+        .aspectRatio(88 / 66, contentMode: .fit)
     }
 }
 

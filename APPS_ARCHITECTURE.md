@@ -23,8 +23,8 @@
 
 ### Desktop (macOS)
 - **App:** `apps/macos`
-- **Stack:** Electron WebView wrapping `apps/mail`
-- **Status:** Active
+- **Stack:** Native SwiftUI (Xcode, Swift 6, macOS 15+)
+- **Status:** Active — shell scaffold with sidebar navigation and placeholder panes
 
 ## Archived Implementations
 
@@ -39,6 +39,6 @@ Legacy apps moved to `apps/archived/` for reference only:
 ## Build Entry Points
 
 - **iOS:** Open `apps/ios/Todus/Todus.xcodeproj` in Xcode, or `pnpm ios:simulator`
-- **macOS:** `pnpm macos`
+- **macOS:** `cd apps/macos && xcodegen generate && open TodusMac.xcodeproj`
 - **Web + Backend:** `pnpm dev` (Turborepo), `pnpm deploy:frontend`, `pnpm deploy:backend`
 - **Database:** `pnpm docker:db:up`, `pnpm db:generate`, `pnpm db:migrate`

@@ -1,26 +1,46 @@
-# Todus macOS WebView App
+# Todus macOS
 
-This is a lightweight Electron wrapper around your deployed Todus frontend.
+Native SwiftUI macOS shell scaffold for Todus.
+
+## Current Scope
+
+This app currently provides:
+
+- a single main window
+- sidebar navigation shell
+- placeholder content panes for Home, Tasks, Email, and Calendar
+- a floating Assistant entry point
+- placeholder Settings and account actions
+
+No backend, shared services, or production business logic are connected yet.
 
 ## Run
 
 ```bash
 cd /Users/ludvighedin/Programming/personal/mail/apps/macos
-pnpm dev
+xcodegen generate
+open TodusMac.xcodeproj
 ```
 
-## Defaults
+Then run the `TodusMac` scheme from Xcode.
 
-- Web: `https://todus-production.ludvighedin15.workers.dev`
-- Backend/Auth: `https://todus-server-v1-production.ludvighedin15.workers.dev`
-- Entry: `/mail/inbox`
-- App name: `Todus`
+## Structure
 
-## Override
-
-```bash
-EXPO_PUBLIC_WEB_URL=https://your-domain.com pnpm dev
-EXPO_PUBLIC_BACKEND_URL=https://your-backend.workers.dev pnpm dev
-EXPO_PUBLIC_APP_ENTRY_URL=https://your-domain.com/mail/inbox pnpm dev
-EXPO_PUBLIC_APP_NAME=YourAppName pnpm dev
+```text
+apps/macos/
+  project.yml
+  TodusMac/
+    App/
+      TodusMacApp.swift
+      MacRootView.swift
+      MacSidebarView.swift
+      MacContentHeaderView.swift
+      AssistantButton.swift
+    Resources/
+      Info.plist
 ```
+
+## Notes
+
+- `pnpm macos` still points to the retired Electron flow and is intentionally not updated in this pass.
+- If Xcode command-line tools are blocked by a local license prompt, run `sudo xcodebuild -license` once before building.

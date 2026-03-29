@@ -10,6 +10,9 @@
 		0B9C47CA469C398346609253 /* TaskRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B19153FC3B672DD3354CCD7 /* TaskRecord.swift */; };
 		0D07B92D45DF2600E81ADCD7 /* LocalTaskParsingServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBCCEB4BDF41611906248F96 /* LocalTaskParsingServiceTests.swift */; };
 		0DD27FD07846B19C5470685D /* GeminiLiveProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3422CECD506994C3DF4DD70 /* GeminiLiveProvider.swift */; };
+		11A1B2C3D4E5F60718293A4B /* ChatUISpec.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22B2C3D4E5F60718293A4B5C /* ChatUISpec.swift */; };
+		11B2C3D4E5F60718293A4B5C /* ChatUISpecView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33C3D4E5F60718293A4B5C6D /* ChatUISpecView.swift */; };
+		11C3D4E5F60718293A4B5C6D /* CardViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44D4E5F60718293A4B5C6D7E /* CardViews.swift */; };
 		136D6034802C294222BCF791 /* BrandIcons.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B6043E7BECE88EF6B7E8317 /* BrandIcons.swift */; };
 		13C07A65B70DD7813EF6F68D /* AppTaskPriority.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9A0A9C59C8274A248E7F19B /* AppTaskPriority.swift */; };
 		159C746E1BF52003FA2B909F /* SyncState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1229E9C510A1286935951ACA /* SyncState.swift */; };
@@ -123,6 +126,9 @@
 		11622A2189A970DECE5C542C /* NotificationCenterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationCenterView.swift; sourceTree = "<group>"; };
 		11BAF286D87FA8A349E6B439 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		1229E9C510A1286935951ACA /* SyncState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncState.swift; sourceTree = "<group>"; };
+		22B2C3D4E5F60718293A4B5C /* ChatUISpec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatUISpec.swift; sourceTree = "<group>"; };
+		33C3D4E5F60718293A4B5C6D /* ChatUISpecView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatUISpecView.swift; sourceTree = "<group>"; };
+		44D4E5F60718293A4B5C6D7E /* CardViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CardViews.swift; sourceTree = "<group>"; };
 		1497E94FCA7FCF70C1DED544 /* CaptureComposer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureComposer.swift; sourceTree = "<group>"; };
 		238C9C52C404130BE9D83559 /* AuthSessionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthSessionStore.swift; sourceTree = "<group>"; };
 		2CAF89510E1151AB2BDBE9F3 /* ParseState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParseState.swift; sourceTree = "<group>"; };
@@ -349,6 +355,9 @@
 			children = (
 				A5BF4AE0C22D8C0028338805 /* AIChatMessage.swift */,
 				056835622DB127253111B077 /* AIChatView.swift */,
+				44D4E5F60718293A4B5C6D7E /* CardViews.swift */,
+				22B2C3D4E5F60718293A4B5C /* ChatUISpec.swift */,
+				33C3D4E5F60718293A4B5C6D /* ChatUISpecView.swift */,
 			);
 			path = AI;
 			sourceTree = "<group>";
@@ -711,6 +720,9 @@
 				F51C903DF28FFDF8819B5A30 /* AIChatMessage.swift in Sources */,
 				BCFB490AAA247E656CE2CD0F /* AIChatService.swift in Sources */,
 				1687702F789BCA6E6EF8688E /* AIChatView.swift in Sources */,
+				11C3D4E5F60718293A4B5C6D /* CardViews.swift in Sources */,
+				11A1B2C3D4E5F60718293A4B /* ChatUISpec.swift in Sources */,
+				11B2C3D4E5F60718293A4B5C /* ChatUISpecView.swift in Sources */,
 				E0582B3CE8B98C1FC8BA2348 /* AppConfiguration.swift in Sources */,
 				D5A51C9ECF92BA1D19A2634A /* AppLogger.swift in Sources */,
 				D7D04E0746F32DCC16548E84 /* AppServices.swift in Sources */,

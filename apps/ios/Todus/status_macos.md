@@ -1,8 +1,8 @@
 # Todus macOS — Status Tracker
 
-## Current Phase: Not Started
+## Current Phase: Shell Scaffold Complete
 
-macOS development begins after iOS MVP is stable and on TestFlight.
+Native macOS shell scaffolding is now in place under `apps/macos` as a standalone SwiftUI app.
 
 ---
 
@@ -18,24 +18,24 @@ macOS development begins after iOS MVP is stable and on TestFlight.
 
 | Component | Status | Notes |
 |-----------|--------|-------|
-| macOS target added | ⬜ Not started | |
-| NavigationSplitView layout | ⬜ Not started | Sidebar-based nav for macOS |
-| Toolbar adaptation | ⬜ Not started | Replace tab bar with toolbar |
+| macOS target added | ✅ Complete | Standalone XcodeGen project in `apps/macos` |
+| NavigationSplitView layout | ✅ Complete | Sidebar-based shell scaffold |
+| Toolbar adaptation | ✅ Complete | Custom SwiftUI content header |
 | CalendarKit macOS | ⬜ Not started | May need replacement |
 | Platform conditionals | ⬜ Not started | `#if os(macOS)` where needed |
-| Compiles on macOS | ⬜ Not started | |
+| Compiles on macOS | 🟨 Pending local license | `xcodebuild` blocked until Xcode license is accepted |
 
 ## Feature Parity
 
 | Feature | iOS | macOS | Notes |
 |---------|-----|-------|-------|
-| Tasks | ✅ | ⬜ | |
-| Calendar | ✅ | ⬜ | CalendarKit is iOS-only |
-| Email | ✅ | ⬜ | |
-| AI Chat | ✅ | ⬜ | |
-| Home | ✅ | ⬜ | |
-| Auth | ✅ | ⬜ | Apple Sign In works on macOS |
-| Settings | ✅ | ⬜ | |
+| Tasks | ✅ | 🟨 Shell only | Placeholder view only |
+| Calendar | ✅ | 🟨 Shell only | Placeholder view only |
+| Email | ✅ | 🟨 Shell only | Placeholder view only |
+| AI Chat | ✅ | 🟨 Entry only | Assistant sheet placeholder |
+| Home | ✅ | 🟨 Shell only | Placeholder view only |
+| Auth | ✅ | ⬜ | Not connected on macOS yet |
+| Settings | ✅ | 🟨 Placeholder | Modal placeholder only |
 
 ## macOS-Specific Features
 
@@ -43,7 +43,7 @@ macOS development begins after iOS MVP is stable and on TestFlight.
 |---------|--------|-------|
 | Keyboard shortcuts | ⬜ Not started | |
 | Menu bar | ⬜ Not started | |
-| Multi-window | ⬜ Not started | |
+| Multi-window | ⬜ Not started | Single window only in this pass |
 | Drag and drop | ⬜ Not started | |
 | Touch Bar | ⬜ Not started | If applicable |
 
@@ -53,8 +53,8 @@ macOS development begins after iOS MVP is stable and on TestFlight.
 
 | Issue | Impact | Resolution |
 |-------|--------|------------|
-| iOS MVP not complete | Can't start macOS | Complete iOS phases 0-6 first |
+| Xcode license not accepted locally | Blocks CLI build verification | Run `sudo xcodebuild -license` once, then build the `TodusMac` scheme |
 
 ---
 
-## Last Updated: 2026-03-26
+## Last Updated: 2026-03-29

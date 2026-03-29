@@ -11,7 +11,7 @@
 | Project structure | ✅ Done | All dirs created, files copied |
 | Xcode project | ✅ Done | XcodeGen project.yml → .xcodeproj |
 | CalendarKit SPM | ✅ Done | richardtop/CalendarKit v1.1.7 |
-| Compiles | ✅ Done | BUILD SUCCEEDED (generic/platform=iOS) |
+| Compiles | ✅ Done | Shell builds succeed; Xcode environment reset completed after custom build path + build.db corruption issues |
 | Runs on device | ✅ Done | Installs and launches on physical iPhone |
 
 ## Auth Status
@@ -54,6 +54,8 @@
 |---------|--------|-------|
 | EmailService | ✅ Code written | TRPC wrapper for all email ops |
 | Connect flow | ✅ Code written | EmailConnectView.swift |
+| Gmail icon sizing | ✅ Fixed | Shared Gmail icon now preserves SVG aspect ratio in onboarding and button usage |
+| Fresh install auth reset | ✅ Fixed | First launch clears stale Keychain auth so reinstall shows login again |
 | Inbox list | ✅ Code written | EmailInboxView.swift with List + swipe |
 | Search | ✅ Code written | Client-side filter + server search on submit |
 | Swipe actions | ✅ Code written | Archive, delete, read/unread, star |
@@ -120,6 +122,18 @@
 | DB migration not run | Tasks won't persist on backend | Run `drizzle-kit push` |
 | TaskService not yet built | Tasks still sync via Supabase | Build TaskService to replace SupabaseSyncService |
 
+## Build Notes
+
+- March 29, 2026: Xcode GUI hangs around `RegisterExecutionPolicyException ... CalendarKit.o` were traced to a local Xcode environment problem, not a CalendarKit source dependency problem.
+- Root cause: Xcode had custom build output paths configured (`~/XcodeDerivedData/Todus` and `~/Desktop/Build/Intermediates.noindex`). After manual cache cleanup, those non-default paths interacted badly with execution-policy registration and `syspolicyd`.
+- Follow-up issue exposed by a truly clean rebuild: the generated Xcode project was stale and missed `Features/AI/ChatUISpec.swift`, `ChatUISpecView.swift`, and `CardViews.swift`, and also included `Navigation/archived/CustomTabBar.swift`.
+- Fixes applied:
+  - reset Xcode build location defaults back to standard DerivedData
+  - cleared Todus DerivedData and SwiftPM caches, then re-resolved packages
+  - regenerated `Todus.xcodeproj` from `project.yml`
+  - excluded `**/archived/**` from the iOS app target source list
+- Manual note: `~/Desktop/Build` still exists because Terminal lacked permission to remove it, but Xcode is no longer configured to use it.
+
 ---
 
-## Last Updated: 2026-03-26
+## Last Updated: 2026-03-29

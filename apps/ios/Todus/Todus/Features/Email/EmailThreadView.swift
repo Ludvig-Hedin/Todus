@@ -150,6 +150,10 @@ struct EmailThreadView: View {
                 .buttonStyle(LiquidGlassButtonStyle(cornerRadius: 10))
                 .minTouchTarget()
 
+                // Visual divider between non-destructive and destructive action groups
+                Divider()
+                    .frame(height: 20)
+
                 // Archive
                 Button {
                     Task { await emailService.archiveThreads(ids: [threadId]) }

@@ -6,9 +6,9 @@ This folder contains comprehensive system design and technical architecture docu
 
 ### APPS_ARCHITECTURE.md
 High-level overview of all Todus applications and runtime targets:
-- **iPhone** - Expo + React Native (apps/ios)
-- **Desktop** - Electron WebView wrapper (apps/macos)
-- **Web** - Next.js application (apps/mail)
+- **iPhone** - Native SwiftUI app (apps/ios/Todus)
+- **Desktop** - Native SwiftUI macOS app (apps/macos)
+- **Web** - React Router + Vite application (apps/mail)
 - **Backend** - Cloudflare Worker API (apps/server)
 
 Includes information about archived implementations and build entry points.
@@ -24,9 +24,9 @@ Detailed structure and organization of active applications with:
 
 | App | Type | Command | Purpose |
 |-----|------|---------|---------|
-| iOS | React Native | `pnpm ios*` | Primary mobile app |
-| macOS | Electron | `pnpm macos` | Desktop wrapper |
-| Web | Next.js | `pnpm dev` | Main web app |
+| iOS | SwiftUI | `pnpm ios:simulator` | Primary mobile app |
+| macOS | SwiftUI | `cd apps/macos && xcodegen generate && open TodusMac.xcodeproj` | Desktop shell |
+| Web | React Router + Vite | `pnpm dev` | Main web app |
 | Backend | Cloudflare Worker | `pnpm deploy:backend` | API & auth |
 
 ## 🚫 Important

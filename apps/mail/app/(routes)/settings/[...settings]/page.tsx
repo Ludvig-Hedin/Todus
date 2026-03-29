@@ -2,6 +2,7 @@ import NotificationsPage from '../notifications/page';
 import ConnectionsPage from '../connections/page';
 import AppearancePage from '../appearance/page';
 import ShortcutsPage from '../shortcuts/page';
+import SignaturesPage from '../signatures/page';
 import SecurityPage from '../security/page';
 import { m } from '@/paraglide/messages';
 import GeneralPage from '../general/page';
@@ -16,6 +17,7 @@ const settingsPages: Record<string, React.ComponentType> = {
   shortcuts: ShortcutsPage,
   notifications: NotificationsPage,
   labels: LabelsPage,
+  signatures: SignaturesPage,
 };
 
 export default function SettingsPage() {
