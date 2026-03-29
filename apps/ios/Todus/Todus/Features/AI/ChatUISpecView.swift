@@ -13,72 +13,74 @@ struct ChatUISpecView: View {
         renderElement(id: spec.root)
     }
 
-    @ViewBuilder
-    private func renderElement(id: String) -> some View {
+    private func renderElement(id: String) -> AnyView {
         if let element = spec.elements[id] {
             elementView(for: element)
         } else {
             // Element ID not found in spec — render nothing
-            EmptyView()
+            AnyView(EmptyView())
         }
     }
 
-    @ViewBuilder
-    private func elementView(for element: UIElement) -> some View {
+    private func elementView(for element: UIElement) -> AnyView {
         switch element.type {
         // Domain cards
         case "EmailCard":
-            EmailCardView(props: element.props, onAction: onAction)
+            return AnyView(EmailCardView(props: element.props, onAction: onAction))
         case "TaskCard":
-            TaskCardView(props: element.props, onAction: onAction)
+            return AnyView(TaskCardView(props: element.props, onAction: onAction))
         case "CalendarEventCard":
-            CalendarEventCardView(props: element.props, onAction: onAction)
+            return AnyView(CalendarEventCardView(props: element.props, onAction: onAction))
         case "NoteCard":
-            NoteCardView(props: element.props)
+            return AnyView(NoteCardView(props: element.props))
         case "DraftCard":
-            DraftCardView(props: element.props, onAction: onAction)
+            return AnyView(DraftCardView(props: element.props, onAction: onAction))
         case "LabelCard":
-            LabelCardView(props: element.props)
+            return AnyView(LabelCardView(props: element.props))
         case "ContactCard":
-            ContactCardView(props: element.props)
+            return AnyView(ContactCardView(props: element.props))
         case "SearchResultCard":
-            SearchResultCardView(props: element.props)
+            return AnyView(SearchResultCardView(props: element.props))
 
         // Layout components
         case "Stack":
-            StackView(props: element.props) {
+            return AnyView(StackView(props: element.props) {
                 if let children = element.children {
                     ForEach(children, id: \.self) { childId in
                         renderElement(id: childId)
                     }
                 }
-            }
+            })
         case "Card":
-            CardContainerView(props: element.props) {
+            return AnyView(CardContainerView(props: element.props) {
                 if let children = element.children {
                     ForEach(children, id: \.self) { childId in
                         renderElement(id: childId)
                     }
                 }
-            }
+            })
         case "Text":
-            TextElementView(props: element.props)
+            return AnyView(TextElementView(props: element.props))
         case "Button":
-            ButtonElementView(props: element.props, onAction: onAction)
+            return AnyView(ButtonElementView(props: element.props, onAction: onAction))
         case "Badge":
-            BadgeElementView(props: element.props)
+            return AnyView(BadgeElementView(props: element.props))
         case "Divider":
-            Divider()
-                .padding(.vertical, 2)
+            return AnyView(
+                Divider()
+                    .padding(.vertical, 2)
+            )
 
         default:
             // Unknown component type — fail gracefully
             #if DEBUG
-            Text("Unknown: \(element.type)")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+            return AnyView(
+                Text("Unknown: \(element.type)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            )
             #else
-            EmptyView()
+            return AnyView(EmptyView())
             #endif
         }
     }

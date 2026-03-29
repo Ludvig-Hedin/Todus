@@ -11,7 +11,7 @@
 | Project structure | ✅ Done | All dirs created, files copied |
 | Xcode project | ✅ Done | XcodeGen project.yml → .xcodeproj |
 | CalendarKit SPM | ✅ Done | richardtop/CalendarKit v1.1.7 |
-| Compiles | ✅ Done | Shell builds succeed; Xcode environment reset completed after custom build path + build.db corruption issues |
+| Compiles | ✅ Done | Clean Xcode build now succeeds after fixing recursive SwiftUI types in `ChatUISpecView` and Swift 6 sendability in `CalendarViewController` / `EKWrapper` |
 | Runs on device | ✅ Done | Installs and launches on physical iPhone |
 
 ## Auth Status
@@ -124,6 +124,7 @@
 
 ## Build Notes
 
+- March 29, 2026: fixed the `ChatUISpecView` opaque-type recursion by switching the recursive renderer to `AnyView`, then marked `EKWrapper` as `@unchecked Sendable` so CalendarKit event wrappers can cross the background-fetch to main-thread boundary in Swift 6 without a data-race compile error.
 - March 29, 2026: Xcode GUI hangs around `RegisterExecutionPolicyException ... CalendarKit.o` were traced to a local Xcode environment problem, not a CalendarKit source dependency problem.
 - Root cause: Xcode had custom build output paths configured (`~/XcodeDerivedData/Todus` and `~/Desktop/Build/Intermediates.noindex`). After manual cache cleanup, those non-default paths interacted badly with execution-policy registration and `syspolicyd`.
 - Follow-up issue exposed by a truly clean rebuild: the generated Xcode project was stale and missed `Features/AI/ChatUISpec.swift`, `ChatUISpecView.swift`, and `CardViews.swift`, and also included `Navigation/archived/CustomTabBar.swift`.
