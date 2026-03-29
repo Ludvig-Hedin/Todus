@@ -5,7 +5,7 @@ import EventKit
 
 // MARK: - AIChatService
 
-/// Manages the AI chat conversation, streaming responses via the backend /ai/chat SSE endpoint.
+/// Manages the AI chat conversation, streaming responses via the backend /api/ai/chat SSE endpoint.
 /// Maintains message history, drives real-time token streaming, and applies task/calendar/email
 /// mutations returned by the AI as tool calls.
 @MainActor
@@ -178,33 +178,82 @@ final class AIChatService {
     /// Removes any failed assistant placeholder and re-sends the last user message.
     func retry(allTasks: [TaskRecord], modelContext: ModelContext) {
         guard !isStreaming else { return }
-        // Find the last user message to replay
-        guard let lastUserMessage = messages.last(where: { $0.role == .user })?.content else {
+        guard let assistantID = messages.last(where: { $0.role == .assistant })?.id else {
             errorMessage = nil
             return
         }
-        // Remove the failed assistant placeholder if present
-        if let lastMsg = messages.last, lastMsg.role == .assistant {
-            messages.removeLast()
-        }
-        // Remove the user message too — send() will re-append it
-        if let lastMsg = messages.last, lastMsg.role == .user {
-            messages.removeLast()
-        }
-        errorMessage = nil
-        send(
-            userMessage: lastUserMessage,
-            mentions: lastSubmittedMentions,
+        retry(
+            assistantMessageID: assistantID,
             allTasks: allTasks,
             modelContext: modelContext
         )
+    }
+
+    /// Whether a specific assistant message can be retried.
+    func canRetry(assistantMessageID: UUID) -> Bool {
+        guard !isStreaming,
+              let assistantIndex = messages.firstIndex(where: { $0.id == assistantMessageID }),
+              messages[assistantIndex].role == .assistant else {
+            return false
+        }
+
+        return messages[..<assistantIndex].last(where: { $0.role == .user }) != nil
+    }
+
+    /// Retry a specific assistant turn in place so the message row is replaced, not duplicated.
+    func retry(
+        assistantMessageID: UUID,
+        allTasks: [TaskRecord],
+        modelContext: ModelContext
+    ) {
+        guard canRetry(assistantMessageID: assistantMessageID),
+              let assistantIndex = messages.firstIndex(where: { $0.id == assistantMessageID }),
+              let userMessage = messages[..<assistantIndex].last(where: { $0.role == .user }) else {
+            errorMessage = nil
+            return
+        }
+
+        errorMessage = nil
+        isConversationSaved = false
+        currentTurnMentions = userMessage.mentions
+        lastSubmittedMentions = userMessage.mentions
+
+        messages[assistantIndex].content = ""
+        messages[assistantIndex].isStreaming = true
+        messages[assistantIndex].taskMutations = []
+        messages[assistantIndex].uiSpec = nil
+        messages[assistantIndex].sources = []
+        messages[assistantIndex].searchQueries = []
+        messages[assistantIndex].searchState = .none
+        messages[assistantIndex].reasoningContent = ""
+        messages[assistantIndex].reasoningDurationMs = nil
+
+        isStreaming = true
+        let requestMessages = Array(messages.prefix(assistantIndex))
+
+        streamingTask = Task { [weak self] in
+            guard let self else { return }
+            await self.streamResponse(
+                assistantMessageID: assistantMessageID,
+                requestMessages: requestMessages,
+                allTasks: allTasks,
+                modelContext: modelContext
+            )
+        }
     }
 
     /// Cancel an in-progress stream.
     func cancelStream() {
         streamingTask?.cancel()
         streamingTask = nil
-        finaliseStream()
+        if let streamingMessageID = messages.first(where: \.isStreaming)?.id {
+            finaliseStream(messageID: streamingMessageID)
+        } else {
+            isStreaming = false
+            currentTurnMentions = []
+            flushScheduled = false
+            tokenBuffer = ""
+        }
     }
 
     /// Save the current conversation to history and reset to a clean slate.
@@ -453,17 +502,18 @@ final class AIChatService {
 
     private func streamResponse(
         assistantMessageID: UUID,
+        requestMessages: [AIChatMessage]? = nil,
         allTasks: [TaskRecord],
         modelContext: ModelContext
     ) async {
-        defer { finaliseStream() }
+        defer { finaliseStream(messageID: assistantMessageID) }
 
         // Pre-fetch calendar events async so buildPayload stays sync
         await refreshCalendarSnapshot()
 
-        // Route through the main backend's /ai/chat endpoint with Bearer auth
+        // Route through the main backend's /api/ai/chat endpoint with Bearer auth
         let baseURL = configuration.effectiveBackendURL
-        let url = baseURL.appending(path: "ai/chat")
+        let url = baseURL.appending(path: "api/ai/chat")
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -472,7 +522,7 @@ final class AIChatService {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
 
-        let payload = buildPayload(allTasks: allTasks)
+        let payload = buildPayload(allTasks: allTasks, conversationMessages: requestMessages)
         guard let body = try? JSONEncoder().encode(payload) else {
             appendError("Failed to encode request.", to: assistantMessageID)
             return
@@ -583,7 +633,12 @@ final class AIChatService {
 
     /// Build the full request payload including system prompt, conversation history, and task context.
     /// Internal visibility so voice chat can access the system prompt via `buildSystemPromptForVoice`.
-    func buildPayload(allTasks: [TaskRecord]) -> ChatRequest {
+    func buildPayload(
+        allTasks: [TaskRecord],
+        conversationMessages: [AIChatMessage]? = nil
+    ) -> ChatRequest {
+        let activeMessages = conversationMessages ?? messages
+
         // ── Tasks ──────────────────────────────────────────────────────────────
         let taskSummaries: [TaskSummaryPayload] = aiCanReadTasks
             ? allTasks.prefix(100).map { task in
@@ -669,7 +724,7 @@ final class AIChatService {
         """
 
         var apiMessages: [ChatMessage] = [ChatMessage(role: "system", content: systemPrompt)]
-        apiMessages += messages.compactMap { msg -> ChatMessage? in
+        apiMessages += activeMessages.compactMap { msg -> ChatMessage? in
             guard !msg.isStreaming || !msg.content.isEmpty else { return nil }
             let role = msg.role == .user ? "user" : "assistant"
             return ChatMessage(role: role, content: msg.content)
@@ -683,7 +738,7 @@ final class AIChatService {
         // De-duplicate by mention ID to avoid sending the same ref multiple times.
         var seenMentionIDs = Set<String>()
         var allMentionPayloads: [MentionPayload] = []
-        for msg in messages where msg.role == .user {
+        for msg in activeMessages where msg.role == .user {
             for ref in msg.mentions where !seenMentionIDs.contains(ref.id) {
                 seenMentionIDs.insert(ref.id)
                 allMentionPayloads.append(MentionPayload(
@@ -834,11 +889,11 @@ final class AIChatService {
         messages[idx].taskMutations.append(mutation)
     }
 
-    private func finaliseStream() {
+    private func finaliseStream(messageID: UUID) {
         isStreaming = false
         currentTurnMentions = []
         flushScheduled = false
-        if let idx = messages.indices.last {
+        if let idx = messages.firstIndex(where: { $0.id == messageID }) {
             // Flush any buffered tokens before marking stream as complete so the
             // last few tokens aren't lost when the stream ends mid-batch.
             if !tokenBuffer.isEmpty {
@@ -1183,4 +1238,3 @@ struct SavedPrompt: Identifiable, Codable {
                     icon: "rocket", category: "Cross-app", isPreset: true),
     ]
 }
-

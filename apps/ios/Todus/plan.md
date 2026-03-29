@@ -85,7 +85,8 @@
 ### Rewire Task Sync
 - [ ] Replace SupabaseEdgeFunctionClient calls with TodosAPIClient
 - [ ] Replace SupabaseSyncService with new TaskService
-- [ ] Update AIChatService to use new backend endpoint
+- [x] Update AIChatService to use new backend endpoint
+- [x] Add per-message AI retry action and stabilize copy button layout
 
 **Milestone:** User signs in with Apple/Google/Email, tasks sync to unified backend.
 

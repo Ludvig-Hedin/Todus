@@ -169,7 +169,7 @@ final class NotificationDigestService {
         }
 
         let baseURL = configuration.effectiveBackendURL
-        let url = baseURL.appending(path: "ai/chat")
+        let url = baseURL.appending(path: "api/ai/chat")
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"

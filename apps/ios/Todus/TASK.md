@@ -33,7 +33,8 @@
   - Replaces SupabaseSyncService
   - list, create, update, delete, sync methods
 - [ ] **IOS-022** — Rewire TaskCaptureService to use TaskService instead of Supabase
-- [ ] **IOS-023** — Rewire AIChatService to use new backend endpoint
+- [x] **IOS-023** — Rewire AIChatService to use new backend endpoint
+- [x] **IOS-024** — Add AI chat message retry + stable copy action row
 
 #### iOS — Navigation Testing
 - [ ] **IOS-031** — Test TasksTabView works with all task features

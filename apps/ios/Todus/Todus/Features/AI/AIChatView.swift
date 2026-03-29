@@ -594,6 +594,14 @@ struct AIChatView: View {
                         MessageBubble(
                             message: message,
                             allTasks: Array(allTasks),
+                            canRetry: chatService.canRetry(assistantMessageID: message.id),
+                            onRetry: {
+                                chatService.retry(
+                                    assistantMessageID: message.id,
+                                    allTasks: Array(allTasks),
+                                    modelContext: modelContext
+                                )
+                            },
                             onNavigate: { action, params in
                                 handleCardNavigation(action, params: params)
                             }
@@ -1195,6 +1203,8 @@ private func parseMessageContent(_ content: String) -> [ContentPart] {
 private struct MessageBubble: View {
     let message: AIChatMessage
     let allTasks: [TaskRecord]
+    let canRetry: Bool
+    var onRetry: () -> Void = {}
     /// Callback for generative UI card actions (e.g. navigate to thread/task/event).
     var onNavigate: ((String, [String: String]) -> Void)?
 
@@ -1516,6 +1526,18 @@ private struct MessageBubble: View {
 
     private var actionRow: some View {
         HStack(spacing: 16) {
+            Button {
+                onRetry()
+            } label: {
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.primary)
+                    .frame(width: 18, height: 18)
+            }
+            .buttonStyle(.plain)
+            .disabled(!canRetry)
+            .opacity(canRetry ? 1 : 0.45)
+
             // Copy button: shows checkmark for 1.5s after tap
             Button {
                 UIPasteboard.general.string = message.content
@@ -1526,7 +1548,8 @@ private struct MessageBubble: View {
             } label: {
                 Image(systemName: didCopy ? "checkmark" : "doc.on.doc")
                     .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(didCopy ? Color.green : AppTheme.mutedText)
+                    .foregroundStyle(.primary)
+                    .frame(width: 18, height: 18)
                     .contentTransition(.symbolEffect(.replace))
             }
             .buttonStyle(.plain)
