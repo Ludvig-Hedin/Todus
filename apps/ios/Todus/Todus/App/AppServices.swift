@@ -106,6 +106,8 @@ final class AppServices {
     let remindersSyncState: RemindersSyncState
     /// AI chat service — manages streaming conversation and task mutations
     let aiChatService: AIChatService
+    /// Voice endpoint service — provides backend WS proxy URL for live voice chat (API key stays server-side)
+    let voiceTokenService: VoiceTokenService
     private let defaults: UserDefaults
 
     var selectedViewMode: TaskViewMode
@@ -263,6 +265,8 @@ final class AppServices {
             calendarService: calendarService,
             emailService: emailService
         )
+        // Voice endpoint service — builds the backend WS proxy URL (API key never leaves server)
+        self.voiceTokenService = VoiceTokenService(authService: authService, backendURL: backendURL)
 
         let storedAppearance = defaults.string(forKey: Keys.appearancePreference)
             .flatMap(AppAppearancePreference.init(rawValue:))

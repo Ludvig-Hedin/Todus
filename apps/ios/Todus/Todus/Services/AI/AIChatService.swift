@@ -85,6 +85,12 @@ final class AIChatService {
     /// Current page/tab context injected by the view before each send — included in system prompt.
     var currentPageContext: String? = nil
 
+    /// Structured mentions for the current outbound user turn.
+    private var currentTurnMentions: [RichInputMentionRef] = []
+    /// Preserved mention refs for the last submitted user turn so retry can resend them
+    /// even after the active request state has been cleared.
+    private var lastSubmittedMentions: [RichInputMentionRef] = []
+
     init(
         configuration: AppConfiguration,
         captureService: TaskCaptureService,
@@ -131,6 +137,7 @@ final class AIChatService {
     /// Send a user message and stream the AI response.
     func send(
         userMessage: String,
+        mentions: [RichInputMentionRef] = [],
         allTasks: [TaskRecord],
         modelContext: ModelContext
     ) {
@@ -144,9 +151,12 @@ final class AIChatService {
 
         // New messages make the conversation unsaved
         isConversationSaved = false
+        currentTurnMentions = mentions
+        lastSubmittedMentions = mentions
 
-        // Append user message
-        messages.append(AIChatMessage(role: .user, content: trimmed))
+        // Append user message with its mention refs so they persist across turns.
+        // Follow-up turns can then resolve entity IDs from earlier mentions.
+        messages.append(AIChatMessage(role: .user, content: trimmed, mentions: mentions))
 
         // Append an empty placeholder the streaming response will fill
         let assistantID = UUID()
@@ -182,7 +192,12 @@ final class AIChatService {
             messages.removeLast()
         }
         errorMessage = nil
-        send(userMessage: lastUserMessage, allTasks: allTasks, modelContext: modelContext)
+        send(
+            userMessage: lastUserMessage,
+            mentions: lastSubmittedMentions,
+            allTasks: allTasks,
+            modelContext: modelContext
+        )
     }
 
     /// Cancel an in-progress stream.
@@ -201,6 +216,8 @@ final class AIChatService {
         chatTitle = nil
         errorMessage = nil
         isConversationSaved = true
+        currentTurnMentions = []
+        lastSubmittedMentions = []
     }
 
     /// Auto-save when the user closes the chat sheet without explicitly starting a new chat.
@@ -229,6 +246,207 @@ final class AIChatService {
     func deleteConversation(_ conversation: AIChatConversation) {
         savedConversations.removeAll { $0.id == conversation.id }
         persistConversations()
+    }
+
+    // MARK: - Voice Chat Integration
+
+    /// Append finalized voice exchanges to the main chat history.
+    /// Called by VoiceChatViewModel when the voice session ends or a turn completes.
+    func appendVoiceExchange(userText: String, assistantText: String) {
+        if !userText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            messages.append(AIChatMessage(role: .user, content: userText, source: .voice))
+        }
+        if !assistantText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            messages.append(AIChatMessage(role: .assistant, content: assistantText, source: .voice))
+        }
+        isConversationSaved = false
+    }
+
+    /// Build the system prompt for a voice session, reusing the same context pipeline as text chat.
+    /// Returns just the system prompt string (not the full request payload).
+    func buildSystemPromptForVoice(allTasks: [TaskRecord]) async -> String {
+        await refreshCalendarSnapshot()
+        let payload = buildPayload(allTasks: allTasks)
+        // The first message in the payload is always the system prompt
+        return payload.messages.first?.content ?? ""
+    }
+
+    /// Process a tool call from a voice session. Returns a result string to send back to the model.
+    func processVoiceToolCall(
+        name: String,
+        arguments: String,
+        modelContext: ModelContext
+    ) async -> String {
+        guard let argsData = arguments.data(using: .utf8) else {
+            return "{\"error\": \"Invalid arguments\"}"
+        }
+
+        switch name {
+        case "create_task":
+            // Respect aiCanWriteTasks permission (same as text chat path)
+            guard aiCanWriteTasks else {
+                return encodeToolResult(success: false, message: "AI is not allowed to write tasks")
+            }
+            if let args = try? JSONDecoder().decode(CreateTaskArgs.self, from: argsData) {
+                let dueDate = args.dueDate.flatMap { ISO8601DateFormatter().date(from: $0) }
+                captureService.capture(
+                    rawComposerText: args.title,
+                    overrideDueDate: dueDate,
+                    in: modelContext
+                )
+                return encodeToolResult(success: true, message: "Task '\(args.title)' created")
+            }
+
+        case "update_task":
+            guard aiCanWriteTasks else {
+                return encodeToolResult(success: false, message: "AI is not allowed to write tasks")
+            }
+            if let args = try? JSONDecoder().decode(UpdateTaskArgs.self, from: argsData),
+               let taskID = UUID(uuidString: args.id) {
+                applyUpdateTask(taskID: taskID, args: args, modelContext: modelContext)
+                return encodeToolResult(success: true, message: "Task updated")
+            }
+
+        case "delete_task":
+            guard aiCanWriteTasks else {
+                return encodeToolResult(success: false, message: "AI is not allowed to write tasks")
+            }
+            if let args = try? JSONDecoder().decode(DeleteTaskArgs.self, from: argsData),
+               let taskID = UUID(uuidString: args.id) {
+                applyDeleteTask(taskID: taskID, modelContext: modelContext)
+                return encodeToolResult(success: true, message: "Task deleted")
+            }
+
+        case "create_calendar_event":
+            if aiCanWriteCalendar,
+               let args = try? JSONDecoder().decode(CreateCalendarEventArgs.self, from: argsData) {
+                let iso = ISO8601DateFormatter()
+                if let startDate = iso.date(from: args.startDate),
+                   let cal = calendarService, cal.canCreateEvents() {
+                    let endDate = args.endDate.flatMap { iso.date(from: $0) }
+                    do {
+                        try await cal.createEvent(title: args.title, startDate: startDate, endDate: endDate)
+                        return encodeToolResult(success: true, message: "Calendar event '\(args.title)' created")
+                    } catch {
+                        return encodeToolResult(success: false, message: "Failed to create event: \(error.localizedDescription)")
+                    }
+                }
+            }
+
+        case "send_email":
+            if aiCanSendEmail,
+               let args = try? JSONDecoder().decode(SendEmailArgs.self, from: argsData),
+               let email = emailService {
+                let draft = EmailDraft(
+                    to: args.to,
+                    subject: args.subject,
+                    body: args.body,
+                    replyToThreadId: args.threadId
+                )
+                let sent = await email.sendEmail(draft)
+                if sent {
+                    return encodeToolResult(success: true, message: "Email sent: \(args.subject)")
+                } else {
+                    return encodeToolResult(success: false, message: "Failed to send email")
+                }
+            }
+
+        default:
+            break
+        }
+
+        return encodeToolResult(success: false, message: "Tool '\(name)' not found or invalid arguments")
+    }
+
+    /// Safely encodes a tool result as JSON using JSONEncoder, avoiding string interpolation
+    /// bugs when the message contains quotes, backslashes, or other special characters.
+    private func encodeToolResult(success: Bool, message: String) -> String {
+        struct ToolResult: Encodable {
+            let success: Bool
+            let message: String
+        }
+        let result = ToolResult(success: success, message: message)
+        if let data = try? JSONEncoder().encode(result),
+           let json = String(data: data, encoding: .utf8) {
+            return json
+        }
+        // Fallback: minimal safe JSON
+        return "{\"success\":\(success),\"message\":\"Result encoding failed\"}"
+    }
+
+    /// Returns the Gemini-format tool declarations for use in voice sessions.
+    /// Maps from the OpenRouter function format used in text chat.
+    func voiceToolDeclarations() -> [[String: Any]] {
+        [
+            [
+                "name": "create_task",
+                "description": "Create a new task for the user",
+                "parameters": [
+                    "type": "object",
+                    "properties": [
+                        "title": ["type": "string", "description": "Task title"],
+                        "dueDate": ["type": "string", "description": "ISO 8601 due date (optional)"],
+                        "folderName": ["type": "string", "description": "Folder name (optional)"],
+                        "priority": ["type": "string", "enum": ["none", "low", "medium", "high", "urgent"], "description": "Task priority"]
+                    ],
+                    "required": ["title"]
+                ] as [String: Any]
+            ],
+            [
+                "name": "update_task",
+                "description": "Update an existing task",
+                "parameters": [
+                    "type": "object",
+                    "properties": [
+                        "id": ["type": "string", "description": "Task UUID"],
+                        "title": ["type": "string"],
+                        "status": ["type": "string", "enum": ["todo", "doing", "done"]],
+                        "priority": ["type": "string", "enum": ["none", "low", "medium", "high", "urgent"]],
+                        "dueDate": ["type": "string"]
+                    ],
+                    "required": ["id"]
+                ] as [String: Any]
+            ],
+            [
+                "name": "delete_task",
+                "description": "Delete a task",
+                "parameters": [
+                    "type": "object",
+                    "properties": [
+                        "id": ["type": "string", "description": "Task UUID to delete"]
+                    ],
+                    "required": ["id"]
+                ] as [String: Any]
+            ],
+            [
+                "name": "create_calendar_event",
+                "description": "Create a new calendar event",
+                "parameters": [
+                    "type": "object",
+                    "properties": [
+                        "title": ["type": "string", "description": "Event title"],
+                        "startDate": ["type": "string", "description": "ISO 8601 start datetime"],
+                        "endDate": ["type": "string", "description": "ISO 8601 end datetime (optional)"],
+                        "notes": ["type": "string", "description": "Event notes (optional)"]
+                    ],
+                    "required": ["title", "startDate"]
+                ] as [String: Any]
+            ],
+            [
+                "name": "send_email",
+                "description": "Send an email on behalf of the user",
+                "parameters": [
+                    "type": "object",
+                    "properties": [
+                        "to": ["type": "array", "items": ["type": "string"], "description": "Recipient email addresses"],
+                        "subject": ["type": "string", "description": "Email subject"],
+                        "body": ["type": "string", "description": "Email body"],
+                        "threadId": ["type": "string", "description": "Thread ID to reply to (optional)"]
+                    ],
+                    "required": ["to", "subject", "body"]
+                ] as [String: Any]
+            ]
+        ]
     }
 
     // MARK: - Streaming
@@ -291,10 +509,18 @@ final class AIChatService {
                 let jsonString = String(line.dropFirst(6))
                 if jsonString == "[DONE]" { break }
 
-                guard
-                    let data = jsonString.data(using: .utf8),
-                    let chunk = try? JSONDecoder().decode(SSEChunk.self, from: data)
-                else { continue }
+                guard let data = jsonString.data(using: .utf8) else { continue }
+
+                // Try custom event first (web search status, sources, reasoning)
+                // These have a "type" field that SSEChunk doesn't, so one will succeed and the other fail.
+                if let customEvent = try? JSONDecoder().decode(SSECustomEvent.self, from: data),
+                   !customEvent.type.isEmpty {
+                    handleCustomEvent(customEvent, messageID: assistantMessageID)
+                    continue
+                }
+
+                // Fall through to existing OpenRouter SSE chunk parsing
+                guard let chunk = try? JSONDecoder().decode(SSEChunk.self, from: data) else { continue }
 
                 // Append delta content token-by-token → drives typewriter animation
                 if let delta = chunk.choices.first?.delta.content, !delta.isEmpty {
@@ -313,9 +539,51 @@ final class AIChatService {
         }
     }
 
+    // MARK: - Custom Event Handling (Web Search + Reasoning)
+
+    /// Process custom SSE events for web search status, sources, and reasoning tokens.
+    /// Updates the assistant message's search/reasoning state to drive progressive UI rendering.
+    private func handleCustomEvent(_ event: SSECustomEvent, messageID: UUID) {
+        guard let idx = messages.firstIndex(where: { $0.id == messageID }) else { return }
+
+        switch event.type {
+        case "search_status":
+            switch event.status {
+            case "searching":
+                messages[idx].searchState = .searching
+                messages[idx].searchQueries = event.queries ?? []
+            case "complete":
+                messages[idx].searchState = .complete
+                messages[idx].searchQueries = event.queries ?? []
+            default:
+                messages[idx].searchState = .none
+                messages[idx].searchQueries = event.queries ?? []
+            }
+
+        case "sources":
+            messages[idx].searchState = .complete
+            messages[idx].sources = (event.sources ?? []).map { src in
+                WebSource(url: src.url, title: src.title, snippet: src.snippet)
+            }
+
+        case "reasoning":
+            if let content = event.content {
+                messages[idx].reasoningContent += content
+            }
+
+        case "reasoning_done":
+            messages[idx].reasoningDurationMs = event.durationMs
+
+        default:
+            break
+        }
+    }
+
     // MARK: - Payload Building
 
-    private func buildPayload(allTasks: [TaskRecord]) -> ChatRequest {
+    /// Build the full request payload including system prompt, conversation history, and task context.
+    /// Internal visibility so voice chat can access the system prompt via `buildSystemPromptForVoice`.
+    func buildPayload(allTasks: [TaskRecord]) -> ChatRequest {
         // ── Tasks ──────────────────────────────────────────────────────────────
         let taskSummaries: [TaskSummaryPayload] = aiCanReadTasks
             ? allTasks.prefix(100).map { task in
@@ -410,7 +678,31 @@ final class AIChatService {
             apiMessages.removeLast()
         }
 
-        return ChatRequest(messages: apiMessages, tasks: Array(taskSummaries), model: selectedModel)
+        // Collect mentions from ALL user messages in the conversation so that entity IDs
+        // (task, thread, event) referenced in earlier turns remain resolvable in follow-up turns.
+        // De-duplicate by mention ID to avoid sending the same ref multiple times.
+        var seenMentionIDs = Set<String>()
+        var allMentionPayloads: [MentionPayload] = []
+        for msg in messages where msg.role == .user {
+            for ref in msg.mentions where !seenMentionIDs.contains(ref.id) {
+                seenMentionIDs.insert(ref.id)
+                allMentionPayloads.append(MentionPayload(
+                    id: ref.id,
+                    kind: ref.kind.rawValue,
+                    title: ref.title,
+                    subtitle: ref.subtitle,
+                    displayText: ref.displayText,
+                    accessibilityLabel: ref.accessibilityLabel
+                ))
+            }
+        }
+
+        return ChatRequest(
+            messages: apiMessages,
+            mentions: allMentionPayloads,
+            tasks: Array(taskSummaries),
+            model: selectedModel
+        )
     }
 
     // MARK: - Tool Call Processing
@@ -544,6 +836,7 @@ final class AIChatService {
 
     private func finaliseStream() {
         isStreaming = false
+        currentTurnMentions = []
         flushScheduled = false
         if let idx = messages.indices.last {
             // Flush any buffered tokens before marking stream as complete so the
@@ -687,25 +980,60 @@ final class AIChatService {
 
 // MARK: - Request / Response Models
 
-private struct ChatRequest: Encodable {
+struct ChatRequest: Encodable {
     let messages: [ChatMessage]
+    let mentions: [MentionPayload]
     let tasks: [TaskSummaryPayload]
     let model: String
     let stream: Bool = true
 }
 
-private struct ChatMessage: Codable {
+struct ChatMessage: Codable {
     let role: String
     let content: String
 }
 
-private struct TaskSummaryPayload: Encodable {
+struct TaskSummaryPayload: Encodable {
     let id: String
     let title: String
     let status: String
     let priority: String
     let dueDate: String?
     let folderName: String?
+}
+
+struct MentionPayload: Encodable {
+    let id: String
+    let kind: String
+    let title: String
+    let subtitle: String?
+    let displayText: String
+    let accessibilityLabel: String
+}
+
+// MARK: - Custom SSE Event Decoding (Web Search + Reasoning)
+
+/// Custom event types sent by the backend before/alongside the OpenRouter SSE stream.
+/// These events carry web search status, sources, and reasoning tokens.
+private struct SSECustomEvent: Decodable {
+    let type: String
+    let status: String?
+    let queries: [String]?
+    let sources: [SSESourcePayload]?
+    let content: String?
+    let durationMs: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case type, status, queries, sources, content
+        case durationMs = "duration_ms"
+    }
+}
+
+/// A web search source returned by the backend's Perplexity integration.
+private struct SSESourcePayload: Decodable {
+    let url: String
+    let title: String
+    let snippet: String
 }
 
 // MARK: - SSE Chunk Decoding
@@ -739,14 +1067,14 @@ private struct SSEToolFunction: Decodable {
 
 // MARK: - Tool Call Argument Models
 
-private struct CreateTaskArgs: Decodable {
+struct CreateTaskArgs: Decodable {
     let title: String
     let dueDate: String?
     let folderName: String?
     let priority: String?
 }
 
-private struct UpdateTaskArgs: Decodable {
+struct UpdateTaskArgs: Decodable {
     let id: String
     let title: String?
     let dueDate: String?
@@ -754,18 +1082,18 @@ private struct UpdateTaskArgs: Decodable {
     let priority: String?
 }
 
-private struct DeleteTaskArgs: Decodable {
+struct DeleteTaskArgs: Decodable {
     let id: String
 }
 
-private struct CreateCalendarEventArgs: Decodable {
+struct CreateCalendarEventArgs: Decodable {
     let title: String
     let startDate: String      // ISO 8601
     let endDate: String?
     let notes: String?
 }
 
-private struct SendEmailArgs: Decodable {
+struct SendEmailArgs: Decodable {
     let to: [String]           // array of email address strings
     let subject: String
     let body: String

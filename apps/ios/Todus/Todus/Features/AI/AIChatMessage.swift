@@ -1,5 +1,27 @@
 import Foundation
 
+// MARK: - WebSource
+
+/// A web search result source cited in an AI response.
+struct WebSource: Identifiable, Codable {
+    let id: UUID
+    let url: String
+    let title: String
+    let snippet: String
+
+    /// Extracts the domain name from the URL for display (e.g. "example.com")
+    var domain: String {
+        URL(string: url)?.host?.replacingOccurrences(of: "www.", with: "") ?? url
+    }
+
+    init(id: UUID = UUID(), url: String, title: String, snippet: String) {
+        self.id = id
+        self.url = url
+        self.title = title
+        self.snippet = snippet
+    }
+}
+
 // MARK: - AIChatMessage
 
 /// A single message in the AI chat conversation.
@@ -7,6 +29,19 @@ struct AIChatMessage: Identifiable {
     enum Role {
         case user
         case assistant
+    }
+
+    /// Indicates whether the message originated from text chat or a live voice session.
+    enum MessageSource {
+        case text
+        case voice
+    }
+
+    /// Tracks the web search phase for progressive UI rendering.
+    enum SearchPhase {
+        case none       // No web search for this message
+        case searching  // Backend is actively searching
+        case complete   // Sources received, answer streaming
     }
 
     let id: UUID
@@ -19,6 +54,22 @@ struct AIChatMessage: Identifiable {
     var taskMutations: [AIChatTaskMutation]
     /// Parsed generative UI spec embedded in the message (extracted from ```ui-spec blocks)
     var uiSpec: ChatUISpec?
+    /// Whether this message came from text chat or a live voice session
+    var source: MessageSource
+    /// Web search sources cited in this response
+    var sources: [WebSource]
+    /// Search queries the backend executed
+    var searchQueries: [String]
+    /// Current search phase — drives the searching/sources UI
+    var searchState: SearchPhase
+    /// Reasoning/thinking text streamed separately from main content (V2)
+    var reasoningContent: String
+    /// Duration of reasoning phase in ms (V2)
+    var reasoningDurationMs: Int?
+    /// Structured mention refs attached to this user message. Persisted so that
+    /// follow-up turns can still resolve the underlying entity IDs (task, thread, event)
+    /// that were mentioned in earlier turns.
+    var mentions: [RichInputMentionRef]
 
     init(
         id: UUID = UUID(),
@@ -26,7 +77,14 @@ struct AIChatMessage: Identifiable {
         content: String = "",
         isStreaming: Bool = false,
         taskMutations: [AIChatTaskMutation] = [],
-        uiSpec: ChatUISpec? = nil
+        uiSpec: ChatUISpec? = nil,
+        source: MessageSource = .text,
+        sources: [WebSource] = [],
+        searchQueries: [String] = [],
+        searchState: SearchPhase = .none,
+        reasoningContent: String = "",
+        reasoningDurationMs: Int? = nil,
+        mentions: [RichInputMentionRef] = []
     ) {
         self.id = id
         self.role = role
@@ -34,6 +92,13 @@ struct AIChatMessage: Identifiable {
         self.isStreaming = isStreaming
         self.taskMutations = taskMutations
         self.uiSpec = uiSpec
+        self.source = source
+        self.sources = sources
+        self.searchQueries = searchQueries
+        self.searchState = searchState
+        self.reasoningContent = reasoningContent
+        self.reasoningDurationMs = reasoningDurationMs
+        self.mentions = mentions
     }
 
     /// Extracts and caches the UI spec from message content.

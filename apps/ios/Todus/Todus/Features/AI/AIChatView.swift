@@ -18,6 +18,8 @@ struct AIChatView: View {
     @Query(sort: \TaskRecord.createdAt, order: .reverse) private var allTasks: [TaskRecord]
 
     @State private var inputText = ""
+    @State private var inputMentions: [RichInputMentionRef] = []
+    @State private var eventMentions: [RichInputMentionRef] = []
     @FocusState private var isInputFocused: Bool
 
     /// Page context pill — name + icon auto-set from currentTab, user can remove it.
@@ -43,6 +45,9 @@ struct AIChatView: View {
     @State private var isShowingFilePicker = false
     @State private var selectedPhotoItem: PhotosPickerItem?
     @State private var pendingAttachments: [String] = []
+
+    // Live voice chat
+    @State private var showVoiceChat = false
 
     // Animated thinking text cycles while streaming
     @State private var thinkingIndex = 0
@@ -175,6 +180,13 @@ struct AIChatView: View {
             }
             .ignoresSafeArea()
         }
+        // Live voice chat modal — presented from the waveform button in the input bar
+        .fullScreenCover(isPresented: $showVoiceChat) {
+            VoiceChatModalView(
+                chatService: chatService,
+                tokenService: services.voiceTokenService
+            )
+        }
         .onChange(of: selectedPhotoItem) { _, newItem in
             guard let newItem else { return }
             Task {
@@ -212,6 +224,7 @@ struct AIChatView: View {
             if inputText.isEmpty { inputText = draft }
             // Re-attach context pill when sheet re-opens
             pageContextAttached = true
+            loadEventMentions()
         }
     }
 
@@ -612,6 +625,14 @@ struct AIChatView: View {
                     }
                 }
             }
+            // Scroll when web search sources arrive (changes message height)
+            .onChange(of: chatService.messages.last?.sources.count) { _, _ in
+                if let lastID = chatService.messages.last?.id {
+                    withAnimation(.snappy(duration: 0.2)) {
+                        proxy.scrollTo(lastID, anchor: .bottom)
+                    }
+                }
+            }
         }
     }
 
@@ -677,6 +698,46 @@ struct AIChatView: View {
         isInputFocused || !chatService.messages.isEmpty || chatService.isStreaming
     }
 
+    private var mentionOptions: [RichInputMentionRef] {
+        let taskMentions = allTasks.prefix(12).map { task in
+            RichInputMentionRef(
+                id: task.id.uuidString,
+                kind: .task,
+                title: task.title,
+                subtitle: task.dueDate.map { "\($0.formatted(date: .abbreviated, time: .shortened))" },
+                displayText: task.title,
+                accessibilityLabel: "Task \(task.title)"
+            )
+        }
+
+        let threadMentions = services.emailService.threads.prefix(12).map { thread in
+            RichInputMentionRef(
+                id: thread.id,
+                kind: .thread,
+                title: thread.subject,
+                subtitle: thread.from.email,
+                displayText: thread.subject,
+                accessibilityLabel: "Email thread \(thread.subject)"
+            )
+        }
+
+        let peopleMentions = Dictionary(grouping: services.emailService.threads.map(\.from), by: \.email)
+            .compactMap { _, senders in senders.first }
+            .prefix(12)
+            .map { sender in
+                RichInputMentionRef(
+                    id: sender.email,
+                    kind: .person,
+                    title: sender.name,
+                    subtitle: sender.email,
+                    displayText: sender.name,
+                    accessibilityLabel: "Person \(sender.name)"
+                )
+            }
+
+        return Array(taskMentions) + Array(threadMentions) + Array(peopleMentions) + eventMentions
+    }
+
     private var chatInputBox: some View {
         let isEmpty = inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && pendingAttachments.isEmpty
 
@@ -723,12 +784,14 @@ struct AIChatView: View {
             }
 
             if isInputExpanded {
-                // Full input: text field + bottom toolbar
-                TextField("Ask, search or make anything…", text: $inputText, axis: .vertical)
-                    .font(.system(size: 16, weight: .medium))
-                    .lineLimit(1...5)
-                    .focused($isInputFocused)
-                    .textFieldStyle(.plain)
+                RichComposerInput(
+                    text: $inputText,
+                    mentions: $inputMentions,
+                    placeholder: "Ask, search or make anything…",
+                    surface: .aiChat,
+                    mentionOptions: mentionOptions,
+                    onCommand: { _ in }
+                )
                     .padding(.horizontal, 16)
                     .padding(.top, hasAccessories ? 6 : 12)
                     .padding(.bottom, 8)
@@ -746,6 +809,17 @@ struct AIChatView: View {
                     .minTouchTarget()
 
                     Spacer()
+
+                    // Live voice chat button — opens full-screen voice modal
+                    Button { showVoiceChat = true } label: {
+                        Image(systemName: "waveform")
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundStyle(voiceButtonGradient)
+                    }
+                    .buttonStyle(.plain)
+                    .frame(width: 36, height: 36)
+                    .contentShape(Rectangle())
+                    .minTouchTarget()
 
                     ChatVoiceInputButton(onTranscription: { transcribed in
                         let current = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -781,13 +855,25 @@ struct AIChatView: View {
                 .padding(.horizontal, 8)
                 .padding(.vertical, 8)
             } else {
-                // Compact input: single-line text field + mic, same height as the + button
                 HStack(spacing: 8) {
-                    TextField("Ask, search or make anything…", text: $inputText)
-                        .font(.system(size: 16, weight: .medium))
-                        .focused($isInputFocused)
-                        .textFieldStyle(.plain)
-                        .padding(.leading, 16)
+                    RichComposerInput(
+                        text: $inputText,
+                        mentions: $inputMentions,
+                        placeholder: "Ask, search or make anything…",
+                        surface: .aiChat,
+                        mentionOptions: mentionOptions,
+                        onCommand: { _ in }
+                    )
+                    .padding(.leading, 16)
+
+                    Button { showVoiceChat = true } label: {
+                        Image(systemName: "waveform")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(voiceButtonGradient)
+                    }
+                    .buttonStyle(.plain)
+                    .frame(width: 30, height: 30)
+                    .contentShape(Rectangle())
 
                     ChatVoiceInputButton(onTranscription: { transcribed in
                         let current = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -891,17 +977,40 @@ struct AIChatView: View {
         .contentShape(Rectangle())
     }
 
+    // MARK: - Voice Button Gradient
+
+    /// Multi-color AI gradient for the live voice button — matches the tab bar sparkles icon.
+    private var voiceButtonGradient: LinearGradient {
+        LinearGradient(
+            stops: [
+                .init(color: Color(red: 0, green: 0xAA / 255.0, blue: 0xF5 / 255.0), location: 0.087),
+                .init(color: Color(red: 0xEF / 255.0, green: 0, blue: 0xC2 / 255.0), location: 0.269),
+                .init(color: Color(red: 1, green: 0, blue: 0x38 / 255.0), location: 0.580),
+                .init(color: Color(red: 0xF9 / 255.0, green: 0x9F / 255.0, blue: 0), location: 0.913),
+            ],
+            startPoint: UnitPoint(x: 0.25, y: 0),
+            endPoint: UnitPoint(x: 0.75, y: 1)
+        )
+    }
+
     // MARK: - Actions
 
     private func sendMessage() {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         inputText = ""
+        let mentions = inputMentions
+        inputMentions = []
         // Clear persisted draft since the message was sent
         UserDefaults.standard.removeObject(forKey: "ai_draft_input")
         // Set the current page context so the AI knows where the user is
         chatService.currentPageContext = pageContextAttached ? currentTab.title + " tab" : nil
-        chatService.send(userMessage: text, allTasks: Array(allTasks), modelContext: modelContext)
+        chatService.send(
+            userMessage: text,
+            mentions: mentions,
+            allTasks: Array(allTasks),
+            modelContext: modelContext
+        )
     }
 
     private func scrollToBottom(proxy: ScrollViewProxy) {
@@ -954,6 +1063,28 @@ struct AIChatView: View {
             while let presented = top.presentedViewController { top = presented }
             av.popoverPresentationController?.sourceView = top.view
             top.present(av, animated: true)
+        }
+    }
+
+    private func loadEventMentions() {
+        Task {
+            let start = Date()
+            let end = Calendar.current.date(byAdding: .day, value: 14, to: start) ?? start
+            let events = await services.calendarService.events(from: start, to: end)
+            let mentions = events.prefix(12).map { event in
+                RichInputMentionRef(
+                    id: event.id,
+                    kind: .event,
+                    title: event.title,
+                    subtitle: event.startDate.formatted(date: .abbreviated, time: .shortened),
+                    displayText: event.title,
+                    accessibilityLabel: "Event \(event.title)"
+                )
+            }
+
+            await MainActor.run {
+                eventMentions = Array(mentions)
+            }
         }
     }
 
@@ -1124,7 +1255,30 @@ private struct MessageBubble: View {
     // MARK: Assistant Bubble
 
     private var assistantBubble: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: 8) {
+            // Web search status indicator — shown while backend is searching
+            if message.searchState == .searching {
+                SearchingIndicator(queries: message.searchQueries)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+
+            // Source chips — shown after search completes, before/alongside the answer
+            if !message.sources.isEmpty {
+                SourceChipsView(sources: message.sources, onSourceTap: nil)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+
+            // Collapsible reasoning box — shows the AI's thinking process
+            if !message.reasoningContent.isEmpty {
+                ReasoningBox(
+                    content: message.reasoningContent,
+                    durationMs: message.reasoningDurationMs,
+                    isStreaming: message.isStreaming
+                )
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+
+            // Main content
             if message.content.isEmpty && message.isStreaming {
                 EmptyView() // Thinking indicator shown by parent
             } else {
@@ -1145,6 +1299,8 @@ private struct MessageBubble: View {
                     }
             }
         }
+        .animation(.snappy(duration: 0.3), value: message.searchState)
+        .animation(.snappy(duration: 0.3), value: message.sources.count)
     }
 
     /// Mixed-content renderer: text runs with live markdown + [task:UUID] cards + generative UI specs.
@@ -1208,14 +1364,41 @@ private struct MessageBubble: View {
     /// Handles bold, italic, inline code and preserves `\n` whitespace.
     @ViewBuilder
     private func inlineMarkdownText(_ content: String) -> some View {
-        if let attributed = try? AttributedString(
-            markdown: content,
-            options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        ) {
+        let attributed = Self.styledInlineMarkdown(content, sources: message.sources, styleCitations: styleCitations)
+        if let attributed {
             Text(attributed)
         } else {
             Text(content)
         }
+    }
+
+    /// Helper that builds an inline-parsed AttributedString with citation styling applied.
+    /// Extracted from @ViewBuilder to avoid Void-in-ViewBuilder compiler errors.
+    private static func styledInlineMarkdown(
+        _ content: String,
+        sources: [WebSource],
+        styleCitations: (inout AttributedString) -> Void
+    ) -> AttributedString? {
+        guard var attributed = try? AttributedString(
+            markdown: content,
+            options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        ) else { return nil }
+        if !sources.isEmpty { styleCitations(&attributed) }
+        return attributed
+    }
+
+    /// Helper that builds a full-parsed AttributedString with citation styling applied.
+    private static func styledFullMarkdown(
+        _ content: String,
+        sources: [WebSource],
+        styleCitations: (inout AttributedString) -> Void
+    ) -> AttributedString? {
+        guard var attributed = try? AttributedString(
+            markdown: content,
+            options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .full)
+        ) else { return nil }
+        if !sources.isEmpty { styleCitations(&attributed) }
+        return attributed
     }
 
     /// Full markdown — runs once when streaming ends.
@@ -1230,13 +1413,45 @@ private struct MessageBubble: View {
             with: "\n\n",
             options: .regularExpression
         )
-        if let attributed = try? AttributedString(
-            markdown: normalized,
-            options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .full)
-        ) {
+        let attributed = Self.styledFullMarkdown(normalized, sources: message.sources, styleCitations: styleCitations)
+        if let attributed {
             Text(attributed)
         } else {
             Text(content)
+        }
+    }
+
+    /// Post-process an AttributedString to highlight [1], [2] etc. citation markers.
+    /// Makes them blue, slightly smaller, and links them to the source URL.
+    private func styleCitations(_ attributed: inout AttributedString) {
+        // Find [n] patterns in the plain text and style them
+        let plainText = String(attributed.characters)
+        guard let regex = try? NSRegularExpression(pattern: #"\[(\d{1,2})\]"#) else { return }
+        let nsRange = NSRange(plainText.startIndex..., in: plainText)
+        let matches = regex.matches(in: plainText, range: nsRange)
+
+        // Process in reverse so indices stay valid
+        for match in matches.reversed() {
+            guard let fullRange = Range(match.range, in: plainText),
+                  let numberRange = Range(match.range(at: 1), in: plainText),
+                  let citationNumber = Int(plainText[numberRange]),
+                  citationNumber >= 1, citationNumber <= message.sources.count
+            else { continue }
+
+            // Convert String range to AttributedString range
+            let attrStart = AttributedString.Index(fullRange.lowerBound, within: attributed)
+            let attrEnd = AttributedString.Index(fullRange.upperBound, within: attributed)
+            guard let start = attrStart, let end = attrEnd else { continue }
+
+            let source = message.sources[citationNumber - 1]
+
+            // Style: blue, slightly smaller, with link to source URL
+            attributed[start..<end].foregroundColor = .accentColor
+            attributed[start..<end].font = .system(size: 12, weight: .semibold)
+            attributed[start..<end].baselineOffset = 4 // Superscript effect
+            if let url = URL(string: source.url) {
+                attributed[start..<end].link = url
+            }
         }
     }
 
@@ -1335,6 +1550,273 @@ private struct MessageBubble: View {
             .buttonStyle(.plain)
         }
         .padding(.leading, 4)
+    }
+}
+
+// MARK: - SearchingIndicator
+
+/// Animated indicator shown while the backend is performing a web search.
+/// Displays a spinning globe icon and the search query being executed.
+private struct SearchingIndicator: View {
+    let queries: [String]
+    @State private var isRotating = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "globe")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(AppTheme.mutedText)
+                .rotationEffect(.degrees(isRotating ? 360 : 0))
+                .animation(.linear(duration: 2).repeatForever(autoreverses: false), value: isRotating)
+                .onAppear { isRotating = true }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Searching the web…")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(AppTheme.mutedText)
+
+                if let query = queries.first {
+                    Text(query)
+                        .font(.system(size: 12))
+                        .foregroundStyle(AppTheme.subtleText)
+                        .lineLimit(1)
+                }
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+// MARK: - SourceChipsView
+
+/// Horizontally scrollable row of source pills. Tap to expand a detail sheet showing the snippet,
+/// or long-press to open the URL directly in Safari.
+private struct SourceChipsView: View {
+    let sources: [WebSource]
+    /// Optional callback when a source chip is tapped (for external handling). Nil = use built-in sheet.
+    var onSourceTap: ((WebSource) -> Void)?
+
+    @State private var selectedSource: WebSource?
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(Array(sources.enumerated()), id: \.element.id) { index, source in
+                    Button {
+                        if let handler = onSourceTap {
+                            handler(source)
+                        } else {
+                            selectedSource = source
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            // Citation number badge
+                            Text("[\(index + 1)]")
+                                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                .foregroundStyle(AppTheme.mutedText)
+
+                            // Favicon via Google's S2 service
+                            AsyncImage(url: faviconURL(source.url)) { image in
+                                image.resizable()
+                                    .aspectRatio(contentMode: .fit)
+                                    .frame(width: 14, height: 14)
+                                    .clipShape(RoundedRectangle(cornerRadius: 3))
+                            } placeholder: {
+                                Image(systemName: "globe")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(AppTheme.mutedText)
+                            }
+
+                            Text(source.domain)
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(AppTheme.surfacePrimary, in: Capsule())
+                        .overlay(Capsule().stroke(AppTheme.cardBorder, lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                    // Long-press opens URL directly in Safari
+                    .contextMenu {
+                        if let url = URL(string: source.url) {
+                            Link("Open in Safari", destination: url)
+                            Button {
+                                UIPasteboard.general.string = source.url
+                            } label: {
+                                Label("Copy URL", systemImage: "doc.on.doc")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .sheet(item: $selectedSource) { source in
+            SourceDetailSheet(source: source)
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
+        }
+    }
+
+    private func faviconURL(_ urlString: String) -> URL? {
+        guard let host = URL(string: urlString)?.host else { return nil }
+        return URL(string: "https://www.google.com/s2/favicons?domain=\(host)&sz=32")
+    }
+}
+
+// MARK: - SourceDetailSheet
+
+/// Expanded source card shown when tapping a source chip.
+/// Shows the full title, domain, snippet, and an "Open" button.
+private struct SourceDetailSheet: View {
+    let source: WebSource
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 16) {
+                // Header: favicon + domain
+                HStack(spacing: 10) {
+                    AsyncImage(url: faviconURL(source.url)) { image in
+                        image.resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: 24, height: 24)
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                    } placeholder: {
+                        Image(systemName: "globe")
+                            .font(.system(size: 18))
+                            .foregroundStyle(AppTheme.mutedText)
+                    }
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(source.title)
+                            .font(.system(size: 16, weight: .semibold))
+                            .lineLimit(2)
+                        Text(source.domain)
+                            .font(.system(size: 13))
+                            .foregroundStyle(AppTheme.mutedText)
+                    }
+                }
+
+                // Snippet
+                if !source.snippet.isEmpty {
+                    Text(source.snippet)
+                        .font(.system(size: 14))
+                        .foregroundStyle(.secondary)
+                        .lineSpacing(3)
+                }
+
+                // Open in Safari button
+                if let url = URL(string: source.url) {
+                    Link(destination: url) {
+                        HStack {
+                            Image(systemName: "safari")
+                            Text("Open in Safari")
+                        }
+                        .font(.system(size: 15, weight: .medium))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(AppTheme.cardBorder, lineWidth: 1)
+                        )
+                    }
+                }
+
+                Spacer()
+            }
+            .padding(20)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 20))
+                            .foregroundStyle(AppTheme.mutedText)
+                    }
+                }
+            }
+        }
+    }
+
+    private func faviconURL(_ urlString: String) -> URL? {
+        guard let host = URL(string: urlString)?.host else { return nil }
+        return URL(string: "https://www.google.com/s2/favicons?domain=\(host)&sz=32")
+    }
+}
+
+// MARK: - ReasoningBox
+
+/// Collapsible thinking/reasoning box that shows the AI's internal reasoning process.
+/// Auto-expands while streaming, auto-collapses when done. Tap header to toggle.
+private struct ReasoningBox: View {
+    let content: String
+    let durationMs: Int?
+    let isStreaming: Bool
+
+    @State private var isExpanded: Bool = true
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Header — tap to toggle expansion
+            Button {
+                withAnimation(.snappy(duration: 0.2)) { isExpanded.toggle() }
+            } label: {
+                HStack(spacing: 6) {
+                    // Animated brain icon — pulses while streaming
+                    Image(systemName: "brain")
+                        .font(.system(size: 12, weight: .medium))
+                        .symbolEffect(.pulse, isActive: isStreaming && durationMs == nil)
+
+                    if let ms = durationMs {
+                        let seconds = max(1, ms / 1000)
+                        Text("Thought for \(seconds)s")
+                            .font(.system(size: 13, weight: .medium))
+                    } else {
+                        Text("Thinking…")
+                            .font(.system(size: 13, weight: .medium))
+                    }
+
+                    Spacer()
+
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 11, weight: .semibold))
+                        .rotationEffect(.degrees(isExpanded ? 0 : -90))
+                        .animation(.snappy(duration: 0.2), value: isExpanded)
+                }
+                .foregroundStyle(AppTheme.mutedText)
+            }
+            .buttonStyle(.plain)
+
+            // Reasoning content — collapsible
+            if isExpanded {
+                Text(content)
+                    .font(.system(size: 13))
+                    .foregroundStyle(AppTheme.subtleText)
+                    .lineSpacing(3)
+                    .padding(.top, 8)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .padding(12)
+        .background(
+            AppTheme.surfacePrimary.opacity(0.5),
+            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(AppTheme.cardBorder, lineWidth: 0.5)
+        )
+        // Auto-collapse when streaming finishes with a slight delay
+        .onChange(of: isStreaming) { _, streaming in
+            if !streaming && durationMs != nil {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                    withAnimation(.snappy(duration: 0.3)) { isExpanded = false }
+                }
+            }
+        }
     }
 }
 
