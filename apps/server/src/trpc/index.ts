@@ -11,6 +11,7 @@ import { draftsRouter } from './routes/drafts';
 import { avatarRouter } from './routes/avatar';
 import { labelsRouter } from './routes/label';
 import { notesRouter } from './routes/notes';
+import { mentionsRouter } from './routes/mentions';
 import { brainRouter } from './routes/brain';
 import { userRouter } from './routes/user';
 import { meetRouter } from './routes/meet';
@@ -32,6 +33,7 @@ export const appRouter = router({
   drafts: draftsRouter,
   labels: labelsRouter,
   mail: mailRouter,
+  mentions: mentionsRouter,
   notes: notesRouter,
   shortcut: shortcutRouter,
   settings: settingsRouter,

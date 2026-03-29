@@ -214,6 +214,39 @@ export type NativeAuthProvider = {
   customRedirectPath?: string;
 };
 
+export const mentionKinds = ['task', 'thread', 'event', 'person'] as const;
+
+export type MentionKind = (typeof mentionKinds)[number];
+
+export type MentionRef = {
+  id: string;
+  kind: MentionKind;
+  title: string;
+  subtitle?: string | null;
+  displayText: string;
+  accessibilityLabel: string;
+};
+
+export type MentionSearchGroup = {
+  kind: MentionKind;
+  label: string;
+  items: MentionRef[];
+};
+
+export type MentionSearchResult = {
+  groups: MentionSearchGroup[];
+};
+
+export const editorCommandSurfaces = ['email-compose', 'ai-chat', 'task-capture'] as const;
+
+export type EditorCommandSurface = (typeof editorCommandSurfaces)[number];
+
+export type MentionCommandAvailability = {
+  trigger: '@' | '/';
+  kind: MentionKind;
+  availableOn: EditorCommandSurface[];
+};
+
 export type NativeRouteParamList = {
   LoginScreen: undefined;
   WebAuthScreen: { providerId: string; initialUrl: string };
