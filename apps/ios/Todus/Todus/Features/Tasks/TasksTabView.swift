@@ -9,14 +9,10 @@ struct TasksTabView: View {
     @Query(sort: \FolderRecord.createdAt) private var folders: [FolderRecord]
     @Query(sort: \TaskRecord.createdAt, order: .reverse) private var allTasks: [TaskRecord]
 
-    @State private var composerText = ""
     @State private var searchText = ""
     @State private var taskSortOrder: TaskSortOrder = .newest
     /// Task opened via AI chat card deep navigation
     @State private var pendingTaskRecord: TaskRecord?
-    /// Keyboard height — used to lift the composer above the keyboard since
-    /// MainTabView ignores keyboard safe area (to keep the tab bar in place).
-    @StateObject private var keyboard = KeyboardObserver()
 
     var body: some View {
         ZStack {
@@ -58,29 +54,6 @@ struct TasksTabView: View {
             }
         }
         .toolbar(.hidden, for: .navigationBar)
-        .safeAreaInset(edge: .bottom) {
-            CaptureComposer(text: $composerText) { attachmentNames, folder, dueDate in
-                let raw = composerText
-                composerText = ""
-                withAnimation(.snappy(duration: 0.18)) {
-                    services.captureService.capture(
-                        rawComposerText: raw,
-                        attachmentNames: attachmentNames,
-                        selectedFolder: folder,
-                        overrideDueDate: dueDate,
-                        in: modelContext
-                    )
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.top, 8)
-            // When keyboard is visible, push the composer above it.
-            // MainTabView uses .ignoresSafeArea(.keyboard) to keep the tab bar at the
-            // bottom, so we manually add keyboard height here for the composer.
-            .padding(.bottom, keyboard.isVisible ? keyboard.height : 8)
-            .animation(.easeOut(duration: 0.25), value: keyboard.height)
-            .background(.clear)
-        }
         // Deep navigation from AI chat cards — open task detail sheet
         .onAppear { consumePendingTaskNavigation() }
         .onChange(of: services.pendingTaskId) { _, _ in consumePendingTaskNavigation() }
@@ -106,7 +79,7 @@ struct TasksTabView: View {
         HStack(spacing: 8) {
             viewModePicker
         }
-        .padding(.vertical, 12)
+        .padding(.vertical, 4)
     }
 
     private var viewModePicker: some View {
@@ -184,12 +157,12 @@ struct TasksTabView: View {
             }
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 9)
+        .padding(.vertical, 6)
         // Use surfacePrimary (white in light / 0.11 in dark) so the bar is clearly
         // visible against the backgroundTop (0.94 in light / 0.05 in dark).
-        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(AppTheme.surfacePrimary, in: Capsule())
         .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            Capsule()
                 .stroke(AppTheme.strongBorder, lineWidth: 1)
         )
     }

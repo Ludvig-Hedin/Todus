@@ -167,14 +167,27 @@ struct AppTopHeader: View {
             Divider()
                 .frame(height: 18)
 
-            Button {
-                services.showsSettings = true
+            Menu {
+                Button("Settings") {
+                    services.showsSettings = true
+                }
+
+                Divider()
+
+                Button("Refresh Mail") {
+                    Task { await services.emailService.loadThreads(refresh: true) }
+                }
+
+                Button("New Email") {
+                    services.showsComposeEmail = true
+                }
             } label: {
                 Image(systemName: "ellipsis.circle")
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(.primary)
                     .frame(width: 40, height: 36)
             }
+            .menuStyle(.borderlessButton)
             .buttonStyle(.plain)
         }
         .glassActionPill()

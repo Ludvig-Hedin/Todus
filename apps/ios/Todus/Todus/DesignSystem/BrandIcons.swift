@@ -162,8 +162,7 @@ struct AppleCalendarIconView: View {
     var size: CGFloat = 30
     var body: some View {
         AppleCalendarLogo()
-            .frame(width: size)
-            .aspectRatio(contentMode: .fit)
+            .frame(width: size, height: size)
             .clipShape(RoundedRectangle(cornerRadius: size * 0.225, style: .continuous))
             .shadow(color: .black.opacity(0.12), radius: 2, x: 0, y: 1)
     }

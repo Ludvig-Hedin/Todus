@@ -18,12 +18,12 @@ struct MainTabView: View {
 
     @State private var showCreateSheet = false
     @State private var showAIChat     = false
-    @State private var createDefaultType: CreateItemType = .auto
 
     /// Wire to EventKit / CalendarService when ready.
     @State private var hasUpcomingCalendarEvent = false
     /// Confirmation dialog for session expired banner — prevents accidental sign-out on tap.
     @State private var showSessionExpiredConfirm = false
+    @State private var activeTabTrace: PerformanceTrace.IntervalState?
 
     /// Cached calendar authorization — updated on appear and whenever the app
     /// returns to the foreground (covers both in-app system dialog and Settings round-trips).
@@ -38,16 +38,10 @@ struct MainTabView: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            // All tabs are rendered simultaneously and kept alive across tab switches.
-            // Only the selected tab is visible and interactive — the others are hidden
-            // with opacity(0) + allowsHitTesting(false). This prevents the 5+ second
-            // hangs caused by destroying and recreating tab content (and re-firing all
-            // .task / .onAppear / network fetches) on every tab change.
-            ForEach(AppTab.allCases, id: \.self) { tab in
-                tabContent(for: tab)
-                    .opacity(selectedTab == tab ? 1 : 0)
-                    .allowsHitTesting(selectedTab == tab)
-            }
+            // Render only the active tab. Keeping every tab tree alive caused broad
+            // invalidation and hidden work whenever shared observable state changed.
+            tabContent(for: selectedTab)
+                .id(selectedTab)
             // Dismiss keyboard when tapping anywhere outside a text field.
             // simultaneousGesture ensures buttons/links still receive taps.
             .simultaneousGesture(
@@ -85,7 +79,6 @@ struct MainTabView: View {
                     hasUpcomingCalendarEvent: hasUpcomingCalendarEvent,
                     onAI:     { showAIChat     = true },
                     onCreate: {
-                        createDefaultType = defaultCreateType(for: selectedTab)
                         withAnimation(.snappy(duration: 0.2)) {
                             showCreateSheet = true
                         }
@@ -97,11 +90,8 @@ struct MainTabView: View {
             }
             .overlay {
                 if showCreateSheet {
-                    CreateSheet(
-                        isPresented: $showCreateSheet,
-                        defaultType: createDefaultType
-                    )
-                    .zIndex(20)
+                    CreateSheet(isPresented: $showCreateSheet)
+                        .zIndex(20)
                 }
             }
             .sheet(isPresented: $showAIChat) {
@@ -146,9 +136,7 @@ struct MainTabView: View {
             }
             // Listen for requestCreateSheet from child views (e.g. HomeView "+" buttons)
             .onChange(of: services.requestCreateSheet) { _, requested in
-                guard let type = requested else { return }
-                createDefaultType = type
-                // Match the animation used by the tab bar's create button
+                guard requested != nil else { return }
                 withAnimation(.snappy(duration: 0.2)) {
                     showCreateSheet = true
                 }
@@ -157,6 +145,10 @@ struct MainTabView: View {
             // Keep AppServices.currentTab in sync so AI suggestions are context-aware
             .onChange(of: selectedTab) { _, newTab in
                 services.currentTab = newTab
+                activeTabTrace = PerformanceTrace.beginInterval(
+                    PerformanceTrace.tabSwitch,
+                    message: "Tab switch begin: \(newTab.rawValue)"
+                )
             }
             // Re-check calendar permission whenever the app becomes active.
             // Covers both the in-app system dialog (app goes .inactive while it shows)
@@ -167,19 +159,22 @@ struct MainTabView: View {
                     calendarPermissionGranted = services.calendarService.canReadEvents()
                 }
             }
-    }
-
-    private func defaultCreateType(for tab: AppTab) -> CreateItemType {
-        switch tab {
-        case .calendar:
-            return .event
-        case .tasks:
-            return .task
-        case .home:
-            return .auto
-        case .email:
-            return .email
-        }
+            .task(id: selectedTab) {
+                await Task.yield()
+                if let activeTabTrace {
+                    PerformanceTrace.endInterval(
+                        PerformanceTrace.tabSwitch,
+                        activeTabTrace,
+                        message: "Tab switch end: \(selectedTab.rawValue)"
+                    )
+                    self.activeTabTrace = nil
+                } else {
+                    PerformanceTrace.event(
+                        PerformanceTrace.tabSwitch,
+                        message: "Initial tab rendered: \(selectedTab.rawValue)"
+                    )
+                }
+            }
     }
 
     // MARK: - Bindings
@@ -288,8 +283,7 @@ struct MainTabView: View {
         .confirmationDialog("Your session has expired", isPresented: $showSessionExpiredConfirm, titleVisibility: .visible) {
             Button("Sign In Again", role: .destructive) {
                 services.authService.isSessionExpired = false
-                services.authService.signOut()
-                services.authStore.signOutToGuest()
+                services.signOut()
             }
             Button("Cancel", role: .cancel) {}
         }

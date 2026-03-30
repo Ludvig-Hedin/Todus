@@ -54,8 +54,8 @@ struct InboxView: View {
                                     Spacer()
                                 }
                                 .padding(.horizontal, 16)
-                                .padding(.vertical, 12)
-                                .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                                .padding(.vertical, 8)
+                                .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                                 // Tap to restore a completed task back to .todo
                                 .contentShape(Rectangle())
                                 .onTapGesture {

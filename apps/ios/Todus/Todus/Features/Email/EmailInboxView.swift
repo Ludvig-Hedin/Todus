@@ -26,10 +26,7 @@ struct EmailInboxView: View {
         }
         .toolbar(.hidden, for: .navigationBar)
         .task {
-            await emailService.checkConnection()
-            if emailService.hasConnection {
-                await emailService.loadThreads(refresh: true)
-            }
+            await emailService.ensureInitialInboxLoaded()
         }
         .navigationDestination(item: $selectedThreadId) { threadId in
             EmailThreadView(threadId: threadId)
