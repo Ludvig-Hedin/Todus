@@ -324,7 +324,15 @@ export default function WebAuthScreen() {
       )}
 
       {errorMessage && (
-        <View style={[styles.errorPill, { backgroundColor: colors.destructive, borderColor: colors.destructive }]}>
+        <View
+          style={[
+            styles.errorPill,
+            {
+              backgroundColor: toRgba(colors.destructive, 0.1),
+              borderColor: toRgba(colors.destructive, 0.2),
+            },
+          ]}
+        >
           <Text style={[styles.errorPillText, { color: colors.destructive }]}>{errorMessage}</Text>
         </View>
       )}
@@ -397,3 +405,25 @@ const styles = StyleSheet.create({
     padding: 20,
   },
 });
+
+function toRgba(color: string, alpha: number): string {
+  const hex = color.trim();
+  if (hex.startsWith('#')) {
+    const normalized = hex.slice(1);
+    const expanded =
+      normalized.length === 3
+        ? normalized
+            .split('')
+            .map((char) => char + char)
+            .join('')
+        : normalized;
+    if (expanded.length === 6) {
+      const r = parseInt(expanded.slice(0, 2), 16);
+      const g = parseInt(expanded.slice(2, 4), 16);
+      const b = parseInt(expanded.slice(4, 6), 16);
+      return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+    }
+  }
+
+  return color;
+}

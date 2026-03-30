@@ -259,7 +259,7 @@ export default function LoginScreen() {
           <Text style={[styles.title, { color: colors.foreground }]}>Welcome to Todus</Text>
           <Text style={[styles.subtitle, { color: colors.mutedForeground, marginBottom: spacing[4] }]}>Your AI agent for emails</Text>
           <Text style={[styles.description, { color: colors.mutedForeground }]}>
-            Sign up for free with your email
+            Sign in with Google or Apple
           </Text>
         </View>
 

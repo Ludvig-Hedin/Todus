@@ -271,7 +271,7 @@ export function MailSidebar(props: DrawerContentComponentProps) {
       }
 
       const mobileTokenUrl = `${env.backendUrl.replace(/\/$/, '')}/api/auth/mobile-token`;
-      setLinkingConnectionId(connectionId ?? null);
+      setLinkingConnectionId(connectionId ?? providerId);
 
       try {
         haptics.selection();

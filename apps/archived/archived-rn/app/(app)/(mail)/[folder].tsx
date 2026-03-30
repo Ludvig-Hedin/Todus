@@ -65,8 +65,13 @@ export default function MailFolderScreen() {
   const activeFolder = folder ?? 'inbox';
   const isSplitLayout = Platform.OS === 'macos' || width >= 768;
   const listThreadsKey = trpc.mail.listThreads.queryKey();
-  const archiveSnapshotsRef = useRef<ReturnType<typeof getThreadListSnapshots>>([]);
-  const deleteSnapshotsRef = useRef<ReturnType<typeof getThreadListSnapshots>>([]);
+  const sharedSnapshotsRef = useRef<
+    Array<{
+      kind: 'archive' | 'delete';
+      ids: string[];
+      snapshots: ReturnType<typeof getThreadListSnapshots>;
+    }>
+  >([]);
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(
     threadId && typeof threadId === 'string' ? threadId : null,
   );
@@ -159,14 +164,29 @@ export default function MailFolderScreen() {
     ...trpc.mail.bulkArchive.mutationOptions(),
     onMutate: ({ ids }) => {
       void queryClient.cancelQueries({ queryKey: listThreadsKey });
-      const previousListSnapshots = getThreadListSnapshots(queryClient, listThreadsKey);
-      archiveSnapshotsRef.current = previousListSnapshots;
+      const snapshots = getThreadListSnapshots(queryClient, listThreadsKey);
+      sharedSnapshotsRef.current.push({ kind: 'archive', ids, snapshots });
       removeThreadIdsFromThreadListCaches(queryClient, listThreadsKey, ids);
-      return undefined;
+      return { ids };
     },
-    onError: (error) => {
-      if (archiveSnapshotsRef.current.length > 0) {
-        restoreThreadListSnapshots(queryClient, archiveSnapshotsRef.current);
+    onSuccess: () => {
+      setSelectedThreadIds([]);
+    },
+    onError: (error, variables) => {
+      const snapshotIndex = [...sharedSnapshotsRef.current]
+        .reverse()
+        .findIndex(
+          (entry) =>
+            entry.kind === 'archive' &&
+            entry.ids.length === variables.ids.length &&
+            entry.ids.every((id) => variables.ids.includes(id)),
+        );
+      if (snapshotIndex >= 0) {
+        const actualIndex = sharedSnapshotsRef.current.length - 1 - snapshotIndex;
+        const [entry] = sharedSnapshotsRef.current.splice(actualIndex, 1);
+        if (entry) {
+          restoreThreadListSnapshots(queryClient, entry.snapshots);
+        }
       }
       Alert.alert(
         'Archive failed',
@@ -179,14 +199,29 @@ export default function MailFolderScreen() {
     ...trpc.mail.bulkDelete.mutationOptions(),
     onMutate: ({ ids }) => {
       void queryClient.cancelQueries({ queryKey: listThreadsKey });
-      const previousListSnapshots = getThreadListSnapshots(queryClient, listThreadsKey);
-      deleteSnapshotsRef.current = previousListSnapshots;
+      const snapshots = getThreadListSnapshots(queryClient, listThreadsKey);
+      sharedSnapshotsRef.current.push({ kind: 'delete', ids, snapshots });
       removeThreadIdsFromThreadListCaches(queryClient, listThreadsKey, ids);
-      return undefined;
+      return { ids };
     },
-    onError: (error) => {
-      if (deleteSnapshotsRef.current.length > 0) {
-        restoreThreadListSnapshots(queryClient, deleteSnapshotsRef.current);
+    onSuccess: () => {
+      setSelectedThreadIds([]);
+    },
+    onError: (error, variables) => {
+      const snapshotIndex = [...sharedSnapshotsRef.current]
+        .reverse()
+        .findIndex(
+          (entry) =>
+            entry.kind === 'delete' &&
+            entry.ids.length === variables.ids.length &&
+            entry.ids.every((id) => variables.ids.includes(id)),
+        );
+      if (snapshotIndex >= 0) {
+        const actualIndex = sharedSnapshotsRef.current.length - 1 - snapshotIndex;
+        const [entry] = sharedSnapshotsRef.current.splice(actualIndex, 1);
+        if (entry) {
+          restoreThreadListSnapshots(queryClient, entry.snapshots);
+        }
       }
       Alert.alert(
         'Delete failed',
@@ -326,7 +361,6 @@ export default function MailFolderScreen() {
   const handleBulkArchive = useCallback(() => {
     if (selectedThreadIds.length === 0) return;
     archiveMutation.mutate({ ids: selectedThreadIds });
-    setSelectedThreadIds([]);
   }, [archiveMutation, selectedThreadIds]);
 
   const handleBulkDelete = useCallback(() => {
@@ -342,7 +376,6 @@ export default function MailFolderScreen() {
           style: 'destructive',
           onPress: () => {
             deleteMutation.mutate({ ids: selectedThreadIds });
-            setSelectedThreadIds([]);
           },
         },
       ],
@@ -350,14 +383,13 @@ export default function MailFolderScreen() {
   }, [deleteMutation, selectedThreadIds]);
 
   const closeSplitThread = useCallback(() => {
-    setSelectedThreadId((current) => {
-      const fallbackId = threads.find((thread: any) => thread.id !== current)?.id ?? null;
-      if (fallbackId) {
-        router.setParams({ threadId: fallbackId });
-      }
-      return fallbackId;
-    });
-  }, [threads, router]);
+    const currentId = selectedThreadId;
+    const fallbackId = threads.find((thread: any) => thread.id !== currentId)?.id ?? null;
+    setSelectedThreadId(fallbackId);
+    if (fallbackId) {
+      router.setParams({ threadId: fallbackId });
+    }
+  }, [selectedThreadId, threads, router]);
 
   const renderThreadList = () => {
     if (!session) {

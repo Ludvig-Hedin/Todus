@@ -126,7 +126,7 @@ export function SenderAvatar({ email, name, size = 32, style }: SenderAvatarProp
 
   return (
     <View style={[styles.container, containerStyle, style]}>
-      {avatarData?.primary?.svgContent && !isLoading ? (
+      {avatarData?.primary?.svgContent && !isAvatarLoading ? (
         <SvgXml xml={avatarData.primary.svgContent} width={size} height={size} />
       ) : bimiData?.logo?.svgContent && !isBimiLoading ? (
         <SvgXml xml={bimiData.logo.svgContent} width={size} height={size} />

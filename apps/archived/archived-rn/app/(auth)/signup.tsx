@@ -188,7 +188,9 @@ export default function SignupScreen() {
         <View style={[styles.headerContainer, { marginBottom: spacing[8] }]}>
           <Text style={[styles.title, { color: colors.foreground }]}>Signup to Todus</Text>
           <Text style={[styles.subtitle, { color: colors.mutedForeground, marginBottom: spacing[4] }]}>Your AI agent for emails</Text>
-          <Text style={[styles.description, { color: colors.mutedForeground }]}>Sign up for free with your email</Text>
+          <Text style={[styles.description, { color: colors.mutedForeground }]}>
+            Sign up for free with Google or Apple
+          </Text>
         </View>
 
         {errorMessage && (
@@ -237,9 +239,33 @@ export default function SignupScreen() {
       </View>
 
       <View style={[styles.footer, { paddingVertical: spacing[6], paddingHorizontal: spacing[6] }]}>
-        <Text style={[styles.footerLinkText, { color: colors.mutedForeground }]}>Terms of Service</Text>
+        <Pressable
+          onPress={() => {
+            Linking.openURL(`${env.webUrl.replace(/\/$/, '')}/terms`).catch((error) => {
+              console.error('[SignupScreen] failed to open terms link', error);
+            });
+          }}
+          accessibilityRole="link"
+          accessibilityLabel="Open Terms of Service"
+        >
+          <Text style={[styles.footerLinkText, { color: colors.mutedForeground }]}>
+            Terms of Service
+          </Text>
+        </Pressable>
         <View style={[styles.dot, { backgroundColor: ui.borderStrong }]} />
-        <Text style={[styles.footerLinkText, { color: colors.mutedForeground }]}>Privacy Policy</Text>
+        <Pressable
+          onPress={() => {
+            Linking.openURL(`${env.webUrl.replace(/\/$/, '')}/privacy`).catch((error) => {
+              console.error('[SignupScreen] failed to open privacy link', error);
+            });
+          }}
+          accessibilityRole="link"
+          accessibilityLabel="Open Privacy Policy"
+        >
+          <Text style={[styles.footerLinkText, { color: colors.mutedForeground }]}>
+            Privacy Policy
+          </Text>
+        </Pressable>
       </View>
     </SafeAreaView>
   );
