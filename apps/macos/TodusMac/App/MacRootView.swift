@@ -70,18 +70,23 @@ struct MacRootView: View {
     @State private var isComposePresented = false
     @State private var isCreatePresented = false
     @State private var isSearchPresented = false
+    @State private var selectedEmailThread: IdentifiableString? = nil
     @State private var showNotifications = false
     @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
     @State private var calendarViewMode: String = "Week"
     @State private var calendarSelectedDate: Date = Date()
     @State private var composeEmailSeedBody: String = ""
+    @State private var hasBootstrappedAuthState = false
 
     // Accent color — drives .tint() on root so SwiftUI controls update immediately
     @AppStorage("mac_accent_color") private var accentColorKey = "blue"
 
     var body: some View {
         Group {
-            if services.authService.showsOnboarding {
+            if !hasBootstrappedAuthState && services.authService.hasPersistedBearerToken {
+                restoringSessionView
+                    .transition(.opacity)
+            } else if services.authService.showsOnboarding {
                 // Not authenticated → show sign-in screen
                 MacAuthView()
                     .transition(.opacity)
@@ -95,13 +100,21 @@ struct MacRootView: View {
         .animation(.snappy(duration: 0.3), value: services.authService.showsOnboarding)
         .animation(.snappy(duration: 0.3), value: services.authService.isAuthenticated)
         .task {
+            guard !hasBootstrappedAuthState else { return }
+            defer { hasBootstrappedAuthState = true }
+
+            if services.authService.hasPersistedBearerToken {
+                _ = await services.authService.restorePersistedSession()
+            }
+        }
+        .task {
             // Validate session on launch — but DON'T sign out on failure.
             // attemptSilentRefresh() returns false for both expired tokens AND
             // network errors (offline, DNS hiccup). Signing out here would
             // destroy a valid Keychain-stored session during a transient outage.
             // Instead, just refresh isSessionExpired so the UI can show a banner.
             // Actual sign-out on 401 is handled reactively by the API client.
-            if services.authService.isAuthenticated {
+            if services.authService.isAuthenticated && hasBootstrappedAuthState {
                 _ = await services.authService.attemptSilentRefresh()
             }
         }
@@ -112,6 +125,28 @@ struct MacRootView: View {
             // is still nil. Matches iOS RootView behavior.
             guard services.authService.isAuthenticated else { return }
             await services.authService.fetchUserProfile()
+        }
+    }
+
+    private var restoringSessionView: some View {
+        ZStack {
+            MacTheme.contentBackground
+                .ignoresSafeArea()
+
+            VStack(spacing: 14) {
+                Image("BrandLogo")
+                    .resizable()
+                    .renderingMode(.template)
+                    .foregroundStyle(.primary.opacity(0.8))
+                    .frame(width: 44, height: 44)
+
+                ProgressView()
+                    .controlSize(.small)
+
+                Text("Verifying session…")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -252,9 +287,27 @@ struct MacRootView: View {
             }
             .animation(.snappy(duration: 0.2), value: isAssistantPresented)
             .navigationTitle(selection.title)
-            // Let the toolbar use the default window chrome — a forced .toolbarBackground
-            // spans the full window width including over the sidebar, clipping it.
+            // Hide the toolbar's own background so the content-area
+            // MacTheme.contentBackground bleeds through seamlessly.
+            // (.hidden doesn't paint anything, so no sidebar clipping issue —
+            // that only happened with .visible which drew an opaque bar.)
+            .toolbarBackground(.hidden, for: .windowToolbar)
+            .toolbar(removing: .sidebarToggle)
             .toolbar {
+                ToolbarItem(placement: .navigation) {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            columnVisibility = columnVisibility == .detailOnly
+                                ? .automatic : .detailOnly
+                        }
+                    } label: {
+                        Image(systemName: "sidebar.left")
+                    }
+                    .help("Toggle Sidebar")
+                    .buttonStyle(.plain)
+                    .focusEffectDisabled()
+                }
+
                 // Context-specific toolbar items based on active view
                 ToolbarItemGroup(placement: .secondaryAction) {
                     contextToolbarItems
@@ -421,6 +474,10 @@ struct MacRootView: View {
             searchSheet
                 .frame(minWidth: 480, minHeight: 360)
         }
+        .sheet(item: $selectedEmailThread) { thread in
+            MacEmailThreadView(threadId: thread.value)
+                .frame(minWidth: 560, minHeight: 400)
+        }
     }
 
     // MARK: - Context Toolbar
@@ -455,22 +512,11 @@ struct MacRootView: View {
             .help("Filter")
 
         case "calendar":
-            // View picker and Today button live inside the calendar header now.
-            // Toolbar only has a "New Event" action.
-            Button {
-                isCreatePresented = true
-            } label: {
-                Image(systemName: "plus")
-            }
-            .help("New Event")
+            // No extra toolbar items — view picker and Today button live inside
+            // the calendar header. The global compose button (⌘N) handles new events.
+            EmptyView()
 
         case "tasks":
-            Button { isCreatePresented = true } label: {
-                Image(systemName: "plus")
-            }
-            .help("New Task (⌘⇧N)")
-            .keyboardShortcut("n", modifiers: [.command, .shift])
-
             Menu {
                 Button("All") {}
                 Button("Today") {}
@@ -544,6 +590,28 @@ struct MacRootView: View {
     }
 
     private var searchSheet: some View {
-        MacSearchView()
+        MacSearchView(
+            onCreateTask: {
+                selection = .tasks
+                isCreatePresented = true
+            },
+            onComposeEmail: {
+                isComposePresented = true
+            },
+            onCreateEvent: {
+                selection = .calendar(.all)
+                isCreatePresented = true
+            },
+            onOpenTasks: {
+                selection = .tasks
+            },
+            onOpenCalendarEvent: { date in
+                calendarSelectedDate = date
+                selection = .calendar(.all)
+            },
+            onOpenEmailThread: { threadId in
+                selectedEmailThread = IdentifiableString(value: threadId)
+            }
+        )
     }
 }

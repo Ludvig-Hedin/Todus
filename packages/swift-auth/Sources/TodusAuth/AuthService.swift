@@ -20,7 +20,9 @@ private func debugAuthLog(_ message: String) {
 private actor KeychainPersistenceActor {
     func persist(key: String, value: String?) {
         if let value {
-            KeychainHelper.save(key: key, value: value)
+            if !KeychainHelper.save(key: key, value: value) {
+                authLog.error("Keychain persistence failed for key \(key, privacy: .public)")
+            }
         } else {
             KeychainHelper.delete(key: key)
         }
@@ -38,6 +40,9 @@ private actor KeychainPersistenceActor {
 @Observable
 public final class AuthService: NSObject {
     private static let keychainPersistence = KeychainPersistenceActor()
+    private static let freshLoginValidationAttempts = 5
+    private static let refreshValidationAttempts = 2
+    private static let callbackDeduplicationWindow: TimeInterval = 2
 
     // MARK: - State
 
@@ -110,10 +115,24 @@ public final class AuthService: NSObject {
     /// Keep a strong reference to the web auth session so the system doesn't deallocate it mid-flow.
     /// Without this, ASWebAuthenticationSession can be garbage-collected and the callback never fires.
     private var webAuthSession: ASWebAuthenticationSession?
+    private var isCompletingAuthentication = false
+    private var lastHandledCallbackToken: String?
+    private var lastHandledCallbackAt: Date?
 
     /// The current Bearer token, cached in memory to avoid repeated synchronous Keychain reads.
     public private(set) var bearerToken: String? {
         didSet { persistStringToKeychain(key: Keys.bearerToken, value: bearerToken) }
+    }
+
+    public var hasPersistedBearerToken: Bool {
+        bearerToken != nil
+    }
+
+    public var bearerTokenPreview: String {
+        guard let token = bearerToken, !token.isEmpty else { return "None" }
+        let prefix = token.prefix(6)
+        let suffix = token.suffix(4)
+        return "\(prefix)...\(suffix) (\(token.count))"
     }
 
     // MARK: - Init
@@ -246,7 +265,9 @@ public final class AuthService: NSObject {
             authState = .guest
         }
 
-        isLoading = false
+        if !isCompletingAuthentication {
+            isLoading = false
+        }
     }
 
     // MARK: - Google Sign In (Web-based OAuth)
@@ -255,7 +276,8 @@ public final class AuthService: NSObject {
     /// 1. POST to backend to get the Google OAuth redirect URL
     /// 2. Open that URL in ASWebAuthenticationSession (system browser)
     /// 3. After Google consent, backend creates session + redirects to /api/auth/mobile-token
-    /// 4. /api/auth/mobile-token converts session cookie → JWT, redirects to todus://auth-callback?token=JWT
+    /// 4. /api/auth/mobile-token converts the browser session cookie into a JWT bearer token
+    ///    and redirects to todus://auth-callback?token=<jwt>
     public func signInWithGoogle() async {
         isLoading = true
         lastErrorMessage = nil
@@ -320,7 +342,7 @@ public final class AuthService: NSObject {
 
             // Step 2: Open the Google OAuth URL in ASWebAuthenticationSession.
             // The browser handles the full OAuth flow: Google consent → backend callback →
-            // /auth/mobile-token → JS redirect to todus://auth-callback?token=JWT
+            // /auth/mobile-token → JS redirect to todus://auth-callback?token=<jwt>
             let callbackURL = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<URL, Error>) in
                 // CRASH FIX: Explicitly type the completion handler as @Sendable to prevent
                 // Swift 6 from inheriting @MainActor isolation from the enclosing context.
@@ -369,7 +391,9 @@ public final class AuthService: NSObject {
         }
 
         webAuthSession = nil
-        isLoading = false
+        if !isCompletingAuthentication {
+            isLoading = false
+        }
     }
 
     // MARK: - Email OTP
@@ -510,8 +534,12 @@ public final class AuthService: NSObject {
         guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return }
 
         if let token = components.queryItems?.first(where: { $0.name == "token" })?.value {
+            if shouldIgnoreCallbackToken(token) {
+                debugAuthLog("Auth callback: ignoring duplicate token \(tokenPreview(token))")
+                return
+            }
             let email = components.queryItems?.first(where: { $0.name == "email" })?.value
-            authLog.info("Auth callback: token received (length=\(token.count))")
+            authLog.info("Auth callback: token received \(self.tokenPreview(token))")
             completeAuthentication(token: token, email: email)
         } else {
             authLog.error("Auth callback: no token in URL — \(url.absoluteString)")
@@ -521,6 +549,43 @@ public final class AuthService: NSObject {
     }
 
     // MARK: - Session Management
+
+    public enum SessionRestoreResult: Sendable {
+        case restored
+        case invalid
+        case deferred
+        case missingToken
+    }
+
+    @discardableResult
+    public func restorePersistedSession() async -> SessionRestoreResult {
+        guard let token = bearerToken else {
+            return .missingToken
+        }
+
+        switch await validateUserProfile(
+            token: token,
+            fallbackEmail: userEmail,
+            attempts: Self.refreshValidationAttempts
+        ) {
+        case .verified(let profile):
+            applyVerifiedProfile(profile, fallbackEmail: userEmail)
+            hasSeenOnboarding = true
+            authState = .authenticated
+            isSessionExpired = false
+            return .restored
+        case .invalidSession:
+            authLog.warning("restorePersistedSession: token no longer valid")
+            signOut()
+            isSessionExpired = true
+            lastErrorMessage = "Your saved session expired. Please sign in again."
+            return .invalid
+        case .transientFailure(let reason):
+            debugAuthLog("restorePersistedSession: deferred due to \(reason)")
+            authState = .authenticated
+            return .deferred
+        }
+    }
 
     /// Attempt a silent session refresh by calling get-session with the current token.
     /// Returns true if the session is still valid, false if it's expired.
@@ -555,7 +620,7 @@ public final class AuthService: NSObject {
         if let newToken = response.value(forHTTPHeaderField: "set-auth-token"),
            !newToken.isEmpty,
            newToken != bearerToken {
-            debugAuthLog("Captured rotated token from set-auth-token header")
+            debugAuthLog("Captured rotated token \(tokenPreview(newToken)) from set-auth-token header")
             bearerToken = newToken
         }
     }
@@ -589,54 +654,22 @@ public final class AuthService: NSObject {
             debugAuthLog("fetchUserProfile: no bearer token, skipping")
             return
         }
-        let url = backendURL.appendingPathComponent("api/auth/me")
-        debugAuthLog("fetchUserProfile: GET \(url.absoluteString)")
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        // Origin required by Better Auth CSRF middleware on all requests
-        request.setValue("https://todus.app", forHTTPHeaderField: "Origin")
-
-        do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-            // Check HTTP status before attempting to parse — avoids treating error pages as profiles
-            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-                if let http = response as? HTTPURLResponse {
-                    let body = String(data: data, encoding: .utf8) ?? "(empty)"
-                    authLog.warning("fetchUserProfile: HTTP \(http.statusCode), body=\(body)")
-                    if http.statusCode == 401 {
-                        isSessionExpired = true
-                        lastErrorMessage = "Your sign-in session could not be verified. Please sign in again."
-                    }
-                }
-                return
-            }
-            // Capture rotated token on successful profile fetch (called on every app launch)
-            captureRotatedToken(from: http)
-            let bodyStr = String(data: data, encoding: .utf8) ?? "(empty)"
-            debugAuthLog("fetchUserProfile: 200 OK, body=\(String(bodyStr.prefix(500)))")
-
-            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let user = json["user"] as? [String: Any] else {
-                debugAuthLog("fetchUserProfile: JSON parse failed or no 'user' key")
-                return
-            }
-
-            if let name = user["name"] as? String, !name.isEmpty {
-                self.userName = name
-                debugAuthLog("fetchUserProfile: set userName=\(name)")
-            }
-            if let image = user["image"] as? String, !image.isEmpty {
-                self.userImage = image
-                debugAuthLog("fetchUserProfile: set userImage=\(image.prefix(60))...")
-            }
-            if let email = user["email"] as? String, !email.isEmpty {
-                self.userEmail = email  // stored property → triggers SwiftUI observation
-                debugAuthLog("fetchUserProfile: set userEmail=\(email)")
-            }
-        } catch {
-            // Non-critical — settings will just show email or initials as fallback
-            authLog.warning("fetchUserProfile failed: \(error.localizedDescription)")
+        switch await validateUserProfile(
+            token: token,
+            fallbackEmail: userEmail,
+            attempts: Self.refreshValidationAttempts
+        ) {
+        case .verified(let profile):
+            applyVerifiedProfile(profile, fallbackEmail: userEmail) // Changed fallbackEmail to userEmail here
+            authState = .authenticated
+            isSessionExpired = false
+        case .invalidSession:
+            authLog.warning("fetchUserProfile: token rejected, signing out")
+            signOut()
+            isSessionExpired = true
+            lastErrorMessage = "Your sign-in session could not be verified. Please sign in again."
+        case .transientFailure(let reason):
+            authLog.warning("fetchUserProfile deferred: \(reason)")
         }
     }
 
@@ -649,13 +682,38 @@ public final class AuthService: NSObject {
     private func completeAuthentication(token: String, email: String?) {
         bearerToken = token
         if let email {
-            self.userEmail = email  // stored property → triggers SwiftUI observation + saves to Keychain via didSet
+            self.userEmail = email
         }
-        hasSeenOnboarding = true   // stored property → triggers SwiftUI observation
-        authState = .authenticated // triggers SwiftUI observation → root view switches to main
+        isCompletingAuthentication = true
+        isLoading = true
 
-        // Fetch full profile (name, avatar) in background — non-blocking
-        Task { await fetchUserProfile() }
+        Task { @MainActor in
+            defer {
+                self.isCompletingAuthentication = false
+                self.isLoading = false
+            }
+
+            switch await validateUserProfile(
+                token: token,
+                fallbackEmail: email,
+                attempts: Self.freshLoginValidationAttempts
+            ) {
+            case .verified(let profile):
+                self.applyVerifiedProfile(profile, fallbackEmail: email)
+                self.hasSeenOnboarding = true
+                self.authState = .authenticated
+                self.isSessionExpired = false
+                self.lastErrorMessage = nil
+            case .invalidSession:
+                authLog.error("completeAuthentication: token rejected after callback")
+                self.signOut()
+                self.lastErrorMessage = "Sign in completed, but Todus could not verify your session. Please try again."
+            case .transientFailure(let reason):
+                authLog.error("completeAuthentication: verification failed due to \(reason)")
+                self.signOut()
+                self.lastErrorMessage = "Sign in completed, but Todus could not reach the server to verify your session."
+            }
+        }
     }
 
     private func persistStringToKeychain(key: String, value: String?) {
@@ -682,6 +740,134 @@ public final class AuthService: NSObject {
         if userImage == nil {
             userImage = snapshot.2
         }
+    }
+
+    private enum ProfileValidationResult {
+        case verified(VerifiedProfile)
+        case invalidSession
+        case transientFailure(String)
+    }
+
+    private struct VerifiedProfile {
+        let email: String?
+        let name: String?
+        let image: String?
+    }
+
+    private func validateUserProfile(
+        token: String,
+        fallbackEmail: String?,
+        attempts: Int
+    ) async -> ProfileValidationResult {
+        let maxAttempts = max(1, attempts)
+
+        for attempt in 1...maxAttempts {
+            let result = await requestUserProfile(token: token)
+            switch result {
+            case .verified(let profile):
+                return .verified(profile)
+            case .invalidSession:
+                if attempt == maxAttempts {
+                    return .invalidSession
+                }
+            case .transientFailure(let reason):
+                if attempt == maxAttempts {
+                    return .transientFailure(reason)
+                }
+            }
+
+            let delay = UInt64(250_000_000 * attempt)
+            try? await Task.sleep(nanoseconds: delay)
+        }
+
+        return .invalidSession
+    }
+
+    private func requestUserProfile(token: String) async -> ProfileValidationResult {
+        let url = backendURL.appendingPathComponent("api/auth/me")
+        debugAuthLog("fetchUserProfile: GET \(url.absoluteString) with \(tokenPreview(token))")
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("https://todus.app", forHTTPHeaderField: "Origin")
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else {
+                return .transientFailure("invalid_response")
+            }
+
+            captureRotatedToken(from: http)
+
+            if http.statusCode == 401 {
+                let body = String(data: data, encoding: .utf8) ?? "(empty)"
+                authLog.warning("fetchUserProfile: HTTP 401, body=\(body)")
+                return .invalidSession
+            }
+
+            guard (200..<300).contains(http.statusCode) else {
+                let body = String(data: data, encoding: .utf8) ?? "(empty)"
+                authLog.warning("fetchUserProfile: HTTP \(http.statusCode), body=\(body)")
+                return .transientFailure("http_\(http.statusCode)")
+            }
+
+            let bodyStr = String(data: data, encoding: .utf8) ?? "(empty)"
+            debugAuthLog("fetchUserProfile: 200 OK, body=\(String(bodyStr.prefix(500)))")
+
+            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let user = json["user"] as? [String: Any] else {
+                debugAuthLog("fetchUserProfile: JSON parse failed or no 'user' key")
+                return .transientFailure("invalid_json")
+            }
+
+            return .verified(
+                VerifiedProfile(
+                    email: (user["email"] as? String) ?? self.userEmail,
+                    name: user["name"] as? String,
+                    image: user["image"] as? String
+                )
+            )
+        } catch {
+            authLog.warning("fetchUserProfile failed: \(error.localizedDescription)")
+            return .transientFailure("network_\(error.localizedDescription)")
+        }
+    }
+
+    private func applyVerifiedProfile(_ profile: VerifiedProfile, fallbackEmail: String?) {
+        if let email = profile.email ?? fallbackEmail, !email.isEmpty {
+            userEmail = email
+            debugAuthLog("fetchUserProfile: set userEmail=\(email)")
+        }
+        if let name = profile.name, !name.isEmpty {
+            userName = name
+            debugAuthLog("fetchUserProfile: set userName=\(name)")
+        }
+        if let image = profile.image, !image.isEmpty {
+            userImage = image
+            debugAuthLog("fetchUserProfile: set userImage=\(image.prefix(60))...")
+        }
+    }
+
+    private func shouldIgnoreCallbackToken(_ token: String) -> Bool {
+        let now = Date()
+        defer {
+            lastHandledCallbackToken = token
+            lastHandledCallbackAt = now
+        }
+
+        guard lastHandledCallbackToken == token,
+              let lastHandledCallbackAt,
+              now.timeIntervalSince(lastHandledCallbackAt) < Self.callbackDeduplicationWindow else {
+            return false
+        }
+
+        return true
+    }
+
+    private func tokenPreview(_ token: String) -> String {
+        let prefix = token.prefix(6)
+        let suffix = token.suffix(4)
+        return "\(prefix)...\(suffix) (len=\(token.count))"
     }
 
     /// Attempts to extract a Bearer token from the backend response.

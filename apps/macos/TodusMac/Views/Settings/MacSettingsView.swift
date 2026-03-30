@@ -46,6 +46,9 @@ struct MacSettingsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     accountSection
+#if DEBUG
+                    authDebugSection
+#endif
                     connectedServicesSection
                     appearanceSection
                     emailPreferencesSection
@@ -228,6 +231,26 @@ struct MacSettingsView: View {
     }
 
     // MARK: - Connected Services
+
+#if DEBUG
+    private var authDebugSection: some View {
+        settingsGroup(title: "Auth Debug") {
+            settingsCard {
+                infoRow(icon: "person.crop.circle.badge.checkmark", label: "Auth state",
+                        value: services.authService.isAuthenticated ? "Authenticated" : "Guest")
+                cardDivider
+                infoRow(icon: "key.fill", label: "Bearer token",
+                        value: services.authService.bearerTokenPreview)
+                cardDivider
+                infoRow(icon: "exclamationmark.shield", label: "Session expired",
+                        value: services.authService.isSessionExpired ? "Yes" : "No")
+                cardDivider
+                infoRow(icon: "at", label: "Profile email",
+                        value: services.authService.userEmail ?? "—")
+            }
+        }
+    }
+#endif
 
     private var connectedServicesSection: some View {
         settingsGroup(title: "Connected Services") {
@@ -414,11 +437,16 @@ struct MacSettingsView: View {
                         .foregroundStyle(MacTheme.textPrimary)
                     Spacer()
                     Picker("", selection: $ai.selectedModel) {
-                        Text("GPT-5.4 mini").tag("openai/gpt-5.4-mini")
-                        Text("GPT-5.4").tag("openai/gpt-5.4-chat")
-                        Text("Gemini 3 Flash").tag("google/gemini-3-flash-preview")
-                        Text("Claude Haiku").tag("anthropic/claude-haiku-4-5")
+                        Text("GPT-5.4").tag("openai/gpt-5.4")
+                        Text("GPT-5.4 Mini").tag("openai/gpt-5.4-mini")
+                        Text("GPT-5.4 Chat").tag("openai/gpt-5.4-chat")
+                        Text("GPT-5.4 Nano").tag("openai/gpt-5.4-nano")
+                        Text("Claude Sonnet 4.5").tag("anthropic/claude-sonnet-4-5")
+                        Text("Claude Haiku 4.5").tag("anthropic/claude-haiku-4-5")
                         Text("Kimi K2.5").tag("moonshotai/kimi-k2.5")
+                        Text("Gemini 3.1 Pro").tag("google/gemini-3.1-pro-preview")
+                        Text("Gemini 3.1 Flash Lite").tag("google/gemini-3.1-flash-lite-preview")
+                        Text("Gemini 3 Flash").tag("google/gemini-3-flash-preview")
                     }
                     .pickerStyle(.menu)
                     .frame(minWidth: 120)

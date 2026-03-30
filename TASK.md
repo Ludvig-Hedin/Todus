@@ -5,10 +5,13 @@ Last updated: 2026-03-30
 ## Active Auth Fixes
 
 - `DONE` Native shared auth now verifies `/api/auth/me` before promoting a callback token into an authenticated app session.
+- `DONE` Server auth middleware now resolves native callback session tokens directly from the Better Auth session table, fixing `/api/auth/me` verification after Google OAuth.
 - `DONE` macOS launch now validates persisted bearer tokens before rendering the main shell, so stale Keychain auth no longer shows a partial logged-in UI.
 - `DONE` Native Keychain auth items are now namespaced by bundle service for deterministic macOS/iOS resets.
 - `DONE` macOS Settings now exposes DEBUG auth diagnostics (state, token preview, session-expired flag, hydrated email).
 - `DONE` Full local macOS reset procedure documented in `apps/macos/README.md`.
+- `DONE` macOS centralized sign-out now resets cached email state before auth sign-out, preventing stale mailbox state from leaking across sessions.
+- `DONE` Invalid-session sign-out now preserves the session-expired banner/message, and Keychain write failures in shared auth/AI persistence are logged instead of being silent.
 
 ## Build Fixes
 

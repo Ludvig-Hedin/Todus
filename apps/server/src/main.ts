@@ -633,10 +633,12 @@ const api = new Hono<HonoContext>()
 
     const auth = createAuth();
     c.set('auth', auth);
-    const session = await auth.api.getSession({ headers: c.req.raw.headers });
-    c.set('sessionUser', session?.user);
+    // Named `authSession` to avoid shadowing the Drizzle `session` schema table import,
+    // which is needed for the session token DB lookup fallback below.
+    const authSession = await auth.api.getSession({ headers: c.req.raw.headers });
+    c.set('sessionUser', authSession?.user);
 
-    if (c.req.header('Authorization') && !session?.user) {
+    if (c.req.header('Authorization') && !authSession?.user) {
       // Start token verification span
       const tokenSpan = TraceContext.startSpan(
         traceId,
@@ -652,6 +654,9 @@ const api = new Hono<HonoContext>()
       const token = c.req.header('Authorization')?.split(' ')[1];
 
       if (token) {
+        let resolved = false;
+
+        // Strategy 1: JWT verification (for tokens issued by the jwt() plugin)
         try {
           const localJwks = await auth.api.getJwks();
           const jwks = createLocalJWKSet(localJwks);
@@ -663,60 +668,88 @@ const api = new Hono<HonoContext>()
             const db = await getZeroDB(userId);
             const user = await db.findUser();
             c.set('sessionUser', user);
+            resolved = true;
 
             TraceContext.completeSpan(traceId, tokenSpan.id, {
               success: true,
               userId,
             });
-          } else {
-            TraceContext.completeSpan(traceId, tokenSpan.id, {
-              success: false,
-              reason: 'no_user_id_in_token',
-            });
           }
-        } catch (jwtError) {
-          // JWT verification failed — token may be a raw Better Auth session token
-          // (32-char string from /auth/mobile-token). Look it up in the session table.
-          // Native apps (iOS/macOS) receive session tokens, not JWTs, from the OAuth flow.
+        } catch {
+          // Not a JWT — try session token strategies below
+        }
+
+        // Strategy 2: Raw native session token → resolve directly from the DB.
+        // /auth/mobile-token returns Better Auth session.session.token, which is the
+        // raw session token stored in the session table. Resolving this directly is
+        // more reliable than reconstructing a signed cookie on the fly.
+        if (!resolved) {
           try {
-            const { db: directDb } = createDb(env.HYPERDRIVE.connectionString);
-            const sessionRow = await directDb.query.session.findFirst({
-              where: and(eq(session.token, token), gt(session.expiresAt, new Date())),
-            });
-            if (sessionRow) {
-              const userRow = await directDb.query.user.findFirst({
-                where: eq(user.id, sessionRow.userId),
+            const { db } = createDb(env.HYPERDRIVE.connectionString);
+            const [activeSession] = await db
+              .select({ userId: session.userId })
+              .from(session)
+              .where(and(eq(session.token, token), gt(session.expiresAt, new Date())))
+              .limit(1);
+
+            if (activeSession?.userId) {
+              const nativeUser = await db.query.user.findFirst({
+                where: eq(user.id, activeSession.userId),
               });
-              if (userRow) {
-                c.set('sessionUser', userRow);
+
+              if (nativeUser) {
+                c.set('sessionUser', nativeUser);
+                resolved = true;
+
                 TraceContext.completeSpan(traceId, tokenSpan.id, {
                   success: true,
-                  userId: userRow.id,
-                  authMethod: 'session_token_lookup',
-                });
-              } else {
-                TraceContext.completeSpan(traceId, tokenSpan.id, {
-                  success: false,
-                  reason: 'session_token_user_not_found',
+                  userId: nativeUser.id,
+                  authMethod: 'raw_session_token_db_lookup',
                 });
               }
-            } else {
+            }
+          } catch {
+            // Raw session token DB lookup failed
+          }
+        }
+
+        // Strategy 3: Raw session token → sign as cookie → re-resolve via Better Auth.
+        // Keep the cookie rehydration path as a fallback for compatibility with
+        // any token variants that aren't stored directly in the session table.
+        if (!resolved) {
+          try {
+            const cookiePrefix = env.NODE_ENV === 'development' ? 'better-auth-dev' : 'better-auth';
+            const signedToken = (
+              await serializeSignedCookie('', token, env.BETTER_AUTH_SECRET)
+            ).replace('=', '');
+
+            const cookieSession = await auth.api.getSession({
+              headers: new Headers({
+                cookie: `${cookiePrefix}.session_token=${signedToken}`,
+                origin: 'https://todus.app',
+              }),
+            });
+
+            if (cookieSession?.user) {
+              c.set('sessionUser', cookieSession.user);
+              resolved = true;
+
               TraceContext.completeSpan(traceId, tokenSpan.id, {
-                success: false,
-                reason: 'session_token_not_found_or_expired',
+                success: true,
+                userId: cookieSession.user.id,
+                authMethod: 'session_token_as_cookie',
               });
             }
-          } catch (sessionLookupError) {
-            TraceContext.completeSpan(
-              traceId,
-              tokenSpan.id,
-              {
-                success: false,
-                reason: 'token_verification_failed',
-              },
-              jwtError instanceof Error ? jwtError.message : 'Unknown token error',
-            );
+          } catch {
+            // Session token resolution failed
           }
+        }
+
+        if (!resolved) {
+          TraceContext.completeSpan(traceId, tokenSpan.id, {
+            success: false,
+            reason: 'all_token_strategies_failed',
+          });
         }
       } else {
         TraceContext.completeSpan(traceId, tokenSpan.id, {
@@ -730,7 +763,7 @@ const api = new Hono<HonoContext>()
     TraceContext.completeSpan(traceId, authSpan.id, {
       authenticated: !!c.var.sessionUser,
       userId: c.var.sessionUser?.id,
-      authMethod: session?.user ? 'session' : c.req.header('Authorization') ? 'token' : 'none',
+      authMethod: authSession?.user ? 'session' : c.req.header('Authorization') ? 'token' : 'none',
     });
 
     // Update trace metadata with user info
@@ -779,10 +812,10 @@ const api = new Hono<HonoContext>()
     return c.json({ user });
   })
   .get('/auth/mobile-token', async (c) => {
-    // Bridge endpoint: converts a cookie-based web session into a bearer token
-    // for the native iOS app. Called from the system browser after web login.
+    // Bridge endpoint: converts a cookie-based web session into a JWT bearer token
+    // for the iOS/macOS apps. Called from the system browser after web login.
     // The system browser has the session cookie, so we can read the session
-    // and generate a bearer token, then redirect to the app's deep link.
+    // and mint the JWT exposed by Better Auth's jwt() plugin for native use.
     //
     // IMPORTANT: We return an HTML page with a JavaScript redirect instead of
     // a 302 redirect. iOS's ASWebAuthenticationSession (used by expo-web-browser)
@@ -795,12 +828,18 @@ const api = new Hono<HonoContext>()
       // No session — redirect back to web login
       return c.redirect(`${env.VITE_PUBLIC_APP_URL}/login?error=no_session`);
     }
-    const token = session.session.token;
+    const jwtToken = await auth.api.getToken({
+      headers: c.req.raw.headers,
+    });
+
+    if (!jwtToken?.token) {
+      return c.redirect(`${env.VITE_PUBLIC_APP_URL}/login?error=no_native_token`);
+    }
 
     // Build the deep link URL for the native app
     const redirectUrl = c.req.query('redirect') || 'todus://auth-callback';
     const separator = redirectUrl.includes('?') ? '&' : '?';
-    const deepLink = `${redirectUrl}${separator}token=${encodeURIComponent(token)}`;
+    const deepLink = `${redirectUrl}${separator}token=${encodeURIComponent(jwtToken.token)}`;
 
     // Return an HTML page that triggers the deep link via JavaScript.
     // This is more reliable than a 302 redirect for custom URL schemes on iOS.
@@ -1024,7 +1063,7 @@ const app = new Hono<HonoContext>()
       },
     }),
   )
-  .get('/health', (c) => c.json({ message: 'Zero Server is Up!' }))
+  .get('/health', (c) => c.json({ message: 'Todus Server is Up!' }))
   .get('/', (c) => c.redirect(`${env.VITE_PUBLIC_APP_URL}`))
   .post('/monitoring/sentry', async (c) => {
     try {
@@ -1146,7 +1185,7 @@ const handler = {
 //         : {},
 //     },
 //     service: {
-//       name: env.OTEL_SERVICE_NAME || 'zero-email-server',
+//       name: env.OTEL_SERVICE_NAME || 'todus-email-server',
 //       version: '1.0.0',
 //     },
 //   };

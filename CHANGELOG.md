@@ -1,5 +1,31 @@
 # Project Changelog
 
+## [2026-03-30] Fix — native Google OAuth now returns a JWT bearer token for iOS/macOS
+
+- Updated `/api/auth/mobile-token` to mint a JWT via Better Auth's `jwt()` plugin (`auth.api.getToken`) instead of forwarding the raw session token from the browser session.
+- Kept the server auth middleware fallback paths in place, but the native callback now receives the JWT format that `/api/auth/me` already verifies directly.
+- Updated the shared native auth comments so the callback token format is documented correctly again.
+
+**Files:** `apps/server/src/main.ts`, `packages/swift-auth/Sources/TodusAuth/AuthService.swift`
+
+## [2026-03-30] Fix — macOS centralized sign-out now clears email state before auth reset
+
+- Updated the macOS `MacAppServices.signOut()` path to call `emailService.resetForSignOut()` before `authService.signOut()`.
+- Removed the stale TODO from the centralized sign-out method so logout behavior now matches the sidebar and settings call sites that already route through this method.
+- This prevents cached email threads, pagination tokens, connection status, and email errors from surviving logout and leaking into the next user session.
+
+**Files:** `apps/macos/TodusMac/App/MacAppServices.swift`
+
+## [2026-03-30] Fix — native auth session-expired state now survives sign-out, and Keychain save failures are observable
+
+- Reordered the shared native auth invalid-session flow so `signOut()` runs before the session-expired flag and user-facing error are set, which preserves the warning banner/message instead of clearing them immediately.
+- Applied the same ordering in persisted-session restoration so invalid saved sessions now leave the app in a consistent expired state after sign-out.
+- Upgraded shared Keychain writes to return success/failure and log OSStatus details instead of silently ignoring `SecItemAdd` / `SecItemDelete` failures.
+- Updated iOS and macOS AI conversation persistence to check the new Keychain write result and log failures instead of dropping them silently.
+- Verified the macOS project `LastUpgradeCheck = 2640` already matches the installed Xcode 26.4 toolchain, so no project file change was required.
+
+**Files:** `packages/swift-auth/Sources/TodusAuth/AuthService.swift`, `packages/swift-auth/Sources/TodusAuth/KeychainHelper.swift`, `apps/ios/Todus/Todus/Services/AI/AIChatService.swift`, `apps/macos/TodusMac/Services/AI/MacAIChatService.swift`
+
 ## [2026-03-30] Fix — Cloudflare install now respects the web workspace lockfile
 
 - Regenerated `pnpm-lock.yaml` so the `apps/web` `uuid` / `@types/uuid` dependency entries match `apps/web/package.json` again.

@@ -8,11 +8,12 @@ This app currently provides:
 
 - a single main window
 - sidebar navigation shell
-- placeholder content panes for Home, Tasks, Email, and Calendar
+- native services for auth, email, calendar, and AI wired through the shared Swift auth package
+- content panes for Home, Tasks, Email, and Calendar
 - a floating Assistant entry point
-- placeholder Settings and account actions
+- settings and account actions, including a profile menu entry that opens the settings panel
 
-No backend, shared services, or production business logic are connected yet.
+The macOS app now shares the native auth implementation with iOS through `packages/swift-auth/Sources/TodusAuth`.
 
 ## Run
 
@@ -44,3 +45,34 @@ apps/macos/
 
 - `pnpm macos` still points to the retired Electron flow and is intentionally not updated in this pass.
 - If Xcode command-line tools are blocked by a local license prompt, run `sudo xcodebuild -license` once before building.
+
+## Full Local Reset
+
+Bundle ID:
+
+- `com.ludvighedin.todus.macos`
+
+Run this from Terminal before retesting auth:
+
+```bash
+pkill -x Todus || true
+
+rm -rf ~/Applications/Todus.app
+rm -rf /Applications/Todus.app
+
+defaults delete com.ludvighedin.todus.macos || true
+rm -rf ~/Library/Preferences/com.ludvighedin.todus.macos.plist
+rm -rf ~/Library/Saved\ Application\ State/com.ludvighedin.todus.macos.savedState
+rm -rf ~/Library/Caches/com.ludvighedin.todus.macos
+
+security delete-generic-password -s com.ludvighedin.todus.macos.auth -a com.todus.auth.bearerToken login.keychain-db || true
+security delete-generic-password -s com.ludvighedin.todus.macos.auth -a com.todus.auth.userEmail login.keychain-db || true
+security delete-generic-password -s com.ludvighedin.todus.macos.auth -a com.todus.auth.userName login.keychain-db || true
+security delete-generic-password -s com.ludvighedin.todus.macos.auth -a com.todus.auth.userImage login.keychain-db || true
+```
+
+If you are running the app from Xcode, also remove the build products:
+
+```bash
+rm -rf ~/Library/Developer/Xcode/DerivedData/TodusMac-*
+```

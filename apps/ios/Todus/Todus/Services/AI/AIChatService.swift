@@ -573,6 +573,9 @@ final class AIChatService {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        // Origin required by Better Auth CSRF middleware — without this the bearer plugin
+        // cannot resolve the session, causing a 401 even though the token is valid.
+        request.setValue("https://todus.app", forHTTPHeaderField: "Origin")
         if let token = authService?.bearerToken {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
@@ -1035,12 +1038,16 @@ final class AIChatService {
     /// Persist to Keychain as a local cache (fast, survives reinstall)
     private func persistConversationsLocally() {
         guard let data = try? JSONEncoder().encode(savedConversations) else { return }
-        KeychainHelper.saveData(key: Self.chatHistoryKey, value: data)
+        if !KeychainHelper.saveData(key: Self.chatHistoryKey, value: data) {
+            log.error("Failed to persist AI chat history to Keychain")
+        }
     }
 
     private func persistDeletedConversationIDs() {
         guard let data = try? JSONEncoder().encode(Array(locallyDeletedConversationIDs)) else { return }
-        KeychainHelper.saveData(key: Self.deletedConversationIDsKey, value: data)
+        if !KeychainHelper.saveData(key: Self.deletedConversationIDsKey, value: data) {
+            log.error("Failed to persist deleted AI conversation IDs to Keychain")
+        }
     }
 
     private func loadPersistedDeletedConversationIDs() {
