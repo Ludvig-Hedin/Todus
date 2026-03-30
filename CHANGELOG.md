@@ -1,5 +1,193 @@
 # Project Changelog
 
+## [2026-03-30] Fix — macOS settings and assistant panel compile cleanup
+
+Resolved the current macOS Xcode warnings/errors blocking the `TodusMac` build:
+
+- restored the branded service-row helper used by `MacSettingsView`
+- added the missing Apple Reminders connection flag used by the settings UI
+- replaced the explicit `Selector(("showHelp:"))` call with `#selector`
+- removed ineffective `nonisolated(unsafe)` storage annotations from `MacVoiceController` and updated the speech callback to hop back to the main actor
+
+**Files changed:**
+- `apps/macos/TodusMac/Views/Settings/MacSettingsView.swift`
+- `apps/macos/TodusMac/Views/AI/MacAssistantPanel.swift`
+
+## [2026-03-30] Fix — `@zero/web` index route & routing parity with `apps/mail`
+
+**Symptom:** Visiting `http://localhost:3200/` showed a non-interactive calendar stub with no sidebar or mail chrome.
+
+**Root cause:** `react-router.config.ts` uses `appDirectory: 'app'`, so `index('page.tsx')` resolves to **`app/page.tsx`**, which had been a placeholder calendar — not the marketing `HomeContent` shell from `apps/mail`. The experimental `app-layout.tsx` wrapper also did not apply to `/`, so the index never matched the unified shell.
+
+**Fix:** Replaced `app/page.tsx` with the same pattern as `apps/mail` (`HomeContent` + `clientLoader` redirect to `/mail/inbox` when authenticated). Replaced **`app/routes.ts`** with the same tree as **`apps/mail/app/routes.ts`** (removed outer `app-layout` and `/home`/`/tasks`/`/calendar` routes under that layout). Removed duplicate/orphan files: root `apps/web/page.tsx`, `app/app-layout.tsx`, `(routes)/home|tasks|calendar/page.tsx`.
+
+**User-facing:** Logged-in users land in the real mail app (`AppSidebar`, folders, working mail UI). Guests still get the marketing home.
+
+## [2026-03-30] Fix — iOS AI chat session expired error & cross-reinstall persistence
+
+### Session expired despite being logged in
+- **Root cause:** `AIChatService` returned "Session expired" immediately on HTTP 401 without attempting a silent session refresh. `TodosAPIClient` already handled this correctly.
+- **Fix:** On 401, attempt `authService.attemptSilentRefresh()` first. If refresh succeeds, prompt user to retry. If it fails, mark `isSessionExpired = true` for proper re-auth flow.
+- **File:** `apps/ios/Todus/Todus/Services/AI/AIChatService.swift`
+
+### Chat history lost on reinstall
+- **Root cause:** Conversations stored in `UserDefaults` which is wiped when the app is uninstalled.
+- **Fix:** Moved conversation persistence to Keychain (`KeychainHelper.saveData`/`readData`), which survives app reinstalls. Includes automatic migration from old `UserDefaults` storage.
+- **Files:** `packages/swift-auth/Sources/TodusAuth/KeychainHelper.swift` (added Data methods), `apps/ios/Todus/Todus/Services/AI/AIChatService.swift`
+
+## [2026-03-30] Fix — macOS app shows "User" with "?" avatar after Google OAuth login
+
+**Root cause:** macOS app never called `fetchUserProfile()` on launch or when settings opened. The iOS app calls it in both `RootView.task{}` and `SettingsView.task{}`, but the macOS equivalents were missing these calls. The only profile fetch happened in `completeAuthentication()`'s fire-and-forget `Task{}`, which could silently fail during the auth→main view transition.
+
+**Fix:** Added `fetchUserProfile()` calls to match iOS behavior:
+- `MacRootView.swift` — new `.task{}` that fetches profile on app start
+- `MacSettingsView.swift` — new `.task{}` that refreshes profile when settings opens
+
+**Files changed:**
+- `apps/macos/TodusMac/App/MacRootView.swift` — Added `.task { await services.authService.fetchUserProfile() }`
+- `apps/macos/TodusMac/Views/Settings/MacSettingsView.swift` — Added `.task { await services.authService.fetchUserProfile() }`
+
+## [2026-03-30] Polish — iOS AI assistant input bar refinements
+
+Five targeted UX improvements to the iOS AI chat input area:
+
+- **Tighter button sizing**: Standardized all action buttons (waveform, mic, send) to consistent 34×34 outer frames with 6pt spacing (was mixed 36/30 with 4/8pt spacing)
+- **Tap-outside to blur**: Tapping anywhere in the chat area now resigns keyboard focus (previously only dismissed attachment picker)
+- **Top-right toolbar breathing room**: Reduced HStack spacing to 16pt and added 2pt trailing padding on ellipsis for less cramped feel
+- **Hidden send button when empty**: Send button now hidden (not just faded) when input is empty; appears with scale+opacity transition when content is typed or file attached
+- **File-only send**: Users can attach and send files/images without any text; auto-generates "View the attached file" prompt when sending attachments alone
+
+**Files changed:**
+- `apps/ios/Todus/Todus/Features/AI/AIChatView.swift` — All five changes in inputSection, chatInputBox, toolbarContent, sendMessage(), ChatVoiceInputButton
+
+## [2026-03-30] Enhancement — Resizable & movable AI assistant panels
+
+Made both floating and side pane assistant panels user-resizable:
+
+- **Floating panel resizable**: Bottom-right drag handle (min 320×400, max 700×900) with crosshair cursor
+- **Floating panel movable**: Header drag gesture moves panel freely around the window
+- **Side pane resizable**: Draggable divider replaces static Divider (min 280px, max 600px) with resize cursor
+- **Self-managed sizing**: Floating panel manages its own frame via internal `floatingSize` state; MacRootView no longer imposes fixed dimensions
+- **Icon consistency**: AssistantButton uses `sparkles` icon matching iOS
+
+**Files changed:**
+- `MacAssistantPanel.swift` — Added `floatingSize`, `floatingOffset`, resize handle overlay, `.frame()` and `.offset()` modifiers
+- `MacRootView.swift` — Added `sidePaneWidth` state, draggable resize divider with `NSCursor.resizeLeftRight`, removed fixed floating frame
+
+## [2026-03-30] Fix — Clear remaining iOS and macOS build blockers
+
+Resolved the latest Xcode compile errors in both native targets:
+
+- marked the shared AI card date formatter as `nonisolated(unsafe)` so `ISO8601DateFormatter` stops tripping Swift 6 sendability checks
+- fixed the voice input controller by storing its completion handler on the main actor and treating `AudioPlayerManager` as the failable optional it is
+- removed the `selection` shadowing bug in the macOS root view so the home view can navigate the sidebar state correctly
+- verified both targets build successfully with `xcodebuild` for the iOS simulator and macOS
+
+**Files changed:**
+- `apps/ios/Todus/Todus/Features/AI/CardViews.swift`
+- `apps/ios/Todus/Todus/Features/Voice/VoiceChatViewModel.swift`
+- `apps/ios/Todus/Todus/Features/Voice/VoiceInputButton.swift`
+- `apps/ios/Todus/Todus/Features/AI/AIChatView.swift`
+- `apps/macos/TodusMac/App/MacRootView.swift`
+- `apps/ios/Todus/status_ios.md`
+- `apps/ios/Todus/status_macos.md`
+
+## [2026-03-30] Enhancement — macOS AI Assistant visual parity with iOS
+
+Second pass to match the iOS AIChatView pixel-for-pixel. Key additions:
+
+- **Page context chip**: Blue pill (e.g. "🏠 Home ×") showing current view, removable by user
+- **Context-aware suggestions**: Suggestion pools change per active page (Home/Tasks/Email/Calendar) matching iOS
+- **Show more / Show less**: Expandable suggestions with shuffle-on-refresh, matching iOS behavior
+- **Prompt library**: Popover with 12 categorized prompt templates (Writing, Planning, Email, etc.)
+- **Voice input (mic)**: Full speech-to-text via macOS Speech framework + AVAudioEngine, matching iOS VoiceInputButton
+- **Attachment button (+)**: File picker for attaching documents, with removable pill previews
+- **Thumbs up/down feedback**: Added to action row matching iOS
+- **Animated sparkle icon**: Rotating gradient sparkles icon matching iOS AnimatedSparkleIcon
+- **Reasoning box**: Collapsible thinking box with auto-expand/collapse matching iOS ReasoningBox
+- **Darker background**: Panel background now matches iOS dark theme
+- **Rounded input box**: Input section wrapped in rounded surface card matching iOS chatInputBox design
+- **Draft persistence**: Input text saved/restored via UserDefaults
+- **Rename conversation**: Alert dialog for renaming chat title
+- **Microphone permissions**: Added NSMicrophoneUsageDescription + NSSpeechRecognitionUsageDescription to Info.plist
+- **Wider panel**: Floating 400×560 (was 380×520), side pane 380 (was 360) for more breathing room
+
+**Files changed:**
+- `MacAssistantPanel.swift` — Complete rewrite with ~900 lines of iOS-parity UI
+- `MacRootView.swift` — Passes `selection` to panel for page context chip
+- `Info.plist` — Added microphone and speech recognition usage descriptions
+
+## [2026-03-30] Feature — macOS AI Assistant with full iOS feature parity
+
+Complete rewrite of the macOS AI assistant to achieve 100% feature parity with the iOS app. Replaced the placeholder `.sheet()` modal with an inline chat panel supporting two display modes.
+
+### Display Modes
+- **Floating mode**: draggable overlay window (380×520) anchored bottom-right, stays open while navigating
+- **Side pane mode**: docked 360px panel on the right edge, integrated into the main layout
+- Toggle between modes via header button; ⌘L toggles open/close; FAB hides when panel is open
+
+### Streaming & Tool Calls (iOS parity)
+- Full SSE streaming with 40ms token batching for smooth typewriter animation
+- Tool call processing: `create_task`, `update_task`, `delete_task`, `create_calendar_event`, `send_email`
+- Task CRUD mutations applied directly to SwiftData via ModelContext
+- Calendar events created via CalendarService actor
+- Email sending via EmailService
+
+### Web Search & Reasoning
+- `search_status` SSE events show animated search indicator with rotating status text
+- `sources` SSE events rendered as clickable source chips (opens URL in browser)
+- `reasoning` / `reasoning_done` events displayed in collapsible disclosure group
+
+### Conversation History
+- Full conversation persistence to UserDefaults (50-conversation cap)
+- History popover for browsing and resuming past conversations
+- New conversation button, auto-save on panel hide
+
+### UI Polish
+- Inline-only markdown during streaming for performance, full CommonMark after streaming ends
+- Action row per message: retry (removes dependent turns) + copy with checkmark feedback
+- Model picker (gpt-4.1, o4-mini, gpt-4.1-mini) in header
+- Mutation chips with color-coded action badges (green=create, blue=update, red=delete)
+- Suggestion chips for empty state quick prompts
+
+**Files created:**
+- `apps/macos/TodusMac/Services/AI/MacAIChatService.swift` — full AI chat service with SSE, tool calls, history, retry
+- `apps/macos/TodusMac/Views/AI/MacAssistantPanel.swift` — polished chat panel with dual display modes
+
+**Files changed:**
+- `apps/macos/TodusMac/App/MacAppServices.swift` — added `aiChatService` with calendarService dependency
+- `apps/macos/TodusMac/App/MacRootView.swift` — replaced `.sheet()` with inline floating/sidepane panel
+- `apps/macos/TodusMac.xcodeproj/project.pbxproj` — registered new files and groups
+
+## [2026-03-30] Fix — Harden iOS AI chat history replay and UI-spec rendering
+
+Resolved three correctness issues in the native iOS AI chat flow that surfaced during code review.
+
+- saved AI conversations now persist mention references alongside message text, so reopened chats keep task/thread/event IDs available for follow-up turns
+- retrying an older assistant response now removes later dependent turns before replaying, preventing contradictory branched history from being sent back to the backend
+- assistant replies that only contain a ```ui-spec``` block now clear the raw fenced JSON from the visible message body and render only the generated UI
+
+**Files changed:**
+- `apps/ios/Todus/Todus/Domain/AIChatConversation.swift`
+- `apps/ios/Todus/Todus/Services/AI/AIChatService.swift`
+- `apps/ios/Todus/Todus/Features/AI/AIChatMessage.swift`
+- `apps/ios/Todus/TASK.md`
+- `apps/ios/Todus/plan.md`
+
+## [2026-03-30] Fix — Stabilize iOS AI chat history loading, duplication, and spec-only actions
+
+Resolved a second set of AI chat state issues found during follow-up review.
+
+- loading a saved chat now cancels any active AI stream first, so the newly loaded conversation does not inherit stale streaming/error state from the previous request
+- duplicating a conversation now preserves the full in-memory message models, including mentions and assistant metadata, and leaves the duplicate marked unsaved so it can autosave normally
+- assistant action rows now remain visible for spec-only replies that render native UI cards, while the copy action is disabled when there is no plain text payload to copy
+
+**Files changed:**
+- `apps/ios/Todus/Todus/Services/AI/AIChatService.swift`
+- `apps/ios/Todus/Todus/Features/AI/AIChatView.swift`
+- `apps/ios/Todus/TASK.md`
+- `apps/ios/Todus/plan.md`
+
 ## [2026-03-30] Fix — Restore iOS AI chat endpoint and message actions
 
 Resolved the current native iOS AI chat regression where every prompt failed immediately with `⚠️ Server error (404).`

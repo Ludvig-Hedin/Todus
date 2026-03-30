@@ -23,7 +23,7 @@ Native macOS shell scaffolding is now in place under `apps/macos` as a standalon
 | Toolbar adaptation | ✅ Complete | Custom SwiftUI content header |
 | CalendarKit macOS | ⬜ Not started | May need replacement |
 | Platform conditionals | ⬜ Not started | `#if os(macOS)` where needed |
-| Compiles on macOS | 🟨 Pending local license | `xcodebuild` blocked until Xcode license is accepted |
+| Compiles on macOS | ✅ Done | `xcodebuild -project apps/macos/TodusMac.xcodeproj -scheme TodusMac -destination 'platform=macOS' build` succeeds after fixing root-view selection shadowing and current settings/assistant compile issues |
 
 ## Feature Parity
 
@@ -53,8 +53,8 @@ Native macOS shell scaffolding is now in place under `apps/macos` as a standalon
 
 | Issue | Impact | Resolution |
 |-------|--------|------------|
-| Xcode license not accepted locally | Blocks CLI build verification | Run `sudo xcodebuild -license` once, then build the `TodusMac` scheme |
+| None currently | — | macOS CLI build verification now passes after the latest settings and assistant-panel cleanup |
 
 ---
 
-## Last Updated: 2026-03-29
+## Last Updated: 2026-03-30
