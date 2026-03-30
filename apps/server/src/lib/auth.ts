@@ -2,9 +2,9 @@ import {
   AIWritingAssistantEmail,
   AutoLabelingEmail,
   CategoriesEmail,
-  Mail0ProEmail,
   ShortcutsEmail,
   SuperSearchEmail,
+  TodusProEmail,
   WelcomeEmail,
 } from './react-emails/email-sequences';
 import { createAuthMiddleware, phoneNumber, jwt, bearer, mcp, emailOTP } from 'better-auth/plugins';
@@ -51,8 +51,8 @@ const scheduleCampaign = (userInfo: { address: string; name: string }) =>
         scheduledAt: undefined,
       },
       {
-        subject: 'Mail0 Pro is here 🚀💼',
-        react: Mail0ProEmail({ name }),
+        subject: 'Todus Pro is here',
+        react: TodusProEmail({ name }),
         scheduledAt: 'in 1 day',
       },
       {
