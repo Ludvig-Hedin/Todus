@@ -600,20 +600,31 @@ aiRouter.use('/do/*', async (c, next) => {
 
 aiRouter.post('/do/:action', async (c) => {
   //   if (env.DISABLE_CALLS) return c.json({ success: false, error: 'Not implemented' }, 400);
-  if (env.VOICE_SECRET !== c.req.header('X-Voice-Secret'))
-    return c.json({ success: false, error: 'Unauthorized' }, 401);
-  const caller = c.req.header('X-Caller');
-  if (!caller) return c.json({ success: false, error: 'Unauthorized' }, 401);
-  const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
-  const user = await db.query.user.findFirst({
-    where: (user, { eq, and }) =>
-      and(eq(user.phoneNumber, caller), eq(user.phoneNumberVerified, true)),
-  });
-  if (!user) return c.json({ success: false, error: 'Unauthorized' }, 401);
+  let user = c.var.sessionUser;
 
+  // Fallback to voice secret + caller ID ONLY if no valid session exists (e.g. Twilio webhook)
+  if (!user) {
+    if (env.VOICE_SECRET !== c.req.header('X-Voice-Secret')) {
+      return c.json({ success: false, error: 'Unauthorized' }, 401);
+    }
+    const caller = c.req.header('X-Caller');
+    if (!caller) return c.json({ success: false, error: 'Unauthorized' }, 401);
+
+    const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
+    const dbUser = await db.query.user.findFirst({
+      where: (u, { eq, and }) =>
+        and(eq(u.phoneNumber, caller), eq(u.phoneNumberVerified, true)),
+    });
+    await conn.end();
+
+    if (!dbUser) return c.json({ success: false, error: 'Unauthorized' }, 401);
+    user = dbUser as typeof user;
+  }
+
+  const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
   const connection = await db.query.connection.findFirst({
     where: (connection, { eq, or }) =>
-      or(eq(connection.id, user.defaultConnectionId!), eq(connection.userId, user.id)),
+      or(eq(connection.id, user!.defaultConnectionId!), eq(connection.userId, user!.id)),
   });
   await conn.end();
   if (!connection) return c.json({ success: false, error: 'Unauthorized' }, 401);

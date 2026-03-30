@@ -55,8 +55,12 @@ public final class AuthService: NSObject {
         return false
     }
 
+    /// User's email — stored property so @Observable triggers SwiftUI re-renders.
+    /// Previously a computed property reading from Keychain, which meant SwiftUI
+    /// never detected changes after fetchUserProfile updated the Keychain.
     public var userEmail: String? {
-        KeychainHelper.read(key: Keys.userEmail)
+        didSet { if let userEmail { KeychainHelper.save(key: Keys.userEmail, value: userEmail) }
+                 else { KeychainHelper.delete(key: Keys.userEmail) } }
     }
 
     /// User's display name from Google / Better Auth profile.
@@ -110,6 +114,7 @@ public final class AuthService: NSObject {
         self.backendURL = backendURL
         // Initialize stored properties from persisted state before super.init()
         self.hasSeenOnboarding = UserDefaults.standard.bool(forKey: Keys.hasSeenOnboarding)
+        self.userEmail = KeychainHelper.read(key: Keys.userEmail)
         self.userName = KeychainHelper.read(key: Keys.userName)
         self.userImage = KeychainHelper.read(key: Keys.userImage)
         super.init()
@@ -510,6 +515,8 @@ public final class AuthService: NSObject {
         let url = backendURL.appendingPathComponent("api/auth/get-session")
         var request = URLRequest(url: url)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        // Origin required by Better Auth CSRF middleware on all requests
+        request.setValue("https://todus.app", forHTTPHeaderField: "Origin")
 
         do {
             let (_, response) = try await URLSession.shared.data(for: request)
@@ -533,10 +540,8 @@ public final class AuthService: NSObject {
 
     private func clearPersistedAuthState() {
         KeychainHelper.delete(key: Keys.bearerToken)
-        KeychainHelper.delete(key: Keys.userEmail)
-        KeychainHelper.delete(key: Keys.userName)
-        KeychainHelper.delete(key: Keys.userImage)
         // Clear stored properties — didSet handles Keychain deletion
+        userEmail = nil
         userName = nil
         userImage = nil
         hasSeenOnboarding = false
@@ -546,29 +551,48 @@ public final class AuthService: NSObject {
     /// Stores name and image URL in Keychain so they persist across app launches.
     /// Safe to call multiple times — silently no-ops if not authenticated.
     public func fetchUserProfile() async {
-        guard let token = bearerToken else { return }
+        guard let token = bearerToken else {
+            debugAuthLog("fetchUserProfile: no bearer token, skipping")
+            return
+        }
         let url = backendURL.appendingPathComponent("api/auth/get-session")
+        debugAuthLog("fetchUserProfile: GET \(url.absoluteString)")
         var request = URLRequest(url: url)
+        request.httpMethod = "GET"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        // Origin required by Better Auth CSRF middleware on all requests
+        request.setValue("https://todus.app", forHTTPHeaderField: "Origin")
 
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
             // Check HTTP status before attempting to parse — avoids treating error pages as profiles
             guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-                authLog.warning("fetchUserProfile: non-2xx response, skipping parse")
+                if let http = response as? HTTPURLResponse {
+                    let body = String(data: data, encoding: .utf8) ?? "(empty)"
+                    authLog.warning("fetchUserProfile: HTTP \(http.statusCode), body=\(body)")
+                }
                 return
             }
+            let bodyStr = String(data: data, encoding: .utf8) ?? "(empty)"
+            debugAuthLog("fetchUserProfile: 200 OK, body=\(String(bodyStr.prefix(500)))")
+
             guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let user = json["user"] as? [String: Any] else { return }
+                  let user = json["user"] as? [String: Any] else {
+                debugAuthLog("fetchUserProfile: JSON parse failed or no 'user' key")
+                return
+            }
 
             if let name = user["name"] as? String, !name.isEmpty {
                 self.userName = name
+                debugAuthLog("fetchUserProfile: set userName=\(name)")
             }
             if let image = user["image"] as? String, !image.isEmpty {
                 self.userImage = image
+                debugAuthLog("fetchUserProfile: set userImage=\(image.prefix(60))...")
             }
             if let email = user["email"] as? String, !email.isEmpty {
-                KeychainHelper.save(key: Keys.userEmail, value: email)
+                self.userEmail = email  // stored property → triggers SwiftUI observation
+                debugAuthLog("fetchUserProfile: set userEmail=\(email)")
             }
         } catch {
             // Non-critical — settings will just show email or initials as fallback
@@ -585,7 +609,7 @@ public final class AuthService: NSObject {
     private func completeAuthentication(token: String, email: String?) {
         KeychainHelper.save(key: Keys.bearerToken, value: token)
         if let email {
-            KeychainHelper.save(key: Keys.userEmail, value: email)
+            self.userEmail = email  // stored property → triggers SwiftUI observation + saves to Keychain via didSet
         }
         hasSeenOnboarding = true   // stored property → triggers SwiftUI observation
         authState = .authenticated // triggers SwiftUI observation → root view switches to main

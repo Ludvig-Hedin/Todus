@@ -356,13 +356,15 @@ export function NotesPanel({ threadId }: NotesPanelProps) {
   };
 
   const confirmDeleteNote = (noteId: string) => {
-    // TODO: Dialog is bugged? needs to be fixed then implement a confirmation dialog
-    const promise = handleDeleteNote(noteId);
-    toast.promise(promise, {
-      loading: m['common.actions.loading'](),
-      success: m['common.notes.noteDeleted'](),
-      error: m['common.notes.errors.failedToDeleteNote'](),
-    });
+    // Replaced bugged Dialog with reliable native confirmation 
+    if (window.confirm("Are you sure you want to delete this note?")) {
+      const promise = handleDeleteNote(noteId);
+      toast.promise(promise, {
+        loading: m['common.actions.loading'](),
+        success: m['common.notes.noteDeleted'](),
+        error: m['common.notes.errors.failedToDeleteNote'](),
+      });
+    }
   };
 
   const handleCopyNote = (content: string) => {

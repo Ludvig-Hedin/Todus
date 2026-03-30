@@ -11,19 +11,19 @@ export class OutlookSubscriptionFactory extends BaseSubscriptionFactory {
   public async subscribe(_: { body: SubscriptionData }): Promise<Response> {
     // TODO: Implement Outlook subscription logic
     // This will handle Microsoft Graph API subscriptions for Outlook
-
-    throw new Error('Outlook subscription not implemented yet');
+    console.warn('[Outlook] Subscription not implemented yet');
+    return new Response('Not Implemented', { status: 501 });
   }
 
   public async unsubscribe(_: { body: UnsubscriptionData }): Promise<Response> {
     // TODO: Implement Outlook unsubscription logic
-
-    throw new Error('Outlook unsubscription not implemented yet');
+    console.warn('[Outlook] Unsubscription not implemented yet');
+    return new Response('Not Implemented', { status: 501 });
   }
 
   public async verifyToken(_: string): Promise<boolean> {
     // TODO: Implement Microsoft Graph token verification
-
-    throw new Error('Outlook token verification not implemented yet');
+    console.warn('[Outlook] Token verification not implemented yet');
+    return false;
   }
 }

@@ -76,7 +76,6 @@ final class NotificationDigestService {
 
         // Build context strings from local data
         let now = Date()
-        let dateFormatter = ISO8601DateFormatter()
         let readableDateFormatter: DateFormatter = {
             let f = DateFormatter()
             f.dateStyle = .medium

@@ -18,8 +18,8 @@ enum MacTheme {
 
     // MARK: - Corner Radii
 
-    /// Cards, sections, email cards
-    static let cardRadius: CGFloat = 8
+    /// Cards, sections, settings panels
+    static let cardRadius: CGFloat = 10
     /// Small interactive elements (badges, pills)
     static let pillRadius: CGFloat = 5
     /// Buttons, inputs
@@ -45,14 +45,50 @@ enum MacTheme {
     /// Secondary text
     static let textSecondary = Color(light: Color(white: 0.42), dark: Color(white: 0.55))
 
-    /// Accent — used very sparingly (unread dots, key actions)
-    static let accent = Color(light: Color(red: 0.22, green: 0.45, blue: 0.85), dark: Color(red: 0.35, green: 0.55, blue: 0.92))
+    /// Accent — dynamically resolved from user's chosen accent color preference.
+    /// Reads from UserDefaults on each access (cached by the OS, negligible cost).
+    static var accent: Color {
+        accentColor(for: UserDefaults.standard.string(forKey: "mac_accent_color") ?? "blue")
+    }
 
     /// Badge / count background
     static let badgeSurface = Color(light: Color(white: 0.92), dark: Color(white: 0.2))
 
     /// Empty state / onboarding card background
     static let emptyStateSurface = Color(light: Color(white: 0.97), dark: Color(white: 0.11))
+
+    // MARK: - Accent Color Palette
+
+    /// Available accent color keys — used by the settings accent picker.
+    static let accentColorKeys = ["blue", "indigo", "teal", "green", "orange", "rose"]
+
+    /// Resolves an accent color key to a light/dark adaptive Color.
+    /// All colors are intentionally muted — not screaming neon. Fits the refined editorial aesthetic.
+    static func accentColor(for key: String) -> Color {
+        switch key {
+        case "blue":
+            return Color(light: Color(red: 0.22, green: 0.45, blue: 0.85),
+                         dark: Color(red: 0.38, green: 0.58, blue: 0.95))
+        case "indigo":
+            return Color(light: Color(red: 0.35, green: 0.32, blue: 0.78),
+                         dark: Color(red: 0.5, green: 0.47, blue: 0.9))
+        case "teal":
+            return Color(light: Color(red: 0.18, green: 0.52, blue: 0.55),
+                         dark: Color(red: 0.32, green: 0.68, blue: 0.72))
+        case "green":
+            return Color(light: Color(red: 0.25, green: 0.55, blue: 0.32),
+                         dark: Color(red: 0.38, green: 0.72, blue: 0.45))
+        case "orange":
+            return Color(light: Color(red: 0.78, green: 0.48, blue: 0.18),
+                         dark: Color(red: 0.9, green: 0.6, blue: 0.3))
+        case "rose":
+            return Color(light: Color(red: 0.72, green: 0.28, blue: 0.35),
+                         dark: Color(red: 0.88, green: 0.42, blue: 0.48))
+        default:
+            return Color(light: Color(red: 0.22, green: 0.45, blue: 0.85),
+                         dark: Color(red: 0.38, green: 0.58, blue: 0.95))
+        }
+    }
 
     // MARK: - Typography Helpers
 

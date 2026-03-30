@@ -34,9 +34,9 @@ struct LocalTaskParsingService: TaskParsingService {
             }
         }
 
-        let timeRegex = try! NSRegularExpression(
+        let timeRegex = (try? NSRegularExpression(
             pattern: #"(?:(?:imorgon|tomorrow|idag|today)\s+)?(?:kl\s*|at\s+|@\s*)?([01]?\d|2[0-3])(?::([0-5]\d))?$"#
-        )
+        )) ?? NSRegularExpression()
         var dueDate: Date?
 
         if let match = timeRegex.firstMatch(in: lowered, options: [], range: nsRange) {

@@ -1,0 +1,38 @@
+Warning: React version not specified in eslint-plugin-react settings. See https://github.com/jsx-eslint/eslint-plugin-react#configuration .
+
+/Users/ludvighedin/Programming/personal/mail/apps/mail/app/(auth)/todus/login/page.tsx
+   19:42  error  Unexpected any. Specify a different type                         @typescript-eslint/no-explicit-any
+  137:20  error  `'` can be escaped with `&apos;`, `&lsquo;`, `&#39;`, `&rsquo;`  react/no-unescaped-entities
+
+/Users/ludvighedin/Programming/personal/mail/apps/mail/app/(auth)/todus/signup/page.tsx
+  20:42  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/Users/ludvighedin/Programming/personal/mail/apps/mail/app/(full-width)/about.tsx
+    6:8   error  'React' is defined but never used                                @typescript-eslint/no-unused-vars
+   62:80  error  `'` can be escaped with `&apos;`, `&lsquo;`, `&#39;`, `&rsquo;`  react/no-unescaped-entities
+   74:25  error  `'` can be escaped with `&apos;`, `&lsquo;`, `&#39;`, `&rsquo;`  react/no-unescaped-entities
+   76:26  error  `'` can be escaped with `&apos;`, `&lsquo;`, `&#39;`, `&rsquo;`  react/no-unescaped-entities
+   76:54  error  `'` can be escaped with `&apos;`, `&lsquo;`, `&#39;`, `&rsquo;`  react/no-unescaped-entities
+  115:43  error  `'` can be escaped with `&apos;`, `&lsquo;`, `&#39;`, `&rsquo;`  react/no-unescaped-entities
+  130:13  error  `'` can be escaped with `&apos;`, `&lsquo;`, `&#39;`, `&rsquo;`  react/no-unescaped-entities
+
+/Users/ludvighedin/Programming/personal/mail/apps/mail/app/(full-width)/privacy.tsx
+    9:8   error  'React' is defined but never used                                @typescript-eslint/no-unused-vars
+  352:25  error  `'` can be escaped with `&apos;`, `&lsquo;`, `&#39;`, `&rsquo;`  react/no-unescaped-entities
+  352:61  error  `'` can be escaped with `&apos;`, `&lsquo;`, `&#39;`, `&rsquo;`  react/no-unescaped-entities
+  366:79  error  `"` can be escaped with `&quot;`, `&ldquo;`, `&#34;`, `&rdquo;`  react/no-unescaped-entities
+  366:85  error  `"` can be escaped with `&quot;`, `&ldquo;`, `&#34;`, `&rdquo;`  react/no-unescaped-entities
+
+/Users/ludvighedin/Programming/personal/mail/apps/mail/app/(full-width)/terms.tsx
+  9:8  error  'React' is defined but never used  @typescript-eslint/no-unused-vars
+
+/Users/ludvighedin/Programming/personal/mail/apps/mail/components/navigation.tsx
+  10:46  error  'Star' is defined but never used               @typescript-eslint/no-unused-vars
+  11:10  error  'AnimatedNumber' is defined but never used     @typescript-eslint/no-unused-vars
+  15:10  error  'useQuery' is defined but never used           @typescript-eslint/no-unused-vars
+  18:20  error  'useEffect' is defined but never used          @typescript-eslint/no-unused-vars
+  20:10  error  'cn' is defined but never used                 @typescript-eslint/no-unused-vars
+  74:11  error  'GitHubApiResponse' is defined but never used  @typescript-eslint/no-unused-vars
+
+✖ 22 problems (22 errors, 0 warnings)
+

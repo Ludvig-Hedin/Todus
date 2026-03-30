@@ -1965,9 +1965,7 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
       try {
         data = JSON.parse(message) as IncomingMessage;
       } catch (error) {
-        console.warn(error);
-        // silently ignore invalid messages for now
-        // TODO: log errors with log levels
+        console.error('[AgentServer] Failed to parse incoming WebSocket message:', error, 'Message:', message);
         return;
       }
       switch (data.type) {

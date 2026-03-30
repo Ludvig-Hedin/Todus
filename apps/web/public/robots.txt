@@ -1,0 +1,23 @@
+# Todus - AI Email, Calendar & Tasks
+# https://todus.app
+
+User-agent: *
+Allow: /
+Allow: /about
+Allow: /pricing
+Allow: /privacy
+Allow: /terms
+Allow: /contributors
+Allow: /home
+Allow: /blog
+
+# Protected app routes - do not crawl
+Disallow: /mail/
+Disallow: /settings/
+Disallow: /login
+Disallow: /signup
+Disallow: /developer
+Disallow: /api/
+
+# Sitemap location
+Sitemap: https://todus.app/sitemap.xml

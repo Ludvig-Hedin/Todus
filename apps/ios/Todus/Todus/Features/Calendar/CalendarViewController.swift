@@ -7,7 +7,7 @@
 
 import UIKit
 import CalendarKit
-import EventKit
+@preconcurrency import EventKit
 import EventKitUI
 
 final class CalendarViewController: DayViewController {
@@ -204,8 +204,11 @@ final class CalendarViewController: DayViewController {
                 // If editing event is different from the original,
                 // then it's pointing to the event already in the `eventStore`
                 // Let's save changes to oriignal event to the `eventStore`
-                try! eventStore.save(editingEvent.ekEvent,
-                                     span: .thisEvent)
+                do {
+                    try eventStore.save(editingEvent.ekEvent, span: .thisEvent)
+                } catch {
+                    print("[CalendarViewController] Failed to save edited event: \(error)")
+                }
             }
         }
         reloadData()

@@ -20,7 +20,9 @@ struct AIChatView: View {
     @State private var inputText = ""
     @State private var inputMentions: [RichInputMentionRef] = []
     @State private var eventMentions: [RichInputMentionRef] = []
-    @FocusState private var isInputFocused: Bool
+    /// Tracks whether the text input UITextView has focus — driven by PasteHandlingTextInput callbacks
+    /// (not @FocusState, which doesn't work with UIViewRepresentable-wrapped UITextViews)
+    @State private var isInputFocused: Bool = false
 
     /// Page context pill — name + icon auto-set from currentTab, user can remove it.
     @State private var pageContextAttached = true
@@ -74,13 +76,20 @@ struct AIChatView: View {
             ZStack(alignment: .bottom) {
                 AppTheme.backgroundTop.ignoresSafeArea()
 
-                // Dismiss attachment picker panel by tapping anywhere in the chat area
-                if isPickingAttachment {
+                // Tap-outside handler: dismiss attachment picker OR blur input focus
+                if isPickingAttachment || isInputFocused {
                     Color.clear
                         .contentShape(Rectangle())
                         .ignoresSafeArea()
                         .onTapGesture {
-                            withAnimation(.snappy(duration: 0.15)) { isPickingAttachment = false }
+                            if isPickingAttachment {
+                                withAnimation(.snappy(duration: 0.15)) { isPickingAttachment = false }
+                            }
+                            // Always resign input focus when tapping outside the input area
+                            if isInputFocused {
+                                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                                isInputFocused = false
+                            }
                         }
                 }
 
@@ -259,7 +268,7 @@ struct AIChatView: View {
                 .frame(maxWidth: 200)
         }
 
-        // New chat + options menu — trailing
+        // New chat + options menu — trailing, with horizontal breathing room
         ToolbarItem(placement: .topBarTrailing) {
             HStack(spacing: 16) {
                 // New chat button
@@ -324,6 +333,8 @@ struct AIChatView: View {
                     Image(systemName: "ellipsis")
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(.primary)
+                        // Slightly larger tap target for the ellipsis since it's at the edge
+                        .padding(.trailing, 2)
                 }
             }
         }
@@ -383,10 +394,8 @@ struct AIChatView: View {
 
             VStack(alignment: .leading, spacing: 20) {
                 VStack(alignment: .leading, spacing: 10) {
-                    // Sparkles icon — matches tab bar: same size, same gradient, no circle
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 20, weight: .semibold))
-                        .foregroundStyle(aiGradient)
+                    // Sparkles icon — animated gradient with subtle glow
+                    AnimatedSparkleIcon(size: 20)
 
                     Text("How can I help you today?")
                         .font(.system(size: 20, weight: .semibold))
@@ -626,8 +635,21 @@ struct AIChatView: View {
                 inputSection
                     .padding(.horizontal, 8)
                     .padding(.top, 8)
-                    .padding(.bottom, 12)   // match side spacing for consistent inset from screen edge
-                    .background(AppTheme.backgroundTop.ignoresSafeArea(edges: .bottom))
+                    .padding(.bottom, 12)
+                    // Gradient fade instead of solid fill — content scrolling behind the gap
+                    // above the + button stays partially visible instead of being hidden
+                    .background {
+                        VStack(spacing: 0) {
+                            LinearGradient(
+                                colors: [AppTheme.backgroundTop.opacity(0), AppTheme.backgroundTop],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                            .frame(height: 16)
+                            AppTheme.backgroundTop
+                        }
+                        .ignoresSafeArea(edges: .bottom)
+                    }
             }
             .onChange(of: chatService.messages.count) { _, _ in
                 scrollToBottom(proxy: proxy)
@@ -654,9 +676,7 @@ struct AIChatView: View {
 
     private var thinkingIndicator: some View {
         HStack(spacing: 8) {
-            ProgressView()
-                .scaleEffect(0.75)
-                .tint(AppTheme.mutedText)
+            AnimatedSparkleIcon(size: 14)
 
             Text(thinkingPhrases[thinkingIndex % thinkingPhrases.count])
                 .font(.system(size: 14, weight: .medium))
@@ -675,33 +695,31 @@ struct AIChatView: View {
     private let chatInputControlSize: CGFloat = 44
 
     private var inputSection: some View {
-        // ZStack anchors the custom attachment panel above the + button
-        ZStack(alignment: .bottomLeading) {
-            // Main input row — matches CaptureComposer HStack layout exactly
-            HStack(alignment: .bottom, spacing: 10) {
-                // Circle plus button — toggles custom attachment panel above it
-                Button {
-                    withAnimation(.snappy(duration: 0.15)) { isPickingAttachment.toggle() }
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 17, weight: .medium))
-                        .foregroundStyle(AppTheme.mutedText)
-                        .frame(width: chatInputControlSize, height: chatInputControlSize)
+        // Main input row — attachment panel floats via .overlay so it never affects layout
+        HStack(alignment: .bottom, spacing: 10) {
+            // Circle plus button — toggles custom attachment panel above it
+            Button {
+                withAnimation(.snappy(duration: 0.15)) { isPickingAttachment.toggle() }
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 17, weight: .medium))
+                    .foregroundStyle(AppTheme.mutedText)
+                    .frame(width: chatInputControlSize, height: chatInputControlSize)
+            }
+            .buttonStyle(.plain)
+            .background(AppTheme.surfacePrimary, in: Circle())
+            .overlay(Circle().stroke(AppTheme.strongBorder, lineWidth: 1))
+            // Attachment picker panel — overlaid above the + button, doesn't affect layout
+            .overlay(alignment: .bottomLeading) {
+                if isPickingAttachment {
+                    attachmentPickerPanel
+                        .offset(y: -(chatInputControlSize + 8))
+                        .transition(.scale(scale: 0.85, anchor: .bottomLeading).combined(with: .opacity))
                 }
-                .buttonStyle(.plain)
-                .background(AppTheme.surfacePrimary, in: Circle())
-                .overlay(Circle().stroke(AppTheme.strongBorder, lineWidth: 1))
-
-                // Input box — images now live inside the box itself
-                chatInputBox
             }
 
-            // Attachment picker panel — floats above the + button, anchored bottom-leading
-            if isPickingAttachment {
-                attachmentPickerPanel
-                    .padding(.bottom, chatInputControlSize + 8)
-                    .transition(.scale(scale: 0.85, anchor: .bottomLeading).combined(with: .opacity))
-            }
+            // Input box — images now live inside the box itself
+            chatInputBox
         }
         .animation(.snappy(duration: 0.15), value: isPickingAttachment)
     }
@@ -765,11 +783,11 @@ struct AIChatView: View {
                     HStack(spacing: 8) {
                         // Page context pill — shows which tab/page the user is on
                         if pageContextAttached {
-                            HStack(spacing: 5) {
+                            HStack(spacing: 6) {
                                 Image(systemName: currentTab.activeIcon)
-                                    .font(.system(size: 11, weight: .semibold))
+                                    .font(.system(size: 13, weight: .semibold))
                                 Text(currentTab.title)
-                                    .font(.system(size: 12, weight: .medium))
+                                    .font(.system(size: 13, weight: .medium))
                                 Button {
                                     withAnimation(.snappy(duration: 0.15)) {
                                         pageContextAttached = false
@@ -781,8 +799,8 @@ struct AIChatView: View {
                                 .buttonStyle(.plain)
                             }
                             .foregroundStyle(.blue)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 5)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 7)
                             .background(Color.blue.opacity(0.12), in: Capsule())
                         }
 
@@ -804,21 +822,25 @@ struct AIChatView: View {
                     placeholder: "Ask, search or make anything…",
                     surface: .aiChat,
                     mentionOptions: mentionOptions,
-                    onCommand: { _ in }
+                    maxHeight: 120,
+                    onCommand: { _ in },
+                    onFocusChange: { focused in isInputFocused = focused }
                 )
+                    .frame(maxHeight: 120)
                     .padding(.horizontal, 16)
                     .padding(.top, hasAccessories ? 6 : 12)
                     .padding(.bottom, 8)
 
-                // Bottom toolbar: [config | spacer | mic | send/stop]
-                HStack(spacing: 4) {
+                // Bottom toolbar: [config | spacer | waveform | mic | send/stop]
+                // Consistent 34×34 outer frames, 6pt spacing between right-side action buttons
+                HStack(spacing: 6) {
                     Button { showsConfig = true } label: {
                         Image(systemName: "slider.horizontal.3")
                             .font(.system(size: 15, weight: .medium))
                             .foregroundStyle(AppTheme.mutedText)
                     }
                     .buttonStyle(.plain)
-                    .frame(width: 36, height: 36)
+                    .frame(width: 34, height: 34)
                     .contentShape(Rectangle())
                     .minTouchTarget()
 
@@ -831,7 +853,7 @@ struct AIChatView: View {
                             .foregroundStyle(voiceButtonGradient)
                     }
                     .buttonStyle(.plain)
-                    .frame(width: 36, height: 36)
+                    .frame(width: 34, height: 34)
                     .contentShape(Rectangle())
                     .minTouchTarget()
 
@@ -840,6 +862,7 @@ struct AIChatView: View {
                         inputText = current.isEmpty ? transcribed : current + " " + transcribed
                     })
 
+                    // Stop button while streaming; send button only visible when there's content
                     if chatService.isStreaming {
                         Button { chatService.cancelStream() } label: {
                             Image(systemName: "stop.fill")
@@ -851,7 +874,8 @@ struct AIChatView: View {
                         .clipShape(Circle())
                         .minTouchTarget()
                         .transition(.scale.combined(with: .opacity))
-                    } else {
+                    } else if !isEmpty {
+                        // Send button — hidden when input is empty for a cleaner look
                         Button(action: sendMessage) {
                             Image(systemName: "arrow.up")
                                 .font(.system(size: 15, weight: .bold))
@@ -861,23 +885,25 @@ struct AIChatView: View {
                         .buttonStyle(AppPrimaryButtonStyle())
                         .clipShape(Circle())
                         .minTouchTarget()
-                        .disabled(isEmpty)
-                        .opacity(isEmpty ? 0.4 : 1)
                         .transition(.scale.combined(with: .opacity))
                     }
                 }
                 .padding(.horizontal, 8)
                 .padding(.vertical, 8)
             } else {
-                HStack(spacing: 8) {
+                // Compact mode — text + voice + mic + send, consistent 6pt spacing
+                HStack(alignment: .bottom, spacing: 6) {
                     RichComposerInput(
                         text: $inputText,
                         mentions: $inputMentions,
                         placeholder: "Ask, search or make anything…",
                         surface: .aiChat,
                         mentionOptions: mentionOptions,
-                        onCommand: { _ in }
+                        maxHeight: 120,
+                        onCommand: { _ in },
+                        onFocusChange: { focused in isInputFocused = focused }
                     )
+                    .frame(maxHeight: 120)
                     .padding(.leading, 16)
 
                     Button { showVoiceChat = true } label: {
@@ -886,16 +912,41 @@ struct AIChatView: View {
                             .foregroundStyle(voiceButtonGradient)
                     }
                     .buttonStyle(.plain)
-                    .frame(width: 30, height: 30)
+                    .frame(width: 34, height: 34)
                     .contentShape(Rectangle())
 
                     ChatVoiceInputButton(onTranscription: { transcribed in
                         let current = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
                         inputText = current.isEmpty ? transcribed : current + " " + transcribed
                     })
-                    .padding(.trailing, 6)
+
+                    // Stop button while streaming; send hidden when empty
+                    if chatService.isStreaming {
+                        Button { chatService.cancelStream() } label: {
+                            Image(systemName: "stop.fill")
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundStyle(.white)
+                                .frame(width: 30, height: 30)
+                        }
+                        .buttonStyle(AppPrimaryButtonStyle())
+                        .clipShape(Circle())
+                        .minTouchTarget()
+                        .transition(.scale.combined(with: .opacity))
+                    } else if !isEmpty {
+                        Button(action: sendMessage) {
+                            Image(systemName: "arrow.up")
+                                .font(.system(size: 15, weight: .bold))
+                                .foregroundStyle(.white)
+                                .frame(width: 30, height: 30)
+                        }
+                        .buttonStyle(AppPrimaryButtonStyle())
+                        .clipShape(Circle())
+                        .minTouchTarget()
+                        .transition(.scale.combined(with: .opacity))
+                    }
                 }
-                .frame(height: chatInputControlSize)
+                .padding(.trailing, 6)
+                .frame(minHeight: chatInputControlSize)
             }
         }
         .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: isInputExpanded ? 24 : chatInputControlSize / 2, style: .continuous))
@@ -906,38 +957,77 @@ struct AIChatView: View {
         .animation(.snappy(duration: 0.15), value: pendingAttachments.count)
     }
 
-    /// Single attachment thumbnail with X button fully contained within image bounds.
+    /// Attachment thumbnail — adapts to context:
+    /// - When a page context pill is present: shows as a pill with small preview + filename + X (cohesive row)
+    /// - When standalone: shows as a square thumbnail with X overlay
     @ViewBuilder
     private func attachmentThumbnail(filename: String) -> some View {
-        ZStack(alignment: .topTrailing) {
-            if let image = AttachmentService.shared.loadImage(for: filename) {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: 56, height: 56)
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            } else {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(AppTheme.surfaceSecondary)
-                    .frame(width: 56, height: 56)
-                    .overlay(
-                        Image(systemName: "doc")
-                            .font(.system(size: 18))
-                            .foregroundStyle(AppTheme.mutedText)
-                    )
+        let isImage = AttachmentService.shared.loadImage(for: filename) != nil
+        let displayName = filename.components(separatedBy: "_").dropFirst().joined(separator: "_")
+            .replacingOccurrences(of: ".\(filename.components(separatedBy: ".").last ?? "")", with: "")
+        let ext = filename.components(separatedBy: ".").last?.uppercased() ?? "FILE"
+        let shortName = displayName.isEmpty ? ext : (displayName.count > 12 ? String(displayName.prefix(12)) + "…" : displayName)
+
+        if pageContextAttached {
+            // Pill style — matches the page context pill look
+            HStack(spacing: 6) {
+                if isImage, let image = AttachmentService.shared.loadImage(for: filename) {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 22, height: 22)
+                        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                } else {
+                    Image(systemName: "doc")
+                        .font(.system(size: 11, weight: .semibold))
+                }
+                Text(shortName)
+                    .font(.system(size: 12, weight: .medium))
+                    .lineLimit(1)
+                Button {
+                    pendingAttachments.removeAll { $0 == filename }
+                    AttachmentService.shared.delete(filename: filename)
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .bold))
+                }
+                .buttonStyle(.plain)
             }
-            // X button inset within image bounds — no offset so it never clips
-            Button {
-                pendingAttachments.removeAll { $0 == filename }
-                AttachmentService.shared.delete(filename: filename)
-            } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 16))
-                    .foregroundStyle(.white)
-                    .background(Color.black.opacity(0.5), in: Circle())
+            .foregroundStyle(AppTheme.mutedText)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(AppTheme.surfaceSecondary, in: Capsule())
+        } else {
+            // Square thumbnail style — standalone without context pill
+            ZStack(alignment: .topTrailing) {
+                if isImage, let image = AttachmentService.shared.loadImage(for: filename) {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 56, height: 56)
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                } else {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(AppTheme.surfaceSecondary)
+                        .frame(width: 56, height: 56)
+                        .overlay(
+                            Image(systemName: "doc")
+                                .font(.system(size: 18))
+                                .foregroundStyle(AppTheme.mutedText)
+                        )
+                }
+                Button {
+                    pendingAttachments.removeAll { $0 == filename }
+                    AttachmentService.shared.delete(filename: filename)
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 16))
+                        .foregroundStyle(.white)
+                        .background(Color.black.opacity(0.5), in: Circle())
+                }
+                .buttonStyle(.plain)
+                .padding(4)
             }
-            .buttonStyle(.plain)
-            .padding(4)
         }
     }
 
@@ -1011,16 +1101,34 @@ struct AIChatView: View {
 
     private func sendMessage() {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+        let hasAttachments = !pendingAttachments.isEmpty
+
+        // Allow sending if there's text OR attachments (file-only send supported)
+        guard !text.isEmpty || hasAttachments else { return }
+
+        // When user sends attachments with no text, auto-prompt to view the attachment
+        let messageText: String
+        if text.isEmpty && hasAttachments {
+            let count = pendingAttachments.count
+            messageText = count == 1
+                ? "View the attached file"
+                : "View the \(count) attached files"
+        } else {
+            messageText = text
+        }
+
         inputText = ""
         let mentions = inputMentions
         inputMentions = []
+        // Clear attachments — they're shown in the UI but not yet sent to the backend.
+        // Clearing prevents them from lingering after the message is sent.
+        pendingAttachments = []
         // Clear persisted draft since the message was sent
         UserDefaults.standard.removeObject(forKey: "ai_draft_input")
         // Set the current page context so the AI knows where the user is
         chatService.currentPageContext = pageContextAttached ? currentTab.title + " tab" : nil
         chatService.send(
-            userMessage: text,
+            userMessage: messageText,
             mentions: mentions,
             allTasks: Array(allTasks),
             modelContext: modelContext
@@ -1049,16 +1157,7 @@ struct AIChatView: View {
     }
 
     private func duplicateChat() {
-        // Save current conversation as a new entry then clear to start fresh
-        chatService.autosave()
-        // Reload the same messages back in — effectively duplicates the conversation
-        let currentMessages = chatService.messages
-        let currentTitle = chatService.chatTitle
-        chatService.clearHistory()
-        for msg in currentMessages {
-            chatService.messages.append(AIChatMessage(role: msg.role, content: msg.content))
-        }
-        chatService.chatTitle = (currentTitle ?? "Untitled") + " (copy)"
+        chatService.duplicateCurrentConversation()
     }
 
     private func deleteConversation() {
@@ -1231,17 +1330,19 @@ private struct MessageBubble: View {
             }
 
             // Post-stream action row (copy / thumbs) with fade-in
-            if message.role == .assistant && !message.isStreaming && !message.content.isEmpty {
+            if message.role == .assistant && !message.isStreaming &&
+                (!message.content.isEmpty || message.uiSpec != nil) {
                 actionRow
                     .opacity(showActions ? 1 : 0)
                     .animation(.easeIn(duration: 0.3), value: showActions)
                     .onAppear {
+                        guard !showActions else { return }
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
                             withAnimation { showActions = true }
                         }
                     }
                     .onChange(of: message.isStreaming) { _, isStreaming in
-                        if !isStreaming {
+                        if !isStreaming, !showActions {
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
                                 withAnimation { showActions = true }
                             }
@@ -1525,22 +1626,27 @@ private struct MessageBubble: View {
     // MARK: Action Row — copy shows checkmark briefly; thumbs toggle state
 
     private var actionRow: some View {
-        HStack(spacing: 16) {
+        let copyableText = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        let canCopy = !copyableText.isEmpty
+
+        return HStack(spacing: 4) {
             Button {
                 onRetry()
             } label: {
                 Image(systemName: "arrow.clockwise")
                     .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.primary)
-                    .frame(width: 18, height: 18)
+                    .foregroundStyle(AppTheme.mutedText)
+                    .frame(width: 32, height: 32)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .disabled(!canRetry)
             .opacity(canRetry ? 1 : 0.45)
 
-            // Copy button: shows checkmark for 1.5s after tap
+            // Copy button: shows checkmark for 1.5s after tap, ignores re-taps while showing
             Button {
-                UIPasteboard.general.string = message.content
+                guard !didCopy else { return }
+                UIPasteboard.general.string = copyableText
                 withAnimation(.snappy(duration: 0.15)) { didCopy = true }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
                     withAnimation(.snappy(duration: 0.15)) { didCopy = false }
@@ -1548,11 +1654,13 @@ private struct MessageBubble: View {
             } label: {
                 Image(systemName: didCopy ? "checkmark" : "doc.on.doc")
                     .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.primary)
-                    .frame(width: 18, height: 18)
+                    .foregroundStyle(didCopy ? .green : AppTheme.mutedText)
+                    .frame(width: 32, height: 32)
+                    .contentShape(Rectangle())
                     .contentTransition(.symbolEffect(.replace))
             }
             .buttonStyle(.plain)
+            .disabled(!canCopy)
 
             // Thumbs up — highlights when selected
             Button {
@@ -1563,6 +1671,8 @@ private struct MessageBubble: View {
                 Image(systemName: thumbsState == .up ? "hand.thumbsup.fill" : "hand.thumbsup")
                     .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(thumbsState == .up ? Color.blue : AppTheme.mutedText)
+                    .frame(width: 32, height: 32)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
@@ -1575,6 +1685,8 @@ private struct MessageBubble: View {
                 Image(systemName: thumbsState == .down ? "hand.thumbsdown.fill" : "hand.thumbsdown")
                     .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(thumbsState == .down ? Color.orange : AppTheme.mutedText)
+                    .frame(width: 32, height: 32)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
         }
@@ -1778,6 +1890,49 @@ private struct SourceDetailSheet: View {
 
 // MARK: - ReasoningBox
 
+/// Sparkle icon with a slowly rotating gradient and a very subtle ambient glow.
+/// Used on the empty state and can be placed alongside streaming AI responses.
+private struct AnimatedSparkleIcon: View {
+    let size: CGFloat
+
+    @State private var rotation: Double = 0
+
+    private var gradientColors: [Color] {
+        [
+            Color(red: 0, green: 0xAA / 255.0, blue: 0xF5 / 255.0),
+            Color(red: 0xEF / 255.0, green: 0, blue: 0xC2 / 255.0),
+            Color(red: 1, green: 0, blue: 0x38 / 255.0),
+            Color(red: 0xF9 / 255.0, green: 0x9F / 255.0, blue: 0),
+        ]
+    }
+
+    var body: some View {
+        // Angular gradient rotates continuously for a living feel
+        let animatedGradient = AngularGradient(
+            colors: gradientColors + [gradientColors[0]],
+            center: .center,
+            angle: .degrees(rotation)
+        )
+
+        Image(systemName: "sparkles")
+            .font(.system(size: size, weight: .semibold))
+            .foregroundStyle(animatedGradient)
+            // Very subtle glow — blurred copy behind the icon
+            .background(
+                Image(systemName: "sparkles")
+                    .font(.system(size: size, weight: .semibold))
+                    .foregroundStyle(animatedGradient)
+                    .blur(radius: 6)
+                    .opacity(0.35)
+            )
+            .onAppear {
+                withAnimation(.linear(duration: 4).repeatForever(autoreverses: false)) {
+                    rotation = 360
+                }
+            }
+    }
+}
+
 /// Collapsible thinking/reasoning box that shows the AI's internal reasoning process.
 /// Auto-expands while streaming, auto-collapses when done. Tap header to toggle.
 private struct ReasoningBox: View {
@@ -1943,7 +2098,7 @@ private struct ChatVoiceInputButton: View {
             if isTranscribing {
                 ProgressView()
                     .scaleEffect(0.8)
-                    .frame(width: 36, height: 36)
+                    .frame(width: 34, height: 34)
             } else if isRecording {
                 Button(action: stopRecording) {
                     Image(systemName: "stop.fill")
@@ -1951,7 +2106,7 @@ private struct ChatVoiceInputButton: View {
                         .foregroundStyle(.white)
                         .frame(width: 30, height: 30)
                 }
-                .frame(width: 36, height: 36)
+                .frame(width: 34, height: 34)
                 .background(Color.red, in: Circle())
                 .overlay(Circle().stroke(AppTheme.cardBorder, lineWidth: 1))
                 .buttonStyle(.plain)
@@ -1963,7 +2118,7 @@ private struct ChatVoiceInputButton: View {
                         .foregroundStyle(AppTheme.mutedText)
                         .frame(width: 30, height: 30)
                 }
-                .frame(width: 36, height: 36)
+                .frame(width: 34, height: 34)
                 .background(AppTheme.surfacePrimary, in: Circle())
                 .overlay(Circle().stroke(AppTheme.cardBorder, lineWidth: 1))
                 .buttonStyle(.plain)
@@ -1982,12 +2137,27 @@ private struct ChatVoiceInputButton: View {
                 // Audio session configured off main thread to prevent UI freeze
                 try await recorder.configureAudioSession()
 
+                // Small delay to let the audio session fully propagate —
+                // inputNode.outputFormat can crash with EXC_BAD_ACCESS if queried
+                // before the session is fully active.
+                try await Task.sleep(for: .milliseconds(50))
+
                 let request = SFSpeechAudioBufferRecognitionRequest()
                 request.shouldReportPartialResults = true
                 recorder.recognitionRequest = request
 
                 let inputNode = recorder.audioEngine.inputNode
                 let recordingFormat = inputNode.outputFormat(forBus: 0)
+
+                // Guard against invalid formats (0 channels / 0 sample rate) which cause crashes
+                guard recordingFormat.channelCount > 0, recordingFormat.sampleRate > 0 else {
+                    #if DEBUG
+                    print("Invalid input format: \(recordingFormat)")
+                    #endif
+                    cleanup()
+                    return
+                }
+
                 inputNode.removeTap(onBus: 0)
                 inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { buffer, _ in
                     request.append(buffer)
@@ -2058,7 +2228,8 @@ private struct ChatVoiceInputButton: View {
         guard speechAuth == .authorized else { return false }
 
         let micGranted: Bool = await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
-            AVAudioSession.sharedInstance().requestRecordPermission { granted in
+            // Min deployment is iOS 18 — AVAudioApplication API is always available.
+            AVAudioApplication.requestRecordPermission { granted in
                 continuation.resume(returning: granted)
             }
         }
@@ -2076,15 +2247,18 @@ private struct ChatVoiceInputButton: View {
 // MARK: - BlinkingCursor
 
 private struct BlinkingCursor: View {
-    @State private var visible = true
+    @State private var visible = false
 
     var body: some View {
         Rectangle()
             .frame(width: 2, height: 16)
             .foregroundStyle(.primary.opacity(0.7))
             .opacity(visible ? 1 : 0)
-            .animation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true), value: visible)
-            .onAppear { visible = false }
+            .onAppear {
+                withAnimation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true)) {
+                    visible = true
+                }
+            }
             .offset(x: 2)
     }
 }
@@ -2100,6 +2274,8 @@ struct ChatHistoryView: View {
     @State private var searchText = ""
 
     private var chatService: AIChatService { services.aiChatService }
+    /// Shared formatter — creating one per row per render is wasteful
+    private let relativeDateFormatter = RelativeDateTimeFormatter()
 
     private var filtered: [AIChatConversation] {
         guard !searchText.isEmpty else { return chatService.savedConversations }
@@ -2154,7 +2330,7 @@ struct ChatHistoryView: View {
                                     .tracking(-0.2)
                                     .foregroundStyle(.primary)
                                     .lineLimit(1)
-                                Text(RelativeDateTimeFormatter().localizedString(for: conv.createdAt, relativeTo: Date()))
+                                Text(relativeDateFormatter.localizedString(for: conv.createdAt, relativeTo: Date()))
                                     .font(.system(size: 12, weight: .medium))
                                     .foregroundStyle(AppTheme.mutedText)
                             }

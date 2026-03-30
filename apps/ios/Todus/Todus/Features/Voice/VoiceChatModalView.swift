@@ -25,8 +25,6 @@ struct VoiceChatModalView: View {
     @State private var textInput = ""
 
     var body: some View {
-        let vm = viewModel
-
         ZStack {
             // Full-screen background
             AppTheme.backgroundTop

@@ -412,9 +412,9 @@ struct SearchResultCardView: View {
 
 // MARK: - Helpers
 
-/// Thread-safe date formatting utilities for card views.
-/// Uses nonisolated(unsafe) because DateFormatter is not Sendable,
-/// but these are only accessed from the @MainActor UI thread.
+/// Date formatting utilities for card views.
+/// ISO8601DateFormatter is not Sendable under Swift 6 strict concurrency, so we keep
+/// a shared formatter behind `nonisolated(unsafe)` for this UI-only formatting path.
 private enum CardDateFormatting {
     nonisolated(unsafe) static let isoFormatter: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
@@ -422,13 +422,13 @@ private enum CardDateFormatting {
         return f
     }()
 
-    nonisolated(unsafe) static let displayDateFormatter: DateFormatter = {
+    static let displayDateFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "MMM d"
         return f
     }()
 
-    nonisolated(unsafe) static let timeFormatter: DateFormatter = {
+    static let timeFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "h:mm a"
         return f

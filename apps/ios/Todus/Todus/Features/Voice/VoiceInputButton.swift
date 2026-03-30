@@ -20,17 +20,21 @@ private final class VoiceController {
     /// Best partial transcript accumulated while recording — used as fallback on timeout.
     private var latestTranscript = ""
     private let speechRecognizer: SFSpeechRecognizer? = SFSpeechRecognizer()
+    /// Completion stored on the main actor so sendable GCD closures do not need to capture it.
+    private var onFinished: ((String) -> Void)?
 
     // MARK: Public API
 
     /// Request permissions (if needed) then start the audio session.
     func startRecording(onFinished: @escaping (String) -> Void) {
+        self.onFinished = onFinished
         SFSpeechRecognizer.requestAuthorization { [weak self] status in
             guard status == .authorized else { return }
-            AVAudioSession.sharedInstance().requestRecordPermission { [weak self] granted in
+            // Min deployment is iOS 18 — AVAudioApplication API is always available.
+            AVAudioApplication.requestRecordPermission { [weak self] granted in
                 guard granted else { return }
                 DispatchQueue.main.async {
-                    self?.beginAudioSession(onFinished: onFinished)
+                    self?.beginAudioSession()
                 }
             }
         }
@@ -39,6 +43,7 @@ private final class VoiceController {
     /// Stop the audio engine; transcription finalises asynchronously via the recognition task.
     /// Falls back to the best partial transcript after a 3-second timeout if no final result arrives.
     func stopRecording(onFinished: @escaping (String) -> Void) {
+        self.onFinished = onFinished
         recordingState = .transcribing
         audioEngine?.stop()
         audioEngine?.inputNode.removeTap(onBus: 0)
@@ -56,13 +61,13 @@ private final class VoiceController {
             self.recognitionTask = nil
             self.latestTranscript = ""
             self.recordingState = .idle
-            if !capturedTranscript.isEmpty { onFinished(capturedTranscript) }
+            if !capturedTranscript.isEmpty { self.finishTranscription(capturedTranscript) }
         }
     }
 
     // MARK: Private
 
-    private func beginAudioSession(onFinished: @escaping (String) -> Void) {
+    private func beginAudioSession() {
         guard let recognizer = speechRecognizer, recognizer.isAvailable else { return }
 
         let engine = AVAudioEngine()
@@ -99,7 +104,7 @@ private final class VoiceController {
                     self.latestTranscript = ""
                     self.recognitionTask = nil
                     self.recordingState = .idle
-                    if !text.isEmpty { onFinished(text) }
+                    if !text.isEmpty { self.finishTranscription(text) }
                 }
             }
         }
@@ -107,6 +112,13 @@ private final class VoiceController {
         audioEngine = engine
         recognitionRequest = request
         recordingState = .recording
+    }
+
+    private func finishTranscription(_ text: String) {
+        guard !text.isEmpty else { return }
+        let completion = onFinished
+        onFinished = nil
+        completion?(text)
     }
 }
 

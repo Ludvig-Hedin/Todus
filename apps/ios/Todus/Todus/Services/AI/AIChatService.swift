@@ -218,6 +218,12 @@ final class AIChatService {
         currentTurnMentions = userMessage.mentions
         lastSubmittedMentions = userMessage.mentions
 
+        if assistantIndex + 1 < messages.count {
+            // Remove dependent turns after the retried assistant message so the
+            // next request cannot mix stale follow-up context with the retried branch.
+            messages.removeSubrange((assistantIndex + 1)..<messages.count)
+        }
+
         messages[assistantIndex].content = ""
         messages[assistantIndex].isStreaming = true
         messages[assistantIndex].taskMutations = []
@@ -279,16 +285,46 @@ final class AIChatService {
 
     /// Restore a saved conversation into the active session.
     func loadConversation(_ conversation: AIChatConversation) {
+        if isStreaming {
+            cancelStream()
+        }
+
         messages = conversation.messages.map { saved in
             AIChatMessage(
                 role: saved.role == "user" ? .user : .assistant,
                 content: saved.content,
-                isStreaming: false
+                isStreaming: false,
+                mentions: saved.mentions
             )
         }
         chatTitle = conversation.title
+        errorMessage = nil
+        currentTurnMentions = []
+        lastSubmittedMentions = []
         // Already persisted — don't duplicate on next autosave
         isConversationSaved = true
+    }
+
+    /// Creates a duplicated working copy of the current conversation while preserving
+    /// all message metadata needed for follow-up actions and retries.
+    func duplicateCurrentConversation() {
+        guard !messages.isEmpty else { return }
+
+        if isStreaming {
+            cancelStream()
+        }
+
+        autosave()
+
+        let duplicatedMessages = messages
+        let duplicatedTitle = (chatTitle ?? "Untitled") + " (copy)"
+
+        messages = duplicatedMessages
+        chatTitle = duplicatedTitle
+        errorMessage = nil
+        currentTurnMentions = []
+        lastSubmittedMentions = []
+        isConversationSaved = false
     }
 
     /// Delete a saved conversation from history.
@@ -419,8 +455,12 @@ final class AIChatService {
            let json = String(data: data, encoding: .utf8) {
             return json
         }
-        // Fallback: minimal safe JSON
-        return "{\"success\":\(success),\"message\":\"Result encoding failed\"}"
+        
+        // Fallback: minimal safe JSON with basic sanitization
+        let safeMessage = message.replacingOccurrences(of: "\"", with: "'")
+                                 .replacingOccurrences(of: "\n", with: " ")
+                                 .replacingOccurrences(of: "\\", with: "\\\\")
+        return "{\"success\":\(success),\"message\":\"Result encoding failed, original message: \(safeMessage)\"}"
     }
 
     /// Returns the Gemini-format tool declarations for use in voice sessions.
@@ -543,7 +583,22 @@ final class AIChatService {
             }
             guard (200..<300).contains(http.statusCode) else {
                 switch http.statusCode {
-                case 401: appendError("Session expired. Please log out and back in.", to: assistantMessageID)
+                case 401:
+                    // Token exists in Keychain (user appears logged in) but backend session
+                    // may have expired. Try silent refresh — if it succeeds the next retry
+                    // (user taps retry button) will use the refreshed token automatically.
+                    if let auth = authService {
+                        let refreshed = await auth.attemptSilentRefresh()
+                        if refreshed {
+                            // Session refreshed — tell user to retry instead of re-logging in
+                            appendError("Connection lost briefly. Please tap retry.", to: assistantMessageID)
+                        } else {
+                            auth.isSessionExpired = true
+                            appendError("Session expired. Please log out and back in.", to: assistantMessageID)
+                        }
+                    } else {
+                        appendError("Session expired. Please log out and back in.", to: assistantMessageID)
+                    }
                 case 503: appendError("AI service is not configured on the server (missing OPENROUTER_API_KEY).", to: assistantMessageID)
                 case 502: appendError("AI provider error. The upstream AI service may be down.", to: assistantMessageID)
                 default:  appendError("Server error (\(http.statusCode)).", to: assistantMessageID)
@@ -919,7 +974,8 @@ final class AIChatService {
             messages: messages.map {
                 AIChatConversation.SavedMessage(
                     role: $0.role == .user ? "user" : "assistant",
-                    content: $0.content
+                    content: $0.content,
+                    mentions: $0.mentions
                 )
             }
         )
@@ -929,18 +985,29 @@ final class AIChatService {
         persistConversations()
     }
 
+    private static let chatHistoryKey = "com.todus.ai.chatHistory"
+
     private func persistConversations() {
-        if let data = try? JSONEncoder().encode(savedConversations) {
-            UserDefaults.standard.set(data, forKey: "ai_chat_history")
-        }
+        guard let data = try? JSONEncoder().encode(savedConversations) else { return }
+        // Store in Keychain so conversations survive app reinstall (UserDefaults is wiped)
+        KeychainHelper.saveData(key: Self.chatHistoryKey, value: data)
     }
 
     private func loadPersistedConversations() {
-        guard
-            let data = UserDefaults.standard.data(forKey: "ai_chat_history"),
-            let convs = try? JSONDecoder().decode([AIChatConversation].self, from: data)
-        else { return }
-        savedConversations = convs
+        // Try Keychain first (new location, survives reinstall)
+        if let data = KeychainHelper.readData(key: Self.chatHistoryKey),
+           let convs = try? JSONDecoder().decode([AIChatConversation].self, from: data) {
+            savedConversations = convs
+            return
+        }
+        // Migrate from UserDefaults (old location) if present
+        if let data = UserDefaults.standard.data(forKey: "ai_chat_history"),
+           let convs = try? JSONDecoder().decode([AIChatConversation].self, from: data) {
+            savedConversations = convs
+            // Migrate to Keychain and clear old location
+            persistConversations()
+            UserDefaults.standard.removeObject(forKey: "ai_chat_history")
+        }
     }
 
     // MARK: - Calendar Context

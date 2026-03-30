@@ -27,7 +27,7 @@ final class AudioPlayerManager: @unchecked Sendable {
     private var scheduledBufferCount = 0
     private var isEngineRunning = false
 
-    init(sampleRate: Double = 24000, channels: AVAudioChannelCount = 1) {
+    init?(sampleRate: Double = 24000, channels: AVAudioChannelCount = 1) {
         // PCM signed 16-bit integer, mono, at the provider's output sample rate.
         // Guard against invalid parameters — AVAudioFormat returns nil for unsupported configs.
         guard let format = AVAudioFormat(
@@ -36,7 +36,8 @@ final class AudioPlayerManager: @unchecked Sendable {
             channels: channels,
             interleaved: true
         ) else {
-            fatalError("[AudioPlayerManager] Invalid audio format: sampleRate=\(sampleRate), channels=\(channels)")
+            print("[AudioPlayerManager] Invalid audio format: sampleRate=\(sampleRate), channels=\(channels)")
+            return nil
         }
         self.outputFormat = format
     }
@@ -108,9 +109,10 @@ final class AudioPlayerManager: @unchecked Sendable {
 
         scheduledBufferCount += 1
         playerNode.scheduleBuffer(buffer) { [weak self] in
-            // Callback fires on an internal AVAudioEngine thread — dispatch to audioQueue for thread safety
-            self?.audioQueue.async {
-                guard let self else { return }
+            // Callback fires on an internal AVAudioEngine thread — guard before dispatching
+            // so `self` is a strong let constant when captured by the audioQueue closure.
+            guard let self else { return }
+            self.audioQueue.async {
                 self.scheduledBufferCount -= 1
                 if self.scheduledBufferCount <= 0 {
                     self.scheduledBufferCount = 0

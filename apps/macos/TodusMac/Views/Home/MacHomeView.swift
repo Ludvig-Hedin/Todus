@@ -10,6 +10,9 @@ import EventKit
 struct MacHomeView: View {
     @Environment(MacAppServices.self) private var services
 
+    /// Called when the user taps a row to navigate to another section.
+    var onNavigate: ((MacPrimarySelection) -> Void)? = nil
+
     // Tasks due today — SwiftData live query (excludes completed tasks)
     @Query(filter: #Predicate<TaskRecord> { task in
         !task.completed
@@ -99,41 +102,47 @@ struct MacHomeView: View {
     }
 
     private func eventRow(_ event: CalendarEvent, index: Int) -> some View {
-        HStack(spacing: MacTheme.spacing8) {
-            // Calendar color dot
-            Circle()
-                .fill(Color(hue: Double(event.calendarColor % 360) / 360.0, saturation: 0.5, brightness: 0.75))
-                .frame(width: 7, height: 7)
+        Button {
+            // Navigate to the Calendar section
+            onNavigate?(.calendar(.all))
+        } label: {
+            HStack(spacing: MacTheme.spacing8) {
+                // Calendar color dot
+                Circle()
+                    .fill(Color(hue: Double(event.calendarColor % 360) / 360.0, saturation: 0.5, brightness: 0.75))
+                    .frame(width: 7, height: 7)
 
-            VStack(alignment: .leading, spacing: 1) {
-                Text(event.title)
-                    .font(MacTheme.cardTitleFont())
-                    .foregroundStyle(MacTheme.textPrimary)
-                    .lineLimit(1)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(event.title)
+                        .font(MacTheme.cardTitleFont())
+                        .foregroundStyle(MacTheme.textPrimary)
+                        .lineLimit(1)
 
-                if event.isAllDay {
-                    Text("All day")
-                        .font(MacTheme.cardSubtitleFont())
-                        .foregroundStyle(MacTheme.textSecondary)
-                } else {
-                    Text(event.startDate, format: .dateTime.hour().minute())
-                        .font(MacTheme.cardSubtitleFont())
-                        .foregroundStyle(MacTheme.textSecondary)
+                    if event.isAllDay {
+                        Text("All day")
+                            .font(MacTheme.cardSubtitleFont())
+                            .foregroundStyle(MacTheme.textSecondary)
+                    } else {
+                        Text(event.startDate, format: .dateTime.hour().minute())
+                            .font(MacTheme.cardSubtitleFont())
+                            .foregroundStyle(MacTheme.textSecondary)
+                    }
                 }
-            }
 
-            Spacer(minLength: 0)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, MacTheme.spacing12)
+            .padding(.vertical, MacTheme.spacing8)
+            .background(
+                RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous)
+                    .fill(isHoveringEventIndex == index ? MacTheme.surfaceHover : MacTheme.surfaceCard)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous)
+                    .stroke(MacTheme.cardBorder, lineWidth: 0.5)
+            )
         }
-        .padding(.horizontal, MacTheme.spacing12)
-        .padding(.vertical, MacTheme.spacing8)
-        .background(
-            RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous)
-                .fill(isHoveringEventIndex == index ? MacTheme.surfaceHover : MacTheme.surfaceCard)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous)
-                .stroke(MacTheme.cardBorder, lineWidth: 0.5)
-        )
+        .buttonStyle(.plain)
         .onHover { hovering in
             withAnimation(.easeOut(duration: 0.12)) {
                 isHoveringEventIndex = hovering ? index : nil
@@ -161,35 +170,41 @@ struct MacHomeView: View {
     }
 
     private func taskRow(_ task: TaskRecord, index: Int) -> some View {
-        HStack(spacing: MacTheme.spacing8) {
-            // Status icon
-            Image(systemName: task.status.systemImage)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(task.status.tintColor)
-                .frame(width: 16)
+        Button {
+            // Navigate to the Tasks section
+            onNavigate?(.tasks)
+        } label: {
+            HStack(spacing: MacTheme.spacing8) {
+                // Status icon
+                Image(systemName: task.status.systemImage)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(task.status.tintColor)
+                    .frame(width: 16)
 
-            Text(task.title)
-                .font(MacTheme.cardTitleFont())
-                .foregroundStyle(MacTheme.textPrimary)
-                .lineLimit(1)
+                Text(task.title)
+                    .font(MacTheme.cardTitleFont())
+                    .foregroundStyle(MacTheme.textPrimary)
+                    .lineLimit(1)
 
-            Spacer(minLength: 0)
+                Spacer(minLength: 0)
 
-            // Priority indicator
-            if task.priority != .none {
-                priorityBadge(task.priority)
+                // Priority indicator
+                if task.priority != .none {
+                    priorityBadge(task.priority)
+                }
             }
+            .padding(.horizontal, MacTheme.spacing12)
+            .padding(.vertical, MacTheme.spacing8)
+            .background(
+                RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous)
+                    .fill(isHoveringTaskIndex == index ? MacTheme.surfaceHover : MacTheme.surfaceCard)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous)
+                    .stroke(MacTheme.cardBorder, lineWidth: 0.5)
+            )
         }
-        .padding(.horizontal, MacTheme.spacing12)
-        .padding(.vertical, MacTheme.spacing8)
-        .background(
-            RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous)
-                .fill(isHoveringTaskIndex == index ? MacTheme.surfaceHover : MacTheme.surfaceCard)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous)
-                .stroke(MacTheme.cardBorder, lineWidth: 0.5)
-        )
+        .buttonStyle(.plain)
         .onHover { hovering in
             withAnimation(.easeOut(duration: 0.12)) {
                 isHoveringTaskIndex = hovering ? index : nil
@@ -262,48 +277,54 @@ struct MacHomeView: View {
     }
 
     private func emailCard(_ thread: EmailThread, index: Int) -> some View {
-        VStack(alignment: .leading, spacing: MacTheme.spacing4) {
-            // Top row: sender + time
-            HStack(spacing: MacTheme.spacing6) {
-                // Unread indicator
-                Circle()
-                    .fill(thread.unread ? MacTheme.accent : Color.clear)
-                    .frame(width: 6, height: 6)
+        Button {
+            // Navigate to Email inbox
+            onNavigate?(.email(.inbox))
+        } label: {
+            VStack(alignment: .leading, spacing: MacTheme.spacing4) {
+                // Top row: sender + time
+                HStack(spacing: MacTheme.spacing6) {
+                    // Unread indicator
+                    Circle()
+                        .fill(thread.unread ? MacTheme.accent : Color.clear)
+                        .frame(width: 6, height: 6)
 
-                Text(thread.from.name)
-                    .font(.system(size: 13, weight: thread.unread ? .semibold : .medium))
-                    .foregroundStyle(MacTheme.textPrimary)
+                    Text(thread.from.name)
+                        .font(.system(size: 13, weight: thread.unread ? .semibold : .medium))
+                        .foregroundStyle(MacTheme.textPrimary)
+                        .lineLimit(1)
+
+                    Spacer(minLength: 0)
+
+                    Text(thread.date, format: .dateTime.hour().minute())
+                        .font(MacTheme.metaFont())
+                        .foregroundStyle(MacTheme.mutedText)
+                }
+
+                // Subject
+                Text(thread.subject)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(MacTheme.textPrimary.opacity(0.8))
                     .lineLimit(1)
 
-                Spacer(minLength: 0)
-
-                Text(thread.date, format: .dateTime.hour().minute())
-                    .font(MacTheme.metaFont())
-                    .foregroundStyle(MacTheme.mutedText)
+                // Snippet
+                Text(thread.snippet)
+                    .font(MacTheme.cardSubtitleFont())
+                    .foregroundStyle(MacTheme.textSecondary)
+                    .lineLimit(2)
             }
-
-            // Subject
-            Text(thread.subject)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(MacTheme.textPrimary.opacity(0.8))
-                .lineLimit(1)
-
-            // Snippet
-            Text(thread.snippet)
-                .font(MacTheme.cardSubtitleFont())
-                .foregroundStyle(MacTheme.textSecondary)
-                .lineLimit(2)
+            .padding(MacTheme.spacing12)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .background(
+                RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous)
+                    .fill(isHoveringEmailIndex == index ? MacTheme.surfaceHover : MacTheme.surfaceCard)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous)
+                    .stroke(thread.unread ? MacTheme.accent.opacity(0.2) : MacTheme.cardBorder, lineWidth: 0.5)
+            )
         }
-        .padding(MacTheme.spacing12)
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-        .background(
-            RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous)
-                .fill(isHoveringEmailIndex == index ? MacTheme.surfaceHover : MacTheme.surfaceCard)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous)
-                .stroke(thread.unread ? MacTheme.accent.opacity(0.2) : MacTheme.cardBorder, lineWidth: 0.5)
-        )
+        .buttonStyle(.plain)
         .onHover { hovering in
             withAnimation(.easeOut(duration: 0.12)) {
                 isHoveringEmailIndex = hovering ? index : nil
@@ -324,45 +345,51 @@ struct MacHomeView: View {
                 getStartedCard(
                     icon: "checkmark.circle",
                     title: "Create your first task",
-                    subtitle: "Organize your day"
+                    subtitle: "Organize your day",
+                    action: { onNavigate?(.tasks) }
                 )
 
                 getStartedCard(
                     icon: "envelope",
                     title: "Connect Gmail",
-                    subtitle: "See your inbox here"
+                    subtitle: "See your inbox here",
+                    action: { onNavigate?(.email(.inbox)) }
                 )
 
                 getStartedCard(
                     icon: "calendar",
                     title: "Check calendar",
-                    subtitle: "View today's events"
+                    subtitle: "View today's events",
+                    action: { onNavigate?(.calendar(.all)) }
                 )
             }
         }
     }
 
-    private func getStartedCard(icon: String, title: String, subtitle: String) -> some View {
-        VStack(alignment: .leading, spacing: MacTheme.spacing8) {
-            Image(systemName: icon)
-                .font(.system(size: 18, weight: .light))
-                .foregroundStyle(MacTheme.accent)
+    private func getStartedCard(icon: String, title: String, subtitle: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: MacTheme.spacing8) {
+                Image(systemName: icon)
+                    .font(.system(size: 18, weight: .light))
+                    .foregroundStyle(MacTheme.accent)
 
-            Text(title)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(MacTheme.textPrimary)
+                Text(title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(MacTheme.textPrimary)
 
-            Text(subtitle)
-                .font(MacTheme.cardSubtitleFont())
-                .foregroundStyle(MacTheme.textSecondary)
+                Text(subtitle)
+                    .font(MacTheme.cardSubtitleFont())
+                    .foregroundStyle(MacTheme.textSecondary)
+            }
+            .padding(MacTheme.spacing16)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .background(MacTheme.emptyStateSurface, in: RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous)
+                    .stroke(MacTheme.cardBorder, lineWidth: 0.5)
+            )
         }
-        .padding(MacTheme.spacing16)
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-        .background(MacTheme.emptyStateSurface, in: RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous)
-                .stroke(MacTheme.cardBorder, lineWidth: 0.5)
-        )
+        .buttonStyle(.plain)
     }
 
     // MARK: - Shared Components

@@ -35,6 +35,8 @@
 - [ ] **IOS-022** — Rewire TaskCaptureService to use TaskService instead of Supabase
 - [x] **IOS-023** — Rewire AIChatService to use new backend endpoint
 - [x] **IOS-024** — Add AI chat message retry + stable copy action row
+- [x] **IOS-025** — Preserve AI mention context across saved chats, prune stale turns on retry, and hide raw spec JSON for spec-only replies
+- [x] **IOS-026** — Cancel active streams before loading chat history, preserve metadata when duplicating chats, and restore assistant actions for spec-only replies
 
 #### iOS — Navigation Testing
 - [ ] **IOS-031** — Test TasksTabView works with all task features
@@ -149,7 +151,13 @@
 - AppConfiguration.swift now loads from `TodosConfig.plist` first, falls back to `TaskAppConfig.plist` ✅ Fixed
 - The existing AuthSessionStore stores tokens in UserDefaults — new AuthService uses Keychain instead
 - EmailService response DTOs (RawThread, GetThreadResponse) may need adjustment once tested against real backend responses ✅ Fixed — listThreads only returns IDs, now enriching via mail.get per thread (same as web app)
+- Saved AI chat history previously dropped mention IDs and broke follow-up turns after reopening a conversation ✅ Fixed — persisted mention refs in saved messages with backward-compatible decoding
+- Retrying an earlier assistant turn previously left later dependent turns in place and could send contradictory history on the next request ✅ Fixed — retry now truncates later turns before replaying that branch
+- Spec-only `ui-spec` assistant replies previously rendered the raw fenced JSON block along with the generated UI ✅ Fixed — content is now cleared when the message only contains a UI spec
+- Loading a saved chat while another AI response was streaming previously left the newly loaded chat stuck behind the old request state ✅ Fixed — history loads now cancel the active stream and clear transient errors/mentions first
+- Duplicating a chat previously rebuilt messages from plain text only, dropping mentions and reply metadata, and the duplicate was not marked unsaved for autosave ✅ Fixed — duplication now preserves the full in-memory message models and leaves the duplicate as a real editable copy
+- Spec-only assistant replies previously lost their retry/action row because the UI only rendered actions when `message.content` was non-empty ✅ Fixed — assistant actions now remain available when a parsed UI spec is present, and copy is disabled only when there is no text to copy
 
 ---
 
-## Last Updated: 2026-03-26
+## Last Updated: 2026-03-30

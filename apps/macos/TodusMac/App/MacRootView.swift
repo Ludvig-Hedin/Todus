@@ -62,6 +62,10 @@ struct MacRootView: View {
     @State private var isEmailExpanded = true
     @State private var isCalendarExpanded = true
     @State private var isAssistantPresented = false
+    @State private var assistantDisplayMode: AssistantDisplayMode = .floating
+    // Side pane resize — user can drag the divider to adjust width
+    @State private var sidePaneWidth: CGFloat = 380
+    @State private var sidePaneDragStartWidth: CGFloat?
     @State private var isSettingsPresented = false
     @State private var isComposePresented = false
     @State private var isCreatePresented = false
@@ -70,6 +74,9 @@ struct MacRootView: View {
     @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
     @State private var calendarViewMode: String = "Week"
     @State private var composeEmailSeedBody: String = ""
+
+    // Accent color — drives .tint() on root so SwiftUI controls update immediately
+    @AppStorage("mac_accent_color") private var accentColorKey = "blue"
 
     var body: some View {
         Group {
@@ -83,6 +90,7 @@ struct MacRootView: View {
                     .transition(.opacity)
             }
         }
+        .tint(MacTheme.accentColor(for: accentColorKey))
         .animation(.snappy(duration: 0.3), value: services.authService.showsOnboarding)
         .animation(.snappy(duration: 0.3), value: services.authService.isAuthenticated)
         .task {
@@ -93,14 +101,102 @@ struct MacRootView: View {
             // Instead, just refresh isSessionExpired so the UI can show a banner.
             // Actual sign-out on 401 is handled reactively by the API client.
             if services.authService.isAuthenticated {
-                await services.authService.attemptSilentRefresh()
+                _ = await services.authService.attemptSilentRefresh()
             }
+        }
+        .task(id: services.authService.isAuthenticated) {
+            // Fetch user profile (name, avatar, email) whenever auth state changes
+            // to authenticated. Uses task(id:) so it re-runs after login — a plain
+            // .task{} only fires on initial appear (before login), when bearerToken
+            // is still nil. Matches iOS RootView behavior.
+            guard services.authService.isAuthenticated else { return }
+            await services.authService.fetchUserProfile()
         }
     }
 
     // MARK: - Main App Shell
 
     private var mainAppView: some View {
+        HStack(spacing: 0) {
+            // Main content area (NavigationSplitView)
+            mainNavigationView
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            // Side pane mode — docked assistant panel on the right
+            if isAssistantPresented && assistantDisplayMode == .sidepane {
+                // Draggable resize divider — replaces plain Divider() so user can adjust side pane width
+                Rectangle()
+                    .fill(Color.primary.opacity(0.08))
+                    .frame(width: 5)
+                    .contentShape(Rectangle())
+                    .onHover { hovering in
+                        if hovering { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+                    }
+                    .gesture(
+                        DragGesture()
+                            .onChanged { value in
+                                if sidePaneDragStartWidth == nil { sidePaneDragStartWidth = sidePaneWidth }
+                                let start = sidePaneDragStartWidth ?? sidePaneWidth
+                                // Negative translation = dragging left = wider panel
+                                sidePaneWidth = max(280, min(600, start - value.translation.width))
+                            }
+                            .onEnded { _ in sidePaneDragStartWidth = nil }
+                    )
+
+                MacAssistantPanel(
+                    isPresented: $isAssistantPresented,
+                    displayMode: $assistantDisplayMode,
+                    currentSelection: selection
+                )
+                .frame(width: sidePaneWidth)
+                .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
+        }
+        .animation(.snappy(duration: 0.25), value: isAssistantPresented && assistantDisplayMode == .sidepane)
+        // Floating mode — overlay panel positioned bottom-right
+        .overlay(alignment: .bottomTrailing) {
+            if isAssistantPresented && assistantDisplayMode == .floating {
+                MacAssistantPanel(
+                    isPresented: $isAssistantPresented,
+                    displayMode: $assistantDisplayMode,
+                    currentSelection: selection
+                )
+                // Panel self-manages its size via floatingSize state — no fixed frame here
+                .padding(.trailing, 20)
+                .padding(.bottom, 20)
+                .transition(.scale(scale: 0.92, anchor: .bottomTrailing).combined(with: .opacity))
+            }
+        }
+        .animation(.snappy(duration: 0.25), value: isAssistantPresented && assistantDisplayMode == .floating)
+        // Settings overlay — full-screen dimmed backdrop; tap outside to dismiss
+        .overlay {
+            if isSettingsPresented {
+                ZStack {
+                    Color.black.opacity(0.35)
+                        .ignoresSafeArea()
+                        .onTapGesture {
+                            withAnimation(.snappy(duration: 0.2)) {
+                                isSettingsPresented = false
+                            }
+                        }
+
+                    MacSettingsView(isPresented: $isSettingsPresented)
+                        .frame(width: 560)
+                        .frame(maxHeight: 680)
+                        .clipShape(RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous))
+                        .shadow(color: .black.opacity(0.28), radius: 32, y: 12)
+                        // Prevent taps on the panel itself from propagating to the backdrop
+                        .onTapGesture {}
+                }
+                .transition(.opacity)
+            }
+        }
+        .animation(.snappy(duration: 0.2), value: isSettingsPresented)
+    }
+
+    /// The NavigationSplitView with detail content, toolbar, and sheets.
+    /// Extracted so the assistant panel HStack can wrap it cleanly.
+    private var mainNavigationView: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
             MacSidebarView(
                 selection: $selection,
@@ -125,10 +221,19 @@ struct MacRootView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .id(selection)
 
-                AssistantButton { isAssistantPresented = true }
+                // Hide the FAB when the assistant panel is already open
+                if !isAssistantPresented {
+                    AssistantButton {
+                        withAnimation(.snappy(duration: 0.25)) {
+                            isAssistantPresented = true
+                        }
+                    }
                     .padding(.trailing, 20)
                     .padding(.bottom, 16)
+                    .transition(.scale(scale: 0.8).combined(with: .opacity))
+                }
             }
+            .animation(.snappy(duration: 0.2), value: isAssistantPresented)
             .navigationTitle(selection.title)
             .toolbar {
                 // Context-specific toolbar items based on active view
@@ -156,69 +261,126 @@ struct MacRootView: View {
                     }
 
                     Menu {
-                        Button("Preferences...") { isSettingsPresented = true }
+                        Button("Preferences…  ⌘,") { isSettingsPresented = true }
                         Divider()
-                        Button {
-                            isComposePresented = true
-                        } label: {
-                            Label("New Email", systemImage: "envelope")
-                        }
-                        Button {
-                            // Reload email threads
+                        Button("New Email  ⌘⇧E") { isComposePresented = true }
+                        Button("Refresh  ⌘R") {
                             Task { await services.emailService.loadThreads(refresh: true) }
-                        } label: {
-                            Label("Refresh", systemImage: "arrow.clockwise")
                         }
                         Divider()
-                        Button {
+                        Button("Toggle Sidebar  ⌘B") {
                             columnVisibility = columnVisibility == .detailOnly
                                 ? .automatic : .detailOnly
+                        }
+                        // Toggle assistant — shows checkmark when open
+                        Button {
+                            withAnimation(.snappy(duration: 0.25)) {
+                                isAssistantPresented.toggle()
+                            }
                         } label: {
-                            Label("Toggle Sidebar", systemImage: "sidebar.left")
+                            if isAssistantPresented {
+                                Text("Hide AI Assistant  ⌘L")
+                            } else {
+                                Text("AI Assistant  ⌘L")
+                            }
                         }
                     } label: {
                         Image(systemName: "ellipsis")
                     }
+                    .help("More Options")
 
-                    // Create button — opens universal create sheet (like iOS)
+                    // Create / compose
                     Button {
                         isCreatePresented = true
                     } label: {
                         Image(systemName: "square.and.pencil")
                     }
-                    .help("Create (⌘N)")
+                    .help("New Item (⌘N)")
                     .keyboardShortcut("n", modifiers: .command)
 
+                    // Search — ⌘K (command palette convention)
                     Button {
                         isSearchPresented = true
                     } label: {
                         Image(systemName: "magnifyingglass")
                     }
-                    .keyboardShortcut("f", modifiers: .command)
-                    .help("Search (⌘F)")
+                    .keyboardShortcut("k", modifiers: .command)
+                    .help("Search (⌘K)")
                 }
             }
         }
         .animation(.none, value: selection)
-        // Hidden button to register ⌘B for sidebar toggle
+        // Global keyboard shortcuts registered via hidden background buttons.
+        // These cover actions not already bound to visible toolbar buttons.
         .background {
-            Button("") {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    columnVisibility = columnVisibility == .detailOnly
-                        ? .automatic : .detailOnly
+            Group {
+                // ⌘,  — Settings (standard macOS convention)
+                Button("") { isSettingsPresented = true }
+                    .keyboardShortcut(",", modifiers: .command)
+
+                // ⌘B — Toggle sidebar
+                Button("") {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        columnVisibility = columnVisibility == .detailOnly
+                            ? .automatic : .detailOnly
+                    }
                 }
+                .keyboardShortcut("b", modifiers: .command)
+
+                // ⌘L — Toggle AI Assistant (not just open — toggle so it can be closed too)
+                Button("") {
+                    withAnimation(.snappy(duration: 0.25)) {
+                        isAssistantPresented.toggle()
+                    }
+                }
+                .keyboardShortcut("l", modifiers: .command)
+
+                // ⌘⇧N — New Task specifically
+                Button("") {
+                    defaultCreateType == .task
+                        ? (isCreatePresented = true)
+                        : (selection = .tasks)
+                }
+                .keyboardShortcut("n", modifiers: [.command, .shift])
+
+                // ⌘R — Refresh (email threads when in email view)
+                Button("") {
+                    if selection.category == "email" {
+                        Task { await services.emailService.loadThreads(refresh: true) }
+                    }
+                }
+                .keyboardShortcut("r", modifiers: .command)
+
+                // ⌘1-4 — Navigate to sections
+                Button("") { selection = .home }
+                    .keyboardShortcut("1", modifiers: .command)
+
+                Button("") { selection = .tasks }
+                    .keyboardShortcut("2", modifiers: .command)
+
+                Button("") { selection = .email(.inbox) }
+                    .keyboardShortcut("3", modifiers: .command)
+
+                Button("") { selection = .calendar(.all) }
+                    .keyboardShortcut("4", modifiers: .command)
+
+                // ⌘⇧M — Mark all read (email)
+                Button("") {
+                    if selection.category == "email" {
+                        Task {
+                            let ids = services.emailService.threads.filter(\.unread).map(\.id)
+                            if !ids.isEmpty { await services.emailService.markAsRead(ids: ids) }
+                        }
+                    }
+                }
+                .keyboardShortcut("m", modifiers: [.command, .shift])
+
+                // ⌘⇧E — Compose email
+                Button("") { isComposePresented = true }
+                    .keyboardShortcut("e", modifiers: [.command, .shift])
             }
-            .keyboardShortcut("b", modifiers: .command)
             .opacity(0)
             .allowsHitTesting(false)
-        }
-        .sheet(isPresented: $isAssistantPresented) {
-            sheetView(title: "AI Assistant", description: "Assistant interface will appear here.")
-                .frame(minWidth: 400, minHeight: 260)
-        }
-        .sheet(isPresented: $isSettingsPresented) {
-            MacSettingsView()
-                .frame(minWidth: 460, minHeight: 360)
         }
         .sheet(isPresented: $isComposePresented) {
             MacEmailComposeView(seedBody: composeEmailSeedBody)
@@ -291,8 +453,8 @@ struct MacRootView: View {
             Button { isCreatePresented = true } label: {
                 Image(systemName: "plus")
             }
-            .help("New Task (⌘T)")
-            .keyboardShortcut("t", modifiers: .command)
+            .help("New Task (⌘⇧N)")
+            .keyboardShortcut("n", modifiers: [.command, .shift])
 
             Menu {
                 Button("All") {}
@@ -313,10 +475,10 @@ struct MacRootView: View {
     // MARK: - Content
 
     @ViewBuilder
-    private func contentView(for selection: MacPrimarySelection) -> some View {
-        switch selection {
+    private func contentView(for currentSelection: MacPrimarySelection) -> some View {
+        switch currentSelection {
         case .home:
-            MacHomeView()
+            MacHomeView(onNavigate: { selection = $0 })
         case .tasks:
             MacTasksView()
         case .email(let section):

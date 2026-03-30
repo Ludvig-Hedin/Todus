@@ -310,10 +310,10 @@ struct SearchResultCardProps {
 /// The AI embeds specs as ```ui-spec\n{...}\n``` code blocks.
 struct ChatUISpecParser {
     /// Regex pattern matching ```ui-spec JSON blocks
-    private static let specPattern = try! NSRegularExpression(
+    private static let specPattern = (try? NSRegularExpression(
         pattern: "```ui-spec\\n([\\s\\S]*?)\\n```",
         options: []
-    )
+    )) ?? NSRegularExpression()
 
     struct ParseResult {
         let textBefore: String

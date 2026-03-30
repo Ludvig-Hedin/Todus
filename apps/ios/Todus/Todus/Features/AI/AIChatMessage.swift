@@ -111,9 +111,7 @@ struct AIChatMessage: Identifiable {
             let cleanContent = [result.textBefore, result.textAfter]
                 .filter { !$0.isEmpty }
                 .joined(separator: "\n")
-            if !cleanContent.isEmpty {
-                self.content = cleanContent
-            }
+            self.content = cleanContent
         }
     }
 }

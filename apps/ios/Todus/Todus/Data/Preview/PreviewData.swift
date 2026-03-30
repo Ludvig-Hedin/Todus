@@ -10,7 +10,12 @@ enum PreviewData {
         ])
 
         let configuration = ModelConfiguration(isStoredInMemoryOnly: true)
-        let container = try! ModelContainer(for: schema, configurations: configuration)
+        let container: ModelContainer
+        do {
+            container = try ModelContainer(for: schema, configurations: configuration)
+        } catch {
+            fatalError("Failed to create preview container: \(error.localizedDescription)")
+        }
         let context = container.mainContext
 
         let inbox = FolderRecord(name: "Ops")

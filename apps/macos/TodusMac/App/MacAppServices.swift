@@ -13,17 +13,27 @@ final class MacAppServices {
     let emailService: EmailService
     let calendarService: CalendarService
     let networkMonitor: NetworkMonitor
+    let aiChatService: MacAIChatService
 
     init() {
         let backendURL = Self.loadBackendURL()
         let auth = AuthService(backendURL: backendURL)
         let api = TodosAPIClient(baseURL: backendURL, authService: auth)
+        let email = EmailService(api: api)
+        let calendar = CalendarService()
 
         self.authService = auth
         self.apiClient = api
-        self.emailService = EmailService(api: api)
-        self.calendarService = CalendarService()
+        self.emailService = email
+        self.calendarService = calendar
         self.networkMonitor = NetworkMonitor()
+        self.aiChatService = MacAIChatService(
+            backendURL: backendURL,
+            apiClient: api,
+            authService: auth,
+            emailService: email,
+            calendarService: calendar
+        )
     }
 
     /// Loads the backend URL from TodosConfig.plist.

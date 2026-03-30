@@ -296,7 +296,7 @@ struct EmailHTMLView: NSViewRepresentable {
     class Coordinator: NSObject, WKNavigationDelegate {
         func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction) async -> WKNavigationActionPolicy {
             if navigationAction.navigationType == .linkActivated, let url = navigationAction.request.url {
-                await NSWorkspace.shared.open(url)
+                NSWorkspace.shared.open(url)
                 return .cancel
             }
             return .allow

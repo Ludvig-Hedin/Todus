@@ -1139,28 +1139,28 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
         await Promise.all(
           batch.messages.map(async (msg: any) => {
             const { messageId, connectionId, mail } = msg.body;
-
             const { pending_emails_status: statusKV, pending_emails_payload: payloadKV } = this
               .env as { pending_emails_status: KVNamespace; pending_emails_payload: KVNamespace };
 
-            const status = await statusKV.get(messageId);
-            if (status === 'cancelled') {
-              console.log(`Email ${messageId} cancelled – skipping send.`);
-              return;
-            }
-
-            let payload = mail;
-            if (!payload) {
-              const stored = await payloadKV.get(messageId);
-              if (!stored) {
-                console.error(`No payload found for scheduled email ${messageId}`);
+            try {
+              const status = await statusKV.get(messageId);
+              if (status === 'cancelled') {
+                console.log(`Email ${messageId} cancelled – skipping send.`);
                 return;
               }
-              payload = JSON.parse(stored);
-            }
 
-            const agent = await getZeroAgent(connectionId, this.ctx);
-            try {
+              let payload = mail;
+              if (!payload) {
+                const stored = await payloadKV.get(messageId);
+                if (!stored) {
+                  console.error(`No payload found for scheduled email ${messageId}`);
+                  return;
+                }
+                payload = JSON.parse(stored);
+              }
+
+              const agent = await getZeroAgent(connectionId, this.ctx);
+
               if (Array.isArray((payload as any).attachments)) {
                 const attachments = (payload as any).attachments;
 

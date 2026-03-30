@@ -40,6 +40,8 @@
 	<string>Todus shows your calendar events and lets you create new ones.</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Allow Todus to use Face ID for secure authentication.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Todus uses your camera to capture photos for attaching to AI conversations.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Todus uses your microphone to transcribe voice prompts in the assistant.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
@@ -57,6 +59,8 @@
 	<array>
 		<string>arm64</string>
 	</array>
+	<key>UIRequiresFullScreen</key>
+	<true/>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>

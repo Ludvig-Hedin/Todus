@@ -22,7 +22,7 @@ struct AssistantButton: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 6) {
-                Image(systemName: "lasso.badge.sparkles")
+                Image(systemName: "sparkles")
                     .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(aiGradient)
 

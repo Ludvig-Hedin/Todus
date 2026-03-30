@@ -1,4 +1,4 @@
-import AVFoundation
+@preconcurrency import AVFoundation
 import Foundation
 import Observation
 import SwiftData
@@ -37,7 +37,7 @@ final class VoiceChatViewModel {
     private let tokenService: VoiceTokenService
     private let chatService: AIChatService
     private let provider: VoiceProvider
-    private let audioPlayer: AudioPlayerManager
+    private let audioPlayer: AudioPlayerManager?
 
     // MARK: - Audio Capture
 
@@ -117,7 +117,17 @@ final class VoiceChatViewModel {
         } catch {
             // Clean up provider if it was already connected before the error
             await provider.disconnect()
-            connectionState = .failed(error.localizedDescription)
+            // Provide user-friendly error messages for common failure modes
+            let message: String
+            if let voiceError = error as? VoiceEndpointError {
+                message = voiceError.errorDescription ?? error.localizedDescription
+            } else if error.localizedDescription.lowercased().contains("bad") ||
+                      error.localizedDescription.lowercased().contains("websocket") {
+                message = "Voice service unavailable — check your connection and try again"
+            } else {
+                message = error.localizedDescription
+            }
+            connectionState = .failed(message)
         }
     }
 
@@ -131,7 +141,7 @@ final class VoiceChatViewModel {
         stopAudioCapture()
 
         // Stop playback
-        audioPlayer.stop()
+        audioPlayer?.stop()
 
         // Cancel event consumer
         eventConsumerTask?.cancel()
@@ -186,7 +196,7 @@ final class VoiceChatViewModel {
             guard let self else { return }
             for await event in self.provider.events {
                 guard !Task.isCancelled else { break }
-                await self.handleEvent(event)
+                self.handleEvent(event)
             }
         }
     }
@@ -197,7 +207,7 @@ final class VoiceChatViewModel {
             connectionState = state
 
         case .audioReceived(let data):
-            audioPlayer.enqueue(data)
+            audioPlayer?.enqueue(data)
             isAssistantSpeaking = true
 
         case .transcriptUpdate(let role, let text, let isFinal):
@@ -299,7 +309,7 @@ final class VoiceChatViewModel {
         do {
             let session = AVAudioSession.sharedInstance()
             // .playAndRecord allows simultaneous capture + playback (unlike .record used in VoiceInputButton)
-            try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetooth])
+            try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetoothHFP])
             try session.setActive(true, options: .notifyOthersOnDeactivation)
         } catch {
             connectionState = .failed("Audio session setup failed: \(error.localizedDescription)")
@@ -346,13 +356,15 @@ final class VoiceChatViewModel {
             var error: NSError?
             // The input block must supply data exactly once; returning .noDataNow on subsequent
             // calls prevents the converter from re-reading the same buffer in a loop.
-            var hasSuppliedInput = false
+            // Uses a reference-type flag so the @Sendable closure captures a let, not a var.
+            // @unchecked Sendable is safe: convert(to:error:inputBlock:) calls the block synchronously.
+            let suppliedInput = _MutableBoolRef()
             converter.convert(to: convertedBuffer, error: &error) { _, outStatus in
-                if hasSuppliedInput {
+                if suppliedInput.value {
                     outStatus.pointee = .noDataNow
                     return nil
                 }
-                hasSuppliedInput = true
+                suppliedInput.value = true
                 outStatus.pointee = .haveData
                 return buffer
             }
@@ -422,4 +434,12 @@ final class VoiceChatViewModel {
         // Deactivate audio session so other apps can use audio
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
+}
+
+// MARK: - Private Helpers
+
+/// Mutable Boolean reference: lets @Sendable closures capture a mutable flag via a let constant.
+/// Marked @unchecked Sendable because the usage context is always single-threaded (synchronous callback).
+private final class _MutableBoolRef: @unchecked Sendable {
+    var value: Bool = false
 }

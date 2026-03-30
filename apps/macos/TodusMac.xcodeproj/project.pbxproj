@@ -48,6 +48,9 @@
 		E00A05101913579DC0E5D1C6 /* KeychainHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 458E1F394617FB142FC17275 /* KeychainHelper.swift */; };
 		E2D56D42AC089CCBC21CD21B /* MacAuthView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9DCCDC4628A7827493203AF /* MacAuthView.swift */; };
 		EE6A839A831D903BC3DBC25D /* MacTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52580E22D0F58138E0CE848E /* MacTheme.swift */; };
+		F0A1B2C3D4E5F6A7B8C9D0E1 /* MacBrandIcons.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0A1B2C3D4E5F6A7B8C9D0E1 /* MacBrandIcons.swift */; };
+		F1A2B3C4D5E6F7A8B9C0D1E2 /* MacAIChatService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6A7B8C9D0E1F2 /* MacAIChatService.swift */; };
+		F2B3C4D5E6F7A8B9C0D1E2F3 /* MacAssistantPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6A7B8C9D0E1F2A3 /* MacAssistantPanel.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -94,7 +97,10 @@
 		DD746B8A12A661970B8AAAEB /* MacSidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacSidebarView.swift; sourceTree = "<group>"; };
 		E1B78F2ECE3BBD9BBD4D0603 /* CalendarService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarService.swift; sourceTree = "<group>"; };
 		E600FB3DFA1A854E9BB82907 /* ParseState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParseState.swift; sourceTree = "<group>"; };
+		E0A1B2C3D4E5F6A7B8C9D0E1 /* MacBrandIcons.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacBrandIcons.swift; sourceTree = "<group>"; };
 		EC7F6BC356E4ECE3D50717F5 /* MacEmailComposeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacEmailComposeView.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F6A7B8C9D0E1F2 /* MacAIChatService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacAIChatService.swift; sourceTree = "<group>"; };
+		B2C3D4E5F6A7B8C9D0E1F2A3 /* MacAssistantPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacAssistantPanel.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -134,6 +140,7 @@
 		188166A57143AE24E24D1FAB /* DesignSystem */ = {
 			isa = PBXGroup;
 			children = (
+				E0A1B2C3D4E5F6A7B8C9D0E1 /* MacBrandIcons.swift */,
 				52580E22D0F58138E0CE848E /* MacTheme.swift */,
 			);
 			path = DesignSystem;
@@ -230,9 +237,18 @@
 			path = Email;
 			sourceTree = "<group>";
 		};
+		D4E5F6A7B8C9D0E1F2A3B4C5 /* AI */ = {
+			isa = PBXGroup;
+			children = (
+				B2C3D4E5F6A7B8C9D0E1F2A3 /* MacAssistantPanel.swift */,
+			);
+			path = AI;
+			sourceTree = "<group>";
+		};
 		9355ECC0EA25534C1F8B6627 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				D4E5F6A7B8C9D0E1F2A3B4C5 /* AI */,
 				B4C380837A132F19BADEB312 /* Calendar */,
 				4C9258EB553FDE89BDC2DE0E /* Create */,
 				8210EDDF4FB85F157A2A7997 /* Email */,
@@ -274,9 +290,18 @@
 			path = Calendar;
 			sourceTree = "<group>";
 		};
+		C3D4E5F6A7B8C9D0E1F2A3B4 /* AI */ = {
+			isa = PBXGroup;
+			children = (
+				A1B2C3D4E5F6A7B8C9D0E1F2 /* MacAIChatService.swift */,
+			);
+			path = AI;
+			sourceTree = "<group>";
+		};
 		C12516BFAEA2EBD4A1800BEB /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				C3D4E5F6A7B8C9D0E1F2A3B4 /* AI */,
 				51646B02A008AB1787EC9240 /* API */,
 				27876A2C1A129D8877C75612 /* Calendar */,
 				934068E9DD959380F2327182 /* Email */,
@@ -419,6 +444,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				553EE990264F3CEFD8E517BC /* AppTaskPriority.swift in Sources */,
+				F1A2B3C4D5E6F7A8B9C0D1E2 /* MacAIChatService.swift in Sources */,
+				F2B3C4D5E6F7A8B9C0D1E2F3 /* MacAssistantPanel.swift in Sources */,
 				94D3AC3D25D4BBA93211F42C /* AppleSignInDelegate.swift in Sources */,
 				37F6479AF457C04C69749DF0 /* AssistantButton.swift in Sources */,
 				3A74856E3BCE1CA3CF44FD04 /* AuthService.swift in Sources */,
@@ -442,6 +469,7 @@
 				2F99507599647B4DACBB4E59 /* MacSettingsView.swift in Sources */,
 				8DA443DB62DF856D9E4498DB /* MacSidebarView.swift in Sources */,
 				781AD1613378DF8ABEAE55FB /* MacTasksView.swift in Sources */,
+				F0A1B2C3D4E5F6A7B8C9D0E1 /* MacBrandIcons.swift in Sources */,
 				EE6A839A831D903BC3DBC25D /* MacTheme.swift in Sources */,
 				AC4E7A7FC7E659AEF1C0A8CF /* NetworkMonitor.swift in Sources */,
 				928618689B0DCC6D49DD695A /* NoRedirectDelegate.swift in Sources */,

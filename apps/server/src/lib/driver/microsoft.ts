@@ -540,6 +540,16 @@ export class OutlookMailManager implements MailManager {
       { draftId, data },
     );
   }
+  public async getMessageAttachments(messageId: string): Promise<any[]> {
+    console.warn('[Outlook] getMessageAttachments not implemented yet');
+    return [];
+  }
+
+  public async getRawEmail(messageId: string): Promise<string> {
+    console.warn('[Outlook] getRawEmail not implemented yet');
+    return '';
+  }
+
   public getDraft(draftId: string) {
     return this.withErrorHandler(
       'getDraft',
@@ -697,10 +707,15 @@ export class OutlookMailManager implements MailManager {
 
         if (data.attachments && data.attachments.length > 0) {
           const regularAttachments = await Promise.all(
-            data.attachments.map(async (file) => {
-              const arrayBuffer = await file.arrayBuffer();
-              const buffer = Buffer.from(arrayBuffer);
-              const base64Content = buffer.toString('base64');
+            data.attachments.map(async (file: any) => {
+              let base64Content = '';
+              if ('arrayBuffer' in file && typeof file.arrayBuffer === 'function') {
+                const arrayBuffer = await file.arrayBuffer();
+                const buffer = Buffer.from(arrayBuffer);
+                base64Content = buffer.toString('base64');
+              } else if (file.base64) {
+                base64Content = file.base64;
+              }
 
               return {
                 '@odata.type': '#microsoft.graph.fileAttachment',
@@ -1181,10 +1196,15 @@ export class OutlookMailManager implements MailManager {
 
     if (attachments?.length > 0) {
       const regularAttachments = await Promise.all(
-        attachments.map(async (file) => {
-          const arrayBuffer = await file.arrayBuffer();
-          const buffer = Buffer.from(arrayBuffer);
-          const base64Content = buffer.toString('base64');
+        attachments.map(async (file: any) => {
+          let base64Content = '';
+          if ('arrayBuffer' in file && typeof file.arrayBuffer === 'function') {
+            const arrayBuffer = await file.arrayBuffer();
+            const buffer = Buffer.from(arrayBuffer);
+            base64Content = buffer.toString('base64');
+          } else if (file.base64) {
+            base64Content = file.base64;
+          }
 
           return {
             '@odata.type': '#microsoft.graph.fileAttachment',

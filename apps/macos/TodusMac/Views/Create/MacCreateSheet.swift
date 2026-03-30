@@ -79,7 +79,7 @@ struct MacCreateSheet: View {
                     .foregroundStyle(.white)
                     .padding(.horizontal, MacTheme.spacing16)
                     .padding(.vertical, MacTheme.spacing8)
-                    .background(MacTheme.accent, in: RoundedRectangle(cornerRadius: MacTheme.buttonRadius))
+                    .background(MacTheme.accent, in: Capsule(style: .continuous))
                 }
                 .buttonStyle(.plain)
                 .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -120,7 +120,7 @@ struct MacCreateSheet: View {
                     .padding(.vertical, MacTheme.spacing6)
                     .background(
                         selectedType == type ? MacTheme.accent.opacity(0.1) : Color.clear,
-                        in: RoundedRectangle(cornerRadius: MacTheme.buttonRadius)
+                        in: Capsule(style: .continuous)
                     )
                 }
                 .buttonStyle(.plain)
@@ -165,8 +165,8 @@ struct MacCreateSheet: View {
             .foregroundStyle(MacTheme.textSecondary)
             .padding(.horizontal, MacTheme.spacing8)
             .padding(.vertical, MacTheme.spacing4)
-            .background(MacTheme.surfaceCard, in: RoundedRectangle(cornerRadius: MacTheme.buttonRadius))
-            .overlay(RoundedRectangle(cornerRadius: MacTheme.buttonRadius).stroke(MacTheme.cardBorder, lineWidth: 0.5))
+            .background(MacTheme.surfaceCard, in: Capsule(style: .continuous))
+            .overlay(Capsule(style: .continuous).stroke(MacTheme.cardBorder, lineWidth: 0.5))
         }
         .menuStyle(.borderlessButton)
     }
@@ -190,8 +190,8 @@ struct MacCreateSheet: View {
             .foregroundStyle(MacTheme.textSecondary)
             .padding(.horizontal, MacTheme.spacing8)
             .padding(.vertical, MacTheme.spacing4)
-            .background(MacTheme.surfaceCard, in: RoundedRectangle(cornerRadius: MacTheme.buttonRadius))
-            .overlay(RoundedRectangle(cornerRadius: MacTheme.buttonRadius).stroke(MacTheme.cardBorder, lineWidth: 0.5))
+            .background(MacTheme.surfaceCard, in: Capsule(style: .continuous))
+            .overlay(Capsule(style: .continuous).stroke(MacTheme.cardBorder, lineWidth: 0.5))
         }
         .buttonStyle(.plain)
         .popover(isPresented: $isShowingDatePicker) {

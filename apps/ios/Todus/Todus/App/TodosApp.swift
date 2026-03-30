@@ -46,7 +46,12 @@ struct TodosApp: App {
             do {
                 container = try ModelContainer(for: schema, configurations: fallbackConfiguration)
             } catch {
-                fatalError("Failed to create model container: \(error)")
+                let inMemoryConfig = ModelConfiguration(isStoredInMemoryOnly: true)
+                do {
+                    container = try ModelContainer(for: schema, configurations: inMemoryConfig)
+                } catch {
+                    fatalError("Failed to create model container even in memory: \(error)")
+                }
             }
         }
 

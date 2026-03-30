@@ -110,9 +110,9 @@ struct MacSidebarView: View {
                 .padding(.bottom, 8)
                 .padding(.top, 10)
 
-            // User row — full width with name stretching to fill, gear icon at trailing edge
+            // User row — avatar + name menu + gear icon pinned right
             HStack(spacing: 6) {
-                // Avatar — show profile image if available, else initial from name
+                // Avatar — profile image or initial
                 if let imageURLString = authService.userImage,
                    let imageURL = URL(string: imageURLString) {
                     AsyncImage(url: imageURL) { phase in
@@ -129,7 +129,7 @@ struct MacSidebarView: View {
                     avatarCircle
                 }
 
-                // Name + chevron (menu trigger) — fills available width
+                // Name — menu trigger (borderlessButton adds its own chevron)
                 Menu {
                     Button("Profile") {}
                     Button("Settings") { onOpenSettings() }
@@ -138,26 +138,20 @@ struct MacSidebarView: View {
                         authService.signOut()
                     }
                 } label: {
-                    HStack(spacing: 4) {
-                        Text(displayName)
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(.primary)
-                            .opacity(0.6)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 8, weight: .medium))
-                            .foregroundStyle(.tertiary)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
+                    Text(displayName)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.primary)
+                        .opacity(0.6)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                 }
                 .menuStyle(.borderlessButton)
                 .buttonStyle(.plain)
                 .pointerStyle(.link)
 
-                // Gear icon at trailing edge (directly right of chevron area)
+                Spacer(minLength: 0)
+
+                // Gear icon pinned to trailing edge
                 Button(action: onOpenSettings) {
                     Image(systemName: "gearshape")
                         .font(.system(size: 12, weight: .regular))
@@ -320,21 +314,45 @@ private struct SidebarItemButton: View {
     @State private var isHovered = false
 
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 15, weight: .regular))
-                    .foregroundStyle(isSelected ? Color.accentColor : Color.primary.opacity(0.5))
-                    .frame(width: 18)
+        // The row is a fixed-height HStack. The trailing slot uses a ZStack overlay
+        // so the + button and badge/chevron occupy the same space — no layout shift on hover.
+        HStack(spacing: 8) {
+            // Main tap target: icon + title
+            Button(action: action) {
+                HStack(spacing: 8) {
+                    Image(systemName: systemImage)
+                        .font(.system(size: 15, weight: .regular))
+                        .foregroundStyle(isSelected ? Color.accentColor : Color.primary.opacity(0.5))
+                        .frame(width: 18)
 
-                Text(title)
-                    .font(.system(size: 13, weight: isSelected ? .semibold : .medium))
-                    .foregroundStyle(isSelected ? Color.primary : Color.primary.opacity(0.8))
+                    Text(title)
+                        .font(.system(size: 13, weight: isSelected ? .semibold : .medium))
+                        .foregroundStyle(isSelected ? Color.primary : Color.primary.opacity(0.8))
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
 
-                Spacer(minLength: 0)
+            // Trailing slot — fixed width 20pt; overlays + on hover above badge/chevron.
+            // ZStack keeps height constant regardless of which child is visible.
+            ZStack {
+                // Badge or chevron (always rendered, hidden when + is shown)
+                Group {
+                    if let badgeCount {
+                        Text("\(badgeCount)")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    } else if let trailingSystemImage {
+                        Image(systemName: trailingSystemImage)
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .opacity(showAddOnHover && isHovered ? 0 : 1)
 
-                // Show + button on hover if enabled, otherwise show badge/chevron
-                if showAddOnHover && isHovered {
+                // + button (only for items with showAddOnHover)
+                if showAddOnHover {
                     Button {
                         onAdd?()
                     } label: {
@@ -345,29 +363,20 @@ private struct SidebarItemButton: View {
                             .background(Color.primary.opacity(0.06), in: Circle())
                     }
                     .buttonStyle(.plain)
-                    .transition(.opacity)
-                } else if let badgeCount {
-                    Text("\(badgeCount)")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                } else if let trailingSystemImage {
-                    Image(systemName: trailingSystemImage)
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(.tertiary)
+                    .opacity(isHovered ? 1 : 0)
                 }
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(fillColor)
-            )
+            .frame(width: 20, height: 20) // fixed slot — no layout shift
             .animation(.easeOut(duration: 0.1), value: isHovered)
         }
-        .buttonStyle(.plain)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(
+            Capsule(style: .continuous)
+                .fill(fillColor)
+        )
+        .animation(.easeOut(duration: 0.1), value: isHovered)
         .focusEffectDisabled()
-        .pointerStyle(.link)
         .onHover { isHovered = $0 }
     }
 
@@ -420,66 +429,82 @@ private struct SidebarChildItemButton: View {
 
 // MARK: - Footer Components
 
-/// Colored dot + label row used for email labels and calendar sources
+/// Colored dot + label row used for email labels and calendar sources — pill hover
 private struct LabelRow: View {
     let color: Color
     let name: String
     var showToggle: Bool = false
 
     @State private var isEnabled = true
+    @State private var isHovered = false
 
     var body: some View {
-        HStack(spacing: 6) {
-            Circle()
-                .fill(color.opacity(isEnabled ? 0.8 : 0.25))
-                .frame(width: 8, height: 8)
-
-            Text(name)
-                .font(.system(size: 12, weight: .regular))
-                .foregroundStyle(Color.primary.opacity(isEnabled ? 0.7 : 0.35))
-
-            Spacer(minLength: 0)
-        }
-        .padding(.vertical, 2)
-        .contentShape(Rectangle())
-        .pointerStyle(.link)
-        .onTapGesture {
+        Button {
             if showToggle {
                 withAnimation(.easeOut(duration: 0.15)) {
                     isEnabled.toggle()
                 }
             }
+        } label: {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(color.opacity(isEnabled ? 0.8 : 0.25))
+                    .frame(width: 8, height: 8)
+
+                Text(name)
+                    .font(.system(size: 12, weight: .regular))
+                    .foregroundStyle(Color.primary.opacity(isEnabled ? 0.7 : 0.35))
+
+                Spacer(minLength: 0)
+            }
+            .padding(.vertical, 4)
+            .padding(.horizontal, 8)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(isHovered ? Color.primary.opacity(0.05) : .clear)
+            )
         }
+        .buttonStyle(.plain)
+        .focusEffectDisabled()
+        .pointerStyle(.link)
+        .onHover { isHovered = $0 }
+        .animation(.easeOut(duration: 0.1), value: isHovered)
     }
 }
 
-/// Quick filter row for the tasks footer
+/// Quick filter row for the tasks footer — pill-shaped hover highlight
 private struct FilterRow: View {
     let icon: String
     let title: String
+    var action: (() -> Void)? = nil
 
     @State private var isHovered = false
 
     var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: icon)
-                .font(.system(size: 11, weight: .regular))
-                .foregroundStyle(.secondary)
-                .frame(width: 14)
+        Button {
+            action?()
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 11, weight: .regular))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 14)
 
-            Text(title)
-                .font(.system(size: 12, weight: .regular))
-                .foregroundStyle(.primary.opacity(0.65))
+                Text(title)
+                    .font(.system(size: 12, weight: .regular))
+                    .foregroundStyle(.primary.opacity(0.65))
 
-            Spacer(minLength: 0)
+                Spacer(minLength: 0)
+            }
+            .padding(.vertical, 4)
+            .padding(.horizontal, 8)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(isHovered ? Color.primary.opacity(0.05) : .clear)
+            )
         }
-        .padding(.vertical, 3)
-        .padding(.horizontal, 4)
-        .background(
-            RoundedRectangle(cornerRadius: 4, style: .continuous)
-                .fill(isHovered ? Color.primary.opacity(0.04) : .clear)
-        )
-        .contentShape(Rectangle())
+        .buttonStyle(.plain)
+        .focusEffectDisabled()
         .pointerStyle(.link)
         .onHover { isHovered = $0 }
         .animation(.easeOut(duration: 0.1), value: isHovered)

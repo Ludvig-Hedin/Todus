@@ -638,8 +638,12 @@ struct RichComposerInput: View {
     let surface: RichInputSurface
     let mentionOptions: [RichInputMentionRef]
     var isFocused: Bool? = nil
+    /// Max content height before scrolling kicks in (0 = unlimited)
+    var maxHeight: CGFloat = 0
     var onPasteImage: ((UIImage) -> Void)? = nil
     var onCommand: ((RichInputCommandAction) -> Void)? = nil
+    /// Called when the text input gains or loses focus
+    var onFocusChange: ((Bool) -> Void)? = nil
 
     @State private var activeMentionQuery = ""
     @State private var activeSlashQuery = ""
@@ -712,9 +716,11 @@ struct RichComposerInput: View {
                 placeholder: placeholder,
                 highlightTerms: mentions.map { "@\($0.displayText)" },
                 isFocused: isFocused,
+                maxHeight: maxHeight,
                 onPasteImage: { image in
                     onPasteImage?(image)
-                }
+                },
+                onFocusChange: onFocusChange
             )
             .onChange(of: text) { _, newValue in
                 updateSuggestions(for: newValue)
@@ -882,10 +888,14 @@ struct PasteHandlingTextInput: UIViewRepresentable {
     let placeholder: String
     var highlightTerms: [String] = []
     var isFocused: Bool? = nil
+    /// Max content height before scrolling kicks in (0 = unlimited)
+    var maxHeight: CGFloat = 0
     let onPasteImage: (UIImage) -> Void
+    /// Called when the UITextView gains or loses focus — drives isInputExpanded in AIChatView
+    var onFocusChange: ((Bool) -> Void)? = nil
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(text: $text, placeholder: placeholder, highlightTerms: highlightTerms, onPasteImage: onPasteImage)
+        Coordinator(text: $text, placeholder: placeholder, highlightTerms: highlightTerms, onPasteImage: onPasteImage, onFocusChange: onFocusChange, maxHeight: maxHeight)
     }
 
     func makeUIView(context: Context) -> PasteInterceptingTextView {
@@ -902,6 +912,7 @@ struct PasteHandlingTextInput: UIViewRepresentable {
         // Hug content vertically so the view shrinks to one line when empty
         view.setContentHuggingPriority(.defaultHigh, for: .vertical)
         view.highlightTerms = highlightTerms
+        view.maxContentHeight = maxHeight
 
         // Show placeholder initially
         if text.isEmpty {
@@ -968,6 +979,8 @@ struct PasteHandlingTextInput: UIViewRepresentable {
         let placeholder: String
         var highlightTerms: [String]
         let onPasteImage: (UIImage) -> Void
+        let onFocusChange: ((Bool) -> Void)?
+        let maxHeight: CGFloat
         /// Tracks the last text value the coordinator wrote to the binding,
         /// used to distinguish external (submit) clears from internal edits.
         var lastKnownText: String = ""
@@ -976,12 +989,16 @@ struct PasteHandlingTextInput: UIViewRepresentable {
             text: Binding<String>,
             placeholder: String,
             highlightTerms: [String],
-            onPasteImage: @escaping (UIImage) -> Void
+            onPasteImage: @escaping (UIImage) -> Void,
+            onFocusChange: ((Bool) -> Void)? = nil,
+            maxHeight: CGFloat = 0
         ) {
             _text = text
             self.placeholder = placeholder
             self.highlightTerms = highlightTerms
             self.onPasteImage = onPasteImage
+            self.onFocusChange = onFocusChange
+            self.maxHeight = maxHeight
         }
 
         func textViewDidBeginEditing(_ textView: UITextView) {
@@ -990,6 +1007,7 @@ struct PasteHandlingTextInput: UIViewRepresentable {
                 textView.text = ""
                 textView.textColor = UIColor.label
             }
+            onFocusChange?(true)
         }
 
         func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText: String) -> Bool {
@@ -1017,6 +1035,7 @@ struct PasteHandlingTextInput: UIViewRepresentable {
                 text = ""
                 lastKnownText = ""
             }
+            onFocusChange?(false)
         }
 
         func textViewDidChange(_ textView: UITextView) {
@@ -1041,6 +1060,13 @@ struct PasteHandlingTextInput: UIViewRepresentable {
             lastKnownText = updatedText
             text = updatedText
             applyHighlights(to: textView)
+
+            // Toggle scrolling based on whether content exceeds max height threshold
+            if maxHeight > 0 {
+                let fitsContent = textView.sizeThatFits(CGSize(width: textView.bounds.width, height: .greatestFiniteMagnitude)).height <= maxHeight
+                textView.isScrollEnabled = !fitsContent
+            }
+
             // Notify SwiftUI layout to re-measure height from intrinsicContentSize
             textView.invalidateIntrinsicContentSize()
         }
@@ -1110,6 +1136,8 @@ final class PasteInterceptingTextView: UITextView {
     var onPasteImage: ((UIImage) -> Void)?
     var highlightTerms: [String] = []
     var mentionHighlightColor: UIColor = UIColor.systemBlue.withAlphaComponent(0.14)
+    /// When > 0, caps intrinsic height and enables scrolling beyond this threshold
+    var maxContentHeight: CGFloat = 0
 
     override var intrinsicContentSize: CGSize {
         // Measure the height required for the current content
@@ -1117,7 +1145,12 @@ final class PasteInterceptingTextView: UITextView {
             CGSize(width: frame.width > 0 ? frame.width : UIScreen.main.bounds.width,
                    height: .greatestFiniteMagnitude)
         )
-        return CGSize(width: UIView.noIntrinsicMetric, height: max(measured.height, 20))
+        let height = max(measured.height, 20)
+        // Cap at maxContentHeight if set — enables scrolling beyond this point
+        if maxContentHeight > 0 && height > maxContentHeight {
+            return CGSize(width: UIView.noIntrinsicMetric, height: maxContentHeight)
+        }
+        return CGSize(width: UIView.noIntrinsicMetric, height: height)
     }
 
     override func draw(_ rect: CGRect) {
