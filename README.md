@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
     <source srcset="apps/mail/public/white-icon.svg" media="(prefers-color-scheme: dark)">
-    <img src="apps/mail/public/black-icon.svg" alt="Zero Logo" width="64" style="background-color: #000; padding: 10px;"/>
+    <img src="apps/mail/public/black-icon.svg" alt="Todus Logo" width="64" style="background-color: #000; padding: 10px;"/>
   </picture>
 </p>
 
@@ -20,7 +20,7 @@ Todus is different:
 
 - ✅ **Open-Source** – No hidden agendas, fully transparent.
 - 🦾 **AI Driven** - Enhance your emails with Agents & LLMs.
-- 🔒 **Data Privacy First** – Your emails, your data. Zero does not track, collect, or sell your data in any way. Please note: while we integrate with external services, the data passed through them is not under our control and falls under their respective privacy policies and terms of service.
+- 🔒 **Data Privacy First** – Your emails, your data. Todus does not track, collect, or sell your data in any way. Please note: while we integrate with external services, the data passed through them is not under our control and falls under their respective privacy policies and terms of service.
 - ⚙️ **Self-Hosting Freedom** – Run your own email app with ease.
 - 📬 **Unified Inbox** – Connect multiple email providers like Gmail, Outlook, and more.
 - 🎨 **Customizable UI & Features** – Tailor your email experience the way you want it.
@@ -40,11 +40,11 @@ Todus is built with modern and reliable technologies:
 
 ### Video Tutorial
 
-Watch this helpful video tutorial on how to set up Zero locally:
+Watch this helpful video tutorial on how to set up Todus locally:
 
 <p align="center">
   <a href="https://www.youtube.com/watch?v=yIXLQcjbeEM">
-    <img src="https://img.youtube.com/vi/yIXLQcjbeEM/0.jpg" alt="Zero Setup Tutorial" />
+    <img src="https://img.youtube.com/vi/yIXLQcjbeEM/0.jpg" alt="Todus Setup Tutorial" />
   </a>
 </p>
 
@@ -60,7 +60,7 @@ Before running the application, you'll need to set up services and configure env
 
 ### Setup Options
 
-You can set up Zero in two ways:
+You can set up Todus in two ways:
 
 <details open>
 <summary><b>Standard Setup (Recommended)</b></summary>
@@ -213,7 +213,7 @@ For local development a connection string example is provided in the `.env.examp
 
 ### Database Setup
 
-Zero uses PostgreSQL for storing data. Here's how to set it up:
+Todus uses PostgreSQL for storing data. Here's how to set it up:
 
 1. **Start the Database**
 
@@ -225,7 +225,7 @@ Zero uses PostgreSQL for storing data. Here's how to set it up:
 
    This creates a database with:
 
-   - Name: `zerodotemail`
+   - Name: `todus`
    - Username: `postgres`
    - Password: `postgres`
    - Port: `5432`
@@ -237,7 +237,7 @@ Zero uses PostgreSQL for storing data. Here's how to set it up:
    For local development use:
 
    ```
-   DATABASE_URL="postgresql://postgres:postgres@localhost:5432/zerodotemail"
+   DATABASE_URL="postgresql://postgres:postgres@localhost:5432/todus"
    ```
 
 3. **Database Commands**
@@ -279,11 +279,11 @@ This also introduces 3 environment variables, `DROP_AGENT_TABLES`,`THREAD_SYNC_M
 
 Please refer to the [contributing guide](.github/CONTRIBUTING.md).
 
-If you'd like to help with translating Zero to other languages, check out our [translation guide](.github/TRANSLATION.md).
+If you'd like to help with translating Todus to other languages, check out our [translation guide](.github/TRANSLATION.md).
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=Mail-0/Zero&type=Timeline)](https://www.star-history.com/#Mail-0/Zero&Timeline)
+[![Star History Chart](https://api.star-history.com/svg?repos=todus-app/todus&type=Timeline)](https://www.star-history.com/#todus-app/todus&Timeline)
 
 ## This project wouldn't be possible without these awesome companies
 

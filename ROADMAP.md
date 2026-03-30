@@ -1,6 +1,6 @@
-# 0.email Roadmap 🛤️
+# Todus Roadmap 🛤️
 
-This document outlines the development roadmap for 0.email. Our vision is to create a powerful, user-friendly, and privacy-focused email experience.
+This document outlines the development roadmap for Todus. Our vision is to create a powerful, user-friendly, and privacy-focused email experience.
 
 ## Current Development Focus
 

@@ -1,5 +1,17 @@
 # Project Updates - March 26, 2026
 
+## 🎯 New Update: Brand Rename Audit
+
+### Updated
+- ✅ Workspace/package metadata now points to `todus`
+- ✅ Root app bundle identifiers updated from `com.ludvighedin15.zero` to `com.ludvighedin15.todus`
+- ✅ Visible brand copy updated in the top-level README, roadmap, project plan, MCP guide, and contributor docs
+- ✅ Server observability labels updated to Todus-aligned names where they are safe to change without a compatibility migration
+
+### Deferred
+- ⏸ Internal `@zero/*`, `ZERO_*`, `zero-query-cache`, and `X-Zero-Redirect` compatibility names remain unchanged for this pass
+- ⏸ Cloudflare service renames that would require dashboard/service cutover are deferred until the live deployments are confirmed
+
 ## 🎯 Summary of Changes
 
 This document outlines recent updates to the Todus project including branding updates and documentation organization.
@@ -31,7 +43,7 @@ The footer previously displayed both social links AND a Y Combinator credit. Thi
 
 **Changes**:
 - "Zero Email" → "Todus"
-- "0.email" → "todus.app"
+- "old production domain" → "todus.app"
 - Repository references updated to `todus-app/todus`
 - Contributor links updated
 

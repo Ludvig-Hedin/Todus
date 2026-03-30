@@ -1,8 +1,8 @@
-# Translation Guide for 0.email
+# Translation Guide for Todus
 
 [![Localization](https://img.shields.io/badge/Localization-Lingo.dev-5fcc03)](https://lingo.dev)
 
-We use [Lingo.dev](https://github.com/lingodotdev/lingo.dev) to manage translations for 0.email. This document explains how our translation workflow operates.
+We use [Lingo.dev](https://github.com/lingodotdev/lingo.dev) to manage translations for Todus. This document explains how our translation workflow operates.
 
 ## Overview
 
@@ -62,10 +62,10 @@ Example:
 
 ```json
 // Before manual update in de.json
-"welcomeMessage": "Willkommen bei 0.email"
+"welcomeMessage": "Willkommen bei Todus"
 
 // After manual update in de.json
-"welcomeMessage": "Herzlich willkommen bei 0.email"
+"welcomeMessage": "Herzlich willkommen bei Todus"
 ```
 
 Your manual override will be preserved during future translation runs, and Lingo.dev will learn from these changes to improve future translations.
@@ -102,6 +102,6 @@ The AI will translate only the words inside the curly braces while maintaining t
 
 ## Need Help?
 
-If you have questions about translation or encounter issues, please [open an issue](https://github.com/Mail-0/Zero/issues) or join our [Discord server](https://discord.gg/mail0).
+If you have questions about translation or encounter issues, please [open an issue](https://github.com/todus-app/todus/issues) or join our [Discord server](https://discord.gg/mail0).
 
-Thank you for helping make 0.email accessible to users in your language!
+Thank you for helping make Todus accessible to users in your language!

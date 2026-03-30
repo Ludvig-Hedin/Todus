@@ -1,8 +1,8 @@
 {
   "android": {
-    "package": "com.ludvighedin15.zero"
+    "package": "com.ludvighedin15.todus"
   },
   "ios": {
-    "bundleIdentifier": "com.ludvighedin15.zero"
+    "bundleIdentifier": "com.ludvighedin15.todus"
   }
 }

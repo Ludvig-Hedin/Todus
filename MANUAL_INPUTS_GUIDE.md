@@ -13,9 +13,9 @@ This guide is based on current repo configuration:
 - macOS workspace: `/Users/ludvighedin/Programming/personal/mail/apps/native/macos/zero-native.xcworkspace`
 - Native backend env key currently used in code: `ZERO_PUBLIC_BACKEND_URL` in `/Users/ludvighedin/Programming/personal/mail/apps/native/src/shared/config/env.ts`
 - Staging web/backend URLs in config:
-  - `https://staging.0.email`
-  - `https://sapi.0.email`
-- Server auth trusted origins currently include `https://staging.0.email`, `https://sapi.0.email`, and `todus://auth-callback` in `/Users/ludvighedin/Programming/personal/mail/apps/server/src/lib/auth.ts`
+  - `https://staging.todus.app`
+  - `https://sapi.todus.app`
+- Server auth trusted origins currently include `https://staging.todus.app`, `https://sapi.todus.app`, and `todus://auth-callback` in `/Users/ludvighedin/Programming/personal/mail/apps/server/src/lib/auth.ts`
 
 Current bundle IDs in native projects:
 
@@ -178,8 +178,8 @@ These keys are referenced in:
 
 Ensure staging web/backend domains are allowed where required:
 
-- `https://staging.0.email`
-- `https://sapi.0.email`
+- `https://staging.todus.app`
+- `https://sapi.todus.app`
 
 If native callback URI is used directly, also include scheme callback:
 
@@ -209,7 +209,7 @@ Source references:
 
 Set backend URL for native app runtime:
 
-- `ZERO_PUBLIC_BACKEND_URL=https://sapi.0.email`
+- `ZERO_PUBLIC_BACKEND_URL=https://sapi.todus.app`
 
 Code source:
 
@@ -220,8 +220,8 @@ Code source:
 Use this pattern when launching iOS/macOS locally against staging:
 
 ```bash
-ZERO_PUBLIC_BACKEND_URL=https://sapi.0.email pnpm --filter @zero/native ios
-ZERO_PUBLIC_BACKEND_URL=https://sapi.0.email pnpm --filter @zero/native macos
+ZERO_PUBLIC_BACKEND_URL=https://sapi.todus.app pnpm --filter @zero/native ios
+ZERO_PUBLIC_BACKEND_URL=https://sapi.todus.app pnpm --filter @zero/native macos
 ```
 
 ## 7. Internal Build Packaging Inputs
@@ -252,7 +252,7 @@ For both platforms, verify:
 
 ## 8. Pre-Flight Verification Checklist (Before sharing build)
 
-- [ ] Native app points to staging backend (`https://sapi.0.email`)
+- [ ] Native app points to staging backend (`https://sapi.todus.app`)
 - [ ] Login works with test account
 - [ ] Session persists across restart
 - [ ] Inbox loads real staging data
@@ -283,7 +283,7 @@ Cause:
 
 Fix:
 
-- confirm `ZERO_PUBLIC_BACKEND_URL` is set to `https://sapi.0.email`.
+- confirm `ZERO_PUBLIC_BACKEND_URL` is set to `https://sapi.todus.app`.
 - verify backend auth endpoints and trusted origins include staging/native callback.
 
 ## 9.3 Xcode signing fails during archive

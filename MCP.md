@@ -2,7 +2,7 @@
 
 ## Capabilties
 
-Zero MCP provides the following capabilities:
+Todus MCP provides the following capabilities:
 
 ### Email Management
 
@@ -39,12 +39,12 @@ Zero MCP provides the following capabilities:
 
 ## How to use?
 
-You can connecto ZeroMCP using two methods:
+You can connect to Todus MCP using two methods:
 
 1. Better Auth session token
 2. OAuth (Coming soon)
 
 ## Better Auth session token
 
-Copy the session cookie from your browser cookies and place it into the Authorization header. You can copy the entire cookie field used in Zero webapp and it will work. Or you can use the format: `better-auth-{env}.session_token={value}`.
+Copy the session cookie from your browser cookies and place it into the Authorization header. You can copy the entire cookie field used in the Todus web app and it will work. Or you can use the format: `better-auth-{env}.session_token={value}`.
 Replace `env` with `dev` for local development, `value` is your session token.

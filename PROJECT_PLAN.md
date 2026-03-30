@@ -9,7 +9,7 @@
 | Platform | Status | URL/Distribution |
 |----------|--------|------------------|
 | Local Dev | ✅ Complete | `http://localhost:3000` |
-| Web (Production) | ✅ Live | `https://0.email` |
+| Web (Production) | ✅ Live | `https://todus.app` |
 | iOS App | 🟡 In Progress | Expo + TestFlight |
 | macOS App | 🟡 In Progress | Electron Wrapper |
 

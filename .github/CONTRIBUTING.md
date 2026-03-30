@@ -1,10 +1,10 @@
-# Contributing to 0.email
+# Contributing to Todus
 
-Thank you for your interest in contributing to 0.email! We're excited to have you join our mission to create an open-source email solution that prioritizes privacy, transparency, and user empowerment.
+Thank you for your interest in contributing to Todus! We're excited to have you join our mission to create an open-source email solution that prioritizes privacy, transparency, and user empowerment.
 
 ## Table of Contents
 
-- [Contributing to 0.email](#contributing-to-0email)
+- [Contributing to Todus](#contributing-to-todus)
   - [Table of Contents](#table-of-contents)
   - [Getting Started](#getting-started)
   - [Development Workflow](#development-workflow)
@@ -26,14 +26,14 @@ Thank you for your interest in contributing to 0.email! We're excited to have yo
 1. **Fork the Repository**
 
    - Click the 'Fork' button at the top right of this repository
-   - Clone your fork locally: `git clone https://github.com/YOUR-USERNAME/Zero.git`
+   - Clone your fork locally: `git clone https://github.com/YOUR-USERNAME/todus.git`
    - Next, add an `upstream` [remote](https://git-scm.com/book/en/v2/Git-Basics-Working-with-Remotes) to sync this repository with your local fork.
 
    ```bash
    # HTTPS
-   git remote add upstream https://github.com/Mail-0/Zero.git
+   git remote add upstream https://github.com/todus-app/todus.git
    # or SSH
-   git remote add upstream git@github.com:Mail-0/Zero.git
+   git remote add upstream git@github.com:todus-app/todus.git
    ```
 
 2. **Set Up Development Environment**
@@ -121,7 +121,7 @@ Thank you for your interest in contributing to 0.email! We're excited to have yo
 
 ## Database Management
 
-Zero uses PostgreSQL with Drizzle ORM. Here's how to work with it:
+Todus uses PostgreSQL with Drizzle ORM. Here's how to work with it:
 
 1. **Database Structure**
 
@@ -149,7 +149,7 @@ Zero uses PostgreSQL with Drizzle ORM. Here's how to work with it:
    For local development:
 
    ```
-   DATABASE_URL="postgresql://postgres:postgres@localhost:5432/zerodotemail"
+   DATABASE_URL="postgresql://postgres:postgres@localhost:5432/todus"
    ```
 
 4. **Troubleshooting**
@@ -187,7 +187,7 @@ Zero uses PostgreSQL with Drizzle ORM. Here's how to work with it:
 
 ## Internationalization (i18n)
 
-0.email supports multiple languages through our internationalization (i18n) system. This makes our application accessible to users worldwide. As a contributor, you play a key role in making new features available in all supported languages.
+Todus supports multiple languages through our internationalization (i18n) system. This makes our application accessible to users worldwide. As a contributor, you play a key role in making new features available in all supported languages.
 
 ### Adding Translations for New Features
 
@@ -259,4 +259,4 @@ If you have questions or need help, you can:
 
 ---
 
-Thank you for contributing to 0.email! Your efforts help make email more open, private, and user-centric. 🚀
+Thank you for contributing to Todus! Your efforts help make email more open, private, and user-centric. 🚀
