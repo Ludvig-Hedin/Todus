@@ -2,6 +2,7 @@ import Foundation
 import SwiftData
 import Observation
 import EventKit
+import OSLog
 
 // MARK: - AIChatService
 
@@ -72,6 +73,7 @@ final class AIChatService {
     /// Email service for reading threads and sending emails
     private weak var emailService: EmailService?
     private var streamingTask: Task<Void, Never>?
+    private let log = Logger(subsystem: "com.todus.ios", category: "AIChatService")
 
     // MARK: - Token batching
     // Buffer rapid SSE tokens and flush every 40 ms so SwiftUI re-renders less often,
@@ -594,6 +596,7 @@ final class AIChatService {
                 appendError("Invalid response from server.", to: assistantMessageID)
                 return
             }
+            debugHTTPResponse(http, context: "chat stream")
             // Capture rotated Bearer token from Better Auth's set-auth-token header
             authService?.captureRotatedToken(from: http)
             guard (200..<300).contains(http.statusCode) else {
@@ -605,18 +608,26 @@ final class AIChatService {
                     if let auth = authService {
                         let refreshed = await auth.attemptSilentRefresh()
                         if refreshed {
-                            // Session refreshed — tell user to retry instead of re-logging in
-                            appendError("Connection lost briefly. Please tap retry.", to: assistantMessageID)
+                            appendError("Session token refreshed. Please tap retry.", to: assistantMessageID)
                         } else {
                             auth.isSessionExpired = true
-                            appendError("Session expired. Please log out and back in.", to: assistantMessageID)
+                            appendError(diagnosticAuthMessage(
+                                statusCode: http.statusCode,
+                                fallback: "Session expired. Please log out and back in."
+                            ), to: assistantMessageID)
                         }
                     } else {
-                        appendError("Session expired. Please log out and back in.", to: assistantMessageID)
+                        appendError(diagnosticAuthMessage(
+                            statusCode: http.statusCode,
+                            fallback: "Session expired. Please log out and back in."
+                        ), to: assistantMessageID)
                     }
-                case 503: appendError("AI service is not configured on the server (missing OPENROUTER_API_KEY).", to: assistantMessageID)
-                case 502: appendError("AI provider error. The upstream AI service may be down.", to: assistantMessageID)
-                default:  appendError("Server error (\(http.statusCode)).", to: assistantMessageID)
+                case 503:
+                    appendError("AI service is not configured on the server (missing OPENROUTER_API_KEY).", to: assistantMessageID)
+                case 502:
+                    appendError("AI provider error. The upstream AI service may be down.", to: assistantMessageID)
+                default:
+                    appendError(diagnosticHTTPMessage(statusCode: http.statusCode), to: assistantMessageID)
                 }
                 return
             }
@@ -654,9 +665,25 @@ final class AIChatService {
             }
         } catch {
             if !Task.isCancelled {
+                log.error("chat stream failed: \(error.localizedDescription, privacy: .public)")
                 appendError(error.localizedDescription, to: assistantMessageID)
             }
         }
+    }
+
+    private func debugHTTPResponse(_ http: HTTPURLResponse, context: String) {
+        let authHeader = http.value(forHTTPHeaderField: "set-auth-token")?.isEmpty == false ? "present" : "missing"
+        log.debug(
+            "\(context, privacy: .public): HTTP \(http.statusCode) set-auth-token=\(authHeader, privacy: .public)"
+        )
+    }
+
+    private func diagnosticHTTPMessage(statusCode: Int) -> String {
+        return "Server error (\(statusCode))."
+    }
+
+    private func diagnosticAuthMessage(statusCode: Int, fallback: String) -> String {
+        return fallback + " (HTTP \(statusCode))."
     }
 
     // MARK: - Custom Event Handling (Web Search + Reasoning)

@@ -35,6 +35,18 @@ struct TodosApp: App {
     /// The splash screen is visible while this runs, eliminating the black screen.
     @MainActor
     private func initializeApp() async {
+        let trace = PerformanceTrace.beginInterval(
+            PerformanceTrace.initializeApp,
+            message: "TodosApp.initializeApp begin"
+        )
+        defer {
+            PerformanceTrace.endInterval(
+                PerformanceTrace.initializeApp,
+                trace,
+                message: "TodosApp.initializeApp end"
+            )
+        }
+
         let schema = Schema([TaskRecord.self, FolderRecord.self])
 
         let container: ModelContainer

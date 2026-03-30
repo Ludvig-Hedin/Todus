@@ -355,7 +355,13 @@ struct AIChatView: View {
                 Text("Can't reach the assistant")
                     .font(.system(size: 20, weight: .bold))
 
-                Text("Check your connection and try again.")
+                Text(error)
+                    .font(.system(size: 14))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+
+                Text("Check your connection and sign-in state, then try again.")
                     .font(.system(size: 15))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)

@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 
 /// Persistent file-based logger. Appends to Documents/app.log across launches.
 ///
@@ -63,5 +64,40 @@ final class AppLogger: @unchecked Sendable {
             // File doesn't exist yet — create it
             try? line.write(to: fileURL, atomically: true, encoding: .utf8)
         }
+    }
+}
+
+enum PerformanceTrace {
+    static let initializeApp: StaticString = "InitializeApp"
+    static let appServicesInit: StaticString = "AppServicesInit"
+    static let rootStartup: StaticString = "RootStartup"
+    static let tabSwitch: StaticString = "TabSwitch"
+    static let saveContext: StaticString = "SaveContext"
+    static let loadThreads: StaticString = "LoadThreads"
+    static let remindersSync: StaticString = "RemindersSync"
+    static let remindersImport: StaticString = "RemindersImport"
+
+    typealias IntervalState = OSSignpostIntervalState
+
+    private static let logger = Logger(subsystem: "com.todus.performance", category: "trace")
+    private static let signposter = OSSignposter(logger: logger)
+
+    static func beginInterval(_ name: StaticString, message: String? = nil) -> IntervalState {
+        if let message {
+            logger.debug("\(message, privacy: .public)")
+        }
+        return signposter.beginInterval(name)
+    }
+
+    static func endInterval(_ name: StaticString, _ state: IntervalState, message: String? = nil) {
+        signposter.endInterval(name, state)
+        if let message {
+            logger.debug("\(message, privacy: .public)")
+        }
+    }
+
+    static func event(_ name: StaticString, message: String) {
+        signposter.emitEvent(name)
+        logger.debug("\(message, privacy: .public)")
     }
 }

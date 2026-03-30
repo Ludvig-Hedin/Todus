@@ -181,6 +181,18 @@ All marked DONE — these are WebView-based, not truly native.
   - Narrowed `pnpm --dir apps/ios exec tsc --noEmit --pretty false` check reports no errors in the broader mail UI refinement files.
   - Workspace-wide TypeScript still fails in unrelated `apps/server` and dependency files outside this iOS inbox scope.
 
+## Session Notes (2026-03-30)
+
+- iOS hang-reduction pass completed for the native shell:
+  - Removed root-level automatic reminders import/sync on first appearance and serialized the remaining deferred startup work after the first interactive frame.
+  - Replaced the “keep every tab alive” shell behavior with active-tab-only rendering to cut hidden observation fan-out and tab-switch invalidation pressure.
+  - Added native performance tracing for launch, deferred startup, tab switches, SwiftData saves, email inbox loading, and reminders sync/import so Instruments `Hangs`, `Time Profiler`, and `Points of Interest` can be correlated directly to app code.
+  - Reduced shared-auth main-thread pressure by caching the bearer token in memory and pushing keychain persistence for token/profile metadata onto utility-priority detached work.
+  - Avoided repeated initial inbox reloads on tab revisit and fixed the Create Sheet event fallback so attachments are preserved when calendar creation is unavailable.
+- Verification completed for this update:
+  - `xcodebuild -project apps/ios/Todus/Todus.xcodeproj -scheme Todus -configuration Debug -destination 'platform=iOS Simulator,id=816A2B85-AC23-43A8-9A57-0310E1AC0292' build` passes.
+  - Build still reports pre-existing EventKit sendability warnings in `CalendarViewController.swift`; they were not introduced by this change set.
+
 ## Session Notes (2026-03-28)
 
 - Cross-platform mention and slash-command work is in progress across web, backend, and iOS:

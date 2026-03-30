@@ -33,6 +33,22 @@ final class EmailService {
     /// Fetches threads for a given folder (default: inbox).
     /// Two-step process: get thread IDs from listThreads, then enrich each with mail.get.
     func loadThreads(folder: String = "inbox", query: String? = nil, refresh: Bool = false) async {
+        if isLoadingThreads && !refresh && query == nil {
+            return
+        }
+
+        let trace = PerformanceTrace.beginInterval(
+            PerformanceTrace.loadThreads,
+            message: "EmailService.loadThreads begin folder=\(folder) refresh=\(refresh)"
+        )
+        defer {
+            PerformanceTrace.endInterval(
+                PerformanceTrace.loadThreads,
+                trace,
+                message: "EmailService.loadThreads end folder=\(folder) count=\(threads.count)"
+            )
+        }
+
         if refresh { nextPageToken = nil }
         isLoadingThreads = true
         errorMessage = nil
@@ -65,6 +81,23 @@ final class EmailService {
         }
 
         isLoadingThreads = false
+    }
+
+    func ensureInitialInboxLoaded() async {
+        await checkConnection()
+        guard hasConnection else { return }
+        guard threads.isEmpty else { return }
+        await loadThreads(refresh: true)
+    }
+
+    func resetForSignOut() {
+        threads = []
+        isLoadingThreads = false
+        isLoadingThread = false
+        isSending = false
+        hasConnection = false
+        errorMessage = nil
+        nextPageToken = nil
     }
 
     /// Fetches full details for multiple threads in parallel via mail.get.

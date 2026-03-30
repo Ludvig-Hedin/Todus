@@ -11,6 +11,7 @@ struct RootView: View {
     /// to prevent the half-screen layout bug caused by competing .move() animations
     /// when multiple state values are already determined from Keychain/UserDefaults.
     @State private var hasAppeared = false
+    @State private var hasRunDeferredStartup = false
 
     var body: some View {
         Group {
@@ -40,17 +41,32 @@ struct RootView: View {
             DispatchQueue.main.async { hasAppeared = true }
         }
         .task {
-            // Fetch user profile (avatar, name) on app start so the header shows real data
-            await services.authService.fetchUserProfile()
+            guard !hasRunDeferredStartup else { return }
+            hasRunDeferredStartup = true
+            await runDeferredStartupWork()
         }
-        .task {
-            await services.completeAuthUpgradeIfNeeded(in: modelContext)
+    }
+
+    @MainActor
+    private func runDeferredStartupWork() async {
+        let trace = PerformanceTrace.beginInterval(
+            PerformanceTrace.rootStartup,
+            message: "RootView deferred startup begin"
+        )
+        defer {
+            PerformanceTrace.endInterval(
+                PerformanceTrace.rootStartup,
+                trace,
+                message: "RootView deferred startup end"
+            )
         }
-        .task {
-            if await services.requestRemindersPermissionIfNeeded() {
-                services.syncExistingTasksToReminders(in: modelContext)
-                await services.importFromReminders(in: modelContext)
-            }
-        }
+
+        // Let the first interactive frame settle before kicking off background work.
+        try? await Task.sleep(for: .milliseconds(350))
+        await services.authService.fetchUserProfile()
+
+        // Delay legacy upgrade work until after the initial shell is usable.
+        try? await Task.sleep(for: .milliseconds(150))
+        await services.completeAuthUpgradeIfNeeded(in: modelContext)
     }
 }

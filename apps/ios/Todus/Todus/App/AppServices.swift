@@ -90,24 +90,21 @@ final class AppServices {
     let authService: AuthService
     // Unified HTTP client for all backend API calls
     let apiClient: TodosAPIClient
-    // Email service — manages inbox state and email actions
+
     let emailService: EmailService
-    // Calendar service — shared EKEventStore access
     let calendarService: CalendarService
-    // Network connectivity monitor — views show offline banner when !isConnected
     let networkMonitor: NetworkMonitor
-    // Local notification scheduling for task due dates
     let notificationService: NotificationService
 
     // Legacy services — kept during migration, will be removed once task sync is fully on new backend
     let authStore: AuthSessionStore
     let syncService: SupabaseSyncService
-    let captureService: TaskCaptureService
     let remindersSyncService: AppleRemindersSyncService
     let remindersSyncState: RemindersSyncState
+    let captureService: TaskCaptureService
     /// AI chat service — manages streaming conversation and task mutations
     let aiChatService: AIChatService
-    /// Voice endpoint service — provides backend WS proxy URL for live voice chat (API key stays server-side)
+    /// Voice endpoint service — provides the backend WS proxy URL (API key stays server-side)
     let voiceTokenService: VoiceTokenService
     private let defaults: UserDefaults
 
@@ -232,6 +229,15 @@ final class AppServices {
     }
 
     init(configuration: AppConfiguration = .load(), defaults: UserDefaults = .standard) {
+        let trace = PerformanceTrace.beginInterval(PerformanceTrace.appServicesInit, message: "AppServices.init start")
+        defer {
+            PerformanceTrace.endInterval(
+                PerformanceTrace.appServicesInit,
+                trace,
+                message: "AppServices.init end"
+            )
+        }
+
         self.configuration = configuration
         self.defaults = defaults
 
@@ -261,16 +267,15 @@ final class AppServices {
             remindersSyncState: remindersSyncState
         )
         self.captureService = captureService
-        // Wire notification service into capture service for task due date reminders
         captureService.notificationService = self.notificationService
         self.aiChatService = AIChatService(
             configuration: configuration,
             captureService: captureService,
             authService: authService,
+            apiClient: apiClient,
             calendarService: calendarService,
             emailService: emailService
         )
-        // Voice endpoint service — builds the backend WS proxy URL (API key never leaves server)
         self.voiceTokenService = VoiceTokenService(authService: authService, backendURL: backendURL)
 
         let storedAppearance = defaults.string(forKey: Keys.appearancePreference)
@@ -329,15 +334,26 @@ final class AppServices {
         }
         self.remindersSyncState.isEnabled = self.remindersSyncEnabled
         self.remindersSyncState.direction = self.remindersSyncDirection
-        self.aiChatService.loadSavedPrompts()
 
-        // Sync initial preferences to services
-        self.aiChatService.toneInstruction = self.aiTonePreference.systemPromptInstruction
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            // Defer AI prompt loading until after the initial shell is interactive.
+            await Task.yield()
+            self.aiChatService.loadSavedPrompts()
+            self.aiChatService.toneInstruction = self.aiTonePreference.systemPromptInstruction
+        }
+
         self.captureService.taskRemindersEnabled = self.taskRemindersEnabled
     }
 
     func selectFolder(_ folder: FolderRecord?) {
         selectedFolderID = folder?.id
+    }
+
+    func signOut() {
+        emailService.resetForSignOut()
+        authService.signOut()
+        authStore.signOutToGuest()
     }
 
     func completeAuthUpgradeIfNeeded(in context: ModelContext) async {
@@ -362,9 +378,18 @@ final class AppServices {
     func syncExistingTasksToReminders(in context: ModelContext) {
         guard remindersSyncEnabled else { return }
         guard remindersSyncDirection != .fromReminders else { return }
+        let trace = PerformanceTrace.beginInterval(
+            PerformanceTrace.remindersSync,
+            message: "Sync existing tasks to reminders begin"
+        )
         let descriptor = FetchDescriptor<TaskRecord>()
         let tasks = (try? context.fetch(descriptor)) ?? []
         remindersSyncService.syncAllTasks(tasks, in: context)
+        PerformanceTrace.endInterval(
+            PerformanceTrace.remindersSync,
+            trace,
+            message: "Sync existing tasks to reminders end count=\(tasks.count)"
+        )
     }
 
     /// Imports any Apple Reminders that aren't yet tracked as app tasks.
@@ -372,6 +397,15 @@ final class AppServices {
     func importFromReminders(in context: ModelContext) async {
         guard remindersSyncEnabled else { return }
         guard remindersSyncDirection != .toReminders else { return }
+        let trace = PerformanceTrace.beginInterval(
+            PerformanceTrace.remindersImport,
+            message: "Import reminders begin"
+        )
         await remindersSyncService.importFromReminders(in: context)
+        PerformanceTrace.endInterval(
+            PerformanceTrace.remindersImport,
+            trace,
+            message: "Import reminders end"
+        )
     }
 }

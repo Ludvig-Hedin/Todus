@@ -166,8 +166,7 @@ struct SettingsView: View {
             if !services.authService.isAuthenticated {
                 Button {
                     services.authService.hasSeenOnboarding = false
-                    services.authService.signOut()
-                    services.authStore.signOutToGuest()
+                    services.signOut()
                     dismiss()
                 } label: {
                     Label("Sign in to your account", systemImage: "person.crop.circle.badge.plus")
@@ -675,8 +674,7 @@ struct SettingsView: View {
 
     private func performLogout() {
         services.authService.hasSeenOnboarding = false
-        services.authService.signOut()
-        services.authStore.signOutToGuest()
+        services.signOut()
         dismiss()
     }
 
@@ -696,8 +694,7 @@ struct SettingsView: View {
         // Clear local state — Keychain token, auth flags, SwiftData
         deleteConfirmText = ""
         services.authService.hasSeenOnboarding = false
-        services.authService.signOut()
-        services.authStore.signOutToGuest()
+        services.signOut()
 
         // Wipe all local SwiftData records (tasks + folders)
         try? modelContext.delete(model: TaskRecord.self)

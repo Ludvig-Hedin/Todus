@@ -256,7 +256,16 @@ final class TaskCaptureService {
     }
 
     private func persist(task: TaskRecord, in context: ModelContext) {
+        let trace = PerformanceTrace.beginInterval(
+            PerformanceTrace.saveContext,
+            message: "TaskCaptureService.persist begin task=\(task.id.uuidString)"
+        )
         try? context.save()
+        PerformanceTrace.endInterval(
+            PerformanceTrace.saveContext,
+            trace,
+            message: "TaskCaptureService.persist end task=\(task.id.uuidString)"
+        )
         let mutation = SyncMutation(action: .upsert, task: task.asPayload(), taskID: task.id)
         Task { @MainActor [syncService] in
             await syncService.enqueue([mutation], in: context)

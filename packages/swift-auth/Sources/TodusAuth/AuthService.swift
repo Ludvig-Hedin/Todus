@@ -17,6 +17,16 @@ private func debugAuthLog(_ message: String) {
 #endif
 }
 
+private actor KeychainPersistenceActor {
+    func persist(key: String, value: String?) {
+        if let value {
+            KeychainHelper.save(key: key, value: value)
+        } else {
+            KeychainHelper.delete(key: key)
+        }
+    }
+}
+
 /// Unified auth service for the Todus app (iOS + macOS).
 /// Talks to the Better-Auth backend (Cloudflare Workers) and supports:
 /// - Apple Sign In (native ASAuthorizationAppleIDProvider → backend validates ID token)
@@ -27,6 +37,7 @@ private func debugAuthLog(_ message: String) {
 @MainActor
 @Observable
 public final class AuthService: NSObject {
+    private static let keychainPersistence = KeychainPersistenceActor()
 
     // MARK: - State
 
@@ -59,22 +70,19 @@ public final class AuthService: NSObject {
     /// Previously a computed property reading from Keychain, which meant SwiftUI
     /// never detected changes after fetchUserProfile updated the Keychain.
     public var userEmail: String? {
-        didSet { if let userEmail { KeychainHelper.save(key: Keys.userEmail, value: userEmail) }
-                 else { KeychainHelper.delete(key: Keys.userEmail) } }
+        didSet { persistStringToKeychain(key: Keys.userEmail, value: userEmail) }
     }
 
     /// User's display name from Google / Better Auth profile.
     /// Stored property so SwiftUI observation triggers re-renders when updated.
     public var userName: String? {
-        didSet { if let userName { KeychainHelper.save(key: Keys.userName, value: userName) }
-                 else { KeychainHelper.delete(key: Keys.userName) } }
+        didSet { persistStringToKeychain(key: Keys.userName, value: userName) }
     }
 
     /// User's avatar URL string from Google profile.
     /// Stored property so SwiftUI observation triggers re-renders when updated.
     public var userImage: String? {
-        didSet { if let userImage { KeychainHelper.save(key: Keys.userImage, value: userImage) }
-                 else { KeychainHelper.delete(key: Keys.userImage) } }
+        didSet { persistStringToKeychain(key: Keys.userImage, value: userImage) }
     }
 
     /// Stored as an @Observable property so SwiftUI detects changes and root view re-renders.
@@ -103,20 +111,22 @@ public final class AuthService: NSObject {
     /// Without this, ASWebAuthenticationSession can be garbage-collected and the callback never fires.
     private var webAuthSession: ASWebAuthenticationSession?
 
-    /// The current Bearer token, read from Keychain
-    public var bearerToken: String? {
-        KeychainHelper.read(key: Keys.bearerToken)
+    /// The current Bearer token, cached in memory to avoid repeated synchronous Keychain reads.
+    public private(set) var bearerToken: String? {
+        didSet { persistStringToKeychain(key: Keys.bearerToken, value: bearerToken) }
     }
 
     // MARK: - Init
 
     public init(backendURL: URL) {
+        debugAuthLog("AuthService bootstrap begin")
         self.backendURL = backendURL
         // Initialize stored properties from persisted state before super.init()
         self.hasSeenOnboarding = UserDefaults.standard.bool(forKey: Keys.hasSeenOnboarding)
-        self.userEmail = KeychainHelper.read(key: Keys.userEmail)
-        self.userName = KeychainHelper.read(key: Keys.userName)
-        self.userImage = KeychainHelper.read(key: Keys.userImage)
+        self.userEmail = nil
+        self.userName = nil
+        self.userImage = nil
+        self.bearerToken = KeychainHelper.read(key: Keys.bearerToken)
         super.init()
 
         if !UserDefaults.standard.bool(forKey: Keys.hasLaunchedBefore) {
@@ -124,10 +134,14 @@ public final class AuthService: NSObject {
             UserDefaults.standard.set(true, forKey: Keys.hasLaunchedBefore)
         }
 
-        // Restore auth state from Keychain
-        if KeychainHelper.read(key: Keys.bearerToken) != nil {
+        if bearerToken != nil {
             authState = .authenticated
         }
+
+        Task {
+            await restoreCachedProfileMetadata()
+        }
+        debugAuthLog("AuthService bootstrap end")
     }
 
     // MARK: - Apple Sign In
@@ -521,6 +535,8 @@ public final class AuthService: NSObject {
         do {
             let (_, response) = try await URLSession.shared.data(for: request)
             if let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) {
+                // Capture rotated token if the server issued a new one
+                captureRotatedToken(from: http)
                 isSessionExpired = false
                 return true
             }
@@ -528,6 +544,20 @@ public final class AuthService: NSObject {
             // Network error — don't mark as expired, might just be offline
         }
         return false
+    }
+
+    /// Check an HTTP response for a rotated Bearer token from Better Auth's bearer plugin.
+    /// When updateAge triggers a session extension, the server returns a fresh token in the
+    /// `set-auth-token` header. Without capturing this, the app keeps using the old token
+    /// which eventually expires, causing "Session expired" errors despite the user appearing
+    /// logged in. Call this on any authenticated API response.
+    public func captureRotatedToken(from response: HTTPURLResponse) {
+        if let newToken = response.value(forHTTPHeaderField: "set-auth-token"),
+           !newToken.isEmpty,
+           newToken != bearerToken {
+            debugAuthLog("Captured rotated token from set-auth-token header")
+            bearerToken = newToken
+        }
     }
 
     public func signOut() {
@@ -539,7 +569,7 @@ public final class AuthService: NSObject {
     }
 
     private func clearPersistedAuthState() {
-        KeychainHelper.delete(key: Keys.bearerToken)
+        bearerToken = nil
         // Clear stored properties — didSet handles Keychain deletion
         userEmail = nil
         userName = nil
@@ -547,7 +577,11 @@ public final class AuthService: NSObject {
         hasSeenOnboarding = false
     }
 
-    /// Fetches the current user's profile from Better Auth's get-session endpoint.
+    /// Fetches the current user's profile from the /auth/me endpoint.
+    /// Uses /auth/me instead of Better Auth's /auth/get-session because the latter
+    /// doesn't resolve bearer tokens — it returns `null` for bearer-authenticated
+    /// requests. The /auth/me endpoint uses the Hono middleware's auth context which
+    /// properly handles bearer tokens via auth.api.getSession() + JWT fallback.
     /// Stores name and image URL in Keychain so they persist across app launches.
     /// Safe to call multiple times — silently no-ops if not authenticated.
     public func fetchUserProfile() async {
@@ -555,7 +589,7 @@ public final class AuthService: NSObject {
             debugAuthLog("fetchUserProfile: no bearer token, skipping")
             return
         }
-        let url = backendURL.appendingPathComponent("api/auth/get-session")
+        let url = backendURL.appendingPathComponent("api/auth/me")
         debugAuthLog("fetchUserProfile: GET \(url.absoluteString)")
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
@@ -570,9 +604,15 @@ public final class AuthService: NSObject {
                 if let http = response as? HTTPURLResponse {
                     let body = String(data: data, encoding: .utf8) ?? "(empty)"
                     authLog.warning("fetchUserProfile: HTTP \(http.statusCode), body=\(body)")
+                    if http.statusCode == 401 {
+                        isSessionExpired = true
+                        lastErrorMessage = "Your sign-in session could not be verified. Please sign in again."
+                    }
                 }
                 return
             }
+            // Capture rotated token on successful profile fetch (called on every app launch)
+            captureRotatedToken(from: http)
             let bodyStr = String(data: data, encoding: .utf8) ?? "(empty)"
             debugAuthLog("fetchUserProfile: 200 OK, body=\(String(bodyStr.prefix(500)))")
 
@@ -607,7 +647,7 @@ public final class AuthService: NSObject {
     // MARK: - Private Helpers
 
     private func completeAuthentication(token: String, email: String?) {
-        KeychainHelper.save(key: Keys.bearerToken, value: token)
+        bearerToken = token
         if let email {
             self.userEmail = email  // stored property → triggers SwiftUI observation + saves to Keychain via didSet
         }
@@ -616,6 +656,32 @@ public final class AuthService: NSObject {
 
         // Fetch full profile (name, avatar) in background — non-blocking
         Task { await fetchUserProfile() }
+    }
+
+    private func persistStringToKeychain(key: String, value: String?) {
+        Task(priority: .utility) {
+            await Self.keychainPersistence.persist(key: key, value: value)
+        }
+    }
+
+    private func restoreCachedProfileMetadata() async {
+        let snapshot = await Task.detached(priority: .utility) {
+            (
+                KeychainHelper.read(key: Keys.userEmail),
+                KeychainHelper.read(key: Keys.userName),
+                KeychainHelper.read(key: Keys.userImage)
+            )
+        }.value
+
+        if userEmail == nil {
+            userEmail = snapshot.0
+        }
+        if userName == nil {
+            userName = snapshot.1
+        }
+        if userImage == nil {
+            userImage = snapshot.2
+        }
     }
 
     /// Attempts to extract a Bearer token from the backend response.

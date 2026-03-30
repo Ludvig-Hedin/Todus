@@ -1,3 +1,4 @@
+import { listConversations, getConversation, saveConversation, deleteConversation } from './conversations';
 import { compose, generateEmailSubject } from './compose';
 import { generateSearchQuery } from './search';
 import { transcribeAudio } from './transcribeAudio';
@@ -10,4 +11,8 @@ export const aiRouter = router({
   generateEmailSubject,
   webSearch,
   transcribeAudio,
+  listConversations,
+  getConversation,
+  saveConversation,
+  deleteConversation,
 });

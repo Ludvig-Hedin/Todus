@@ -89,6 +89,7 @@
 - [x] Add per-message AI retry action and stabilize copy button layout
 - [x] Preserve AI mention refs in saved chat history, truncate stale turns on retry, and strip spec-only JSON from rendered replies
 - [x] Cancel active AI streams before loading saved chats, preserve metadata when duplicating chats, and keep actions available on spec-only assistant replies
+- [x] Separate the calendar header ellipsis from the avatar settings action by turning it into a quick-actions menu
 
 **Milestone:** User signs in with Apple/Google/Email, tasks sync to unified backend.
 
