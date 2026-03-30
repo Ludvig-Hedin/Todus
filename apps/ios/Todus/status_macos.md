@@ -59,6 +59,7 @@ Native macOS shell scaffolding is now in place under `apps/macos` as a standalon
 
 ## Build Notes
 
+- March 30, 2026: removed the explicit `AppIcon.icns` plist/resource wiring so the macOS app now uses the asset catalog `AppIcon` target directly, matching the iOS artwork and avoiding the cropped launcher icon.
 - March 30, 2026: wired the mini calendar sidebar tap through to the calendar view's selected date so tapping a day now jumps the main calendar to that date instead of only opening the calendar section.
 - March 30, 2026: aligned the macOS settings Apple Calendar and Apple Reminders icons with the iOS BrandIcons implementation so the connected-services rows render with the correct proportions.
 

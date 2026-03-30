@@ -11,7 +11,6 @@
 		16E2E04A85DA754EE034D0D1 /* MacContentHeaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BC2CFEF093D8584286BE20B /* MacContentHeaderView.swift */; };
 		19F6CCD4CA1B0486DC9FC6F3 /* TodosConfig.plist in Resources */ = {isa = PBXBuildFile; fileRef = D781F56D4BD27C55F3E8F7F8 /* TodosConfig.plist */; };
 		1A4A6BEF2511133A5550E42C /* SyncModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A87121AD344331AAA348FB3 /* SyncModels.swift */; };
-		1EE17250C40060265DE72BB0 /* AppIcon.icns in Resources */ = {isa = PBXBuildFile; fileRef = 9174DF615C066916378ACE05 /* AppIcon.icns */; };
 		21AB7C6A8D655F461E48E375 /* MacEmailInboxView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF20EABA4B082AA168D3DDF7 /* MacEmailInboxView.swift */; };
 		2D555E443F1CAE9F0BCF376C /* CreateItemType.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0978AB24BCBA5061D06B50 /* CreateItemType.swift */; };
 		2F99507599647B4DACBB4E59 /* MacSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D1039835BD7B82F4F126EC4 /* MacSettingsView.swift */; };
@@ -83,7 +82,6 @@
 		7F0770529CFD6B1D54769766 /* NoRedirectDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoRedirectDelegate.swift; sourceTree = "<group>"; };
 		8D451E359ABBB69A4D11FDDE /* TodusMac.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TodusMac.entitlements; sourceTree = "<group>"; };
 		90565199B1A829021602D8C0 /* EmailService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailService.swift; sourceTree = "<group>"; };
-		9174DF615C066916378ACE05 /* AppIcon.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = AppIcon.icns; sourceTree = "<group>"; };
 		99A1500ECA0199177C906A2A /* EventKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; path = EventKit.framework; sourceTree = "<group>"; };
 		9B1DA8871127C8B42C32B686 /* MacEmailThreadView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacEmailThreadView.swift; sourceTree = "<group>"; };
 		9D1039835BD7B82F4F126EC4 /* MacSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacSettingsView.swift; sourceTree = "<group>"; };
@@ -165,7 +163,6 @@
 		267FFD0121EB8EE6B9EA1B91 /* Resources */ = {
 			isa = PBXGroup;
 			children = (
-				9174DF615C066916378ACE05 /* AppIcon.icns */,
 				AE1D36D7DEA8080434732636 /* Assets.xcassets */,
 				0B4864E4D8074B1E115B4EB3 /* Info.plist */,
 				D781F56D4BD27C55F3E8F7F8 /* TodosConfig.plist */,
@@ -436,7 +433,6 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				1EE17250C40060265DE72BB0 /* AppIcon.icns in Resources */,
 				D76EFB86A42A4E0974640454 /* Assets.xcassets in Resources */,
 				19F6CCD4CA1B0486DC9FC6F3 /* TodosConfig.plist in Resources */,
 			);
