@@ -73,6 +73,7 @@ struct MacRootView: View {
     @State private var showNotifications = false
     @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
     @State private var calendarViewMode: String = "Week"
+    @State private var calendarSelectedDate: Date = Date()
     @State private var composeEmailSeedBody: String = ""
 
     // Accent color — drives .tint() on root so SwiftUI controls update immediately
@@ -206,8 +207,8 @@ struct MacRootView: View {
                 onCompose: { isComposePresented = true },
                 taskCount: incompleteTasks.count,
                 onCreateItem: { isCreatePresented = true },
-                onCalendarDayTap: { _ in
-                    // Navigate to calendar section on mini calendar tap
+                onCalendarDayTap: { date in
+                    calendarSelectedDate = date
                     selection = .calendar(.all)
                 }
             )
@@ -500,7 +501,7 @@ struct MacRootView: View {
         case .email(let section):
             MacEmailInboxView(folder: section.rawValue)
         case .calendar:
-            MacCalendarView(viewMode: $calendarViewMode)
+            MacCalendarView(viewMode: $calendarViewMode, selectedDate: $calendarSelectedDate)
         }
     }
 

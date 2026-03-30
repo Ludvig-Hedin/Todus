@@ -12,7 +12,7 @@ struct MacCalendarView: View {
     @Environment(MacAppServices.self) private var services
 
     @Binding var viewMode: String
-    @State private var selectedDate = Date()
+    @Binding var selectedDate: Date
     @State private var events: [CalendarEvent] = []
     @State private var isLoading = false
     @State private var hasAccess = false

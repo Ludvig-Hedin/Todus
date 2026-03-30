@@ -57,4 +57,10 @@ Native macOS shell scaffolding is now in place under `apps/macos` as a standalon
 
 ---
 
+## Build Notes
+
+- March 30, 2026: wired the mini calendar sidebar tap through to the calendar view's selected date so tapping a day now jumps the main calendar to that date instead of only opening the calendar section.
+
+---
+
 ## Last Updated: 2026-03-30
