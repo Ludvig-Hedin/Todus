@@ -4,6 +4,7 @@ import { createDb } from '../../../db';
 import { eq, and, desc } from 'drizzle-orm';
 import { env } from '../../../env';
 import { z } from 'zod';
+import { TRPCError } from '@trpc/server';
 
 const getDb = () => createDb(env.HYPERDRIVE.connectionString);
 
@@ -76,25 +77,48 @@ export const saveConversation = privateProcedure
     const { db, conn } = getDb();
     try {
       const now = new Date();
-      await db
-        .insert(aiConversation)
-        .values({
+      const [existingConversation] = await db
+        .select({
+          userId: aiConversation.userId,
+        })
+        .from(aiConversation)
+        .where(eq(aiConversation.id, input.id))
+        .limit(1);
+
+      if (existingConversation && existingConversation.userId !== ctx.sessionUser.id) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Conversation ID belongs to another user.',
+        });
+      }
+
+      if (existingConversation) {
+        const [updated] = await db
+          .update(aiConversation)
+          .set({
+            title: input.title,
+            messages: input.messages,
+            updatedAt: now,
+          })
+          .where(and(eq(aiConversation.id, input.id), eq(aiConversation.userId, ctx.sessionUser.id)))
+          .returning({ id: aiConversation.id });
+
+        if (!updated) {
+          throw new TRPCError({
+            code: 'INTERNAL_SERVER_ERROR',
+            message: 'Failed to update conversation.',
+          });
+        }
+      } else {
+        await db.insert(aiConversation).values({
           id: input.id,
           userId: ctx.sessionUser.id,
           title: input.title,
           messages: input.messages,
           createdAt: input.createdAt ? new Date(input.createdAt) : now,
           updatedAt: now,
-        })
-        .onConflictDoUpdate({
-          target: aiConversation.id,
-          where: eq(aiConversation.userId, ctx.sessionUser.id),
-          set: {
-            title: input.title,
-            messages: input.messages,
-            updatedAt: now,
-          },
         });
+      }
       return { success: true };
     } finally {
       await conn.end();
