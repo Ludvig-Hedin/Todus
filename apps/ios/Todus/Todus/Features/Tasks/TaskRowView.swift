@@ -20,7 +20,7 @@ struct TaskRowView: View {
                         .foregroundStyle(task.completed ? task.status.tintColor : AppTheme.subtleText)
                 }
                 .buttonStyle(.plain)
-                // Apple HIG: minimum 44x44pt tap target for accessibility
+                // Minimum tappable area for accessibility
                 .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
 
@@ -73,7 +73,7 @@ struct TaskRowView: View {
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .padding(.vertical, 5)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

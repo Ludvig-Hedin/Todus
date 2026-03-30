@@ -168,7 +168,7 @@ export const getWritingStyleMatrixForConnectionId = async ({
   const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
 
   const matrix = await db.query.writingStyleMatrix.findFirst({
-    where: eq(writingStyleMatrix.connectionId, connectionId),
+    where: eq(writingStyleMatrix.connection_id, connectionId),
   });
 
   await conn.end();
@@ -181,9 +181,10 @@ export const getWritingStyleMatrixForConnectionId = async ({
     const newMatrix = await extractStyleMatrix(backupContent);
 
     return {
-      connectionId,
-      numMessages: 1,
+      connection_id: connectionId,
+      num_messages: 1,
       style: initializeStyleMatrixFromEmail(newMatrix),
+      updated_at: new Date(),
     };
   }
 
@@ -199,11 +200,11 @@ export const updateWritingStyleMatrix = async (connectionId: string, emailBody: 
       await db.transaction(async (tx) => {
         const [existingMatrix] = await tx
           .select({
-            numMessages: writingStyleMatrix.numMessages,
+            numMessages: writingStyleMatrix.num_messages,
             style: writingStyleMatrix.style,
           })
           .from(writingStyleMatrix)
-          .where(eq(writingStyleMatrix.connectionId, connectionId));
+          .where(eq(writingStyleMatrix.connection_id, connectionId));
 
         if (existingMatrix) {
           const newStyle = createUpdatedMatrixFromNewEmail(
@@ -215,19 +216,20 @@ export const updateWritingStyleMatrix = async (connectionId: string, emailBody: 
           await tx
             .update(writingStyleMatrix)
             .set({
-              numMessages: existingMatrix.numMessages + 1,
+              num_messages: existingMatrix.numMessages + 1,
               style: newStyle,
             })
-            .where(eq(writingStyleMatrix.connectionId, connectionId));
+            .where(eq(writingStyleMatrix.connection_id, connectionId));
         } else {
           const newStyle = initializeStyleMatrixFromEmail(emailStyleMatrix);
 
           await tx
             .insert(writingStyleMatrix)
             .values({
-              connectionId,
-              numMessages: 1,
+              connection_id: connectionId,
+              num_messages: 1,
               style: newStyle,
+              updated_at: new Date(),
             })
             .onConflictDoNothing();
         }

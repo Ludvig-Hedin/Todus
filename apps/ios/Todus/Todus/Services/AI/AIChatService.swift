@@ -55,6 +55,8 @@ final class AIChatService {
 
     /// Chronologically ordered list of saved conversations (newest first).
     var savedConversations: [AIChatConversation] = []
+    /// Conversations deleted locally but not yet confirmed removed by the backend.
+    private var locallyDeletedConversationIDs: Set<UUID> = []
 
     /// Tone instruction injected from AppServices.aiTonePreference — appended to the system prompt.
     var toneInstruction: String = ""
@@ -63,6 +65,8 @@ final class AIChatService {
     private let captureService: TaskCaptureService
     /// Auth service provides the Bearer token for backend API calls
     private weak var authService: AuthService?
+    /// API client for tRPC calls (conversation sync)
+    private weak var apiClient: TodosAPIClient?
     /// Calendar service for creating/reading EventKit events
     private var calendarService: CalendarService?
     /// Email service for reading threads and sending emails
@@ -95,12 +99,14 @@ final class AIChatService {
         configuration: AppConfiguration,
         captureService: TaskCaptureService,
         authService: AuthService? = nil,
+        apiClient: TodosAPIClient? = nil,
         calendarService: CalendarService? = nil,
         emailService: EmailService? = nil
     ) {
         self.configuration = configuration
         self.captureService = captureService
         self.authService = authService
+        self.apiClient = apiClient
         self.calendarService = calendarService
         self.emailService = emailService
 
@@ -125,6 +131,9 @@ final class AIChatService {
         if UserDefaults.standard.object(forKey: "ai_can_send_email") != nil {
             self.aiCanSendEmail = UserDefaults.standard.bool(forKey: "ai_can_send_email")
         }
+
+        loadPersistedDeletedConversationIDs()
+
         // Defer conversation history loading — JSON deserialization from UserDefaults
         // can be slow with many saved conversations and blocks the main thread during startup.
         Task { @MainActor in
@@ -327,10 +336,14 @@ final class AIChatService {
         isConversationSaved = false
     }
 
-    /// Delete a saved conversation from history.
+    /// Delete a saved conversation from history (local + backend).
     func deleteConversation(_ conversation: AIChatConversation) {
+        locallyDeletedConversationIDs.insert(conversation.id)
+        persistDeletedConversationIDs()
         savedConversations.removeAll { $0.id == conversation.id }
-        persistConversations()
+        persistConversationsLocally()
+        // Delete from backend in background — fire-and-forget
+        Task { await syncDeleteConversation(id: conversation.id.uuidString) }
     }
 
     // MARK: - Voice Chat Integration
@@ -581,6 +594,8 @@ final class AIChatService {
                 appendError("Invalid response from server.", to: assistantMessageID)
                 return
             }
+            // Capture rotated Bearer token from Better Auth's set-auth-token header
+            authService?.captureRotatedToken(from: http)
             guard (200..<300).contains(http.statusCode) else {
                 switch http.statusCode {
                 case 401:
@@ -982,31 +997,183 @@ final class AIChatService {
         savedConversations.insert(saved, at: 0)
         // Cap history at 50 conversations
         if savedConversations.count > 50 { savedConversations.removeLast() }
-        persistConversations()
+        persistConversationsLocally()
+        // Sync new conversation to backend in background
+        Task { await syncSaveConversation(saved) }
     }
 
     private static let chatHistoryKey = "com.todus.ai.chatHistory"
+    private static let deletedConversationIDsKey = "com.todus.ai.deletedConversationIDs"
 
-    private func persistConversations() {
+    /// Persist to Keychain as a local cache (fast, survives reinstall)
+    private func persistConversationsLocally() {
         guard let data = try? JSONEncoder().encode(savedConversations) else { return }
-        // Store in Keychain so conversations survive app reinstall (UserDefaults is wiped)
         KeychainHelper.saveData(key: Self.chatHistoryKey, value: data)
     }
 
+    private func persistDeletedConversationIDs() {
+        guard let data = try? JSONEncoder().encode(Array(locallyDeletedConversationIDs)) else { return }
+        KeychainHelper.saveData(key: Self.deletedConversationIDsKey, value: data)
+    }
+
+    private func loadPersistedDeletedConversationIDs() {
+        if let data = KeychainHelper.readData(key: Self.deletedConversationIDsKey),
+           let ids = try? JSONDecoder().decode([UUID].self, from: data) {
+            locallyDeletedConversationIDs = Set(ids)
+        }
+    }
+
     private func loadPersistedConversations() {
-        // Try Keychain first (new location, survives reinstall)
+        // Load local cache immediately for fast UI
         if let data = KeychainHelper.readData(key: Self.chatHistoryKey),
            let convs = try? JSONDecoder().decode([AIChatConversation].self, from: data) {
             savedConversations = convs
-            return
         }
         // Migrate from UserDefaults (old location) if present
-        if let data = UserDefaults.standard.data(forKey: "ai_chat_history"),
-           let convs = try? JSONDecoder().decode([AIChatConversation].self, from: data) {
+        else if let data = UserDefaults.standard.data(forKey: "ai_chat_history"),
+                let convs = try? JSONDecoder().decode([AIChatConversation].self, from: data) {
             savedConversations = convs
-            // Migrate to Keychain and clear old location
-            persistConversations()
+            persistConversationsLocally()
             UserDefaults.standard.removeObject(forKey: "ai_chat_history")
+        }
+        // Then fetch from backend to get conversations from other devices
+        Task { await syncLoadConversations() }
+    }
+
+    // MARK: - Backend Sync
+
+    /// Codable wrapper matching the backend tRPC response for conversation list
+    private struct ConversationListResponse: Decodable {
+        let conversations: [RemoteConversation]
+    }
+
+    private struct RemoteConversation: Decodable {
+        let id: String
+        let title: String
+        let createdAt: Date
+        let updatedAt: Date
+        // Only included in getConversation, not listConversations
+        let messages: [AIChatConversation.SavedMessage]?
+    }
+
+    private struct SyncSuccess: Decodable {
+        let success: Bool
+    }
+
+    /// Fetch conversation list from backend and merge with local cache
+    private func syncLoadConversations() async {
+        guard let api = apiClient else { return }
+        let preSyncIDs = Set(savedConversations.map { $0.id })
+        let preSyncDeletedIDs = locallyDeletedConversationIDs
+        do {
+            let response: ConversationListResponse = try await api.trpcQuery("ai.listConversations")
+            let remoteConvos = response.conversations
+            let deletedIDsToSkip = preSyncDeletedIDs.union(locallyDeletedConversationIDs)
+            var mergedByID = Dictionary(uniqueKeysWithValues: savedConversations.map { ($0.id, $0) })
+            for remote in remoteConvos {
+                guard let uuid = UUID(uuidString: remote.id),
+                      !deletedIDsToSkip.contains(uuid) else {
+                    continue
+                }
+
+                // Fetch full conversation with messages and update the local item in place.
+                if let full = await fetchFullConversation(id: remote.id) {
+                    guard !deletedIDsToSkip.contains(full.id) else { continue }
+                    mergedByID[full.id] = full
+                }
+            }
+            var merged = Array(mergedByID.values)
+            // Sort by creation date (newest first) and cap at 50
+            merged.sort { $0.createdAt > $1.createdAt }
+            if merged.count > 50 { merged = Array(merged.prefix(50)) }
+            savedConversations = merged
+            persistConversationsLocally()
+
+            // Upload any local-only conversations that aren't on the server
+            let remoteIDs = Set(remoteConvos.compactMap { UUID(uuidString: $0.id) })
+            for convo in merged
+                where preSyncIDs.contains(convo.id)
+                && !remoteIDs.contains(convo.id)
+                && !deletedIDsToSkip.contains(convo.id) {
+                await syncSaveConversation(convo)
+            }
+            await syncPendingDeletedConversations()
+        } catch {
+            // Backend unreachable — local cache is still available, no action needed
+            await syncPendingDeletedConversations()
+        }
+    }
+
+    /// Fetch a single conversation with full messages from the backend
+    private func fetchFullConversation(id: String) async -> AIChatConversation? {
+        guard let api = apiClient else { return nil }
+        struct GetInput: Encodable { let id: String }
+        do {
+            let remote: RemoteConversation = try await api.trpcQuery("ai.getConversation", input: GetInput(id: id))
+            guard let uuid = UUID(uuidString: remote.id) else { return nil }
+            return AIChatConversation(
+                id: uuid,
+                title: remote.title,
+                createdAt: remote.createdAt,
+                messages: remote.messages ?? []
+            )
+        } catch {
+            return nil
+        }
+    }
+
+    /// Save a conversation to the backend
+    private func syncSaveConversation(_ conversation: AIChatConversation) async {
+        guard let api = apiClient else { return }
+        struct SaveInput: Encodable {
+            let id: String
+            let title: String
+            let messages: [AIChatConversation.SavedMessage]
+            let createdAt: String
+        }
+        let input = SaveInput(
+            id: conversation.id.uuidString,
+            title: conversation.title,
+            messages: conversation.messages,
+            createdAt: ISO8601DateFormatter().string(from: conversation.createdAt)
+        )
+        do {
+            let _: SyncSuccess = try await api.trpcMutation("ai.saveConversation", input: input)
+        } catch {
+            // Silently fail — local cache is the source of truth, sync is best-effort
+        }
+    }
+
+    /// Delete a conversation from the backend
+    private func syncDeleteConversation(id: String) async {
+        guard let api = apiClient else { return }
+        struct DeleteInput: Encodable { let id: String }
+        let maxAttempts = 4
+        for attempt in 0..<maxAttempts {
+            do {
+                let _: SyncSuccess = try await api.trpcMutation(
+                    "ai.deleteConversation",
+                    input: DeleteInput(id: id)
+                )
+                if let uuid = UUID(uuidString: id),
+                   locallyDeletedConversationIDs.remove(uuid) != nil {
+                    persistDeletedConversationIDs()
+                }
+                return
+            } catch {
+                if attempt == maxAttempts - 1 {
+                    break
+                }
+                try? await Task.sleep(nanoseconds: UInt64(250_000_000 * (attempt + 1)))
+            }
+        }
+    }
+
+    /// Retry any backend deletes that are still pending confirmation.
+    private func syncPendingDeletedConversations() async {
+        guard !locallyDeletedConversationIDs.isEmpty else { return }
+        for id in locallyDeletedConversationIDs.sorted(by: { $0.uuidString < $1.uuidString }) {
+            await syncDeleteConversation(id: id.uuidString)
         }
     }
 
@@ -1099,7 +1266,6 @@ final class AIChatService {
         return str
     }
 }
-
 // MARK: - Request / Response Models
 
 struct ChatRequest: Encodable {

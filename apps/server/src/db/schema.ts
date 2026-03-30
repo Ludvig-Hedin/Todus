@@ -207,14 +207,14 @@ export const userSettings = createTable(
 export const writingStyleMatrix = createTable(
   'writing_style_matrix',
   {
-    connectionId: text()
+    connection_id: text('connection_id')
       .notNull()
       .references(() => connection.id, { onDelete: 'cascade' }),
-    numMessages: integer().notNull(),
+    num_messages: integer('num_messages').notNull(),
     // TODO: way too much pain to get this type to work,
     // revisit later
-    style: jsonb().$type<unknown>().notNull(),
-    updatedAt: timestamp()
+    style: jsonb('style').$type<unknown>().notNull(),
+    updated_at: timestamp('updated_at')
       .defaultNow()
       .notNull()
       .$onUpdate(() => new Date()),
@@ -222,7 +222,7 @@ export const writingStyleMatrix = createTable(
   (table) => {
     return [
       primaryKey({
-        columns: [table.connectionId],
+        columns: [table.connection_id],
       }),
       index('writing_style_matrix_style_idx').on(table.style),
     ];
@@ -252,7 +252,7 @@ export const oauthApplication = createTable(
     redirectURLs: text('redirect_u_r_ls'),
     type: text('type'),
     disabled: boolean('disabled'),
-    userId: text('user_id'),
+    userId: text('user_id').references(() => user.id, { onDelete: 'cascade' }),
     createdAt: timestamp('created_at'),
     updatedAt: timestamp('updated_at'),
   },
@@ -270,8 +270,8 @@ export const oauthAccessToken = createTable(
     refreshToken: text('refresh_token').unique(),
     accessTokenExpiresAt: timestamp('access_token_expires_at'),
     refreshTokenExpiresAt: timestamp('refresh_token_expires_at'),
-    clientId: text('client_id'),
-    userId: text('user_id'),
+    clientId: text('client_id').references(() => oauthApplication.clientId, { onDelete: 'cascade' }),
+    userId: text('user_id').references(() => user.id, { onDelete: 'cascade' }),
     scopes: text('scopes'),
     createdAt: timestamp('created_at'),
     updatedAt: timestamp('updated_at'),
@@ -287,8 +287,8 @@ export const oauthConsent = createTable(
   'oauth_consent',
   {
     id: text('id').primaryKey(),
-    clientId: text('client_id'),
-    userId: text('user_id'),
+    clientId: text('client_id').references(() => oauthApplication.clientId, { onDelete: 'cascade' }),
+    userId: text('user_id').references(() => user.id, { onDelete: 'cascade' }),
     scopes: text('scopes'),
     createdAt: timestamp('created_at'),
     updatedAt: timestamp('updated_at'),
@@ -369,5 +369,24 @@ export const emailTemplate = createTable(
   (t) => [
     index('idx_mail0_email_template_user_id').on(t.userId),
     unique('mail0_email_template_user_id_name_unique').on(t.userId, t.name),
+  ],
+);
+
+export const aiConversation = createTable(
+  'ai_conversation',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    title: text('title').notNull().default(''),
+    // Full conversation stored as JSON array of {role, content, mentions?}
+    messages: jsonb('messages').notNull().default('[]'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (t) => [
+    index('ai_conversation_user_id_idx').on(t.userId),
+    index('ai_conversation_updated_at_idx').on(t.updatedAt),
   ],
 );

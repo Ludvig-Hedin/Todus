@@ -51,6 +51,9 @@ final class TodosAPIClient {
             throw APIError.invalidResponse
         }
 
+        // Capture rotated Bearer token from Better Auth's set-auth-token header
+        authService.captureRotatedToken(from: http)
+
         if http.statusCode == 401 {
             // Try silent refresh then retry the request once with the new token
             let refreshed = await authService.attemptSilentRefresh()
@@ -86,6 +89,7 @@ final class TodosAPIClient {
         }
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
+        authService.captureRotatedToken(from: http)
         guard (200..<300).contains(http.statusCode) else {
             throw APIError.httpError(statusCode: http.statusCode, body: String(data: data, encoding: .utf8))
         }
@@ -138,6 +142,9 @@ final class TodosAPIClient {
             throw APIError.invalidResponse
         }
 
+        // Capture rotated Bearer token from Better Auth's set-auth-token header
+        authService.captureRotatedToken(from: http)
+
         if http.statusCode == 401 {
             // Try silent refresh then retry the TRPC request once with the new token
             let refreshed = await authService.attemptSilentRefresh()
@@ -187,6 +194,7 @@ final class TodosAPIClient {
         }
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
+        authService.captureRotatedToken(from: http)
         guard (200..<300).contains(http.statusCode) else {
             throw APIError.httpError(statusCode: http.statusCode, body: String(data: data, encoding: .utf8))
         }

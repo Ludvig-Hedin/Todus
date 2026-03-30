@@ -9,6 +9,7 @@ struct MacEmailInboxView: View {
     @State private var filteredThreads: [EmailThread] = []
     @State private var searchDebounceTask: Task<Void, Never>?
     @State private var hoveredThreadId: String? = nil
+    @FocusState private var isConnectGmailFocused: Bool
 
     /// Which email folder to show (inbox, drafts, sent)
     var folder: String = "inbox"
@@ -208,11 +209,17 @@ struct MacEmailInboxView: View {
                     .font(.system(size: 13, weight: .semibold))
             }
             .foregroundStyle(.white)
-            .padding(.horizontal, MacTheme.spacing16)
+            .padding(.horizontal, MacTheme.spacing20)
             .padding(.vertical, MacTheme.spacing8)
-            .background(MacTheme.accent, in: RoundedRectangle(cornerRadius: MacTheme.buttonRadius))
+            .background(MacTheme.accent, in: Capsule(style: .continuous))
         }
         .buttonStyle(.plain)
+        .focused($isConnectGmailFocused)
+        .overlay(
+            Capsule(style: .continuous)
+                .stroke(isConnectGmailFocused ? MacTheme.accent.opacity(0.75) : Color.clear, lineWidth: 2)
+        )
+        .pointerStyle(.link)
         .padding(.top, MacTheme.spacing4)
     }
 

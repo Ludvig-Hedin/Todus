@@ -9,7 +9,11 @@ struct CalendarEvent: Identifiable, Sendable {
     let startDate: Date
     let endDate: Date
     let isAllDay: Bool
-    let calendarColor: UInt
+    /// Actual calendar color RGB components (0.0–1.0), extracted from EKCalendar.cgColor
+    let calendarColorRed: Double
+    let calendarColorGreen: Double
+    let calendarColorBlue: Double
+    let calendarName: String
 }
 
 /// Shared calendar service actor that manages a single EKEventStore instance.
@@ -41,9 +45,22 @@ actor CalendarService {
     }
 
     /// Fetch events for a given date range, returned as sendable CalendarEvent structs.
+    /// Deduplicates events with the same title on the same day (e.g. holidays from
+    /// multiple calendar sources like iCloud + Google both showing "Långfredagen").
     func events(from startDate: Date, to endDate: Date) -> [CalendarEvent] {
         let predicate = eventStore.predicateForEvents(withStart: startDate, end: endDate, calendars: nil)
-        return eventStore.events(matching: predicate).map { $0.toCalendarEvent() }
+        let all = eventStore.events(matching: predicate).map { $0.toCalendarEvent() }
+
+        // Deduplicate all-day events only: same title on the same day can appear
+        // from multiple calendar sources, but timed events should remain distinct.
+        let cal = Calendar.current
+        var seen = Set<String>()
+        return all.filter { event in
+            guard event.isAllDay else { return true }
+            let dayKey = cal.startOfDay(for: event.startDate)
+            let key = "\(event.title)|\(dayKey.timeIntervalSince1970)"
+            return seen.insert(key).inserted
+        }
     }
 
     /// Fetch today's events (from midnight to midnight).
@@ -67,13 +84,26 @@ actor CalendarService {
 
 private extension EKEvent {
     func toCalendarEvent() -> CalendarEvent {
-        CalendarEvent(
+        // Extract actual RGB from the calendar's CGColor, falling back to system blue
+        let (r, g, b): (Double, Double, Double) = {
+            guard let cgColor = calendar?.cgColor,
+                  let converted = cgColor.converted(to: CGColorSpaceCreateDeviceRGB(), intent: .defaultIntent, options: nil),
+                  let comps = converted.components, comps.count >= 3 else {
+                return (0.35, 0.55, 0.9) // default blue
+            }
+            return (comps[0], comps[1], comps[2])
+        }()
+
+        return CalendarEvent(
             id: eventIdentifier ?? UUID().uuidString,
             title: title ?? "Untitled",
             startDate: startDate,
             endDate: endDate,
             isAllDay: isAllDay,
-            calendarColor: UInt(calendar?.cgColor?.hashValue ?? 0)
+            calendarColorRed: r,
+            calendarColorGreen: g,
+            calendarColorBlue: b,
+            calendarName: calendar?.title ?? "Calendar"
         )
     }
 }

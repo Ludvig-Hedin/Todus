@@ -458,11 +458,11 @@ class ZeroDB extends DurableObject<ZeroEnv> {
     await this.db.transaction(async (tx) => {
       const [existingMatrix] = await tx
         .select({
-          numMessages: writingStyleMatrix.numMessages,
+          numMessages: writingStyleMatrix.num_messages,
           style: writingStyleMatrix.style,
         })
         .from(writingStyleMatrix)
-        .where(eq(writingStyleMatrix.connectionId, connectionId));
+        .where(eq(writingStyleMatrix.connection_id, connectionId));
 
       if (existingMatrix) {
         const newStyle = createUpdatedMatrixFromNewEmail(
@@ -474,19 +474,20 @@ class ZeroDB extends DurableObject<ZeroEnv> {
         await tx
           .update(writingStyleMatrix)
           .set({
-            numMessages: existingMatrix.numMessages + 1,
+            num_messages: existingMatrix.numMessages + 1,
             style: newStyle,
           })
-          .where(eq(writingStyleMatrix.connectionId, connectionId));
+          .where(eq(writingStyleMatrix.connection_id, connectionId));
       } else {
         const newStyle = initializeStyleMatrixFromEmail(emailStyleMatrix);
 
         await tx
           .insert(writingStyleMatrix)
           .values({
-            connectionId,
-            numMessages: 1,
+            connection_id: connectionId,
+            num_messages: 1,
             style: newStyle,
+            updated_at: new Date(),
           })
           .onConflictDoNothing();
       }
@@ -497,12 +498,12 @@ class ZeroDB extends DurableObject<ZeroEnv> {
     connectionId: string,
   ): Promise<typeof writingStyleMatrix.$inferSelect | undefined> {
     return await this.db.query.writingStyleMatrix.findFirst({
-      where: eq(writingStyleMatrix.connectionId, connectionId),
+      where: eq(writingStyleMatrix.connection_id, connectionId),
       columns: {
-        numMessages: true,
+        num_messages: true,
         style: true,
-        updatedAt: true,
-        connectionId: true,
+        updated_at: true,
+        connection_id: true,
       },
     });
   }
@@ -673,16 +674,49 @@ const api = new Hono<HonoContext>()
               reason: 'no_user_id_in_token',
             });
           }
-        } catch (error) {
-          TraceContext.completeSpan(
-            traceId,
-            tokenSpan.id,
-            {
-              success: false,
-              reason: 'token_verification_failed',
-            },
-            error instanceof Error ? error.message : 'Unknown token error',
-          );
+        } catch (jwtError) {
+          // JWT verification failed — token may be a raw Better Auth session token
+          // (32-char string from /auth/mobile-token). Look it up in the session table.
+          // Native apps (iOS/macOS) receive session tokens, not JWTs, from the OAuth flow.
+          try {
+            const { db: directDb } = createDb(env.HYPERDRIVE.connectionString);
+            const sessionRow = await directDb.query.session.findFirst({
+              where: and(eq(session.token, token), gt(session.expiresAt, new Date())),
+            });
+            if (sessionRow) {
+              const userRow = await directDb.query.user.findFirst({
+                where: eq(user.id, sessionRow.userId),
+              });
+              if (userRow) {
+                c.set('sessionUser', userRow);
+                TraceContext.completeSpan(traceId, tokenSpan.id, {
+                  success: true,
+                  userId: userRow.id,
+                  authMethod: 'session_token_lookup',
+                });
+              } else {
+                TraceContext.completeSpan(traceId, tokenSpan.id, {
+                  success: false,
+                  reason: 'session_token_user_not_found',
+                });
+              }
+            } else {
+              TraceContext.completeSpan(traceId, tokenSpan.id, {
+                success: false,
+                reason: 'session_token_not_found_or_expired',
+              });
+            }
+          } catch (sessionLookupError) {
+            TraceContext.completeSpan(
+              traceId,
+              tokenSpan.id,
+              {
+                success: false,
+                reason: 'token_verification_failed',
+              },
+              jwtError instanceof Error ? jwtError.message : 'Unknown token error',
+            );
+          }
         }
       } else {
         TraceContext.completeSpan(traceId, tokenSpan.id, {
@@ -733,6 +767,17 @@ const api = new Hono<HonoContext>()
   .route('/ai', aiRouter)
   .route('/autumn', autumnApi)
   .route('/public', publicRouter)
+  .get('/auth/me', async (c) => {
+    // Returns the authenticated user's profile from the middleware context.
+    // Better Auth's HTTP get-session endpoint doesn't resolve bearer tokens,
+    // but the Hono middleware (auth.api.getSession + JWT fallback) does.
+    // Native apps (iOS/macOS) use this instead of /auth/get-session.
+    const user = c.var.sessionUser;
+    if (!user) {
+      return c.json({ user: null }, 401);
+    }
+    return c.json({ user });
+  })
   .get('/auth/mobile-token', async (c) => {
     // Bridge endpoint: converts a cookie-based web session into a bearer token
     // for the native iOS app. Called from the system browser after web login.

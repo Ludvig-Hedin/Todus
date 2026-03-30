@@ -281,6 +281,13 @@
       "when": 1772224607696,
       "tag": "0038_update_todus_signature_default",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1774858522739,
+      "tag": "0039_brainy_junta",
+      "breakpoints": true
     }
   ]
 }

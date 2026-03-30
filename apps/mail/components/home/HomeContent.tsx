@@ -237,12 +237,12 @@ export default function HomeContent() {
                     width={20}
                     className="h-5 w-5 rounded-full"
                     src="/adam.jpg"
-                    alt="Ludvig"
+                    alt="Adam"
                   />
                   <div className="flex items-center justify-start">
                     <div className="flex items-center justify-center gap-2.5 pr-0.5">
                       <div className="text-base-gray-950 justify-start text-sm leading-none">
-                        Ludvig
+                        Adam
                       </div>
                     </div>
                   </div>

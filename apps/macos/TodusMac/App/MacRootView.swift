@@ -205,21 +205,37 @@ struct MacRootView: View {
                 onOpenSettings: { isSettingsPresented = true },
                 onCompose: { isComposePresented = true },
                 taskCount: incompleteTasks.count,
-                onCreateItem: { isCreatePresented = true }
+                onCreateItem: { isCreatePresented = true },
+                onCalendarDayTap: { _ in
+                    // Navigate to calendar section on mini calendar tap
+                    selection = .calendar(.all)
+                }
             )
             .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 260)
         } detail: {
             ZStack(alignment: .bottomTrailing) {
-                ScrollView {
+                // Content-area base background — slightly tinted to match iOS app tone
+                MacTheme.contentBackground
+                    .ignoresSafeArea()
+
+                // Calendar manages its own scroll and needs edge-to-edge layout;
+                // other views use a standard padded ScrollView wrapper.
+                if selection.category == "calendar" {
                     contentView(for: selection)
-                        .padding(.horizontal, 28)
-                        .padding(.top, 20)
-                        .padding(.bottom, 80)
-                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        .id(selection)
+                } else {
+                    ScrollView {
+                        contentView(for: selection)
+                            .padding(.horizontal, 28)
+                            .padding(.top, 20)
+                            .padding(.bottom, 80)
+                            .frame(maxWidth: .infinity, alignment: .topLeading)
+                    }
+                    .scrollIndicators(.automatic)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .id(selection)
                 }
-                .scrollIndicators(.automatic)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .id(selection)
 
                 // Hide the FAB when the assistant panel is already open
                 if !isAssistantPresented {
@@ -235,6 +251,8 @@ struct MacRootView: View {
             }
             .animation(.snappy(duration: 0.2), value: isAssistantPresented)
             .navigationTitle(selection.title)
+            // Let the toolbar use the default window chrome — a forced .toolbarBackground
+            // spans the full window width including over the sidebar, clipping it.
             .toolbar {
                 // Context-specific toolbar items based on active view
                 ToolbarItemGroup(placement: .secondaryAction) {
@@ -287,6 +305,7 @@ struct MacRootView: View {
                     } label: {
                         Image(systemName: "ellipsis")
                     }
+                    .tint(Color.primary.opacity(0.7))
                     .help("More Options")
 
                     // Create / compose
@@ -429,25 +448,20 @@ struct MacRootView: View {
                 Button("With Attachments") {}
             } label: {
                 Image(systemName: "line.3.horizontal.decrease.circle")
+                    .foregroundStyle(Color.primary.opacity(0.7))
             }
+            .tint(Color.primary.opacity(0.7))
             .help("Filter")
 
         case "calendar":
+            // View picker and Today button live inside the calendar header now.
+            // Toolbar only has a "New Event" action.
             Button {
-                // Go to today
-                selection = .calendar(.all)
+                isCreatePresented = true
             } label: {
-                Image(systemName: "calendar.circle")
+                Image(systemName: "plus")
             }
-            .help("Today")
-
-            Picker("View", selection: $calendarViewMode) {
-                Text("Day").tag("Day")
-                Text("Week").tag("Week")
-                Text("Month").tag("Month")
-            }
-            .pickerStyle(.segmented)
-            .frame(width: 180)
+            .help("New Event")
 
         case "tasks":
             Button { isCreatePresented = true } label: {
@@ -464,7 +478,9 @@ struct MacRootView: View {
                 Button("Completed") {}
             } label: {
                 Image(systemName: "line.3.horizontal.decrease.circle")
+                    .foregroundStyle(Color.primary.opacity(0.7))
             }
+            .tint(Color.primary.opacity(0.7))
             .help("Filter Tasks")
 
         default:
