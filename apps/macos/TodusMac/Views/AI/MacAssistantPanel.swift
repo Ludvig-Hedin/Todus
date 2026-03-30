@@ -454,6 +454,14 @@ struct MacAssistantPanel: View {
                 }
                 .padding(.horizontal, 14)
 
+                if let error = chatService.errorMessage, !chatService.isStreaming {
+                    Text(error)
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(MacTheme.mutedText)
+                        .multilineTextAlignment(.leading)
+                        .padding(.horizontal, 14)
+                }
+
                 // Suggestions — 3 default, up to 10 when expanded
                 VStack(alignment: .leading, spacing: 0) {
                     let pool = contextualSuggestionsPool

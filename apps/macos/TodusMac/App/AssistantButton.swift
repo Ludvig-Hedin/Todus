@@ -34,18 +34,18 @@ struct AssistantButton: View {
             .padding(.vertical, 8)
             .background(
                 Capsule(style: .continuous)
-                    .fill(Color(nsColor: .controlBackgroundColor))
+                    .fill(.ultraThickMaterial)
             )
             .overlay(
                 Capsule(style: .continuous)
-                    .stroke(Color.primary.opacity(0.06), lineWidth: 0.5)
+                    .stroke(Color.primary.opacity(0.12), lineWidth: 0.5)
             )
-            .shadow(color: Color.primary.opacity(0.06), radius: 10, x: 0, y: 4)
+            .shadow(color: Color.black.opacity(0.18), radius: 12, x: 0, y: 4)
         }
         .buttonStyle(.plain)
         .focusEffectDisabled()
         .pointerStyle(.link)
-        .opacity(isHovered ? 1.0 : 0.85)
+        .opacity(isHovered ? 1.0 : 0.92)
         .animation(.easeOut(duration: 0.15), value: isHovered)
         .onHover { isHovered = $0 }
         .help("AI Assistant")

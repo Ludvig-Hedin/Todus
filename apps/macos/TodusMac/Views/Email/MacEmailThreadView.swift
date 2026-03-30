@@ -224,7 +224,7 @@ struct MacEmailThreadView: View {
                     .foregroundStyle(MacTheme.accent)
                     .padding(.horizontal, MacTheme.spacing16)
                     .padding(.vertical, MacTheme.spacing8)
-                    .background(MacTheme.accent.opacity(0.08), in: RoundedRectangle(cornerRadius: MacTheme.buttonRadius))
+                    .background(MacTheme.accent.opacity(0.08), in: Capsule(style: .continuous))
                 }
                 .buttonStyle(.plain)
                 Spacer()

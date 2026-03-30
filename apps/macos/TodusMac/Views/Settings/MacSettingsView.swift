@@ -481,7 +481,7 @@ struct MacSettingsView: View {
                 infoRow(icon: "lock.shield", label: "Data Sync", value: "End-to-end")
             }
 
-            // Legal & help links — separate card for visual distinction
+            // Legal links — separate card for visual distinction
             settingsCard {
                 linkRow(icon: "doc.text", label: "Privacy Policy") {
                     openURL("https://todus.app/privacy")
@@ -491,13 +491,8 @@ struct MacSettingsView: View {
                     openURL("https://todus.app/terms")
                 }
                 cardDivider
-                linkRow(icon: "questionmark.circle", label: "Help & Support") {
-                    openURL("https://todus.app/support")
-                }
-                cardDivider
-                linkRow(icon: "keyboard", label: "Keyboard Shortcuts") {
-                    // Open macOS keyboard shortcuts panel for the app
-                    NSApp.sendAction(#selector(NSApplication.showHelp(_:)), to: nil, from: nil)
+                linkRow(icon: "envelope", label: "Contact Us") {
+                    openURL("mailto:hello@todus.app")
                 }
             }
         }
@@ -610,37 +605,6 @@ struct MacSettingsView: View {
             icon()
                 .frame(width: 26, height: 26)
                 .padding(.leading, 2)
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text(name)
-                    .font(.system(size: 12.5, weight: .medium))
-                    .foregroundStyle(MacTheme.textPrimary)
-                Text(status)
-                    .font(.system(size: 10.5))
-                    .foregroundStyle(isConnected ? .green.opacity(0.7) : MacTheme.mutedText)
-            }
-
-            Spacer()
-            trailing()
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-    }
-
-    /// Service connection row — icon, name, status badge, trailing action.
-    private func serviceRow<Trailing: View>(
-        icon: String,
-        iconColor: Color,
-        name: String,
-        status: String,
-        isConnected: Bool,
-        @ViewBuilder trailing: () -> Trailing
-    ) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: icon)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(iconColor)
-                .frame(width: 20)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(name)

@@ -27,6 +27,8 @@
 		57FBCDF125B965458E0BECF3 /* TodusMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 046484DCDC536576B1BBB40C /* TodusMacApp.swift */; };
 		5ADF61DDFE8A3E3F7B49F343 /* MacHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AA56C7900CF82A6B22C847C /* MacHomeView.swift */; };
 		680812535C1CC7B2F7FDC9BB /* MacCalendarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0977C553BCC4593120370036 /* MacCalendarView.swift */; };
+		A1E2F3A4B5C6D7E8F9A0B1C2 /* CalendarTimeGridView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1E2F3A4B5C6D7E8F9A0B1C2 /* CalendarTimeGridView.swift */; };
+		A2E3F4A5B6C7D8E9F0A1B2C3 /* CalendarEventBlockView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2E3F4A5B6C7D8E9F0A1B2C3 /* CalendarEventBlockView.swift */; };
 		6F775FA79762FB29E75EBF88 /* EmailService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90565199B1A829021602D8C0 /* EmailService.swift */; };
 		781AD1613378DF8ABEAE55FB /* MacTasksView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B974F05FBCA3D4523D8602C6 /* MacTasksView.swift */; };
 		78BD1210EB9A905EE0141C92 /* ParseState.swift in Sources */ = {isa = PBXBuildFile; fileRef = E600FB3DFA1A854E9BB82907 /* ParseState.swift */; };
@@ -56,6 +58,8 @@
 /* Begin PBXFileReference section */
 		046484DCDC536576B1BBB40C /* TodusMacApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodusMacApp.swift; sourceTree = "<group>"; };
 		0977C553BCC4593120370036 /* MacCalendarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacCalendarView.swift; sourceTree = "<group>"; };
+		D1E2F3A4B5C6D7E8F9A0B1C2 /* CalendarTimeGridView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarTimeGridView.swift; sourceTree = "<group>"; };
+		D2E3F4A5B6C7D8E9F0A1B2C3 /* CalendarEventBlockView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarEventBlockView.swift; sourceTree = "<group>"; };
 		0B4864E4D8074B1E115B4EB3 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		0F0978AB24BCBA5061D06B50 /* CreateItemType.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreateItemType.swift; sourceTree = "<group>"; };
 		27FFF0A469A295576A24B8F9 /* TodosAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodosAPIClient.swift; sourceTree = "<group>"; };
@@ -286,6 +290,8 @@
 			isa = PBXGroup;
 			children = (
 				0977C553BCC4593120370036 /* MacCalendarView.swift */,
+				D1E2F3A4B5C6D7E8F9A0B1C2 /* CalendarTimeGridView.swift */,
+				D2E3F4A5B6C7D8E9F0A1B2C3 /* CalendarEventBlockView.swift */,
 			);
 			path = Calendar;
 			sourceTree = "<group>";
@@ -458,6 +464,8 @@
 				D690F1E9E68EB72DB2A0FF10 /* MacAppServices.swift in Sources */,
 				E2D56D42AC089CCBC21CD21B /* MacAuthView.swift in Sources */,
 				680812535C1CC7B2F7FDC9BB /* MacCalendarView.swift in Sources */,
+				A1E2F3A4B5C6D7E8F9A0B1C2 /* CalendarTimeGridView.swift in Sources */,
+				A2E3F4A5B6C7D8E9F0A1B2C3 /* CalendarEventBlockView.swift in Sources */,
 				16E2E04A85DA754EE034D0D1 /* MacContentHeaderView.swift in Sources */,
 				925EAACC9F2A49C38CE4FE49 /* MacCreateSheet.swift in Sources */,
 				D89DF48DA2B18922837710B9 /* MacEmailComposeView.swift in Sources */,

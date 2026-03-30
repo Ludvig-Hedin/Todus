@@ -109,7 +109,7 @@ struct MacHomeView: View {
             HStack(spacing: MacTheme.spacing8) {
                 // Calendar color dot
                 Circle()
-                    .fill(Color(hue: Double(event.calendarColor % 360) / 360.0, saturation: 0.5, brightness: 0.75))
+                    .fill(Color(red: event.calendarColorRed, green: event.calendarColorGreen, blue: event.calendarColorBlue))
                     .frame(width: 7, height: 7)
 
                 VStack(alignment: .leading, spacing: 1) {
@@ -143,6 +143,8 @@ struct MacHomeView: View {
             )
         }
         .buttonStyle(.plain)
+        .focusEffectDisabled()
+        .pointerStyle(.link)
         .onHover { hovering in
             withAnimation(.easeOut(duration: 0.12)) {
                 isHoveringEventIndex = hovering ? index : nil
@@ -205,6 +207,8 @@ struct MacHomeView: View {
             )
         }
         .buttonStyle(.plain)
+        .focusEffectDisabled()
+        .pointerStyle(.link)
         .onHover { hovering in
             withAnimation(.easeOut(duration: 0.12)) {
                 isHoveringTaskIndex = hovering ? index : nil
@@ -246,9 +250,14 @@ struct MacHomeView: View {
                             Text("Connect Gmail")
                                 .font(.system(size: 12, weight: .semibold))
                         }
-                        .foregroundStyle(MacTheme.accent)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, MacTheme.spacing16)
+                        .padding(.vertical, MacTheme.spacing6)
+                        .background(MacTheme.accent, in: Capsule(style: .continuous))
                     }
                     .buttonStyle(.plain)
+                    .focusEffectDisabled()
+                    .pointerStyle(.link)
                 }
             } else if services.emailService.threads.isEmpty {
                 if services.emailService.isLoadingThreads {
@@ -325,6 +334,8 @@ struct MacHomeView: View {
             )
         }
         .buttonStyle(.plain)
+        .focusEffectDisabled()
+        .pointerStyle(.link)
         .onHover { hovering in
             withAnimation(.easeOut(duration: 0.12)) {
                 isHoveringEmailIndex = hovering ? index : nil

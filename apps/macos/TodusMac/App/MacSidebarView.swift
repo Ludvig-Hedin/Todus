@@ -16,6 +16,8 @@ struct MacSidebarView: View {
     var taskCount: Int = 0
     /// Callback to open the create sheet
     var onCreateItem: (() -> Void)? = nil
+    /// Callback when a day is tapped in the mini calendar
+    var onCalendarDayTap: ((Date) -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -39,10 +41,11 @@ struct MacSidebarView: View {
                 )
 
                 // Email — expandable with sub-sections
+                // Parent is NOT highlighted when expanded (only the child sub-link is)
                 SidebarItemButton(
                     title: "Email",
                     systemImage: "envelope",
-                    isSelected: isEmailSelected,
+                    isSelected: isEmailSelected && !isEmailExpanded,
                     trailingSystemImage: isEmailExpanded ? "chevron.down" : "chevron.right",
                     action: {
                         withAnimation(.snappy(duration: 0.18)) {
@@ -64,14 +67,16 @@ struct MacSidebarView: View {
                             )
                         }
                     }
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+                    // Use opacity-only so sub-items don't slide over sibling rows during animation
+                    .transition(.opacity)
                 }
 
                 // Calendar — expandable with sub-sections
+                // Parent is NOT highlighted when expanded (only the child sub-link is)
                 SidebarItemButton(
                     title: "Calendar",
                     systemImage: "calendar",
-                    isSelected: isCalendarSelected,
+                    isSelected: isCalendarSelected && !isCalendarExpanded,
                     trailingSystemImage: isCalendarExpanded ? "chevron.down" : "chevron.right",
                     action: {
                         withAnimation(.snappy(duration: 0.18)) {
@@ -93,7 +98,7 @@ struct MacSidebarView: View {
                             )
                         }
                     }
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+                    .transition(.opacity)
                 }
             }
 
@@ -129,7 +134,8 @@ struct MacSidebarView: View {
                     avatarCircle
                 }
 
-                // Name — menu trigger (borderlessButton adds its own chevron)
+                // Name — menu trigger. tint(.primary.opacity(0.5)) prevents the
+                // borderlessButton disclosure chevron from rendering in blue accent color.
                 Menu {
                     Button("Profile") {}
                     Button("Settings") { onOpenSettings() }
@@ -140,12 +146,12 @@ struct MacSidebarView: View {
                 } label: {
                     Text(displayName)
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.primary)
-                        .opacity(0.6)
+                        .foregroundStyle(.primary.opacity(0.6))
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
                 .menuStyle(.borderlessButton)
+                .tint(.primary.opacity(0.45))
                 .buttonStyle(.plain)
                 .pointerStyle(.link)
 
@@ -228,8 +234,12 @@ struct MacSidebarView: View {
             }
 
             // Mini month calendar
-            MiniCalendarView()
-                .padding(.top, 4)
+            MiniCalendarView { date in
+                // Navigate to calendar section — the date itself is visual-only
+                // since MacCalendarView owns its own selectedDate state
+                onCalendarDayTap?(date)
+            }
+            .padding(.top, 4)
         }
         .padding(.horizontal, 10)
         .transition(.opacity)
@@ -317,7 +327,9 @@ private struct SidebarItemButton: View {
         // The row is a fixed-height HStack. The trailing slot uses a ZStack overlay
         // so the + button and badge/chevron occupy the same space — no layout shift on hover.
         HStack(spacing: 8) {
-            // Main tap target: icon + title
+            // Main tap target: icon + title.
+            // contentShape(Rectangle()) ensures the transparent area of the label is also tappable —
+            // without this, only the text/icon pixels register clicks, which breaks navigation.
             Button(action: action) {
                 HStack(spacing: 8) {
                     Image(systemName: systemImage)
@@ -330,8 +342,11 @@ private struct SidebarItemButton: View {
                         .foregroundStyle(isSelected ? Color.primary : Color.primary.opacity(0.8))
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .focusEffectDisabled()
+            .pointerStyle(.link)
 
             // Trailing slot — fixed width 20pt; overlays + on hover above badge/chevron.
             // ZStack keeps height constant regardless of which child is visible.
@@ -361,8 +376,11 @@ private struct SidebarItemButton: View {
                             .foregroundStyle(.secondary)
                             .frame(width: 18, height: 18)
                             .background(Color.primary.opacity(0.06), in: Circle())
+                            .contentShape(Circle())
                     }
                     .buttonStyle(.plain)
+                    .focusEffectDisabled()
+                    .pointerStyle(.link)
                     .opacity(isHovered ? 1 : 0)
                 }
             }
@@ -375,6 +393,7 @@ private struct SidebarItemButton: View {
             Capsule(style: .continuous)
                 .fill(fillColor)
         )
+        .contentShape(Capsule(style: .continuous))
         .animation(.easeOut(duration: 0.1), value: isHovered)
         .focusEffectDisabled()
         .onHover { isHovered = $0 }
@@ -412,6 +431,7 @@ private struct SidebarChildItemButton: View {
                 Capsule(style: .continuous)
                     .fill(fillColor)
             )
+            .contentShape(Capsule(style: .continuous))
             .animation(.easeOut(duration: 0.1), value: isHovered)
         }
         .buttonStyle(.plain)
@@ -513,10 +533,15 @@ private struct FilterRow: View {
 
 // MARK: - Mini Calendar
 
-/// Compact month grid shown in the calendar sidebar footer
+/// Compact month grid shown in the calendar sidebar footer.
+/// Days are tappable — tapping a day calls `onSelectDay` with the Date.
 private struct MiniCalendarView: View {
+    var onSelectDay: ((Date) -> Void)? = nil
+
     private let calendar = Calendar.current
     private let today = Date()
+    @State private var selectedDay: Int? = nil
+
     // Derive single-letter weekday headers from locale, rotated to match firstWeekday
     private var weekdaySymbols: [String] {
         let symbols = calendar.veryShortWeekdaySymbols
@@ -565,18 +590,28 @@ private struct MiniCalendarView: View {
                         .frame(maxWidth: .infinity)
                 }
 
-                // Day numbers
+                // Day numbers — tappable
                 ForEach(Array(daysInMonth), id: \.self) { day in
                     let isToday = day == todayDay
+                    let isSelected = day == selectedDay
                     Text("\(day)")
-                        .font(.system(size: 10, weight: isToday ? .bold : .regular))
-                        .foregroundStyle(isToday ? Color.accentColor : .primary.opacity(0.55))
+                        .font(.system(size: 10, weight: (isToday || isSelected) ? .bold : .regular))
+                        .foregroundStyle(isToday ? Color.accentColor : isSelected ? MacTheme.textPrimary : .primary.opacity(0.55))
                         .frame(width: 20, height: 20)
                         .background(
                             Circle()
-                                .fill(isToday ? Color.accentColor.opacity(0.15) : .clear)
+                                .fill(isToday ? Color.accentColor.opacity(0.15) : isSelected ? Color.primary.opacity(0.08) : .clear)
                         )
                         .frame(maxWidth: .infinity)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            selectedDay = day
+                            // Build the tapped Date and notify parent
+                            if let monthStart = calendar.date(from: calendar.dateComponents([.year, .month], from: today)),
+                               let date = calendar.date(bySetting: .day, value: day, of: monthStart) {
+                                onSelectDay?(date)
+                            }
+                        }
                 }
             }
         }

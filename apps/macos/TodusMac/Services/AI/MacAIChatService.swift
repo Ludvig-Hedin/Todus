@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import SwiftData
+import OSLog
 
 // MARK: - MacAIChatService
 
@@ -36,6 +37,7 @@ final class MacAIChatService {
     private weak var emailService: EmailService?
     private var calendarService: CalendarService?
     private var streamingTask: Task<Void, Never>?
+    private let log = Logger(subsystem: "com.todus.macos", category: "MacAIChatService")
 
     // Token batching — flush every 40ms for smooth typewriter animation
     private var tokenBuffer = ""
@@ -256,6 +258,7 @@ final class MacAIChatService {
                 appendError("Invalid response from server.", to: assistantMessageID)
                 return
             }
+            debugHTTPResponse(http, context: "chat stream")
             // Capture rotated Bearer token from Better Auth's set-auth-token header
             authService?.captureRotatedToken(from: http)
             guard (200..<300).contains(http.statusCode) else {
@@ -265,17 +268,23 @@ final class MacAIChatService {
                     if let auth = authService {
                         let refreshed = await auth.attemptSilentRefresh()
                         if refreshed {
-                            appendError("Connection lost briefly. Please tap retry.", to: assistantMessageID)
+                            appendError("Session token refreshed. Please tap retry.", to: assistantMessageID)
                         } else {
                             auth.isSessionExpired = true
-                            appendError("Session expired. Please log out and back in.", to: assistantMessageID)
+                            appendError(diagnosticAuthMessage(
+                                statusCode: http.statusCode,
+                                fallback: "Session expired. Please log out and back in."
+                            ), to: assistantMessageID)
                         }
                     } else {
-                        appendError("Session expired. Please log out and back in.", to: assistantMessageID)
+                        appendError(diagnosticAuthMessage(
+                            statusCode: http.statusCode,
+                            fallback: "Session expired. Please log out and back in."
+                        ), to: assistantMessageID)
                     }
                 case 503: appendError("AI service is not configured on the server (missing OPENROUTER_API_KEY).", to: assistantMessageID)
                 case 502: appendError("AI provider error. The upstream AI service may be down.", to: assistantMessageID)
-                default:  appendError("Server error (\(http.statusCode)).", to: assistantMessageID)
+                default:  appendError(diagnosticHTTPMessage(statusCode: http.statusCode), to: assistantMessageID)
                 }
                 return
             }
@@ -311,9 +320,25 @@ final class MacAIChatService {
             }
         } catch {
             if !Task.isCancelled {
+                log.error("chat stream failed: \(error.localizedDescription, privacy: .public)")
                 appendError(error.localizedDescription, to: assistantMessageID)
             }
         }
+    }
+
+    private func debugHTTPResponse(_ http: HTTPURLResponse, context: String) {
+        let authHeader = http.value(forHTTPHeaderField: "set-auth-token")?.isEmpty == false ? "present" : "missing"
+        log.debug(
+            "\(context, privacy: .public): HTTP \(http.statusCode) set-auth-token=\(authHeader, privacy: .public)"
+        )
+    }
+
+    private func diagnosticHTTPMessage(statusCode: Int) -> String {
+        return "Server error (\(statusCode))."
+    }
+
+    private func diagnosticAuthMessage(statusCode: Int, fallback: String) -> String {
+        return fallback + " (HTTP \(statusCode))."
     }
 
     // MARK: - Custom Event Handling (Web Search + Reasoning)

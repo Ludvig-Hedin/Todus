@@ -100,13 +100,11 @@ struct MacTasksView: View {
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(MacTheme.mutedText)
                     .frame(width: 28, height: 28)
-                    .background(MacTheme.surfaceCard, in: RoundedRectangle(cornerRadius: MacTheme.buttonRadius, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: MacTheme.buttonRadius, style: .continuous)
-                            .stroke(MacTheme.cardBorder, lineWidth: 0.5)
-                    )
+                    .background(MacTheme.surfaceCard, in: Circle())
+                    .overlay(Circle().stroke(MacTheme.cardBorder, lineWidth: 0.5))
             }
             .menuStyle(.borderlessButton)
+            .tint(Color.primary.opacity(0.7))
             .frame(width: 28)
         }
     }
@@ -127,7 +125,7 @@ struct MacTasksView: View {
                             viewMode == mode
                                 ? MacTheme.surfaceHover
                                 : Color.clear,
-                            in: RoundedRectangle(cornerRadius: MacTheme.pillRadius, style: .continuous)
+                            in: Capsule(style: .continuous)
                         )
                 }
                 .buttonStyle(.plain)
