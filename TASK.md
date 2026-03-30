@@ -14,6 +14,8 @@ Last updated: 2026-03-30
 
 - `DONE` Refreshed `pnpm-lock.yaml` so Cloudflare's frozen install no longer fails on the `apps/web` `uuid` / `@types/uuid` lockfile drift.
 - `DONE` Verified `pnpm --filter @zero/mail build` completes successfully after the lockfile refresh.
+- `DONE` Verified `pnpm --filter @zero/web build` completes successfully locally.
+- `DONE` Verified `pnpm --filter @zero/server exec wrangler deploy --dry-run --env production` completes successfully, which exercises the Cloudflare bundle path for the Worker.
 
 ## Current State
 
