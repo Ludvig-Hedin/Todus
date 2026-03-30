@@ -150,10 +150,18 @@ const connectionHandlerHook = async (account: Account) => {
     updatingInfo,
   );
 
-  if (env.NODE_ENV === 'production') {
-    await Effect.runPromise(
-      scheduleCampaign({ address: userInfo.address, name: userInfo.name || 'there' }),
-    );
+  const settingsRow = await db.findUserSettings(account.userId);
+  const currentSettings = settingsRow?.settings ?? defaultUserSettings;
+  if (!currentSettings.welcomeEmailSent) {
+    if (env.NODE_ENV === 'production') {
+      await Effect.runPromise(
+        scheduleCampaign({ address: userInfo.address, name: userInfo.name || 'there' }),
+      );
+    }
+    await db.updateUserSettings(account.userId, {
+      ...currentSettings,
+      welcomeEmailSent: true,
+    });
   }
 
   if (env.GOOGLE_S_ACCOUNT && env.GOOGLE_S_ACCOUNT !== '{}') {
