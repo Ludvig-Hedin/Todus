@@ -531,7 +531,7 @@ struct CreateSheet: View {
             case .task:
                 createTask(input, attachments: attachments)
             case .event:
-                await createEvent(input)
+                await createEvent(input, attachments: attachments)
             case .email:
                 services.composeEmailSeedBody = input
                 services.showsComposeEmail = true
@@ -552,7 +552,7 @@ struct CreateSheet: View {
         )
     }
 
-    private func createEvent(_ input: String) async {
+    private func createEvent(_ input: String, attachments: [String]) async {
         let startDate = selectedDate ?? Date()
         let hasAccess: Bool
         if services.calendarService.canCreateEvents() {
@@ -562,7 +562,7 @@ struct CreateSheet: View {
         }
 
         guard hasAccess else {
-            createTask(input)
+            createTask(input, attachments: attachments)
             return
         }
 
@@ -573,7 +573,7 @@ struct CreateSheet: View {
                 endDate: startDate.addingTimeInterval(3600)
             )
         } catch {
-            createTask(input)
+            createTask(input, attachments: attachments)
         }
     }
 
@@ -606,8 +606,10 @@ struct CreateSheet: View {
     }
 
     private func applySlashAction(_ action: RichInputCommandAction) {
-        if text.hasSuffix("/") {
-            text = String(text.dropLast())
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        if trimmed.hasSuffix("/") {
+            let withoutSlash = String(trimmed.dropLast())
+            text = withoutSlash.trimmingCharacters(in: .whitespaces)
         }
         switch action {
         case .dueToday:

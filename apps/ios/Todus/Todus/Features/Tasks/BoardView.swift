@@ -33,13 +33,20 @@ struct BoardView: View {
                 .presentationBackground(AppTheme.backgroundTop)
         }
         .onAppear { recomputeTasksByStatus() }
-        .onChange(of: allTasks) { recomputeTasksByStatus() }
-        .onChange(of: services.selectedFolderID) { recomputeTasksByStatus() }
         .onChange(of: taskChangeSignature) { recomputeTasksByStatus() }
+        .onChange(of: services.selectedFolderID) { recomputeTasksByStatus() }
     }
 
     private var taskChangeSignature: String {
-        allTasks.map { "\($0.id)-\($0.status.rawValue)-\($0.folderID?.uuidString ?? "")" }.joined()
+        allTasks
+            .map { task in
+                [
+                    task.id.uuidString,
+                    task.status.rawValue,
+                    task.folderID ?? "nil"
+                ].joined(separator: ":")
+            }
+            .joined(separator: "|")
     }
 
     private func recomputeTasksByStatus() {

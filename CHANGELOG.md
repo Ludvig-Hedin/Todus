@@ -1,5 +1,22 @@
 # Project Changelog
 
+## [2026-03-30] Fix — iOS create-sheet attachment fallback and board regrouping
+
+- Forwarded the captured attachment list into event creation fallback paths so failed calendar permission or event-creation errors still preserve user-selected attachments when creating a task instead.
+- Restored the Kanban regroup observer using a task signature derived from each task's id, status, and folder so in-place SwiftData mutations move cards between columns again.
+
+**Files:** `apps/ios/Todus/Todus/Navigation/CreateSheet.swift`, `apps/ios/Todus/Todus/Features/Tasks/BoardView.swift`
+
+## [2026-03-30] Fix — iOS hang triage instrumentation and shell pressure reduction
+
+- Deferred non-critical root startup work so launch no longer immediately competes with reminders import/sync and legacy auth-upgrade work.
+- Switched the iOS shell back to rendering only the active tab, reducing hidden SwiftUI invalidation and background work during tab switches, focus changes, and general interaction.
+- Added Instruments-friendly trace points around app initialization, deferred startup, tab switching, SwiftData saves, email thread loading, and reminders sync/import.
+- Cached bearer tokens in-memory inside the shared native auth service and moved profile/token metadata persistence off the synchronous main-actor path to reduce Security/Keychain stalls.
+- Prevented the email inbox from re-running its full initial fetch every time the tab becomes visible, and fixed a create-sheet fallback path so event creation failures preserve attachments when falling back to task capture.
+
+**Files:** `TodosApp.swift`, `RootView.swift`, `MainTabView.swift`, `AppServices.swift`, `AppLogger.swift`, `EmailService.swift`, `EmailInboxView.swift`, `TaskCaptureService.swift`, `BoardView.swift`, `CreateSheet.swift`, `AuthService.swift`
+
 ## [2026-03-30] Fix — native sync, calendar, and accessibility cleanup
 
 - Kept the marketing home avatar text consistent with the existing `adam.jpg` asset in both web shells.

@@ -39,10 +39,10 @@
 | Feature | Status | Notes |
 |---------|--------|-------|
 | Task list | ✅ Ported | From MiniTaskApp |
-| Board view | ✅ Ported | From MiniTaskApp |
+| Board view | ✅ Ported | Added task signature regrouping so in-place status/folder mutations move cards between columns again |
 | Table view | ✅ Ported | From MiniTaskApp |
 | Calendar view | ✅ Ported | From MiniTaskApp |
-| Capture composer | ✅ Ported | From MiniTaskApp |
+| Capture composer | ✅ Ported | Preserves selected attachments when event creation falls back to task capture |
 | Folders | ✅ Ported | From MiniTaskApp |
 | Search + sort | ✅ Ported | From MiniTaskApp |
 | Reminders sync | ✅ Ported | From MiniTaskApp |
@@ -126,6 +126,7 @@
 ## Build Notes
 
 - March 30, 2026: fixed the remaining iOS compile blockers in `CardViews.swift`, `AIChatView.swift`, `VoiceChatViewModel.swift`, and `VoiceInputButton.swift`; verified `xcodebuild -project apps/ios/Todus/Todus.xcodeproj -scheme Todus -destination 'generic/platform=iOS Simulator' build` succeeds.
+- March 30, 2026: tightened AI chat failure handling on iOS and macOS so auth/session issues now surface as explicit messages instead of the generic "Connection lost briefly" banner; macOS build verified with `xcodebuild -project apps/macos/TodusMac.xcodeproj -scheme TodusMac build`.
 - March 29, 2026: fixed the `ChatUISpecView` opaque-type recursion by switching the recursive renderer to `AnyView`, then marked `EKWrapper` as `@unchecked Sendable` so CalendarKit event wrappers can cross the background-fetch to main-thread boundary in Swift 6 without a data-race compile error.
 - March 29, 2026: Xcode GUI hangs around `RegisterExecutionPolicyException ... CalendarKit.o` were traced to a local Xcode environment problem, not a CalendarKit source dependency problem.
 - Root cause: Xcode had custom build output paths configured (`~/XcodeDerivedData/Todus` and `~/Desktop/Build/Intermediates.noindex`). After manual cache cleanup, those non-default paths interacted badly with execution-policy registration and `syspolicyd`.
@@ -139,4 +140,4 @@
 
 ---
 
-## Last Updated: 2026-03-29
+## Last Updated: 2026-03-30
