@@ -10,7 +10,7 @@ import {
   SettingsSectionTitle,
 } from '../../../src/features/settings/SettingsUI';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ActivityIndicator, Alert, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native';
 import { useTRPC } from '../../../src/providers/QueryTrpcProvider';
 import { useTheme } from '../../../src/shared/theme/ThemeContext';
 import { useEffect, useState } from 'react';

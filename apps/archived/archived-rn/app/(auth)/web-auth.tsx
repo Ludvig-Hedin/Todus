@@ -21,6 +21,7 @@ import {
 } from 'react-native';
 import { WebView } from 'react-native-webview';
 import type { WebViewSourceUri } from 'react-native-webview/lib/WebViewTypes';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getNativeEnv } from '../../src/shared/config/env';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
 import {
@@ -89,6 +90,7 @@ export default function WebAuthScreen() {
   const router = useRouter();
   const env = getNativeEnv();
   const { colors, ui } = useTheme();
+  const insets = useSafeAreaInsets();
   const setWebCookieSession = useSetAtom(setWebCookieSessionAtom);
   const setBearerSession = useSetAtom(setBearerSessionAtom);
   const setCurrentPath = useSetAtom(setCurrentPathAtom);
@@ -206,7 +208,12 @@ export default function WebAuthScreen() {
   if (!source) {
     return (
       <View style={[styles.container, { backgroundColor: ui.canvas }]}>
-        <View style={[styles.topBar, { backgroundColor: colors.background, borderColor: ui.borderSubtle }]}>
+        <View
+          style={[
+            styles.topBar,
+            { backgroundColor: colors.background, borderColor: ui.borderSubtle, paddingTop: insets.top + 10 },
+          ]}
+        >
           <Pressable style={[styles.backButton, { backgroundColor: colors.primary }]} onPress={() => router.back()}>
             <Text style={[styles.backButtonText, { color: colors.primaryForeground }]}>Back</Text>
           </Pressable>
@@ -221,7 +228,7 @@ export default function WebAuthScreen() {
   }
 
   return (
-    <View style={[styles.container, { backgroundColor: ui.canvas }]}>
+    <View style={[styles.container, { backgroundColor: ui.canvas, paddingTop: insets.top }]}>
       <WebView
         ref={webViewRef}
         source={source}
@@ -297,7 +304,12 @@ export default function WebAuthScreen() {
       />
 
       {/* Top bar with back button */}
-      <View style={[styles.topBar, { backgroundColor: colors.background, borderColor: ui.borderSubtle }]}>
+      <View
+        style={[
+          styles.topBar,
+          { backgroundColor: colors.background, borderColor: ui.borderSubtle, paddingTop: insets.top + 10 },
+        ]}
+      >
         <Pressable style={[styles.backButton, { backgroundColor: colors.primary }]} onPress={() => router.back()}>
           <Text style={[styles.backButtonText, { color: colors.primaryForeground }]}>Back</Text>
         </Pressable>
@@ -312,7 +324,7 @@ export default function WebAuthScreen() {
       )}
 
       {errorMessage && (
-        <View style={[styles.errorPill, { backgroundColor: `${colors.destructive}1A`, borderColor: `${colors.destructive}33` }]}>
+        <View style={[styles.errorPill, { backgroundColor: colors.destructive, borderColor: colors.destructive }]}>
           <Text style={[styles.errorPillText, { color: colors.destructive }]}>{errorMessage}</Text>
         </View>
       )}

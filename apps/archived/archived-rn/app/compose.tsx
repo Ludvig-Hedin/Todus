@@ -378,7 +378,14 @@ export default function ComposeScreen() {
         );
       }
     }
-  }, [defaultConnectionQuery.data, isForward, isReply, isReplyAll, threadData]);
+  }, [
+    defaultConnectionQuery.data,
+    defaultConnectionQuery.isLoading,
+    isForward,
+    isReply,
+    isReplyAll,
+    threadData,
+  ]);
 
   const hasRestoredDraftRef = useRef(false);
   const hasAppliedUndoPrefillRef = useRef(false);
@@ -590,9 +597,16 @@ export default function ComposeScreen() {
       return;
     }
 
-    if (scheduleAt && new Date(scheduleAt).getTime() <= Date.now()) {
-      Alert.alert('Invalid schedule', 'Scheduled time must be in the future.');
-      return;
+    if (scheduleAt) {
+      const scheduleTimestamp = Date.parse(scheduleAt);
+      if (Number.isNaN(scheduleTimestamp)) {
+        Alert.alert('Invalid schedule', 'Scheduled time is not a valid date.');
+        return;
+      }
+      if (scheduleTimestamp <= Date.now()) {
+        Alert.alert('Invalid schedule', 'Scheduled time must be in the future.');
+        return;
+      }
     }
 
     const messageHtml = await editor.getHTML();

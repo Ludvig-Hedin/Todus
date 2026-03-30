@@ -76,7 +76,9 @@ export default function SignupScreen() {
       };
 
       const subscription = Linking.addEventListener('url', ({ url }) => {
-        handleAuthUrl(url);
+        void handleAuthUrl(url).catch((error) => {
+          console.error('[GoogleSignUp] handleAuthUrl failed', error);
+        });
       });
 
       try {
@@ -135,6 +137,15 @@ export default function SignupScreen() {
           }),
         });
 
+        if (!response.ok) {
+          const errorText = await response.text().catch(() => '');
+          setErrorMessage(
+            `Apple sign-up failed (${response.status}). ${errorText || 'Please try again.'}`,
+          );
+          setLoading(false);
+          return;
+        }
+
         const result = await response.json();
         if (result.url) {
           const token = extractTokenFromUrl(result.url);
@@ -146,6 +157,8 @@ export default function SignupScreen() {
         } else if (result.error) {
           setErrorMessage(result.error.message || 'Apple sign-up failed on server.');
         }
+      } else {
+        setErrorMessage('Apple sign-up failed: missing identity token.');
       }
     } catch (error: unknown) {
       if ((error as { code?: string }).code === 'ERR_CANCELED') {
@@ -343,4 +356,3 @@ const styles = StyleSheet.create({
     marginHorizontal: 12,
   },
 });
-

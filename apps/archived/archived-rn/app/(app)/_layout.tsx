@@ -13,7 +13,6 @@ import { getNativeEnv } from '../../src/shared/config/env';
 import { useQuery } from '@tanstack/react-query';
 import { Drawer } from 'expo-router/drawer';
 import { useEffect } from 'react';
-import { isAnalyticsConsentGiven } from '../../src/shared/storage/analytics-consent';
 
 export default function AppLayout() {
   const { ui } = useTheme();
@@ -30,10 +29,8 @@ export default function AppLayout() {
     const defaultConnection = defaultConnectionQuery.data as any;
     if (!defaultConnection?.id) return;
 
-    const hasConsent = isAnalyticsConsentGiven();
     identifyPostHog(`connection:${defaultConnection.id}`, {
       provider: defaultConnection.providerId ?? null,
-      ...(hasConsent && defaultConnection.email ? { email: defaultConnection.email } : {}),
     });
   }, [defaultConnectionQuery.data]);
 
