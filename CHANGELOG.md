@@ -1,5 +1,58 @@
 # Project Changelog
 
+## [2026-03-30] Fix — Cloudflare install now respects the web workspace lockfile
+
+- Regenerated `pnpm-lock.yaml` so the `apps/web` `uuid` / `@types/uuid` dependency entries match `apps/web/package.json` again.
+- Kept the dependency update scoped to the lockfile only; no app source changes were required for this deploy fix.
+
+**Files:** `pnpm-lock.yaml`
+
+## [2026-03-30] Fix — macOS search modal now searches calendar events and opens real actions
+
+- Wired the macOS search modal to actual app callbacks so quick actions now open task creation, email compose, and new event flows instead of rendering inert rows.
+- Added calendar event loading and search indexing to the modal so event names from the home dashboard now appear in search results.
+- Improved the empty state with actionable suggestions and tap targets for common follow-up actions.
+- Added direct navigation for search results so task, email, and event rows move the user into the right surface instead of doing nothing.
+
+**Files:** `apps/macos/TodusMac/Views/Search/MacSearchView.swift`, `apps/macos/TodusMac/App/MacRootView.swift`
+
+## [2026-03-30] Fix — macOS native auth now verifies session before entering the app shell
+
+- Hardened the shared native `AuthService` so Google/Apple/OTP callbacks no longer mark the app as authenticated from token presence alone.
+- Added post-callback `/api/auth/me` verification with short retry backoff to absorb the native OAuth handoff window before profile hydration completes.
+- Added callback deduping so macOS dual callback entrypoints cannot race the same token through auth completion twice.
+- Added explicit persisted-session restoration on macOS launch so stale Keychain state is rejected before the main shell renders.
+- Namespaced native Keychain entries by bundle-specific service to make session storage deterministic across iOS/macOS and to make full local resets reliable.
+- Added a DEBUG-only auth section in macOS Settings showing auth state, token preview, session-expired flag, and profile email for faster diagnosis.
+
+**Files:** `packages/swift-auth/Sources/TodusAuth/AuthService.swift`, `packages/swift-auth/Sources/TodusAuth/KeychainHelper.swift`, `apps/macos/TodusMac/App/MacRootView.swift`, `apps/macos/TodusMac/Views/Settings/MacSettingsView.swift`, `apps/macos/README.md`, `TASK.md`
+
+## [2026-03-30] Fix — macOS sidebar profile menu now opens settings
+
+- Removed the no-op `Profile` item from the macOS sidebar account dropdown.
+- Wired the profile menu entry to the existing macOS settings overlay so it now opens real profile/account controls.
+- Kept the separate gear icon and keyboard shortcut as alternate settings entry points.
+
+**Files:** `apps/macos/TodusMac/App/MacSidebarView.swift`, `apps/macos/README.md`
+
+## [2026-03-30] Polish — macOS Calendar UI Round 5
+
+- **Tap-to-create on time grid:** Tapping empty space in Day/Week time grid opens Apple Calendar's new event dialog at that time (snapped to 30-min slot). Uses `x-apple-calevent://new` URL scheme.
+- **Segmented control visibility:** Replaced invisible `.thinMaterial` highlight with solid opaque pill (`Color(white: 0.22)` dark, white light) + shadow. Outer track uses matching solid color (`Color(white: 0.13)` dark) instead of `.ultraThickMaterial`.
+- **Unified header controls:** Nav arrows, Today button, and segmented picker all use the same `controlBg` color and `headerControlHeight` (30pt). No more mismatched materials/heights.
+- **Month view: prev/next month days visible muted:** Empty cells at month start/end now show actual dates from the previous/next months at 35% opacity — matching Apple Calendar behavior.
+- **Month view: instant transitions:** Removed animation on month navigation. `.animation(.none, value: selectedDate)` on the grid prevents the "circus" effect of cells moving around.
+- **Month view: scrollable:** Grid remains wrapped in ScrollView for overflow.
+
+**Files:** `MacCalendarView.swift`, `CalendarTimeGridView.swift`
+
+## [2026-03-30] Fix — macOS `EmailService.resetForSignOut()` (compile unblock)
+
+- Implemented the missing `resetForSignOut()` on macOS `EmailService` so callers that clear cached threads, pagination, errors, and connection flags after sign-out resolve at link time.
+- **Impact:** Fixes a hard build failure (undefined symbol) once logout/delete-account paths reference this API; unrelated to calendar UI work beyond sharing the same release.
+
+**Files:** `apps/macos/TodusMac/Services/Email/EmailService.swift`
+
 ## [2026-03-30] Fix — macOS logout now resets email state before auth sign-out
 
 - Centralized macOS sign-out in `MacAppServices.signOut()` so logout now mirrors the iOS flow.

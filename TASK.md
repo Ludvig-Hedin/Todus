@@ -1,6 +1,19 @@
 # Migration Backlog
 
-Last updated: 2026-03-28
+Last updated: 2026-03-30
+
+## Active Auth Fixes
+
+- `DONE` Native shared auth now verifies `/api/auth/me` before promoting a callback token into an authenticated app session.
+- `DONE` macOS launch now validates persisted bearer tokens before rendering the main shell, so stale Keychain auth no longer shows a partial logged-in UI.
+- `DONE` Native Keychain auth items are now namespaced by bundle service for deterministic macOS/iOS resets.
+- `DONE` macOS Settings now exposes DEBUG auth diagnostics (state, token preview, session-expired flag, hydrated email).
+- `DONE` Full local macOS reset procedure documented in `apps/macos/README.md`.
+
+## Build Fixes
+
+- `DONE` Refreshed `pnpm-lock.yaml` so Cloudflare's frozen install no longer fails on the `apps/web` `uuid` / `@types/uuid` lockfile drift.
+- `DONE` Verified `pnpm --filter @zero/mail build` completes successfully after the lockfile refresh.
 
 ## Current State
 
