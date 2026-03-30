@@ -141,7 +141,7 @@ struct MacSidebarView: View {
                     Button("Settings") { onOpenSettings() }
                     Divider()
                     Button("Log Out", role: .destructive) {
-                        authService.signOut()
+                        services.signOut()
                     }
                 } label: {
                     Text(displayName)

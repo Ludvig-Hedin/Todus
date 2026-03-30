@@ -71,7 +71,7 @@ struct MacSettingsView: View {
             isPresented: $showsLogoutConfirmation,
             titleVisibility: .visible
         ) {
-            Button("Log out", role: .destructive) { services.authService.signOut() }
+            Button("Log out", role: .destructive) { services.signOut() }
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("You can sign back in anytime.")
@@ -649,7 +649,7 @@ struct MacSettingsView: View {
             print("[Settings] Delete account failed: \(error)")
         }
         deleteConfirmText = ""
-        services.authService.signOut()
+        services.signOut()
         try? modelContext.delete(model: TaskRecord.self)
         try? modelContext.delete(model: FolderRecord.self)
         try? modelContext.save()

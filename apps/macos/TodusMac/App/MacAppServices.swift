@@ -36,6 +36,11 @@ final class MacAppServices {
         )
     }
 
+    func signOut() {
+        emailService.resetForSignOut()
+        authService.signOut()
+    }
+
     /// Loads the backend URL from TodosConfig.plist.
     /// Falls back to production URL if plist is missing or malformed.
     private static func loadBackendURL() -> URL {
