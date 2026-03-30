@@ -229,8 +229,39 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
       const historyProcessingKey = `history_${connectionId}__${historyId}`;
       const keysToDelete: string[] = [];
 
+      const lockAcquired = yield* Effect.tryPromise({
+        try: async () => {
+          return await this.ctx.blockConcurrencyWhile(async () => {
+            const existingLock = await this.env.gmail_processing_threads.get(
+              historyProcessingKey,
+            );
+            if (existingLock) {
+              return false;
+            }
+
+            await this.env.gmail_processing_threads.put(historyProcessingKey, 'true', {
+              expirationTtl: 3600,
+            });
+            return true;
+          });
+        },
+        catch: (error) => ({ _tag: 'WorkflowCreationFailed' as const, error }),
+      });
+
+      if (!lockAcquired) {
+        yield* Console.log('[ZERO_WORKFLOW] History already being processed:', {
+          connectionId,
+          historyId,
+        });
+        return yield* Effect.fail({
+          _tag: 'HistoryAlreadyProcessing' as const,
+          connectionId,
+          historyId,
+        });
+      }
+
       yield* Console.log(
-        '[ZERO_WORKFLOW] Processing history:',
+        '[ZERO_WORKFLOW] Acquired processing lock for history:',
         historyProcessingKey,
       );
 

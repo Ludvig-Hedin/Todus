@@ -771,7 +771,9 @@ struct AIChatView: View {
     }
 
     private var chatInputBox: some View {
-        let isEmpty = inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && pendingAttachments.isEmpty
+        let isEmpty =
+            inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            pendingAttachments.isEmpty
 
         // Whether any "above-text" accessories are visible (pill or attachments)
         let hasAccessories = pageContextAttached || !pendingAttachments.isEmpty

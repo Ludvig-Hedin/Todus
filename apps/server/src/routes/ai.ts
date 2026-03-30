@@ -18,6 +18,21 @@ export const aiRouter = new Hono<HonoContext>();
 
 aiRouter.get('/', (c) => c.text('Twilio + ElevenLabs + AI Phone System Ready'));
 
+const trustedOrigins = new Set(
+  [
+    'https://app.todus.app',
+    'https://api.todus.app',
+    'https://todus.app',
+    'https://todus-production.ludvighedin15.workers.dev',
+    'https://todus-server-v1-production.ludvighedin15.workers.dev',
+    'https://zero-server-v1-production.ludvighedin15.workers.dev',
+    'http://localhost:3000',
+    'http://localhost:8787',
+    env.VITE_PUBLIC_APP_URL,
+    env.VITE_PUBLIC_BACKEND_URL,
+  ].filter((origin): origin is string => Boolean(origin)),
+);
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Web Search — heuristic detection + Perplexity search + source injection
 // ─────────────────────────────────────────────────────────────────────────────
@@ -589,7 +604,12 @@ aiRouter.get('/voice-ws', async (c) => {
 
 // Add CORS headers for /do/* routes
 aiRouter.use('/do/*', async (c, next) => {
-  c.header('Access-Control-Allow-Origin', '*');
+  const origin = c.req.header('Origin');
+  if (origin && trustedOrigins.has(origin)) {
+    c.header('Access-Control-Allow-Origin', origin);
+    c.header('Vary', 'Origin');
+    c.header('Access-Control-Allow-Credentials', 'true');
+  }
   c.header('Access-Control-Allow-Headers', 'Content-Type, X-Voice-Secret, X-Caller');
   c.header('Access-Control-Allow-Methods', 'POST, OPTIONS');
   if (c.req.method === 'OPTIONS') {
