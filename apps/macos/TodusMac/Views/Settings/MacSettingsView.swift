@@ -67,6 +67,7 @@ struct MacSettingsView: View {
         .task {
             // Refresh profile data (name, avatar) when settings opens — matches iOS SettingsView
             await services.authService.fetchUserProfile()
+            await services.loadSharedAIProfile()
         }
         // Logout confirmation
         .confirmationDialog(
@@ -125,7 +126,10 @@ struct MacSettingsView: View {
                 .foregroundStyle(MacTheme.textPrimary)
             Spacer()
             Button {
-                withAnimation(.snappy(duration: 0.2)) { isPresented = false }
+                Task { @MainActor in
+                    await services.saveSharedAIProfile()
+                    withAnimation(.snappy(duration: 0.2)) { isPresented = false }
+                }
             } label: {
                 Image(systemName: "xmark.circle.fill")
                     .font(.system(size: 15))
@@ -402,6 +406,44 @@ struct MacSettingsView: View {
                 cardDivider
 
                 settingsToggle(icon: "pencil", label: "Create & edit tasks", isOn: $aiCanWriteTasks)
+
+                cardDivider
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Context about you")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(MacTheme.textPrimary)
+                    TextEditor(
+                        text: Binding(
+                            get: { services.contextAboutYou },
+                            set: { services.contextAboutYou = $0 }
+                        )
+                    )
+                    .frame(minHeight: 96)
+                    .scrollContentBackground(.hidden)
+                    .padding(8)
+                    .background(Color.white.opacity(0.04))
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                }
+
+                cardDivider
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Custom instructions")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(MacTheme.textPrimary)
+                    TextEditor(
+                        text: Binding(
+                            get: { services.customInstructions },
+                            set: { services.customInstructions = $0 }
+                        )
+                    )
+                    .frame(minHeight: 96)
+                    .scrollContentBackground(.hidden)
+                    .padding(8)
+                    .background(Color.white.opacity(0.04))
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                }
 
                 cardDivider
 

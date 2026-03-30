@@ -149,6 +149,7 @@
 - CalendarViewController uses `CalendarKit` which imports as a module — need SPM dependency before it compiles
 - RootView has a `dismissKeyboard()` function — duplicated in TasksTabView, should be a shared utility
 - AppConfiguration.swift now loads from `TodosConfig.plist` first, falls back to `TaskAppConfig.plist` ✅ Fixed
+- Shared AI profile settings now sync through backend `userSettings` and feed web/iOS/macOS prompts with `Context about you` and `Custom instructions`.
 - The existing AuthSessionStore stores tokens in UserDefaults — new AuthService uses Keychain instead
 - EmailService response DTOs (RawThread, GetThreadResponse) may need adjustment once tested against real backend responses ✅ Fixed — listThreads only returns IDs, now enriching via mail.get per thread (same as web app)
 - Saved AI chat history previously dropped mention IDs and broke follow-up turns after reopening a conversation ✅ Fixed — persisted mention refs in saved messages with backward-compatible decoding

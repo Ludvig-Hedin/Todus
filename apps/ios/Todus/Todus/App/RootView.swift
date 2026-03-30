@@ -45,6 +45,10 @@ struct RootView: View {
             hasRunDeferredStartup = true
             await runDeferredStartupWork()
         }
+        .task(id: services.authService.isAuthenticated) {
+            guard services.authService.isAuthenticated else { return }
+            await services.loadSharedAIProfile()
+        }
     }
 
     @MainActor
@@ -64,6 +68,7 @@ struct RootView: View {
         // Let the first interactive frame settle before kicking off background work.
         try? await Task.sleep(for: .milliseconds(350))
         await services.authService.fetchUserProfile()
+        await services.loadSharedAIProfile()
 
         // Delay legacy upgrade work until after the initial shell is usable.
         try? await Task.sleep(for: .milliseconds(150))

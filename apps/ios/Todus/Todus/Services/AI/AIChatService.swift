@@ -62,6 +62,12 @@ final class AIChatService {
     /// Tone instruction injected from AppServices.aiTonePreference — appended to the system prompt.
     var toneInstruction: String = ""
 
+    /// Shared AI profile context loaded from settings.
+    var contextAboutYou: String = ""
+
+    /// Shared custom instructions loaded from settings.
+    var customInstructions: String = ""
+
     private let configuration: AppConfiguration
     private let captureService: TaskCaptureService
     /// Auth service provides the Bearer token for backend API calls
@@ -794,10 +800,15 @@ final class AIChatService {
         }
 
         // ── System prompt ──────────────────────────────────────────────────────
+        let sharedAIProfilePrompt = Self.buildAIProfilePrompt(
+            contextAboutYou: contextAboutYou,
+            customInstructions: customInstructions
+        )
         let toneLine = toneInstruction.isEmpty ? "" : "\n\(toneInstruction)"
         let pageContextLine = currentPageContext.map { "\nThe user is currently viewing: \($0)." } ?? ""
+        let profileLine = sharedAIProfilePrompt.isEmpty ? "" : "\(sharedAIProfilePrompt)\n\n"
         let systemPrompt = """
-        You are a powerful personal assistant embedded in Todus — a task manager, email client, and calendar app.
+        \(profileLine)You are a powerful personal assistant embedded in Todus — a task manager, email client, and calendar app.
         Today is \(Self.formattedDate(Date())).\(toneLine)\(pageContextLine)
 
         You have full access to the user's tasks, calendar, and email:
@@ -858,6 +869,22 @@ final class AIChatService {
             tasks: Array(taskSummaries),
             model: selectedModel
         )
+    }
+
+    private static func buildAIProfilePrompt(contextAboutYou: String, customInstructions: String) -> String {
+        var sections: [String] = []
+
+        let context = contextAboutYou.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !context.isEmpty {
+            sections.append("## Context about you\n\(context)")
+        }
+
+        let instructions = customInstructions.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !instructions.isEmpty {
+            sections.append("## Custom instructions\n\(instructions)")
+        }
+
+        return sections.joined(separator: "\n\n")
     }
 
     // MARK: - Tool Call Processing

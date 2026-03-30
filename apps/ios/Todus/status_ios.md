@@ -24,6 +24,7 @@
 | Keychain storage | ✅ Done | KeychainHelper enum in AuthService.swift |
 | Onboarding flow | ✅ Redesigned | AuthView.swift — matches RN app: brand logo, pill-shaped Apple/Google buttons, colored Google logo, error box, terms footer |
 | Deep link handling | ✅ Done | TodosApp.swift routes todus://auth-callback to AuthService |
+| AI profile settings | ✅ Done | Shared `Context about you` + `Custom instructions` fields now sync through backend `userSettings` and are injected into every AI prompt |
 
 ## Tab: Home
 
@@ -126,6 +127,7 @@
 ## Build Notes
 
 - March 30, 2026: fixed the remaining iOS compile blockers in `CardViews.swift`, `AIChatView.swift`, `VoiceChatViewModel.swift`, and `VoiceInputButton.swift`; verified `xcodebuild -project apps/ios/Todus/Todus.xcodeproj -scheme Todus -destination 'generic/platform=iOS Simulator' build` succeeds.
+- March 30, 2026: added the shared AI profile settings flow (`Context about you` + `Custom instructions`) to iOS, wired the form to backend `userSettings`, and injected the profile into every AI request path.
 - March 30, 2026: tightened AI chat failure handling on iOS and macOS so auth/session issues now surface as explicit messages instead of the generic "Connection lost briefly" banner; macOS build verified with `xcodebuild -project apps/macos/TodusMac.xcodeproj -scheme TodusMac build`.
 - March 29, 2026: fixed the `ChatUISpecView` opaque-type recursion by switching the recursive renderer to `AnyView`, then marked `EKWrapper` as `@unchecked Sendable` so CalendarKit event wrappers can cross the background-fetch to main-thread boundary in Swift 6 without a data-race compile error.
 - March 29, 2026: Xcode GUI hangs around `RegisterExecutionPolicyException ... CalendarKit.o` were traced to a local Xcode environment problem, not a CalendarKit source dependency problem.

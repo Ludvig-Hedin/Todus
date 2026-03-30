@@ -1,6 +1,7 @@
 import { getCachedMemories, formatMemoriesForPrompt, addMemories, invalidateMemoryCache, preloadMemories } from '../lib/mem0';
 import { injectMentionContextIntoMessages, mentionRefSchema } from '../lib/mentions';
 import { systemPrompt } from '../services/call-service/system-prompt';
+import { buildAIProfilePrompt } from '../lib/ai-profile';
 import { perplexity } from '@ai-sdk/perplexity';
 import { openai } from '@ai-sdk/openai';
 import { tools } from './agent/tools';
@@ -11,6 +12,7 @@ import { env } from '../env';
 import type { HonoContext } from '../ctx';
 import { Hono } from 'hono';
 import { z } from 'zod';
+import { getZeroDB } from '../lib/server-utils';
 
 type ToolsReturnType = Awaited<ReturnType<typeof tools>>;
 
@@ -263,6 +265,22 @@ aiRouter.post('/chat', async (c) => {
     } catch (error) {
       // Web search failure must never block the AI flow — proceed without sources
       console.warn('[WebSearch] Perplexity search failed:', error);
+    }
+  }
+
+  const zeroDB = await getZeroDB(user.id);
+  const settings = await zeroDB.findUserSettings();
+  const sharedAIProfilePrompt = buildAIProfilePrompt(settings?.settings);
+  if (sharedAIProfilePrompt) {
+    const systemIdx = enrichedMessages.findIndex((m) => m.role === 'system');
+    if (systemIdx >= 0) {
+      enrichedMessages = [...enrichedMessages];
+      enrichedMessages[systemIdx] = {
+        ...enrichedMessages[systemIdx],
+        content: `${sharedAIProfilePrompt}\n\n${enrichedMessages[systemIdx].content}`,
+      };
+    } else {
+      enrichedMessages = [{ role: 'system', content: sharedAIProfilePrompt }, ...enrichedMessages];
     }
   }
 
@@ -734,7 +752,12 @@ aiRouter.post('/call', async (c) => {
   const toolset = await tools(connection.id);
   const { text } = await generateText({
     model: openai(env.OPENAI_MODEL || 'gpt-4o'),
-    system: systemPrompt,
+    system: await (async () => {
+      const zeroDB = await getZeroDB(user.id);
+      const settings = await zeroDB.findUserSettings();
+      const sharedAIProfilePrompt = buildAIProfilePrompt(settings?.settings);
+      return sharedAIProfilePrompt ? `${sharedAIProfilePrompt}\n\n${systemPrompt}` : systemPrompt;
+    })(),
     prompt: data.query,
     tools: toolset,
     maxSteps: 10,

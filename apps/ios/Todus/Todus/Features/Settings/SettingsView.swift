@@ -44,17 +44,23 @@ struct SettingsView: View {
             .background(AppTheme.backgroundBottom)
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Done") {
+                            Task { @MainActor in
+                                await services.saveSharedAIProfile()
+                                dismiss()
+                            }
+                        }
                         .fontWeight(.semibold)
+                    }
                 }
-            }
         }
         .presentationDragIndicator(.visible)
         .task {
             // Refresh profile data (name, avatar) when settings opens
             await services.authService.fetchUserProfile()
+            await services.loadSharedAIProfile()
         }
         .task {
             await services.emailService.checkConnection()
@@ -507,6 +513,38 @@ struct SettingsView: View {
                 Label("Create & edit tasks", systemImage: "pencil")
             }
             .tint(.blue)
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Context about you")
+                    .font(.system(size: 15, weight: .medium))
+                TextEditor(
+                    text: Binding(
+                        get: { services.contextAboutYou },
+                        set: { services.contextAboutYou = $0 }
+                    )
+                )
+                .frame(minHeight: 110)
+                .scrollContentBackground(.hidden)
+                .padding(8)
+                .background(Color.secondary.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Custom instructions")
+                    .font(.system(size: 15, weight: .medium))
+                TextEditor(
+                    text: Binding(
+                        get: { services.customInstructions },
+                        set: { services.customInstructions = $0 }
+                    )
+                )
+                .frame(minHeight: 110)
+                .scrollContentBackground(.hidden)
+                .padding(8)
+                .background(Color.secondary.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
 
             Picker(selection: Binding(
                 get: { services.aiTonePreference },

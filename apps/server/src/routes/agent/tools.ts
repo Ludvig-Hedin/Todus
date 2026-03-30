@@ -1,5 +1,6 @@
 import { getCurrentDateContext, GmailSearchAssistantSystemPrompt } from '../../lib/prompts';
-import { getThread, getZeroAgent } from '../../lib/server-utils';
+import { buildAIProfilePrompt } from '../../lib/ai-profile';
+import { getThread, getZeroAgent, getZeroDB } from '../../lib/server-utils';
 import type { IGetThreadResponse } from '../../lib/driver/types';
 import { composeEmail } from '../../trpc/routes/ai/compose';
 import { perplexity } from '@ai-sdk/perplexity';
@@ -9,6 +10,7 @@ import { generateText, tool } from 'ai';
 import { Tools } from '../../types';
 import { env } from '../../env';
 import { z } from 'zod';
+import { createDb } from '../../db';
 
 type ModelTypes = 'summarize' | 'general' | 'chat' | 'vectorize';
 
@@ -409,7 +411,7 @@ const deleteLabel = (connectionId: string) =>
     },
   });
 
-const buildGmailSearchQuery = () =>
+const buildGmailSearchQuery = (connectionId: string) =>
   tool({
     description: 'Build a Gmail search query',
     parameters: z.object({
@@ -418,9 +420,26 @@ const buildGmailSearchQuery = () =>
     execute: async (params) => {
       console.log('[DEBUG] buildGmailSearchQuery', params);
 
+      const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
+      let sharedAIProfilePrompt = '';
+      try {
+        const connection = await db.query.connection.findFirst({
+          where: (table, { eq }) => eq(table.id, connectionId),
+        });
+        if (connection?.userId) {
+          const zeroDB = await getZeroDB(connection.userId);
+          const settings = await zeroDB.findUserSettings();
+          sharedAIProfilePrompt = buildAIProfilePrompt(settings?.settings);
+        }
+      } finally {
+        await conn.end();
+      }
+
       const result = await generateText({
         model: openai(env.OPENAI_MODEL || 'gpt-4o'),
-        system: GmailSearchAssistantSystemPrompt(),
+        system: sharedAIProfilePrompt
+          ? `${sharedAIProfilePrompt}\n\n${GmailSearchAssistantSystemPrompt()}`
+          : GmailSearchAssistantSystemPrompt(),
         prompt: params.query,
       });
       return {
@@ -493,7 +512,7 @@ export const tools = async (connectionId: string, ragEffect: boolean = false) =>
     [Tools.BulkDelete]: bulkDelete(connectionId),
     [Tools.BulkArchive]: bulkArchive(connectionId),
     [Tools.DeleteLabel]: deleteLabel(connectionId),
-    [Tools.BuildGmailSearchQuery]: buildGmailSearchQuery(),
+    [Tools.BuildGmailSearchQuery]: buildGmailSearchQuery(connectionId),
     [Tools.GetCurrentDate]: getCurrentDate(),
     [Tools.WebSearch]: webSearch(),
     [Tools.InboxRag]: tool({

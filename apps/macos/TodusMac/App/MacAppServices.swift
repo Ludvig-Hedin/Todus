@@ -7,6 +7,10 @@ import Observation
 @MainActor
 @Observable
 final class MacAppServices {
+    private enum Keys {
+        static let contextAboutYou = "MacApp.contextAboutYou"
+        static let customInstructions = "MacApp.customInstructions"
+    }
 
     let authService: AuthService
     let apiClient: TodosAPIClient
@@ -14,6 +18,21 @@ final class MacAppServices {
     let calendarService: CalendarService
     let networkMonitor: NetworkMonitor
     let aiChatService: MacAIChatService
+    private let defaults = UserDefaults.standard
+
+    var contextAboutYou: String {
+        didSet {
+            defaults.set(contextAboutYou, forKey: Keys.contextAboutYou)
+            aiChatService.contextAboutYou = contextAboutYou
+        }
+    }
+
+    var customInstructions: String {
+        didSet {
+            defaults.set(customInstructions, forKey: Keys.customInstructions)
+            aiChatService.customInstructions = customInstructions
+        }
+    }
 
     init() {
         let backendURL = Self.loadBackendURL()
@@ -27,6 +46,8 @@ final class MacAppServices {
         self.emailService = email
         self.calendarService = calendar
         self.networkMonitor = NetworkMonitor()
+        self.contextAboutYou = defaults.string(forKey: Keys.contextAboutYou) ?? ""
+        self.customInstructions = defaults.string(forKey: Keys.customInstructions) ?? ""
         self.aiChatService = MacAIChatService(
             backendURL: backendURL,
             apiClient: api,
@@ -34,6 +55,36 @@ final class MacAppServices {
             emailService: email,
             calendarService: calendar
         )
+        self.aiChatService.contextAboutYou = contextAboutYou
+        self.aiChatService.customInstructions = customInstructions
+    }
+
+    func loadSharedAIProfile() async {
+        guard authService.isAuthenticated else { return }
+
+        do {
+            let response: SharedAIProfileResponse = try await apiClient.trpcQuery("settings.get")
+            contextAboutYou = response.settings.contextAboutYou
+            customInstructions = response.settings.customPrompt
+        } catch {
+            print("[MacAppServices] Failed to load shared AI profile: \(error)")
+        }
+    }
+
+    func saveSharedAIProfile() async {
+        guard authService.isAuthenticated else { return }
+
+        do {
+            let _: SharedAIProfileSaveResponse = try await apiClient.trpcMutation(
+                "settings.save",
+                input: SharedAIProfileSaveInput(
+                    contextAboutYou: contextAboutYou,
+                    customPrompt: customInstructions
+                )
+            )
+        } catch {
+            print("[MacAppServices] Failed to save shared AI profile: \(error)")
+        }
     }
 
     func signOut() {
@@ -53,4 +104,22 @@ final class MacAppServices {
         // Fallback to production backend
         return URL(string: "https://api.todus.app")!
     }
+}
+
+private struct SharedAIProfileResponse: Decodable {
+    struct Settings: Decodable {
+        let contextAboutYou: String
+        let customPrompt: String
+    }
+
+    let settings: Settings
+}
+
+private struct SharedAIProfileSaveInput: Encodable {
+    let contextAboutYou: String
+    let customPrompt: String
+}
+
+private struct SharedAIProfileSaveResponse: Decodable {
+    let success: Bool
 }

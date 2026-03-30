@@ -12,6 +12,7 @@ import {
   GmailSearchAssistantSystemPrompt,
   AiChatPrompt,
 } from '../lib/prompts';
+import { buildAIProfilePrompt } from '../lib/ai-profile';
 import { type Connection, type ConnectionContext, type WSMessage } from 'agents';
 import { EPrompts, type IOutgoingMessage, type ParsedMessage } from '../types';
 import type { IGetThreadResponse, MailManager } from '../lib/driver/types';
@@ -33,6 +34,7 @@ import { and, eq } from 'drizzle-orm';
 import { McpAgent } from 'agents/mcp';
 import { groq } from '@ai-sdk/groq';
 import { createDb } from '../db';
+import { getZeroDB } from '../lib/server-utils';
 import { z } from 'zod';
 
 const decoder = new TextDecoder();
@@ -356,7 +358,12 @@ export class ZeroAgent extends AIChatAgent<typeof env> {
             throw new Error('Unauthorized no driver or connectionId [2]');
           }
         }
-        const tools = { ...authTools(this.driver, connectionId), buildGmailSearchQuery };
+        const tools = {
+          ...(await authTools(connectionId)),
+          buildGmailSearchQuery: buildGmailSearchQuery(() =>
+            this.getSharedAIProfilePrompt(connectionId),
+          ),
+        };
         const processedMessages = await processToolCalls(
           {
             messages: this.messages,
@@ -371,10 +378,14 @@ export class ZeroAgent extends AIChatAgent<typeof env> {
           messages: processedMessages,
           tools,
           onFinish,
-          system: await getPrompt(
-            getPromptName(connectionId, EPrompts.Chat),
-            AiChatPrompt('', '', ''),
-          ),
+          system: await (async () => {
+            const basePrompt = await getPrompt(
+              getPromptName(connectionId, EPrompts.Chat),
+              AiChatPrompt(),
+            );
+            const sharedAIProfilePrompt = await this.getSharedAIProfilePrompt(connectionId);
+            return sharedAIProfilePrompt ? `${sharedAIProfilePrompt}\n\n${basePrompt}` : basePrompt;
+          })(),
         });
 
         result.mergeIntoDataStream(dataStream);
@@ -690,10 +701,29 @@ export class ZeroAgent extends AIChatAgent<typeof env> {
     });
   }
 
+  private async getSharedAIProfilePrompt(connectionId: string) {
+    const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
+    try {
+      const connectionRow = await db.query.connection.findFirst({
+        where: eq(connection.id, connectionId),
+      });
+      if (!connectionRow?.userId) return '';
+
+      const zeroDB = await getZeroDB(connectionRow.userId);
+      const settings = await zeroDB.findUserSettings();
+      return buildAIProfilePrompt(settings?.settings);
+    } finally {
+      await conn.end();
+    }
+  }
+
   async buildGmailSearchQuery(query: string) {
+    const sharedAIProfilePrompt = await this.getSharedAIProfilePrompt(this.name);
     const result = await generateText({
       model: openai('gpt-4o'),
-      system: GmailSearchAssistantSystemPrompt(),
+      system: sharedAIProfilePrompt
+        ? `${sharedAIProfilePrompt}\n\n${GmailSearchAssistantSystemPrompt()}`
+        : GmailSearchAssistantSystemPrompt(),
       prompt: query,
     });
     return result.text;
@@ -1178,6 +1208,12 @@ export class ZeroMCP extends McpAgent<typeof env, {}, { userId: string }> {
     super(ctx, env);
   }
 
+  private async getSharedAIProfilePrompt() {
+    const zeroDB = await getZeroDB(this.props.userId);
+    const settings = await zeroDB.findUserSettings();
+    return buildAIProfilePrompt(settings?.settings);
+  }
+
   async init(): Promise<void> {
     const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
     const _connection = await db.query.connection.findFirst({
@@ -1251,9 +1287,12 @@ export class ZeroMCP extends McpAgent<typeof env, {}, { userId: string }> {
         query: z.string(),
       },
       async (s) => {
+        const sharedAIProfilePrompt = await this.getSharedAIProfilePrompt();
         const result = await generateText({
           model: openai('gpt-4o'),
-          system: GmailSearchAssistantSystemPrompt(),
+          system: sharedAIProfilePrompt
+            ? `${sharedAIProfilePrompt}\n\n${GmailSearchAssistantSystemPrompt()}`
+            : GmailSearchAssistantSystemPrompt(),
           prompt: s.query,
         });
         return {
@@ -1590,20 +1629,24 @@ export class ZeroMCP extends McpAgent<typeof env, {}, { userId: string }> {
   }
 }
 
-const buildGmailSearchQuery = tool({
-  description: 'Build a Gmail search query',
-  parameters: z.object({
-    query: z.string().describe('The search query to build, provided in natural language'),
-  }),
-  execute: async ({ query }) => {
-    const result = await generateObject({
-      model: openai('gpt-4o'),
-      system: GmailSearchAssistantSystemPrompt(),
-      prompt: query,
-      schema: z.object({
-        query: z.string(),
-      }),
-    });
-    return result.object;
-  },
-});
+const buildGmailSearchQuery = (getSharedAIProfilePrompt: () => Promise<string>) =>
+  tool({
+    description: 'Build a Gmail search query',
+    parameters: z.object({
+      query: z.string().describe('The search query to build, provided in natural language'),
+    }),
+    execute: async ({ query }) => {
+      const sharedAIProfilePrompt = await getSharedAIProfilePrompt();
+      const result = await generateObject({
+        model: openai('gpt-4o'),
+        system: sharedAIProfilePrompt
+          ? `${sharedAIProfilePrompt}\n\n${GmailSearchAssistantSystemPrompt()}`
+          : GmailSearchAssistantSystemPrompt(),
+        prompt: query,
+        schema: z.object({
+          query: z.string(),
+        }),
+      });
+      return result.object;
+    },
+  });

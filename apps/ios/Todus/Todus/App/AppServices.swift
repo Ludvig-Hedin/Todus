@@ -82,6 +82,8 @@ final class AppServices {
         static let aiTonePreference = "TaskApp.aiTonePreference"
         static let taskRemindersEnabled = "TaskApp.taskRemindersEnabled"
         static let calendarRemindersEnabled = "TaskApp.calendarRemindersEnabled"
+        static let contextAboutYou = "TaskApp.contextAboutYou"
+        static let customInstructions = "TaskApp.customInstructions"
     }
 
     let configuration: AppConfiguration
@@ -215,6 +217,20 @@ final class AppServices {
         }
     }
 
+    var contextAboutYou: String {
+        didSet {
+            defaults.set(contextAboutYou, forKey: Keys.contextAboutYou)
+            aiChatService.contextAboutYou = contextAboutYou
+        }
+    }
+
+    var customInstructions: String {
+        didSet {
+            defaults.set(customInstructions, forKey: Keys.customInstructions)
+            aiChatService.customInstructions = customInstructions
+        }
+    }
+
     /// Whether local notifications are scheduled for task due dates
     var taskRemindersEnabled: Bool {
         didSet {
@@ -299,6 +315,8 @@ final class AppServices {
         self.threadGroupingEnabled = defaults.object(forKey: Keys.threadGroupingEnabled) as? Bool ?? true
         self.aiTonePreference = defaults.string(forKey: Keys.aiTonePreference)
             .flatMap(AITonePreference.init(rawValue:)) ?? .professional
+        self.contextAboutYou = defaults.string(forKey: Keys.contextAboutYou) ?? ""
+        self.customInstructions = defaults.string(forKey: Keys.customInstructions) ?? ""
         self.taskRemindersEnabled = defaults.object(forKey: Keys.taskRemindersEnabled) as? Bool ?? true
         self.calendarRemindersEnabled = defaults.object(forKey: Keys.calendarRemindersEnabled) as? Bool ?? true
         // Load signatures — migrate from old single-text format if no v2 data exists
@@ -341,6 +359,8 @@ final class AppServices {
             await Task.yield()
             self.aiChatService.loadSavedPrompts()
             self.aiChatService.toneInstruction = self.aiTonePreference.systemPromptInstruction
+            self.aiChatService.contextAboutYou = self.contextAboutYou
+            self.aiChatService.customInstructions = self.customInstructions
         }
 
         self.captureService.taskRemindersEnabled = self.taskRemindersEnabled
@@ -354,6 +374,34 @@ final class AppServices {
         emailService.resetForSignOut()
         authService.signOut()
         authStore.signOutToGuest()
+    }
+
+    func loadSharedAIProfile() async {
+        guard authService.isAuthenticated else { return }
+
+        do {
+            let response: SharedAIProfileResponse = try await apiClient.trpcQuery("settings.get")
+            contextAboutYou = response.settings.contextAboutYou
+            customInstructions = response.settings.customPrompt
+        } catch {
+            print("[AppServices] Failed to load shared AI profile: \(error)")
+        }
+    }
+
+    func saveSharedAIProfile() async {
+        guard authService.isAuthenticated else { return }
+
+        do {
+            let _: SharedAIProfileSaveResponse = try await apiClient.trpcMutation(
+                "settings.save",
+                input: SharedAIProfileSaveInput(
+                    contextAboutYou: contextAboutYou,
+                    customPrompt: customInstructions
+                )
+            )
+        } catch {
+            print("[AppServices] Failed to save shared AI profile: \(error)")
+        }
     }
 
     func completeAuthUpgradeIfNeeded(in context: ModelContext) async {
@@ -408,4 +456,22 @@ final class AppServices {
             message: "Import reminders end"
         )
     }
+}
+
+private struct SharedAIProfileResponse: Decodable {
+    struct Settings: Decodable {
+        let contextAboutYou: String
+        let customPrompt: String
+    }
+
+    let settings: Settings
+}
+
+private struct SharedAIProfileSaveInput: Encodable {
+    let contextAboutYou: String
+    let customPrompt: String
+}
+
+private struct SharedAIProfileSaveResponse: Decodable {
+    let success: Bool
 }

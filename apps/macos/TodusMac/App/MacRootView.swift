@@ -125,6 +125,7 @@ struct MacRootView: View {
             // is still nil. Matches iOS RootView behavior.
             guard services.authService.isAuthenticated else { return }
             await services.authService.fetchUserProfile()
+            await services.loadSharedAIProfile()
         }
     }
 

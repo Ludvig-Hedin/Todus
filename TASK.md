@@ -207,6 +207,7 @@ All marked DONE — these are WebView-based, not truly native.
   - Added native performance tracing for launch, deferred startup, tab switches, SwiftData saves, email inbox loading, and reminders sync/import so Instruments `Hangs`, `Time Profiler`, and `Points of Interest` can be correlated directly to app code.
   - Reduced shared-auth main-thread pressure by caching the bearer token in memory and pushing keychain persistence for token/profile metadata onto utility-priority detached work.
   - Avoided repeated initial inbox reloads on tab revisit and fixed the Create Sheet event fallback so attachments are preserved when calendar creation is unavailable.
+- Shared AI profile settings now flow through backend `userSettings` and are injected into every AI prompt across web, iOS, and macOS. The profile is split into `Context about you` and `Custom instructions`, with `customPrompt` preserved as the stored field for instructions.
 - Verification completed for this update:
   - `xcodebuild -project apps/ios/Todus/Todus.xcodeproj -scheme Todus -configuration Debug -destination 'platform=iOS Simulator,id=816A2B85-AC23-43A8-9A57-0310E1AC0292' build` passes.
   - Build still reports pre-existing EventKit sendability warnings in `CalendarViewController.swift`; they were not introduced by this change set.

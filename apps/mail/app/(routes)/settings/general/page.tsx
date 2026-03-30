@@ -13,6 +13,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useForm, type ControllerRenderProps } from 'react-hook-form';
@@ -132,6 +133,7 @@ export default function GeneralPage() {
       language: locale,
       timezone: getBrowserTimezone(),
       dynamicContent: false,
+      contextAboutYou: '',
       customPrompt: '',
       todusSignature: true,
       defaultEmailAlias: '',
@@ -319,6 +321,40 @@ export default function GeneralPage() {
     [],
   );
 
+  const renderContextAboutYouField = useCallback(
+    ({ field }: { field: any }) => (
+      <FormItem className="max-w-xl space-y-2">
+        <FormLabel className="text-sm font-medium">Context about you</FormLabel>
+        <FormControl>
+          <Textarea
+            {...field}
+            value={field.value ?? ''}
+            placeholder="Share background about yourself, your role, preferences, and anything the AI should know."
+            className="min-h-[120px] resize-y"
+          />
+        </FormControl>
+      </FormItem>
+    ),
+    [],
+  );
+
+  const renderCustomInstructionsField = useCallback(
+    ({ field }: { field: any }) => (
+      <FormItem className="max-w-xl space-y-2">
+        <FormLabel className="text-sm font-medium">Custom instructions</FormLabel>
+        <FormControl>
+          <Textarea
+            {...field}
+            value={field.value ?? ''}
+            placeholder="Add instructions for how the AI should respond."
+            className="min-h-[120px] resize-y"
+          />
+        </FormControl>
+      </FormItem>
+    ),
+    [],
+  );
+
   return (
     <div className="grid gap-6">
       <SettingsCard
@@ -372,6 +408,18 @@ export default function GeneralPage() {
               name="undoSendEnabled"
               render={renderUndoSendEnabledField}
             />
+            <div className="space-y-4">
+              <FormField
+                control={form.control}
+                name="contextAboutYou"
+                render={renderContextAboutYouField}
+              />
+              <FormField
+                control={form.control}
+                name="customPrompt"
+                render={renderCustomInstructionsField}
+              />
+            </div>
             <FormField control={form.control} name="animations" render={renderAnimationsField} />
           </form>
         </Form>

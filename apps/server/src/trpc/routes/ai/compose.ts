@@ -4,6 +4,7 @@ import {
 } from '../../../services/writing-style-service';
 import { escapeXml } from '../../../thread-workflow-utils/workflow-utils';
 import { StyledEmailAssistantSystemPrompt } from '../../../lib/prompts';
+import { buildAIProfilePrompt } from '../../../lib/ai-profile';
 import { webSearch } from '../../../routes/agent/tools';
 import { activeConnectionProcedure } from '../../trpc';
 import { getPrompt } from '../../../lib/brain';
@@ -13,6 +14,8 @@ import { openai } from '@ai-sdk/openai';
 import { env } from '../../../env';
 import { generateText } from 'ai';
 import { z } from 'zod';
+import { createDb } from '../../../db';
+import { getZeroDB } from '../../../lib/server-utils';
 
 type ComposeEmailInput = {
   prompt: string;
@@ -30,6 +33,23 @@ type ComposeEmailInput = {
   connectionId: string;
 };
 
+async function getSharedAIProfilePrompt(connectionId: string) {
+  const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
+  try {
+    const connectionRow = await db.query.connection.findFirst({
+      where: (table, { eq }) => eq(table.id, connectionId),
+    });
+
+    if (!connectionRow?.userId) return '';
+
+    const zeroDB = await getZeroDB(connectionRow.userId);
+    const settings = await zeroDB.findUserSettings();
+    return buildAIProfilePrompt(settings?.settings);
+  } finally {
+    await conn.end();
+  }
+}
+
 export async function composeEmail(input: ComposeEmailInput) {
   const { prompt, threadMessages = [], cc, emailSubject, to, username, connectionId } = input;
 
@@ -37,10 +57,15 @@ export async function composeEmail(input: ComposeEmailInput) {
     connectionId,
   });
 
+  const sharedAIProfilePrompt = await getSharedAIProfilePrompt(connectionId);
+
   const systemPrompt = await getPrompt(
     `${connectionId}-${EPrompts.Compose}`,
     StyledEmailAssistantSystemPrompt(),
   );
+  const systemPromptWithProfile = sharedAIProfilePrompt
+    ? `${sharedAIProfilePrompt}\n\n${systemPrompt}`
+    : systemPrompt;
   const userPrompt = EmailAssistantPrompt({
     currentSubject: emailSubject,
     recipients: [...(to ?? []), ...(cc ?? [])],
@@ -91,7 +116,7 @@ export async function composeEmail(input: ComposeEmailInput) {
     messages: [
       {
         role: 'system',
-        content: systemPrompt,
+        content: systemPromptWithProfile,
       },
       ...messages,
       {

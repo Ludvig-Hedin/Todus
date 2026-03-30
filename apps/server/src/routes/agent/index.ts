@@ -47,6 +47,7 @@ import { connectionToDriver, getZeroSocketAgent, reSyncThread } from '../../lib/
 import { generateWhatUserCaresAbout, type UserTopic } from '../../lib/analyze/interests';
 import { DurableObjectOAuthClientProvider } from 'agents/mcp/do-oauth-client-provider';
 import { AiChatPrompt, GmailSearchAssistantSystemPrompt } from '../../lib/prompts';
+import { buildAIProfilePrompt } from '../../lib/ai-profile';
 import { Migratable, Queryable, Transfer } from 'dormroom';
 import type { CreateDraftData } from '../../lib/schemas';
 import { drizzle } from 'drizzle-orm/durable-sqlite';
@@ -76,6 +77,7 @@ import { groq } from '@ai-sdk/groq';
 import { createDb } from '../../db';
 import type { Message } from 'ai';
 import { create } from './db';
+import { getZeroDB } from '../../lib/server-utils';
 
 const decoder = new TextDecoder();
 const maxCount = 20;
@@ -703,6 +705,14 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
     await this.syncFolders();
   }
 
+  private async getSharedAIProfilePrompt() {
+    if (!this.connection?.userId) return '';
+
+    const zeroDB = await getZeroDB(this.connection.userId);
+    const settings = await zeroDB.findUserSettings();
+    return buildAIProfilePrompt(settings?.settings);
+  }
+
   public async setupAuth() {
     if (this.name === 'general') return;
     if (!this.driver) {
@@ -1128,10 +1138,14 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
       }),
     ).pipe(Effect.catchAll(() => Effect.succeed([])));
 
+    const sharedAIProfilePrompt = await this.getSharedAIProfilePrompt();
+
     const genQueryEffect = Effect.tryPromise(() =>
       generateText({
         model: openai(this.env.OPENAI_MODEL || 'gpt-4o'),
-        system: GmailSearchAssistantSystemPrompt(),
+        system: sharedAIProfilePrompt
+          ? `${sharedAIProfilePrompt}\n\n${GmailSearchAssistantSystemPrompt()}`
+          : GmailSearchAssistantSystemPrompt(),
         prompt: params.query,
       }).then((response) => response.text),
     ).pipe(Effect.catchAll(() => Effect.succeed(query)));
@@ -1826,15 +1840,16 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
 
         const model =
           this.env.OPENROUTER_API_KEY
-            ? openai(this.env.DEFAULT_MODEL || 'google/gemini-2.0-flash-001', {
+            ? openai(this.env.DEFAULT_MODEL || 'google/gemini-3-flash-preview', {
               baseURL: 'https://openrouter.ai/api/v1',
               apiKey: this.env.OPENROUTER_API_KEY,
             })
             : this.env.GOOGLE_GENERATIVE_AI_API_KEY
-              ? google(this.env.DEFAULT_MODEL || 'gemini-1.5-flash')
+              ? google(this.env.DEFAULT_MODEL || 'gemini-3-flash-preview')
               : this.env.USE_OPENAI === 'true'
-                ? openai(this.env.OPENAI_MODEL || 'gpt-4o')
-                : anthropic(this.env.OPENAI_MODEL || 'claude-3-7-sonnet-20250219');
+                ? openai(this.env.OPENAI_MODEL || 'gpt-5.4-mini')
+                : anthropic(this.env.OPENAI_MODEL || 'claude-4-5-haiku');
+        const sharedAIProfilePrompt = await this.getSharedAIProfilePrompt();
 
         // ── Mem0: Inject cached memories into the system prompt ────────────
         // Reads from in-memory cache (0ms) populated by onConnect preload.
@@ -1848,7 +1863,7 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
               ?? await getCachedMemories(userId, this.env.prompts_storage, this.env.MEM0_API_KEY);
             memoryBlock = formatMemoriesForPrompt(memories);
           } catch (error) {
-            console.warn('[Mem0] Failed to get memories for ZeroAgent prompt:', error);
+            console.warn('[Mem0] Failed to get memories for Todus AI prompt:', error);
           }
         }
 
@@ -1900,6 +1915,9 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
         const systemPromptWithMemory = memoryBlock
           ? memoryBlock + '\n\n' + baseSystemPrompt
           : baseSystemPrompt;
+        const systemPromptWithProfile = sharedAIProfilePrompt
+          ? `${sharedAIProfilePrompt}\n\n${systemPromptWithMemory}`
+          : systemPromptWithMemory;
 
         const result = streamText({
           model,
@@ -1910,7 +1928,7 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
           onError: (error) => {
             console.error('Error in streamText', error);
           },
-          system: systemPromptWithMemory,
+          system: systemPromptWithProfile,
         });
 
         result.mergeIntoDataStream(dataStream);
@@ -1918,6 +1936,14 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
     });
 
     return dataStreamResponse;
+  }
+
+  private async getSharedAIProfilePrompt() {
+    if (!this.memoriesUserId) return '';
+
+    const zeroDB = await getZeroDB(this.memoriesUserId);
+    const settings = await zeroDB.findUserSettings();
+    return buildAIProfilePrompt(settings?.settings);
   }
 
   private async tryCatchChat<T>(fn: () => T | Promise<T>) {
