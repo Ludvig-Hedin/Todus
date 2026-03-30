@@ -54,8 +54,18 @@ export default function ConnectionsSettings() {
   );
 
   const openConnectionsOnWeb = async () => {
-    const url = `${env.webUrl.replace(/\/$/, '')}/settings/connections`;
-    await Linking.openURL(url);
+    const url = `${env.webUrl?.replace(/\/$/, '')}/settings/connections`;
+    try {
+      const canOpen = await Linking.canOpenURL(url);
+      if (!canOpen) {
+        Alert.alert('Could not open web settings', 'Please open the web app manually.');
+        return;
+      }
+      await Linking.openURL(url);
+    } catch (error: any) {
+      console.error('[connections] failed to open web settings', error);
+      Alert.alert('Could not open web settings', error?.message || 'Please try again.');
+    }
   };
 
   const setDefaultConnection = async (connectionId: string) => {
@@ -172,8 +182,17 @@ export default function ConnectionsSettings() {
                           defaultConnectionId === conn.id ? colors.foreground : ui.surface,
                       },
                     ]}
-                    onPress={() => setDefaultConnection(conn.id)}
-                    disabled={setDefaultMutation.isPending}
+                    onPress={() => {
+                      if (!conn.id || setDefaultMutation.isPending) return;
+                      void setDefaultConnection(conn.id);
+                    }}
+                    disabled={!conn.id || setDefaultMutation.isPending}
+                    accessibilityRole="button"
+                    accessibilityLabel={
+                      defaultConnectionId === conn.id
+                        ? `Default connection, ${conn.email || conn.providerId || 'selected'}`
+                        : `Set default connection: ${conn.email || conn.providerId || 'account'}`
+                    }
                   >
                     <Star
                       size={16}
@@ -188,7 +207,11 @@ export default function ConnectionsSettings() {
                         styles.iconButton,
                         { borderColor: ui.borderStrong, backgroundColor: ui.surface },
                       ]}
-                      onPress={openConnectionsOnWeb}
+                      onPress={() => {
+                        void openConnectionsOnWeb();
+                      }}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Reconnect ${conn.email || conn.providerId || 'account'}`}
                     >
                       <Unplug size={16} color={colors.foreground} />
                     </Pressable>
@@ -198,8 +221,13 @@ export default function ConnectionsSettings() {
                         styles.iconButton,
                         { borderColor: ui.borderStrong, backgroundColor: ui.surface },
                       ]}
-                      onPress={() => disconnectConnection(conn.id)}
-                      disabled={connections.length <= 1 || deleteMutation.isPending}
+                      onPress={() => {
+                        if (!conn.id || connections.length <= 1 || deleteMutation.isPending) return;
+                        disconnectConnection(conn.id);
+                      }}
+                      disabled={!conn.id || connections.length <= 1 || deleteMutation.isPending}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Disconnect ${conn.email || conn.providerId || 'account'}`}
                     >
                       <Trash2 size={16} color={colors.destructive} />
                     </Pressable>
@@ -215,7 +243,11 @@ export default function ConnectionsSettings() {
             styles.addButton,
             { borderColor: ui.borderStrong, backgroundColor: ui.surfaceRaised },
           ]}
-          onPress={openConnectionsOnWeb}
+          onPress={() => {
+            void openConnectionsOnWeb();
+          }}
+          accessibilityRole="button"
+          accessibilityLabel="Add Email Account"
         >
           <Plus size={16} color={colors.foreground} />
           <Text style={[styles.addButtonLabel, { color: colors.foreground }]}>

@@ -168,7 +168,7 @@ export function MailSidebar(props: DrawerContentComponentProps) {
   const settingsActive = pathname.includes('/settings');
   const searchActive = pathname === '/search';
   const bearerToken = session?.mode === 'bearer' ? session.token : null;
-  const [linkingProviderId, setLinkingProviderId] = useState<string | null>(null);
+  const [linkingConnectionId, setLinkingConnectionId] = useState<string | null>(null);
 
   const connectionsQuery = useQuery({
     ...trpc.connections.list.queryOptions(),
@@ -264,14 +264,14 @@ export function MailSidebar(props: DrawerContentComponentProps) {
   }, [queryClient, trpc]);
 
   const startLinkFlow = useCallback(
-    async (providerId: string) => {
+    async (providerId: string, connectionId?: string) => {
       if (!bearerToken) {
         navigateToRoute('/(app)/settings/connections');
         return;
       }
 
       const mobileTokenUrl = `${env.backendUrl.replace(/\/$/, '')}/api/auth/mobile-token`;
-      setLinkingProviderId(providerId);
+      setLinkingConnectionId(connectionId ?? null);
 
       try {
         haptics.selection();
@@ -303,7 +303,7 @@ export function MailSidebar(props: DrawerContentComponentProps) {
 
         Alert.alert('Could not connect another account', message);
       } finally {
-        setLinkingProviderId(null);
+        setLinkingConnectionId(null);
       }
     },
     [
@@ -326,7 +326,7 @@ export function MailSidebar(props: DrawerContentComponentProps) {
   }, [canAddConnection, navigateToRoute, startLinkFlow]);
 
   const handleReconnect = useCallback(
-    (providerId?: string | null) => {
+    (providerId?: string | null, connectionId?: string) => {
       if (!providerId) {
         Alert.alert(
           'Reconnect unavailable',
@@ -335,7 +335,7 @@ export function MailSidebar(props: DrawerContentComponentProps) {
         return;
       }
 
-      void startLinkFlow(providerId);
+      void startLinkFlow(providerId, connectionId);
     },
     [startLinkFlow],
   );
@@ -435,11 +435,11 @@ export function MailSidebar(props: DrawerContentComponentProps) {
                       {
                         borderColor: ui.borderSubtle,
                         backgroundColor: canAddConnection ? ui.surface : ui.surfaceInset,
-                        opacity: linkingProviderId ? 0.7 : 1,
+                    opacity: linkingConnectionId ? 0.7 : 1,
                       },
                     ]}
                     onPress={handleAddAccount}
-                    disabled={Boolean(linkingProviderId)}
+                    disabled={Boolean(linkingConnectionId)}
                     accessibilityRole="button"
                     accessibilityLabel={
                       canAddConnection
@@ -447,7 +447,7 @@ export function MailSidebar(props: DrawerContentComponentProps) {
                         : 'Open billing to add another email account'
                     }
                   >
-                    {linkingProviderId ? (
+                    {linkingConnectionId ? (
                       <ActivityIndicator size="small" color={colors.foreground} />
                     ) : (
                       <Plus width={16} height={16} color={colors.foreground} />
@@ -501,8 +501,8 @@ export function MailSidebar(props: DrawerContentComponentProps) {
                 <Text style={[styles.disconnectedTitle, { color: colors.mutedForeground }]}>
                   Reconnect
                 </Text>
-                {disconnectedConnections.map((connection) => {
-                  const reconnecting = linkingProviderId === connection.providerId;
+                  {disconnectedConnections.map((connection) => {
+                  const reconnecting = linkingConnectionId === connection.id;
 
                   return (
                     <View
@@ -525,8 +525,8 @@ export function MailSidebar(props: DrawerContentComponentProps) {
                           styles.reconnectButton,
                           { backgroundColor: ui.surface, borderColor: ui.borderStrong },
                         ]}
-                        onPress={() => handleReconnect(connection.providerId)}
-                        disabled={Boolean(linkingProviderId)}
+                        onPress={() => handleReconnect(connection.providerId, connection.id)}
+                        disabled={Boolean(linkingConnectionId)}
                         accessibilityRole="button"
                         accessibilityLabel={`Reconnect ${connection.email || getConnectionTitle(connection)}`}
                       >

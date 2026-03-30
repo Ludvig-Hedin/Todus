@@ -16,7 +16,7 @@ import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTRPC } from '../../../src/providers/QueryTrpcProvider';
 import { useTheme } from '../../../src/shared/theme/ThemeContext';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 type GeneralFormState = {
   language: string;
@@ -44,6 +44,7 @@ export default function GeneralSettings() {
   const queryClient = useQueryClient();
   const [form, setForm] = useState<GeneralFormState>(DEFAULT_FORM_STATE);
   const [isDirty, setIsDirty] = useState(false);
+  const hasInitializedRef = useRef(false);
 
   const settingsQuery = useQuery(trpc.settings.get.queryOptions());
   const connectionsQuery = useQuery(trpc.connections.list.queryOptions());
@@ -59,6 +60,7 @@ export default function GeneralSettings() {
   useEffect(() => {
     const settings = settingsQuery.data?.settings;
     if (!settings) return;
+    if (hasInitializedRef.current && isDirty) return;
     setForm({
       language: settings.language || 'en',
       timezone: settings.timezone || 'UTC',
@@ -69,7 +71,8 @@ export default function GeneralSettings() {
       animations: settings.animations ?? false,
     });
     setIsDirty(false);
-  }, [settingsQuery.data?.settings]);
+    hasInitializedRef.current = true;
+  }, [isDirty, settingsQuery.data?.settings]);
 
   const aliasOptions = useMemo(() => {
     const connections = connectionsQuery.data?.connections ?? [];
@@ -104,6 +107,21 @@ export default function GeneralSettings() {
     return (
       <View style={[styles.loading, { backgroundColor: ui.canvas }]}>
         <ActivityIndicator color={colors.foreground} />
+      </View>
+    );
+  }
+
+  if (settingsQuery.isError) {
+    return (
+      <View style={[styles.loading, { backgroundColor: ui.canvas }]}>
+        <View style={[styles.errorBox, { backgroundColor: ui.surfaceRaised, borderColor: ui.borderSubtle }]}>
+          <Text style={{ color: colors.foreground, fontWeight: '600' }}>Could not load settings</Text>
+          <Text style={{ color: colors.mutedForeground, marginTop: 4 }}>
+            {(settingsQuery.error as Error | undefined)?.message ??
+              'Settings may be out of date.'}
+          </Text>
+          <SettingsButton label="Retry" onPress={() => settingsQuery.refetch()} />
+        </View>
       </View>
     );
   }
@@ -192,5 +210,12 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  errorBox: {
+    width: '100%',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 12,
+    padding: 16,
+    gap: 8,
   },
 });

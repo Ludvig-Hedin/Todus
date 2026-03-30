@@ -147,6 +147,10 @@ export default function SearchScreen() {
           {query.length > 0 && (
             <Pressable
               onPress={() => {
+                if (debounceTimerRef.current) {
+                  clearTimeout(debounceTimerRef.current);
+                  debounceTimerRef.current = null;
+                }
                 setQuery('');
                 setDebouncedQuery('');
               }}

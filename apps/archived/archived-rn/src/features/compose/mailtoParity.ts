@@ -26,9 +26,13 @@ export function getFirstQueryValue(value: string | string[] | undefined): string
 function decodeMaybe(value: string): string {
   let decoded = value;
   for (let i = 0; i < DECODE_ATTEMPTS; i += 1) {
+    const previousDecoded = decoded;
     try {
       decoded = decodeURIComponent(decoded);
     } catch {
+      break;
+    }
+    if (decoded === previousDecoded) {
       break;
     }
   }
@@ -87,7 +91,7 @@ export function parseMailtoUrl(mailtoUrl: string): ParsedMailtoData | null {
     let bcc = '';
 
     if (queryPartRaw) {
-      const queryParams = new URLSearchParams(decodeMaybe(queryPartRaw));
+      const queryParams = new URLSearchParams(queryPartRaw);
       subject = decodeMaybe(queryParams.get('subject') ?? '');
       body = decodeMaybe(queryParams.get('body') ?? '');
       cc = decodeMaybe(queryParams.get('cc') ?? '');

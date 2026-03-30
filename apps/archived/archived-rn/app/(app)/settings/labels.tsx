@@ -145,6 +145,8 @@ export default function LabelsSettings() {
                 { borderColor: ui.borderStrong, backgroundColor: ui.surface },
               ]}
               onPress={openCreate}
+              accessibilityRole="button"
+              accessibilityLabel="Create label"
             >
               <Plus size={16} color={colors.foreground} />
             </Pressable>
@@ -241,6 +243,8 @@ export default function LabelsSettings() {
                       { borderColor: ui.borderStrong, backgroundColor: ui.surface },
                     ]}
                     onPress={() => openEdit(label)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Edit label ${label.name || 'unnamed'}`}
                   >
                     <Pencil size={14} color={colors.foreground} />
                   </Pressable>
@@ -250,6 +254,8 @@ export default function LabelsSettings() {
                       { borderColor: ui.borderStrong, backgroundColor: ui.surface },
                     ]}
                     onPress={() => deleteLabel(label.id)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Delete label ${label.name || 'unnamed'}`}
                   >
                     <Trash2 size={14} color={colors.destructive} />
                   </Pressable>

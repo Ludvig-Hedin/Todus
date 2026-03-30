@@ -35,10 +35,11 @@ export default function PrivacySettings() {
   useEffect(() => {
     const settings = settingsQuery.data?.settings;
     if (!settings) return;
+    if (isDirty) return;
     setExternalImages(settings.externalImages ?? true);
     setTrustedSenders(settings.trustedSenders ?? []);
     setIsDirty(false);
-  }, [settingsQuery.data?.settings]);
+  }, [isDirty, settingsQuery.data?.settings]);
 
   const normalizedNewSender = useMemo(() => newSender.trim().toLowerCase(), [newSender]);
 
@@ -71,6 +72,21 @@ export default function PrivacySettings() {
     return (
       <View style={[styles.loading, { backgroundColor: ui.canvas }]}>
         <ActivityIndicator color={colors.foreground} />
+      </View>
+    );
+  }
+
+  if (settingsQuery.isError) {
+    return (
+      <View style={[styles.loading, { backgroundColor: ui.canvas }]}>
+        <View style={[styles.errorBox, { backgroundColor: ui.surfaceRaised, borderColor: ui.borderSubtle }]}>
+          <Text style={{ color: colors.foreground, fontWeight: '600' }}>Could not load settings</Text>
+          <Text style={{ color: colors.mutedForeground, marginTop: 4 }}>
+            {(settingsQuery.error as Error | undefined)?.message ??
+              'Privacy values may be out of date.'}
+          </Text>
+          <SettingsButton label="Retry" onPress={() => settingsQuery.refetch()} />
+        </View>
       </View>
     );
   }
@@ -143,6 +159,13 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  errorBox: {
+    width: '100%',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 12,
+    padding: 16,
+    gap: 8,
   },
   addSenderRow: {
     flexDirection: 'row',

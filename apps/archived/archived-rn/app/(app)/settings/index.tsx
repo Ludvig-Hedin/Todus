@@ -95,9 +95,14 @@ export default function SettingsIndex() {
               styles.topActionButton,
               { borderColor: ui.borderSubtle, backgroundColor: ui.surface },
             ]}
-            onPress={() =>
-              (navigation as any).openDrawer?.() ?? navigation.dispatch({ type: 'OPEN_DRAWER' })
-            }
+            onPress={() => {
+              const openDrawer = (navigation as any).openDrawer;
+              if (typeof openDrawer === 'function') {
+                openDrawer();
+                return;
+              }
+              navigation.dispatch({ type: 'OPEN_DRAWER' });
+            }}
             accessibilityRole="button"
             accessibilityLabel="Open app menu"
           >
