@@ -24,7 +24,7 @@ private struct PromptTemplate: Identifiable {
 // MARK: - MacVoiceController
 
 /// Speech-to-text controller for macOS. Manages AVAudioEngine + SFSpeechRecognizer lifecycle.
-/// Audio capture properties are nonisolated(unsafe) because they're accessed from audio callbacks.
+/// Recognition callbacks hop to the main actor to mutate state safely.
 @MainActor
 @Observable
 private final class MacVoiceController {

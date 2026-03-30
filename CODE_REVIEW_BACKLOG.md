@@ -12,7 +12,7 @@ Maintained by the automated code-review agent. Updated on each review session.
 - **Impact:** user-facing
 - **Risk:** high
 - **Files:** `apps/mail/lib/auth-client.ts`, `apps/mail/lib/auth-proxy.ts`, `apps/mail/providers/query-provider.tsx`
-- **Summary:** `VITE_PUBLIC_PARITY_AUTH_BYPASS` completely bypasses authentication when set. The `VITE_PUBLIC_` prefix means it is bundled into the client JS. If accidentally set in a production build, all authentication is bypassed with a fixed fake user (`parity-bypass-user`). There is no `import.meta.env.DEV` guard to ensure it is tree-shaken in production.
+- **Summary:** `VITE_PUBLIC_PARITY_AUTH_BYPASS` completely bypasses authentication when set. The `VITE_PUBLIC_` prefix means it is bundled into the client JS. If accidentally set in a production build, all authentication is bypassed with a fixed fake user (`parity-bypass-user`). There is no `import.meta.env.DEV` guard to ensure it is tree-shaken in production builds.
 - **Suggested approach:** Add `import.meta.env.DEV &&` before each env var check so Vite's dead-code elimination removes the bypass in production builds.
 - **Status:** `auto-fixed` — Added `import.meta.env.DEV` guards in auth-client.ts, auth-proxy.ts, and query-provider.tsx (2026-03-03).
 
@@ -229,3 +229,23 @@ Maintained by the automated code-review agent. Updated on each review session.
 - **Summary:** The build still emits deprecation warnings for `requestRecordPermission`. This is low-risk, but it should be migrated to `AVAudioApplication.requestRecordPermission` to stay aligned with the current iOS API surface.
 - **Suggested approach:** Update both call sites to the iOS 17+ API with a compatibility branch for older OS versions if needed.
 - **Status:** `open`
+
+### CR-022: Full WIP snapshot committed as single safety backup
+- **Area/Scope:** `repo/git`
+- **Type:** design-debt
+- **Impact:** internal
+- **Risk:** low
+- **Files:** (branch `backup/safety-2026-03-30-full-wip` on origin)
+- **Summary:** Before the 2026-03-30 macOS review, all local changes were captured in one commit and pushed for recovery. `main` was fast-forwarded to include that snapshot. Granular per-feature history for that batch was not preserved.
+- **Suggested approach:** If needed, split history in a dedicated session (e.g. interactive rebase) without rewriting shared `main` unless the team agrees.
+- **Status:** `open`
+
+### CR-023: macOS AI chat HTTP 401 without silent refresh
+- **Area/Scope:** `macos/ai`
+- **Type:** bug
+- **Impact:** user-facing
+- **Risk:** low
+- **Files:** `apps/macos/TodusMac/Services/AI/MacAIChatService.swift`
+- **Summary:** `MacAIChatService` treated every 401 as a hard session expiry. iOS already attempts `attemptSilentRefresh()` first.
+- **Suggested approach:** Mirror iOS: refresh, then prompt retry or set `isSessionExpired`.
+- **Status:** `auto-fixed` — Implemented 2026-03-30.

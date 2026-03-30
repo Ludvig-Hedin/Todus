@@ -252,7 +252,19 @@ final class MacAIChatService {
             }
             guard (200..<300).contains(http.statusCode) else {
                 switch http.statusCode {
-                case 401: appendError("Session expired. Please log out and back in.", to: assistantMessageID)
+                case 401:
+                    // Match iOS AIChatService: transient 401s often recover after get-session refresh.
+                    if let auth = authService {
+                        let refreshed = await auth.attemptSilentRefresh()
+                        if refreshed {
+                            appendError("Connection lost briefly. Please tap retry.", to: assistantMessageID)
+                        } else {
+                            auth.isSessionExpired = true
+                            appendError("Session expired. Please log out and back in.", to: assistantMessageID)
+                        }
+                    } else {
+                        appendError("Session expired. Please log out and back in.", to: assistantMessageID)
+                    }
                 case 503: appendError("AI service is not configured on the server (missing OPENROUTER_API_KEY).", to: assistantMessageID)
                 case 502: appendError("AI provider error. The upstream AI service may be down.", to: assistantMessageID)
                 default:  appendError("Server error (\(http.statusCode)).", to: assistantMessageID)
