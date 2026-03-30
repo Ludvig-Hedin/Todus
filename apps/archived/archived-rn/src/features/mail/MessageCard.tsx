@@ -29,7 +29,7 @@ export function MessageCard({ message }: MessageCardProps) {
   const senderName = message.sender?.name || message.sender?.email || 'Unknown';
   const senderEmail = message.sender?.email || '';
   const date = message.receivedOn
-    ? new Date(message.receivedOn).toLocaleDateString([], {
+    ? new Date(message.receivedOn).toLocaleString([], {
       month: 'short',
       day: 'numeric',
       hour: 'numeric',

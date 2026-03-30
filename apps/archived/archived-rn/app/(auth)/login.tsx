@@ -102,7 +102,9 @@ export default function LoginScreen() {
       // Fallback listener for deep link redirects (iOS edge cases)
       const subscription = Linking.addEventListener('url', ({ url }) => {
         console.log('[GoogleSignIn] Linking url event:', url);
-        handleAuthUrl(url);
+        void handleAuthUrl(url).catch((error) => {
+          console.error('[GoogleSignIn] handleAuthUrl failed', error);
+        });
       });
 
       try {
@@ -151,9 +153,9 @@ export default function LoginScreen() {
 
       console.log('[AppleSignIn] credential received:', {
         identityToken: credential.identityToken ? 'present' : 'missing',
-        user: credential.user,
-        email: credential.email,
-        fullName: credential.fullName,
+        user: credential.user ? 'present' : 'missing',
+        email: credential.email ? 'present' : 'missing',
+        fullName: credential.fullName ? 'present' : 'missing',
       });
 
       if (credential.identityToken) {
@@ -298,9 +300,33 @@ export default function LoginScreen() {
       </View>
 
       <View style={[styles.footer, { paddingVertical: spacing[6], paddingHorizontal: spacing[6] }]}>
-        <Text style={[styles.footerLinkText, { color: colors.mutedForeground }]}>Terms of Service</Text>
+        <Pressable
+          onPress={() => {
+            Linking.openURL(`${env.webUrl.replace(/\/$/, '')}/terms`).catch((error) => {
+              console.error('[LoginScreen] failed to open terms link', error);
+            });
+          }}
+          accessibilityRole="link"
+          accessibilityLabel="Open Terms of Service"
+        >
+          <Text style={[styles.footerLinkText, { color: colors.mutedForeground }]}>
+            Terms of Service
+          </Text>
+        </Pressable>
         <View style={[styles.dot, { backgroundColor: ui.borderStrong }]} />
-        <Text style={[styles.footerLinkText, { color: colors.mutedForeground }]}>Privacy Policy</Text>
+        <Pressable
+          onPress={() => {
+            Linking.openURL(`${env.webUrl.replace(/\/$/, '')}/privacy`).catch((error) => {
+              console.error('[LoginScreen] failed to open privacy link', error);
+            });
+          }}
+          accessibilityRole="link"
+          accessibilityLabel="Open Privacy Policy"
+        >
+          <Text style={[styles.footerLinkText, { color: colors.mutedForeground }]}>
+            Privacy Policy
+          </Text>
+        </Pressable>
       </View>
     </SafeAreaView>
   );
@@ -406,4 +432,3 @@ const styles = StyleSheet.create({
     marginHorizontal: 12,
   },
 });
-

@@ -88,7 +88,11 @@ export const setPreviewBypassSessionAtom = atom(null, (_get, set) => {
 
 /** Clears the session and resets to unauthenticated */
 export const clearSessionAtom = atom(null, async (_get, set) => {
-  await secureStorage.clearSession();
+  try {
+    await secureStorage.clearSession();
+  } catch (error) {
+    console.error('[session] failed to clear secure storage session', error);
+  }
   set(sessionAtom, null);
   set(authStatusAtom, 'unauthenticated');
 });

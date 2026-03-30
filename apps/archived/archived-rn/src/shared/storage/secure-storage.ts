@@ -25,11 +25,13 @@ class SecureStorageAdapter {
     }
   }
 
-  async setSession(session: NativeAuthSession): Promise<void> {
+  async setSession(session: NativeAuthSession): Promise<boolean> {
     try {
       await SecureStore.setItemAsync(SESSION_KEY, JSON.stringify(session));
-    } catch {
-      // No-op: callers should continue gracefully if secure storage is unavailable.
+      return true;
+    } catch (error) {
+      console.error('[secure-storage] failed to persist session', error);
+      return false;
     }
   }
 
@@ -43,24 +45,42 @@ class SecureStorageAdapter {
 
   /** Theme mode stored in AsyncStorage (non-sensitive) */
   async getThemeMode(): Promise<ThemeMode> {
-    const value = await AsyncStorage.getItem(THEME_MODE_KEY);
-    if (value === 'light' || value === 'dark' || value === 'system') {
-      return value;
+    try {
+      const value = await AsyncStorage.getItem(THEME_MODE_KEY);
+      if (value === 'light' || value === 'dark' || value === 'system') {
+        return value;
+      }
+      return 'system';
+    } catch (error) {
+      console.error('[secure-storage] failed to load theme mode', error);
+      return 'system';
     }
-    return 'system';
   }
 
   async setThemeMode(mode: ThemeMode): Promise<void> {
-    await AsyncStorage.setItem(THEME_MODE_KEY, mode);
+    try {
+      await AsyncStorage.setItem(THEME_MODE_KEY, mode);
+    } catch (error) {
+      console.error('[secure-storage] failed to save theme mode', error);
+    }
   }
 
   /** Last visited path stored in AsyncStorage (non-sensitive) */
   async getLastVisitedPath(): Promise<string | null> {
-    return AsyncStorage.getItem(LAST_VISITED_PATH_KEY);
+    try {
+      return await AsyncStorage.getItem(LAST_VISITED_PATH_KEY);
+    } catch (error) {
+      console.error('[secure-storage] failed to load last visited path', error);
+      return null;
+    }
   }
 
   async setLastVisitedPath(path: string): Promise<void> {
-    await AsyncStorage.setItem(LAST_VISITED_PATH_KEY, path);
+    try {
+      await AsyncStorage.setItem(LAST_VISITED_PATH_KEY, path);
+    } catch (error) {
+      console.error('[secure-storage] failed to save last visited path', error);
+    }
   }
 }
 

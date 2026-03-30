@@ -170,6 +170,7 @@ export function SettingsOptionGroup<T extends string>({
           backgroundColor: 'transparent',
         },
       ]}
+      accessibilityRole="radiogroup"
     >
       {options.map((option, index) => {
         const selected = option.value === value;
@@ -200,7 +201,7 @@ export function SettingsOptionGroup<T extends string>({
               ]}
             >
               {selected ? (
-                <View style={[styles.optionIndicatorInner, { backgroundColor: '#f3f1ec' }]} />
+                <View style={[styles.optionIndicatorInner, { backgroundColor: ui.canvas }]} />
               ) : null}
             </View>
           </Pressable>
@@ -247,7 +248,7 @@ export function SettingsButton({
               ? isPrimary
                 ? ui.accent
                 : isDestructive
-                  ? colors.destructive
+                  ? ui.pressed
                   : ui.pressed
               : backgroundColor,
           borderColor: isPrimary || isDestructive ? backgroundColor : ui.borderSubtle,

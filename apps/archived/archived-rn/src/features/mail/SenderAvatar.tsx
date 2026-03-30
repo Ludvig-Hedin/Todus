@@ -72,7 +72,7 @@ export function SenderAvatar({ email, name, size = 32, style }: SenderAvatarProp
   const hasValidEmail = EMAIL_PATTERN.test(normalizedEmail);
   const avatarInput = useMemo(() => ({ email: normalizedEmail, name }), [name, normalizedEmail]);
 
-  const { data: avatarData, isLoading } = useQuery({
+  const { data: avatarData, isLoading: isAvatarLoading } = useQuery({
     queryKey: trpc.avatar.getByEmail.queryKey(avatarInput),
     enabled: hasValidEmail,
     retry: false,
@@ -94,7 +94,7 @@ export function SenderAvatar({ email, name, size = 32, style }: SenderAvatarProp
 
   const { data: bimiData, isLoading: isBimiLoading } = useQuery({
     ...trpc.bimi.getByEmail.queryOptions({ email: normalizedEmail }),
-    enabled: hasValidEmail && !avatarData?.primary?.svgContent,
+    enabled: hasValidEmail && !isAvatarLoading && avatarData !== undefined && !avatarData?.primary?.svgContent,
     retry: false,
     staleTime: 1000 * 60 * 60 * 24,
     gcTime: 1000 * 60 * 60 * 24 * 7,

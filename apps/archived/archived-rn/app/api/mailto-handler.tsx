@@ -47,6 +47,7 @@ export default function MailtoHandlerScreen() {
         return;
       }
 
+      hasHandledRef.current = true;
       let draftId: string | undefined;
       try {
         const result = (await createDraft(buildDraftInputFromMailto(parsed) as any)) as {
@@ -55,11 +56,11 @@ export default function MailtoHandlerScreen() {
         if (result?.id) {
           draftId = result.id;
         }
-      } catch {
+      } catch (err) {
+        console.error('[mailto-handler] failed to create draft', err);
         draftId = undefined;
       }
 
-      hasHandledRef.current = true;
       router.replace({
         pathname: '/compose',
         params: buildComposePrefillParams(parsed, draftId),

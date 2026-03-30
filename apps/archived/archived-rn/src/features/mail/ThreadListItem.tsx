@@ -28,7 +28,7 @@ function ThreadListItemComponent({
 }: ThreadListItemProps) {
   const { colors, ui } = useTheme();
   const trpc = useTRPC();
-  const { data: threadData, isLoading } = useQuery({
+  const { data: threadData, isLoading, isError, error, refetch } = useQuery({
     ...trpc.mail.get.queryOptions({ id: threadId }),
     staleTime: 60_000,
     gcTime: 5 * 60_000,
@@ -87,6 +87,28 @@ function ThreadListItemComponent({
           />
         </View>
       </View>
+    );
+  }
+
+  if (isError) {
+    return (
+      <Pressable
+        style={[
+          styles.container,
+          {
+            backgroundColor: ui.canvas,
+          },
+        ]}
+        onPress={() => {
+          void refetch();
+        }}
+        accessibilityRole="button"
+        accessibilityLabel={`Retry loading thread ${threadId}`}
+      >
+        <Text style={{ color: colors.mutedForeground }}>
+          {(error as Error | undefined)?.message ?? 'Failed to load thread.'}
+        </Text>
+      </Pressable>
     );
   }
 
@@ -203,7 +225,14 @@ function formatDate(date: Date): string {
     return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   }
 
-  if (diffHours < 48) {
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  const isYesterday =
+    date.getFullYear() === yesterday.getFullYear() &&
+    date.getMonth() === yesterday.getMonth() &&
+    date.getDate() === yesterday.getDate();
+
+  if (isYesterday) {
     return 'Yesterday';
   }
 
