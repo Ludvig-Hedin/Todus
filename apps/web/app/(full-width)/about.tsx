@@ -149,7 +149,7 @@ const sections = [
     content: (
       <div className="space-y-4">
         <p>
-          Adam and Nizar, the cofounders of Todus, met through family friends. Coming from
+          Ludvig and Nizar, the cofounders of Todus, met through family friends. Coming from
           backgrounds in product design and software engineering, we both felt the pain of drowning
           in email firsthand while trying to build and grow companies.
         </p>

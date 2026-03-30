@@ -237,12 +237,12 @@ export default function HomeContent() {
                     width={20}
                     className="h-5 w-5 rounded-full"
                     src="/adam.jpg"
-                    alt="Adam"
+                    alt="Ludvig"
                   />
                   <div className="flex items-center justify-start">
                     <div className="flex items-center justify-center gap-2.5 pr-0.5">
                       <div className="text-base-gray-950 justify-start text-sm leading-none">
-                        Adam
+                        Ludvig
                       </div>
                     </div>
                   </div>
@@ -1092,7 +1092,7 @@ export default function HomeContent() {
                         <div className="flex flex-1 items-center justify-start gap-3">
                           <div className="flex items-center justify-start gap-1">
                             <div className="text-base-gray-950 justify-start text-sm leading-none">
-                              Adam from Todus
+                              Ludvig from Todus
                             </div>
                             <div className="justify-start text-center text-sm leading-none text-[#8C8C8C]">
                               [9]

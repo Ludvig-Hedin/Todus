@@ -30,13 +30,13 @@ export const SummarizeMessage = dedent`
       <example_input>
           <message>
               <from>Josh</from>
-              <to>Adam</to>
+              <to>Ludvig</to>
               <cc>Emily</cc>
               <date>2025-03-24T14:23:00</date>
               <subject>83(b) Election Mailing</subject>
-              <body>Adam,
+              <body>Ludvig,
 
-              Nothing further needed on your end – I've asked our mail team to expedite the mailing of Adam's 83(b) election, which will go out tomorrow. I'll send the proof of mailing to YC after it is sent out and will separately confirm when done with you.
+              Nothing further needed on your end – I've asked our mail team to expedite the mailing of Ludvig's 83(b) election, which will go out tomorrow. I'll send the proof of mailing to YC after it is sent out and will separately confirm when done with you.
 
               Best,
               Josh</body>
@@ -44,7 +44,7 @@ export const SummarizeMessage = dedent`
       </example_input>
 
       <expected_output>
-          <summary>On Monday, March 24, at 2:23 PM, Josh informs Adam (CC: Emily) that no further action is required. The mail team will expedite the mailing of Adam's 83(b) election tomorrow. Josh will send the proof of mailing to YC and confirm separately with Adam once it is sent.</summary>
+          <summary>On Monday, March 24, at 2:23 PM, Josh informs Ludvig (CC: Emily) that no further action is required. The mail team will expedite the mailing of Ludvig's 83(b) election tomorrow. Josh will send the proof of mailing to YC and confirm separately with Ludvig once it is sent.</summary>
       </expected_output>
 
       <strict_guidelines>Strictly follow these rules. No missing details. No extra fluff. Just precise, high-performance summarization. Never say "Here is"</strict_guidelines>
@@ -77,19 +77,19 @@ export const SummarizeThread = dedent`
               <title>83(b) Election Mailing</title>
               <participants>
                   <participant>Josh</participant>
-                  <participant>Adam</participant>
+                  <participant>Ludvig</participant>
                   <participant>Emily</participant>
               </participants>
               <messages>
                   <message>
                       <from>Josh</from>
-                      <to>Adam</to>
+                      <to>Ludvig</to>
                       <cc>Emily</cc>
                       <date>2025-03-24T14:23:00</date>
-                      <body>Adam, nothing further needed on your end. I've asked our mail team to expedite the mailing of Adam's 83(b) election, which will go out tomorrow. I'll send the proof of mailing to YC after it is sent and will confirm separately with you.</body>
+                      <body>Ludvig, nothing further needed on your end. I've asked our mail team to expedite the mailing of Ludvig's 83(b) election, which will go out tomorrow. I'll send the proof of mailing to YC after it is sent and will confirm separately with you.</body>
                   </message>
                   <message>
-                      <from>Adam</from>
+                      <from>Ludvig</from>
                       <to>Josh</to>
                       <cc>Emily</cc>
                       <date>2025-03-24T15:10:00</date>
@@ -97,7 +97,7 @@ export const SummarizeThread = dedent`
                   </message>
                   <message>
                       <from>Josh</from>
-                      <to>Adam</to>
+                      <to>Ludvig</to>
                       <cc>Emily</cc>
                       <date>2025-03-25T09:45:00</date>
                       <body>The mail team has sent out the 83(b) election. I've attached the proof of mailing. Let me know if you need anything else.</body>
@@ -109,10 +109,10 @@ export const SummarizeThread = dedent`
       <expected_output>
           <summary>
               Thread: 83(b) Election Mailing
-              Participants: Josh, Adam, Emily
+              Participants: Josh, Ludvig, Emily
 
-              - March 24, 2:23 PM – Josh informs Adam (CC: Emily) that no further action is needed. The mail team will expedite the mailing of Adam's 83(b) election tomorrow. Proof of mailing will be sent to YC, and Josh will confirm separately.
-              - March 24, 3:10 PM – Adam acknowledges Josh's message and requests confirmation once the mailing is sent.
+              - March 24, 2:23 PM – Josh informs Ludvig (CC: Emily) that no further action is needed. The mail team will expedite the mailing of Ludvig's 83(b) election tomorrow. Proof of mailing will be sent to YC, and Josh will confirm separately.
+              - March 24, 3:10 PM – Ludvig acknowledges Josh's message and requests confirmation once the mailing is sent.
               - March 25, 9:45 AM – Josh confirms that the 83(b) election has been sent and attaches proof of mailing. He asks if anything else is needed.
           </summary>
       </expected_output>
@@ -158,20 +158,20 @@ export const ReSummarizeThread = dedent`
               <title>83(b) Election Mailing</title>
               <participants>
                   <participant>Josh</participant>
-                  <participant>Adam</participant>
+                  <participant>Ludvig</participant>
                   <participant>Emily</participant>
               </participants>
               <existing_summary>
                   Thread: 83(b) Election Mailing
-                  Participants: Josh, Adam, Emily
+                  Participants: Josh, Ludvig, Emily
 
-                  - March 24, 2:23 PM – Josh informs Adam (CC: Emily) that no further action is needed. The mail team will expedite the mailing of Adam's 83(b) election tomorrow. Proof of mailing will be sent to YC, and Josh will confirm separately.
-                  - March 24, 3:10 PM – Adam acknowledges Josh's message and requests confirmation once the mailing is sent.
+                  - March 24, 2:23 PM – Josh informs Ludvig (CC: Emily) that no further action is needed. The mail team will expedite the mailing of Ludvig's 83(b) election tomorrow. Proof of mailing will be sent to YC, and Josh will confirm separately.
+                  - March 24, 3:10 PM – Ludvig acknowledges Josh's message and requests confirmation once the mailing is sent.
               </existing_summary>
               <new_messages>
                   <message>
                       <from>Josh</from>
-                      <to>Adam</to>
+                      <to>Ludvig</to>
                       <cc>Emily</cc>
                       <date>2025-03-25T09:45:00</date>
                       <body>The mail team has sent out the 83(b) election. I've attached the proof of mailing. Let me know if you need anything else.</body>
@@ -183,10 +183,10 @@ export const ReSummarizeThread = dedent`
       <expected_output>
           <updated_summary>
               Thread: 83(b) Election Mailing
-              Participants: Josh, Adam, Emily
+              Participants: Josh, Ludvig, Emily
 
-              - March 24, 2:23 PM – Josh informs Adam (CC: Emily) that no further action is needed. The mail team will expedite the mailing of Adam's 83(b) election tomorrow. Proof of mailing will be sent to YC, and Josh will confirm separately.
-              - March 24, 3:10 PM – Adam acknowledges Josh's message and requests confirmation once the mailing is sent.
+              - March 24, 2:23 PM – Josh informs Ludvig (CC: Emily) that no further action is needed. The mail team will expedite the mailing of Ludvig's 83(b) election tomorrow. Proof of mailing will be sent to YC, and Josh will confirm separately.
+              - March 24, 3:10 PM – Ludvig acknowledges Josh's message and requests confirmation once the mailing is sent.
               - March 25, 9:45 AM – Josh confirms that the 83(b) election has been sent and attaches proof of mailing. He asks if anything else is needed.
           </updated_summary>
       </expected_output>

@@ -1,5 +1,118 @@
 # Project Changelog
 
+## [2026-03-30] Copy — Founder / demo names: Adam → Ludvig
+
+- Marketing home mock UI, About founders copy, HR demo row, and AI brain fallback sample thread now use **Ludvig** (abbreviated **Ludvig H** in HR mock data) instead of Adam / Adam G.
+- **Unchanged:** `Scarlett Adams` in mail demo data (surname, not the first name Adam).
+
+**Files:** `HomeContent.tsx` (mail + web), `about.tsx` (mail + web), `hr.tsx` (mail + web), `brain.fallback.prompts.ts`
+
+## [2026-03-30] Feature — Year view + Apple Calendar glass segmented control
+
+- **Year view:** New infinitely-scrollable vertical year view showing 21 years (±10) as 4×3 grids of mini-month calendars. Each mini-month shows day numbers, today circled in red, event dot indicators (accent color), weekday initials. Tap a mini-month → navigate to Month view for that month. Auto-scrolls to current year on appear.
+- **Glass segmented control:** Replaced native `Picker(.segmented)` with custom `CalendarViewModePicker` using Apple Calendar-style glass/material design — `.ultraThickMaterial` outer pill, `.thinMaterial` selected highlight, `matchedGeometryEffect` for smooth animated sliding, 4 segments (Day/Week/Month/Year). Respects light/dark mode via SwiftUI Material.
+- **Header buttons:** Nav arrows and "Today" button now use `.ultraThinMaterial` glass backgrounds instead of solid `surfaceCard` — matches the new glass aesthetic across all header controls.
+- **Control sizing:** Unified `headerControlHeight` to 28pt for better tap targets.
+
+**Files:** `MacCalendarView.swift`
+
+## [2026-03-30] Fix — macOS Calendar UI Round 4
+
+- **Week view header too tall (ROOT CAUSE):** `Color.clear.frame(width:)` gutter spacer expanded vertically — replaced with `Text("")` + `.fixedSize(horizontal: false, vertical: true)` wrapper
+- **Header buttons:** Nav arrows now fully circular (24pt `Circle()`), "Today" pill same 24pt height, all controls aligned
+- **Month view scrolling:** Wrapped LazyVGrid in `ScrollView(.vertical)` inside GeometryReader
+- **Event deduplication:** Holidays from multiple calendars deduplicated by title+date
+- **Day view tint:** Removed blueish accent highlight, now neutral
+- **Segmented picker:** Fixed text wrapping with `.labelsHidden()` + wider frame
+
+**Files:** `MacCalendarView.swift`, `CalendarService.swift`, `CalendarTimeGridView.swift`
+
+## [2026-03-30] Redesign — Unified Create Sheet (merged CaptureComposer into CreateSheet)
+
+**Problem:** Two competing input systems (CaptureComposer in tasks tab + CreateSheet global overlay) overlapped visually. CaptureComposer sat under the tab bar and was unusable. CreateSheet lacked attachments, voice, and slash commands.
+
+**Solution:** Removed CaptureComposer from tasks tab entirely. Merged all its features into CreateSheet:
+- Attachments (photo picker, camera, file picker) with inline thumbnails
+- Voice transcription (VoiceInputButton)
+- Slash commands (/due-today, /due-tomorrow, /due-next-week, /in-one-hour)
+- Image paste handling (PasteHandlingTextInput)
+- Keyboard-aware positioning
+
+**Visual improvements:**
+- Scrim opacity 0.10 → 0.45 (clearly distinguishable modal overlay)
+- Text input 28pt → 16pt (compact, not oversized)
+- Default type always "Auto" (AI decides) regardless of which tab
+- Tight, clean toolbar with folder/date/voice/send in a single row
+
+**Files:**
+- `CreateSheet.swift` — Major rewrite with all merged features
+- `TasksTabView.swift` — Removed CaptureComposer and keyboard observer
+- `MainTabView.swift` — Removed defaultType parameter and method
+- `CaptureComposer.swift` — Removed CaptureComposer struct; kept shared types (RichComposerInput, PasteHandlingTextInput, CameraPicker)
+
+## [2026-03-30] Fix — macOS/iOS user profile not loading after login (shows "User" / "?")
+
+**Root cause:** Better Auth's HTTP `/auth/get-session` endpoint returns `null` for bearer-token-authenticated requests. The Hono middleware's `auth.api.getSession()` call resolves bearer tokens correctly (tRPC routes work), but the HTTP handler doesn't — so `fetchUserProfile()` always got `null` back.
+
+**Fix:**
+- Added `/api/auth/me` endpoint on backend that returns `c.var.sessionUser` from the middleware context (which properly resolves bearer tokens)
+- Updated `fetchUserProfile()` in shared AuthService to use `/api/auth/me` instead of `/api/auth/get-session`
+- Added `.task(id: isAuthenticated)` to MacRootView so profile fetch re-runs after login (not just on initial view appear)
+- Added `.task { fetchUserProfile() }` to MacSettingsView to refresh on settings open
+
+**Files:**
+- `apps/server/src/main.ts` — New `/api/auth/me` endpoint
+- `packages/swift-auth/Sources/TodusAuth/AuthService.swift` — Use `/auth/me`, added debug logging
+- `apps/macos/TodusMac/App/MacRootView.swift` — `.task(id: isAuthenticated)` for profile fetch
+- `apps/macos/TodusMac/Views/Settings/MacSettingsView.swift` — `.task { fetchUserProfile() }` on open
+
+**Requires:** Backend deployment before the native apps can fetch profile data.
+
+## [2026-03-30] Fix — macOS Calendar UI Round 3 bugs
+
+- **Week view all-day events:** Changed from vertical column layout to horizontal per-day-column layout matching Apple Calendar — each day column now shows its own all-day events, preventing the massive tall header
+- **Event deduplication:** Holidays and events appearing from multiple calendar sources (e.g. iCloud + Google) are now deduplicated by title+date, keeping only the first occurrence
+- **Day view background tint:** Removed blueish accent tint from today's column highlight — now uses neutral `Color.primary.opacity(0.015)` instead of `MacTheme.accent.opacity(0.025)`
+- **Segmented picker wrapping:** Fixed "Vie\nw" text wrapping by removing the "View" label text, adding `.labelsHidden()`, and widening frame from 170→180pt
+
+**Files:** `MacCalendarView.swift`, `CalendarService.swift`, `CalendarTimeGridView.swift`
+
+## [2026-03-30] Fix — iOS calendar icon stretched + tasks page too bulky
+
+- **Calendar icon:** Added explicit height to `AppleCalendarIconView` so GeometryReader doesn't stretch vertically
+- **Search bar:** Reduced vertical padding (9→6) and changed to Capsule shape for a slimmer, rounded look
+- **Task rows:** Reduced vertical padding (8→5) and checkbox height (44→32) for more compact list items
+- **Completed task rows:** Reduced vertical padding (12→8) and corner radius (16→14)
+- **Header spacing:** Reduced view mode picker vertical padding (12→4)
+
+**Files:** `BrandIcons.swift`, `TasksTabView.swift`, `TaskRowView.swift`, `InboxView.swift`
+
+## [2026-03-30] Feature — Backend-synced AI conversation history
+
+Conversations now sync to the backend via tRPC, enabling cross-device and cross-reinstall persistence.
+
+### Backend
+- **New table:** `mail0_ai_conversation` (id, userId, title, messages JSONB, timestamps)
+- **New tRPC endpoints:** `ai.listConversations`, `ai.getConversation`, `ai.saveConversation`, `ai.deleteConversation`
+- **Migration:** `0039_brainy_junta.sql`
+
+### iOS & macOS
+- Conversations synced to backend on save/delete (fire-and-forget)
+- On launch: loads local cache first, then merges with backend
+- Local cache moved from UserDefaults → Keychain (survives reinstall)
+- Auto-migration from old UserDefaults storage
+
+**Files:** `apps/server/src/db/schema.ts`, `apps/server/src/trpc/routes/ai/conversations.ts`, `apps/server/src/trpc/routes/ai/index.ts`, `apps/server/src/db/migrations/0039_brainy_junta.sql`, `apps/ios/.../AIChatService.swift`, `apps/macos/.../MacAIChatService.swift`
+
+## [2026-03-30] Fix — Bearer token rotation capture (root cause of "Session expired")
+
+Better Auth's bearer plugin returns a rotated session token via `set-auth-token` header when `updateAge` extends the session. Neither iOS nor macOS captured this — they kept the old token until it expired, causing 401s.
+
+- **`AuthService.swift`**: Added `captureRotatedToken(from:)` — checks responses for `set-auth-token` and stores new token. Called from `attemptSilentRefresh()` and `fetchUserProfile()`.
+- **`TodosAPIClient.swift` (iOS + macOS)**: Calls `captureRotatedToken` on every API response.
+- **`AIChatService.swift` / `MacAIChatService.swift`**: Capture on SSE stream responses.
+- **`KeychainHelper.swift`**: Added `saveData`/`readData` for Data blobs.
+
 ## [2026-03-30] Fix — macOS AI chat 401 handling (silent refresh parity with iOS)
 
 `MacAIChatService` now mirrors iOS: on HTTP 401 from `/api/ai/chat`, call `attemptSilentRefresh()` before treating the session as dead. Success → user message to retry; failure → `isSessionExpired = true` and re-auth prompt.

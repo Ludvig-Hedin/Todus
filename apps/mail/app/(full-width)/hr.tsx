@@ -124,7 +124,7 @@ export default function HRPage() {
     },
     {
       id: '3',
-      name: 'Adam G',
+      name: 'Ludvig H',
       timezone: 'Asia/Qatar',
       startTime: '19:00',
       endTime: '20:00',
