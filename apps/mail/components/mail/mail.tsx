@@ -4,26 +4,36 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from '../ui/dropdown-menu';
+import {
+  Bell,
+  Lightning,
+  Mail,
+  PencilCompose,
+  ScanEye,
+  Tag,
+  User,
+  X,
+  Search,
+} from '../icons/icons';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { Bell, Lightning, Mail, PencilCompose, ScanEye, Tag, User, X, Search } from '../icons/icons';
-import { useCategorySettings, useDefaultCategoryId } from '@/hooks/use-categories';
 import { ResizablePanel, ResizablePanelGroup, ResizableHandle } from '@/components/ui/resizable';
+import { useCategorySettings, useDefaultCategoryId } from '@/hooks/use-categories';
 import { useCommandPalette } from '../context/command-palette-context';
 import { useHotkeys, useHotkeysContext } from 'react-hotkeys-hook';
 import { ThreadDisplay } from '@/components/mail/thread-display';
-import { useMutation } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useActiveConnection } from '@/hooks/use-connections';
-import { useTRPC } from '@/providers/query-provider';
 import { Check, ChevronDown, RefreshCcw } from 'lucide-react';
 import { useMediaQuery } from '../../hooks/use-media-query';
 import useSearchLabels from '@/hooks/use-labels-search';
 import * as CustomIcons from '@/components/icons/icons';
 import { MailList } from '@/components/mail/mail-list';
 import { useNavigate, useParams } from 'react-router';
+import { useTRPC } from '@/providers/query-provider';
 import { useMail } from '@/components/mail/use-mail';
 import { SidebarToggle } from '../ui/sidebar-toggle';
 import { PricingDialog } from '../ui/pricing-dialog';
+import { useMutation } from '@tanstack/react-query';
 import { clearBulkSelectionAtom } from './use-mail';
 import AISidebar from '@/components/ui/ai-sidebar';
 import { useThreads } from '@/hooks/use-threads';
@@ -414,25 +424,32 @@ export function MailLayout() {
     setMail({ ...mail, bulkSelected: [] });
   }, [mail, setMail]);
 
-  const runLocalAutoSync = useCallback(async (skipWhenHidden: boolean = true) => {
-    if (!isLocalAutoSyncEnabled) return;
-    if (!session?.user?.id || !activeConnection?.id) return;
-    if (skipWhenHidden && typeof document !== 'undefined' && document.visibilityState === 'hidden') {
-      return;
-    }
-    if (localAutoSyncInFlightRef.current) return;
+  const runLocalAutoSync = useCallback(
+    async (skipWhenHidden: boolean = true) => {
+      if (!isLocalAutoSyncEnabled) return;
+      if (!session?.user?.id || !activeConnection?.id) return;
+      if (
+        skipWhenHidden &&
+        typeof document !== 'undefined' &&
+        document.visibilityState === 'hidden'
+      ) {
+        return;
+      }
+      if (localAutoSyncInFlightRef.current) return;
 
-    localAutoSyncInFlightRef.current = true;
+      localAutoSyncInFlightRef.current = true;
 
-    try {
-      await forceSync();
-      await refetchThreads();
-    } catch (error) {
-      console.error('Local auto-sync failed:', error);
-    } finally {
-      localAutoSyncInFlightRef.current = false;
-    }
-  }, [activeConnection?.id, forceSync, refetchThreads, session?.user?.id]);
+      try {
+        await forceSync();
+        await refetchThreads();
+      } catch (error) {
+        console.error('Local auto-sync failed:', error);
+      } finally {
+        localAutoSyncInFlightRef.current = false;
+      }
+    },
+    [activeConnection?.id, forceSync, refetchThreads, session?.user?.id],
+  );
 
   const handleRefetchThreads = useCallback(() => {
     if (isLocalAutoSyncEnabled) {
@@ -495,8 +512,8 @@ export function MailLayout() {
               `bg-panelLight dark:bg-panelDark mb-1 w-fit shadow-sm md:mr-[3px] md:rounded-2xl lg:flex lg:h-[calc(100dvh-8px)] lg:shadow-sm`,
               isDesktop && threadId && 'hidden lg:block',
             )}
-          // onMouseEnter={handleMailListMouseEnter}
-          // onMouseLeave={handleMailListMouseLeave}
+            // onMouseEnter={handleMailListMouseEnter}
+            // onMouseLeave={handleMailListMouseLeave}
           >
             <div className="w-full md:h-[calc(100dvh-10px)]">
               <div className="z-15 sticky top-0 p-4 pb-0">
@@ -517,12 +534,12 @@ export function MailLayout() {
                         <span className="ml-3 hidden truncate pr-20 lg:inline-block">
                           {activeFilters.length > 0
                             ? activeFilters.map((f) => f.display).join(', ')
-                            : 'Search'}
+                            : 'Search or filter mail'}
                         </span>
                         <span className="ml-3 inline-block truncate pr-20 lg:hidden">
                           {activeFilters.length > 0
                             ? `${activeFilters.length} filter${activeFilters.length > 1 ? 's' : ''}`
-                            : 'Search'}
+                            : 'Search mail'}
                         </span>
 
                         <div className="absolute right-2 flex items-center gap-2">
@@ -538,7 +555,7 @@ export function MailLayout() {
                               className="h-6 rounded-full px-2 text-xs"
                               onClick={handleClearFilters}
                             >
-                              Clear
+                              Clear filters
                             </Button>
                           )}
                           <kbd className="bg-muted border-border/40 dark:bg-muted/40 pointer-events-none hidden h-6 select-none items-center gap-1 rounded border px-2 text-xs font-medium opacity-80 sm:flex">
@@ -582,7 +599,7 @@ export function MailLayout() {
                     onClick={handleRefetchThreads}
                     variant="ghost"
                     size="icon"
-                    className="border-none bg-transparent hover:bg-accent/50 h-10 w-10 rounded-full backdrop-blur-sm"
+                    className="hover:bg-accent/50 h-10 w-10 rounded-full border-none bg-transparent backdrop-blur-sm"
                   >
                     <RefreshCcw className="text-muted-foreground h-4 w-4" />
                   </Button>
@@ -640,9 +657,7 @@ export function MailLayout() {
           {activeConnection?.id ? <AIToggleButton /> : null}
         </ResizablePanelGroup>
       </div>
-      {isMobile && (
-        <ComposeFloatingButton />
-      )}
+      {isMobile && <ComposeFloatingButton />}
     </TooltipProvider>
   );
 }
@@ -667,7 +682,7 @@ function ComposeFloatingButton() {
     <button
       onClick={handleCompose}
       aria-label="Compose email"
-      className="fixed bottom-20 right-4 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-mainBlue shadow-lg hover:bg-mainBlue/90 transition-colors md:hidden"
+      className="bg-mainBlue hover:bg-mainBlue/90 fixed bottom-20 right-4 z-50 flex h-14 w-14 items-center justify-center rounded-full shadow-lg transition-colors md:hidden"
     >
       <PencilCompose className="h-5 w-5 fill-white" aria-hidden="true" />
     </button>
@@ -737,8 +752,7 @@ export const Categories = () => {
               className={cn('fill-muted-foreground dark:fill-white', isSelected && 'fill-white')}
             />
           ),
-          colors:
-            'border-0 bg-mainBlue text-white hover:bg-mainBlue/90',
+          colors: 'border-0 bg-mainBlue text-white hover:bg-mainBlue/90',
         };
       case 'Personal':
         return {
@@ -858,14 +872,14 @@ function CategoryDropdown({ isMultiSelectMode }: CategoryDropdownProps) {
           className={cn(
             'text-muted-foreground border-border/40 bg-background/50 hover:bg-accent/30 dark:border-border/20 dark:bg-background/40 flex h-10 min-w-fit items-center gap-2 rounded-lg border px-3 backdrop-blur-sm transition-all',
           )}
-          aria-label="Filter by labels"
+          aria-label="Filter inbox"
           aria-expanded={isOpen}
           aria-haspopup="menu"
         >
           <span className="text-sm font-medium">
             {labels.length > 0
-              ? `${labels.length} View${labels.length > 1 ? 's' : ''}`
-              : m['navigation.settings.categories']()}
+              ? `${labels.length} filter${labels.length > 1 ? 's' : ''}`
+              : 'Filter inbox'}
           </span>
           <ChevronDown
             className={cn(
@@ -891,7 +905,11 @@ function CategoryDropdown({ isMultiSelectMode }: CategoryDropdownProps) {
               handleLabelChange(category.searchValue);
             }}
             role="menuitemcheckbox"
-            aria-checked={labels.includes(category.id)}
+            aria-checked={
+              category.searchValue === ''
+                ? labels.length === 0
+                : category.searchValue.split(',').some((value) => labels.includes(value))
+            }
           >
             <span className="text-foreground font-medium capitalize">
               {category.name.toLowerCase()}
@@ -900,8 +918,8 @@ function CategoryDropdown({ isMultiSelectMode }: CategoryDropdownProps) {
             {(category.searchValue === ''
               ? labels.length === 0
               : category.searchValue.split(',').some((val) => labels.includes(val))) && (
-                <Check className="text-primary ml-auto h-4 w-4" />
-              )}
+              <Check className="text-primary ml-auto h-4 w-4" />
+            )}
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>

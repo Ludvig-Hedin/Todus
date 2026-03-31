@@ -1,4 +1,11 @@
 import {
+  useIsFetching,
+  useIsRestoring,
+  useQuery,
+  useInfiniteQuery,
+  type UseQueryResult,
+} from '@tanstack/react-query';
+import {
   Archive2,
   ExclamationCircle,
   GroupPeople,
@@ -18,12 +25,13 @@ import {
 import { useOptimisticThreadState } from '@/components/mail/optimistic-thread-state';
 import { focusedIndexAtom, useMailNavigation } from '@/hooks/use-mail-navigation';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { useIsFetching, useIsRestoring, useQuery, useInfiniteQuery, type UseQueryResult } from '@tanstack/react-query';
+import { Check, Star, ChevronRight, ChevronLeft, Users } from 'lucide-react';
 import type { MailSelectMode, ParsedMessage, ThreadProps } from '@/types';
 import type { ParsedDraft } from '../../../server/src/lib/driver/types';
 import { ThreadContextMenu } from '@/components/context/thread-context';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
 import { useMail, type Config } from '@/components/mail/use-mail';
+import { useActiveConnection } from '@/hooks/use-connections';
 import { type ThreadDestination } from '@/lib/thread-actions';
 import { useThread, useThreads } from '@/hooks/use-threads';
 import { useSearchValue } from '@/hooks/use-search-value';
@@ -39,7 +47,6 @@ import { BimiAvatar } from '../ui/bimi-avatar';
 import { RenderLabels } from './render-labels';
 import { Badge } from '@/components/ui/badge';
 import { useDraft } from '@/hooks/use-drafts';
-import { Check, Star, ChevronRight, ChevronLeft, Users } from 'lucide-react';
 import { Skeleton } from '../ui/skeleton';
 import { m } from '@/paraglide/messages';
 import { useParams } from 'react-router';
@@ -234,14 +241,13 @@ const Thread = memo(
               'hover:bg-accent/60 group relative mx-1 flex cursor-pointer flex-col items-start rounded-lg py-2 text-left text-[13px] transition-colors duration-100',
               (isMailSelected || isMailBulkSelected || isKeyboardFocused) &&
                 'bg-accent/70 opacity-100',
-              isKeyboardFocused && 'ring-2 ring-ring/30',
+              isKeyboardFocused && 'ring-ring/30 ring-2',
             )}
           >
             <div
               className={cn(
-                'z-25 absolute right-2 flex -translate-y-1/2 items-center gap-0.5 rounded-lg border bg-popover p-0.5 shadow-[0_2px_8px_rgba(0,0,0,0.06)] transition-opacity duration-100',
-                // Visible on hover (pointer devices) and when thread is selected/focused (touch devices)
-                'opacity-0 group-hover:opacity-100 focus-within:opacity-100',
+                'z-25 bg-popover absolute right-2 flex -translate-y-1/2 items-center gap-0.5 rounded-lg border p-0.5 shadow-[0_2px_8px_rgba(0,0,0,0.06)] transition-opacity duration-100',
+                'opacity-35 focus-within:opacity-100 group-hover:opacity-100',
                 (isMailSelected || isKeyboardFocused) && 'opacity-100',
                 index === 0 ? 'top-4' : 'top-[-1px]',
               )}
@@ -264,10 +270,7 @@ const Thread = memo(
                     />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent
-                  side={index === 0 ? 'bottom' : 'top'}
-                  className="mb-1"
-                >
+                <TooltipContent side={index === 0 ? 'bottom' : 'top'} className="mb-1">
                   {displayStarred
                     ? m['common.threadDisplay.unstar']()
                     : m['common.threadDisplay.star']()}
@@ -289,10 +292,7 @@ const Thread = memo(
                     />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent
-                  side={index === 0 ? 'bottom' : 'top'}
-                  className="mb-1"
-                >
+                <TooltipContent side={index === 0 ? 'bottom' : 'top'} className="mb-1">
                   {m['common.mail.toggleImportant']()}
                 </TooltipContent>
               </Tooltip>
@@ -310,10 +310,7 @@ const Thread = memo(
                     <Archive2 className="fill-[#9D9D9D]" />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent
-                  side={index === 0 ? 'bottom' : 'top'}
-                  className="mb-1"
-                >
+                <TooltipContent side={index === 0 ? 'bottom' : 'top'} className="mb-1">
                   {m['common.threadDisplay.archive']()}
                 </TooltipContent>
               </Tooltip>
@@ -323,7 +320,7 @@ const Thread = memo(
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="h-6 w-6 hover:bg-destructive/10 [&_svg]:size-3.5"
+                      className="hover:bg-destructive/10 h-6 w-6 [&_svg]:size-3.5"
                       onClick={(e: React.MouseEvent) => {
                         e.stopPropagation();
                         moveThreadTo('bin');
@@ -332,10 +329,7 @@ const Thread = memo(
                       <Trash className="fill-[#F43F5E]" />
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent
-                    side={index === 0 ? 'bottom' : 'top'}
-                    className="mb-1"
-                  >
+                  <TooltipContent side={index === 0 ? 'bottom' : 'top'} className="mb-1">
                     {m['common.actions.Bin']()}
                   </TooltipContent>
                 </Tooltip>
@@ -354,7 +348,7 @@ const Thread = memo(
                     )}
                   >
                     <div
-                      className="flex h-full w-full items-center justify-center rounded-full bg-mainBlue p-2"
+                      className="bg-mainBlue flex h-full w-full items-center justify-center rounded-full p-2"
                       onClick={(e: React.MouseEvent) => {
                         e.stopPropagation();
                         setMail((prev: Config) => ({
@@ -373,7 +367,7 @@ const Thread = memo(
                       displayUnread && !isMailSelected && !isFolderSent ? '' : 'border',
                     )}
                   >
-                    <div className="flex h-full w-full items-center justify-center rounded-full bg-secondary p-2">
+                    <div className="bg-secondary flex h-full w-full items-center justify-center rounded-full p-2">
                       <GroupPeople className="h-4 w-4" />
                     </div>
                   </Avatar>
@@ -423,7 +417,7 @@ const Thread = memo(
                             </span>
                             {displayUnread && !isMailSelected && !isFolderSent ? (
                               <>
-                                <span className="ml-0.5 size-1.5 rounded-full bg-mainBlue" />
+                                <span className="bg-mainBlue ml-0.5 size-1.5 rounded-full" />
                               </>
                             ) : null}
                           </div>
@@ -478,7 +472,7 @@ const Thread = memo(
                     {isFolderSent ? (
                       <p
                         className={cn(
-                          'mt-1 line-clamp-1 max-w-[50ch] overflow-hidden text-[13px] text-muted-foreground md:max-w-[25ch]',
+                          'text-muted-foreground mt-1 line-clamp-1 max-w-[50ch] overflow-hidden text-[13px] md:max-w-[25ch]',
                         )}
                       >
                         {latestMessage.to.map((e) => e.email).join(', ')}
@@ -486,7 +480,7 @@ const Thread = memo(
                     ) : (
                       <p
                         className={cn(
-                          'mt-1 line-clamp-1 w-[95%] min-w-0 overflow-hidden text-[13px] text-muted-foreground',
+                          'text-muted-foreground mt-1 line-clamp-1 w-[95%] min-w-0 overflow-hidden text-[13px]',
                         )}
                       >
                         {highlightText(latestMessage.subject, searchValue.highlight)}
@@ -633,7 +627,7 @@ const Draft = memo(({ message, index }: { message: { id: string }; index: number
       >
         <div
           className={cn(
-            'shadow-xs absolute right-2 z-20 flex -translate-y-1/2 items-center gap-1 rounded-xl border bg-popover p-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100',
+            'shadow-xs bg-popover absolute right-2 z-20 flex -translate-y-1/2 items-center gap-1 rounded-xl border p-1 opacity-0 focus-within:opacity-100 group-hover:opacity-100',
             index === 0 ? 'top-4' : 'top-[-1px]',
           )}
           aria-busy={optimisticState.isRemoving}
@@ -651,10 +645,7 @@ const Draft = memo(({ message, index }: { message: { id: string }; index: number
                 <Trash className="fill-[#F43F5E]" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent
-              side={index === 0 ? 'bottom' : 'top'}
-              className="mb-1"
-            >
+            <TooltipContent side={index === 0 ? 'bottom' : 'top'} className="mb-1">
               {m['common.actions.Bin']()}
             </TooltipContent>
           </Tooltip>
@@ -688,7 +679,7 @@ const Draft = memo(({ message, index }: { message: { id: string }; index: number
               <div className="flex justify-between">
                 <p
                   className={cn(
-                    'mt-1 line-clamp-1 max-w-[50ch] text-[13px] text-muted-foreground md:max-w-[30ch]',
+                    'text-muted-foreground mt-1 line-clamp-1 max-w-[50ch] text-[13px] md:max-w-[30ch]',
                   )}
                 >
                   {draft?.subject}
@@ -782,7 +773,9 @@ const PeopleList = memo(function PeopleList({
                 <Skeleton className="h-3.5 w-28 rounded" />
                 <Skeleton className="h-3 w-10 rounded" />
               </div>
-              <Skeleton className={`h-3 rounded ${i % 3 === 0 ? 'w-44' : i % 3 === 1 ? 'w-36' : 'w-52'}`} />
+              <Skeleton
+                className={`h-3 rounded ${i % 3 === 0 ? 'w-44' : i % 3 === 1 ? 'w-36' : 'w-52'}`}
+              />
             </div>
           </div>
         ))}
@@ -901,7 +894,11 @@ const PersonThreadsView = memo(function PersonThreadsView({
             onScroll={() => {
               if (!vListRef.current) return;
               const endIndex = vListRef.current.findEndIndex();
-              if (Math.abs(threads.length - 1 - endIndex) < 5 && !isFetchingNextPage && hasNextPage) {
+              if (
+                Math.abs(threads.length - 1 - endIndex) < 5 &&
+                !isFetchingNextPage &&
+                hasNextPage
+              ) {
                 void fetchNextPage();
               }
             }}
@@ -920,7 +917,9 @@ const PersonThreadsView = memo(function PersonThreadsView({
                     setDraftId(null);
                   }}
                 />
-              ) : <></>;
+              ) : (
+                <></>
+              );
             }}
           </VList>
           {isFetchingNextPage && (
@@ -938,6 +937,7 @@ export const MailList = memo(
   function MailList() {
     const { folder } = useParams<{ folder: string }>();
     const { data: settingsData } = useSettings();
+    const { data: activeConnection } = useActiveConnection();
     const [, setThreadId] = useQueryState('threadId');
     const [, setDraftId] = useQueryState('draftId');
     const [searchValue, setSearchValue] = useSearchValue();
@@ -949,7 +949,7 @@ export const MailList = memo(
     const isPeopleView = viewMode === 'people';
 
     // Only show the toggle for inbox (meaningful to group by sender)
-    const showViewToggle = !folder || folder === 'inbox';
+    const showViewToggle = (!folder || folder === 'inbox') && !!activeConnection;
 
     useEffect(() => {
       const handleKeyDown = (event: KeyboardEvent) => {
@@ -1193,33 +1193,46 @@ export const MailList = memo(
       <>
         {/* View toggle pill — Threads vs People. Only shown in inbox. */}
         {showViewToggle && (
-          <div className="flex items-center px-3 pt-2 pb-1">
-            <div className="bg-muted flex items-center gap-0.5 rounded-lg p-1">
-              <button
-                type="button"
-                className={cn(
-                  'rounded-md px-3 py-1 text-xs font-medium transition-colors',
-                  !isPeopleView
-                    ? 'bg-background text-foreground shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground',
-                )}
-                onClick={() => { void setViewMode(null); void setPersonEmail(null); }}
-              >
-                Threads
-              </button>
-              <button
-                type="button"
-                className={cn(
-                  'rounded-md px-3 py-1 text-xs font-medium transition-colors',
-                  isPeopleView
-                    ? 'bg-background text-foreground shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground',
-                )}
-                onClick={() => { void setViewMode('people'); void setPersonEmail(null); }}
-              >
-                People
-              </button>
+          <div className="px-3 pb-1 pt-2">
+            <div className="flex items-center gap-2">
+              <div className="bg-muted flex items-center gap-0.5 rounded-lg p-1">
+                <button
+                  type="button"
+                  className={cn(
+                    'rounded-md px-3 py-1 text-xs font-medium transition-colors',
+                    !isPeopleView
+                      ? 'bg-background text-foreground shadow-sm'
+                      : 'text-muted-foreground hover:text-foreground',
+                  )}
+                  onClick={() => {
+                    void setViewMode(null);
+                    void setPersonEmail(null);
+                  }}
+                >
+                  Threads
+                </button>
+                <button
+                  type="button"
+                  className={cn(
+                    'rounded-md px-3 py-1 text-xs font-medium transition-colors',
+                    isPeopleView
+                      ? 'bg-background text-foreground shadow-sm'
+                      : 'text-muted-foreground hover:text-foreground',
+                  )}
+                  onClick={() => {
+                    void setViewMode('people');
+                    void setPersonEmail(null);
+                  }}
+                >
+                  People
+                </button>
+              </div>
             </div>
+            <p className="text-muted-foreground mt-2 px-1 text-xs leading-relaxed">
+              {isPeopleView
+                ? 'Group inbox threads by sender when you want to review a relationship instead of individual emails.'
+                : 'Switch to People to group your inbox by sender and scan conversations faster.'}
+            </p>
           </div>
         )}
 
@@ -1227,10 +1240,7 @@ export const MailList = memo(
         {isPeopleView && (
           <div className="flex h-[calc(100%-44px)] flex-col">
             {personEmail ? (
-              <PersonThreadsView
-                email={personEmail}
-                onBack={() => setPersonEmail(null)}
-              />
+              <PersonThreadsView email={personEmail} onBack={() => setPersonEmail(null)} />
             ) : (
               <PeopleList onSelectPerson={(email) => setPersonEmail(email)} />
             )}
@@ -1239,95 +1249,120 @@ export const MailList = memo(
 
         {/* Standard threads view */}
         {!isPeopleView && (
-        <>
-        <div
-          ref={parentRef}
-          className={cn(
-            'hide-link-indicator flex w-full',
-            // Reserve space for the toggle pill only when it's visible
-            showViewToggle ? 'h-[calc(100%-44px)]' : 'h-full',
-            getSelectMode() === 'range' && 'select-none',
-          )}
-        >
           <>
-            {isLoading || isRestoring || (isFetching && items.length === 0) ? (
-              // Show skeleton rows while loading/restoring IDB cache so user sees structure, not "It's empty here"
-              <div className="flex flex-1 flex-col gap-0.5 px-1 pt-2">
-                {Array.from({ length: 9 }).map((_, i) => (
-                  <div key={i} className="flex items-center gap-3 rounded-lg px-3 py-3">
-                    <Skeleton className="h-9 w-9 flex-shrink-0 rounded-full" />
-                    <div className="flex flex-1 flex-col gap-2">
-                      <div className="flex justify-between">
-                        <Skeleton className="h-3.5 w-32 rounded" />
-                        <Skeleton className="h-3 w-10 rounded" />
+            <div
+              ref={parentRef}
+              className={cn(
+                'hide-link-indicator flex w-full',
+                // Reserve space for the toggle pill only when it's visible
+                showViewToggle ? 'h-[calc(100%-44px)]' : 'h-full',
+                getSelectMode() === 'range' && 'select-none',
+              )}
+            >
+              <>
+                {isLoading || isRestoring || (isFetching && items.length === 0) ? (
+                  // Show skeleton rows while loading/restoring IDB cache so user sees structure, not "It's empty here"
+                  <div className="flex flex-1 flex-col gap-0.5 px-1 pt-2">
+                    {Array.from({ length: 9 }).map((_, i) => (
+                      <div key={i} className="flex items-center gap-3 rounded-lg px-3 py-3">
+                        <Skeleton className="h-9 w-9 flex-shrink-0 rounded-full" />
+                        <div className="flex flex-1 flex-col gap-2">
+                          <div className="flex justify-between">
+                            <Skeleton className="h-3.5 w-32 rounded" />
+                            <Skeleton className="h-3 w-10 rounded" />
+                          </div>
+                          <Skeleton
+                            className={`h-3 rounded ${i % 3 === 0 ? 'w-48' : i % 3 === 1 ? 'w-40' : 'w-52'}`}
+                          />
+                        </div>
                       </div>
-                      <Skeleton className={`h-3 rounded ${i % 3 === 0 ? 'w-48' : i % 3 === 1 ? 'w-40' : 'w-52'}`} />
+                    ))}
+                  </div>
+                ) : !activeConnection ? (
+                  <div className="flex w-full items-center justify-center">
+                    <div className="flex max-w-sm flex-col items-center justify-center gap-2 text-center">
+                      <EmptyStateIcon width={200} height={200} />
+                      <div className="mt-5 space-y-1">
+                        <p className="text-base font-medium">Connect an inbox to load your mail</p>
+                        <p className="text-muted-foreground text-[13px]">
+                          Add Gmail or Outlook to start reading threads, drafting replies, and using
+                          AI on your messages.
+                        </p>
+                      </div>
                     </div>
                   </div>
-                ))}
-              </div>
-            ) : !items || items.length === 0 ? (
-              <div className="flex w-full items-center justify-center">
-                <div className="flex flex-col items-center justify-center gap-2 text-center">
-                  <EmptyStateIcon width={200} height={200} />
-                  <div className="mt-5">
-                    <p className="text-base font-medium">
-                      {isFiltering ? 'No results found' : 'It\u2019s empty here'}
-                    </p>
-                    <p className="mt-1 text-[13px] text-muted-foreground">
-                      {isFiltering ? (
-                        <>
-                          Try a different search or{' '}
-                          <button type="button" className="underline cursor-pointer" onClick={clearFilters}>
-                            clear filters
-                          </button>
-                        </>
-                      ) : (
-                        'No emails in this folder yet'
-                      )}
-                    </p>
+                ) : !items || items.length === 0 ? (
+                  <div className="flex w-full items-center justify-center">
+                    <div className="flex flex-col items-center justify-center gap-2 text-center">
+                      <EmptyStateIcon width={200} height={200} />
+                      <div className="mt-5">
+                        <p className="text-base font-medium">
+                          {isFiltering
+                            ? 'No matching threads'
+                            : folder === FOLDERS.INBOX
+                              ? 'Your inbox is clear'
+                              : 'Nothing here yet'}
+                        </p>
+                        <p className="text-muted-foreground mt-1 text-[13px]">
+                          {isFiltering ? (
+                            <>
+                              Try a different search or{' '}
+                              <button
+                                type="button"
+                                className="cursor-pointer underline"
+                                onClick={clearFilters}
+                              >
+                                clear filters
+                              </button>
+                            </>
+                          ) : folder === FOLDERS.INBOX ? (
+                            'New mail will appear here as soon as your inbox syncs.'
+                          ) : (
+                            'Move messages here, or head back to inbox to keep processing mail.'
+                          )}
+                        </p>
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </div>
-            ) : (
-              <div className="flex flex-1 flex-col" id="mail-list-scroll">
-                <VList
-                  ref={vListRef}
-                  count={filteredItems.length}
-                  overscan={5}
-                  itemSize={100}
-                  className="scrollbar-none flex-1 overflow-x-hidden"
-                  onScroll={() => {
-                    if (!vListRef.current) return;
-                    const endIndex = vListRef.current.findEndIndex();
-                    if (
-                      // if the shown items are last 5 items, load more
-                      Math.abs(filteredItems.length - 1 - endIndex) < 7 &&
-                      !isLoading &&
-                      !isFetchingNextPage &&
-                      !isFetchingMail &&
-                      hasNextPage
-                    ) {
-                      void loadMore();
-                    }
-                  }}
-                >
-                  {vListRenderer}
-                </VList>
-              </div>
-            )}
-          </>
-        </div>
-        <div className="w-full pt-2 text-center">
-          {isFetching ? (
-            <div className="text-center">
-              <div className="mx-auto h-4 w-4 animate-spin rounded-full border-2 border-neutral-900 border-t-transparent dark:border-white dark:border-t-transparent" />
+                ) : (
+                  <div className="flex flex-1 flex-col" id="mail-list-scroll">
+                    <VList
+                      ref={vListRef}
+                      count={filteredItems.length}
+                      overscan={5}
+                      itemSize={100}
+                      className="scrollbar-none flex-1 overflow-x-hidden"
+                      onScroll={() => {
+                        if (!vListRef.current) return;
+                        const endIndex = vListRef.current.findEndIndex();
+                        if (
+                          // if the shown items are last 5 items, load more
+                          Math.abs(filteredItems.length - 1 - endIndex) < 7 &&
+                          !isLoading &&
+                          !isFetchingNextPage &&
+                          !isFetchingMail &&
+                          hasNextPage
+                        ) {
+                          void loadMore();
+                        }
+                      }}
+                    >
+                      {vListRenderer}
+                    </VList>
+                  </div>
+                )}
+              </>
             </div>
-          ) : (
-            <div className="h-2" />
-          )}
-        </div>
-        </>
+            <div className="w-full pt-2 text-center">
+              {isFetching ? (
+                <div className="text-center">
+                  <div className="mx-auto h-4 w-4 animate-spin rounded-full border-2 border-neutral-900 border-t-transparent dark:border-white dark:border-t-transparent" />
+                </div>
+              ) : (
+                <div className="h-2" />
+              )}
+            </div>
+          </>
         )}
       </>
     );

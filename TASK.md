@@ -4,6 +4,7 @@ Last updated: 2026-03-31
 
 ## Current Web/Server Fix Batch
 
+- `DONE` Shipped a focused web mail UX pass: non-blocking inbox connection setup, onboarding sequencing, clearer search/filter wording, better empty-state guidance, more discoverable list actions, and a stronger thread action hierarchy.
 - `DONE` Added a one-click share/copy action to the thread AI summary card so users can paste branded thread summaries into email or Slack.
 - `DONE` Web task mutations now invalidate all `tasks.list` TanStack caches via `trpc.tasks.list.queryFilter()` (tasks page, home, calendar, TaskItem).
 - `DONE` Fixed the web root error boundary hook-order violation by moving Sentry/error-reporting side effects into a dedicated child component.

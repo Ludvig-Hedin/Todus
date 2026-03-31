@@ -73,6 +73,9 @@ import { toast } from 'sonner';
 
 interface NotesPanelProps {
   threadId: string;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  showTrigger?: boolean;
 }
 
 function SortableNote({
@@ -230,12 +233,12 @@ function SortableNote({
   );
 }
 
-export function NotesPanel({ threadId }: NotesPanelProps) {
+export function NotesPanel({ threadId, open, onOpenChange, showTrigger = true }: NotesPanelProps) {
   const {
     data: { notes },
     refetch,
   } = useThreadNotes(threadId);
-  const [isOpen, setIsOpen] = useState(false);
+  const [internalIsOpen, setInternalIsOpen] = useState(false);
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [newNoteContent, setNewNoteContent] = useState('');
   const [editContent, setEditContent] = useState('');
@@ -356,8 +359,8 @@ export function NotesPanel({ threadId }: NotesPanelProps) {
   };
 
   const confirmDeleteNote = (noteId: string) => {
-    // Replaced bugged Dialog with reliable native confirmation 
-    if (window.confirm("Are you sure you want to delete this note?")) {
+    // Replaced bugged Dialog with reliable native confirmation
+    if (window.confirm('Are you sure you want to delete this note?')) {
       const promise = handleDeleteNote(noteId);
       toast.promise(promise, {
         loading: m['common.actions.loading'](),
@@ -493,38 +496,49 @@ export function NotesPanel({ threadId }: NotesPanelProps) {
     [sortedUnpinnedNotes],
   );
 
+  const isControlled = open !== undefined;
+  const isOpen = isControlled ? open : internalIsOpen;
+  const setIsOpen = (nextOpen: boolean) => {
+    if (!isControlled) {
+      setInternalIsOpen(nextOpen);
+    }
+    onOpenChange?.(nextOpen);
+  };
+
   return (
     <div className="relative" ref={panelRef}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            variant="ghost"
-            size="sm"
-            className={cn(
-              'inline-flex h-7 w-7 items-center justify-center gap-1 overflow-hidden rounded-lg bg-white dark:bg-[#313131]',
-              notes.length > 0 && 'text-amber-500',
-              isOpen && 'bg-white/80 dark:bg-[#313131]/80',
-            )}
-            onClick={() => setIsOpen(!isOpen)}
-          >
-            <StickyNote
+      {showTrigger ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="sm"
               className={cn(
-                'h-4 w-4',
-                notes.length > 0 ? 'fill-amber-200 dark:fill-amber-900' : 'text-[#9A9A9A]',
+                'inline-flex h-7 w-7 items-center justify-center gap-1 overflow-hidden rounded-lg bg-white dark:bg-[#313131]',
+                notes.length > 0 && 'text-amber-500',
+                isOpen && 'bg-white/80 dark:bg-[#313131]/80',
               )}
-            />
-            {notes.length > 0 && (
-              <span className="bg-primary text-primary-foreground absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full text-[10px]">
-                {notes.length}
-              </span>
-            )}
-            <span className="sr-only">{m['common.notes.title']()}</span>
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent side="bottom" className="bg-white dark:bg-[#313131]">
-          <p>{m['common.notes.noteCount']({ count: notes.length })}</p>
-        </TooltipContent>
-      </Tooltip>
+              onClick={() => setIsOpen(!isOpen)}
+            >
+              <StickyNote
+                className={cn(
+                  'h-4 w-4',
+                  notes.length > 0 ? 'fill-amber-200 dark:fill-amber-900' : 'text-[#9A9A9A]',
+                )}
+              />
+              {notes.length > 0 && (
+                <span className="bg-primary text-primary-foreground absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full text-[10px]">
+                  {notes.length}
+                </span>
+              )}
+              <span className="sr-only">{m['common.notes.title']()}</span>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" className="bg-white dark:bg-[#313131]">
+            <p>{m['common.notes.noteCount']({ count: notes.length })}</p>
+          </TooltipContent>
+        </Tooltip>
+      ) : null}
 
       {isOpen && (
         <div

@@ -1,5 +1,47 @@
 # Project Changelog
 
+## [2026-03-31] UX Polish — web mail first-run and inbox clarity pass
+
+- Reworked the first-run flow in `apps/mail` so onboarding no longer competes with inbox connection setup. The inbox tour now waits until the user has at least one connected account.
+- Replaced the blocking connect-email modal with a dismissible setup card, so users can orient themselves or navigate to settings without being trapped in a modal on first load.
+- Clarified primary inbox controls: the main search affordance now reads as `Search or filter mail`, the category dropdown is labeled `Filter inbox`, active filter counts use consistent wording, and the inbox/People toggle now explains what the People view does.
+- Improved thread-list discoverability by keeping row actions lightly visible instead of fully hidden until hover, and upgraded empty states with clearer, action-oriented copy.
+- Simplified thread-header hierarchy by making `Reply all` the obvious primary action and moving notes into secondary actions, while also making the AI entry point more concrete through updated tooltip/call-to-action language.
+- Tightened onboarding copy to focus on immediate email tasks instead of vague marketing or future-looking messaging.
+
+**User-facing:** First-time users get a calmer setup flow, inbox controls are easier to understand within a few seconds, and the main email actions are more obvious.
+
+**Files:** `apps/mail/components/onboarding.tsx`, `apps/mail/components/connection/connection-wrapper.tsx`, `apps/mail/components/mail/mail.tsx`, `apps/mail/components/mail/mail-list.tsx`, `apps/mail/components/mail/thread-display.tsx`, `apps/mail/components/mail/note-panel.tsx`, `apps/mail/components/ai-toggle-button.tsx`, `TASK.md`
+
+## [2026-03-31] Fix — iOS: email inbox 4-state branching (loading / error / empty / results)
+
+### iOS — `EmailInboxView.swift`
+
+- Added `errorState` view: `exclamationmark.triangle` icon, "Couldn't load \(folder)" title, backend error message as subtitle, "Try Again" button
+- Body condition now has 4 branches: no-connection → skeleton (isLoading && empty) → **error** (errorMessage != nil && empty && !loading) → empty → thread list
+- `emptyState` now branches: search-empty ("No results for X", Clear Search button) vs folder-empty (folder icon, Refresh button)
+- Fixed bug: `searchBar.onSubmit` was calling `loadThreads(query:refresh:)` without `folder:` — now passes `selectedFolder.rawValue`
+
+**Files:** `apps/ios/Todus/Todus/Features/Email/EmailInboxView.swift`
+
+## [2026-03-31] UX Polish — email folder parity on iOS and macOS
+
+### iOS — `EmailInboxView.swift`
+
+- Added `EmailFolder` private enum covering all 7 backend folders: inbox, drafts, sent, archive, snoozed, spam, bin (trash)
+- Header title is now tappable — opens a `Menu` folder picker with icons, divided into primary (Inbox/Drafts/Sent) and secondary (Archive/Snoozed/Spam/Trash) groups
+- Folder changes clear the search field and reload threads via `loadThreads(folder:refresh:)`
+- Loading skeleton, empty state icon, and empty state title all reflect the active folder
+
+### macOS — `MacRootView.swift` + `MacSidebarView.swift`
+
+- Extended `EmailSection` enum with four new cases: `.archive`, `.snoozed`, `.spam`, `.bin` — each with a `title`, `systemImage`, and `isPrimary` flag
+- Sidebar email sub-items now show icons alongside text (updated `SidebarChildItemButton` to accept optional `systemImage`)
+- Primary folders (Inbox, Drafts, Sent) appear above a subtle divider; secondary folders below
+- `MacEmailInboxView(folder: section.rawValue)` already routes the raw value to the backend — no additional changes needed
+
+**Files:** `apps/ios/Todus/Todus/Features/Email/EmailInboxView.swift`, `apps/macos/TodusMac/App/MacRootView.swift`, `apps/macos/TodusMac/App/MacSidebarView.swift`, `apps/macos/TodusMac/Views/Email/MacEmailInboxView.swift`
+
 ## [2026-03-31] Feature — web: shareable thread summary copy action
 
 - Added a one-click `Copy summary` action to the thread summary card in `apps/mail/components/mail/mail-display.tsx`.

@@ -1,73 +1,109 @@
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../ui/dialog';
 import { useConnections } from '@/hooks/use-connections';
+import { useLocation, useNavigate } from 'react-router';
+import { useEffect, useMemo, useState } from 'react';
 import { emailProviders } from '@/lib/constants';
 import { authClient } from '@/lib/auth-client';
-import { m } from '@/paraglide/messages';
-import { motion } from 'motion/react';
 import { Button } from '../ui/button';
-import { useLocation } from 'react-router';
+import { X } from 'lucide-react';
+
+const DISMISS_KEY = 'dismissedConnectionPrompt';
 
 export const ConnectionWrapper = () => {
-    const { data: connectionsData, isLoading } = useConnections();
-    const location = useLocation();
+  const { data: connectionsData, isLoading } = useConnections();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [dismissed, setDismissed] = useState(false);
 
-    // We only show this if we have finished loading and confirmed there are 0 connections
-    const hasNoConnections = connectionsData && connectionsData.connections.length === 0;
+  const hasNoConnections = (connectionsData?.connections.length ?? 0) === 0;
 
-    if (isLoading || !hasNoConnections) return null;
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    setDismissed(localStorage.getItem(DISMISS_KEY) === 'true');
+  }, []);
 
-    return (
-        <Dialog open={true}>
-            <DialogContent
-                showOverlay={false}
-                className="max-w-md border-none bg-transparent shadow-none"
-                onPointerDownOutside={(e) => e.preventDefault()}
-                onEscapeKeyDown={(e) => e.preventDefault()}
-            >
-                <div className="bg-panelLight dark:bg-panelDark rounded-xl border p-6 shadow-2xl">
-                    <DialogHeader>
-                        <DialogTitle className="text-xl">{m['pages.settings.connections.connectEmail']()}</DialogTitle>
-                        <DialogDescription className="mt-2 text-[13px] leading-relaxed">
-                            {m['pages.settings.connections.connectEmailDescription']()}
-                        </DialogDescription>
-                    </DialogHeader>
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
 
-                    <motion.div
-                        className="mt-6 grid grid-cols-2 gap-4"
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        transition={{ duration: 0.3 }}
-                    >
-                        {emailProviders.map((provider, index) => {
-                            const Icon = provider.icon;
-                            return (
-                                <motion.div
-                                    key={provider.name}
-                                    initial={{ opacity: 0, y: 20 }}
-                                    animate={{ opacity: 1, y: 0 }}
-                                    transition={{ delay: index * 0.1, duration: 0.3 }}
-                                    whileHover={{ scale: 1.02 }}
-                                    whileTap={{ scale: 0.98 }}
-                                >
-                                    <Button
-                                        variant="outline"
-                                        className="h-28 w-full flex-col items-center justify-center gap-3 border shadow-sm"
-                                        onClick={async () =>
-                                            await authClient.linkSocial({
-                                                provider: provider.providerId,
-                                                callbackURL: `${window.location.origin}${location.pathname}`,
-                                            })
-                                        }
-                                    >
-                                        <Icon className="size-7!" />
-                                        <span className="text-[13px] font-medium">{provider.name}</span>
-                                    </Button>
-                                </motion.div>
-                            );
-                        })}
-                    </motion.div>
-                </div>
-            </DialogContent>
-        </Dialog>
-    );
+    if (!hasNoConnections) {
+      localStorage.removeItem(DISMISS_KEY);
+      setDismissed(false);
+    }
+  }, [hasNoConnections]);
+
+  const providerButtons = useMemo(
+    () =>
+      emailProviders.map((provider) => {
+        const Icon = provider.icon;
+
+        return (
+          <Button
+            key={provider.name}
+            variant="outline"
+            className="h-11 justify-start gap-3 rounded-xl border shadow-none"
+            onClick={async () =>
+              await authClient.linkSocial({
+                provider: provider.providerId,
+                callbackURL: `${window.location.origin}${location.pathname}`,
+              })
+            }
+          >
+            <Icon className="size-5!" />
+            <span>{provider.name}</span>
+          </Button>
+        );
+      }),
+    [location.pathname],
+  );
+
+  if (isLoading || !hasNoConnections || dismissed) return null;
+
+  return (
+    <div className="pointer-events-none fixed inset-x-4 bottom-4 z-40 md:inset-x-auto md:bottom-auto md:right-4 md:top-4 md:w-[360px]">
+      <div className="bg-background/98 pointer-events-auto rounded-2xl border p-4 shadow-2xl backdrop-blur">
+        <div className="flex items-start justify-between gap-3">
+          <div className="space-y-1">
+            <p className="text-foreground text-sm font-semibold">Connect an inbox to start</p>
+            <p className="text-muted-foreground text-sm leading-relaxed">
+              Add Gmail or Outlook to load messages, use AI on your mail, and start replying from
+              this workspace.
+            </p>
+          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 shrink-0 rounded-full"
+            onClick={() => {
+              localStorage.setItem(DISMISS_KEY, 'true');
+              setDismissed(true);
+            }}
+          >
+            <X className="h-4 w-4" />
+            <span className="sr-only">Dismiss connection prompt</span>
+          </Button>
+        </div>
+
+        <div className="mt-4 grid gap-2">{providerButtons}</div>
+
+        <div className="mt-4 flex flex-wrap gap-2">
+          <Button
+            variant="secondary"
+            className="rounded-full"
+            onClick={() => navigate('/settings/connections')}
+          >
+            Open connection settings
+          </Button>
+          <Button
+            variant="ghost"
+            className="text-muted-foreground rounded-full"
+            onClick={() => {
+              localStorage.setItem(DISMISS_KEY, 'true');
+              setDismissed(true);
+            }}
+          >
+            Continue without email
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
 };

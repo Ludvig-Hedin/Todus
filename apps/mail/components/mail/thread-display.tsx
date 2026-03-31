@@ -12,7 +12,6 @@ import {
   Trash,
   X,
 } from '../icons/icons';
-import { APP_NAME } from '@/lib/branding';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -37,15 +36,16 @@ import { MailDisplaySkeleton } from './mail-skeleton';
 import { useTRPC } from '@/providers/query-provider';
 import { useMutation } from '@tanstack/react-query';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { Inbox, StickyNote } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cleanHtml } from '@/lib/email-utils';
 import ReplyCompose from './reply-composer';
+import { APP_NAME } from '@/lib/branding';
 import { NotesPanel } from './note-panel';
 import { cn, FOLDERS } from '@/lib/utils';
 import { m } from '@/paraglide/messages';
 import MailDisplay from './mail-display';
 import { useParams } from 'react-router';
-import { Inbox } from 'lucide-react';
 import { useQueryState } from 'nuqs';
 import { format } from 'date-fns';
 import { useAtom } from 'jotai';
@@ -62,7 +62,7 @@ const cleanNameDisplay = (name?: string) => {
 };
 
 interface ThreadDisplayProps {
-  threadParam?: any;
+  threadParam?: unknown;
   onClose?: () => void;
   isMobile?: boolean;
   messages?: ParsedMessage[];
@@ -119,7 +119,7 @@ function ThreadActionButton({
   disabled = false,
   className,
 }: {
-  icon: React.ComponentType<React.ComponentPropsWithRef<any>> & {
+  icon: React.ComponentType<React.SVGProps<SVGSVGElement>> & {
     startAnimation?: () => void;
     stopAnimation?: () => void;
   };
@@ -128,7 +128,7 @@ function ThreadActionButton({
   disabled?: boolean;
   className?: string;
 }) {
-  const iconRef = useRef<any>(null);
+  const iconRef = useRef<SVGSVGElement | null>(null);
 
   return (
     <TooltipProvider delayDuration={0}>
@@ -163,6 +163,7 @@ export function ThreadDisplay() {
   const [, items] = useThreads();
   const [isStarred, setIsStarred] = useState(false);
   const [isImportant, setIsImportant] = useState(false);
+  const [isNotesOpen, setIsNotesOpen] = useState(false);
 
   const [navigationDirection, setNavigationDirection] = useState<'previous' | 'next' | null>(null);
 
@@ -237,6 +238,7 @@ export function ThreadDisplay() {
     setMode(null);
     setActiveReplyId(null);
     setDraftId(null);
+    setIsNotesOpen(false);
   }, [setThreadId, setMode, setActiveReplyId, setDraftId]);
 
   const { optimisticMoveThreadsTo } = useOptimisticActions();
@@ -280,7 +282,11 @@ export function ThreadDisplay() {
 
       // HTML-escape to prevent XSS in the print iframe (e.g. malicious email subjects)
       const escapeHtml = (str: string) =>
-        str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        str
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;');
 
       // Generate clean, simple HTML content for printing
       const printContent = `
@@ -732,29 +738,26 @@ export function ThreadDisplay() {
               <div className="mt-4">
                 {/* "Select a conversation" is clearer than "It's empty here" — the latter implies
                     something is missing/broken rather than communicating that nothing is selected yet */}
-                <p className="text-base font-medium text-foreground">Select a conversation</p>
-                <p className="text-[13px] text-muted-foreground mt-1">
+                <p className="text-foreground text-base font-medium">Select a conversation</p>
+                <p className="text-muted-foreground mt-1 text-[13px]">
                   Choose a thread from the list to read, reply, or archive it
                 </p>
                 <div className="mt-4 grid grid-cols-1 gap-2 xl:grid-cols-2">
                   {/* Compose is the primary action in an empty thread pane; AI is secondary */}
                   <button
                     onClick={() => setIsComposeOpen('true')}
-                    className="inline-flex h-7 items-center justify-center gap-1 overflow-hidden rounded-full border bg-card px-2.5 hover:bg-accent transition-colors duration-100 cursor-pointer"
+                    className="bg-card hover:bg-accent inline-flex h-8 cursor-pointer items-center justify-center gap-1 overflow-hidden rounded-full border px-3 transition-colors duration-100"
                   >
-                    <Mail className="h-3.5 w-3.5 fill-muted-foreground/50" />
-                    <span className="text-[13px] leading-none text-foreground">
-                      Compose email
-                    </span>
+                    <Mail className="fill-muted-foreground/50 h-3.5 w-3.5" />
+                    <span className="text-foreground text-[13px] leading-none">Compose email</span>
                   </button>
                   <button
                     onClick={toggleAISidebar}
-                    className="inline-flex h-7 items-center justify-center gap-1 overflow-hidden rounded-full border bg-card px-2.5 hover:bg-accent transition-colors duration-100 cursor-pointer"
+                    className="bg-card hover:bg-accent inline-flex h-8 cursor-pointer items-center justify-center gap-1 overflow-hidden rounded-full border px-3 transition-colors duration-100"
                   >
-                    <Sparkles className="h-3.5 w-3.5 fill-muted-foreground/50" />
-                    {/* Use APP_NAME for consistency across the product rather than hardcoded "Todus chat" */}
-                    <span className="text-[13px] leading-none text-foreground">
-                      {APP_NAME} AI
+                    <Sparkles className="fill-muted-foreground/50 h-3.5 w-3.5" />
+                    <span className="text-foreground text-[13px] leading-none">
+                      Ask {APP_NAME} AI
                     </span>
                   </button>
                 </div>
@@ -783,14 +786,12 @@ export function ThreadDisplay() {
                     <TooltipTrigger asChild>
                       <button
                         onClick={handleClose}
-                        className="inline-flex h-7 w-7 items-center justify-center gap-1 overflow-hidden rounded-full hover:bg-accent md:hidden transition-colors duration-100"
+                        className="hover:bg-accent inline-flex h-7 w-7 items-center justify-center gap-1 overflow-hidden rounded-full transition-colors duration-100 md:hidden"
                       >
                         <X className="fill-iconLight dark:fill-iconDark h-3.5 w-3.5" />
                       </button>
                     </TooltipTrigger>
-                    <TooltipContent side="bottom">
-                      {m['common.actions.close']()}
-                    </TooltipContent>
+                    <TooltipContent side="bottom">{m['common.actions.close']()}</TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
                 <ThreadActionButton
@@ -807,20 +808,19 @@ export function ThreadDisplay() {
                     setMode('replyAll');
                     setActiveReplyId(emailData?.latest?.id ?? '');
                   }}
-                  className="inline-flex h-7 items-center justify-center gap-1 overflow-hidden rounded-full border bg-card px-2 hover:bg-accent transition-colors duration-100 cursor-pointer"
+                  className="bg-mainBlue hover:bg-mainBlue/90 inline-flex h-8 cursor-pointer items-center justify-center gap-1 overflow-hidden rounded-full px-3 transition-colors duration-100"
                 >
-                  <Reply className="fill-muted-foreground" />
-                  <span className="whitespace-nowrap text-[13px] leading-none text-foreground pl-0.5 pr-0.5">
+                  <Reply className="fill-white" />
+                  <span className="whitespace-nowrap pl-0.5 pr-0.5 text-[13px] leading-none text-white">
                     {m['common.threadDisplay.replyAll']()}
                   </span>
                 </button>
-                <NotesPanel threadId={id} />
                 <TooltipProvider delayDuration={0}>
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
                         onClick={handleToggleStar}
-                        className="inline-flex h-7 w-7 items-center justify-center gap-1 overflow-hidden rounded-full border bg-card hover:bg-accent transition-colors duration-100 cursor-pointer"
+                        className="bg-card hover:bg-accent inline-flex h-7 w-7 cursor-pointer items-center justify-center gap-1 overflow-hidden rounded-full border transition-colors duration-100"
                       >
                         <Star
                           className={cn(
@@ -845,7 +845,7 @@ export function ThreadDisplay() {
                     <TooltipTrigger asChild>
                       <button
                         onClick={() => moveThreadTo('archive')}
-                        className="inline-flex h-7 w-7 items-center justify-center gap-1 overflow-hidden rounded-full bg-card hover:bg-accent transition-colors cursor-pointer"
+                        className="bg-card hover:bg-accent inline-flex h-7 w-7 cursor-pointer items-center justify-center gap-1 overflow-hidden rounded-full transition-colors"
                       >
                         <Archive className="fill-iconLight dark:fill-iconDark" />
                       </button>
@@ -862,7 +862,7 @@ export function ThreadDisplay() {
                       <TooltipTrigger asChild>
                         <button
                           onClick={() => moveThreadTo('bin')}
-                          className="inline-flex h-7 w-7 items-center justify-center gap-1 overflow-hidden rounded-full border border-[#FCCDD5] bg-[#FDE4E9] hover:bg-[#fccdd5]/70 dark:border-[#6E2532] dark:bg-[#411D23] dark:hover:bg-[#6E2532]/70 cursor-pointer transition-colors"
+                          className="inline-flex h-7 w-7 cursor-pointer items-center justify-center gap-1 overflow-hidden rounded-full border border-[#FCCDD5] bg-[#FDE4E9] transition-colors hover:bg-[#fccdd5]/70 dark:border-[#6E2532] dark:bg-[#411D23] dark:hover:bg-[#6E2532]/70"
                         >
                           <Trash className="fill-[#F43F5E]" />
                         </button>
@@ -876,11 +876,24 @@ export function ThreadDisplay() {
 
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <button type="button" aria-label="Thread actions" aria-haspopup="menu" className="inline-flex h-7 w-7 items-center justify-center gap-1 overflow-hidden rounded-full bg-white cursor-pointer focus:outline-hidden focus:ring-0 dark:bg-[#313131] transition-colors">
+                    <button
+                      type="button"
+                      aria-label="Thread actions"
+                      aria-haspopup="menu"
+                      className="focus:outline-hidden inline-flex h-7 w-7 cursor-pointer items-center justify-center gap-1 overflow-hidden rounded-full bg-white transition-colors focus:ring-0 dark:bg-[#313131]"
+                    >
                       <ThreeDots className="fill-iconLight dark:fill-iconDark" />
                     </button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="bg-card">
+                    <DropdownMenuItem onClick={toggleAISidebar}>
+                      <Sparkles className="fill-iconLight dark:fill-iconDark mr-2 h-4 w-4" />
+                      <span>Ask AI about this thread</span>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setIsNotesOpen(true)}>
+                      <StickyNote className="mr-2 h-4 w-4" />
+                      <span>{m['common.notes.title']()}</span>
+                    </DropdownMenuItem>
                     {/* <DropdownMenuItem onClick={() => setIsFullscreen(!isFullscreen)}>
                       <Expand className="fill-iconLight dark:fill-iconDark mr-2" />
                       <span>
@@ -930,6 +943,14 @@ export function ThreadDisplay() {
               </div>
             </div>
             <div className={cn('flex min-h-0 flex-1 flex-col', isMobile && 'h-full')}>
+              <div className="absolute right-3 top-14 z-20">
+                <NotesPanel
+                  threadId={id}
+                  open={isNotesOpen}
+                  onOpenChange={setIsNotesOpen}
+                  showTrigger={false}
+                />
+              </div>
               {animationsEnabled ? (
                 <AnimatePresence mode="wait" initial={false}>
                   <motion.div

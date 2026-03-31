@@ -1,44 +1,37 @@
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import { useConnections } from '@/hooks/use-connections';
 import { Button } from '@/components/ui/button';
-import { APP_NAME } from '@/lib/branding';
 import { useState, useEffect } from 'react';
+import { APP_NAME } from '@/lib/branding';
 import confetti from 'canvas-confetti';
 
 const steps = [
   {
-    title: `Welcome to ${APP_NAME}!`,
-    description: 'Your new intelligent email experience starts here.',
+    title: `Welcome to ${APP_NAME}`,
+    description:
+      'Process inbox work faster with clearer threads, quicker replies, and built-in AI help.',
     video: '/onboarding/get-started.png',
   },
   {
-    title: 'Chat with your inbox',
-    description: `${APP_NAME} lets you chat with your inbox and take action faster.`,
+    title: 'Find the next thing to do',
+    description:
+      'Scan threads, triage what matters, and open the exact conversation you need in one place.',
     video: '/onboarding/step2.gif',
   },
   {
-    title: 'AI Compose & Reply',
-    description: 'Our AI assistant allows you to write emails that sound like you.',
+    title: 'Draft replies with less effort',
+    description:
+      'Use AI to summarize threads, draft responses, and get unstuck without leaving your inbox.',
     video: '/onboarding/step1.gif',
   },
   {
-    title: 'Label your emails',
-    description: `${APP_NAME} helps you label emails so you can focus on what matters.`,
+    title: 'Stay organized as you go',
+    description: 'Star, archive, and label messages so your inbox stays easy to understand.',
     video: '/onboarding/step3.gif',
   },
   {
-    title: 'Coming Soon',
-    description: (
-      <>
-        <span className="text-muted-foreground mb-4">
-          We're excited to bring these powerful features to all users very soon!
-        </span>
-      </>
-    ),
-    video: '/onboarding/coming-soon.png',
-  },
-  {
     title: 'Ready to start?',
-    description: 'Click below to begin your intelligent email experience!',
+    description: 'Connect your inbox when you are ready, or explore the workspace first.',
     video: '/onboarding/ready.png',
   },
 ];
@@ -60,7 +53,7 @@ export function OnboardingDialog({
         origin: { y: 0.6 },
       });
     }
-  }, [currentStep, steps.length]);
+  }, [currentStep]);
 
   const handleNext = () => {
     if (currentStep < steps.length - 1) {
@@ -86,8 +79,9 @@ export function OnboardingDialog({
                     step.video && (
                       <div
                         key={step.title}
-                        className={`absolute inset-0 transition-opacity duration-300 ${index === currentStep ? 'opacity-100' : 'opacity-0'
-                          }`}
+                        className={`absolute inset-0 transition-opacity duration-300 ${
+                          index === currentStep ? 'opacity-100' : 'opacity-0'
+                        }`}
                       >
                         <img
                           loading="eager"
@@ -129,8 +123,9 @@ export function OnboardingDialog({
                 {steps.map((_, index) => (
                   <div
                     key={_.title}
-                    className={`h-1 w-4 rounded-full md:w-10 ${index === currentStep ? 'bg-primary' : 'bg-muted'
-                      }`}
+                    className={`h-1 w-4 rounded-full md:w-10 ${
+                      index === currentStep ? 'bg-primary' : 'bg-muted'
+                    }`}
                   />
                 ))}
               </div>
@@ -145,11 +140,18 @@ export function OnboardingDialog({
 export function OnboardingWrapper() {
   const [showOnboarding, setShowOnboarding] = useState(false);
   const ONBOARDING_KEY = 'hasCompletedOnboarding';
+  const { data: connectionsData, isLoading } = useConnections();
 
   useEffect(() => {
+    if (isLoading) return;
+
     const hasCompletedOnboarding = localStorage.getItem(ONBOARDING_KEY) === 'true';
-    setShowOnboarding(!hasCompletedOnboarding);
-  }, []);
+    const hasConnections = (connectionsData?.connections.length ?? 0) > 0;
+
+    // Show the tour only after the user has at least one connected inbox.
+    // Otherwise the connect prompt and onboarding compete for attention on first run.
+    setShowOnboarding(hasConnections && !hasCompletedOnboarding);
+  }, [connectionsData?.connections.length, isLoading]);
 
   const handleOpenChange = (open: boolean) => {
     if (!open) {

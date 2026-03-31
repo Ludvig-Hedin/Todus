@@ -14,7 +14,7 @@ const AIToggleButton = () => {
             <Button
               variant="outline"
               size="icon"
-              className="dark:bg-sidebar border h-12 w-12 rounded-lg"
+              className="dark:bg-sidebar h-12 w-12 rounded-lg border"
               onClick={(e) => {
                 if (!isSidebarOpen) {
                   e.stopPropagation();
@@ -40,7 +40,7 @@ const AIToggleButton = () => {
               </div>
             </Button>
           </TooltipTrigger>
-          <TooltipContent>Toggle AI Assistant</TooltipContent>
+          <TooltipContent>Ask AI to summarize, draft, or search your mail</TooltipContent>
         </Tooltip>
       </div>
     )
