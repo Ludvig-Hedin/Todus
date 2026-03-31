@@ -71,7 +71,6 @@ struct MacRootView: View {
     @State private var isCreatePresented = false
     @State private var isSearchPresented = false
     @State private var selectedEmailThread: IdentifiableString? = nil
-    @State private var showNotifications = false
     @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
     @State private var calendarViewMode: String = "Week"
     @State private var calendarSelectedDate: Date = Date()
@@ -293,45 +292,15 @@ struct MacRootView: View {
             // (.hidden doesn't paint anything, so no sidebar clipping issue —
             // that only happened with .visible which drew an opaque bar.)
             .toolbarBackground(.hidden, for: .windowToolbar)
-            .toolbar(removing: .sidebarToggle)
             .toolbar {
-                ToolbarItem(placement: .navigation) {
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            columnVisibility = columnVisibility == .detailOnly
-                                ? .automatic : .detailOnly
-                        }
-                    } label: {
-                        Image(systemName: "sidebar.left")
-                    }
-                    .help("Toggle Sidebar")
-                    .buttonStyle(.plain)
-                    .focusEffectDisabled()
-                }
-
                 // Context-specific toolbar items based on active view
                 ToolbarItemGroup(placement: .secondaryAction) {
                     contextToolbarItems
                 }
 
                 ToolbarItemGroup(placement: .primaryAction) {
-                    Button {
-                        showNotifications.toggle()
-                    } label: {
-                        Image(systemName: "bell")
-                    }
-                    .help("Notifications")
-                    .popover(isPresented: $showNotifications, arrowEdge: .bottom) {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Notifications")
-                                .font(.system(size: 13, weight: .semibold))
-                            Text("No new notifications.")
-                                .font(.system(size: 12))
-                                .foregroundStyle(.secondary)
-                        }
-                        .padding(14)
-                        .frame(width: 220)
-                    }
+                    // Notifications bell removed — placeholder "No new notifications" popover
+                    // offered no value. Will be re-added when notification backend is implemented.
 
                     Menu {
                         Button("Preferences…  ⌘,") { isSettingsPresented = true }
@@ -483,11 +452,13 @@ struct MacRootView: View {
 
     // MARK: - Context Toolbar
 
-    /// Toolbar items that change based on the active view
+    /// Toolbar items that change based on the active view.
+    /// Only functional actions are shown — filter menus removed until backend filtering is wired up.
     @ViewBuilder
     private var contextToolbarItems: some View {
         switch selection.category {
         case "email":
+            // Mark all read — functional, wired to EmailService
             Button {
                 Task {
                     let ids = services.emailService.threads.filter(\.unread).map(\.id)
@@ -500,38 +471,8 @@ struct MacRootView: View {
             }
             .help("Mark All Read")
 
-            Menu {
-                Button("All Mail") {}
-                Button("Unread") {}
-                Button("Flagged") {}
-                Button("With Attachments") {}
-            } label: {
-                Image(systemName: "line.3.horizontal.decrease.circle")
-                    .foregroundStyle(Color.primary.opacity(0.7))
-            }
-            .tint(Color.primary.opacity(0.7))
-            .help("Filter")
-
-        case "calendar":
-            // No extra toolbar items — view picker and Today button live inside
-            // the calendar header. The global compose button (⌘N) handles new events.
-            EmptyView()
-
-        case "tasks":
-            Menu {
-                Button("All") {}
-                Button("Today") {}
-                Button("Upcoming") {}
-                Divider()
-                Button("Completed") {}
-            } label: {
-                Image(systemName: "line.3.horizontal.decrease.circle")
-                    .foregroundStyle(Color.primary.opacity(0.7))
-            }
-            .tint(Color.primary.opacity(0.7))
-            .help("Filter Tasks")
-
         default:
+            // No context toolbar items for calendar, tasks, home
             EmptyView()
         }
     }

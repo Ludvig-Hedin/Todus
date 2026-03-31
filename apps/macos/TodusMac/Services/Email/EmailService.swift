@@ -28,6 +28,14 @@ final class EmailService {
         self.api = api
     }
 
+    /// Clears all cached email state on sign-out so the next session starts fresh.
+    func resetForSignOut() {
+        threads = []
+        nextPageToken = nil
+        errorMessage = nil
+        hasConnection = false
+    }
+
     // MARK: - Inbox
 
     /// Fetches threads for a given folder (default: inbox).

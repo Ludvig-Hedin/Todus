@@ -238,9 +238,16 @@ struct MacHomeView: View {
             sectionHeader(title: "RECENT EMAILS", count: services.emailService.threads.prefix(5).count)
 
             if !services.emailService.hasConnection {
-                // Show connect Gmail prompt with action button
-                VStack(spacing: MacTheme.spacing8) {
-                    emptyCard(message: "Connect Gmail to see your inbox", icon: "envelope")
+                // Connect Gmail prompt — button inside the empty state card
+                VStack(spacing: MacTheme.spacing12) {
+                    Image(systemName: "envelope")
+                        .font(.system(size: 22, weight: .light))
+                        .foregroundStyle(MacTheme.mutedText.opacity(0.6))
+
+                    Text("Connect Gmail to see your inbox")
+                        .font(MacTheme.cardSubtitleFont())
+                        .foregroundStyle(MacTheme.mutedText)
+
                     Button {
                         Task { await services.emailService.connectGmail(authService: services.authService) }
                     } label: {
@@ -259,6 +266,13 @@ struct MacHomeView: View {
                     .focusEffectDisabled()
                     .pointerStyle(.link)
                 }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, MacTheme.spacing20)
+                .background(MacTheme.emptyStateSurface, in: RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous)
+                        .stroke(MacTheme.cardBorder, lineWidth: 0.5)
+                )
             } else if services.emailService.threads.isEmpty {
                 if services.emailService.isLoadingThreads {
                     HStack(spacing: MacTheme.spacing8) {

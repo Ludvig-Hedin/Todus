@@ -18,6 +18,10 @@ struct MacSettingsView: View {
     @State private var showsDeleteAlert = false
     @State private var deleteConfirmText = ""
     @State private var showsDisconnectGmail = false
+    @State private var activeSessions: [ActiveSessionRecord] = []
+    @State private var isLoadingSessions = false
+    @State private var isRevokingAllSessions = false
+    @State private var revokingSessionIDs: Set<String> = []
 
     // Preferences
     @AppStorage("preferredColorScheme") private var preferredColorScheme = "system"
@@ -46,6 +50,7 @@ struct MacSettingsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     accountSection
+                    activeSessionsSection
 #if DEBUG
                     authDebugSection
 #endif
@@ -68,6 +73,9 @@ struct MacSettingsView: View {
             // Refresh profile data (name, avatar) when settings opens — matches iOS SettingsView
             await services.authService.fetchUserProfile()
             await services.loadSharedAIProfile()
+        }
+        .task {
+            await loadActiveSessions()
         }
         // Logout confirmation
         .confirmationDialog(
@@ -230,6 +238,98 @@ struct MacSettingsView: View {
                 Image(systemName: "person.fill")
                     .font(.system(size: 13))
                     .foregroundStyle(MacTheme.mutedText)
+            }
+        }
+    }
+
+    private var activeSessionsSection: some View {
+        settingsGroup(title: "Security") {
+            settingsCard {
+                HStack(spacing: 12) {
+                    sessionHeader("Device", width: 170)
+                    sessionHeader("Location", width: 140)
+                    sessionHeader("Created", width: 140)
+                    sessionHeader("Updated", width: 140)
+                    sessionHeader("Action", width: 80)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+
+                cardDivider
+
+                if isLoadingSessions {
+                    rowContainer {
+                        Text("Loading active sessions…")
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(MacTheme.textSecondary)
+                    }
+                } else if activeSessions.isEmpty {
+                    rowContainer {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("No active sessions found")
+                                .font(.system(size: 12.5, weight: .medium))
+                                .foregroundStyle(MacTheme.textPrimary)
+                            Text("New sign-ins will appear here automatically.")
+                                .font(.system(size: 11))
+                                .foregroundStyle(MacTheme.textSecondary)
+                        }
+                    }
+                } else {
+                    ForEach(activeSessions) { activeSession in
+                        VStack(spacing: 0) {
+                            HStack(spacing: 12) {
+                                sessionValue(
+                                    activeSession.device + ((activeSession.isCurrent ?? false) ? " (Current)" : ""),
+                                    width: 170,
+                                    emphasized: true
+                                )
+                                sessionValue(activeSession.location, width: 140)
+                                sessionValue(formatSessionDate(activeSession.createdAt), width: 140)
+                                sessionValue(formatSessionDate(activeSession.updatedAt), width: 140)
+
+                                Button(role: .destructive) {
+                                    Task { await revokeSession(activeSession.id) }
+                                } label: {
+                                    if revokingSessionIDs.contains(activeSession.id) {
+                                        ProgressView()
+                                            .controlSize(.small)
+                                    } else {
+                                        Text("Log out")
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(isRevokingAllSessions || revokingSessionIDs.contains(activeSession.id))
+                                .frame(width: 80, alignment: .leading)
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+
+                            if activeSession.id != activeSessions.last?.id {
+                                cardDivider
+                            }
+                        }
+                    }
+                }
+
+                cardDivider
+
+                HStack {
+                    Spacer()
+                    Button(role: .destructive) {
+                        Task { await revokeAllSessions() }
+                    } label: {
+                        if isRevokingAllSessions {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Text("Log out all devices")
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isRevokingAllSessions || activeSessions.isEmpty)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
             }
         }
     }
@@ -643,6 +743,21 @@ struct MacSettingsView: View {
         }
     }
 
+    private func sessionHeader(_ text: String, width: CGFloat) -> some View {
+        Text(text)
+            .font(.system(size: 10.5, weight: .semibold))
+            .foregroundStyle(MacTheme.mutedText)
+            .frame(width: width, alignment: .leading)
+    }
+
+    private func sessionValue(_ text: String, width: CGFloat, emphasized: Bool = false) -> some View {
+        Text(text)
+            .font(.system(size: emphasized ? 12.5 : 11.5, weight: emphasized ? .medium : .regular))
+            .foregroundStyle(emphasized ? MacTheme.textPrimary : MacTheme.textSecondary)
+            .frame(width: width, alignment: .leading)
+            .lineLimit(2)
+    }
+
     /// Tappable link row — icon + label on left, arrow on right.
     private func linkRow(icon: String, label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
@@ -710,6 +825,25 @@ struct MacSettingsView: View {
         }
     }
 
+    private func formatSessionDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .short
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
+    }
+
+    private func loadActiveSessions() async {
+        isLoadingSessions = true
+        defer { isLoadingSessions = false }
+
+        do {
+            let response = try await services.apiClient.listSessions()
+            activeSessions = response.sessions
+        } catch {
+            print("[Settings] Load sessions failed: \(error)")
+        }
+    }
+
     // MARK: - Actions
 
     private func performDeleteAccount() async {
@@ -732,6 +866,42 @@ struct MacSettingsView: View {
             await services.emailService.checkConnection()
         } catch {
             print("[Settings] Disconnect Gmail failed: \(error)")
+        }
+    }
+
+    private func revokeSession(_ sessionId: String) async {
+        revokingSessionIDs.insert(sessionId)
+        defer { revokingSessionIDs.remove(sessionId) }
+
+        do {
+            let response = try await services.apiClient.revokeSession(sessionId: sessionId)
+            await loadActiveSessions()
+            if response.revokedCurrent {
+                services.signOut()
+                isPresented = false
+            } else {
+                await services.authService.fetchUserProfile()
+            }
+        } catch {
+            print("[Settings] Revoke session failed: \(error)")
+        }
+    }
+
+    private func revokeAllSessions() async {
+        isRevokingAllSessions = true
+        defer { isRevokingAllSessions = false }
+
+        do {
+            let response = try await services.apiClient.revokeAllSessions()
+            activeSessions = []
+            if response.revokedCurrent {
+                services.signOut()
+                isPresented = false
+            } else {
+                await services.authService.fetchUserProfile()
+            }
+        } catch {
+            print("[Settings] Revoke all sessions failed: \(error)")
         }
     }
 }

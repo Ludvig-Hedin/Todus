@@ -986,18 +986,34 @@ struct MacAssistantPanel: View {
         }
     }
 
+    // Parity with iOS AIChatConfigSheet.availableModels — keep in sync
     private var availableModels: [String] {
-        ["openai/gpt-4.1-mini", "openai/gpt-4.1", "openai/o4-mini", "anthropic/claude-sonnet-4", "anthropic/claude-3.5-haiku", "google/gemini-2.0-flash-001"]
+        [
+            "openai/gpt-5.4",
+            "openai/gpt-5.4-mini",
+            "openai/gpt-5.4-chat",
+            "openai/gpt-5.4-nano",
+            "anthropic/claude-sonnet-4-5",
+            "anthropic/claude-haiku-4-5",
+            "moonshotai/kimi-k2.5",
+            "google/gemini-3.1-pro-preview",
+            "google/gemini-3.1-flash-lite-preview",
+            "google/gemini-3-flash-preview",
+        ]
     }
 
     private func modelDisplayName(_ model: String) -> String {
         switch model {
-        case "openai/gpt-4.1-mini": return "GPT-4.1 Mini"
-        case "openai/gpt-4.1": return "GPT-4.1"
-        case "openai/o4-mini": return "o4-mini"
-        case "anthropic/claude-sonnet-4": return "Claude Sonnet 4"
-        case "anthropic/claude-3.5-haiku": return "Claude 3.5 Haiku"
-        case "google/gemini-2.0-flash-001": return "Gemini 2.0 Flash"
+        case "openai/gpt-5.4":                       return "GPT-5.4"
+        case "openai/gpt-5.4-mini":                  return "GPT-5.4 Mini"
+        case "openai/gpt-5.4-chat":                  return "GPT-5.4 Chat"
+        case "openai/gpt-5.4-nano":                  return "GPT-5.4 Nano"
+        case "anthropic/claude-sonnet-4-5":           return "Claude Sonnet 4.5"
+        case "anthropic/claude-haiku-4-5":            return "Claude Haiku 4.5"
+        case "moonshotai/kimi-k2.5":                  return "Kimi K2.5"
+        case "google/gemini-3.1-pro-preview":         return "Gemini 3.1 Pro"
+        case "google/gemini-3.1-flash-lite-preview":  return "Gemini 3.1 Flash Lite"
+        case "google/gemini-3-flash-preview":         return "Gemini 3 Flash"
         default: return model
         }
     }

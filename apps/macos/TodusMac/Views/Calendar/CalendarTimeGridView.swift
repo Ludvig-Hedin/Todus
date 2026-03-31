@@ -12,6 +12,9 @@ struct CalendarTimeGridView: View {
     var highlightToday: Bool = true
     /// Callback when an event block is tapped
     var onEventTap: ((CalendarEvent) -> Void)? = nil
+    /// Callback when an empty area in the grid is tapped — passes the date+hour for creating a new event.
+    /// The Date is set to the start of the tapped hour on the relevant column's day.
+    var onGridTap: ((Date) -> Void)? = nil
 
     private let totalHeight: CGFloat = 24 * MacTheme.calendarHourHeight
 
@@ -39,6 +42,25 @@ struct CalendarTimeGridView: View {
                                 if highlightToday && Calendar.current.isDateInToday(column.date) {
                                     Rectangle()
                                         .fill(Color.primary.opacity(0.015))
+                                }
+
+                                // Tappable background for creating new events — converts tap y-position
+                                // to an hour on this column's day and fires onGridTap callback
+                                if onGridTap != nil {
+                                    Color.clear
+                                        .contentShape(Rectangle())
+                                        .onTapGesture { location in
+                                            let minutesSinceMidnight = location.y / (MacTheme.calendarHourHeight / 60)
+                                            // Snap to nearest 30-minute slot
+                                            let snappedMinutes = (Int(minutesSinceMidnight) / 30) * 30
+                                            let hour = snappedMinutes / 60
+                                            let minute = snappedMinutes % 60
+                                            let cal = Calendar.current
+                                            let dayStart = cal.startOfDay(for: column.date)
+                                            if let tappedDate = cal.date(bySettingHour: hour, minute: minute, second: 0, of: dayStart) {
+                                                onGridTap?(tappedDate)
+                                            }
+                                        }
                                 }
 
                                 // Positioned event blocks

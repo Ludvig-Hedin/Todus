@@ -180,18 +180,28 @@ struct MacEmailInboxView: View {
     // MARK: - States
 
     private var connectPrompt: some View {
-        VStack(spacing: MacTheme.spacing12) {
+        VStack {
             Spacer()
-            Image(systemName: "envelope")
-                .font(.system(size: 28, weight: .light))
-                .foregroundStyle(MacTheme.mutedText.opacity(0.5))
-            Text("Connect Gmail to see your inbox")
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(MacTheme.textSecondary)
-            Text("Sign in to your Google account to get started.")
-                .font(MacTheme.cardSubtitleFont())
-                .foregroundStyle(MacTheme.mutedText)
-            connectGmailButton
+            // Single card containing both the prompt text and the connect button
+            VStack(spacing: MacTheme.spacing12) {
+                Image(systemName: "envelope")
+                    .font(.system(size: 28, weight: .light))
+                    .foregroundStyle(MacTheme.mutedText.opacity(0.5))
+                Text("Connect Gmail to see your inbox")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(MacTheme.textSecondary)
+                Text("Sign in to your Google account to get started.")
+                    .font(MacTheme.cardSubtitleFont())
+                    .foregroundStyle(MacTheme.mutedText)
+                connectGmailButton
+            }
+            .padding(MacTheme.spacing24)
+            .frame(maxWidth: 360)
+            .background(MacTheme.emptyStateSurface, in: RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous)
+                    .stroke(MacTheme.cardBorder, lineWidth: 0.5)
+            )
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

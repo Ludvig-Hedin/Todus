@@ -17,6 +17,8 @@ struct MacCalendarView: View {
     @State private var isLoading = false
     @State private var hasAccess = false
     @State private var selectedEvent: CalendarEvent? = nil
+    /// Date passed from tap-to-create on the time grid — opens system Calendar's event creation
+    @State private var createEventDate: Date? = nil
 
     var body: some View {
         VStack(spacing: 0) {
@@ -76,34 +78,44 @@ struct MacCalendarView: View {
     // MARK: - Permission View
 
     private var permissionView: some View {
-        VStack(spacing: MacTheme.spacing16) {
+        VStack {
             Spacer()
-            Image(systemName: "calendar.badge.exclamationmark")
-                .font(.system(size: 36, weight: .light))
-                .foregroundStyle(MacTheme.mutedText.opacity(0.5))
-            Text("Calendar Access Required")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(MacTheme.textPrimary)
-            Text("Todus needs access to your calendar to show events.")
-                .font(MacTheme.cardSubtitleFont())
-                .foregroundStyle(MacTheme.textSecondary)
-                .multilineTextAlignment(.center)
-            Button {
-                Task {
-                    hasAccess = await services.calendarService.requestAccess()
-                    if hasAccess { await loadEvents() }
+            // Single card containing prompt + grant access button
+            VStack(spacing: MacTheme.spacing16) {
+                Image(systemName: "calendar.badge.exclamationmark")
+                    .font(.system(size: 36, weight: .light))
+                    .foregroundStyle(MacTheme.mutedText.opacity(0.5))
+                Text("Calendar Access Required")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(MacTheme.textPrimary)
+                Text("Todus needs access to your calendar to show events.")
+                    .font(MacTheme.cardSubtitleFont())
+                    .foregroundStyle(MacTheme.textSecondary)
+                    .multilineTextAlignment(.center)
+                Button {
+                    Task {
+                        hasAccess = await services.calendarService.requestAccess()
+                        if hasAccess { await loadEvents() }
+                    }
+                } label: {
+                    Text("Grant Access")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 9)
+                        .background(MacTheme.accent, in: Capsule(style: .continuous))
                 }
-            } label: {
-                Text("Grant Access")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 9)
-                    .background(MacTheme.accent, in: Capsule(style: .continuous))
+                .buttonStyle(.plain)
+                .focusEffectDisabled()
+                .pointerStyle(.link)
             }
-            .buttonStyle(.plain)
-            .focusEffectDisabled()
-            .pointerStyle(.link)
+            .padding(MacTheme.spacing24)
+            .frame(maxWidth: 360)
+            .background(MacTheme.emptyStateSurface, in: RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous)
+                    .stroke(MacTheme.cardBorder, lineWidth: 0.5)
+            )
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -112,8 +124,13 @@ struct MacCalendarView: View {
     // MARK: - Calendar Header
     // Modeled after Apple Calendar: "March 2026" large left, nav arrows + Today + picker right
 
-    /// Shared control height — all header buttons use the same height for visual alignment
-    private let headerControlHeight: CGFloat = 28
+    /// Shared control height — matches the segmented picker's inner height for visual alignment
+    private let headerControlHeight: CGFloat = 30
+
+    /// Shared background color for header controls — matches the segmented picker outer bg
+    private var controlBg: Color {
+        Color(light: Color(white: 0.88), dark: Color(white: 0.13))
+    }
 
     private var calendarHeader: some View {
         HStack(alignment: .center, spacing: 10) {
@@ -129,13 +146,13 @@ struct MacCalendarView: View {
 
             Spacer()
 
-            // Navigation arrows — fully circular, matching control height
+            // Navigation arrows — circular, same surface as picker
             HStack(spacing: 4) {
                 calendarNavButton(icon: "chevron.left") { navigate(by: -1) }
                 calendarNavButton(icon: "chevron.right") { navigate(by: 1) }
             }
 
-            // Today — rounded pill, same height as nav circles
+            // Today — pill button, same surface as other controls
             Button {
                 withAnimation(.easeOut(duration: 0.2)) { selectedDate = Date() }
             } label: {
@@ -144,14 +161,13 @@ struct MacCalendarView: View {
                     .foregroundStyle(Color.primary.opacity(0.75))
                     .padding(.horizontal, 12)
                     .frame(height: headerControlHeight)
-                    .background(.ultraThinMaterial, in: Capsule(style: .continuous))
-                    .overlay(Capsule(style: .continuous).stroke(Color.white.opacity(0.06), lineWidth: 0.5))
+                    .background(controlBg, in: Capsule(style: .continuous))
             }
             .buttonStyle(.plain)
             .focusEffectDisabled()
             .pointerStyle(.link)
 
-            // Apple Calendar-style glass segmented control
+            // Apple Calendar-style segmented control
             CalendarViewModePicker(selection: $viewMode)
         }
     }
@@ -172,15 +188,14 @@ struct MacCalendarView: View {
         }
     }
 
-    /// Fully circular chevron nav button — glass material matching Apple Calendar
+    /// Fully circular chevron nav button — same surface color as picker & Today button
     private func calendarNavButton(icon: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: icon)
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(Color.primary.opacity(0.65))
                 .frame(width: headerControlHeight, height: headerControlHeight)
-                .background(.ultraThinMaterial, in: Circle())
-                .overlay(Circle().stroke(Color.white.opacity(0.06), lineWidth: 0.5))
+                .background(controlBg, in: Circle())
         }
         .buttonStyle(.plain)
         .focusEffectDisabled()
@@ -189,17 +204,28 @@ struct MacCalendarView: View {
 
     private func navigate(by offset: Int) {
         let cal = Calendar.current
-        withAnimation(.easeOut(duration: 0.2)) {
-            switch viewMode {
-            case "Day":
-                selectedDate = cal.date(byAdding: .day, value: offset, to: selectedDate) ?? selectedDate
-            case "Month":
-                selectedDate = cal.date(byAdding: .month, value: offset, to: selectedDate) ?? selectedDate
-            case "Year":
-                selectedDate = cal.date(byAdding: .year, value: offset, to: selectedDate) ?? selectedDate
-            default:
-                selectedDate = cal.date(byAdding: .weekOfYear, value: offset, to: selectedDate) ?? selectedDate
+        // Month view uses instant swap (no animation) to avoid confusing grid cell movement.
+        // Other views use a subtle transition.
+        let animated = viewMode != "Month"
+        if animated {
+            withAnimation(.easeOut(duration: 0.2)) {
+                applyNavigation(offset: offset, cal: cal)
             }
+        } else {
+            applyNavigation(offset: offset, cal: cal)
+        }
+    }
+
+    private func applyNavigation(offset: Int, cal: Calendar) {
+        switch viewMode {
+        case "Day":
+            selectedDate = cal.date(byAdding: .day, value: offset, to: selectedDate) ?? selectedDate
+        case "Month":
+            selectedDate = cal.date(byAdding: .month, value: offset, to: selectedDate) ?? selectedDate
+        case "Year":
+            selectedDate = cal.date(byAdding: .year, value: offset, to: selectedDate) ?? selectedDate
+        default:
+            selectedDate = cal.date(byAdding: .weekOfYear, value: offset, to: selectedDate) ?? selectedDate
         }
     }
 
@@ -235,7 +261,8 @@ struct MacCalendarView: View {
                     CalendarTimeGridColumn(date: selectedDate, events: timedEvents)
                 ],
                 highlightToday: true,
-                onEventTap: { event in selectedEvent = event }
+                onEventTap: { event in selectedEvent = event },
+                onGridTap: { date in openNewEvent(at: date) }
             )
         }
         .popover(item: $selectedEvent, arrowEdge: .trailing) { event in
@@ -376,7 +403,8 @@ struct MacCalendarView: View {
             CalendarTimeGridView(
                 columns: columns,
                 highlightToday: true,
-                onEventTap: { event in selectedEvent = event }
+                onEventTap: { event in selectedEvent = event },
+                onGridTap: { date in openNewEvent(at: date) }
             )
         }
         .popover(item: $selectedEvent, arrowEdge: .trailing) { event in
@@ -432,23 +460,18 @@ struct MacCalendarView: View {
     // MARK: - Month View
 
     /// Apple Calendar-style month grid: weekday headers, bordered cells,
-    /// events as colored pill blocks (not dots).
+    /// events as colored pill blocks. Shows prev/next month days muted.
+    /// No animation on month swap — instant transition to avoid confusing grid movement.
     private var monthView: some View {
         let cal = Calendar.current
-        let monthInterval = cal.dateInterval(of: .month, for: selectedDate)!
-        let daysInMonth = cal.range(of: .day, in: .month, for: selectedDate)!
-        let firstDayOfMonth = monthInterval.start
-        let firstWeekdayOffset = (cal.component(.weekday, from: firstDayOfMonth) - cal.firstWeekday + 7) % 7
 
         // Weekday symbols rotated to locale's first weekday
         let symbols = cal.shortWeekdaySymbols
         let offset = cal.firstWeekday - 1
         let rotatedSymbols = Array(symbols[offset...]) + Array(symbols[..<offset])
 
-        let totalRows = numberOfRows(firstWeekdayOffset: firstWeekdayOffset, daysInMonth: daysInMonth.count)
-
         return VStack(spacing: 0) {
-            // Weekday header row — fixed at top, not scrollable
+            // Weekday header row — fixed at top
             HStack(spacing: 0) {
                 ForEach(Array(rotatedSymbols.enumerated()), id: \.offset) { _, symbol in
                     Text(symbol)
@@ -462,29 +485,69 @@ struct MacCalendarView: View {
 
             Divider()
 
-            // Day cells grid — scrollable when content exceeds viewport
+            // Month grid — fills remaining height, scrollable vertically
             GeometryReader { geo in
+                let gridDates = monthGridDates(for: selectedDate)
+                let totalRows = gridDates.count / 7
                 let rowHeight = max(80, geo.size.height / CGFloat(totalRows))
+                let selectedMonth = cal.component(.month, from: selectedDate)
 
                 ScrollView(.vertical, showsIndicators: true) {
                     LazyVGrid(
                         columns: Array(repeating: GridItem(.flexible(), spacing: 0), count: 7),
                         spacing: 0
                     ) {
-                        // Empty cells before month start
-                        ForEach(0..<firstWeekdayOffset, id: \.self) { _ in
-                            monthDayCell(nil, rowHeight: rowHeight)
-                        }
-
-                        // Actual days
-                        ForEach(Array(daysInMonth), id: \.self) { day in
-                            let date = cal.date(bySetting: .day, value: day, of: firstDayOfMonth) ?? firstDayOfMonth
-                            monthDayCell(date, rowHeight: rowHeight)
+                        ForEach(Array(gridDates.enumerated()), id: \.offset) { _, date in
+                            let isCurrentMonth = cal.component(.month, from: date) == selectedMonth
+                            monthDayCell(date, rowHeight: rowHeight, isMuted: !isCurrentMonth)
                         }
                     }
                 }
+                // Disable animation on the grid content itself — prevents the "circus" effect
+                // when navigating months. The grid swaps instantly.
+                .animation(.none, value: selectedDate)
             }
         }
+    }
+
+    /// Builds the full 6-row (42-cell) grid of dates for a month view.
+    /// Includes trailing days from the previous month and leading days from the next month,
+    /// so the grid is always complete with no empty cells — matching Apple Calendar.
+    private func monthGridDates(for date: Date) -> [Date] {
+        let cal = Calendar.current
+        let monthInterval = cal.dateInterval(of: .month, for: date)!
+        let firstDayOfMonth = monthInterval.start
+        let firstWeekdayOffset = (cal.component(.weekday, from: firstDayOfMonth) - cal.firstWeekday + 7) % 7
+
+        var dates: [Date] = []
+
+        // Previous month's trailing days
+        for i in (0..<firstWeekdayOffset).reversed() {
+            if let d = cal.date(byAdding: .day, value: -(i + 1), to: firstDayOfMonth) {
+                dates.append(d)
+            }
+        }
+
+        // Current month's days
+        let daysInMonth = cal.range(of: .day, in: .month, for: date)!
+        for day in daysInMonth {
+            if let d = cal.date(bySetting: .day, value: day, of: firstDayOfMonth) {
+                dates.append(d)
+            }
+        }
+
+        // Next month's leading days — fill to complete the last row (multiple of 7)
+        let remainder = dates.count % 7
+        if remainder > 0 {
+            let lastDay = dates.last ?? firstDayOfMonth
+            for i in 1...(7 - remainder) {
+                if let d = cal.date(byAdding: .day, value: i, to: lastDay) {
+                    dates.append(d)
+                }
+            }
+        }
+
+        return dates
     }
 
     // MARK: - Year View
@@ -600,8 +663,6 @@ struct MacCalendarView: View {
                 }
 
                 // Day number grid
-                let totalSlots = firstWeekdayOffset + daysInMonth.count
-                let rows = (totalSlots + 6) / 7
                 LazyVGrid(
                     columns: Array(repeating: GridItem(.flexible(), spacing: 0), count: 7),
                     spacing: 1
@@ -662,49 +723,46 @@ struct MacCalendarView: View {
     }
 
     /// A single month grid cell — Apple Calendar style.
-    /// Date number top-right (Apple) or top-left, events as colored pill blocks.
-    private func monthDayCell(_ date: Date?, rowHeight: CGFloat) -> some View {
+    /// Shows day number top-right, events as colored pill blocks.
+    /// `isMuted` dims the cell for days belonging to the adjacent months (prev/next).
+    private func monthDayCell(_ date: Date, rowHeight: CGFloat, isMuted: Bool = false) -> some View {
         let cal = Calendar.current
-        let isToday = date.map { cal.isDateInToday($0) } ?? false
-        let dayEvents = date.map { d in
-            events.filter { cal.isDate($0.startDate, inSameDayAs: d) }
-                .sorted { $0.startDate < $1.startDate }
-        } ?? []
+        let isToday = cal.isDateInToday(date)
+        let dayEvents = events.filter { cal.isDate($0.startDate, inSameDayAs: date) }
+            .sorted { $0.startDate < $1.startDate }
 
         return VStack(alignment: .leading, spacing: 2) {
-            if let date {
-                // Day number — top-right aligned like Apple Calendar
-                HStack {
-                    Spacer()
-                    Text(date.formatted(.dateTime.day()))
-                        .font(MacTheme.calendarDayNumberFont(isToday: isToday))
-                        .foregroundStyle(isToday ? .white : MacTheme.textPrimary)
-                        .frame(width: 20, height: 20)
-                        .background {
-                            if isToday {
-                                Circle().fill(MacTheme.calendarNowIndicator)
-                            }
+            // Day number — top-right aligned like Apple Calendar
+            HStack {
+                Spacer()
+                Text(date.formatted(.dateTime.day()))
+                    .font(MacTheme.calendarDayNumberFont(isToday: isToday))
+                    .foregroundStyle(isToday ? .white : isMuted ? MacTheme.mutedText : MacTheme.textPrimary)
+                    .frame(width: 20, height: 20)
+                    .background {
+                        if isToday {
+                            Circle().fill(MacTheme.calendarNowIndicator)
                         }
+                    }
+            }
+            .padding(.trailing, 4)
+            .padding(.top, 2)
+
+            // Events as colored pill blocks — dimmed for non-current month days
+            VStack(alignment: .leading, spacing: 1) {
+                let maxVisible = max(1, Int((rowHeight - 32) / 16))
+                let visible = Array(dayEvents.prefix(maxVisible))
+                let remaining = dayEvents.count - visible.count
+
+                ForEach(visible) { event in
+                    monthEventPill(event)
                 }
-                .padding(.trailing, 4)
-                .padding(.top, 2)
 
-                // Events as colored pill blocks — Apple Calendar style
-                VStack(alignment: .leading, spacing: 1) {
-                    let maxVisible = max(1, Int((rowHeight - 32) / 16))
-                    let visible = Array(dayEvents.prefix(maxVisible))
-                    let remaining = dayEvents.count - visible.count
-
-                    ForEach(visible) { event in
-                        monthEventPill(event)
-                    }
-
-                    if remaining > 0 {
-                        Text("+\(remaining) more")
-                            .font(.system(size: 9, weight: .medium))
-                            .foregroundStyle(MacTheme.mutedText)
-                            .padding(.leading, 4)
-                    }
+                if remaining > 0 {
+                    Text("+\(remaining) more")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(MacTheme.mutedText)
+                        .padding(.leading, 4)
                 }
             }
 
@@ -712,6 +770,7 @@ struct MacCalendarView: View {
         }
         .frame(height: rowHeight, alignment: .topLeading)
         .padding(.horizontal, 2)
+        .opacity(isMuted ? 0.35 : 1.0)
         // Grid border — Apple Calendar uses thin cell borders
         .overlay(
             Rectangle()
@@ -719,12 +778,9 @@ struct MacCalendarView: View {
         )
         .contentShape(Rectangle())
         .onTapGesture {
-            if let date {
-                withAnimation(.easeOut(duration: 0.2)) {
-                    selectedDate = date
-                    viewMode = "Day"
-                }
-            }
+            // Tapping a muted day navigates to that day (which also changes the month)
+            selectedDate = date
+            viewMode = "Day"
         }
     }
 
@@ -818,6 +874,21 @@ struct MacCalendarView: View {
         .frame(minWidth: 220, alignment: .leading)
     }
 
+    // MARK: - Tap-to-Create
+
+    /// Opens the system Calendar app with a new event at the given date/time.
+    /// Uses the calshow: URL scheme to open Calendar.app to the correct date,
+    /// then AppleScript to open the new-event dialog. Falls back to just opening Calendar.
+    private func openNewEvent(at date: Date) {
+        // Apple Calendar uses seconds since 2001-01-01 (Core Data reference date) for calshow:
+        let refDate = date.timeIntervalSinceReferenceDate
+        if let url = URL(string: "x-apple-calevent://new?startDate=\(refDate)") {
+            NSWorkspace.shared.open(url)
+        } else if let fallback = URL(string: "ical://") {
+            NSWorkspace.shared.open(fallback)
+        }
+    }
+
     // MARK: - Context Menu
 
     @ViewBuilder
@@ -852,9 +923,10 @@ struct MacCalendarView: View {
             start = dayStart
             end = cal.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart
         case "Month":
+            // Load extra for prev/next month days visible in the grid (up to 6 days each side)
             let monthInterval = cal.dateInterval(of: .month, for: selectedDate)!
-            start = cal.date(byAdding: .day, value: -7, to: monthInterval.start) ?? monthInterval.start
-            end = cal.date(byAdding: .day, value: 7, to: monthInterval.end) ?? monthInterval.end
+            start = cal.date(byAdding: .day, value: -10, to: monthInterval.start) ?? monthInterval.start
+            end = cal.date(byAdding: .day, value: 10, to: monthInterval.end) ?? monthInterval.end
         case "Year":
             // Load the full selected year for event dot indicators on mini-months
             let year = cal.component(.year, from: selectedDate)
@@ -874,10 +946,11 @@ struct MacCalendarView: View {
 // MARK: - Apple Calendar-Style Glass Segmented Control
 
 /// Custom segmented control matching Apple Calendar's glass/material design:
-/// - Rounded pill container with `.thickMaterial` (frosted glass)
-/// - Selected segment highlighted with a lighter capsule pill
+/// - Rounded pill container with frosted glass material
+/// - Selected segment highlighted with a visible lighter capsule pill + shadow
 /// - Smooth animated selection via `matchedGeometryEffect`
 /// - Respects light/dark mode automatically via Material
+/// - Height matches the header nav buttons for visual consistency
 ///
 /// Reference: https://developer.apple.com/design/human-interface-guidelines/segmented-controls
 struct CalendarViewModePicker: View {
@@ -892,22 +965,21 @@ struct CalendarViewModePicker: View {
                 let isSelected = selection == mode
 
                 Button {
-                    withAnimation(.easeInOut(duration: 0.2)) {
+                    withAnimation(.snappy(duration: 0.2)) {
                         selection = mode
                     }
                 } label: {
                     Text(mode)
-                        .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
-                        .foregroundStyle(isSelected ? Color.primary : Color.primary.opacity(0.5))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
-                        .frame(minWidth: 44)
+                        .font(.system(size: 12, weight: isSelected ? .medium : .regular))
+                        .foregroundStyle(isSelected ? Color.primary : Color.secondary)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
                         .background {
                             if isSelected {
-                                // Animated pill highlight behind the selected segment
+                                // Visible pill highlight — solid surface with shadow for clear contrast
                                 Capsule(style: .continuous)
-                                    .fill(.thinMaterial)
-                                    .shadow(color: .black.opacity(0.12), radius: 1, y: 0.5)
+                                    .fill(Color(light: Color.white, dark: Color(white: 0.22)))
+                                    .shadow(color: .black.opacity(0.15), radius: 2, y: 1)
                                     .matchedGeometryEffect(id: "picker-highlight", in: pickerNamespace)
                             }
                         }
@@ -918,10 +990,10 @@ struct CalendarViewModePicker: View {
             }
         }
         .padding(3)
-        .background(.ultraThickMaterial, in: Capsule(style: .continuous))
-        .overlay(
-            Capsule(style: .continuous)
-                .stroke(Color.white.opacity(0.06), lineWidth: 0.5)
+        .background(
+            Color(light: Color(white: 0.88), dark: Color(white: 0.13)),
+            in: Capsule(style: .continuous)
         )
     }
 }
+

@@ -71,7 +71,7 @@ enum MacTheme {
         switch key {
         case "blue":
             return Color(light: Color(red: 0.22, green: 0.45, blue: 0.85),
-                         dark: Color(red: 0.38, green: 0.58, blue: 0.95))
+                         dark: Color(red: 0.30, green: 0.50, blue: 0.88))
         case "indigo":
             return Color(light: Color(red: 0.35, green: 0.32, blue: 0.78),
                          dark: Color(red: 0.5, green: 0.47, blue: 0.9))
