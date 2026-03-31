@@ -101,6 +101,7 @@ public final class AuthService: NSObject {
 
     private enum Keys {
         static let bearerToken = "com.todus.auth.bearerToken"
+        static let currentSessionId = "com.todus.auth.currentSessionId"
         static let userEmail = "com.todus.auth.userEmail"
         static let userName = "com.todus.auth.userName"
         static let userImage = "com.todus.auth.userImage"
@@ -124,6 +125,10 @@ public final class AuthService: NSObject {
         didSet { persistStringToKeychain(key: Keys.bearerToken, value: bearerToken) }
     }
 
+    public private(set) var currentSessionId: String? {
+        didSet { persistStringToKeychain(key: Keys.currentSessionId, value: currentSessionId) }
+    }
+
     public var hasPersistedBearerToken: Bool {
         bearerToken != nil
     }
@@ -145,6 +150,7 @@ public final class AuthService: NSObject {
         self.userEmail = nil
         self.userName = nil
         self.userImage = nil
+        self.currentSessionId = KeychainHelper.read(key: Keys.currentSessionId)
         self.bearerToken = KeychainHelper.read(key: Keys.bearerToken)
         super.init()
 
@@ -539,8 +545,9 @@ public final class AuthService: NSObject {
                 return
             }
             let email = components.queryItems?.first(where: { $0.name == "email" })?.value
+            let sessionId = components.queryItems?.first(where: { $0.name == "sessionId" })?.value
             authLog.info("Auth callback: token received \(self.tokenPreview(token))")
-            completeAuthentication(token: token, email: email)
+            completeAuthentication(token: token, email: email, sessionId: sessionId)
         } else {
             authLog.error("Auth callback: no token in URL — \(url.absoluteString)")
             lastErrorMessage = "Sign in failed. No token received."
@@ -635,6 +642,7 @@ public final class AuthService: NSObject {
 
     private func clearPersistedAuthState() {
         bearerToken = nil
+        currentSessionId = nil
         // Clear stored properties — didSet handles Keychain deletion
         userEmail = nil
         userName = nil
@@ -679,8 +687,9 @@ public final class AuthService: NSObject {
 
     // MARK: - Private Helpers
 
-    private func completeAuthentication(token: String, email: String?) {
+    private func completeAuthentication(token: String, email: String?, sessionId: String? = nil) {
         bearerToken = token
+        currentSessionId = sessionId?.isEmpty == false ? sessionId : nil
         if let email {
             self.userEmail = email
         }
