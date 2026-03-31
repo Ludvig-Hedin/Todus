@@ -1,5 +1,11 @@
 # Project Changelog
 
+## [2026-03-31] Fix — categories settings state sync
+
+- Updated `apps/mail/app/(routes)/settings/categories/page.tsx` so the local categories state rehydrates from `initialCategories` when fresh server data arrives, instead of relying on a stale effect dependency. Also removed the loose `any` type from the field-change prop.
+
+**Files:** `apps/mail/app/(routes)/settings/categories/page.tsx`, `TASK.md`
+
 ## [2026-03-31] Fix — web root error boundary hook order
 
 - Split the root error boundary in `apps/mail/app/root.tsx` so the 404 branch returns before any hooks and the Sentry/reporting side effects live in a dedicated child component. This removes the conditional hook call that violated `react-hooks/rules-of-hooks`.

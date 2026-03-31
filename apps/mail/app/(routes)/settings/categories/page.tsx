@@ -41,7 +41,11 @@ import { toast } from 'sonner';
 
 interface SortableCategoryItemProps {
   cat: CategorySetting;
-  handleFieldChange: (id: string, field: keyof CategorySetting, value: any) => void;
+  handleFieldChange: (
+    id: string,
+    field: keyof CategorySetting,
+    value: string | number | boolean,
+  ) => void;
   toggleDefault: (id: string) => void;
   handleDeleteCategory: (id: string) => void;
   allLabels: Array<{ id: string; name: string; type: string }>;
@@ -229,7 +233,7 @@ export default function CategoriesSettingsPage() {
   useEffect(() => {
     setCategories(initialCategories);
     setHasUnsavedChanges(false);
-  }, [data?.settings?.categories]);
+  }, [initialCategories]);
 
   const handleFieldChange = (
     id: string,
