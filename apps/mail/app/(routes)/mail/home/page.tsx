@@ -1,0 +1,415 @@
+/**
+ * Home page — iOS/macOS parity redesign.
+ * Section headers: icon + title + count badge + "+" action button.
+ * Sections: Today's Events (Calendar CTA) → Due Tasks → Recent Emails.
+ */
+import {
+  ArrowRight,
+  CheckCircle2,
+  Circle,
+  Inbox,
+  Plus,
+  CalendarDays,
+  CheckSquare2,
+  Mail,
+  ExternalLink,
+} from 'lucide-react';
+import { useInfiniteQuery, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { formatDistanceToNow, isToday, format, startOfDay, endOfDay } from 'date-fns';
+import { authClient, useSession } from '@/lib/auth-client';
+import { useTRPC } from '@/providers/query-provider';
+import type { Outputs } from '@zero/server/trpc';
+import { Button } from '@/components/ui/button';
+import { useThread } from '@/hooks/use-threads';
+import { Badge } from '@/components/ui/badge';
+import { authProxy } from '@/lib/auth-proxy';
+import type { Route } from './+types/page';
+import { Link } from 'react-router';
+import { cn } from '@/lib/utils';
+import { useMemo } from 'react';
+
+type Task = Outputs['tasks']['list']['tasks'][number];
+type CalendarEvent = Outputs['calendar']['events']['events'][number];
+
+// Auth guard
+export async function clientLoader({ request }: Route.ClientLoaderArgs) {
+  const session = await authProxy.api.getSession({ headers: request.headers });
+  if (!session) return Response.redirect(`${import.meta.env.VITE_PUBLIC_APP_URL}/login`);
+  return {};
+}
+
+// Greeting based on time of day
+function getGreeting() {
+  const hour = new Date().getHours();
+  if (hour < 12) return 'Good morning';
+  if (hour < 17) return 'Good afternoon';
+  return 'Good evening';
+}
+
+// ─── SectionHeader ────────────────────────────────────────────────────────────
+// iOS-style section header: icon + title + count badge + optional "+" action button
+
+function SectionHeader({
+  icon: Icon,
+  title,
+  count,
+  linkTo,
+  onAdd,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  title: string;
+  count?: number;
+  linkTo?: string;
+  onAdd?: () => void;
+}) {
+  return (
+    <div className="mb-3 flex items-center gap-2">
+      <Icon className="text-muted-foreground h-4 w-4 shrink-0" />
+      <span className="text-[15px] font-semibold leading-none">{title}</span>
+      {typeof count === 'number' && count > 0 && (
+        <span className="bg-muted text-muted-foreground rounded-full px-1.5 py-0.5 text-[11px] font-bold">
+          {count}
+        </span>
+      )}
+      <div className="ml-auto flex items-center gap-1">
+        {linkTo && (
+          <Button
+            asChild
+            variant="ghost"
+            size="sm"
+            className="text-muted-foreground h-7 gap-1 px-2 text-[12px]"
+          >
+            <Link to={linkTo}>
+              See all
+              <ArrowRight className="h-3 w-3" />
+            </Link>
+          </Button>
+        )}
+        {onAdd && (
+          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onAdd}>
+            <Plus className="h-3.5 w-3.5" />
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Section container with card styling ──────────────────────────────────────
+
+function Section({ children, className }: { children: React.ReactNode; className?: string }) {
+  return <div className={cn('bg-card rounded-xl border px-4 py-4', className)}>{children}</div>;
+}
+
+export default function HomePage() {
+  const { data: session } = useSession();
+  const trpc = useTRPC();
+  const queryClient = useQueryClient();
+  const firstName = session?.user?.name?.split(' ')[0] ?? '';
+
+  // Tasks — fetch all, filter client-side for "today or pending"
+  const { data: tasksData, isLoading: tasksLoading } = useQuery(
+    trpc.tasks.list.queryOptions({ limit: 100 }),
+  );
+
+  const todayTasks = useMemo(() => {
+    const tasks = tasksData?.tasks ?? [];
+    return tasks
+      .filter((t) => {
+        if (t.status === 'done') return false;
+        if (t.dueDate && isToday(new Date(t.dueDate))) return true;
+        if (!t.dueDate && t.status === 'todo') return true;
+        return false;
+      })
+      .slice(0, 5);
+  }, [tasksData]);
+
+  // Quick task toggle from home page
+  const updateTask = useMutation({
+    ...trpc.tasks.update.mutationOptions(),
+    onSuccess: () => void queryClient.invalidateQueries(trpc.tasks.list.queryFilter()),
+  });
+
+  // Today's calendar events
+  const todayStart = startOfDay(new Date()).toISOString();
+  const todayEnd = endOfDay(new Date()).toISOString();
+  const { data: eventsData, isLoading: eventsLoading } = useQuery(
+    trpc.calendar.events.queryOptions({ timeMin: todayStart, timeMax: todayEnd }),
+  );
+  const todayEvents = eventsData?.events ?? [];
+  const calendarScopeMissing = eventsData?.scopeMissing ?? false;
+
+  // Recent inbox threads — first page, 3 items
+  const threadsQuery = useInfiniteQuery(
+    trpc.mail.listThreads.infiniteQueryOptions(
+      { folder: 'inbox', q: '', maxResults: 5 },
+      {
+        initialCursor: '',
+        getNextPageParam: (lastPage) => lastPage?.nextPageToken ?? null,
+        staleTime: 60 * 1000 * 2,
+      },
+    ),
+  );
+  const recentThreadIds = useMemo(
+    () => (threadsQuery.data?.pages[0]?.threads ?? []).slice(0, 3).map((t) => t.id),
+    [threadsQuery.data],
+  );
+
+  return (
+    <div className="bg-background flex h-screen flex-col overflow-y-auto">
+      <div className="mx-auto w-full max-w-2xl px-6 py-8">
+        {/* Greeting — first name only, date subtitle */}
+        <div className="mb-8">
+          <h1 className="text-[22px] font-bold tracking-tight">
+            {getGreeting()}
+            {firstName ? `, ${firstName}` : ''}
+          </h1>
+          <p className="text-muted-foreground mt-0.5 text-[13px]">
+            {format(new Date(), 'EEEE, MMMM d')}
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-4">
+          {/* ── Today's Events ────────────────────────────────────────────── */}
+          <Section>
+            <SectionHeader
+              icon={CalendarDays}
+              title="Today's Events"
+              count={todayEvents.length}
+              linkTo="/mail/calendar"
+            />
+            {eventsLoading ? (
+              <div className="flex flex-col gap-2">
+                {['event-skeleton-1', 'event-skeleton-2'].map((key) => (
+                  <div key={key} className="bg-muted/50 h-10 animate-pulse rounded-lg" />
+                ))}
+              </div>
+            ) : calendarScopeMissing ? (
+              /* User connected Google but hasn't granted calendar scope — prompt re-auth */
+              <button
+                type="button"
+                onClick={() =>
+                  authClient.linkSocial({ provider: 'google', callbackURL: '/mail/home' })
+                }
+                className="bg-muted/30 hover:bg-muted/50 flex w-full items-center gap-3 rounded-lg border border-dashed px-4 py-3.5 text-left transition-colors"
+              >
+                <CalendarDays className="text-muted-foreground h-5 w-5 shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-[13px] font-medium">Allow calendar access</p>
+                  <p className="text-muted-foreground text-[12px]">
+                    Grant the calendar permission to see today&apos;s events.
+                  </p>
+                </div>
+                <ExternalLink className="text-muted-foreground h-3.5 w-3.5 shrink-0" />
+              </button>
+            ) : todayEvents.length === 0 ? (
+              <div className="flex flex-col items-center gap-2 py-3 text-center">
+                <CalendarDays className="text-muted-foreground/40 h-7 w-7" />
+                <p className="text-muted-foreground text-[13px]">No events today</p>
+              </div>
+            ) : (
+              <div className="divide-border/60 flex flex-col divide-y">
+                {todayEvents.map((event) => (
+                  <CalendarEventRow key={event.id} event={event} />
+                ))}
+              </div>
+            )}
+          </Section>
+
+          {/* ── Due Tasks ──────────────────────────────────────────────────── */}
+          <Section>
+            <SectionHeader
+              icon={CheckSquare2}
+              title="Due Tasks"
+              count={todayTasks.length}
+              linkTo="/mail/tasks"
+            />
+            {tasksLoading ? (
+              <div className="flex flex-col gap-2">
+                {['task-skeleton-1', 'task-skeleton-2', 'task-skeleton-3'].map((key) => (
+                  <div key={key} className="bg-muted/50 h-9 animate-pulse rounded-lg" />
+                ))}
+              </div>
+            ) : todayTasks.length === 0 ? (
+              <div className="flex flex-col items-center gap-2 py-3 text-center">
+                <CheckCircle2 className="text-muted-foreground/40 h-7 w-7" />
+                <p className="text-muted-foreground text-[13px]">All caught up!</p>
+                <Button asChild variant="outline" size="sm" className="h-7 text-xs">
+                  <Link to="/mail/tasks">
+                    <Plus className="mr-1 h-3 w-3" />
+                    New task
+                  </Link>
+                </Button>
+              </div>
+            ) : (
+              <div className="divide-border/60 flex flex-col divide-y">
+                {todayTasks.map((task) => (
+                  <TaskItem
+                    key={task.id}
+                    task={task}
+                    onToggle={() =>
+                      updateTask.mutate({
+                        id: task.id,
+                        data: { status: task.status === 'done' ? 'todo' : 'done' },
+                      })
+                    }
+                  />
+                ))}
+              </div>
+            )}
+          </Section>
+
+          {/* ── Recent Emails ─────────────────────────────────────────────── */}
+          <Section>
+            <SectionHeader icon={Mail} title="Recent Emails" linkTo="/mail/inbox" />
+            {threadsQuery.isLoading ? (
+              <div className="flex flex-col gap-2">
+                {['mail-skeleton-1', 'mail-skeleton-2', 'mail-skeleton-3'].map((key) => (
+                  <div key={key} className="bg-muted/50 h-11 animate-pulse rounded-lg" />
+                ))}
+              </div>
+            ) : recentThreadIds.length === 0 ? (
+              <div className="flex flex-col items-center gap-2 py-3 text-center">
+                <Inbox className="text-muted-foreground/40 h-7 w-7" />
+                <p className="text-muted-foreground text-[13px]">Your inbox is empty</p>
+              </div>
+            ) : (
+              <div className="divide-border/60 flex flex-col divide-y">
+                {recentThreadIds.map((id) => (
+                  <EmailThreadRow key={id} threadId={id} />
+                ))}
+              </div>
+            )}
+          </Section>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── TaskItem ─────────────────────────────────────────────────────────────────
+// Compact task row with toggle checkbox + priority badge
+
+function TaskItem({ task, onToggle }: { task: Task; onToggle: () => void }) {
+  return (
+    <div className="flex items-center gap-3 py-2.5">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="text-muted-foreground hover:text-primary shrink-0 transition-colors"
+      >
+        {task.status === 'done' ? (
+          <CheckCircle2 className="text-primary h-4 w-4" />
+        ) : (
+          <Circle className="h-4 w-4" />
+        )}
+      </button>
+      <div className="min-w-0 flex-1">
+        <p
+          className={cn(
+            'truncate text-[13px] font-medium',
+            task.status === 'done' && 'text-muted-foreground line-through',
+          )}
+        >
+          {task.title}
+        </p>
+        {task.dueDate && isToday(new Date(task.dueDate)) && (
+          <p className="text-muted-foreground text-[11px]">Due today</p>
+        )}
+      </div>
+      {task.priority && task.priority !== 'none' && (
+        <Badge
+          variant="secondary"
+          className={cn(
+            'h-4 shrink-0 border-0 px-1.5 text-[10px] font-medium',
+            task.priority === 'high' &&
+              'bg-red-50 text-red-600 dark:bg-red-950/30 dark:text-red-400',
+            task.priority === 'medium' &&
+              'bg-yellow-50 text-yellow-600 dark:bg-yellow-950/30 dark:text-yellow-400',
+            task.priority === 'low' &&
+              'bg-blue-50 text-blue-600 dark:bg-blue-950/30 dark:text-blue-400',
+          )}
+        >
+          {task.priority}
+        </Badge>
+      )}
+    </div>
+  );
+}
+
+// ─── EmailThreadRow ────────────────────────────────────────────────────────────
+// Fetches full thread data per ID to show sender + subject + unread dot
+
+function EmailThreadRow({ threadId }: { threadId: string }) {
+  const { data, isLoading } = useThread(threadId);
+  const latest = data?.latest;
+
+  if (isLoading) {
+    return <div className="bg-muted/50 my-1 h-11 animate-pulse rounded-lg" />;
+  }
+
+  if (!latest) return null;
+
+  const sender = latest.sender;
+  const senderName = sender?.name || sender?.email || 'Unknown';
+  const subject = latest.subject || '(no subject)';
+  const time = latest.receivedOn
+    ? formatDistanceToNow(new Date(latest.receivedOn), { addSuffix: true })
+    : '';
+
+  return (
+    <Link
+      to={`/mail/inbox?threadId=${threadId}`}
+      className="hover:bg-accent/40 -mx-1 flex items-start gap-3 rounded-lg px-1 py-3 transition-colors"
+    >
+      {/* Unread dot */}
+      <div className="mt-1.5 shrink-0">
+        <div
+          className={cn('h-2 w-2 rounded-full', latest.unread ? 'bg-primary' : 'bg-transparent')}
+        />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline justify-between gap-2">
+          <p
+            className={cn('truncate text-[13px]', latest.unread ? 'font-semibold' : 'font-medium')}
+          >
+            {senderName}
+          </p>
+          {time && <p className="text-muted-foreground shrink-0 text-[11px]">{time}</p>}
+        </div>
+        <p className="text-muted-foreground truncate text-[12px]">{subject}</p>
+      </div>
+    </Link>
+  );
+}
+
+function CalendarEventRow({ event }: { event: CalendarEvent }) {
+  const timeLabel = event.allDay
+    ? 'All day'
+    : `${format(new Date(event.startTime), 'h:mm a')} - ${format(new Date(event.endTime), 'h:mm a')}`;
+
+  const content = (
+    <div
+      className="border-border bg-card hover:bg-accent/20 flex items-start gap-3 rounded-lg border px-3 py-3 transition-colors"
+      style={{ borderLeftColor: event.color, borderLeftWidth: 3 }}
+    >
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-[13px] font-medium">{event.title}</p>
+        <p className="text-muted-foreground mt-0.5 truncate text-[11px]">{timeLabel}</p>
+        {event.location ? (
+          <p className="text-muted-foreground mt-1 truncate text-[11px]">{event.location}</p>
+        ) : null}
+      </div>
+    </div>
+  );
+
+  if (event.htmlLink) {
+    return (
+      <a href={event.htmlLink} target="_blank" rel="noopener noreferrer" className="block">
+        {content}
+      </a>
+    );
+  }
+
+  return content;
+}

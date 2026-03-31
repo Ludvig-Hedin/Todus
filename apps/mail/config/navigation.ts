@@ -2,8 +2,6 @@ import {
   Archive,
   Bin,
   ExclamationCircle,
-  Folder,
-  Inbox,
   SettingsGear,
   Stars,
   Tabs,
@@ -11,27 +9,37 @@ import {
   ArrowLeft,
   Danger,
   Sheet,
-  Plane2,
   LockIcon,
   Clock,
+  Mail,
 } from '@/components/icons/icons';
-import { MessageSquareIcon } from 'lucide-react';
+import { CalendarDays, CheckSquare2, Home, MessageSquareIcon, Search } from 'lucide-react';
+import type { ComponentType, SVGProps } from 'react';
 import { m } from '@/paraglide/messages';
+
+export interface NavChildItem {
+  id?: string;
+  title: string;
+  url: string;
+  badge?: number;
+}
 
 export interface NavItem {
   id?: string;
   title: string;
   url: string;
-  icon: React.ComponentType<any>;
+  icon: ComponentType<SVGProps<SVGSVGElement>>;
   badge?: number;
   isBackButton?: boolean;
   isSettingsButton?: boolean;
   disabled?: boolean;
   target?: string;
   shortcut?: string;
+  children?: NavChildItem[];
 }
 
 interface NavSection {
+  id?: string;
   title: string;
   items: NavItem[];
 }
@@ -47,33 +55,78 @@ export const navigationConfig: Record<string, NavConfig> = {
     path: '/mail',
     sections: [
       {
+        id: 'primary',
         title: '',
         items: [
           {
-            id: 'inbox',
-            title: m['navigation.sidebar.inbox'](),
+            id: 'home',
+            title: 'Home',
+            url: '/mail/home',
+            icon: Home,
+            shortcut: 'g + h',
+          },
+          {
+            id: 'tasks',
+            title: 'Tasks',
+            url: '/mail/tasks',
+            icon: CheckSquare2,
+            shortcut: 'g + k',
+          },
+          {
+            id: 'email',
+            title: 'Email',
             url: '/mail/inbox',
-            icon: Inbox,
-            shortcut: 'g + i',
+            icon: Mail,
+            children: [
+              {
+                id: 'inbox',
+                title: m['navigation.sidebar.inbox'](),
+                url: '/mail/inbox',
+              },
+              {
+                id: 'drafts',
+                title: m['navigation.sidebar.drafts'](),
+                url: '/mail/draft',
+              },
+              {
+                id: 'sent',
+                title: m['navigation.sidebar.sent'](),
+                url: '/mail/sent',
+              },
+            ],
           },
           {
-            id: 'drafts',
-            title: m['navigation.sidebar.drafts'](),
-            url: '/mail/draft',
-            icon: Folder,
-            shortcut: 'g + d',
-          },
-          {
-            id: 'sent',
-            title: m['navigation.sidebar.sent'](),
-            url: '/mail/sent',
-            icon: Plane2,
-            shortcut: 'g + t',
+            id: 'calendar',
+            title: 'Calendar',
+            url: '/mail/calendar',
+            icon: CalendarDays,
+            shortcut: 'g + c',
           },
         ],
       },
       {
-        title: 'More',
+        id: 'extras',
+        title: '',
+        items: [
+          {
+            id: 'search',
+            title: 'Search',
+            url: '/mail/search',
+            icon: Search,
+            shortcut: 'g + f',
+          },
+          {
+            id: 'chat',
+            title: 'AI Assistant',
+            url: '/mail/chat',
+            icon: MessageSquareIcon,
+            shortcut: 'g + /',
+          },
+        ],
+      },
+      {
+        id: 'archive',
+        title: '',
         items: [
           {
             id: 'archive',

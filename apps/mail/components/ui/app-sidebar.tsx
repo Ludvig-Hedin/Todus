@@ -7,8 +7,6 @@ import {
 } from '@/components/ui/dialog';
 import { Sidebar, SidebarContent, SidebarFooter, SidebarHeader } from '@/components/ui/sidebar';
 import { navigationConfig, bottomNavItems } from '@/config/navigation';
-// import { useTRPC } from '@/providers/query-provider';
-import { APP_NAME } from '@/lib/branding';
 import { useSidebar } from '@/components/ui/sidebar';
 import { CreateEmail } from '../create/create-email';
 // import { useMutation } from '@tanstack/react-query';
@@ -21,6 +19,8 @@ import { useSession } from '@/lib/auth-client';
 import { useAIFullScreen } from './ai-sidebar';
 import { useStats } from '@/hooks/use-stats';
 import { useLocation } from 'react-router';
+// import { useTRPC } from '@/providers/query-provider';
+import { APP_NAME } from '@/lib/branding';
 import { cn, FOLDERS } from '@/lib/utils';
 import { m } from '@/paraglide/messages';
 // import { Video } from 'lucide-react';
@@ -52,16 +52,29 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 
     const currentSection = section?.[0] || 'mail';
     if (navigationConfig[currentSection]) {
-      const items = [...navigationConfig[currentSection].sections];
+      const items = navigationConfig[currentSection].sections.map((section) => ({
+        ...section,
+        items: section.items.map((item) => ({
+          ...item,
+          children: item.children?.map((child) => ({ ...child })),
+        })),
+      }));
 
       if (currentSection === 'mail' && stats && stats.length) {
-        if (items[0]?.items[0]) {
-          items[0].items[0].badge =
-            stats.find((stat) => stat.label?.toLowerCase() === FOLDERS.INBOX)?.count ?? 0;
-        }
-        if (items[0]?.items[3]) {
-          items[0].items[3].badge =
-            stats.find((stat) => stat.label?.toLowerCase() === FOLDERS.SENT)?.count ?? 0;
+        const emailItem = items
+          .flatMap((section) => section.items)
+          .find((item) => item.id === 'email');
+
+        if (emailItem?.children) {
+          emailItem.children = emailItem.children.map((child) => ({
+            ...child,
+            badge:
+              child.id === 'inbox'
+                ? stats.find((stat) => stat.label?.toLowerCase() === FOLDERS.INBOX)?.count
+                : child.id === 'sent'
+                  ? stats.find((stat) => stat.label?.toLowerCase() === FOLDERS.SENT)?.count
+                  : undefined,
+          }));
         }
       }
 
@@ -143,17 +156,15 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               <div className="flex items-start gap-2">
                 <div className="flex-1 space-y-0.5">
                   {/* Use APP_NAME from branding.ts — avoids hardcoded "Todus" diverging from branding source */}
-                  <h3 className="text-[13px] font-semibold text-foreground">
-                    Get {APP_NAME} Pro
-                  </h3>
-                  <p className="text-[12px] leading-snug text-muted-foreground">
+                  <h3 className="text-foreground text-[13px] font-semibold">Get {APP_NAME} Pro</h3>
+                  <p className="text-muted-foreground text-[12px] leading-snug">
                     Unlimited AI chats, auto-labeling, writing assistant, and more.
                   </p>
                 </div>
               </div>
               <button
                 onClick={() => setPricingDialog('true')}
-                className="mt-2.5 inline-flex h-7 w-full items-center justify-center gap-0.5 overflow-hidden rounded-full bg-mainBlue px-2 transition-colors hover:bg-mainBlue/90"
+                className="bg-mainBlue hover:bg-mainBlue/90 mt-2.5 inline-flex h-7 w-full items-center justify-center gap-0.5 overflow-hidden rounded-full px-2 transition-colors"
               >
                 <span className="whitespace-nowrap text-[12px] font-medium leading-none text-white">
                   Start 7 day free trial
@@ -198,7 +209,10 @@ function ComposeButton() {
       <DialogDescription></DialogDescription>
 
       <DialogTrigger asChild>
-        <button type="button" className="relative mb-1 inline-flex h-8 w-full items-center justify-center gap-1 self-stretch overflow-hidden rounded-full bg-mainBlue dark:border-none cursor-pointer hover:bg-mainBlue/90 transition-all duration-150">
+        <button
+          type="button"
+          className="bg-mainBlue hover:bg-mainBlue/90 relative mb-1 inline-flex h-8 w-full cursor-pointer items-center justify-center gap-1 self-stretch overflow-hidden rounded-full transition-all duration-150 dark:border-none"
+        >
           {state === 'collapsed' && !isMobile ? (
             <PencilCompose className="mt-0.5 fill-white text-black" />
           ) : (
@@ -212,7 +226,7 @@ function ComposeButton() {
         </button>
       </DialogTrigger>
 
-      <DialogContent className="h-screen w-screen max-w-none border-none bg-background p-0 shadow-none">
+      <DialogContent className="bg-background h-screen w-screen max-w-none border-none p-0 shadow-none">
         <CreateEmail />
       </DialogContent>
     </Dialog>

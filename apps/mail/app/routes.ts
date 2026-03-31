@@ -18,6 +18,10 @@ export default [
     // SEO: Blog pages — content hub for organic search traffic
     route('/blog', '(full-width)/blog/index.tsx'),
     route('/blog/:slug', '(full-width)/blog/[slug]/page.tsx'),
+    // Shared AI conversation permalink — public read-only snapshot
+    route('/share/:slug', '(full-width)/share/[slug]/page.tsx'),
+    // Group chat invite landing page — join via invite token
+    route('/g/:token', '(full-width)/group-join/[token]/page.tsx'),
   ]),
 
   route('/login', '(auth)/todus/login/page.tsx'),
@@ -29,6 +33,11 @@ export default [
       '(routes)/mail/layout.tsx',
       prefix('/mail', [
         index('(routes)/mail/page.tsx'),
+        route('/home', '(routes)/mail/home/page.tsx'),
+        route('/tasks', '(routes)/mail/tasks/page.tsx'),
+        route('/calendar', '(routes)/mail/calendar/page.tsx'),
+        route('/search', '(routes)/mail/search/page.tsx'),
+        route('/chat', '(routes)/mail/chat/page.tsx'),
         route('/create', '(routes)/mail/create/page.tsx'),
         route('/compose', '(routes)/mail/compose/page.tsx'),
         route('/under-construction/:path', '(routes)/mail/under-construction/[path]/page.tsx'),
@@ -50,6 +59,7 @@ export default [
         route('/privacy', '(routes)/settings/privacy/page.tsx'),
         route('/security', '(routes)/settings/security/page.tsx'),
         route('/shortcuts', '(routes)/settings/shortcuts/page.tsx'),
+        route('/sharing', '(routes)/settings/sharing/page.tsx'),
         route('/*', '(routes)/settings/[...settings]/page.tsx'),
       ]),
     ),

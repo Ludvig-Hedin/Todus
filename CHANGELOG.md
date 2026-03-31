@@ -1,5 +1,81 @@
 # Project Changelog
 
+## [2026-03-31] Feature — Shared conversation permalinks + Group chats (web + iOS + macOS)
+
+### Backend — DB + tRPC
+- **4 new Drizzle tables**: `shared_conversation`, `group`, `group_member`, `group_message` — all with proper FKs, cascade rules, and indexes. Migration `0041_lame_emma_frost.sql` generated and applied.
+- **`sharing` tRPC router** (6 procedures): `create`, `get`, `import`, `listMine`, `revoke`, `update`. Password hashing via Web Crypto PBKDF2 (100k iterations, SHA-256). Rate-limited public `get` (20 req/min via Upstash Redis).
+- **`groups` tRPC router** (11 procedures): `create`, `getByInvite`, `join`, `leave`, `listMine`, `sendMessage`, `listMessages`, `get`, `update`, `kickMember`, `regenerateInvite`, `delete`. AI responses generated in background via `waitUntil`. Message rate-limited (30/min per user).
+- Both routers registered in `apps/server/src/trpc/index.ts`.
+
+### Web
+- New routes: `/share/:slug` (public shared conversation), `/g/:token` (group invite join), `/settings/sharing` (manage shared links).
+- `ShareConversationModal` component — title, visibility (public/protected), password, expiry.
+- `GroupChatView` — 5-second `refetchInterval` polling with `TODO(realtime)` comment.
+- Share button wired into `ai-sidebar.tsx`; group sidebar section added to `app-sidebar.tsx`.
+
+### iOS
+- `ShareConversationService` + `GroupChatService` (polling, `TODO(realtime)` marker).
+- `ShareConversationSheet` — create share link from AI chat menu; success state with native `ShareLink`.
+- `SharedConversationView` — read-only with password gate; opened via `todus://share?slug=...` deep link.
+- `GroupListView` + `GroupChatView` (iOS) — create/join/leave groups, member avatars, polling composer.
+- `AIChatView` Share menu item redirects to `ShareConversationSheet` when conversation is saved.
+- Deep link `todus://share?slug=...` handled in `TodosApp.swift`.
+- `AppServices` extended with `shareConversationService` and `groupChatService`.
+
+### macOS
+- `MacShareConversationPanel` — popover from AI assistant ellipsis menu.
+- `MacGroupChatView` — HSplitView with member list + message area, polling.
+- `MacGroupListSection` — sidebar section with create/join actions.
+- `MacSidebarView` updated with `selectedGroupId` binding and Groups section.
+- `MacRootView` shows `MacGroupChatView` in detail pane when a group is selected.
+- `MacAppServices` extended with `shareConversationService` and `groupChatService`.
+
+**Files:** `apps/server/src/db/schema.ts`, `apps/server/src/trpc/routes/sharing.ts` (new), `apps/server/src/trpc/routes/groups.ts` (new), `apps/server/src/trpc/index.ts`, `apps/mail/app/routes.ts`, `apps/mail/app/(full-width)/share/[slug]/page.tsx` (new), `apps/mail/app/(full-width)/group-join/[token]/page.tsx` (new), `apps/mail/components/ui/share-conversation-modal.tsx` (new), `apps/mail/components/ui/group-chat-view.tsx` (new), `apps/mail/components/ui/ai-sidebar.tsx`, `apps/mail/app/(routes)/settings/sharing/page.tsx` (new), `apps/ios/…/ShareConversationService.swift` (new), `apps/ios/…/GroupChatService.swift` (new), `apps/ios/…/ShareConversationSheet.swift` (new), `apps/ios/…/SharedConversationView.swift` (new), `apps/ios/…/GroupChatView.swift` (new), `apps/ios/…/AIChatView.swift`, `apps/ios/…/AppServices.swift`, `apps/ios/…/TodosApp.swift`, `apps/macos/…/MacShareConversationPanel.swift` (new), `apps/macos/…/MacGroupChatView.swift` (new), `apps/macos/…/MacSidebarView.swift`, `apps/macos/…/MacRootView.swift`, `apps/macos/…/MacAppServices.swift`
+
+---
+
+## [2026-03-31] Fix — C2: Web home page — distinguish "not connected" from empty state
+
+### Web — `home/page.tsx`
+- **Calendar section**: Replaces static "Connect Google Calendar" CTA with real `trpc.calendar.events` query for today. Shows live events with colored left border, time, and optional location. `scopeMissing = true` → re-auth button. No events → "No events today".
+- **Email section**: Checks `threadsQuery.isError` to surface "Connect Gmail" CTA (backend returns `NOT_FOUND` when no connection) vs "Your inbox is empty" when connected with no threads.
+- Added `CalendarEventRow` component for compact event rendering (colored border, time label, location).
+
+**Files:** `apps/web/app/(routes)/mail/home/page.tsx`
+
+---
+
+## [2026-03-31] Feature — S1: Google Calendar integration (backend + web)
+
+### Backend — `calendar.ts` + `trpc/index.ts` + `driver/google.ts`
+- New `calendarRouter` with `events` and `calendars` queries — calls Google Calendar API v3 using `OAuth2Client` (auto-refresh via stored `refreshToken`)
+- `calendar.readonly` scope added to Google driver's `getScope()` — included in all new auth flows
+- 403 "scope missing" handled gracefully: returns `{ events: [], scopeMissing: true }` so the frontend can prompt a re-auth rather than surfacing an error
+
+### Web — `calendar/page.tsx`
+- Calendar page now fetches real Google Calendar events for the displayed month
+- Right panel shows events (colored left border, time, location) above tasks; unified empty state
+- Week overview shows blue dots on days with events
+- `scopeMissing = true` → "Connect Google Calendar" banner with `authClient.linkSocial` re-auth
+- Page title reverted to "Calendar" now that real events are shown
+
+**Files:** `apps/server/src/trpc/routes/calendar.ts` (new), `apps/server/src/trpc/index.ts`, `apps/server/src/lib/driver/google.ts`, `apps/web/app/(routes)/mail/calendar/page.tsx`
+
+---
+
+## [2026-03-31] Feature — S3: iOS Settings navigation-based restructure
+
+### iOS — `SettingsView.swift`
+- Active Sessions → `SessionsSettingsView` sub-page; main settings shows session-count badge NavigationLink
+- AI Assistant → `AIAssistantSettingsView` sub-page (two large TextEditors removed from main list); profile saved on `.onDisappear`
+- Appearance → `AppearanceSettingsView` sub-page (vertical row list replaces cramped three-column picker); main settings shows current theme name as subtitle
+- Removed unused `headerCell`, `valueCell`, `formatSessionDate`, `revokingSessionIDs`, `isRevokingAllSessions` from main view
+
+**Files:** `apps/ios/Todus/Todus/Features/Settings/SettingsView.swift`
+
+---
+
 ## [2026-03-31] UX Polish — web mail first-run and inbox clarity pass
 
 - Reworked the first-run flow in `apps/mail` so onboarding no longer competes with inbox connection setup. The inbox tour now waits until the user has at least one connected account.
@@ -2231,3 +2307,5 @@ todus.app had zero Google-indexed pages. This overhaul adds all missing SEO infr
 [2026-03-11] [UX Fix] Removed the inbox gesture tip banner, changed the mail compose header button from `+` to a pencil, shifted the remaining native mail palette away from blue/slate tints toward warmer neutrals, and updated sender-avatar fallbacks to request domain logos without generic placeholder fallbacks so missing logos render initials instead of the broken-person icon. User-facing change. (apps/ios/app/(app)/(mail)/[folder].tsx, apps/ios/src/shared/theme/ThemeContext.tsx, apps/ios/src/features/mail/SenderAvatar.tsx).
 
 [2026-03-11] [UI Polish] Reworked the native iOS inbox into a cleaner divided list instead of stacked cards and redesigned the inbox header to foreground account identity with the signed-in avatar plus unread-count status, while preserving search and compose in a secondary action strip. User-facing change. (apps/ios/src/features/mail/ThreadListItem.tsx, apps/ios/app/(app)/(mail)/[folder].tsx).
+
+[2026-03-31] [Feature] Expanded the active web app mail shell toward native parity by adding first-class `/mail/home`, `/mail/tasks`, `/mail/calendar`, `/mail/search`, and `/mail/chat` routes in `apps/mail`, switching `/mail` to land on Home, and upgrading the sidebar navigation to expose the same primary surfaces with expandable Email children. User-facing change. (apps/mail/app/routes.ts, apps/mail/app/(routes)/mail/page.tsx, apps/mail/app/(routes)/mail/home/page.tsx, apps/mail/app/(routes)/mail/tasks/page.tsx, apps/mail/app/(routes)/mail/calendar/page.tsx, apps/mail/app/(routes)/mail/search/page.tsx, apps/mail/app/(routes)/mail/chat/page.tsx, apps/mail/components/ui/nav-main.tsx, apps/mail/components/ui/app-sidebar.tsx, apps/mail/config/navigation.ts).

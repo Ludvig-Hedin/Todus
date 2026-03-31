@@ -407,3 +407,11 @@ All marked DONE — these are WebView-based, not truly native.
 | PG-012 | Establish screenshot-driven visual regression proof in `/parity_screenshots/`                                                             | DONE   | Naming convention + manifest + diff log + verifier are implemented, and required iOS-scope coverage passes (`web` + `ios`: `46/46`)                                            |
 | PG-013 | Build parity-focused automated tests (unit/integration/E2E)                                                                               | DONE   | Added Autumn integration tests to iOS unit suite and documented RC E2E/manual parity workflow script in `apps/ios/TEST_PLAN_PARITY.md`                                         |
 | PG-014 | Resolve macOS architecture blocker                                                                                                        | DONE   | De-scoped from this stream because current migration goal is iOS-native parity (`apps/ios`); macOS architecture work is tracked separately outside this iOS backlog            |
+
+## Web Parity Follow-up (2026-03-31)
+
+- Added the missing primary web surfaces in `apps/mail` for Home, Tasks, Calendar, Search, and AI Chat under `/mail/*`.
+- Switched the authenticated web landing route from `/mail/inbox` to `/mail/home` to match the native app information architecture.
+- Upgraded the web sidebar to surface native-style primary navigation with expandable Email children instead of inbox-only navigation.
+- Ported existing parity page implementations from the legacy web app into the active `apps/mail` app and validated them with targeted ESLint plus a successful `pnpm --filter @zero/mail build`.
+- Build still emits pre-existing workspace warnings from unrelated files and reference/archived tsconfig parsing; these were not introduced by this parity work.
