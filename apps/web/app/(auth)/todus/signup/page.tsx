@@ -45,11 +45,16 @@ export default function SignupTodus() {
     );
   }
 
-  function handleGoogleSignIn() {
-    signIn.social({
+  async function handleGoogleSignIn() {
+    try {
+      await signIn.social({
         provider: 'google',
         callbackURL: `${window.location.origin}/mail/inbox`,
       });
+    } catch (err) {
+      console.error('Google sign-in failed:', err);
+      toast.error(err instanceof Error ? err.message : 'Google sign-in failed. Please try again.');
+    }
   }
 
   return (
