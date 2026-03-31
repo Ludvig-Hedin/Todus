@@ -23,7 +23,11 @@ import { useEmailAliases } from '@/hooks/use-email-aliases';
 import { Globe, Clock, Mail, InfoIcon } from 'lucide-react';
 import { getLocale, setLocale } from '@/paraglide/runtime';
 import { useState, useEffect, useMemo, memo } from 'react';
-import { userSettingsSchema } from '@zero/server/schemas';
+import {
+  assistantAutoSendScenarioSchema,
+  defaultAssistantAutomationPolicy,
+  userSettingsSchema,
+} from '@zero/server/schemas';
 import { locales } from '@/project.inlang/settings.json';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -40,6 +44,16 @@ import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import * as z from 'zod';
 import { useCallback } from 'react';
+
+type AssistantAutoSendScenario = z.infer<typeof assistantAutoSendScenarioSchema>;
+
+const assistantAutoSendScenarioOptions: ReadonlyArray<
+  readonly [AssistantAutoSendScenario, string]
+> = [
+  ['acknowledgment', 'Acknowledgments'],
+  ['simple_confirmation', 'Simple confirmations'],
+  ['scheduling_confirmation', 'Scheduling confirmations'],
+];
 
 const TimezoneSelect = memo(
   ({ field }: { field: ControllerRenderProps<z.infer<typeof userSettingsSchema>, 'timezone'> }) => {
@@ -128,7 +142,7 @@ export default function GeneralPage() {
   //   const { revalidate } = useRevalidator();
 
   const form = useForm<z.infer<typeof userSettingsSchema>>({
-    resolver: zodResolver(userSettingsSchema),
+    resolver: zodResolver(userSettingsSchema as never),
     defaultValues: {
       language: locale,
       timezone: getBrowserTimezone(),
@@ -355,6 +369,36 @@ export default function GeneralPage() {
     [],
   );
 
+  const renderAssistantToggleField = useCallback(
+    ({
+      field,
+      label,
+      description,
+    }: {
+      field: any;
+      label: string;
+      description: string;
+    }) => (
+      <FormItem className="flex max-w-xl flex-row items-center justify-between rounded-lg border p-3 shadow-sm">
+        <div className="space-y-0.5 pr-4">
+          <FormLabel>{label}</FormLabel>
+          <FormDescription>{description}</FormDescription>
+        </div>
+        <FormControl>
+          <Switch checked={Boolean(field.value)} onCheckedChange={field.onChange} />
+        </FormControl>
+      </FormItem>
+    ),
+    [],
+  );
+
+  const applyRecommendedAssistantPreset = useCallback(() => {
+    form.setValue('assistantAutomationPolicy', defaultAssistantAutomationPolicy, {
+      shouldDirty: true,
+    });
+    toast.success('Recommended assistant defaults applied');
+  }, [form]);
+
   return (
     <div className="grid gap-6">
       <SettingsCard
@@ -418,6 +462,205 @@ export default function GeneralPage() {
                 control={form.control}
                 name="customPrompt"
                 render={renderCustomInstructionsField}
+              />
+            </div>
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-semibold">Mail assistant automation</h3>
+                  <p className="text-muted-foreground text-sm">
+                    Control what Todus should suggest automatically versus what always stays manual.
+                  </p>
+                </div>
+                <Button type="button" variant="secondary" onClick={applyRecommendedAssistantPreset}>
+                  Apply recommended defaults
+                </Button>
+              </div>
+
+              <FormField
+                control={form.control}
+                name="assistantAutomationPolicy.autoSummarizeLongThreads"
+                render={({ field }) =>
+                  renderAssistantToggleField({
+                    field,
+                    label: 'Auto summarize long threads',
+                    description: 'Generate thread summaries by default so long conversations become scannable immediately.',
+                  })
+                }
+              />
+              <FormField
+                control={form.control}
+                name="assistantAutomationPolicy.suggestTasksFromEmail"
+                render={({ field }) =>
+                  renderAssistantToggleField({
+                    field,
+                    label: 'Suggest tasks from emails',
+                    description: 'Turn actionable requests and follow-ups into proposed tasks inside each thread.',
+                  })
+                }
+              />
+              <FormField
+                control={form.control}
+                name="assistantAutomationPolicy.suggestEventsFromEmail"
+                render={({ field }) =>
+                  renderAssistantToggleField({
+                    field,
+                    label: 'Suggest events from emails',
+                    description: 'Detect scheduling and meeting coordination, then surface one-tap event creation.',
+                  })
+                }
+              />
+              <FormField
+                control={form.control}
+                name="assistantAutomationPolicy.autoDraftReplies"
+                render={({ field }) =>
+                  renderAssistantToggleField({
+                    field,
+                    label: 'Auto draft replies',
+                    description: 'Prepare high-confidence reply drafts using thread history, related tasks, and timing context.',
+                  })
+                }
+              />
+              <FormField
+                control={form.control}
+                name="assistantAutomationPolicy.smartReplyNudges"
+                render={({ field }) =>
+                  renderAssistantToggleField({
+                    field,
+                    label: 'Smart reply nudges',
+                    description: 'Highlight threads that likely need a response before they get buried in the inbox.',
+                  })
+                }
+              />
+              <FormField
+                control={form.control}
+                name="assistantAutomationPolicy.smartDeadlineNudges"
+                render={({ field }) =>
+                  renderAssistantToggleField({
+                    field,
+                    label: 'Smart deadline nudges',
+                    description: 'Warn you when a thread contains a likely deadline, follow-up risk, or stale commitment.',
+                  })
+                }
+              />
+              <FormField
+                control={form.control}
+                name="assistantAutomationPolicy.assistantThreadActionsVisible"
+                render={({ field }) =>
+                  renderAssistantToggleField({
+                    field,
+                    label: 'Show assistant controls in threads',
+                    description: 'Keep summarize, task extraction, event creation, and research actions visible above every thread.',
+                  })
+                }
+              />
+              <FormField
+                control={form.control}
+                name="assistantAutomationPolicy.autoSendExperimentEnabled"
+                render={({ field }) =>
+                  renderAssistantToggleField({
+                    field,
+                    label: 'Enable low-risk auto-send experiment',
+                    description: 'Off by default. Only narrow, high-confidence acknowledgements and confirmations become candidates.',
+                  })
+                }
+              />
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <FormField
+                  control={form.control}
+                  name="assistantAutomationPolicy.autoSendQuietHours.startHour"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Auto-send quiet hours start</FormLabel>
+                      <Select
+                        onValueChange={(value) => field.onChange(Number(value))}
+                        value={String(field.value ?? defaultAssistantAutomationPolicy.autoSendQuietHours.startHour)}
+                      >
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select hour" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {Array.from({ length: 24 }, (_, hour) => (
+                            <SelectItem key={hour} value={String(hour)}>
+                              {hour.toString().padStart(2, '0')}:00
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="assistantAutomationPolicy.autoSendQuietHours.endHour"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Auto-send quiet hours end</FormLabel>
+                      <Select
+                        onValueChange={(value) => field.onChange(Number(value))}
+                        value={String(field.value ?? defaultAssistantAutomationPolicy.autoSendQuietHours.endHour)}
+                      >
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select hour" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {Array.from({ length: 24 }, (_, hour) => (
+                            <SelectItem key={hour} value={String(hour)}>
+                              {hour.toString().padStart(2, '0')}:00
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              <FormField
+                control={form.control}
+                name="assistantAutomationPolicy.autoSendAllowedScenarios"
+                render={({ field }) => {
+                  const selectedScenarios = field.value ?? [];
+                  const toggleScenario = (scenario: AssistantAutoSendScenario) => {
+                    const next = selectedScenarios.includes(scenario)
+                      ? selectedScenarios.filter((item) => item !== scenario)
+                      : [...selectedScenarios, scenario];
+                    field.onChange(next);
+                  };
+
+                  return (
+                    <FormItem className="max-w-xl space-y-3 rounded-lg border p-3 shadow-sm">
+                      <div className="space-y-0.5">
+                        <FormLabel>Allowed auto-send scenarios</FormLabel>
+                        <FormDescription>
+                          Keep this narrow. These only matter when the low-risk auto-send experiment is enabled.
+                        </FormDescription>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {assistantAutoSendScenarioOptions.map(([value, label]) => {
+                          const selected = selectedScenarios.includes(value);
+                          return (
+                            <Button
+                              key={value}
+                              type="button"
+                              variant={selected ? 'default' : 'secondary'}
+                              size="sm"
+                              className="rounded-full"
+                              onClick={() => toggleScenario(value)}
+                            >
+                              {label}
+                            </Button>
+                          );
+                        })}
+                      </div>
+                    </FormItem>
+                  );
+                }}
               />
             </div>
             <FormField control={form.control} name="animations" render={renderAnimationsField} />

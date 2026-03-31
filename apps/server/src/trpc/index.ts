@@ -23,6 +23,7 @@ import { calendarRouter } from './routes/calendar';
 import { sessionsRouter } from './routes/sessions';
 import { sharingRouter } from './routes/sharing';
 import { groupsRouter } from './routes/groups';
+import { mailAssistantRouter } from './routes/mail-assistant';
 import { aiRouter } from './routes/ai';
 import { router } from './trpc';
 
@@ -38,6 +39,7 @@ export const appRouter = router({
   drafts: draftsRouter,
   groups: groupsRouter,
   labels: labelsRouter,
+  mailAssistant: mailAssistantRouter,
   mail: mailRouter,
   mentions: mentionsRouter,
   notes: notesRouter,

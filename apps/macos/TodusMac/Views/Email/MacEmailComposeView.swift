@@ -17,10 +17,11 @@ struct MacEmailComposeView: View {
     }
 
     /// Reply to a message
-    init(replyTo message: EmailMessage, threadId: String) {
+    init(replyTo message: EmailMessage, threadId: String, body: String = "") {
         var d = EmailDraft()
         d.to = [message.from.email]
         d.subject = message.subject.hasPrefix("Re:") ? message.subject : "Re: \(message.subject)"
+        d.body = body
         d.replyToThreadId = threadId
         d.replyToMessageId = message.id
         _draft = State(initialValue: d)

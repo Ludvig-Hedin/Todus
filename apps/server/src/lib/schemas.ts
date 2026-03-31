@@ -1,5 +1,50 @@
 import { z } from 'zod';
 
+export const assistantAutoSendScenarioSchema = z.enum([
+  'acknowledgment',
+  'simple_confirmation',
+  'scheduling_confirmation',
+]);
+
+export const assistantQuietHoursSchema = z.object({
+  startHour: z.number().int().min(0).max(23).default(22),
+  endHour: z.number().int().min(0).max(23).default(7),
+});
+
+export const assistantAutomationPolicySchema = z.object({
+  autoSummarizeLongThreads: z.boolean().default(true),
+  suggestTasksFromEmail: z.boolean().default(true),
+  suggestEventsFromEmail: z.boolean().default(true),
+  autoDraftReplies: z.boolean().default(true),
+  smartReplyNudges: z.boolean().default(true),
+  smartDeadlineNudges: z.boolean().default(true),
+  assistantThreadActionsVisible: z.boolean().default(true),
+  autoSendExperimentEnabled: z.boolean().default(false),
+  autoSendAllowedScenarios: z.array(assistantAutoSendScenarioSchema).default(['acknowledgment']),
+  autoSendQuietHours: assistantQuietHoursSchema.default({
+    startHour: 22,
+    endHour: 7,
+  }),
+});
+
+export type AssistantAutomationPolicy = z.infer<typeof assistantAutomationPolicySchema>;
+
+export const defaultAssistantAutomationPolicy: AssistantAutomationPolicy = {
+  autoSummarizeLongThreads: true,
+  suggestTasksFromEmail: true,
+  suggestEventsFromEmail: true,
+  autoDraftReplies: true,
+  smartReplyNudges: true,
+  smartDeadlineNudges: true,
+  assistantThreadActionsVisible: true,
+  autoSendExperimentEnabled: false,
+  autoSendAllowedScenarios: ['acknowledgment'],
+  autoSendQuietHours: {
+    startHour: 22,
+    endHour: 7,
+  },
+};
+
 export const serializedFileSchema = z.object({
   name: z.string(),
   type: z.string(),
@@ -115,6 +160,7 @@ export const userSettingsSchema = z.object({
   imageCompression: z.enum(['low', 'medium', 'original']).default('medium'),
   autoRead: z.boolean().default(true),
   animations: z.boolean().default(false),
+  assistantAutomationPolicy: assistantAutomationPolicySchema.default(defaultAssistantAutomationPolicy),
 });
 
 export type UserSettings = z.infer<typeof userSettingsSchema>;
@@ -137,4 +183,26 @@ export const defaultUserSettings: UserSettings = {
   undoSendEnabled: false,
   imageCompression: 'medium',
   animations: false,
+  assistantAutomationPolicy: defaultAssistantAutomationPolicy,
+};
+
+export const mergeUserSettings = (
+  current: Partial<UserSettings> | undefined,
+  incoming: Partial<UserSettings>,
+): UserSettings => {
+  return userSettingsSchema.parse({
+    ...defaultUserSettings,
+    ...current,
+    ...incoming,
+    assistantAutomationPolicy: {
+      ...defaultAssistantAutomationPolicy,
+      ...(current?.assistantAutomationPolicy ?? {}),
+      ...(incoming.assistantAutomationPolicy ?? {}),
+      autoSendQuietHours: {
+        ...defaultAssistantAutomationPolicy.autoSendQuietHours,
+        ...(current?.assistantAutomationPolicy?.autoSendQuietHours ?? {}),
+        ...(incoming.assistantAutomationPolicy?.autoSendQuietHours ?? {}),
+      },
+    },
+  });
 };

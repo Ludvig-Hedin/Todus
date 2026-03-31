@@ -13,6 +13,10 @@ Last updated: 2026-03-31
 
 ## Current Web/Server Fix Batch
 
+- `DONE` Added a shared `mailAssistant` backend domain with per-thread recommendations, inbox nudges, task/event apply actions, draft generation, and lightweight assistant activity logging.
+- `DONE` Added nested `assistantAutomationPolicy` settings defaults and backward-compatible settings merges for summaries, suggestions, nudges, auto-drafts, and the opt-in auto-send experiment.
+- `DONE` Shipped visible proactive mail assistant surfaces in the web thread view and inbox list, including thread summaries, task/event suggestions, draft actions, inline assistant buttons, and inbox nudges.
+- `DONE` Added native mail assistant thread/inbox surfaces on iOS and macOS plus shared settings toggles for assistant automation preferences.
 - `DONE` Shipped a focused web mail UX pass: non-blocking inbox connection setup, onboarding sequencing, clearer search/filter wording, better empty-state guidance, more discoverable list actions, and a stronger thread action hierarchy.
 - `DONE` Added a one-click share/copy action to the thread AI summary card so users can paste branded thread summaries into email or Slack.
 - `DONE` Web task mutations now invalidate all `tasks.list` TanStack caches via `trpc.tasks.list.queryFilter()` (tasks page, home, calendar, TaskItem).

@@ -22,6 +22,11 @@
 		413EB23387CF524ADEE6AA47 /* MacRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51FB7C44A440DFC527210FE5 /* MacRootView.swift */; };
 		430B1D78D4B567975A394A37 /* TaskViewMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A6E6D9EAB8380C6BE5719C3 /* TaskViewMode.swift */; };
 		4564647511EB57A78B398E63 /* TodosAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27FFF0A469A295576A24B8F9 /* TodosAPIClient.swift */; };
+		D1E2F3A4B5C60718293A4B5C /* MailAssistantModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1D2E3F4A5B60718293A4B5C /* MailAssistantModels.swift */; };
+		F1A2B3C4D5061728394A5B6C /* ShareConversationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1F2A3B4C5061728394A5B6C /* ShareConversationService.swift */; };
+		F2A3B4C5D60718293A4B5C6D /* GroupChatService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2F3A4B5C60718293A4B5C6D /* GroupChatService.swift */; };
+		A3B4C5D6E708192A3B4C5D6E /* MacGroupChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3A4B5C6D708192A3B4C5D6E /* MacGroupChatView.swift */; };
+		A4B5C6D7E8091A2B3C4D5E6F /* MacShareConversationPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4A5B6C7D8091A2B3C4D5E6F /* MacShareConversationPanel.swift */; };
 		553EE990264F3CEFD8E517BC /* AppTaskPriority.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC585F2265934558433E3E36 /* AppTaskPriority.swift */; };
 		57FBCDF125B965458E0BECF3 /* TodusMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 046484DCDC536576B1BBB40C /* TodusMacApp.swift */; };
 		5ADF61DDFE8A3E3F7B49F343 /* MacHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AA56C7900CF82A6B22C847C /* MacHomeView.swift */; };
@@ -93,6 +98,11 @@
 		B6B833B391C01BEE4CB84524 /* EmailModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailModels.swift; sourceTree = "<group>"; };
 		B974F05FBCA3D4523D8602C6 /* MacTasksView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacTasksView.swift; sourceTree = "<group>"; };
 		BC585F2265934558433E3E36 /* AppTaskPriority.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppTaskPriority.swift; sourceTree = "<group>"; };
+		C1D2E3F4A5B60718293A4B5C /* MailAssistantModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MailAssistantModels.swift; sourceTree = "<group>"; };
+		E1F2A3B4C5061728394A5B6C /* ShareConversationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareConversationService.swift; sourceTree = "<group>"; };
+		E2F3A4B5C60718293A4B5C6D /* GroupChatService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupChatService.swift; sourceTree = "<group>"; };
+		F3A4B5C6D708192A3B4C5D6E /* MacGroupChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacGroupChatView.swift; sourceTree = "<group>"; };
+		F4A5B6C7D8091A2B3C4D5E6F /* MacShareConversationPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacShareConversationPanel.swift; sourceTree = "<group>"; };
 		BF20EABA4B082AA168D3DDF7 /* MacEmailInboxView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacEmailInboxView.swift; sourceTree = "<group>"; };
 		C27FE022BFDFDA4FCC15BCB4 /* AssistantButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantButton.swift; sourceTree = "<group>"; };
 		D1E2F3A4B5C6D7E8F9A0B1C2 /* CalendarTimeGridView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarTimeGridView.swift; sourceTree = "<group>"; };
@@ -310,7 +320,9 @@
 		C3D4E5F6A7B8C9D0E1F2A3B4 /* AI */ = {
 			isa = PBXGroup;
 			children = (
+				E2F3A4B5C60718293A4B5C6D /* GroupChatService.swift */,
 				A1B2C3D4E5F6A7B8C9D0E1F2 /* MacAIChatService.swift */,
+				E1F2A3B4C5061728394A5B6C /* ShareConversationService.swift */,
 			);
 			path = AI;
 			sourceTree = "<group>";
@@ -321,6 +333,7 @@
 				BC585F2265934558433E3E36 /* AppTaskPriority.swift */,
 				0F0978AB24BCBA5061D06B50 /* CreateItemType.swift */,
 				B6B833B391C01BEE4CB84524 /* EmailModels.swift */,
+				C1D2E3F4A5B60718293A4B5C /* MailAssistantModels.swift */,
 				E600FB3DFA1A854E9BB82907 /* ParseState.swift */,
 				4A87121AD344331AAA348FB3 /* SyncModels.swift */,
 				456C42750E641F95F8340F79 /* SyncState.swift */,
@@ -336,6 +349,8 @@
 			isa = PBXGroup;
 			children = (
 				B2C3D4E5F6A7B8C9D0E1F2A3 /* MacAssistantPanel.swift */,
+				F3A4B5C6D708192A3B4C5D6E /* MacGroupChatView.swift */,
+				F4A5B6C7D8091A2B3C4D5E6F /* MacShareConversationPanel.swift */,
 			);
 			path = AI;
 			sourceTree = "<group>";
@@ -454,6 +469,8 @@
 				A021A447733E1411FF2A61C7 /* CalendarService.swift in Sources */,
 				2D555E443F1CAE9F0BCF376C /* CreateItemType.swift in Sources */,
 				D1ED251E912D63B61727D06F /* EmailModels.swift in Sources */,
+				F2A3B4C5D60718293A4B5C6D /* GroupChatService.swift in Sources */,
+				D1E2F3A4B5C60718293A4B5C /* MailAssistantModels.swift in Sources */,
 				6F775FA79762FB29E75EBF88 /* EmailService.swift in Sources */,
 				A1AA1459AFBEC54E5B9ED5C5 /* FolderRecord.swift in Sources */,
 				E00A05101913579DC0E5D1C6 /* KeychainHelper.swift in Sources */,
@@ -478,6 +495,7 @@
 				AC4E7A7FC7E659AEF1C0A8CF /* NetworkMonitor.swift in Sources */,
 				928618689B0DCC6D49DD695A /* NoRedirectDelegate.swift in Sources */,
 				78BD1210EB9A905EE0141C92 /* ParseState.swift in Sources */,
+				F1A2B3C4D5061728394A5B6C /* ShareConversationService.swift in Sources */,
 				1A4A6BEF2511133A5550E42C /* SyncModels.swift in Sources */,
 				0F5B670890164922821F1D85 /* SyncState.swift in Sources */,
 				C0AC54923C3B9903F72784A4 /* TaskDateFormatter.swift in Sources */,
@@ -487,6 +505,8 @@
 				430B1D78D4B567975A394A37 /* TaskViewMode.swift in Sources */,
 				4564647511EB57A78B398E63 /* TodosAPIClient.swift in Sources */,
 				57FBCDF125B965458E0BECF3 /* TodusMacApp.swift in Sources */,
+				A3B4C5D6E708192A3B4C5D6E /* MacGroupChatView.swift in Sources */,
+				A4B5C6D7E8091A2B3C4D5E6F /* MacShareConversationPanel.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

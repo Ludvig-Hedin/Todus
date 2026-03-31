@@ -1,6 +1,53 @@
 import SwiftUI
 
-/// Email inbox — thread list with search, pull-to-refresh, and swipe actions.
+// MARK: - Folder Model
+
+/// All email folders supported by the backend — matches server FOLDERS constant.
+private enum EmailFolder: String, CaseIterable {
+    case inbox    = "inbox"
+    case drafts   = "draft"
+    case sent     = "sent"
+    case archive  = "archive"
+    case snoozed  = "snoozed"
+    case spam     = "spam"
+    case bin      = "bin"
+
+    var title: String {
+        switch self {
+        case .inbox:   "Inbox"
+        case .drafts:  "Drafts"
+        case .sent:    "Sent"
+        case .archive: "Archive"
+        case .snoozed: "Snoozed"
+        case .spam:    "Spam"
+        case .bin:     "Trash"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .inbox:   "tray"
+        case .drafts:  "doc"
+        case .sent:    "paperplane"
+        case .archive: "archivebox"
+        case .snoozed: "clock"
+        case .spam:    "exclamationmark.triangle"
+        case .bin:     "trash"
+        }
+    }
+
+    /// Primary folders shown before the divider in the picker
+    var isPrimary: Bool {
+        switch self {
+        case .inbox, .drafts, .sent: true
+        default: false
+        }
+    }
+}
+
+// MARK: - EmailInboxView
+
+/// Email inbox — thread list with folder switching, search, pull-to-refresh, and swipe actions.
 struct EmailInboxView: View {
     @Environment(AppServices.self) private var services
 
@@ -9,6 +56,8 @@ struct EmailInboxView: View {
     @State private var filteredThreads: [EmailThread] = []
     /// Debounce task for server-side search — cancelled on each new keystroke.
     @State private var searchDebounceTask: Task<Void, Never>?
+    /// Active folder — defaults to inbox, switchable via the folder menu in the header
+    @State private var selectedFolder: EmailFolder = .inbox
 
     // Deterministic skeleton widths — computed once to avoid visual jitter from CGFloat.random in view body
     private static let skeletonNameWidths: [CGFloat]    = [120, 140, 130, 155, 125, 145]
@@ -25,6 +74,9 @@ struct EmailInboxView: View {
             } else if emailService.isLoadingThreads && emailService.threads.isEmpty {
                 // First load — show skeleton rather than empty state to avoid flicker
                 loadingState
+            } else if emailService.errorMessage != nil && emailService.threads.isEmpty && !emailService.isLoadingThreads {
+                // Load failed and no cached threads to show — surface the error
+                errorState
             } else if emailService.threads.isEmpty && !emailService.isLoadingThreads {
                 emptyState
             } else {
@@ -33,7 +85,19 @@ struct EmailInboxView: View {
         }
         .toolbar(.hidden, for: .navigationBar)
         .task {
-            await emailService.ensureInitialInboxLoaded()
+            // Initial load — use ensureInitialInboxLoaded for inbox (avoids double-fetch
+            // if threads are already cached), load fresh for other folders
+            if selectedFolder == .inbox {
+                await emailService.ensureInitialInboxLoaded()
+            } else {
+                await emailService.loadThreads(folder: selectedFolder.rawValue, refresh: true)
+            }
+        }
+        .onChange(of: selectedFolder) { _, newFolder in
+            // Clear search and reload fresh when folder changes
+            searchText = ""
+            searchDebounceTask?.cancel()
+            Task { await emailService.loadThreads(folder: newFolder.rawValue, refresh: true) }
         }
         .navigationDestination(item: $selectedThreadId) { threadId in
             EmailThreadView(threadId: threadId)
@@ -57,6 +121,7 @@ struct EmailInboxView: View {
                 try? await Task.sleep(for: .milliseconds(500))
                 guard !Task.isCancelled else { return }
                 await emailService.loadThreads(
+                    folder: selectedFolder.rawValue,
                     query: searchText.isEmpty ? nil : searchText,
                     refresh: true
                 )
@@ -68,9 +133,37 @@ struct EmailInboxView: View {
 
     private var threadList: some View {
         VStack(spacing: 0) {
-            // Header — consistent 4pt top across all tabs
+            // Header — folder title + picker menu + optional loading spinner
             HStack(spacing: 6) {
-                AppTopHeader(title: "Inbox")
+                // Folder picker — tapping the title opens a menu to switch folders
+                Menu {
+                    // Primary folders
+                    ForEach(EmailFolder.allCases.filter(\.isPrimary), id: \.rawValue) { folder in
+                        Button {
+                            selectedFolder = folder
+                        } label: {
+                            Label(folder.title, systemImage: folder.systemImage)
+                        }
+                    }
+                    Divider()
+                    // Secondary folders
+                    ForEach(EmailFolder.allCases.filter { !$0.isPrimary }, id: \.rawValue) { folder in
+                        Button {
+                            selectedFolder = folder
+                        } label: {
+                            Label(folder.title, systemImage: folder.systemImage)
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        AppTopHeader(title: selectedFolder.title)
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(AppTheme.mutedText)
+                    }
+                }
+                .buttonStyle(.plain)
+
                 if emailService.isLoadingThreads {
                     ProgressView().scaleEffect(0.6)
                 }
@@ -94,6 +187,14 @@ struct EmailInboxView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.bottom, 4)
+            }
+
+            if services.assistantAutomationPolicy.assistantThreadActionsVisible &&
+                !emailService.assistantNudges.isEmpty &&
+                searchText.isEmpty {
+                assistantNudgesStrip
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 10)
             }
 
             Divider().foregroundStyle(AppTheme.divider)
@@ -152,18 +253,60 @@ struct EmailInboxView: View {
                         .frame(maxWidth: .infinity)
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
-                        .onAppear { Task { await emailService.loadThreads() } }
+                        // Load next page — pass current folder so pagination stays in the right mailbox
+                        .onAppear { Task { await emailService.loadThreads(folder: selectedFolder.rawValue) } }
                 }
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
             .refreshable {
                 await emailService.loadThreads(
+                    folder: selectedFolder.rawValue,
                     query: searchText.isEmpty ? nil : searchText,
                     refresh: true
                 )
             }
             .contentMargins(.bottom, 16, for: .scrollContent)
+        }
+    }
+
+    private var assistantNudgesStrip: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Mail Assistant")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.purple)
+                .textCase(.uppercase)
+
+            ForEach(emailService.assistantNudges.prefix(3)) { nudge in
+                Button {
+                    if let firstThreadId = nudge.threadIds.first {
+                        selectedThreadId = firstThreadId
+                    }
+                } label: {
+                    HStack(alignment: .top, spacing: 10) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(nudge.title)
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(.primary)
+                            Text(nudge.description)
+                                .font(.system(size: 12))
+                                .foregroundStyle(AppTheme.mutedText)
+                                .multilineTextAlignment(.leading)
+                        }
+                        Spacer()
+                        Text("\(nudge.count)")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color.white.opacity(0.65), in: Capsule(style: .continuous))
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.purple.opacity(0.07), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+                .buttonStyle(.plain)
+            }
         }
     }
 
@@ -182,6 +325,7 @@ struct EmailInboxView: View {
                 .onSubmit {
                     Task {
                         await emailService.loadThreads(
+                            folder: selectedFolder.rawValue,
                             query: searchText.isEmpty ? nil : searchText,
                             refresh: true
                         )
@@ -191,7 +335,7 @@ struct EmailInboxView: View {
             if !searchText.isEmpty {
                 Button {
                     searchText = ""
-                    Task { await emailService.loadThreads(refresh: true) }
+                    Task { await emailService.loadThreads(folder: selectedFolder.rawValue, refresh: true) }
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 14))
@@ -225,9 +369,9 @@ struct EmailInboxView: View {
     /// Shown on first load when threads haven't arrived yet — skeleton prevents confusing empty flash
     private var loadingState: some View {
         VStack(spacing: 0) {
-            // Match the thread list header layout
+            // Match the thread list header layout — shows current folder name
             HStack(spacing: 6) {
-                AppTopHeader(title: "Inbox")
+                AppTopHeader(title: selectedFolder.title)
             }
             .padding(.horizontal, 16)
             .padding(.top, 4)
@@ -270,11 +414,80 @@ struct EmailInboxView: View {
 
     // MARK: - Empty State
 
-    /// Shown after a successful load returns zero results — clearly "inbox is empty", not "loading"
+    /// Shown after a successful load returns zero results — clearly "folder is empty", not "loading"
     private var emptyState: some View {
         VStack(spacing: 0) {
             HStack(spacing: 6) {
-                AppTopHeader(title: "Inbox")
+                AppTopHeader(title: selectedFolder.title)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 4)
+            .padding(.bottom, 6)
+
+            searchBar
+                .padding(.horizontal, 16)
+                .padding(.bottom, 10)
+
+            Divider().foregroundStyle(AppTheme.divider)
+
+            Spacer()
+            if !searchText.isEmpty {
+                // Search returned no results — offer clear action rather than Refresh
+                VStack(spacing: 12) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 44, weight: .light))
+                        .foregroundStyle(AppTheme.mutedText)
+                    Text("No results for \"\(searchText)\"")
+                        .font(.system(size: 17, weight: .semibold))
+                    Text("Try a different search term.")
+                        .font(.system(size: 14))
+                        .foregroundStyle(AppTheme.subtleText)
+                    Button {
+                        searchText = ""
+                        Task { await emailService.loadThreads(folder: selectedFolder.rawValue, refresh: true) }
+                    } label: {
+                        Text("Clear Search")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(.blue)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 4)
+                }
+            } else {
+                // Folder is genuinely empty
+                VStack(spacing: 12) {
+                    Image(systemName: selectedFolder.systemImage)
+                        .font(.system(size: 44, weight: .light))
+                        .foregroundStyle(AppTheme.mutedText)
+                    Text("\(selectedFolder.title) is empty")
+                        .font(.system(size: 17, weight: .semibold))
+                    if selectedFolder == .inbox {
+                        Text("You're all caught up.")
+                            .font(.system(size: 14))
+                            .foregroundStyle(AppTheme.subtleText)
+                    }
+                    Button {
+                        Task { await emailService.loadThreads(folder: selectedFolder.rawValue, refresh: true) }
+                    } label: {
+                        Text("Refresh")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(.blue)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 4)
+                }
+            }
+            Spacer()
+        }
+    }
+
+    // MARK: - Error State
+
+    /// Shown when a load fails and there are no cached threads — error is real, not just "empty"
+    private var errorState: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 6) {
+                AppTopHeader(title: selectedFolder.title)
             }
             .padding(.horizontal, 16)
             .padding(.top, 4)
@@ -288,20 +501,22 @@ struct EmailInboxView: View {
 
             Spacer()
             VStack(spacing: 12) {
-                Image(systemName: "tray")
+                Image(systemName: "exclamationmark.triangle")
                     .font(.system(size: 44, weight: .light))
                     .foregroundStyle(AppTheme.mutedText)
-                Text("Inbox is empty")
+                Text("Couldn't load \(selectedFolder.title)")
                     .font(.system(size: 17, weight: .semibold))
-                Text("You're all caught up.")
-                    .font(.system(size: 14))
-                    .foregroundStyle(AppTheme.subtleText)
+                if let errorMessage = emailService.errorMessage {
+                    Text(errorMessage)
+                        .font(.system(size: 13))
+                        .foregroundStyle(AppTheme.subtleText)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 32)
+                }
                 Button {
-                    // Pass active search query so Refresh respects the current filter,
-                    // matching the pull-to-refresh behavior in threadList
-                    Task { await emailService.loadThreads(refresh: true, query: searchText.isEmpty ? nil : searchText) }
+                    Task { await emailService.loadThreads(folder: selectedFolder.rawValue, refresh: true) }
                 } label: {
-                    Text("Refresh")
+                    Text("Try Again")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(.blue)
                 }

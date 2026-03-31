@@ -77,7 +77,7 @@ struct MainTabView: View {
                 CustomTabBar(
                     selectedTab: $selectedTab,
                     hasUpcomingCalendarEvent: hasUpcomingCalendarEvent,
-                    onAI:     { showAIChat     = true },
+                    onAI:     { services.showsAIChat = true },
                     onCreate: {
                         withAnimation(.snappy(duration: 0.2)) {
                             showCreateSheet = true
@@ -94,7 +94,9 @@ struct MainTabView: View {
                         .zIndex(20)
                 }
             }
-            .sheet(isPresented: $showAIChat) {
+            .sheet(isPresented: $showAIChat, onDismiss: {
+                services.showsAIChat = false
+            }) {
                 AIChatView(currentTab: selectedTab)
                     .presentationDetents([.medium, .large])
                     .presentationBackgroundInteraction(.enabled(upThrough: .medium))
@@ -133,6 +135,9 @@ struct MainTabView: View {
                 if !isPresented {
                     services.composeEmailSeedBody = nil
                 }
+            }
+            .onChange(of: services.showsAIChat) { _, isPresented in
+                showAIChat = isPresented
             }
             // Listen for requestCreateSheet from child views (e.g. HomeView "+" buttons)
             .onChange(of: services.requestCreateSheet) { _, requested in

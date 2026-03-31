@@ -15,8 +15,7 @@ struct SettingsView: View {
     @State private var isConnectingReminders = false
     @State private var activeSessions: [ActiveSessionRecord] = []
     @State private var isLoadingSessions = false
-    @State private var isRevokingAllSessions = false
-    @State private var revokingSessionIDs: Set<String> = []
+    // revokingSessionIDs and isRevokingAllSessions live in SessionsSettingsView now
 
     private var calendarAccessGranted: Bool {
         services.calendarService.canReadEvents()
@@ -26,17 +25,17 @@ struct SettingsView: View {
         NavigationStack {
             List {
                 accountSection
-                activeSessionsSection
+                sessionsNavigationSection
                 connectedServicesSection
 
-                // Appearance + Preferences
-                preferencesAndAppearanceSection
+                // Appearance sub-page + small preferences inline
+                preferencesSection
 
                 // Email preferences — separate from AI to reduce cognitive load
                 emailSection
 
-                // AI Assistant — separate section for clarity
-                aiAssistantSection
+                // AI Assistant — dedicated sub-page (contains large TextEditors)
+                aiAssistantNavigationSection
 
                 // Notifications + Privacy
                 notificationsAndPrivacySection
@@ -213,97 +212,29 @@ struct SettingsView: View {
         }
     }
 
-    private var activeSessionsSection: some View {
+    // MARK: - Sessions (NavigationLink → sub-view)
+
+    /// Compact NavigationLink row replacing the old inline sessions table.
+    /// Session count badge gives users at-a-glance info without cluttering the main list.
+    private var sessionsNavigationSection: some View {
         Section {
-            if isLoadingSessions {
-                HStack(spacing: 8) {
-                    ProgressView()
-                        .scaleEffect(0.8)
-                    Text("Loading sessions…")
-                        .font(.system(size: 14))
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.vertical, 4)
-            } else if activeSessions.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("No active sessions found")
-                        .font(.system(size: 15, weight: .medium))
-                    Text("New sign-ins will appear here automatically.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.vertical, 4)
-            } else {
-                // Vertical session cards — much more readable on mobile than a horizontal table
-                ForEach(activeSessions) { session in
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack(spacing: 6) {
-                            Image(systemName: "laptopcomputer")
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(.secondary)
-                            Text(session.device)
-                                .font(.system(size: 14, weight: .semibold))
-                                .lineLimit(1)
-                            if session.isCurrent == true {
-                                Text("This device")
-                                    .font(.system(size: 11, weight: .medium))
-                                    .foregroundStyle(.white)
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .background(Color.blue, in: Capsule())
-                            }
-                            Spacer()
-                            // Log out button — only for non-current sessions
-                            if session.isCurrent != true {
-                                Button(role: .destructive) {
-                                    Task { await revokeSession(session.id) }
-                                } label: {
-                                    if revokingSessionIDs.contains(session.id) {
-                                        ProgressView()
-                                            .scaleEffect(0.7)
-                                    } else {
-                                        Text("Log out")
-                                            .font(.system(size: 13, weight: .medium))
-                                    }
-                                }
-                                .buttonStyle(.borderless)
-                                .disabled(isRevokingAllSessions || revokingSessionIDs.contains(session.id))
-                            }
-                        }
-
-                        HStack(spacing: 16) {
-                            if !session.location.isEmpty {
-                                Label(session.location, systemImage: "location")
-                                    .font(.system(size: 12))
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                            }
-                            Label(formatSessionDate(session.updatedAt), systemImage: "clock")
-                                .font(.system(size: 12))
-                                .foregroundStyle(.secondary)
-                        }
+            NavigationLink {
+                SessionsSettingsView()
+            } label: {
+                HStack {
+                    Label("Active Sessions", systemImage: "desktopcomputer.and.arrow.down")
+                    Spacer()
+                    if isLoadingSessions {
+                        ProgressView().scaleEffect(0.7)
+                    } else if !activeSessions.isEmpty {
+                        Text("\(activeSessions.count)")
+                            .font(.system(size: 13))
+                            .foregroundStyle(.secondary)
                     }
-                    .padding(.vertical, 4)
-                }
-
-                // Log out all other devices
-                if activeSessions.count > 1 {
-                    Button(role: .destructive) {
-                        Task { await revokeAllSessions() }
-                    } label: {
-                        HStack {
-                            if isRevokingAllSessions {
-                                ProgressView()
-                                    .scaleEffect(0.8)
-                            }
-                            Text(isRevokingAllSessions ? "Signing out…" : "Log out all other devices")
-                        }
-                    }
-                    .disabled(isRevokingAllSessions)
                 }
             }
         } header: {
-            Text("Active Sessions")
+            Text("Security")
         } footer: {
             Text("Review signed-in devices and revoke access without changing your password.")
         }
@@ -436,114 +367,25 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - Appearance Helpers
 
-    @ViewBuilder
-    private func appearanceOption(_ preference: AppAppearancePreference) -> some View {
-        let isSelected = services.appearancePreference == preference
+    // MARK: - Preferences (trimmed — Appearance moved to sub-page)
 
-        Button {
-            services.appearancePreference = preference
-        } label: {
-            VStack(spacing: 8) {
-                // Mini preview swatch
-                ZStack {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(previewBackground(for: preference))
-                        .frame(height: 52)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .strokeBorder(
-                                    isSelected ? Color.blue : Color(UIColor.separator).opacity(0.4),
-                                    lineWidth: isSelected ? 2 : 1
-                                )
-                        )
-
-                    VStack(spacing: 4) {
-                        Capsule()
-                            .fill(previewAccent(for: preference).opacity(0.3))
-                            .frame(width: 28, height: 5)
-                        Capsule()
-                            .fill(previewAccent(for: preference).opacity(0.15))
-                            .frame(width: 38, height: 4)
-                        Capsule()
-                            .fill(previewAccent(for: preference).opacity(0.10))
-                            .frame(width: 30, height: 4)
-                    }
-
-                    if isSelected {
-                        VStack {
-                            HStack {
-                                Spacer()
-                                Image(systemName: "checkmark.circle.fill")
-                                    .font(.system(size: 14))
-                                    .foregroundStyle(.blue)
-                                    .padding(4)
-                            }
-                            Spacer()
-                        }
-                    }
-                }
-
-                HStack(spacing: 4) {
-                    Image(systemName: preferenceIcon(preference))
-                        .font(.system(size: 10))
-                        .foregroundStyle(isSelected ? .blue : .secondary)
-                    Text(preference.title)
-                        .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
-                        .foregroundStyle(isSelected ? .blue : .primary)
-                }
-            }
-        }
-        .buttonStyle(.plain)
-        .frame(maxWidth: .infinity)
-    }
-
-    private func previewBackground(for preference: AppAppearancePreference) -> Color {
-        switch preference {
-        case .system:
-            return Color(UIColor.systemBackground)
-        case .light:
-            return Color(UIColor(white: 0.98, alpha: 1))
-        case .dark:
-            return Color(UIColor(white: 0.08, alpha: 1))
-        }
-    }
-
-    private func previewAccent(for preference: AppAppearancePreference) -> Color {
-        preference == .dark ? .white : .black
-    }
-
-    private func preferenceIcon(_ preference: AppAppearancePreference) -> String {
-        switch preference {
-        case .system: return "iphone"
-        case .light:  return "sun.max"
-        case .dark:   return "moon"
-        }
-    }
-
-    // Old individual sections removed — replaced by combined sections above
-    // (preferencesAndAppearanceSection, emailAndAISection, notificationsAndPrivacySection)
-
-    // MARK: - Combined: Preferences + Appearance
-
-    private var preferencesAndAppearanceSection: some View {
+    private var preferencesSection: some View {
         Section {
-            // Theme picker (from Appearance)
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Theme")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
-
-                HStack(spacing: 10) {
-                    ForEach(AppAppearancePreference.allCases) { preference in
-                        appearanceOption(preference)
-                    }
+            // Appearance sub-page — theme picker lives there to avoid the wide three-column
+            // layout being awkward in a scrollable List
+            NavigationLink {
+                AppearanceSettingsView()
+            } label: {
+                HStack {
+                    Label("Appearance", systemImage: "paintbrush")
+                    Spacer()
+                    Text(services.appearancePreference.title)
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
                 }
             }
-            .padding(.vertical, 6)
 
-            // Default View picker (from Preferences)
             Picker(selection: Binding(
                 get: { services.preferredStartViewMode },
                 set: {
@@ -574,6 +416,23 @@ struct SettingsView: View {
             .tint(.orange)
         } header: {
             Text("Preferences")
+        }
+    }
+
+    // MARK: - AI Assistant (NavigationLink → sub-view)
+
+    /// Single NavigationLink row — the two large TextEditors moved to AIAssistantSettingsView
+    private var aiAssistantNavigationSection: some View {
+        Section {
+            NavigationLink {
+                AIAssistantSettingsView()
+            } label: {
+                Label("AI Assistant", systemImage: "sparkles")
+            }
+        } header: {
+            Text("AI Assistant")
+        } footer: {
+            Text("Configure what the AI can read, write, and how it responds.")
         }
     }
 
@@ -613,70 +472,6 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - AI Assistant
-
-    private var aiAssistantSection: some View {
-        @Bindable var ai = services.aiChatService
-        return Section {
-            Toggle(isOn: $ai.aiCanReadTasks) {
-                Label("Read my tasks", systemImage: "eye")
-            }
-            .tint(.blue)
-
-            Toggle(isOn: $ai.aiCanWriteTasks) {
-                Label("Create & edit tasks", systemImage: "pencil")
-            }
-            .tint(.blue)
-
-            Picker(selection: Binding(
-                get: { services.aiTonePreference },
-                set: { services.aiTonePreference = $0 }
-            )) {
-                ForEach(AITonePreference.allCases) { tone in
-                    Text(tone.title).tag(tone)
-                }
-            } label: {
-                Label("Response Tone", systemImage: "text.quote")
-            }
-            .pickerStyle(.menu)
-
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Context about you")
-                    .font(.system(size: 15, weight: .medium))
-                TextEditor(
-                    text: Binding(
-                        get: { services.contextAboutYou },
-                        set: { services.contextAboutYou = $0 }
-                    )
-                )
-                .frame(minHeight: 100)
-                .scrollContentBackground(.hidden)
-                .padding(8)
-                .background(Color.secondary.opacity(0.08))
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            }
-
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Custom instructions")
-                    .font(.system(size: 15, weight: .medium))
-                TextEditor(
-                    text: Binding(
-                        get: { services.customInstructions },
-                        set: { services.customInstructions = $0 }
-                    )
-                )
-                .frame(minHeight: 100)
-                .scrollContentBackground(.hidden)
-                .padding(8)
-                .background(Color.secondary.opacity(0.08))
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            }
-        } header: {
-            Text("AI Assistant")
-        } footer: {
-            Text("Controls what the AI can read and modify, and how it responds to you.")
-        }
-    }
 
     // MARK: - Combined: Notifications + Privacy
 
@@ -824,27 +619,6 @@ struct SettingsView: View {
         model.split(separator: "/").last.map(String.init) ?? model
     }
 
-    private func headerCell(_ text: String, width: CGFloat) -> some View {
-        Text(text)
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(.secondary)
-            .frame(width: width, alignment: .leading)
-    }
-
-    private func valueCell(_ text: String, width: CGFloat, emphasized: Bool = false) -> some View {
-        Text(text)
-            .font(.system(size: emphasized ? 13 : 12, weight: emphasized ? .medium : .regular))
-            .frame(width: width, alignment: .leading)
-            .lineLimit(2)
-    }
-
-    private func formatSessionDate(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .short
-        formatter.timeStyle = .short
-        return formatter.string(from: date)
-    }
-
     private func loadActiveSessions() async {
         isLoadingSessions = true
         defer { isLoadingSessions = false }
@@ -899,15 +673,144 @@ struct SettingsView: View {
         }
     }
 
+}
+
+// MARK: - SessionsSettingsView
+
+/// Dedicated sub-page for Active Sessions — replaces the inline sessions table.
+/// Much cleaner on mobile: the main settings page now shows just a count badge.
+struct SessionsSettingsView: View {
+    @Environment(AppServices.self) private var services
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var activeSessions: [ActiveSessionRecord] = []
+    @State private var isLoadingSessions = false
+    @State private var isRevokingAllSessions = false
+    @State private var revokingSessionIDs: Set<String> = []
+
+    var body: some View {
+        List {
+            if isLoadingSessions {
+                HStack(spacing: 8) {
+                    ProgressView().scaleEffect(0.8)
+                    Text("Loading sessions…")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 4)
+            } else if activeSessions.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("No active sessions found")
+                        .font(.system(size: 15, weight: .medium))
+                    Text("New sign-ins will appear here automatically.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 4)
+            } else {
+                Section {
+                    ForEach(activeSessions) { session in
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "laptopcomputer")
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundStyle(.secondary)
+                                Text(session.device)
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .lineLimit(1)
+                                if session.isCurrent == true {
+                                    Text("This device")
+                                        .font(.system(size: 11, weight: .medium))
+                                        .foregroundStyle(.white)
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(Color.blue, in: Capsule())
+                                }
+                                Spacer()
+                                if session.isCurrent != true {
+                                    Button(role: .destructive) {
+                                        Task { await revokeSession(session.id) }
+                                    } label: {
+                                        if revokingSessionIDs.contains(session.id) {
+                                            ProgressView().scaleEffect(0.7)
+                                        } else {
+                                            Text("Log out")
+                                                .font(.system(size: 13, weight: .medium))
+                                        }
+                                    }
+                                    .buttonStyle(.borderless)
+                                    .disabled(isRevokingAllSessions || revokingSessionIDs.contains(session.id))
+                                }
+                            }
+
+                            HStack(spacing: 16) {
+                                if !session.location.isEmpty {
+                                    Label(session.location, systemImage: "location")
+                                        .font(.system(size: 12))
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                }
+                                Label(formatDate(session.updatedAt), systemImage: "clock")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                } header: {
+                    Text("Signed-in Devices")
+                }
+
+                if activeSessions.count > 1 {
+                    Section {
+                        Button(role: .destructive) {
+                            Task { await revokeAllSessions() }
+                        } label: {
+                            HStack {
+                                if isRevokingAllSessions { ProgressView().scaleEffect(0.8) }
+                                Text(isRevokingAllSessions ? "Signing out…" : "Log out all other devices")
+                            }
+                        }
+                        .disabled(isRevokingAllSessions)
+                    }
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(AppTheme.backgroundBottom)
+        .navigationTitle("Active Sessions")
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await loadSessions() }
+    }
+
+    private func formatDate(_ date: Date) -> String {
+        let f = DateFormatter(); f.dateStyle = .short; f.timeStyle = .short
+        return f.string(from: date)
+    }
+
+    private func loadSessions() async {
+        isLoadingSessions = true
+        defer { isLoadingSessions = false }
+        do {
+            let response = try await services.apiClient.listSessions()
+            activeSessions = response.sessions
+        } catch {
+            AppLogger.shared.log("Load sessions failed: \(error.localizedDescription)")
+        }
+    }
+
     private func revokeSession(_ sessionId: String) async {
         revokingSessionIDs.insert(sessionId)
         defer { revokingSessionIDs.remove(sessionId) }
-
         do {
             let response = try await services.apiClient.revokeSession(sessionId: sessionId)
-            await loadActiveSessions()
+            await loadSessions()
             if response.revokedCurrent {
-                performLogout()
+                // Current device was logged out — pop back and sign out
+                services.authService.hasSeenOnboarding = false
+                services.signOut()
+                dismiss()
             } else {
                 await services.authService.fetchUserProfile()
             }
@@ -919,17 +822,280 @@ struct SettingsView: View {
     private func revokeAllSessions() async {
         isRevokingAllSessions = true
         defer { isRevokingAllSessions = false }
-
         do {
             let response = try await services.apiClient.revokeAllSessions()
             activeSessions = []
             if response.revokedCurrent {
-                performLogout()
+                services.authService.hasSeenOnboarding = false
+                services.signOut()
+                dismiss()
             } else {
                 await services.authService.fetchUserProfile()
             }
         } catch {
             AppLogger.shared.log("Revoke all sessions failed: \(error.localizedDescription)")
+        }
+    }
+}
+
+// MARK: - AIAssistantSettingsView
+
+/// Dedicated sub-page for AI settings — removes the two large TextEditors from the
+/// main settings list, where they caused awkward inline scrolling on iPhone.
+struct AIAssistantSettingsView: View {
+    @Environment(AppServices.self) private var services
+
+    var body: some View {
+        @Bindable var ai = services.aiChatService
+        return List {
+            Section {
+                Toggle(isOn: $ai.aiCanReadTasks) {
+                    Label("Read my tasks", systemImage: "eye")
+                }
+                .tint(.blue)
+
+                Toggle(isOn: $ai.aiCanWriteTasks) {
+                    Label("Create & edit tasks", systemImage: "pencil")
+                }
+                .tint(.blue)
+
+                Picker(selection: Binding(
+                    get: { services.aiTonePreference },
+                    set: { services.aiTonePreference = $0 }
+                )) {
+                    ForEach(AITonePreference.allCases) { tone in
+                        Text(tone.title).tag(tone)
+                    }
+                } label: {
+                    Label("Response Tone", systemImage: "text.quote")
+                }
+                .pickerStyle(.menu)
+            } header: {
+                Text("Permissions & Tone")
+            }
+
+            Section {
+                Button("Apply recommended assistant defaults") {
+                    services.assistantAutomationPolicy = .recommended
+                }
+
+                Toggle(
+                    "Auto summarize long threads",
+                    isOn: Binding(
+                        get: { services.assistantAutomationPolicy.autoSummarizeLongThreads },
+                        set: { services.assistantAutomationPolicy.autoSummarizeLongThreads = $0 }
+                    )
+                )
+
+                Toggle(
+                    "Suggest tasks from email",
+                    isOn: Binding(
+                        get: { services.assistantAutomationPolicy.suggestTasksFromEmail },
+                        set: { services.assistantAutomationPolicy.suggestTasksFromEmail = $0 }
+                    )
+                )
+
+                Toggle(
+                    "Suggest events from email",
+                    isOn: Binding(
+                        get: { services.assistantAutomationPolicy.suggestEventsFromEmail },
+                        set: { services.assistantAutomationPolicy.suggestEventsFromEmail = $0 }
+                    )
+                )
+
+                Toggle(
+                    "Auto draft replies",
+                    isOn: Binding(
+                        get: { services.assistantAutomationPolicy.autoDraftReplies },
+                        set: { services.assistantAutomationPolicy.autoDraftReplies = $0 }
+                    )
+                )
+
+                Toggle(
+                    "Smart reply nudges",
+                    isOn: Binding(
+                        get: { services.assistantAutomationPolicy.smartReplyNudges },
+                        set: { services.assistantAutomationPolicy.smartReplyNudges = $0 }
+                    )
+                )
+
+                Toggle(
+                    "Smart deadline nudges",
+                    isOn: Binding(
+                        get: { services.assistantAutomationPolicy.smartDeadlineNudges },
+                        set: { services.assistantAutomationPolicy.smartDeadlineNudges = $0 }
+                    )
+                )
+
+                Toggle(
+                    "Show thread assistant controls",
+                    isOn: Binding(
+                        get: { services.assistantAutomationPolicy.assistantThreadActionsVisible },
+                        set: { services.assistantAutomationPolicy.assistantThreadActionsVisible = $0 }
+                    )
+                )
+
+                Toggle(
+                    "Enable low-risk auto-send experiment",
+                    isOn: Binding(
+                        get: { services.assistantAutomationPolicy.autoSendExperimentEnabled },
+                        set: { services.assistantAutomationPolicy.autoSendExperimentEnabled = $0 }
+                    )
+                )
+            } header: {
+                Text("Mail Assistant")
+            } footer: {
+                Text("Suggestions and smart nudges are on by default. Auto-send stays off unless you opt in.")
+            }
+
+            Section {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Context about you")
+                        .font(.system(size: 15, weight: .medium))
+                    TextEditor(
+                        text: Binding(
+                            get: { services.contextAboutYou },
+                            set: { services.contextAboutYou = $0 }
+                        )
+                    )
+                    .frame(minHeight: 120)
+                    .scrollContentBackground(.hidden)
+                    .padding(8)
+                    .background(Color.secondary.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .padding(.vertical, 4)
+            } header: {
+                Text("Context about you")
+            } footer: {
+                Text("Tell the AI about your role, goals, or preferences so it can give more relevant responses.")
+            }
+
+            Section {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Custom instructions")
+                        .font(.system(size: 15, weight: .medium))
+                    TextEditor(
+                        text: Binding(
+                            get: { services.customInstructions },
+                            set: { services.customInstructions = $0 }
+                        )
+                    )
+                    .frame(minHeight: 120)
+                    .scrollContentBackground(.hidden)
+                    .padding(8)
+                    .background(Color.secondary.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .padding(.vertical, 4)
+            } header: {
+                Text("Custom instructions")
+            } footer: {
+                Text("Instructions the AI follows on every response — e.g. tone, format, or topics to avoid.")
+            }
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(AppTheme.backgroundBottom)
+        .navigationTitle("AI Assistant")
+        .navigationBarTitleDisplayMode(.inline)
+        .onDisappear {
+            // Save shared AI profile when leaving the AI settings page
+            Task { @MainActor in await services.saveSharedAIProfile() }
+        }
+    }
+}
+
+// MARK: - AppearanceSettingsView
+
+/// Dedicated sub-page for theme selection — removes the three-column theme picker
+/// from the main settings list where it was visually heavy and hard to tap precisely.
+struct AppearanceSettingsView: View {
+    @Environment(AppServices.self) private var services
+
+    var body: some View {
+        List {
+            Section {
+                ForEach(AppAppearancePreference.allCases) { preference in
+                    Button {
+                        services.appearancePreference = preference
+                    } label: {
+                        HStack(spacing: 14) {
+                            // Compact swatch preview
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(previewBackground(for: preference))
+                                .frame(width: 44, height: 44)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                        .strokeBorder(
+                                            services.appearancePreference == preference
+                                                ? Color.blue
+                                                : Color(UIColor.separator).opacity(0.4),
+                                            lineWidth: services.appearancePreference == preference ? 2 : 1
+                                        )
+                                )
+                                .overlay {
+                                    Image(systemName: preferenceIcon(preference))
+                                        .font(.system(size: 18, weight: .light))
+                                        .foregroundStyle(previewAccent(for: preference).opacity(0.6))
+                                }
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(preference.title)
+                                    .font(.system(size: 15, weight: services.appearancePreference == preference ? .semibold : .regular))
+                                    .foregroundStyle(.primary)
+                                Text(preferenceSubtitle(preference))
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            if services.appearancePreference == preference {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundStyle(.blue)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            } header: {
+                Text("Theme")
+            } footer: {
+                Text("System follows your iPhone's Dark Mode setting.")
+            }
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(AppTheme.backgroundBottom)
+        .navigationTitle("Appearance")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func previewBackground(for preference: AppAppearancePreference) -> Color {
+        switch preference {
+        case .system: return Color(UIColor.systemBackground)
+        case .light:  return Color(UIColor(white: 0.98, alpha: 1))
+        case .dark:   return Color(UIColor(white: 0.08, alpha: 1))
+        }
+    }
+
+    private func previewAccent(for preference: AppAppearancePreference) -> Color {
+        preference == .dark ? .white : .black
+    }
+
+    private func preferenceIcon(_ preference: AppAppearancePreference) -> String {
+        switch preference {
+        case .system: return "iphone"
+        case .light:  return "sun.max"
+        case .dark:   return "moon"
+        }
+    }
+
+    private func preferenceSubtitle(_ preference: AppAppearancePreference) -> String {
+        switch preference {
+        case .system: return "Follows iPhone Dark Mode"
+        case .light:  return "Always light interface"
+        case .dark:   return "Always dark interface"
         }
     }
 }

@@ -84,6 +84,7 @@ final class AppServices {
         static let calendarRemindersEnabled = "TaskApp.calendarRemindersEnabled"
         static let contextAboutYou = "TaskApp.contextAboutYou"
         static let customInstructions = "TaskApp.customInstructions"
+        static let assistantAutomationPolicy = "TaskApp.assistantAutomationPolicy"
     }
 
     let configuration: AppConfiguration
@@ -106,6 +107,10 @@ final class AppServices {
     let captureService: TaskCaptureService
     /// AI chat service — manages streaming conversation and task mutations
     let aiChatService: AIChatService
+    /// Share conversation service — creates and manages public/protected share links
+    let shareConversationService: ShareConversationService
+    /// Group chat service — multi-user rooms with AI participation
+    let groupChatService: GroupChatService
     /// Voice endpoint service — provides the backend WS proxy URL (API key stays server-side)
     let voiceTokenService: VoiceTokenService
     private let defaults: UserDefaults
@@ -128,6 +133,7 @@ final class AppServices {
     /// Set true to trigger the global email compose sheet from MainTabView.
     var showsComposeEmail = false
     var composeEmailSeedBody: String? = nil
+    var showsAIChat = false
 
     // MARK: - Deep Navigation (from AI chat cards → specific items)
     /// Set by AI chat card taps to navigate to a specific email thread after dismissing the sheet.
@@ -231,6 +237,14 @@ final class AppServices {
         }
     }
 
+    var assistantAutomationPolicy: AssistantAutomationPolicy {
+        didSet {
+            if let data = try? JSONEncoder().encode(assistantAutomationPolicy) {
+                defaults.set(data, forKey: Keys.assistantAutomationPolicy)
+            }
+        }
+    }
+
     /// Whether local notifications are scheduled for task due dates
     var taskRemindersEnabled: Bool {
         didSet {
@@ -293,6 +307,8 @@ final class AppServices {
             calendarService: calendarService,
             emailService: emailService
         )
+        self.shareConversationService = ShareConversationService(apiClient: apiClient)
+        self.groupChatService = GroupChatService(apiClient: apiClient)
         self.voiceTokenService = VoiceTokenService(authService: authService, backendURL: backendURL)
 
         let storedAppearance = defaults.string(forKey: Keys.appearancePreference)
@@ -318,6 +334,12 @@ final class AppServices {
             .flatMap(AITonePreference.init(rawValue:)) ?? .professional
         self.contextAboutYou = defaults.string(forKey: Keys.contextAboutYou) ?? ""
         self.customInstructions = defaults.string(forKey: Keys.customInstructions) ?? ""
+        if let data = defaults.data(forKey: Keys.assistantAutomationPolicy),
+           let savedPolicy = try? JSONDecoder().decode(AssistantAutomationPolicy.self, from: data) {
+            self.assistantAutomationPolicy = savedPolicy
+        } else {
+            self.assistantAutomationPolicy = .recommended
+        }
         self.taskRemindersEnabled = defaults.object(forKey: Keys.taskRemindersEnabled) as? Bool ?? true
         self.calendarRemindersEnabled = defaults.object(forKey: Keys.calendarRemindersEnabled) as? Bool ?? true
         // Load signatures — migrate from old single-text format if no v2 data exists
@@ -381,9 +403,10 @@ final class AppServices {
         guard authService.isAuthenticated else { return }
 
         do {
-            let response: SharedAIProfileResponse = try await apiClient.trpcQuery("settings.get")
+            let response: MailAssistantSettingsResponse = try await apiClient.trpcQuery("settings.get")
             contextAboutYou = response.settings.contextAboutYou
             customInstructions = response.settings.customPrompt
+            assistantAutomationPolicy = response.settings.assistantAutomationPolicy
         } catch {
             print("[AppServices] Failed to load shared AI profile: \(error)")
         }
@@ -397,7 +420,8 @@ final class AppServices {
                 "settings.save",
                 input: SharedAIProfileSaveInput(
                     contextAboutYou: contextAboutYou,
-                    customPrompt: customInstructions
+                    customPrompt: customInstructions,
+                    assistantAutomationPolicy: assistantAutomationPolicy
                 )
             )
         } catch {
@@ -459,18 +483,10 @@ final class AppServices {
     }
 }
 
-private struct SharedAIProfileResponse: Decodable {
-    struct Settings: Decodable {
-        let contextAboutYou: String
-        let customPrompt: String
-    }
-
-    let settings: Settings
-}
-
 private struct SharedAIProfileSaveInput: Encodable {
     let contextAboutYou: String
     let customPrompt: String
+    let assistantAutomationPolicy: AssistantAutomationPolicy
 }
 
 private struct SharedAIProfileSaveResponse: Decodable {

@@ -547,6 +547,108 @@ struct MacSettingsView: View {
 
                 cardDivider
 
+                rowContainer {
+                    Text("Mail Assistant")
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .foregroundStyle(MacTheme.textPrimary)
+                    Spacer()
+                    Button("Apply recommended defaults") {
+                        services.assistantAutomationPolicy = .recommended
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+
+                cardDivider
+
+                settingsToggle(
+                    icon: "text.append",
+                    label: "Auto summarize long threads",
+                    isOn: Binding(
+                        get: { services.assistantAutomationPolicy.autoSummarizeLongThreads },
+                        set: { services.assistantAutomationPolicy.autoSummarizeLongThreads = $0 }
+                    )
+                )
+
+                cardDivider
+
+                settingsToggle(
+                    icon: "checklist",
+                    label: "Suggest tasks from email",
+                    isOn: Binding(
+                        get: { services.assistantAutomationPolicy.suggestTasksFromEmail },
+                        set: { services.assistantAutomationPolicy.suggestTasksFromEmail = $0 }
+                    )
+                )
+
+                cardDivider
+
+                settingsToggle(
+                    icon: "calendar.badge.plus",
+                    label: "Suggest events from email",
+                    isOn: Binding(
+                        get: { services.assistantAutomationPolicy.suggestEventsFromEmail },
+                        set: { services.assistantAutomationPolicy.suggestEventsFromEmail = $0 }
+                    )
+                )
+
+                cardDivider
+
+                settingsToggle(
+                    icon: "arrowshape.turn.up.left",
+                    label: "Auto draft replies",
+                    isOn: Binding(
+                        get: { services.assistantAutomationPolicy.autoDraftReplies },
+                        set: { services.assistantAutomationPolicy.autoDraftReplies = $0 }
+                    )
+                )
+
+                cardDivider
+
+                settingsToggle(
+                    icon: "tray.full",
+                    label: "Smart reply nudges",
+                    isOn: Binding(
+                        get: { services.assistantAutomationPolicy.smartReplyNudges },
+                        set: { services.assistantAutomationPolicy.smartReplyNudges = $0 }
+                    )
+                )
+
+                cardDivider
+
+                settingsToggle(
+                    icon: "clock.badge.exclamationmark",
+                    label: "Smart deadline nudges",
+                    isOn: Binding(
+                        get: { services.assistantAutomationPolicy.smartDeadlineNudges },
+                        set: { services.assistantAutomationPolicy.smartDeadlineNudges = $0 }
+                    )
+                )
+
+                cardDivider
+
+                settingsToggle(
+                    icon: "sparkles",
+                    label: "Show thread assistant controls",
+                    isOn: Binding(
+                        get: { services.assistantAutomationPolicy.assistantThreadActionsVisible },
+                        set: { services.assistantAutomationPolicy.assistantThreadActionsVisible = $0 }
+                    )
+                )
+
+                cardDivider
+
+                settingsToggle(
+                    icon: "paperplane",
+                    label: "Enable low-risk auto-send experiment",
+                    isOn: Binding(
+                        get: { services.assistantAutomationPolicy.autoSendExperimentEnabled },
+                        set: { services.assistantAutomationPolicy.autoSendExperimentEnabled = $0 }
+                    )
+                )
+
+                cardDivider
+
                 // Response tone — matches iOS AITonePreference cases
                 rowContainer {
                     Image(systemName: "text.quote")

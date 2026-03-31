@@ -33,14 +33,16 @@ import { useTRPC } from '@/providers/query-provider';
 import { useMail } from '@/components/mail/use-mail';
 import { SidebarToggle } from '../ui/sidebar-toggle';
 import { PricingDialog } from '../ui/pricing-dialog';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { clearBulkSelectionAtom } from './use-mail';
 import AISidebar from '@/components/ui/ai-sidebar';
 import { useThreads } from '@/hooks/use-threads';
 import AIToggleButton from '../ai-toggle-button';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { useSession } from '@/lib/auth-client';
+import { useSettings } from '@/hooks/use-settings';
 import { m } from '@/paraglide/messages';
 import { isMac } from '@/lib/platform';
 import { useQueryState } from 'nuqs';
@@ -51,6 +53,69 @@ const LOCAL_AUTO_SYNC_INTERVAL_MS = 60_000;
 const isLocalAutoSyncEnabled =
   import.meta.env.DEV &&
   String(import.meta.env.VITE_PUBLIC_BACKEND_URL ?? '').includes('localhost');
+
+function MailAssistantNudges({ folder }: { folder: string }) {
+  const trpc = useTRPC();
+  const { data: settings } = useSettings();
+  const [, setThreadId] = useQueryState('threadId');
+  const nudgesQuery = useQuery(
+    trpc.mailAssistant.getInboxNudges.queryOptions(
+      { folder },
+      {
+        enabled:
+          settings?.settings.assistantAutomationPolicy.assistantThreadActionsVisible !== false,
+        staleTime: 60 * 1000,
+      },
+    ),
+  );
+
+  const nudges = nudgesQuery.data?.nudges ?? [];
+  if (!nudges.length) return null;
+
+  return (
+    <div className="px-4 pb-3">
+      <div className="rounded-2xl border border-[#D7CCFF] bg-[#FCFAFF] p-3 dark:border-[#4A3D76] dark:bg-[#1E1A28]">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#7C63E6]">
+              Mail Assistant
+            </p>
+            <p className="text-muted-foreground mt-1 text-xs">
+              Proactive nudges pulled from your inbox activity.
+            </p>
+          </div>
+          {nudgesQuery.isFetching && <RefreshCcw className="text-muted-foreground h-3.5 w-3.5 animate-spin" />}
+        </div>
+
+        <div className="flex flex-col gap-2">
+          {nudges.map((nudge) => (
+            <button
+              key={`${nudge.type}-${nudge.title}`}
+              type="button"
+              className="flex w-full items-start justify-between gap-3 rounded-xl border border-white/60 bg-white/70 px-3 py-3 text-left transition-colors hover:bg-white dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10"
+              onClick={() => {
+                const [firstThreadId] = nudge.threadIds;
+                if (firstThreadId) {
+                  setThreadId(firstThreadId);
+                }
+              }}
+            >
+              <div className="space-y-1">
+                <p className="text-sm font-medium text-black dark:text-white">{nudge.title}</p>
+                <p className="text-xs leading-5 text-[#6B6484] dark:text-[#B3A8D9]">
+                  {nudge.description}
+                </p>
+              </div>
+              <Badge variant="secondary" className="rounded-full px-2.5 py-0.5 text-[11px]">
+                {nudge.count}
+              </Badge>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // const AutoLabelingSettings = () => {
 //   const trpc = useTRPC();
@@ -616,8 +681,11 @@ export function MailLayout() {
                 />
               </div>
 
-              <div className="z-1 relative h-[calc(100dvh-(2px+2px))] overflow-hidden pt-0 md:h-[calc(100dvh-4rem)]">
-                <MailList />
+              <div className="z-1 relative flex h-[calc(100dvh-(2px+2px))] flex-col overflow-hidden pt-0 md:h-[calc(100dvh-4rem)]">
+                <MailAssistantNudges folder={folder} />
+                <div className="min-h-0 flex-1">
+                  <MailList />
+                </div>
               </div>
             </div>
           </ResizablePanel>

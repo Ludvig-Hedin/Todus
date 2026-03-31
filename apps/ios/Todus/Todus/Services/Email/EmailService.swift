@@ -21,6 +21,7 @@ final class EmailService {
     var hasConnection = false
     var errorMessage: String?
     var nextPageToken: String?
+    var assistantNudges: [MailAssistantNudge] = []
 
     // MARK: - Init
 
@@ -73,6 +74,9 @@ final class EmailService {
                 threads.append(contentsOf: enrichedThreads)
             }
             nextPageToken = response.nextPageToken
+            if query == nil {
+                await loadAssistantNudges(folder: folder)
+            }
         } catch let error as APIError where error.errorDescription?.contains("Session expired") == true {
             hasConnection = false
         } catch {
@@ -98,6 +102,7 @@ final class EmailService {
         hasConnection = false
         errorMessage = nil
         nextPageToken = nil
+        assistantNudges = []
     }
 
     /// Fetches full details for multiple threads in parallel via mail.get.
@@ -174,6 +179,67 @@ final class EmailService {
             return response
         } catch {
             errorMessage = "Failed to load thread."
+            return nil
+        }
+    }
+
+    func loadAssistant(threadId: String) async -> MailAssistantThread? {
+        do {
+            return try await api.trpcQuery("mailAssistant.getThread", input: AssistantThreadInput(threadId: threadId))
+        } catch {
+            AppLogger.shared.log("[EmailService] loadAssistant error: \(error)")
+            return nil
+        }
+    }
+
+    func loadAssistantNudges(folder: String = "inbox") async {
+        do {
+            let response: MailAssistantNudgesResponse = try await api.trpcQuery(
+                "mailAssistant.getInboxNudges",
+                input: MailAssistantNudgesInput(folder: folder)
+            )
+            assistantNudges = response.nudges
+        } catch {
+            AppLogger.shared.log("[EmailService] loadAssistantNudges error: \(error)")
+        }
+    }
+
+    func createAssistantTask(threadId: String, suggestion: MailAssistantSuggestedTask) async -> Bool {
+        do {
+            let _: MailAssistantTaskCreateResponse = try await api.trpcMutation(
+                "mailAssistant.createTaskFromSuggestion",
+                input: MailAssistantCreateTaskInput(threadId: threadId, task: suggestion)
+            )
+            return true
+        } catch {
+            AppLogger.shared.log("[EmailService] createAssistantTask error: \(error)")
+            return false
+        }
+    }
+
+    func createAssistantEvent(threadId: String, suggestion: MailAssistantSuggestedEvent) async -> Bool {
+        guard suggestion.startAt != nil, suggestion.endAt != nil else { return false }
+
+        do {
+            let _: MailAssistantEventCreateResponse = try await api.trpcMutation(
+                "mailAssistant.createEventFromSuggestion",
+                input: MailAssistantCreateEventInput(threadId: threadId, event: suggestion)
+            )
+            return true
+        } catch {
+            AppLogger.shared.log("[EmailService] createAssistantEvent error: \(error)")
+            return false
+        }
+    }
+
+    func generateAssistantDraft(threadId: String) async -> MailAssistantDraftResult? {
+        do {
+            return try await api.trpcMutation(
+                "mailAssistant.generateDraft",
+                input: MailAssistantDraftInput(threadId: threadId, openInComposer: true)
+            )
+        } catch {
+            AppLogger.shared.log("[EmailService] generateAssistantDraft error: \(error)")
             return nil
         }
     }
@@ -293,6 +359,29 @@ private struct SendEmailInput: Encodable {
     let threadId: String?
 }
 
+private struct AssistantThreadInput: Encodable {
+    let threadId: String
+}
+
+private struct MailAssistantDraftInput: Encodable {
+    let threadId: String
+    let openInComposer: Bool
+}
+
+private struct MailAssistantNudgesInput: Encodable {
+    let folder: String
+}
+
+private struct MailAssistantCreateTaskInput: Encodable {
+    let threadId: String
+    let task: MailAssistantSuggestedTask
+}
+
+private struct MailAssistantCreateEventInput: Encodable {
+    let threadId: String
+    let event: MailAssistantSuggestedEvent
+}
+
 // Response types
 
 /// Backend listThreads returns minimal thread objects — just IDs, no sender/subject.
@@ -338,6 +427,23 @@ struct EmailConnection: Decodable, Identifiable {
 
 private struct SendResponse: Decodable {
     let success: Bool
+}
+
+private struct MailAssistantNudgesResponse: Decodable {
+    let nudges: [MailAssistantNudge]
+}
+
+private struct MailAssistantTaskCreateResponse: Decodable {
+    let task: AssistantTaskRecord
+}
+
+private struct AssistantTaskRecord: Decodable {
+    let id: String
+}
+
+private struct MailAssistantEventCreateResponse: Decodable {
+    let id: String
+    let htmlLink: String?
 }
 
 private struct SuccessResponse: Decodable {

@@ -14,7 +14,13 @@
 		136D6034802C294222BCF791 /* BrandIcons.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B6043E7BECE88EF6B7E8317 /* BrandIcons.swift */; };
 		13C07A65B70DD7813EF6F68D /* AppTaskPriority.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9A0A9C59C8274A248E7F19B /* AppTaskPriority.swift */; };
 		159C746E1BF52003FA2B909F /* SyncState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1229E9C510A1286935951ACA /* SyncState.swift */; };
+		B7C3D9E4F50123456789ABCD /* MailAssistantModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7B3C9D4E5F60123456789AB /* MailAssistantModels.swift */; };
 		1687702F789BCA6E6EF8688E /* AIChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 056835622DB127253111B077 /* AIChatView.swift */; };
+		C1D2E3F4A5061728394A5B6C /* ShareConversationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1C2D3E4F5061728394A5B6C /* ShareConversationService.swift */; };
+		C2D3E4F5A60718293A4B5C6D /* GroupChatService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F60718293A4B5C6D /* GroupChatService.swift */; };
+		D3E4F5A6B708192A3B4C5D6E /* SharedConversationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3D4E5F6A708192A3B4C5D6E /* SharedConversationView.swift */; };
+		E4F5A6B7C8091A2B3C4D5E6F /* GroupChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E5F6A7B8091A2B3C4D5E6F /* GroupChatView.swift */; };
+		E5F6A7B8C9012A3B4C5D6E7F /* ShareConversationSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E6F7A8B9012A3B4C5D6E7F /* ShareConversationSheet.swift */; };
 		1ABEC124807AD4F90CECC510 /* CreateSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B8C4C7226F0FE95E3C83108 /* CreateSheet.swift */; };
 		1BE8A158151320ABB5E6D36D /* CalendarContainerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C393C0082291CAB42009E8EB /* CalendarContainerView.swift */; };
 		1C314B90EE9572DB232889DB /* AppleRemindersSyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D4F6F5B369E9F8603154EE9 /* AppleRemindersSyncService.swift */; };
@@ -150,6 +156,7 @@
 		42AB13446D7F0CF43F8FE697 /* Formatters.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Formatters.swift; sourceTree = "<group>"; };
 		4585B9433A61DC172B6A4799 /* TaskParserModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskParserModels.swift; sourceTree = "<group>"; };
 		476EF61D6691E5C4E888E603 /* EmailModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailModels.swift; sourceTree = "<group>"; };
+		A7B3C9D4E5F60123456789AB /* MailAssistantModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MailAssistantModels.swift; sourceTree = "<group>"; };
 		4C1833FAA3F2EC3DF40CFE16 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		4D83D8CA2C7D2BEF0D34A4BF /* AIChatConversation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChatConversation.swift; sourceTree = "<group>"; };
 		50D16BFA6D994A391DD979B9 /* EmailComposeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailComposeView.swift; sourceTree = "<group>"; };
@@ -161,6 +168,11 @@
 		5CF0758DFD583BED9A96112A /* AppServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppServices.swift; sourceTree = "<group>"; };
 		5F6C8F87F427AAEBB5BEEDF4 /* AttachmentService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachmentService.swift; sourceTree = "<group>"; };
 		621BDB25784B86D43849D4CC /* SyncModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncModels.swift; sourceTree = "<group>"; };
+		B1C2D3E4F5061728394A5B6C /* ShareConversationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareConversationService.swift; sourceTree = "<group>"; };
+		B2C3D4E5F60718293A4B5C6D /* GroupChatService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupChatService.swift; sourceTree = "<group>"; };
+		C3D4E5F6A708192A3B4C5D6E /* SharedConversationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedConversationView.swift; sourceTree = "<group>"; };
+		D4E5F6A7B8091A2B3C4D5E6F /* GroupChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupChatView.swift; sourceTree = "<group>"; };
+		D5E6F7A8B9012A3B4C5D6E7F /* ShareConversationSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareConversationSheet.swift; sourceTree = "<group>"; };
 		668D6B7F097C9BB3D96136E5 /* VoiceInputButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceInputButton.swift; sourceTree = "<group>"; };
 		67EBC96D933AD3FB3FFB08B7 /* TaskCaptureServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskCaptureServiceTests.swift; sourceTree = "<group>"; };
 		6D2A0F6355F3AD950310D73D /* TaskParsingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskParsingService.swift; sourceTree = "<group>"; };
@@ -347,6 +359,7 @@
 				E9A0A9C59C8274A248E7F19B /* AppTaskPriority.swift */,
 				D6E5CFD86815A337DFBA8ACD /* CreateItemType.swift */,
 				476EF61D6691E5C4E888E603 /* EmailModels.swift */,
+				A7B3C9D4E5F60123456789AB /* MailAssistantModels.swift */,
 				2CAF89510E1151AB2BDBE9F3 /* ParseState.swift */,
 				621BDB25784B86D43849D4CC /* SyncModels.swift */,
 				1229E9C510A1286935951ACA /* SyncState.swift */,
@@ -366,6 +379,9 @@
 				8EB6BB18CCC595B4F2BD4E4A /* CardViews.swift */,
 				A4E63434C6EBCA9F4070FB0C /* ChatUISpec.swift */,
 				76A558F735657405593AD572 /* ChatUISpecView.swift */,
+				D4E5F6A7B8091A2B3C4D5E6F /* GroupChatView.swift */,
+				D5E6F7A8B9012A3B4C5D6E7F /* ShareConversationSheet.swift */,
+				C3D4E5F6A708192A3B4C5D6E /* SharedConversationView.swift */,
 			);
 			path = AI;
 			sourceTree = "<group>";
@@ -448,6 +464,8 @@
 			isa = PBXGroup;
 			children = (
 				3073FEFB1EB1B1A57A7DAFAF /* AIChatService.swift */,
+				B2C3D4E5F60718293A4B5C6D /* GroupChatService.swift */,
+				B1C2D3E4F5061728394A5B6C /* ShareConversationService.swift */,
 			);
 			path = AI;
 			sourceTree = "<group>";
@@ -749,6 +767,10 @@
 				F51C903DF28FFDF8819B5A30 /* AIChatMessage.swift in Sources */,
 				BCFB490AAA247E656CE2CD0F /* AIChatService.swift in Sources */,
 				1687702F789BCA6E6EF8688E /* AIChatView.swift in Sources */,
+				C2D3E4F5A60718293A4B5C6D /* GroupChatService.swift in Sources */,
+				D3E4F5A6B708192A3B4C5D6E /* SharedConversationView.swift in Sources */,
+				E4F5A6B7C8091A2B3C4D5E6F /* GroupChatView.swift in Sources */,
+				E5F6A7B8C9012A3B4C5D6E7F /* ShareConversationSheet.swift in Sources */,
 				E0582B3CE8B98C1FC8BA2348 /* AppConfiguration.swift in Sources */,
 				D5A51C9ECF92BA1D19A2634A /* AppLogger.swift in Sources */,
 				D7D04E0746F32DCC16548E84 /* AppServices.swift in Sources */,
@@ -784,6 +806,7 @@
 				562F6B6238B6FD2095E557A4 /* EmailConnectView.swift in Sources */,
 				F1C9A9E9F6962024B24D4503 /* EmailInboxView.swift in Sources */,
 				EDD6E03CED344F224EF71461 /* EmailModels.swift in Sources */,
+				B7C3D9E4F50123456789ABCD /* MailAssistantModels.swift in Sources */,
 				3E10478313CD0789B1E28BB4 /* EmailRowView.swift in Sources */,
 				2C3477BD848888F7D36F3938 /* EmailService.swift in Sources */,
 				7134EE01B58A20F8DFA8E183 /* EmailThreadView.swift in Sources */,
@@ -814,6 +837,7 @@
 				A5F4F724ED7D84C4AE17E773 /* RemoteFirstTaskParsingService.swift in Sources */,
 				912C6F60B1F01235B46B6F46 /* RootView.swift in Sources */,
 				45A6702CEEF806C7A8B0F9AF /* SenderAvatarView.swift in Sources */,
+				C1D2E3F4A5061728394A5B6C /* ShareConversationService.swift in Sources */,
 				DD7AF0C7CBDA1864A52C917B /* SettingsView.swift in Sources */,
 				75654D27148B3E85DD3A2F4A /* SignaturesView.swift in Sources */,
 				2B8C4BC73C30E4DB7C3A8F0C /* SupabaseEdgeFunctionClient.swift in Sources */,

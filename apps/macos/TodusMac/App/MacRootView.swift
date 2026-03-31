@@ -4,13 +4,41 @@ import SwiftData
 // MARK: - Navigation Model
 
 enum EmailSection: String, CaseIterable, Hashable {
+    // Primary folders — shown at the top of the expanded email group
     case inbox, drafts, sent
+    // Secondary folders — archive, snoozed, spam, bin (matches backend FOLDERS constant)
+    case archive, snoozed, spam, bin
 
     var title: String {
         switch self {
-        case .inbox: "Inbox"
-        case .drafts: "Drafts"
-        case .sent: "Sent"
+        case .inbox:   "Inbox"
+        case .drafts:  "Drafts"
+        case .sent:    "Sent"
+        case .archive: "Archive"
+        case .snoozed: "Snoozed"
+        case .spam:    "Spam"
+        case .bin:     "Trash"
+        }
+    }
+
+    /// SF Symbol for each folder — used in the sidebar child rows
+    var systemImage: String {
+        switch self {
+        case .inbox:   "tray"
+        case .drafts:  "doc"
+        case .sent:    "paperplane"
+        case .archive: "archivebox"
+        case .snoozed: "clock"
+        case .spam:    "exclamationmark.triangle"
+        case .bin:     "trash"
+        }
+    }
+
+    /// Primary folders shown before the divider; secondary shown after
+    var isPrimary: Bool {
+        switch self {
+        case .inbox, .drafts, .sent: true
+        default: false
         }
     }
 }
@@ -76,6 +104,8 @@ struct MacRootView: View {
     @State private var calendarSelectedDate: Date = Date()
     @State private var composeEmailSeedBody: String = ""
     @State private var hasBootstrappedAuthState = false
+    /// Currently selected group chat ID — nil when viewing regular content
+    @State private var selectedGroupId: String? = nil
 
     // Accent color — drives .tint() on root so SwiftUI controls update immediately
     @AppStorage("mac_accent_color") private var accentColorKey = "blue"
@@ -98,6 +128,12 @@ struct MacRootView: View {
         .tint(MacTheme.accentColor(for: accentColorKey))
         .animation(.snappy(duration: 0.3), value: services.authService.showsOnboarding)
         .animation(.snappy(duration: 0.3), value: services.authService.isAuthenticated)
+        .onChange(of: services.showsAssistantPanel) { _, isPresented in
+            isAssistantPresented = isPresented
+        }
+        .onChange(of: isAssistantPresented) { _, isPresented in
+            services.showsAssistantPanel = isPresented
+        }
         .task {
             guard !hasBootstrappedAuthState else { return }
             defer { hasBootstrappedAuthState = true }
@@ -238,6 +274,7 @@ struct MacRootView: View {
                 selection: $selection,
                 isEmailExpanded: $isEmailExpanded,
                 isCalendarExpanded: $isCalendarExpanded,
+                selectedGroupId: $selectedGroupId,
                 onOpenSettings: { isSettingsPresented = true },
                 onCompose: { isComposePresented = true },
                 taskCount: incompleteTasks.count,
@@ -245,6 +282,7 @@ struct MacRootView: View {
                 onCalendarDayTap: { date in
                     calendarSelectedDate = date
                     selection = .calendar(.all)
+                    selectedGroupId = nil  // deselect group when switching to calendar
                 }
             )
             .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 260)
@@ -254,9 +292,14 @@ struct MacRootView: View {
                 MacTheme.contentBackground
                     .ignoresSafeArea()
 
+                // Group chat view takes over the detail pane when a group is selected
+                if let groupId = selectedGroupId {
+                    MacGroupChatView(groupId: groupId)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .id(groupId)
                 // Calendar manages its own scroll and needs edge-to-edge layout;
                 // other views use a standard padded ScrollView wrapper.
-                if selection.category == "calendar" {
+                } else if selection.category == "calendar" {
                     contentView(for: selection)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                         .id(selection)

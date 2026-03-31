@@ -14,6 +14,9 @@ struct MacEmailThreadView: View {
     @State private var errorMessage: String? = nil
     @State private var expandedMessages: Set<String> = []
     @State private var showCompose = false
+    @State private var assistantThread: MailAssistantThread? = nil
+    @State private var assistantDraftSeed = ""
+    @State private var assistantNotice: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -42,6 +45,24 @@ struct MacEmailThreadView: View {
                 // Messages
                 ScrollView {
                     LazyVStack(spacing: MacTheme.spacing8) {
+                        if let assistant = assistantThread, services.assistantAutomationPolicy.assistantThreadActionsVisible {
+                            MacMailAssistantCard(
+                                assistant: assistant,
+                                onSummarize: refreshAssistant,
+                                onCreateTask: { suggestion in
+                                    await handleCreateTask(suggestion)
+                                },
+                                onCreateEvent: {
+                                    await handleCreateEvent()
+                                },
+                                onDraftReply: {
+                                    await handleDraftReply()
+                                },
+                                onAskAssistant: openAssistant,
+                                onResearch: openAssistant
+                            )
+                        }
+
                         ForEach(Array(detail.messages.enumerated()), id: \.element.id) { index, message in
                             messageView(message, isLast: index == detail.messages.count - 1)
                         }
@@ -58,9 +79,17 @@ struct MacEmailThreadView: View {
         }
         .sheet(isPresented: $showCompose) {
             if let lastMessage = detail?.messages.last {
-                MacEmailComposeView(replyTo: lastMessage, threadId: threadId)
+                MacEmailComposeView(replyTo: lastMessage, threadId: threadId, body: assistantDraftSeed)
                     .frame(minWidth: 520, minHeight: 380)
             }
+        }
+        .alert("Mail Assistant", isPresented: Binding(
+            get: { assistantNotice != nil },
+            set: { if !$0 { assistantNotice = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(assistantNotice ?? "")
         }
     }
 
@@ -118,6 +147,50 @@ struct MacEmailThreadView: View {
         }
         .padding(.horizontal, MacTheme.spacing16)
         .padding(.vertical, MacTheme.spacing12)
+    }
+
+    private func refreshAssistant() async {
+        assistantThread = await services.emailService.loadAssistant(threadId: threadId)
+    }
+
+    private func handleCreateTask(_ suggestion: MailAssistantSuggestedTask) async {
+        let success = await services.emailService.createAssistantTask(threadId: threadId, suggestion: suggestion)
+        assistantNotice = success ? "Task created from this email thread." : "Could not create the task."
+        if success {
+            await refreshAssistant()
+        }
+    }
+
+    private func handleCreateEvent() async {
+        guard let event = assistantThread?.suggestedEvent else {
+            assistantNotice = "No event suggestion is ready for this thread yet."
+            return
+        }
+
+        let success = await services.emailService.createAssistantEvent(threadId: threadId, suggestion: event)
+        assistantNotice = success ? "Calendar event created from this thread." : "Could not create the event."
+        if success {
+            await refreshAssistant()
+        }
+    }
+
+    private func handleDraftReply() async {
+        guard let result = await services.emailService.generateAssistantDraft(threadId: threadId) else {
+            assistantNotice = "Could not generate a reply draft."
+            return
+        }
+
+        assistantDraftSeed = result.preview ?? ""
+        assistantNotice = result.reason
+        if result.created {
+            showCompose = true
+            await refreshAssistant()
+        }
+    }
+
+    private func openAssistant() {
+        services.aiChatService.currentPageContext = "Email thread: \(detail?.messages.first?.subject ?? "Message")"
+        services.showsAssistantPanel = true
     }
 
     // MARK: - Message View
@@ -182,6 +255,36 @@ struct MacEmailThreadView: View {
                         .italic()
                         .padding(MacTheme.spacing12)
                 }
+
+                HStack(spacing: MacTheme.spacing8) {
+                    Button("Task") {
+                        Task {
+                            await handleCreateTask(
+                                MailAssistantSuggestedTask(
+                                    title: message.subject.isEmpty ? "Email follow-up" : "Follow up: \(message.subject)",
+                                    description: message.plainText,
+                                    priority: "medium",
+                                    dueDate: nil
+                                )
+                            )
+                        }
+                    }
+                    .buttonStyle(.bordered)
+
+                    Button("Event") {
+                        Task { await handleCreateEvent() }
+                    }
+                    .buttonStyle(.bordered)
+
+                    Button("Ask AI", action: openAssistant)
+                        .buttonStyle(.bordered)
+
+                    Button("Research", action: openAssistant)
+                        .buttonStyle(.bordered)
+                }
+                .font(.system(size: 11, weight: .semibold))
+                .padding(.horizontal, MacTheme.spacing12)
+                .padding(.bottom, MacTheme.spacing12)
             }
         }
         .background(MacTheme.surfaceCard, in: RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous))
@@ -237,7 +340,10 @@ struct MacEmailThreadView: View {
 
     private func loadThread() async {
         isLoading = true
-        detail = await services.emailService.loadThread(id: threadId)
+        async let threadDetail = services.emailService.loadThread(id: threadId)
+        async let assistant = services.emailService.loadAssistant(threadId: threadId)
+        detail = await threadDetail
+        assistantThread = await assistant
         if detail == nil {
             errorMessage = "Could not load thread."
         }
@@ -245,6 +351,105 @@ struct MacEmailThreadView: View {
 
         // Mark as read
         Task { await services.emailService.markAsRead(ids: [threadId]) }
+    }
+}
+
+private struct MacMailAssistantCard: View {
+    let assistant: MailAssistantThread
+    let onSummarize: () async -> Void
+    let onCreateTask: (MailAssistantSuggestedTask) async -> Void
+    let onCreateEvent: () async -> Void
+    let onDraftReply: () async -> Void
+    let onAskAssistant: () -> Void
+    let onResearch: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Mail Assistant")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.purple)
+                        .textCase(.uppercase)
+                    HStack(spacing: 8) {
+                        MacAssistantPill(text: "\(Int(assistant.confidence * 100))% confidence")
+                        MacAssistantPill(text: "\(assistant.riskLevel.rawValue.capitalized) risk")
+                        if assistant.autoSendCandidate {
+                            MacAssistantPill(text: "Low-risk auto-send")
+                        }
+                    }
+                }
+                Spacer()
+                Button("Summarize") {
+                    Task { await onSummarize() }
+                }
+                .buttonStyle(.bordered)
+            }
+
+            HStack(spacing: 8) {
+                if assistant.replyNeeded { MacAssistantPill(text: "Needs reply") }
+                if assistant.meetingRequested { MacAssistantPill(text: "Meeting request") }
+                if !assistant.actionItems.isEmpty { MacAssistantPill(text: "Action items") }
+                if assistant.followUpNeeded { MacAssistantPill(text: "Follow-up") }
+            }
+
+            Text(assistant.summary)
+                .font(.system(size: 13))
+                .foregroundStyle(MacTheme.textPrimary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(assistant.reason)
+                .font(MacTheme.cardSubtitleFont())
+                .foregroundStyle(MacTheme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 8) {
+                Button("Extract tasks") {
+                    if let firstTask = assistant.suggestedTasks.first {
+                        Task { await onCreateTask(firstTask) }
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(assistant.suggestedTasks.isEmpty)
+
+                Button("Create event") {
+                    Task { await onCreateEvent() }
+                }
+                .buttonStyle(.bordered)
+                .disabled(assistant.suggestedEvent?.startAt == nil || assistant.suggestedEvent?.endAt == nil)
+
+                Button(assistant.existingDraft ? "Open draft" : "Draft reply") {
+                    Task { await onDraftReply() }
+                }
+                .buttonStyle(.bordered)
+                .disabled(!assistant.draftEligible && !assistant.existingDraft)
+
+                Button("Ask AI", action: onAskAssistant)
+                    .buttonStyle(.bordered)
+                Button("Research", action: onResearch)
+                    .buttonStyle(.bordered)
+            }
+            .font(.system(size: 11, weight: .semibold))
+        }
+        .padding(MacTheme.spacing12)
+        .background(Color.purple.opacity(0.07), in: RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous)
+                .stroke(Color.purple.opacity(0.2), lineWidth: 1)
+        )
+    }
+}
+
+private struct MacAssistantPill: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 10.5, weight: .medium))
+            .foregroundStyle(MacTheme.textSecondary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color.white.opacity(0.65), in: Capsule(style: .continuous))
     }
 }
 

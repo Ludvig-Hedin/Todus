@@ -25,10 +25,11 @@ struct EmailComposeView: View {
     }
 
     /// Create a reply compose
-    init(replyTo message: EmailMessage, threadId: String) {
+    init(replyTo message: EmailMessage, threadId: String, body: String? = nil) {
         let replyDraft = EmailDraft(
             to: [message.from.email],
             subject: message.subject.hasPrefix("Re:") ? message.subject : "Re: \(message.subject)",
+            body: body ?? "",
             replyToThreadId: threadId,
             replyToMessageId: message.id
         )

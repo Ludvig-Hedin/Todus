@@ -11,7 +11,8 @@ struct MacEmailInboxView: View {
     @State private var hoveredThreadId: String? = nil
     @FocusState private var isConnectGmailFocused: Bool
 
-    /// Which email folder to show (inbox, drafts, sent)
+    /// Which email folder to show — matches backend FOLDERS constant.
+    /// Values: "inbox", "draft", "sent", "archive", "snoozed", "spam", "bin"
     var folder: String = "inbox"
 
     var body: some View {
@@ -19,6 +20,13 @@ struct MacEmailInboxView: View {
             // Search bar
             searchBar
                 .padding(.bottom, MacTheme.spacing12)
+
+            if services.assistantAutomationPolicy.assistantThreadActionsVisible &&
+                !services.emailService.assistantNudges.isEmpty &&
+                searchText.isEmpty {
+                assistantNudgesStrip
+                    .padding(.bottom, MacTheme.spacing12)
+            }
 
             // Thread list
             if !services.emailService.hasConnection {
@@ -46,6 +54,46 @@ struct MacEmailInboxView: View {
         .sheet(item: $selectedThread) { thread in
             MacEmailThreadView(threadId: thread.value)
                 .frame(minWidth: 560, minHeight: 400)
+        }
+    }
+
+    private var assistantNudgesStrip: some View {
+        VStack(alignment: .leading, spacing: MacTheme.spacing8) {
+            Text("Mail Assistant")
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(.purple)
+                .textCase(.uppercase)
+
+            ForEach(services.emailService.assistantNudges.prefix(3)) { nudge in
+                Button {
+                    if let firstThreadId = nudge.threadIds.first {
+                        selectedThread = IdentifiableString(value: firstThreadId)
+                    }
+                } label: {
+                    HStack(alignment: .top, spacing: MacTheme.spacing8) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(nudge.title)
+                                .font(.system(size: 12.5, weight: .semibold))
+                                .foregroundStyle(MacTheme.textPrimary)
+                            Text(nudge.description)
+                                .font(MacTheme.cardSubtitleFont())
+                                .foregroundStyle(MacTheme.textSecondary)
+                                .multilineTextAlignment(.leading)
+                        }
+                        Spacer()
+                        Text("\(nudge.count)")
+                            .font(.system(size: 10.5, weight: .semibold))
+                            .foregroundStyle(MacTheme.textSecondary)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color.white.opacity(0.65), in: Capsule(style: .continuous))
+                    }
+                    .padding(MacTheme.spacing12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.purple.opacity(0.07), in: RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous))
+                }
+                .buttonStyle(.plain)
+            }
         }
     }
 

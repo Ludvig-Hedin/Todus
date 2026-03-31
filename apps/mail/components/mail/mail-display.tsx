@@ -16,6 +16,7 @@ import {
 } from '../icons/icons';
 import {
   Briefcase,
+  CalendarClock,
   Star,
   StickyNote,
   Users,
@@ -23,6 +24,8 @@ import {
   HardDriveDownload,
   Loader2,
   CopyIcon,
+  ListTodo,
+  Search,
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -41,9 +44,8 @@ import { useActiveConnection } from '@/hooks/use-connections';
 import { useAttachments } from '@/hooks/use-attachments';
 import { useTRPC } from '@/providers/query-provider';
 import { useThreadLabels } from '@/hooks/use-labels';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { Markdown } from '@react-email/components';
-import { useSummary } from '@/hooks/use-summary';
 import { TextShimmer } from '../ui/text-shimmer';
 import { useThread } from '@/hooks/use-threads';
 import { BimiAvatar } from '../ui/bimi-avatar';
@@ -58,6 +60,8 @@ import { Button } from '../ui/button';
 import { useQueryState } from 'nuqs';
 import { Badge } from '../ui/badge';
 import { format } from 'date-fns';
+import { useAISidebar } from '@/components/ui/ai-sidebar';
+import { useSettings } from '@/hooks/use-settings';
 import posthog from 'posthog-js';
 import { toast } from 'sonner';
 
@@ -99,6 +103,20 @@ const buildSummaryShareText = (subject: string | undefined, summary: string) => 
   return [headline, '', summary.trim(), '', `Shared with ${APP_NAME} • https://todus.app`].join(
     '\n',
   );
+};
+
+const buildTaskSuggestionFromMessage = (message: ParsedMessage) => {
+  const fallbackSubject = message.subject?.trim() || 'Email follow-up';
+  const description = cleanHtml(message.decodedBody || message.body || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  return {
+    title: fallbackSubject.startsWith('Re:') ? fallbackSubject : `Follow up: ${fallbackSubject}`,
+    description: description.length > 280 ? `${description.slice(0, 277)}...` : description || null,
+    priority: 'medium' as const,
+    dueDate: null,
+  };
 };
 
 const StreamingText = ({ text }: { text: string }) => {
@@ -318,17 +336,43 @@ const ThreadAttachments = ({ attachments }: { attachments: Attachment[] }) => {
   );
 };
 
-const AiSummary = ({ subject }: { subject?: string }) => {
+const MailAssistantCard = ({
+  subject,
+  latestMessage,
+  onAskAI,
+  onResearch,
+}: {
+  subject?: string;
+  latestMessage: ParsedMessage;
+  onAskAI: () => void;
+  onResearch: (query: string) => void;
+}) => {
   const [threadId] = useQueryState('threadId');
-  const { data: summary, isLoading } = useSummary(threadId ?? null);
-  const [showSummary, setShowSummary] = useState(false);
+  const [, setMode] = useQueryState('mode');
+  const [, setDraftId] = useQueryState('draftId');
   const [isCopied, setIsCopied] = useState(false);
   const copyResetTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
-  const handleToggle = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setShowSummary(!showSummary);
-  };
+  const trpc = useTRPC();
+  const { data: settings } = useSettings();
+  const assistantPolicy = settings?.settings.assistantAutomationPolicy;
+  const assistantQuery = useQuery(
+    trpc.mailAssistant.getThread.queryOptions(
+      { threadId: threadId! },
+      {
+        enabled: !!threadId && assistantPolicy?.assistantThreadActionsVisible !== false,
+      },
+    ),
+  );
+  const { mutateAsync: createTaskSuggestion, isPending: isCreatingTask } = useMutation(
+    trpc.mailAssistant.createTaskFromSuggestion.mutationOptions(),
+  );
+  const { mutateAsync: createEventSuggestion, isPending: isCreatingEvent } = useMutation(
+    trpc.mailAssistant.createEventFromSuggestion.mutationOptions(),
+  );
+  const { mutateAsync: generateDraft, isPending: isGeneratingDraft } = useMutation(
+    trpc.mailAssistant.generateDraft.mutationOptions(),
+  );
+  const { mutateAsync: logActivity } = useMutation(trpc.mailAssistant.logActivity.mutationOptions());
 
   useEffect(() => {
     return () => {
@@ -342,7 +386,7 @@ const AiSummary = ({ subject }: { subject?: string }) => {
     async (e: React.MouseEvent) => {
       e.stopPropagation();
 
-      const summaryText = summary?.data.short?.trim();
+      const summaryText = assistantQuery.data?.summary?.trim();
       if (!summaryText) return;
 
       try {
@@ -358,6 +402,14 @@ const AiSummary = ({ subject }: { subject?: string }) => {
 
         setIsCopied(true);
         toast.success('Thread summary copied');
+        if (threadId) {
+          await logActivity({
+            threadId,
+            type: 'summary_viewed',
+            summary: summaryText,
+            metadata: { source: 'copy-summary' },
+          });
+        }
 
         if (copyResetTimeoutRef.current) {
           clearTimeout(copyResetTimeoutRef.current);
@@ -371,45 +423,314 @@ const AiSummary = ({ subject }: { subject?: string }) => {
         toast.error('Failed to copy thread summary');
       }
     },
-    [summary?.data.short, subject, threadId],
+    [assistantQuery.data?.summary, subject, threadId, logActivity],
   );
 
-  if (isLoading) return null;
-  if (!summary?.data.short?.length) return null;
+  const assistant = assistantQuery.data;
+  if (assistantPolicy?.assistantThreadActionsVisible === false) return null;
+  if (assistantQuery.isLoading || !assistant) return null;
+
+  const intentBadges = [
+    assistant.replyNeeded ? 'Needs reply' : null,
+    assistant.meetingRequested ? 'Meeting request' : null,
+    assistant.actionItems.length ? 'Action items found' : null,
+    assistant.followUpNeeded ? 'Follow up overdue' : null,
+  ].filter(Boolean);
+
+  const handleCreateTask = async (task: (typeof assistant.suggestedTasks)[number]) => {
+    if (!threadId) return;
+
+    try {
+      await createTaskSuggestion({ threadId, task });
+      toast.success('Task created from thread');
+      await assistantQuery.refetch();
+    } catch (error) {
+      console.error('Failed to create task from thread', error);
+      toast.error('Failed to create task');
+    }
+  };
+
+  const handleCreateEvent = async () => {
+    if (!threadId || !assistant.suggestedEvent?.startAt || !assistant.suggestedEvent.endAt) return;
+
+    try {
+      await createEventSuggestion({
+        threadId,
+        event: {
+          ...assistant.suggestedEvent,
+          startAt: assistant.suggestedEvent.startAt,
+          endAt: assistant.suggestedEvent.endAt,
+        },
+      });
+      toast.success('Calendar event created');
+      await assistantQuery.refetch();
+    } catch (error) {
+      console.error('Failed to create event from thread', error);
+      toast.error('Failed to create calendar event');
+    }
+  };
+
+  const handleGenerateDraft = async () => {
+    if (!threadId) return;
+
+    try {
+      const result = await generateDraft({ threadId, openInComposer: true });
+      if (!result.created || !result.draftId) {
+        toast.message(result.reason || 'Draft already exists for this thread');
+        return;
+      }
+      setDraftId(result.draftId);
+      setMode('reply');
+      toast.success('Assistant draft opened');
+      await assistantQuery.refetch();
+    } catch (error) {
+      console.error('Failed to generate assistant draft', error);
+      toast.error('Failed to draft reply');
+    }
+  };
 
   return (
     <div
-      className="mt-2 max-w-3xl rounded-xl border border-[#8B5CF6] bg-white px-4 py-2 dark:bg-[#252525]"
+      className="mt-3 flex max-w-4xl flex-col gap-4 rounded-2xl border border-[#D7CCFF] bg-[#FCFAFF] p-4 dark:border-[#4A3D76] dark:bg-[#1E1A28]"
       onClick={(e) => e.stopPropagation()}
     >
-      <div className="flex items-start justify-between gap-3">
-        <button
-          type="button"
-          className="flex cursor-pointer items-center gap-1 text-left"
-          onClick={handleToggle}
-        >
-          <TextShimmer className="text-xs font-medium text-[#929292]">Summary</TextShimmer>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <TextShimmer className="text-xs font-semibold tracking-[0.16em] text-[#7C63E6] uppercase">
+              Mail Assistant
+            </TextShimmer>
+            <Badge variant="secondary" className="rounded-full px-2.5 py-0.5 text-[11px]">
+              {Math.round(assistant.confidence * 100)}% confidence
+            </Badge>
+            <Badge
+              variant="outline"
+              className={cn(
+                'rounded-full px-2.5 py-0.5 text-[11px]',
+                assistant.riskLevel === 'high'
+                  ? 'border-[#F43F5E]/30 text-[#F43F5E]'
+                  : assistant.riskLevel === 'medium'
+                    ? 'border-[#F59E0B]/30 text-[#F59E0B]'
+                    : 'border-[#10B981]/30 text-[#10B981]',
+              )}
+            >
+              {assistant.riskLevel} risk
+            </Badge>
+            {assistant.autoSendCandidate && (
+              <Badge variant="outline" className="rounded-full px-2.5 py-0.5 text-[11px]">
+                Low-risk auto-send candidate
+              </Badge>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {intentBadges.map((badge) => (
+              <Badge key={badge} variant="secondary" className="rounded-full px-2.5 py-0.5 text-[11px]">
+                {badge}
+              </Badge>
+            ))}
+          </div>
+        </div>
 
-          {!isLoading && (
-            <ChevronDown
-              className={`ml-1 h-2.5 w-2.5 fill-[#929292] transition-transform ${showSummary ? 'rotate-180' : ''}`}
-            />
-          )}
-        </button>
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            size="xs"
+            variant="secondary"
+            className="h-7 gap-1.5 rounded-full px-2.5 text-[11px]"
+            onClick={async (e) => {
+              e.stopPropagation();
+              await assistantQuery.refetch();
+              if (threadId) {
+                await logActivity({
+                  threadId,
+                  type: 'summary_viewed',
+                  summary: assistant.summary,
+                  metadata: { source: 'manual-refresh' },
+                });
+              }
+              toast.success('Assistant refreshed');
+            }}
+          >
+            <ChevronDown className="h-3.5 w-3.5 -rotate-90" />
+            Summarize
+          </Button>
+          <Button
+            type="button"
+            size="xs"
+            variant="secondary"
+            className="h-7 gap-1.5 rounded-full px-2.5 text-[11px]"
+            onClick={handleCopySummary}
+          >
+            <CopyIcon className="h-3.5 w-3.5" />
+            {isCopied ? 'Copied' : 'Copy summary'}
+          </Button>
+        </div>
+      </div>
 
+      <div className="flex flex-wrap gap-2">
         <Button
           type="button"
-          size="xs"
-          variant="secondary"
-          className="h-7 gap-1.5 rounded-full px-2.5 text-[11px]"
-          onClick={handleCopySummary}
+          size="sm"
+          className="h-8 rounded-full px-3"
+          onClick={() => void (assistant.suggestedTasks[0] && handleCreateTask(assistant.suggestedTasks[0]))}
+          disabled={!assistant.suggestedTasks.length || isCreatingTask}
         >
-          <CopyIcon className="h-3.5 w-3.5" />
-          {isCopied ? 'Copied' : 'Copy summary'}
+          <ListTodo className="mr-1 h-3.5 w-3.5" />
+          Extract tasks
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="secondary"
+          className="h-8 rounded-full px-3"
+          onClick={handleCreateEvent}
+          disabled={!assistant.suggestedEvent?.startAt || !assistant.suggestedEvent.endAt || isCreatingEvent}
+        >
+          <CalendarClock className="mr-1 h-3.5 w-3.5" />
+          Create event
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="secondary"
+          className="h-8 rounded-full px-3"
+          onClick={handleGenerateDraft}
+          disabled={!assistant.draftEligible || isGeneratingDraft}
+        >
+          {isGeneratingDraft ? (
+            <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Reply className="mr-1 h-3.5 w-3.5 fill-current" />
+          )}
+          Draft reply
+        </Button>
+        <Button type="button" size="sm" variant="secondary" className="h-8 rounded-full px-3" onClick={onAskAI}>
+          <Lightning className="mr-1 h-3.5 w-3.5 fill-current" />
+          Ask AI
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="secondary"
+          className="h-8 rounded-full px-3"
+          onClick={() =>
+            onResearch(
+              assistant.researchQueries[0] ||
+                `${latestMessage.sender?.name || latestMessage.sender?.email || 'sender'} ${subject || latestMessage.subject || ''}`,
+            )
+          }
+        >
+          <Search className="mr-1 h-3.5 w-3.5" />
+          Research
         </Button>
       </div>
-      {showSummary && (
-        <Markdown markdownContainerStyles={{ fontSize: 15 }}>{summary?.data.short || ''}</Markdown>
+
+      <div className="rounded-2xl border border-white/60 bg-white/70 p-3 dark:border-white/10 dark:bg-white/5">
+        <p className="text-xs font-medium uppercase tracking-[0.16em] text-[#8C78D8]">Summary</p>
+        <div className="mt-2 text-sm leading-6 text-black dark:text-white">
+          <Markdown markdownContainerStyles={{ fontSize: 15 }}>{assistant.summary}</Markdown>
+        </div>
+        <p className="mt-2 text-xs text-[#6B6484] dark:text-[#B3A8D9]">{assistant.reason}</p>
+      </div>
+
+      {assistant.actionItems.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-xs font-medium uppercase tracking-[0.16em] text-[#8C78D8]">Detected actions</p>
+          <div className="flex flex-col gap-2">
+            {assistant.actionItems.map((item) => (
+              <div
+                key={item}
+                className="flex items-start gap-2 rounded-xl border border-white/60 bg-white/70 px-3 py-2 text-sm dark:border-white/10 dark:bg-white/5"
+              >
+                <ListTodo className="mt-0.5 h-4 w-4 shrink-0 text-[#7C63E6]" />
+                <span>{item}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {assistantPolicy?.suggestTasksFromEmail !== false && assistant.suggestedTasks.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-xs font-medium uppercase tracking-[0.16em] text-[#8C78D8]">Suggested tasks</p>
+          <div className="flex flex-col gap-2">
+            {assistant.suggestedTasks.map((task) => (
+              <div
+                key={task.title}
+                className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-white/60 bg-white/70 px-3 py-3 dark:border-white/10 dark:bg-white/5"
+              >
+                <div className="space-y-1">
+                  <p className="text-sm font-medium text-black dark:text-white">{task.title}</p>
+                  {task.description && (
+                    <p className="text-xs leading-5 text-[#6B6484] dark:text-[#B3A8D9]">
+                      {task.description}
+                    </p>
+                  )}
+                </div>
+                <Button
+                  type="button"
+                  size="xs"
+                  variant="secondary"
+                  className="h-7 rounded-full px-2.5 text-[11px]"
+                  onClick={() => void handleCreateTask(task)}
+                  disabled={isCreatingTask}
+                >
+                  Create task
+                </Button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {assistantPolicy?.suggestEventsFromEmail !== false && assistant.suggestedEvent && (
+        <div className="space-y-2">
+          <p className="text-xs font-medium uppercase tracking-[0.16em] text-[#8C78D8]">Suggested event</p>
+          <div className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-white/60 bg-white/70 px-3 py-3 dark:border-white/10 dark:bg-white/5">
+            <div className="space-y-1">
+              <p className="text-sm font-medium text-black dark:text-white">{assistant.suggestedEvent.title}</p>
+              <p className="text-xs leading-5 text-[#6B6484] dark:text-[#B3A8D9]">
+                {assistant.suggestedEvent.startAt
+                  ? `${format(new Date(assistant.suggestedEvent.startAt), 'PPp')} · ${format(new Date(assistant.suggestedEvent.endAt || assistant.suggestedEvent.startAt), 'p')}`
+                  : 'Needs a quick review before creating the calendar event.'}
+              </p>
+            </div>
+            <Button
+              type="button"
+              size="xs"
+              variant="secondary"
+              className="h-7 rounded-full px-2.5 text-[11px]"
+              onClick={handleCreateEvent}
+              disabled={!assistant.suggestedEvent.startAt || !assistant.suggestedEvent.endAt || isCreatingEvent}
+            >
+              Create event
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {(assistant.draftEligible || assistant.existingDraft) && (
+        <div className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-white/60 bg-white/70 px-3 py-3 dark:border-white/10 dark:bg-white/5">
+          <div className="space-y-1">
+            <p className="text-sm font-medium text-black dark:text-white">
+              {assistant.existingDraft ? 'Draft already attached' : 'Assistant can draft the reply'}
+            </p>
+            <p className="text-xs leading-5 text-[#6B6484] dark:text-[#B3A8D9]">
+              {assistant.autoSendReason ||
+                'Drafts use the thread, related tasks, and scheduling context before suggesting a reply.'}
+            </p>
+          </div>
+          <Button
+            type="button"
+            size="xs"
+            variant="secondary"
+            className="h-7 rounded-full px-2.5 text-[11px]"
+            onClick={handleGenerateDraft}
+            disabled={isGeneratingDraft}
+          >
+            {assistant.existingDraft ? 'Open draft' : 'Draft reply'}
+          </Button>
+        </div>
       )}
     </div>
   );
@@ -745,15 +1066,29 @@ const MailDisplay = ({ emailData, index, totalEmails, demo, threadAttachments }:
   const [openDetailsPopover, setOpenDetailsPopover] = useState<boolean>(false);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const collapseTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const trpc = useTRPC();
+  const { toggleOpen: toggleAISidebar } = useAISidebar();
 
   const [activeReplyId, setActiveReplyId] = useQueryState('activeReplyId');
+  const [threadId] = useQueryState('threadId');
   const { labels: threadLabels } = useThreadLabels(
     emailData.tags ? emailData.tags.map((l) => l.id) : [],
   );
   const { data: activeConnection } = useActiveConnection();
   const [researchSender, setResearchSender] = useState<Sender | null>(null);
   const [searchQuery, setSearchQuery] = useState<string | null>(null);
-  //   const trpc = useTRPC();
+  const assistantQuery = useQuery(
+    trpc.mailAssistant.getThread.queryOptions(
+      { threadId: threadId! },
+      { enabled: !!threadId && !demo },
+    ),
+  );
+  const { mutateAsync: createTaskFromSuggestion } = useMutation(
+    trpc.mailAssistant.createTaskFromSuggestion.mutationOptions(),
+  );
+  const { mutateAsync: createEventFromSuggestion } = useMutation(
+    trpc.mailAssistant.createEventFromSuggestion.mutationOptions(),
+  );
 
   const isLastEmail = useMemo(
     () => emailData.id === threadData?.latest?.id,
@@ -1382,7 +1717,16 @@ const MailDisplay = ({ emailData, index, totalEmails, demo, threadAttachments }:
                     })()}
                   </div>
                 </div>
-                <AiSummary subject={emailData.subject} />
+                <MailAssistantCard
+                  subject={emailData.subject}
+                  latestMessage={emailData}
+                  onAskAI={() => {
+                    toggleAISidebar();
+                  }}
+                  onResearch={(query) => {
+                    setSearchQuery(query);
+                  }}
+                />
                 {threadAttachments && threadAttachments.length > 0 && (
                   <ThreadAttachments attachments={threadAttachments} />
                 )}
@@ -1796,6 +2140,74 @@ const MailDisplay = ({ emailData, index, totalEmails, demo, threadAttachments }:
                     icon={<Forward className="fill-muted-foreground dark:fill-[#9B9B9B]" />}
                     text={m['common.mail.forward']()}
                     shortcut={isLastEmail ? 'f' : undefined}
+                  />
+                  <ActionButton
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (!threadId) return;
+
+                      void createTaskFromSuggestion({
+                        threadId,
+                        task: buildTaskSuggestionFromMessage(emailData),
+                      })
+                        .then(() => {
+                          toast.success('Task created from email');
+                        })
+                        .catch((error) => {
+                          console.error('Failed to create task from message', error);
+                          toast.error('Failed to create task');
+                        });
+                    }}
+                    icon={<ListTodo className="text-muted-foreground dark:text-[#9B9B9B] h-3.5 w-3.5" />}
+                    text="Task"
+                  />
+                  <ActionButton
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const suggestedEvent = assistantQuery.data?.suggestedEvent;
+
+                      if (!threadId || !suggestedEvent?.startAt || !suggestedEvent.endAt) {
+                        setSearchQuery(`Double check scheduling details for ${emailData.subject}`);
+                        return;
+                      }
+
+                      void createEventFromSuggestion({
+                        threadId,
+                        event: {
+                          ...suggestedEvent,
+                          startAt: suggestedEvent.startAt,
+                          endAt: suggestedEvent.endAt,
+                        },
+                      })
+                        .then(() => {
+                          toast.success('Calendar event created');
+                        })
+                        .catch((error) => {
+                          console.error('Failed to create event from message', error);
+                          toast.error('Failed to create calendar event');
+                        });
+                    }}
+                    icon={<CalendarClock className="text-muted-foreground dark:text-[#9B9B9B] h-3.5 w-3.5" />}
+                    text="Event"
+                  />
+                  <ActionButton
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleAISidebar();
+                    }}
+                    icon={<Lightning className="fill-muted-foreground dark:fill-[#9B9B9B]" />}
+                    text="Ask AI"
+                  />
+                  <ActionButton
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSearchQuery(
+                        assistantQuery.data?.researchQueries?.[0] ||
+                          `${emailData.sender?.name || emailData.sender?.email || 'sender'} ${emailData.subject || ''}`,
+                      );
+                    }}
+                    icon={<Search className="text-muted-foreground dark:text-[#9B9B9B] h-3.5 w-3.5" />}
+                    text="Research"
                   />
                 </div>
               </div>

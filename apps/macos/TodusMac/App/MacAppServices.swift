@@ -11,6 +11,7 @@ final class MacAppServices {
     private enum Keys {
         static let contextAboutYou = "MacApp.contextAboutYou"
         static let customInstructions = "MacApp.customInstructions"
+        static let assistantAutomationPolicy = "MacApp.assistantAutomationPolicy"
     }
 
     let authService: AuthService
@@ -19,7 +20,10 @@ final class MacAppServices {
     let calendarService: CalendarService
     let networkMonitor: NetworkMonitor
     let aiChatService: MacAIChatService
+    let shareConversationService: ShareConversationService
+    let groupChatService: GroupChatService
     private let defaults = UserDefaults.standard
+    var showsAssistantPanel = false
 
     var contextAboutYou: String {
         didSet {
@@ -32,6 +36,14 @@ final class MacAppServices {
         didSet {
             defaults.set(customInstructions, forKey: Keys.customInstructions)
             aiChatService.customInstructions = customInstructions
+        }
+    }
+
+    var assistantAutomationPolicy: AssistantAutomationPolicy {
+        didSet {
+            if let data = try? JSONEncoder().encode(assistantAutomationPolicy) {
+                defaults.set(data, forKey: Keys.assistantAutomationPolicy)
+            }
         }
     }
 
@@ -49,6 +61,12 @@ final class MacAppServices {
         self.networkMonitor = NetworkMonitor()
         self.contextAboutYou = defaults.string(forKey: Keys.contextAboutYou) ?? ""
         self.customInstructions = defaults.string(forKey: Keys.customInstructions) ?? ""
+        if let data = defaults.data(forKey: Keys.assistantAutomationPolicy),
+           let savedPolicy = try? JSONDecoder().decode(AssistantAutomationPolicy.self, from: data) {
+            self.assistantAutomationPolicy = savedPolicy
+        } else {
+            self.assistantAutomationPolicy = .recommended
+        }
         self.aiChatService = MacAIChatService(
             backendURL: backendURL,
             apiClient: api,
@@ -56,6 +74,8 @@ final class MacAppServices {
             emailService: email,
             calendarService: calendar
         )
+        self.shareConversationService = ShareConversationService(apiClient: api)
+        self.groupChatService = GroupChatService(apiClient: api)
         self.aiChatService.contextAboutYou = contextAboutYou
         self.aiChatService.customInstructions = customInstructions
     }
@@ -64,9 +84,10 @@ final class MacAppServices {
         guard authService.isAuthenticated else { return }
 
         do {
-            let response: SharedAIProfileResponse = try await apiClient.trpcQuery("settings.get")
+            let response: MailAssistantSettingsResponse = try await apiClient.trpcQuery("settings.get")
             contextAboutYou = response.settings.contextAboutYou
             customInstructions = response.settings.customPrompt
+            assistantAutomationPolicy = response.settings.assistantAutomationPolicy
         } catch {
             print("[MacAppServices] Failed to load shared AI profile: \(error)")
         }
@@ -80,7 +101,8 @@ final class MacAppServices {
                 "settings.save",
                 input: SharedAIProfileSaveInput(
                     contextAboutYou: contextAboutYou,
-                    customPrompt: customInstructions
+                    customPrompt: customInstructions,
+                    assistantAutomationPolicy: assistantAutomationPolicy
                 )
             )
         } catch {
@@ -89,6 +111,8 @@ final class MacAppServices {
     }
 
     func syncSharedFolders(in context: ModelContext) async {
+        guard authService.isAuthenticated else { return }
+
         struct FolderListResponse: Decodable {
             let folders: [RemoteFolder]
         }
@@ -142,18 +166,10 @@ final class MacAppServices {
     }
 }
 
-private struct SharedAIProfileResponse: Decodable {
-    struct Settings: Decodable {
-        let contextAboutYou: String
-        let customPrompt: String
-    }
-
-    let settings: Settings
-}
-
 private struct SharedAIProfileSaveInput: Encodable {
     let contextAboutYou: String
     let customPrompt: String
+    let assistantAutomationPolicy: AssistantAutomationPolicy
 }
 
 private struct SharedAIProfileSaveResponse: Decodable {

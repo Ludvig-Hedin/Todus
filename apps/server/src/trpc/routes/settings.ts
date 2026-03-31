@@ -1,5 +1,10 @@
 import { createRateLimiterMiddleware, privateProcedure, publicProcedure, router } from '../trpc';
-import { defaultUserSettings, userSettingsSchema, type UserSettings } from '../../lib/schemas';
+import {
+  defaultUserSettings,
+  mergeUserSettings,
+  userSettingsSchema,
+  type UserSettings,
+} from '../../lib/schemas';
 import { getZeroDB } from '../../lib/server-utils';
 import { Ratelimit } from '@upstash/ratelimit';
 
@@ -28,7 +33,7 @@ export const settingsRouter = router({
         return { settings: defaultUserSettings };
       }
 
-      return { settings: settingsRes.data };
+      return { settings: mergeUserSettings(undefined, settingsRes.data) };
     }),
 
   save: privateProcedure.input(userSettingsSchema.partial()).mutation(async ({ ctx, input }) => {
@@ -37,10 +42,13 @@ export const settingsRouter = router({
     const existingSettings: any = await db.findUserSettings();
 
     if (existingSettings) {
-      const newSettings: any = { ...(existingSettings.settings as UserSettings), ...input };
+      // Parse existing settings through the schema before merging to avoid propagating malformed data
+      const parsed = userSettingsSchema.safeParse(existingSettings.settings);
+      const base: UserSettings | undefined = parsed.success ? parsed.data : undefined;
+      const newSettings: any = mergeUserSettings(base, input);
       await db.updateUserSettings(newSettings);
     } else {
-      await db.insertUserSettings({ ...(defaultUserSettings as any), ...input });
+      await db.insertUserSettings(mergeUserSettings(undefined, input));
     }
 
     return { success: true };

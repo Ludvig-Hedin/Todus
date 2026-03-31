@@ -15,10 +15,12 @@ struct EmailThreadView: View {
     @State private var isStarred = false
     /// Tracks read/unread state — starts false (thread is marked read on open).
     @State private var isUnread = false
-    /// Populated from `brain.generateSummary` — nil if the thread hasn't been vectorized yet.
-    @State private var aiSummary: String? = nil
+    /// Shared thread-level assistant model for summaries, task extraction, and draft suggestions.
+    @State private var assistantThread: MailAssistantThread? = nil
+    @State private var assistantDraftSeed: String? = nil
     /// Guards against accidental delete — trash is the only destructive action in the header.
     @State private var showDeleteConfirmation = false
+    @State private var assistantNotice: String?
 
     private var emailService: EmailService { services.emailService }
 
@@ -55,29 +57,69 @@ struct EmailThreadView: View {
             }) ?? false
 
             async let markReadTask: Void = emailService.markAsRead(ids: [threadId])
-            async let summary = fetchAISummary(threadId: threadId)
-            aiSummary = await summary
+            async let assistant = emailService.loadAssistant(threadId: threadId)
+            assistantThread = await assistant
             await markReadTask
         }
         .sheet(isPresented: $showCompose) {
             if let lastMessage = detail?.messages.last {
-                EmailComposeView(replyTo: lastMessage, threadId: threadId)
+                EmailComposeView(replyTo: lastMessage, threadId: threadId, body: assistantDraftSeed)
                     .preferredColorScheme(services.appearancePreference.colorScheme)
             }
         }
+        .alert("Mail Assistant", isPresented: Binding(
+            get: { assistantNotice != nil },
+            set: { if !$0 { assistantNotice = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(assistantNotice ?? "")
+        }
     }
 
-    // MARK: - AI Summary
+    private func refreshAssistant() async {
+        assistantThread = await emailService.loadAssistant(threadId: threadId)
+    }
 
-    private func fetchAISummary(threadId: String) async -> String? {
-        struct Input: Encodable { let threadId: String }
-        struct ResponseData: Decodable { let short: String? }
-        struct Response: Decodable { let data: ResponseData? }
-        let response: Response? = try? await services.apiClient.trpcQuery(
-            "brain.generateSummary", input: Input(threadId: threadId)
-        )
-        let text = response?.data?.short
-        return (text?.isEmpty == false) ? text : nil
+    private func handleCreateTask(_ suggestion: MailAssistantSuggestedTask) async {
+        let success = await emailService.createAssistantTask(threadId: threadId, suggestion: suggestion)
+        assistantNotice = success ? "Task created from this email thread." : "Could not create the task."
+        if success {
+            await refreshAssistant()
+        }
+    }
+
+    private func handleCreateEvent() async {
+        guard let event = assistantThread?.suggestedEvent else {
+            assistantNotice = "No event suggestion is ready for this thread yet."
+            return
+        }
+
+        let success = await emailService.createAssistantEvent(threadId: threadId, suggestion: event)
+        assistantNotice = success ? "Calendar event created from this thread." : "Could not create the event."
+        if success {
+            await refreshAssistant()
+        }
+    }
+
+    private func handleDraftReply() async {
+        guard let result = await emailService.generateAssistantDraft(threadId: threadId) else {
+            assistantNotice = "Could not generate a reply draft."
+            return
+        }
+
+        assistantDraftSeed = result.preview
+        assistantNotice = result.reason
+        if result.created {
+            showCompose = true
+            await refreshAssistant()
+        }
+    }
+
+    private func openAssistant() {
+        services.currentTab = .email
+        services.aiChatService.currentPageContext = "Email thread: \(detail?.messages.first?.subject ?? "Message")"
+        services.showsAIChat = true
     }
 
     // MARK: - Thread Content
@@ -201,18 +243,48 @@ struct EmailThreadView: View {
     private func scrollBody(_ detail: EmailThreadDetail) -> some View {
         ScrollView {
             LazyVStack(spacing: 0) {
-                // AI summary — only shown when the brain has indexed this thread
-                if let summary = aiSummary {
-                    AISummaryCard(summary: summary)
+                if let assistant = assistantThread, services.assistantAutomationPolicy.assistantThreadActionsVisible {
+                    MailAssistantCard(
+                        assistant: assistant,
+                        onSummarize: refreshAssistant,
+                        onCreateTask: { suggestion in
+                            await handleCreateTask(suggestion)
+                        },
+                        onCreateEvent: {
+                            await handleCreateEvent()
+                        },
+                        onDraftReply: {
+                            await handleDraftReply()
+                        },
+                        onAskAssistant: openAssistant,
+                        onResearch: openAssistant
+                    )
                         .padding(.horizontal, 16)
                         .padding(.top, 16)
                         .padding(.bottom, 8)
                 }
 
                 ForEach(Array(detail.messages.enumerated()), id: \.element.id) { index, message in
-                    MessageBubble(message: message)
+                    MessageBubble(
+                        message: message,
+                        onCreateTask: {
+                            await handleCreateTask(
+                                MailAssistantSuggestedTask(
+                                    title: message.subject.isEmpty ? "Email follow-up" : "Follow up: \(message.subject)",
+                                    description: message.plainText,
+                                    priority: "medium",
+                                    dueDate: nil
+                                )
+                            )
+                        },
+                        onCreateEvent: {
+                            await handleCreateEvent()
+                        },
+                        onAskAssistant: openAssistant,
+                        onResearch: openAssistant
+                    )
                         .padding(.horizontal, 16)
-                        .padding(.top, index == 0 && aiSummary == nil ? 16 : 8)
+                        .padding(.top, index == 0 && assistantThread == nil ? 16 : 8)
                         .padding(.bottom, index == detail.messages.count - 1 ? 16 : 0)
                 }
             }
@@ -248,50 +320,120 @@ struct EmailThreadView: View {
     }
 }
 
-// MARK: - AI Summary Card
+// MARK: - Mail Assistant Card
 
-private struct AISummaryCard: View {
-    let summary: String
-    // Expanded by default — the summary is a key feature and only shown when data exists,
-    // so hiding it behind a tap would mean most users never see it.
-    @State private var isExpanded = true
+private struct MailAssistantCard: View {
+    let assistant: MailAssistantThread
+    let onSummarize: () async -> Void
+    let onCreateTask: (MailAssistantSuggestedTask) async -> Void
+    let onCreateEvent: () async -> Void
+    let onDraftReply: () async -> Void
+    let onAskAssistant: () -> Void
+    let onResearch: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Button {
-                withAnimation(.snappy(duration: 0.2)) { isExpanded.toggle() }
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "sparkles")
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Mail Assistant")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.purple)
-                    Text("AI Summary")
+                        .textCase(.uppercase)
+                    HStack(spacing: 8) {
+                        AssistantPill(text: "\(Int(assistant.confidence * 100))% confidence")
+                        AssistantPill(text: "\(assistant.riskLevel.rawValue.capitalized) risk")
+                        if assistant.autoSendCandidate {
+                            AssistantPill(text: "Low-risk auto-send")
+                        }
+                    }
+                }
+                Spacer()
+                Button("Summarize") {
+                    Task { await onSummarize() }
+                }
+                .font(.system(size: 12, weight: .semibold))
+                .buttonStyle(.bordered)
+            }
+
+            HStack(spacing: 8) {
+                if assistant.replyNeeded { AssistantPill(text: "Needs reply") }
+                if assistant.meetingRequested { AssistantPill(text: "Meeting request") }
+                if !assistant.actionItems.isEmpty { AssistantPill(text: "Action items found") }
+                if assistant.followUpNeeded { AssistantPill(text: "Follow-up suggested") }
+            }
+
+            Text(assistant.summary)
+                .font(.system(size: 14))
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(assistant.reason)
+                .font(.system(size: 12))
+                .foregroundStyle(AppTheme.mutedText)
+                .fixedSize(horizontal: false, vertical: true)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    Button("Extract tasks") {
+                        if let firstTask = assistant.suggestedTasks.first {
+                            Task { await onCreateTask(firstTask) }
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(assistant.suggestedTasks.isEmpty)
+
+                    Button("Create event") {
+                        Task { await onCreateEvent() }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(assistant.suggestedEvent?.startAt == nil || assistant.suggestedEvent?.endAt == nil)
+
+                    Button(assistant.existingDraft ? "Open draft" : "Draft reply") {
+                        Task { await onDraftReply() }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!assistant.draftEligible && !assistant.existingDraft)
+
+                    Button("Ask assistant", action: onAskAssistant)
+                        .buttonStyle(.bordered)
+                    Button("Research", action: onResearch)
+                        .buttonStyle(.bordered)
+                }
+            }
+
+            if !assistant.actionItems.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Detected actions")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(.secondary)
-                    Spacer()
-                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(AppTheme.mutedText)
+                    ForEach(assistant.actionItems, id: \.self) { item in
+                        Text("• \(item)")
+                            .font(.system(size: 13))
+                            .foregroundStyle(.primary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
-            }
-            .buttonStyle(.plain)
-
-            if isExpanded {
-                Text(summary)
-                    .font(.system(size: 14))
-                    .foregroundStyle(.primary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 12)
             }
         }
-        .background(Color.purple.opacity(0.07), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(14)
+        .background(Color.purple.opacity(0.07), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(Color.purple.opacity(0.2), lineWidth: 1)
         )
+    }
+}
+
+private struct AssistantPill: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color.white.opacity(0.7), in: Capsule(style: .continuous))
     }
 }
 
@@ -299,6 +441,10 @@ private struct AISummaryCard: View {
 
 private struct MessageBubble: View {
     let message: EmailMessage
+    let onCreateTask: () async -> Void
+    let onCreateEvent: () async -> Void
+    let onAskAssistant: () -> Void
+    let onResearch: () -> Void
     @State private var isExpanded = true
 
     var body: some View {
@@ -355,6 +501,27 @@ private struct MessageBubble: View {
                         .padding(.horizontal, 14)
                         .padding(.vertical, 12)
                 }
+
+                HStack(spacing: 8) {
+                    Button("Task") {
+                        Task { await onCreateTask() }
+                    }
+                    .buttonStyle(.bordered)
+
+                    Button("Event") {
+                        Task { await onCreateEvent() }
+                    }
+                    .buttonStyle(.bordered)
+
+                    Button("Ask AI", action: onAskAssistant)
+                        .buttonStyle(.bordered)
+
+                    Button("Research", action: onResearch)
+                        .buttonStyle(.bordered)
+                }
+                .font(.system(size: 12, weight: .semibold))
+                .padding(.horizontal, 14)
+                .padding(.bottom, 12)
             }
         }
         .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
