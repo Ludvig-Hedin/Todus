@@ -13,6 +13,10 @@ struct SettingsView: View {
     @State private var showsDisconnectGmail = false
     @State private var isConnectingCalendar = false
     @State private var isConnectingReminders = false
+    @State private var activeSessions: [ActiveSessionRecord] = []
+    @State private var isLoadingSessions = false
+    @State private var isRevokingAllSessions = false
+    @State private var revokingSessionIDs: Set<String> = []
 
     private var calendarAccessGranted: Bool {
         services.calendarService.canReadEvents()
@@ -22,15 +26,19 @@ struct SettingsView: View {
         NavigationStack {
             List {
                 accountSection
+                activeSessionsSection
                 connectedServicesSection
 
-                // Combined: Appearance + Preferences
+                // Appearance + Preferences
                 preferencesAndAppearanceSection
 
-                // Combined: Email + AI
-                emailAndAISection
+                // Email preferences — separate from AI to reduce cognitive load
+                emailSection
 
-                // Combined: Notifications + Privacy
+                // AI Assistant — separate section for clarity
+                aiAssistantSection
+
+                // Notifications + Privacy
                 notificationsAndPrivacySection
 
                 aboutSection
@@ -64,6 +72,9 @@ struct SettingsView: View {
         }
         .task {
             await services.emailService.checkConnection()
+        }
+        .task {
+            await loadActiveSessions()
         }
         .confirmationDialog(
             "Are you sure you want to log out?",
@@ -199,6 +210,102 @@ struct SettingsView: View {
             }
         } header: {
             Text("Account")
+        }
+    }
+
+    private var activeSessionsSection: some View {
+        Section {
+            if isLoadingSessions {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                    Text("Loading sessions…")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 4)
+            } else if activeSessions.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("No active sessions found")
+                        .font(.system(size: 15, weight: .medium))
+                    Text("New sign-ins will appear here automatically.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 4)
+            } else {
+                // Vertical session cards — much more readable on mobile than a horizontal table
+                ForEach(activeSessions) { session in
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "laptopcomputer")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(.secondary)
+                            Text(session.device)
+                                .font(.system(size: 14, weight: .semibold))
+                                .lineLimit(1)
+                            if session.isCurrent == true {
+                                Text("This device")
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(Color.blue, in: Capsule())
+                            }
+                            Spacer()
+                            // Log out button — only for non-current sessions
+                            if session.isCurrent != true {
+                                Button(role: .destructive) {
+                                    Task { await revokeSession(session.id) }
+                                } label: {
+                                    if revokingSessionIDs.contains(session.id) {
+                                        ProgressView()
+                                            .scaleEffect(0.7)
+                                    } else {
+                                        Text("Log out")
+                                            .font(.system(size: 13, weight: .medium))
+                                    }
+                                }
+                                .buttonStyle(.borderless)
+                                .disabled(isRevokingAllSessions || revokingSessionIDs.contains(session.id))
+                            }
+                        }
+
+                        HStack(spacing: 16) {
+                            if !session.location.isEmpty {
+                                Label(session.location, systemImage: "location")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                            Label(formatSessionDate(session.updatedAt), systemImage: "clock")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+
+                // Log out all other devices
+                if activeSessions.count > 1 {
+                    Button(role: .destructive) {
+                        Task { await revokeAllSessions() }
+                    } label: {
+                        HStack {
+                            if isRevokingAllSessions {
+                                ProgressView()
+                                    .scaleEffect(0.8)
+                            }
+                            Text(isRevokingAllSessions ? "Signing out…" : "Log out all other devices")
+                        }
+                    }
+                    .disabled(isRevokingAllSessions)
+                }
+            }
+        } header: {
+            Text("Active Sessions")
+        } footer: {
+            Text("Review signed-in devices and revoke access without changing your password.")
         }
     }
 
@@ -470,12 +577,10 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - Combined: Email + AI
+    // MARK: - Email
 
-    private var emailAndAISection: some View {
-        @Bindable var ai = services.aiChatService
-        return Section {
-            // Email toggles
+    private var emailSection: some View {
+        Section {
             Toggle(isOn: Binding(
                 get: { services.swipeGesturesEnabled },
                 set: { services.swipeGesturesEnabled = $0 }
@@ -503,16 +608,37 @@ struct SettingsView: View {
                 Label("Group by Thread", systemImage: "text.bubble")
             }
             .tint(.blue)
+        } header: {
+            Text("Email")
+        }
+    }
 
-            // AI toggles
+    // MARK: - AI Assistant
+
+    private var aiAssistantSection: some View {
+        @Bindable var ai = services.aiChatService
+        return Section {
             Toggle(isOn: $ai.aiCanReadTasks) {
                 Label("Read my tasks", systemImage: "eye")
             }
             .tint(.blue)
+
             Toggle(isOn: $ai.aiCanWriteTasks) {
                 Label("Create & edit tasks", systemImage: "pencil")
             }
             .tint(.blue)
+
+            Picker(selection: Binding(
+                get: { services.aiTonePreference },
+                set: { services.aiTonePreference = $0 }
+            )) {
+                ForEach(AITonePreference.allCases) { tone in
+                    Text(tone.title).tag(tone)
+                }
+            } label: {
+                Label("Response Tone", systemImage: "text.quote")
+            }
+            .pickerStyle(.menu)
 
             VStack(alignment: .leading, spacing: 10) {
                 Text("Context about you")
@@ -523,7 +649,7 @@ struct SettingsView: View {
                         set: { services.contextAboutYou = $0 }
                     )
                 )
-                .frame(minHeight: 110)
+                .frame(minHeight: 100)
                 .scrollContentBackground(.hidden)
                 .padding(8)
                 .background(Color.secondary.opacity(0.08))
@@ -539,28 +665,16 @@ struct SettingsView: View {
                         set: { services.customInstructions = $0 }
                     )
                 )
-                .frame(minHeight: 110)
+                .frame(minHeight: 100)
                 .scrollContentBackground(.hidden)
                 .padding(8)
                 .background(Color.secondary.opacity(0.08))
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
-
-            Picker(selection: Binding(
-                get: { services.aiTonePreference },
-                set: { services.aiTonePreference = $0 }
-            )) {
-                ForEach(AITonePreference.allCases) { tone in
-                    Text(tone.title).tag(tone)
-                }
-            } label: {
-                Label("Response Tone", systemImage: "text.quote")
-            }
-            .pickerStyle(.menu)
         } header: {
-            Text("Email & AI")
+            Text("AI Assistant")
         } footer: {
-            Text("Controls email behaviors (swipe gestures, signatures, thread grouping) and what the AI can access and modify in your task list.")
+            Text("Controls what the AI can read and modify, and how it responds to you.")
         }
     }
 
@@ -710,6 +824,39 @@ struct SettingsView: View {
         model.split(separator: "/").last.map(String.init) ?? model
     }
 
+    private func headerCell(_ text: String, width: CGFloat) -> some View {
+        Text(text)
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(.secondary)
+            .frame(width: width, alignment: .leading)
+    }
+
+    private func valueCell(_ text: String, width: CGFloat, emphasized: Bool = false) -> some View {
+        Text(text)
+            .font(.system(size: emphasized ? 13 : 12, weight: emphasized ? .medium : .regular))
+            .frame(width: width, alignment: .leading)
+            .lineLimit(2)
+    }
+
+    private func formatSessionDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .short
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
+    }
+
+    private func loadActiveSessions() async {
+        isLoadingSessions = true
+        defer { isLoadingSessions = false }
+
+        do {
+            let response = try await services.apiClient.listSessions()
+            activeSessions = response.sessions
+        } catch {
+            AppLogger.shared.log("Load sessions failed: \(error.localizedDescription)")
+        }
+    }
+
     private func performLogout() {
         services.authService.hasSeenOnboarding = false
         services.signOut()
@@ -749,6 +896,40 @@ struct SettingsView: View {
             await services.emailService.checkConnection()
         } catch {
             AppLogger.shared.log("Disconnect Gmail failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func revokeSession(_ sessionId: String) async {
+        revokingSessionIDs.insert(sessionId)
+        defer { revokingSessionIDs.remove(sessionId) }
+
+        do {
+            let response = try await services.apiClient.revokeSession(sessionId: sessionId)
+            await loadActiveSessions()
+            if response.revokedCurrent {
+                performLogout()
+            } else {
+                await services.authService.fetchUserProfile()
+            }
+        } catch {
+            AppLogger.shared.log("Revoke session failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func revokeAllSessions() async {
+        isRevokingAllSessions = true
+        defer { isRevokingAllSessions = false }
+
+        do {
+            let response = try await services.apiClient.revokeAllSessions()
+            activeSessions = []
+            if response.revokedCurrent {
+                performLogout()
+            } else {
+                await services.authService.fetchUserProfile()
+            }
+        } catch {
+            AppLogger.shared.log("Revoke all sessions failed: \(error.localizedDescription)")
         }
     }
 }

@@ -43,7 +43,7 @@ struct BoardView: View {
                 [
                     task.id.uuidString,
                     task.status.rawValue,
-                    task.folderID ?? "nil"
+                    task.folderID?.uuidString ?? "nil"
                 ].joined(separator: ":")
             }
             .joined(separator: "|")

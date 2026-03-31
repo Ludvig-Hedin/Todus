@@ -33,8 +33,10 @@ private final class VoiceController {
             // Min deployment is iOS 18 — AVAudioApplication API is always available.
             AVAudioApplication.requestRecordPermission { [weak self] granted in
                 guard granted else { return }
-                DispatchQueue.main.async {
-                    self?.beginAudioSession()
+                // Use Task @MainActor to hop back to the main actor asynchronously —
+                // this allows beginAudioSession to do off-actor work without blocking.
+                Task { @MainActor [weak self] in
+                    await self?.beginAudioSession()
                 }
             }
         }
@@ -67,7 +69,7 @@ private final class VoiceController {
 
     // MARK: Private
 
-    private func beginAudioSession() {
+    private func beginAudioSession() async {
         guard let recognizer = speechRecognizer, recognizer.isAvailable else { return }
 
         let engine = AVAudioEngine()
@@ -82,10 +84,15 @@ private final class VoiceController {
         }
 
         do {
-            let session = AVAudioSession.sharedInstance()
-            // .duckOthers lowers background audio while recording
-            try session.setCategory(.record, mode: .measurement, options: .duckOthers)
-            try session.setActive(true, options: .notifyOthersOnDeactivation)
+            // Configure the audio session off the main actor — setActive can block briefly
+            // while notifying other audio clients, which would freeze the UI if run on main.
+            try await Task.detached(priority: .userInitiated) {
+                let session = AVAudioSession.sharedInstance()
+                // .duckOthers lowers background audio while recording
+                try session.setCategory(.record, mode: .measurement, options: .duckOthers)
+                try session.setActive(true, options: .notifyOthersOnDeactivation)
+            }.value
+
             engine.prepare()
             try engine.start()
         } catch {

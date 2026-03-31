@@ -31,9 +31,10 @@ final class VoiceTokenService {
         }
         components.scheme = (components.scheme == "https") ? "wss" : "ws"
 
-        // Build the voice-ws proxy path, avoiding double slashes
+        // Build the voice-ws proxy path — must include the /api prefix that the server mounts
+        // its api router on (aiRouter is at /api/ai/..., same as the chat endpoint /api/ai/chat).
         let basePath = components.path.hasSuffix("/") ? String(components.path.dropLast()) : components.path
-        components.path = basePath + "/ai/voice-ws"
+        components.path = basePath + "/api/ai/voice-ws"
 
         guard let url = components.url else {
             throw VoiceEndpointError.invalidURL

@@ -7,7 +7,7 @@
 
 import UIKit
 import CalendarKit
-@preconcurrency import EventKit
+import EventKit
 import EventKitUI
 
 final class CalendarViewController: DayViewController {
@@ -51,9 +51,10 @@ final class CalendarViewController: DayViewController {
     }
 
     private func requestAccessToCalendar() {
-        let completionHandler: EKEventStoreRequestAccessCompletionHandler = { _, _ in
+        let completionHandler: EKEventStoreRequestAccessCompletionHandler = { granted, error in
             Task { @MainActor [weak self] in
                 guard let self else { return }
+                _ = granted; _ = error
                 self.initializeStore()
                 self.subscribeToNotifications()
                 self.reloadData()
@@ -116,7 +117,7 @@ final class CalendarViewController: DayViewController {
         let key = Calendar.current.startOfDay(for: date)
         inFlightDates.insert(key)
         let store = self.eventStore
-        backgroundQueue.async { [weak self] in
+        backgroundQueue.async { [weak self, store, date] in
             let startDate = date
             var oneDayComponents = DateComponents()
             oneDayComponents.day = 1
@@ -126,9 +127,8 @@ final class CalendarViewController: DayViewController {
             let eventKitEvents = store.events(matching: predicate)
             let calendarKitEvents = eventKitEvents.map(EKWrapper.init)
 
-            DispatchQueue.main.async { [weak self] in
+            DispatchQueue.main.async { [weak self, key] in
                 guard let self else { return }
-                let key = Calendar.current.startOfDay(for: date)
                 self.inFlightDates.remove(key)
                 self.cachedEvents[key] = calendarKitEvents
                 self.reloadData()
@@ -238,12 +238,13 @@ final class CalendarViewController: DayViewController {
 }
 
 // MARK: - EKEventEditViewDelegate
-// Separate extension to satisfy Swift 6 strict concurrency — the delegate protocol
-// is not annotated @MainActor, so the conformance must be nonisolated.
-extension CalendarViewController: @preconcurrency EKEventEditViewDelegate {
-    func eventEditViewController(_ controller: EKEventEditViewController, didCompleteWith action: EKEventEditViewAction) {
-        endEventEditing()
-        reloadData()
-        controller.dismiss(animated: true, completion: nil)
+extension CalendarViewController: @MainActor EKEventEditViewDelegate {
+    nonisolated func eventEditViewController(_ controller: EKEventEditViewController, didCompleteWith action: EKEventEditViewAction) {
+        DispatchQueue.main.async { [weak self, weak controller] in
+            guard let self, let controller else { return }
+            self.endEventEditing()
+            self.reloadData()
+            controller.dismiss(animated: true, completion: nil)
+        }
     }
 }
