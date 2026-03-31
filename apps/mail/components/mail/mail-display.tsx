@@ -50,12 +50,15 @@ import { BimiAvatar } from '../ui/bimi-avatar';
 import { RenderLabels } from './render-labels';
 import { cleanHtml } from '@/lib/email-utils';
 import { MailContent } from './mail-content';
+import { APP_NAME } from '@/lib/branding';
 import { m } from '@/paraglide/messages';
 import { useParams } from 'react-router';
 import { FileText } from 'lucide-react';
+import { Button } from '../ui/button';
 import { useQueryState } from 'nuqs';
 import { Badge } from '../ui/badge';
 import { format } from 'date-fns';
+import posthog from 'posthog-js';
 import { toast } from 'sonner';
 
 // Add formatFileSize utility function
@@ -88,6 +91,14 @@ const getFileIcon = (filename: string) => {
     default:
       return <FileText className="h-4 w-4 text-[#8B5CF6]" />;
   }
+};
+
+const buildSummaryShareText = (subject: string | undefined, summary: string) => {
+  const headline = subject?.trim() ? `Thread: ${subject.trim()}` : 'Todus thread summary';
+
+  return [headline, '', summary.trim(), '', `Shared with ${APP_NAME} • https://todus.app`].join(
+    '\n',
+  );
 };
 
 const StreamingText = ({ text }: { text: string }) => {
@@ -307,15 +318,61 @@ const ThreadAttachments = ({ attachments }: { attachments: Attachment[] }) => {
   );
 };
 
-const AiSummary = () => {
+const AiSummary = ({ subject }: { subject?: string }) => {
   const [threadId] = useQueryState('threadId');
   const { data: summary, isLoading } = useSummary(threadId ?? null);
   const [showSummary, setShowSummary] = useState(false);
+  const [isCopied, setIsCopied] = useState(false);
+  const copyResetTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const handleToggle = (e: React.MouseEvent) => {
     e.stopPropagation();
     setShowSummary(!showSummary);
   };
+
+  useEffect(() => {
+    return () => {
+      if (copyResetTimeoutRef.current) {
+        clearTimeout(copyResetTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const handleCopySummary = useCallback(
+    async (e: React.MouseEvent) => {
+      e.stopPropagation();
+
+      const summaryText = summary?.data.short?.trim();
+      if (!summaryText) return;
+
+      try {
+        const shareText = buildSummaryShareText(subject, summaryText);
+        await navigator.clipboard.writeText(shareText);
+
+        posthog.capture('Thread Summary Shared', {
+          threadId: threadId ?? null,
+          subject: subject ?? '',
+          summaryLength: summaryText.length,
+          source: 'mail-thread-summary',
+        });
+
+        setIsCopied(true);
+        toast.success('Thread summary copied');
+
+        if (copyResetTimeoutRef.current) {
+          clearTimeout(copyResetTimeoutRef.current);
+        }
+
+        copyResetTimeoutRef.current = setTimeout(() => {
+          setIsCopied(false);
+        }, 2000);
+      } catch (error) {
+        console.error('Failed to copy thread summary:', error);
+        toast.error('Failed to copy thread summary');
+      }
+    },
+    [summary?.data.short, subject, threadId],
+  );
 
   if (isLoading) return null;
   if (!summary?.data.short?.length) return null;
@@ -325,14 +382,31 @@ const AiSummary = () => {
       className="mt-2 max-w-3xl rounded-xl border border-[#8B5CF6] bg-white px-4 py-2 dark:bg-[#252525]"
       onClick={(e) => e.stopPropagation()}
     >
-      <div className="flex cursor-pointer items-center" onClick={handleToggle}>
-        <TextShimmer className="text-xs font-medium text-[#929292]">Summary</TextShimmer>
+      <div className="flex items-start justify-between gap-3">
+        <button
+          type="button"
+          className="flex cursor-pointer items-center gap-1 text-left"
+          onClick={handleToggle}
+        >
+          <TextShimmer className="text-xs font-medium text-[#929292]">Summary</TextShimmer>
 
-        {!isLoading && (
-          <ChevronDown
-            className={`ml-1 h-2.5 w-2.5 fill-[#929292] transition-transform ${showSummary ? 'rotate-180' : ''}`}
-          />
-        )}
+          {!isLoading && (
+            <ChevronDown
+              className={`ml-1 h-2.5 w-2.5 fill-[#929292] transition-transform ${showSummary ? 'rotate-180' : ''}`}
+            />
+          )}
+        </button>
+
+        <Button
+          type="button"
+          size="xs"
+          variant="secondary"
+          className="h-7 gap-1.5 rounded-full px-2.5 text-[11px]"
+          onClick={handleCopySummary}
+        >
+          <CopyIcon className="h-3.5 w-3.5" />
+          {isCopied ? 'Copied' : 'Copy summary'}
+        </Button>
       </div>
       {showSummary && (
         <Markdown markdownContainerStyles={{ fontSize: 15 }}>{summary?.data.short || ''}</Markdown>
@@ -353,7 +427,7 @@ const ActionButton = ({ onClick, icon, text, shortcut }: ActionButtonProps) => {
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex h-7 items-center justify-center gap-1 overflow-hidden rounded-md border bg-white px-1.5 dark:border-none dark:bg-[#313131] cursor-pointer hover:bg-gray-100 dark:hover:bg-[#3d3d3d] transition-colors"
+      className="inline-flex h-7 cursor-pointer items-center justify-center gap-1 overflow-hidden rounded-md border bg-white px-1.5 transition-colors hover:bg-gray-100 dark:border-none dark:bg-[#313131] dark:hover:bg-[#3d3d3d]"
     >
       {icon}
       <div className="flex items-center justify-center gap-2.5 pl-0.5 pr-1">
@@ -1308,7 +1382,7 @@ const MailDisplay = ({ emailData, index, totalEmails, demo, threadAttachments }:
                     })()}
                   </div>
                 </div>
-                <AiSummary />
+                <AiSummary subject={emailData.subject} />
                 {threadAttachments && threadAttachments.length > 0 && (
                   <ThreadAttachments attachments={threadAttachments} />
                 )}
@@ -1350,7 +1424,7 @@ const MailDisplay = ({ emailData, index, totalEmails, demo, threadAttachments }:
                           <Popover open={openDetailsPopover} onOpenChange={handlePopoverChange}>
                             <PopoverTrigger asChild>
                               <button
-                                className="hover:bg-iconLight/10 dark:hover:bg-iconDark/20 flex items-center gap-2 rounded-md p-2 cursor-pointer"
+                                className="hover:bg-iconLight/10 dark:hover:bg-iconDark/20 flex cursor-pointer items-center gap-2 rounded-md p-2"
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   e.preventDefault();
@@ -1495,7 +1569,7 @@ const MailDisplay = ({ emailData, index, totalEmails, demo, threadAttachments }:
                                   e.stopPropagation();
                                   e.preventDefault();
                                 }}
-                                className="inline-flex h-7 w-7 items-center justify-center gap-1 overflow-hidden rounded-md bg-white hover:bg-gray-100 focus:outline-none focus:ring-0 dark:bg-[#313131] dark:hover:bg-[#3d3d3d] cursor-pointer transition-colors"
+                                className="inline-flex h-7 w-7 cursor-pointer items-center justify-center gap-1 overflow-hidden rounded-md bg-white transition-colors hover:bg-gray-100 focus:outline-none focus:ring-0 dark:bg-[#313131] dark:hover:bg-[#3d3d3d]"
                               >
                                 <ThreeDots className="fill-iconLight dark:fill-iconDark" />
                               </button>
