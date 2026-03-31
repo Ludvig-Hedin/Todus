@@ -7,6 +7,7 @@ Last updated: 2026-03-31
 - `DONE` Web task mutations now invalidate all `tasks.list` TanStack caches via `trpc.tasks.list.queryFilter()` (tasks page, home, calendar, TaskItem).
 - `DONE` Fixed the web root error boundary hook-order violation by moving Sentry/error-reporting side effects into a dedicated child component.
 - `DONE` Fixed categories settings state sync so the local list rehydrates from fresh server data and removed the stale hook dependency warning.
+- `DONE` Fixed the privacy settings "remove trusted sender" control so it no longer submits the form when removing an address.
 - `IN_PROGRESS` Apply targeted fixes for AI profile prompt safety, session freshness filtering, navigation i18n, and device logout UX.
 - `PENDING` Verify whether the web settings-general AI profile fields exist in this branch before adding localization keys for them.
 

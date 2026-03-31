@@ -122,6 +122,7 @@ export default function PrivacyPage() {
                             <Tooltip>
                               <TooltipTrigger asChild>
                                 <button
+                                  type="button"
                                   onClick={() =>
                                     field.onChange(field.value?.filter((e) => e !== senderEmail))
                                   }
