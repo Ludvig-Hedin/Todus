@@ -4,6 +4,7 @@ import { formatDistanceToNow } from 'date-fns';
 import { Calendar as CalendarIcon, Check, Circle } from 'lucide-react';
 import { useTRPC } from '@/providers/query-provider';
 import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
 
 type Task = Outputs['tasks']['list']['tasks'][number];
 
@@ -13,6 +14,10 @@ export function TaskItem({ task }: { task: Task }) {
 
   const updateTask = useMutation({
     ...trpc.tasks.update.mutationOptions(),
+    onError: (error) => {
+      console.error(error);
+      toast.error('Failed to update task.');
+    },
     onSettled: () => {
       void queryClient.invalidateQueries(trpc.tasks.list.queryFilter());
     },
@@ -35,7 +40,7 @@ export function TaskItem({ task }: { task: Task }) {
   return (
     <div
       className={cn(
-        'group flex cursor-pointer items-start gap-3 rounded-xl border border-border bg-card p-3 shadow-sm transition-colors hover:border-border/80',
+        'group flex items-start gap-3 rounded-xl border border-border bg-card p-3 shadow-sm transition-colors hover:border-border/80',
         task.status === 'done' && 'opacity-60',
       )}
     >
@@ -43,6 +48,7 @@ export function TaskItem({ task }: { task: Task }) {
         type="button"
         onClick={handleToggleComplete}
         className="mt-0.5 shrink-0"
+        disabled={updateTask.isPending}
         aria-label={task.status === 'done' ? 'Mark as not done' : 'Mark as done'}
       >
         {task.status === 'done' ? (

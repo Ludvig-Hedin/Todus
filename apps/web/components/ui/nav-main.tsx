@@ -1,13 +1,21 @@
-import { SidebarGroup, SidebarMenu, SidebarMenuButton, SidebarMenuItem } from './sidebar';
-import { Collapsible, CollapsibleTrigger } from '@/components/ui/collapsible';
+import {
+  SidebarGroup,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+} from './sidebar';
+import {
+  Collapsible,
+  CollapsibleTrigger,
+  CollapsibleContent,
+} from '@/components/ui/collapsible';
 import { useCommandPalette } from '../context/command-palette-context.jsx';
 import { LabelDialog } from '@/components/labels/label-dialog';
 import { useActiveConnection } from '@/hooks/use-connections';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { MessageSquare, OldPhone } from '../icons/icons';
 import { useSidebar } from '../context/sidebar-context';
 import { useTRPC } from '@/providers/query-provider';
-import { type NavItem } from '@/config/navigation';
+import { type NavItem, type NavChildItem } from '@/config/navigation';
 import type { Label as LabelType } from '@/types';
 import { Link, useLocation } from 'react-router';
 import { m } from '../../paraglide/messages.js';
@@ -16,9 +24,9 @@ import { useLabels } from '@/hooks/use-labels';
 import { Badge } from '@/components/ui/badge';
 import { useStats } from '@/hooks/use-stats';
 import SidebarLabels from './sidebar-labels';
-import { useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { BASE_URL } from '@/lib/constants';
-import { Plus } from 'lucide-react';
+import { ChevronRight, Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import * as React from 'react';
@@ -38,6 +46,7 @@ interface NavItemProps extends NavItem {
 
 interface NavMainProps {
   items: {
+    id?: string;
     title: string;
     items: NavItemProps[];
     isActive?: boolean;
@@ -54,7 +63,6 @@ export function NavMain({ items }: NavMainProps) {
   const pathname = location.pathname;
   const searchParams = new URLSearchParams(location.search);
 
-
   const trpc = useTRPC();
 
   const { mutateAsync: createLabel } = useMutation(trpc.labels.create.mutationOptions());
@@ -62,9 +70,6 @@ export function NavMain({ items }: NavMainProps) {
   const { userLabels, refetch } = useLabels();
 
   const { state } = useSidebar();
-
-  // Check if these are bottom navigation items by looking at the first section's title
-  const isBottomNav = items[0]?.title === '';
 
   /**
    * Validates URLs to prevent open redirect vulnerabilities.
@@ -174,23 +179,10 @@ export function NavMain({ items }: NavMainProps) {
   return (
     <SidebarGroup className={`${state !== 'collapsed' ? '' : 'mt-1'} space-y-2.5 py-0 md:px-0`}>
       <SidebarMenu>
-        {isBottomNav ? (
-          <>
-            <NavItem
-              key={'feedback'}
-              isActive={isUrlActive('https://feedback.todus.app')}
-              href={'https://feedback.todus.app'}
-              url={'https://feedback.todus.app'}
-
-              icon={MessageSquare}
-              target={'_blank'}
-              title={m['navigation.sidebar.feedback']()}
-            />
-          </>
-        ) : null}
+        {/* Feedback link removed — feedback.todus.app subdomain is empty */}
         {items.map((section) => (
           <Collapsible
-            key={section.title}
+            key={section.id ?? section.title}
             defaultOpen={section.isActive}
             className="group/collapsible"
           >
@@ -204,22 +196,37 @@ export function NavMain({ items }: NavMainProps) {
               ) : (
                 <div className="bg-border mx-2 mb-3 mt-1.5 h-px" />
               )}
-              <div className="z-20 space-y-1 pb-2">
-                {section.items.map((item) => (
-                  <NavItem
-                    key={item.url}
-                    {...item}
-                    isActive={isUrlActive(item.url)}
-                    href={getHref(item)}
-                    target={item.target}
-                    title={item.title}
-                  />
-                ))}
+              <div className="z-20 space-y-0.5 pb-2">
+                {section.items.map((item) =>
+                  item.children && item.children.length > 0 ? (
+                    // Items with children render as collapsible expandable groups
+                    <NavItemExpandable
+                      key={item.url}
+                      {...item}
+                      // Non-null assertion safe: guarded by item.children check above
+                      children={item.children!}
+                      isActive={
+                        item.children.some((child) => isUrlActive(child.url)) ||
+                        isUrlActive(item.url)
+                      }
+                      href={getHref(item)}
+                    />
+                  ) : (
+                    <NavItem
+                      key={item.url}
+                      {...item}
+                      isActive={isUrlActive(item.url)}
+                      href={getHref(item)}
+                      target={item.target}
+                      title={item.title}
+                    />
+                  ),
+                )}
               </div>
             </SidebarMenuItem>
           </Collapsible>
         ))}
-        {!pathname.includes('/settings') && !isBottomNav && state !== 'collapsed' && (
+        {!pathname.includes('/settings') && state !== 'collapsed' && (
           <Collapsible defaultOpen={true} className="group/collapsible flex-col">
             <SidebarMenuItem className="mb-4" style={{ height: 'auto' }}>
               <div className="mx-2 mb-4 flex items-center justify-between">
@@ -251,6 +258,125 @@ export function NavMain({ items }: NavMainProps) {
   );
 }
 
+// ─── NavItemExpandable ────────────────────────────────────────────────────────
+// Renders a parent nav item with a chevron that expands to show child links.
+// Matches the macOS sidebar pattern where Email expands to Inbox/Drafts/Sent.
+
+function NavItemExpandable(
+  item: NavItemProps & { href: string; children: NavChildItem[] },
+) {
+  const { state, setOpenMobile } = useSidebar();
+  const { clearAllFilters } = useCommandPalette();
+  const { data: stats } = useStats();
+
+  // Default open when any child is active
+  const [open, setOpen] = useState(item.isActive ?? false);
+
+  // Keep open state in sync when active route changes (e.g., external navigation)
+  useEffect(() => {
+    setOpen(item.isActive ?? false);
+  }, [item.isActive]);
+
+  // When collapsed to icon-only, navigate to the parent URL (inbox default)
+  if (state === 'collapsed') {
+    return (
+      <NavItem
+        {...item}
+        href={item.href}
+        title={item.title}
+      />
+    );
+  }
+
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <CollapsibleTrigger asChild>
+        <SidebarMenuButton
+          className={cn(
+            'hover:bg-accent flex w-full items-center transition-colors duration-100',
+            item.isActive && 'bg-accent text-accent-foreground',
+          )}
+        >
+          {item.icon && <item.icon className="mr-2 h-3.5 w-3.5 shrink-0" />}
+          <p className="relative bottom-px mt-0.5 min-w-0 flex-1 truncate text-[13px]">
+            {item.title}
+          </p>
+          {/* Chevron rotates 90° when expanded */}
+          <ChevronRight
+            className={cn(
+              'text-muted-foreground ml-auto h-3.5 w-3.5 shrink-0 transition-transform duration-200',
+              open && 'rotate-90',
+            )}
+          />
+        </SidebarMenuButton>
+      </CollapsibleTrigger>
+
+      <CollapsibleContent>
+        <div className="mt-0.5 space-y-0.5 pb-1 pl-[1.375rem]">
+          {item.children.map((child) => (
+            <NavChildRow
+              key={child.url}
+              child={child}
+              stats={stats}
+              onNavigate={() => {
+                clearAllFilters();
+                setOpenMobile(false);
+              }}
+            />
+          ))}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+// ─── NavChildRow ──────────────────────────────────────────────────────────────
+// Indented child link inside an expandable group. Shows unread badge via stats.
+
+function NavChildRow({
+  child,
+  stats,
+  onNavigate,
+}: {
+  child: NavChildItem;
+  stats: ReturnType<typeof useStats>['data'];
+  onNavigate: () => void;
+}) {
+  const location = useLocation();
+  const pathname = location.pathname;
+
+  // Simple path match — children don't have query params
+  const isActive = pathname === child.url || pathname.replace(/\/$/, '') === child.url;
+
+  const unreadCount = stats?.find(
+    (stat) => stat.label?.toLowerCase() === child.id?.toLowerCase(),
+  )?.count;
+
+  return (
+    <SidebarMenuButton
+      asChild
+      className={cn(
+        'hover:bg-accent flex items-center transition-colors duration-100',
+        isActive && 'bg-accent text-accent-foreground',
+      )}
+      onClick={onNavigate}
+    >
+      <Link to={child.url}>
+        <p className="relative bottom-px mt-0.5 min-w-0 flex-1 truncate text-[13px]">
+          {child.title}
+        </p>
+        {unreadCount != null && unreadCount > 0 && (
+          <Badge className="text-muted-foreground ml-auto shrink-0 rounded-full border-none bg-transparent text-[11px]">
+            {unreadCount.toLocaleString()}
+          </Badge>
+        )}
+      </Link>
+    </SidebarMenuButton>
+  );
+}
+
+// ─── NavItem ──────────────────────────────────────────────────────────────────
+
 function NavItem(item: NavItemProps & { href: string }) {
   const iconRef = useRef<IconRefType>(null);
   const { data: stats } = useStats();
@@ -264,7 +390,9 @@ function NavItem(item: NavItemProps & { href: string }) {
         tooltip={state === 'collapsed' ? item.title : undefined}
         className="flex cursor-not-allowed items-center opacity-50"
       >
-        {item.icon && <item.icon ref={iconRef} className="relative mr-2.5 h-3 w-3.5" />}
+        {item.icon && (
+          <item.icon ref={iconRef} className="relative mr-2 h-3.5 w-3.5 shrink-0" />
+        )}
         <p className="relative bottom-px mt-0.5 truncate text-[13px]">{item.title}</p>
       </SidebarMenuButton>
     );
@@ -291,13 +419,15 @@ function NavItem(item: NavItemProps & { href: string }) {
           onClick={handleClick}
         >
           <Link target={item.target} to={item.href}>
-            {item.icon && <item.icon ref={iconRef} className="mr-2 shrink-0" />}
+            {item.icon && (
+              <item.icon ref={iconRef} className="mr-2 h-3.5 w-3.5 shrink-0" />
+            )}
             <p className="relative bottom-px mt-0.5 min-w-0 flex-1 truncate text-[13px]">
               {item.title}
             </p>
             {stats &&
               stats.some((stat) => stat.label?.toLowerCase() === item.id?.toLowerCase()) && (
-                <Badge className="text-muted-foreground ml-auto shrink-0 rounded-full border-none bg-transparent">
+                <Badge className="text-muted-foreground ml-auto shrink-0 rounded-full border-none bg-transparent text-[11px]">
                   {stats
                     .find((stat) => stat.label?.toLowerCase() === item.id?.toLowerCase())
                     ?.count?.toLocaleString() || '0'}

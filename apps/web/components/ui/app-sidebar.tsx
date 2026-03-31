@@ -19,9 +19,8 @@ import React, { useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { useSession } from '@/lib/auth-client';
 import { useAIFullScreen } from './ai-sidebar';
-import { useStats } from '@/hooks/use-stats';
 import { useLocation } from 'react-router';
-import { cn, FOLDERS } from '@/lib/utils';
+import { cn } from '@/lib/utils';
 import { m } from '@/paraglide/messages';
 // import { Video } from 'lucide-react';
 import { NavUser } from './nav-user';
@@ -41,7 +40,6 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   });
   const [, setPricingDialog] = useQueryState('pricingDialog');
   const { isFullScreen } = useAIFullScreen();
-  const { data: stats } = useStats();
   const location = useLocation();
   const { data: session } = useSession();
   const { currentSection, navItems } = useMemo(() => {
@@ -54,16 +52,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     if (navigationConfig[currentSection]) {
       const items = [...navigationConfig[currentSection].sections];
 
-      if (currentSection === 'mail' && stats && stats.length) {
-        if (items[0]?.items[0]) {
-          items[0].items[0].badge =
-            stats.find((stat) => stat.label?.toLowerCase() === FOLDERS.INBOX)?.count ?? 0;
-        }
-        if (items[0]?.items[3]) {
-          items[0].items[3].badge =
-            stats.find((stat) => stat.label?.toLowerCase() === FOLDERS.SENT)?.count ?? 0;
-        }
-      }
+      // Badges are rendered in NavItem/NavChildRow via useStats() matching item.id —
+      // no manual badge mutation needed here.
 
       return { currentSection, navItems: items };
     } else {
@@ -72,7 +62,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         navItems: [],
       };
     }
-  }, [location.pathname, stats]);
+  }, [location.pathname]);
 
   const showComposeButton = currentSection === 'mail';
   const { state } = useSidebar();
