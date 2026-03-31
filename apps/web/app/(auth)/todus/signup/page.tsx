@@ -1,59 +1,13 @@
-import { Form, FormControl, FormField, FormItem, FormLabel } from '@/components/ui/form';
 import { Google } from '@/components/icons/icons';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { signIn, signUp } from '@/lib/auth-client';
+import { signIn } from '@/lib/auth-client';
 import { Button } from '@/components/ui/button';
-import { APP_NAME } from '@/lib/branding';
-import { Input } from '@/components/ui/input';
-import { useForm } from 'react-hook-form';
-import { toast } from 'sonner';
-import { z } from 'zod';
-
-const formSchema = z.object({
-  name: z.string().min(1, { message: 'Name must be at least 1 character' }),
-  email: z.string().min(1, { message: 'Username must be at least 1 character' }),
-  password: z.string().min(6, { message: 'Password must be at least 6 characters' }),
-});
 
 export default function SignupTodus() {
-  const form = useForm<z.infer<typeof formSchema>>({
-    resolver: zodResolver(formSchema as any),
-    defaultValues: {
-      name: '',
-      email: '',
-      password: '',
-    },
-  });
-
-  function onSubmit(values: z.infer<typeof formSchema>) {
-    const fullEmail = `${values.email}@todus.app`;
-
-    toast.promise(
-      signUp.email({
-        name: values.name,
-        email: fullEmail,
-        password: values.password,
-        callbackURL: '/mail/inbox',
-      }),
-      {
-        loading: 'Creating account...',
-        success: 'Account created successfully',
-        error: (err) =>
-          err?.message || 'Sign-up failed. Email/password registration may not be enabled.',
-      },
-    );
-  }
-
   function handleGoogleSignIn() {
-    toast.promise(
-      signIn.social({
+    signIn.social({
         provider: 'google',
         callbackURL: `${window.location.origin}/mail/inbox`,
-      }),
-      {
-        error: 'Login redirect failed',
-      },
-    );
+      });
   }
 
   return (
@@ -90,93 +44,6 @@ export default function SignupTodus() {
             <Google className="mr-2 h-4 w-4" />
             Continue with Google
           </Button>
-
-          {false && (
-            <>
-              <div className="relative mb-4">
-                <div className="absolute inset-0 flex items-center">
-                  <span className="w-full border-t border-border" />
-                </div>
-                <div className="relative flex justify-center text-xs uppercase">
-                  <span className="bg-background px-2 text-muted-foreground">or</span>
-                </div>
-              </div>
-
-              <Form {...form}>
-                <form onSubmit={form.handleSubmit(onSubmit)} className="mx-auto space-y-4">
-                  <FormField
-                    control={form.control}
-                    name="name"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Name</FormLabel>
-                        <FormControl>
-                          <Input
-                            placeholder="Luke"
-                            {...field}
-                          />
-                        </FormControl>
-                      </FormItem>
-                    )}
-                  />
-
-                  <FormField
-                    control={form.control}
-                    name="email"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Email</FormLabel>
-                        <FormControl>
-                          <div className="relative w-full rounded-md">
-                            <Input
-                              placeholder="adam"
-                              {...field}
-                              className="w-full pr-20"
-                            />
-                            <span className="bg-popover text-muted-foreground border-input absolute bottom-0 right-0 top-0 flex items-center rounded-r-md border border-l-0 px-3 py-2 text-sm">
-                              @todus.app
-                            </span>
-                          </div>
-                        </FormControl>
-                      </FormItem>
-                    )}
-                  />
-
-                  <FormField
-                    control={form.control}
-                    name="password"
-                    render={({ field }) => (
-                      <FormItem>
-                        <div className="flex items-center justify-between">
-                          <FormLabel>Password</FormLabel>
-                        </div>
-                        <FormControl>
-                          <Input
-                            type="password"
-                            placeholder="••••••••"
-                            {...field}
-                          />
-                        </FormControl>
-                      </FormItem>
-                    )}
-                  />
-
-                  <Button type="submit" className="w-full">
-                    Signup
-                  </Button>
-
-                  <div className="mt-6 text-center text-sm">
-                    <p className="text-muted-foreground">
-                      Already have an account?{' '}
-                      <a href="/login" className="font-medium underline underline-offset-4 hover:text-foreground">
-                        Login
-                      </a>
-                    </p>
-                  </div>
-                </form>
-              </Form>
-            </>
-          )}
         </div>
 
         <footer className="mt-auto">
