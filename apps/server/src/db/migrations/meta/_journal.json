@@ -288,6 +288,13 @@
       "when": 1774858522739,
       "tag": "0039_brainy_junta",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1774907141994,
+      "tag": "0040_stiff_living_lightning",
+      "breakpoints": true
     }
   ]
 }

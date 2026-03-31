@@ -1,7 +1,7 @@
 import { getCachedMemories, formatMemoriesForPrompt, addMemories, invalidateMemoryCache, preloadMemories } from '../lib/mem0';
 import { injectMentionContextIntoMessages, mentionRefSchema } from '../lib/mentions';
 import { systemPrompt } from '../services/call-service/system-prompt';
-import { buildAIProfilePrompt } from '../lib/ai-profile';
+import { getSharedAIProfilePromptForUser } from '../lib/ai-profile';
 import { perplexity } from '@ai-sdk/perplexity';
 import { openai } from '@ai-sdk/openai';
 import { tools } from './agent/tools';
@@ -12,7 +12,6 @@ import { env } from '../env';
 import type { HonoContext } from '../ctx';
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { getZeroDB } from '../lib/server-utils';
 
 type ToolsReturnType = Awaited<ReturnType<typeof tools>>;
 
@@ -268,20 +267,23 @@ aiRouter.post('/chat', async (c) => {
     }
   }
 
-  const zeroDB = await getZeroDB(user.id);
-  const settings = await zeroDB.findUserSettings();
-  const sharedAIProfilePrompt = buildAIProfilePrompt(settings?.settings);
-  if (sharedAIProfilePrompt) {
-    const systemIdx = enrichedMessages.findIndex((m) => m.role === 'system');
-    if (systemIdx >= 0) {
-      enrichedMessages = [...enrichedMessages];
-      enrichedMessages[systemIdx] = {
-        ...enrichedMessages[systemIdx],
-        content: `${sharedAIProfilePrompt}\n\n${enrichedMessages[systemIdx].content}`,
-      };
-    } else {
-      enrichedMessages = [{ role: 'system', content: sharedAIProfilePrompt }, ...enrichedMessages];
+  try {
+    const sharedAIProfilePrompt = await getSharedAIProfilePromptForUser(user.id);
+    if (sharedAIProfilePrompt) {
+      const systemIdx = enrichedMessages.findIndex((m) => m.role === 'system');
+      if (systemIdx >= 0) {
+        enrichedMessages = [...enrichedMessages];
+        // Append profile AFTER base system instructions so core rules take precedence
+        enrichedMessages[systemIdx] = {
+          ...enrichedMessages[systemIdx],
+          content: `${enrichedMessages[systemIdx].content}\n\n${sharedAIProfilePrompt}`,
+        };
+      } else {
+        enrichedMessages = [{ role: 'system', content: sharedAIProfilePrompt }, ...enrichedMessages];
+      }
     }
+  } catch (error) {
+    console.warn('[AIProfile] Failed to inject AI profile into /ai/chat for user:', user.id, error);
   }
 
   // Proxy the request to OpenRouter as SSE
@@ -312,7 +314,8 @@ aiRouter.post('/chat', async (c) => {
                 folderName: { type: 'string', description: 'Folder name (optional)' },
                 priority: {
                   type: 'string',
-                  enum: ['none', 'low', 'medium', 'high', 'urgent'],
+                  // 'urgent' excluded — server schema only accepts ['none','low','medium','high']
+                  enum: ['none', 'low', 'medium', 'high'],
                   description: 'Task priority',
                 },
               },
@@ -331,7 +334,7 @@ aiRouter.post('/chat', async (c) => {
                 id: { type: 'string', description: 'Task UUID' },
                 title: { type: 'string' },
                 status: { type: 'string', enum: ['todo', 'doing', 'done'] },
-                priority: { type: 'string', enum: ['none', 'low', 'medium', 'high', 'urgent'] },
+                priority: { type: 'string', enum: ['none', 'low', 'medium', 'high'] },
                 dueDate: { type: 'string' },
               },
               required: ['id'],
@@ -752,12 +755,15 @@ aiRouter.post('/call', async (c) => {
   const toolset = await tools(connection.id);
   const { text } = await generateText({
     model: openai(env.OPENAI_MODEL || 'gpt-4o'),
-    system: await (async () => {
-      const zeroDB = await getZeroDB(user.id);
-      const settings = await zeroDB.findUserSettings();
-      const sharedAIProfilePrompt = buildAIProfilePrompt(settings?.settings);
-      return sharedAIProfilePrompt ? `${sharedAIProfilePrompt}\n\n${systemPrompt}` : systemPrompt;
-    })(),
+    system: await getSharedAIProfilePromptForUser(user.id)
+      .then((sharedAIProfilePrompt) =>
+        // Append profile AFTER base system instructions so core rules take precedence
+        sharedAIProfilePrompt ? `${systemPrompt}\n\n${sharedAIProfilePrompt}` : systemPrompt,
+      )
+      .catch((error) => {
+        console.warn('[AIProfile] Failed to build system prompt with profile for user:', user.id, error);
+        return systemPrompt;
+      }),
     prompt: data.query,
     tools: toolset,
     maxSteps: 10,

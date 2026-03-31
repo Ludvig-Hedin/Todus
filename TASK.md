@@ -1,6 +1,20 @@
 # Migration Backlog
 
-Last updated: 2026-03-30
+Last updated: 2026-03-31
+
+## Current Web/Server Fix Batch
+
+- `DONE` Web task mutations now invalidate all `tasks.list` TanStack caches via `trpc.tasks.list.queryFilter()` (tasks page, home, calendar, TaskItem).
+- `IN_PROGRESS` Apply targeted fixes for AI profile prompt safety, session freshness filtering, navigation i18n, and device logout UX.
+- `PENDING` Verify whether the web settings-general AI profile fields exist in this branch before adding localization keys for them.
+
+## Active Security Work
+
+- `DONE` Added backend session-management primitives in `apps/server` via `sessions.list`, `sessions.revoke`, and `sessions.revokeAll`.
+- `DONE` Added the `mail0_session_metadata` table for coarse device/location labels and last-seen tracking for signed-in sessions.
+- `DONE` Replaced the `apps/web` security placeholder with a real Active Sessions table and `Log out all devices` action.
+- `DONE` Added Active Sessions management to iOS and macOS settings.
+- `PENDING` Cross-device near-live sync architecture across tasks, folders, settings, and AI state. This was intentionally not folded into the session-management change because it requires a broader server-authoritative sync pass.
 
 ## Active Auth Fixes
 
@@ -12,6 +26,7 @@ Last updated: 2026-03-30
 - `DONE` Full local macOS reset procedure documented in `apps/macos/README.md`.
 - `DONE` macOS centralized sign-out now resets cached email state before auth sign-out, preventing stale mailbox state from leaking across sessions.
 - `DONE` Invalid-session sign-out now preserves the session-expired banner/message, and Keychain write failures in shared auth/AI persistence are logged instead of being silent.
+- `DONE` Onboarding marketing email campaigns are now idempotent: the `welcomeEmailSent` guard is persisted before sending, and one failed queued campaign email no longer causes repeat sends on later logins.
 
 ## Build Fixes
 

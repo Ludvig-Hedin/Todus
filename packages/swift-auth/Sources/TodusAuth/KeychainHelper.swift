@@ -19,6 +19,13 @@ public enum KeychainHelper {
         ]
     }
 
+    private static func legacyQuery(key: String) -> [String: Any] {
+        [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrAccount as String: key,
+        ]
+    }
+
     private static func logFailure(operation: String, key: String, status: OSStatus) {
         let message = SecCopyErrorMessageString(status, nil) as String? ?? "Unknown keychain error"
         NSLog("KeychainHelper.\(operation) failed for key '\(key)': \(status) (\(message))")
@@ -27,9 +34,11 @@ public enum KeychainHelper {
     public static func save(key: String, value: String) -> Bool {
         guard let data = value.data(using: .utf8) else { return false }
         let query = baseQuery(key: key)
+        let legacy = legacyQuery(key: key)
         let deleteStatus = SecItemDelete(query as CFDictionary)
-        guard deleteStatus == errSecSuccess || deleteStatus == errSecItemNotFound else {
-            logFailure(operation: "save", key: key, status: deleteStatus)
+        let legacyDeleteStatus = SecItemDelete(legacy as CFDictionary)
+        guard [deleteStatus, legacyDeleteStatus].allSatisfy({ $0 == errSecSuccess || $0 == errSecItemNotFound }) else {
+            logFailure(operation: "save", key: key, status: deleteStatus != errSecSuccess && deleteStatus != errSecItemNotFound ? deleteStatus : legacyDeleteStatus)
             return false
         }
 
@@ -57,18 +66,20 @@ public enum KeychainHelper {
     }
 
     public static func read(key: String) -> String? {
-        var query = baseQuery(key: key)
-        query[kSecReturnData as String] = true
-        query[kSecMatchLimit as String] = kSecMatchLimitOne
-        var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        guard status == errSecSuccess, let data = result as? Data else { return nil }
-        return String(data: data, encoding: .utf8)
+        if let data = readData(from: baseQuery(key: key)) {
+            return String(data: data, encoding: .utf8)
+        }
+        if let data = readData(from: legacyQuery(key: key)) {
+            return String(data: data, encoding: .utf8)
+        }
+        return nil
     }
 
     public static func delete(key: String) {
         let query = baseQuery(key: key)
+        let legacy = legacyQuery(key: key)
         SecItemDelete(query as CFDictionary)
+        SecItemDelete(legacy as CFDictionary)
     }
 
     // MARK: - Data persistence (for larger blobs like conversation history)
@@ -76,9 +87,11 @@ public enum KeychainHelper {
 
     public static func saveData(key: String, value: Data) -> Bool {
         let query = baseQuery(key: key)
+        let legacy = legacyQuery(key: key)
         let deleteStatus = SecItemDelete(query as CFDictionary)
-        guard deleteStatus == errSecSuccess || deleteStatus == errSecItemNotFound else {
-            logFailure(operation: "saveData", key: key, status: deleteStatus)
+        let legacyDeleteStatus = SecItemDelete(legacy as CFDictionary)
+        guard [deleteStatus, legacyDeleteStatus].allSatisfy({ $0 == errSecSuccess || $0 == errSecItemNotFound }) else {
+            logFailure(operation: "saveData", key: key, status: deleteStatus != errSecSuccess && deleteStatus != errSecItemNotFound ? deleteStatus : legacyDeleteStatus)
             return false
         }
 
@@ -106,11 +119,21 @@ public enum KeychainHelper {
     }
 
     public static func readData(key: String) -> Data? {
-        var query = baseQuery(key: key)
-        query[kSecReturnData as String] = true
-        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        if let data = readData(from: baseQuery(key: key)) {
+            return data
+        }
+        if let data = readData(from: legacyQuery(key: key)) {
+            return data
+        }
+        return nil
+    }
+
+    private static func readData(from query: [String: Any]) -> Data? {
+        var lookup = query
+        lookup[kSecReturnData as String] = true
+        lookup[kSecMatchLimit as String] = kSecMatchLimitOne
         var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        let status = SecItemCopyMatching(lookup as CFDictionary, &result)
         guard status == errSecSuccess, let data = result as? Data else { return nil }
         return data
     }

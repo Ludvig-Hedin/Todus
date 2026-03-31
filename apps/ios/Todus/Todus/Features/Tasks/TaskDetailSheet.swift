@@ -173,7 +173,7 @@ struct TaskDetailSheet: View {
             )) {
                 Text("Inbox").tag("")
                 ForEach(folders) { folder in
-                    Text(folder.name).tag(folder.id.uuidString)
+                    Text(folder.name).tag(folder.id.uuidString as String)
                 }
             }
 
@@ -318,3 +318,4 @@ private struct TaskDetailCameraPicker: UIViewControllerRepresentable {
         }
     }
 }
+

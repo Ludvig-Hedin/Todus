@@ -174,6 +174,9 @@ function ChatHeader({
 
 interface AISidebarProps {
   className?: string;
+  /** When true, suppresses the ResizablePanel (sidebar) render so the component
+   *  can safely be mounted outside a ResizablePanelGroup (e.g. in the mail layout). */
+  popupOnly?: boolean;
 }
 
 type ViewMode = 'sidebar' | 'popup' | 'fullscreen';
@@ -335,7 +338,7 @@ export function useAISidebar() {
   };
 }
 
-function AISidebar({ className }: AISidebarProps) {
+function AISidebar({ className, popupOnly }: AISidebarProps) {
   const { open, setOpen, isFullScreen, setIsFullScreen, toggleViewMode, isSidebar, isPopup } =
     useAISidebar();
   const { isPro, track, refetch: refetchBilling } = useBilling();
@@ -479,8 +482,9 @@ function AISidebar({ className }: AISidebarProps) {
     <>
       {open && (
         <>
-          {/* Desktop view - visible on md and larger screens */}
-          {isSidebar && !isFullScreen && (
+          {/* Desktop view - visible on md and larger screens.
+              Skipped when popupOnly=true (e.g. mounted outside ResizablePanelGroup). */}
+          {!popupOnly && isSidebar && !isFullScreen && (
             <>
               <ResizableHandle className="hidden md:flex w-px bg-transparent" />
               <ResizablePanel

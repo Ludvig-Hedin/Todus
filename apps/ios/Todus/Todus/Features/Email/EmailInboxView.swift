@@ -10,6 +10,10 @@ struct EmailInboxView: View {
     /// Debounce task for server-side search — cancelled on each new keystroke.
     @State private var searchDebounceTask: Task<Void, Never>?
 
+    // Deterministic skeleton widths — computed once to avoid visual jitter from CGFloat.random in view body
+    private static let skeletonNameWidths: [CGFloat]    = [120, 140, 130, 155, 125, 145]
+    private static let skeletonSnippetWidths: [CGFloat] = [180, 200, 195, 215, 185, 205]
+
     private var emailService: EmailService { services.emailService }
 
     var body: some View {
@@ -18,6 +22,9 @@ struct EmailInboxView: View {
 
             if !emailService.hasConnection {
                 EmailConnectView()
+            } else if emailService.isLoadingThreads && emailService.threads.isEmpty {
+                // First load — show skeleton rather than empty state to avoid flicker
+                loadingState
             } else if emailService.threads.isEmpty && !emailService.isLoadingThreads {
                 emptyState
             } else {
@@ -213,28 +220,95 @@ struct EmailInboxView: View {
         .modifier(SearchBarGlassModifier())
     }
 
+    // MARK: - Loading State
+
+    /// Shown on first load when threads haven't arrived yet — skeleton prevents confusing empty flash
+    private var loadingState: some View {
+        VStack(spacing: 0) {
+            // Match the thread list header layout
+            HStack(spacing: 6) {
+                AppTopHeader(title: "Inbox")
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 4)
+            .padding(.bottom, 6)
+
+            // Search bar placeholder
+            searchBar
+                .padding(.horizontal, 16)
+                .padding(.bottom, 10)
+                .disabled(true)
+
+            Divider().foregroundStyle(AppTheme.divider)
+
+            // Skeleton rows — visual hint that content is loading
+            VStack(spacing: 0) {
+                ForEach(0..<6, id: \.self) { index in
+                    HStack(spacing: 12) {
+                        Circle()
+                            .fill(AppTheme.surfaceSecondary)
+                            .frame(width: 36, height: 36)
+                        VStack(alignment: .leading, spacing: 6) {
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(AppTheme.surfaceSecondary)
+                                // Use static widths to prevent jitter from random values on re-render
+                                .frame(width: EmailInboxView.skeletonNameWidths[index], height: 12)
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(AppTheme.surfaceSecondary.opacity(0.6))
+                                .frame(width: EmailInboxView.skeletonSnippetWidths[index], height: 10)
+                        }
+                        Spacer()
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    Divider().foregroundStyle(AppTheme.divider)
+                }
+            }
+            .redacted(reason: .placeholder)
+        }
+    }
+
     // MARK: - Empty State
 
+    /// Shown after a successful load returns zero results — clearly "inbox is empty", not "loading"
     private var emptyState: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "tray")
-                .font(.system(size: 44, weight: .light))
-                .foregroundStyle(AppTheme.mutedText)
-            Text("Your inbox is empty")
-                .font(.system(size: 17, weight: .semibold))
-            Text("Tap Refresh to check for new mail, or compose a new email")
-                .font(.system(size: 14))
-                .foregroundStyle(AppTheme.subtleText)
-            // Manual refresh button — gives a clear action when inbox appears empty
-            Button {
-                Task { await emailService.loadThreads(refresh: true) }
-            } label: {
-                Text("Refresh")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.blue)
+        VStack(spacing: 0) {
+            HStack(spacing: 6) {
+                AppTopHeader(title: "Inbox")
             }
-            .buttonStyle(.plain)
+            .padding(.horizontal, 16)
             .padding(.top, 4)
+            .padding(.bottom, 6)
+
+            searchBar
+                .padding(.horizontal, 16)
+                .padding(.bottom, 10)
+
+            Divider().foregroundStyle(AppTheme.divider)
+
+            Spacer()
+            VStack(spacing: 12) {
+                Image(systemName: "tray")
+                    .font(.system(size: 44, weight: .light))
+                    .foregroundStyle(AppTheme.mutedText)
+                Text("Inbox is empty")
+                    .font(.system(size: 17, weight: .semibold))
+                Text("You're all caught up.")
+                    .font(.system(size: 14))
+                    .foregroundStyle(AppTheme.subtleText)
+                Button {
+                    // Pass active search query so Refresh respects the current filter,
+                    // matching the pull-to-refresh behavior in threadList
+                    Task { await emailService.loadThreads(refresh: true, query: searchText.isEmpty ? nil : searchText) }
+                } label: {
+                    Text("Refresh")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.blue)
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 4)
+            }
+            Spacer()
         }
     }
 

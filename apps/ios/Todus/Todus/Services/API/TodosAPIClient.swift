@@ -40,6 +40,9 @@ final class TodosAPIClient {
         if let token = authService.bearerToken {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
+        if let sessionId = authService.currentSessionId {
+            request.setValue(sessionId, forHTTPHeaderField: "X-Todus-Session-Id")
+        }
 
         if let body {
             request.httpBody = try JSONEncoder().encode(body)
@@ -84,6 +87,9 @@ final class TodosAPIClient {
         if let token = authService.bearerToken {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
+        if let sessionId = authService.currentSessionId {
+            request.setValue(sessionId, forHTTPHeaderField: "X-Todus-Session-Id")
+        }
         if let body {
             request.httpBody = try JSONEncoder().encode(body)
         }
@@ -108,6 +114,18 @@ final class TodosAPIClient {
         let _: EmptyResponse = try await trpcMutation("connections.delete")
     }
 
+    func listSessions() async throws -> ActiveSessionsResponse {
+        try await trpcQuery("sessions.list")
+    }
+
+    func revokeSession(sessionId: String) async throws -> RevokeSessionResponse {
+        try await trpcMutation("sessions.revoke", input: SessionIDInput(sessionId: sessionId))
+    }
+
+    func revokeAllSessions() async throws -> RevokeAllSessionsResponse {
+        try await trpcMutation("sessions.revokeAll")
+    }
+
     // MARK: - Private
 
     private func trpcRequest<T: Decodable>(
@@ -124,6 +142,9 @@ final class TodosAPIClient {
 
         if let token = authService.bearerToken {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        if let sessionId = authService.currentSessionId {
+            request.setValue(sessionId, forHTTPHeaderField: "X-Todus-Session-Id")
         }
 
         if let input {
@@ -184,6 +205,9 @@ final class TodosAPIClient {
         if let token = authService.bearerToken {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
+        if let sessionId = authService.currentSessionId {
+            request.setValue(sessionId, forHTTPHeaderField: "X-Todus-Session-Id")
+        }
         if let input {
             let inputData = try JSONEncoder().encode(input)
             let inputJSON = try JSONSerialization.jsonObject(with: inputData)
@@ -211,6 +235,34 @@ final class TodosAPIClient {
 
 /// Empty response placeholder for API calls that don't return meaningful data.
 struct EmptyResponse: Decodable {}
+
+struct ActiveSessionRecord: Decodable, Identifiable {
+    let id: String
+    let device: String
+    let location: String
+    let createdAt: Date
+    let updatedAt: Date
+    let isCurrent: Bool?
+}
+
+struct ActiveSessionsResponse: Decodable {
+    let sessions: [ActiveSessionRecord]
+}
+
+private struct SessionIDInput: Encodable {
+    let sessionId: String
+}
+
+struct RevokeSessionResponse: Decodable {
+    let success: Bool
+    let revokedCurrent: Bool
+}
+
+struct RevokeAllSessionsResponse: Decodable {
+    let success: Bool
+    let revokedCount: Int
+    let revokedCurrent: Bool
+}
 
 // MARK: - API Error
 

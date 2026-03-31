@@ -51,6 +51,11 @@ struct AIChatView: View {
     // Live voice chat
     @State private var showVoiceChat = false
 
+    // Full-screen compose overlay — expands input into a dedicated sheet for long prompts
+    @State private var showsFullScreenInput = false
+    // True when the text input has grown to its maxHeight cap (120pt); shows expand button
+    @State private var inputAtMaxHeight = false
+
     // Animated thinking text cycles while streaming
     @State private var thinkingIndex = 0
     private let thinkingPhrases = ["Thinking", "Reading tasks", "Searching", "Writing"]
@@ -202,6 +207,17 @@ struct AIChatView: View {
             )
             .preferredColorScheme(services.appearancePreference.colorScheme)
         }
+        // Full-screen compose — lets users write long prompts comfortably
+        .sheet(isPresented: $showsFullScreenInput) {
+            FullScreenComposeView(inputText: $inputText, onSend: {
+                showsFullScreenInput = false
+                // Brief delay so the sheet dismiss animation plays before sending
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { sendMessage() }
+            })
+            .presentationDragIndicator(.visible)
+            .presentationBackground(AppTheme.backgroundTop)
+            .preferredColorScheme(services.appearancePreference.colorScheme)
+        }
         .onChange(of: selectedPhotoItem) { _, newItem in
             guard let newItem else { return }
             Task {
@@ -259,18 +275,18 @@ struct AIChatView: View {
             .buttonStyle(.plain)
         }
 
-        // Chat title (or app name when empty)
+        // Chat title (or app name when empty) — fills available space, truncates with ellipsis
         ToolbarItem(placement: .principal) {
             Text(chatService.chatTitle ?? "AI Assistant")
                 .font(.system(size: 15, weight: .semibold))
                 .tracking(-0.2)
                 .lineLimit(1)
-                .frame(maxWidth: 200)
+                .truncationMode(.tail)
         }
 
         // New chat + options menu — trailing, with horizontal breathing room
         ToolbarItem(placement: .topBarTrailing) {
-            HStack(spacing: 16) {
+            HStack(spacing: 14) {
                 // New chat button
                 Button {
                     withAnimation(.snappy(duration: 0.2)) {
@@ -333,10 +349,9 @@ struct AIChatView: View {
                     Image(systemName: "ellipsis")
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(.primary)
-                        // Slightly larger tap target for the ellipsis since it's at the edge
-                        .padding(.trailing, 2)
                 }
             }
+            .padding(.trailing, 4)  // breathing room from the screen edge
         }
     }
 
@@ -642,21 +657,32 @@ struct AIChatView: View {
                     .padding(.horizontal, 8)
                     .padding(.top, 8)
                     .padding(.bottom, 12)
-                    // Gradient fade instead of solid fill — content scrolling behind the gap
-                    // above the + button stays partially visible instead of being hidden
+                    // Gradient fade — taller fade so content above the input is still partially
+                    // visible; solid background only covers the input box itself, not a huge area.
                     .background {
                         VStack(spacing: 0) {
                             LinearGradient(
-                                colors: [AppTheme.backgroundTop.opacity(0), AppTheme.backgroundTop],
+                                colors: [AppTheme.backgroundTop.opacity(0), AppTheme.backgroundTop.opacity(0.94)],
                                 startPoint: .top,
                                 endPoint: .bottom
                             )
-                            .frame(height: 16)
-                            AppTheme.backgroundTop
+                            .frame(height: 48)
+                            AppTheme.backgroundTop.opacity(0.97)
                         }
                         .ignoresSafeArea(edges: .bottom)
                     }
             }
+            // Tapping anywhere in the scroll area dismisses the keyboard, including message content.
+            .simultaneousGesture(
+                TapGesture().onEnded {
+                    if isInputFocused {
+                        UIApplication.shared.sendAction(
+                            #selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil
+                        )
+                        isInputFocused = false
+                    }
+                }
+            )
             .onChange(of: chatService.messages.count) { _, _ in
                 scrollToBottom(proxy: proxy)
             }
@@ -694,16 +720,16 @@ struct AIChatView: View {
     }
 
     // MARK: - Input Section
-    // Layout mirrors CaptureComposer exactly:
-    //   [circle paperclip btn (outside left)] [VStack: text field / divider / [config | spacer | send]]
-    // Attachment panel floats above the circle button when active.
+    // Layout: [circle + btn] [chatInputBox: config | text | expand | voice | mic | send]
+    // Attachment panel floats above the + button when active (via HStack-level overlay).
 
     private let chatInputControlSize: CGFloat = 44
 
     private var inputSection: some View {
-        // Main input row — attachment panel floats via .overlay so it never affects layout
+        // Main input row — attachment panel floats via overlay at HStack level (above chatInputBox)
         HStack(alignment: .bottom, spacing: 10) {
-            // Circle plus button — toggles custom attachment panel above it
+            // Circle plus button — toggles custom attachment panel above it.
+            // Rotates 45° when open to visually become an × (close indicator).
             Button {
                 withAnimation(.snappy(duration: 0.15)) { isPickingAttachment.toggle() }
             } label: {
@@ -711,29 +737,25 @@ struct AIChatView: View {
                     .font(.system(size: 17, weight: .medium))
                     .foregroundStyle(AppTheme.mutedText)
                     .frame(width: chatInputControlSize, height: chatInputControlSize)
+                    .rotationEffect(.degrees(isPickingAttachment ? 45 : 0))
             }
             .buttonStyle(.plain)
             .background(AppTheme.surfacePrimary, in: Circle())
             .overlay(Circle().stroke(AppTheme.strongBorder, lineWidth: 1))
-            // Attachment picker panel — overlaid above the + button, doesn't affect layout
-            .overlay(alignment: .bottomLeading) {
-                if isPickingAttachment {
-                    attachmentPickerPanel
-                        .offset(y: -(chatInputControlSize + 8))
-                        .transition(.scale(scale: 0.85, anchor: .bottomLeading).combined(with: .opacity))
-                }
-            }
 
             // Input box — images now live inside the box itself
             chatInputBox
         }
+        // Attachment picker panel at HStack level so it renders above chatInputBox.
+        // Anchored to the bottom-leading corner (the + button area), offset upward.
+        .overlay(alignment: .bottomLeading) {
+            if isPickingAttachment {
+                attachmentPickerPanel
+                    .offset(y: -(chatInputControlSize + 8))
+                    .transition(.scale(scale: 0.85, anchor: .bottomLeading).combined(with: .opacity))
+            }
+        }
         .animation(.snappy(duration: 0.15), value: isPickingAttachment)
-    }
-
-    /// Whether the input box should show its full toolbar (config, mic, send).
-    /// Compact mode: only text field + mic, matching the height of the + button.
-    private var isInputExpanded: Bool {
-        isInputFocused || !chatService.messages.isEmpty || chatService.isStreaming
     }
 
     private var mentionOptions: [RichInputMentionRef] {
@@ -786,7 +808,7 @@ struct AIChatView: View {
 
         return VStack(spacing: 0) {
             // ── Above-text row: page context pill + attachment thumbnails ──────
-            if pageContextAttached || !pendingAttachments.isEmpty {
+            if hasAccessories {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
                         // Page context pill — shows which tab/page the user is on
@@ -823,146 +845,116 @@ struct AIChatView: View {
                 .padding(.bottom, 2)
             }
 
-            if isInputExpanded {
+            // ── Main input row: [config] [text field] [expand] [voice] [mic] [send] ──
+            // Unified layout — config button always left, action buttons always right.
+            // The text field grows naturally between them (up to maxHeight: 120).
+            HStack(alignment: .bottom, spacing: 6) {
+                // Config button — always on the left of the text input
+                Button { showsConfig = true } label: {
+                    Image(systemName: "slider.horizontal.3")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(AppTheme.mutedText)
+                }
+                .buttonStyle(.plain)
+                .frame(width: 34, height: 34)
+                .contentShape(Rectangle())
+                .minTouchTarget()
+
+                // Growing text input — sits between config and action buttons
                 RichComposerInput(
                     text: $inputText,
                     mentions: $inputMentions,
                     placeholder: "Ask, search or make anything…",
                     surface: .aiChat,
                     mentionOptions: mentionOptions,
+                    isFocused: isInputFocused,
                     maxHeight: 120,
                     onCommand: { _ in },
                     onFocusChange: { focused in isInputFocused = focused }
                 )
-                    .frame(maxHeight: 120)
-                    .padding(.horizontal, 16)
-                    .padding(.top, hasAccessories ? 6 : 12)
-                    .padding(.bottom, 8)
+                .frame(maxHeight: 120)
+                // Measure the content height to decide whether to show the expand button.
+                // Background reads before padding so we get the raw content height (not padded).
+                .background(
+                    GeometryReader { geo in
+                        Color.clear
+                            .onAppear { inputAtMaxHeight = geo.size.height >= 118 }
+                            .onChange(of: geo.size.height) { _, h in
+                                inputAtMaxHeight = h >= 118
+                            }
+                    }
+                )
+                .padding(.vertical, hasAccessories ? 6 : 10)
 
-                // Bottom toolbar: [config | spacer | waveform | mic | send/stop]
-                // Consistent 34×34 outer frames, 6pt spacing between right-side action buttons
-                HStack(spacing: 6) {
-                    Button { showsConfig = true } label: {
-                        Image(systemName: "slider.horizontal.3")
-                            .font(.system(size: 15, weight: .medium))
+                // Full-screen expand toggle — only visible when text has filled the input box.
+                // This signals the user that more space is available and avoids a confusing
+                // always-visible button when the input is just one line.
+                if inputAtMaxHeight {
+                    Button { showsFullScreenInput.toggle() } label: {
+                        Image(systemName: showsFullScreenInput
+                              ? "arrow.down.right.and.arrow.up.left"
+                              : "arrow.up.left.and.arrow.down.right")
+                            .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(AppTheme.mutedText)
                     }
                     .buttonStyle(.plain)
-                    .frame(width: 34, height: 34)
+                    .frame(width: 28, height: 28)
                     .contentShape(Rectangle())
-                    .minTouchTarget()
-
-                    Spacer()
-
-                    // Live voice chat button — opens full-screen voice modal
-                    Button { showVoiceChat = true } label: {
-                        Image(systemName: "waveform")
-                            .font(.system(size: 15, weight: .medium))
-                            .foregroundStyle(voiceButtonGradient)
-                    }
-                    .buttonStyle(.plain)
-                    .frame(width: 34, height: 34)
-                    .contentShape(Rectangle())
-                    .minTouchTarget()
-
-                    ChatVoiceInputButton(onTranscription: { transcribed in
-                        let current = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-                        inputText = current.isEmpty ? transcribed : current + " " + transcribed
-                    })
-
-                    // Stop button while streaming; send button only visible when there's content
-                    if chatService.isStreaming {
-                        Button { chatService.cancelStream() } label: {
-                            Image(systemName: "stop.fill")
-                                .font(.system(size: 13, weight: .bold))
-                                .foregroundStyle(.white)
-                                .frame(width: 30, height: 30)
-                        }
-                        .buttonStyle(AppPrimaryButtonStyle())
-                        .clipShape(Circle())
-                        .minTouchTarget()
-                        .transition(.scale.combined(with: .opacity))
-                    } else if !isEmpty {
-                        // Send button — hidden when input is empty for a cleaner look
-                        Button(action: sendMessage) {
-                            Image(systemName: "arrow.up")
-                                .font(.system(size: 15, weight: .bold))
-                                .foregroundStyle(.white)
-                                .frame(width: 30, height: 30)
-                        }
-                        .buttonStyle(AppPrimaryButtonStyle())
-                        .clipShape(Circle())
-                        .minTouchTarget()
-                        .transition(.scale.combined(with: .opacity))
-                    }
+                    .transition(.scale.combined(with: .opacity))
                 }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 8)
-            } else {
-                // Compact mode — text + voice + mic + send, consistent 6pt spacing
-                HStack(alignment: .bottom, spacing: 6) {
-                    RichComposerInput(
-                        text: $inputText,
-                        mentions: $inputMentions,
-                        placeholder: "Ask, search or make anything…",
-                        surface: .aiChat,
-                        mentionOptions: mentionOptions,
-                        maxHeight: 120,
-                        onCommand: { _ in },
-                        onFocusChange: { focused in isInputFocused = focused }
-                    )
-                    .frame(maxHeight: 120)
-                    .padding(.leading, 16)
 
-                    Button { showVoiceChat = true } label: {
-                        Image(systemName: "waveform")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(voiceButtonGradient)
-                    }
-                    .buttonStyle(.plain)
-                    .frame(width: 34, height: 34)
-                    .contentShape(Rectangle())
-
-                    ChatVoiceInputButton(onTranscription: { transcribed in
-                        let current = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-                        inputText = current.isEmpty ? transcribed : current + " " + transcribed
-                    })
-
-                    // Stop button while streaming; send hidden when empty
-                    if chatService.isStreaming {
-                        Button { chatService.cancelStream() } label: {
-                            Image(systemName: "stop.fill")
-                                .font(.system(size: 13, weight: .bold))
-                                .foregroundStyle(.white)
-                                .frame(width: 30, height: 30)
-                        }
-                        .buttonStyle(AppPrimaryButtonStyle())
-                        .clipShape(Circle())
-                        .minTouchTarget()
-                        .transition(.scale.combined(with: .opacity))
-                    } else if !isEmpty {
-                        Button(action: sendMessage) {
-                            Image(systemName: "arrow.up")
-                                .font(.system(size: 15, weight: .bold))
-                                .foregroundStyle(.white)
-                                .frame(width: 30, height: 30)
-                        }
-                        .buttonStyle(AppPrimaryButtonStyle())
-                        .clipShape(Circle())
-                        .minTouchTarget()
-                        .transition(.scale.combined(with: .opacity))
-                    }
+                // Live voice chat button — opens full-screen voice modal
+                Button { showVoiceChat = true } label: {
+                    Image(systemName: "waveform")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(voiceButtonGradient)
                 }
-                .padding(.trailing, 6)
-                .frame(minHeight: chatInputControlSize)
+                .buttonStyle(.plain)
+                .frame(width: 30, height: 30)
+                .contentShape(Rectangle())
+                .minTouchTarget()
+
+                ChatVoiceInputButton(onTranscription: { transcribed in
+                    let current = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+                    inputText = current.isEmpty ? transcribed : current + " " + transcribed
+                })
+
+                // Stop button while streaming; send button only visible when there's content
+                if chatService.isStreaming {
+                    Button { chatService.cancelStream() } label: {
+                        Image(systemName: "stop.fill")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 30, height: 30)
+                    }
+                    .buttonStyle(AppPrimaryButtonStyle())
+                    .clipShape(Circle())
+                    .minTouchTarget()
+                    .transition(.scale.combined(with: .opacity))
+                } else if !isEmpty {
+                    Button(action: sendMessage) {
+                        Image(systemName: "arrow.up")
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 30, height: 30)
+                    }
+                    .buttonStyle(AppPrimaryButtonStyle())
+                    .clipShape(Circle())
+                    .minTouchTarget()
+                    .transition(.scale.combined(with: .opacity))
+                }
             }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
         }
-        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: isInputExpanded ? 24 : chatInputControlSize / 2, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: isInputExpanded ? 24 : chatInputControlSize / 2, style: .continuous).stroke(AppTheme.strongBorder, lineWidth: 1))
+        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(AppTheme.strongBorder, lineWidth: 1))
         .animation(.snappy(duration: 0.18), value: chatService.isStreaming)
-        .animation(.snappy(duration: 0.2), value: isInputExpanded)
         .animation(.easeOut(duration: 0.12), value: isEmpty)
         .animation(.snappy(duration: 0.15), value: pendingAttachments.count)
+        // Tapping anywhere on the input box (padding areas) focuses the text field
+        .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .onTapGesture { isInputFocused = true }
     }
 
     /// Attachment thumbnail — adapts to context:
@@ -1457,25 +1449,27 @@ private struct MessageBubble: View {
         case .text(let txt):
             // Streaming phase: fast inline-only markdown (bold, italic, inline code, preserves newlines).
             // Completion phase: crossfade to full markdown (headings, list bullets, code blocks).
-            Group {
-                if showFullMarkdown {
-                    fullMarkdownText(txt)
-                        .transition(.opacity)
-                } else {
-                    inlineMarkdownText(txt)
-                        .overlay(alignment: .bottomLeading) {
-                            // Blinking cursor only after the very last text chunk
-                            if isLastPart && message.isStreaming { BlinkingCursor() }
-                        }
-                        .transition(.opacity)
-                }
+            // NOTE: font/tracking are NOT applied to the full-markdown branch so heading
+            // sizes from AttributedString markdown parsing are respected.
+            if showFullMarkdown {
+                fullMarkdownText(txt)
+                    .transition(.opacity)
+                    .animation(.easeIn(duration: 0.3), value: showFullMarkdown)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                inlineMarkdownText(txt)
+                    .overlay(alignment: .bottomLeading) {
+                        // Blinking cursor only after the very last text chunk
+                        if isLastPart && message.isStreaming { BlinkingCursor() }
+                    }
+                    .transition(.opacity)
+                    .animation(.easeIn(duration: 0.3), value: showFullMarkdown)
+                    .font(.system(size: 16, weight: .regular))
+                    .tracking(-0.1)
+                    .lineSpacing(3)
+                    .foregroundStyle(.primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .animation(.easeIn(duration: 0.3), value: showFullMarkdown)
-            .font(.system(size: 16, weight: .regular))
-            .tracking(-0.1)
-            .lineSpacing(4)
-            .foregroundStyle(.primary)
-            .frame(maxWidth: .infinity, alignment: .leading)
 
         case .taskRef(let uuid):
             if let task = allTasks.first(where: { $0.id == uuid }) {
@@ -1530,6 +1524,8 @@ private struct MessageBubble: View {
     /// Adds headings, list bullets, code blocks on top of inline syntax.
     /// Preprocesses single `\n` → `\n\n` because CommonMark collapses single newlines
     /// to a space, causing all paragraphs/bullets to run together in one blob.
+    /// Does NOT apply an explicit `.font()` override so heading sizes from AttributedString
+    /// markdown parsing (h1/h2/h3) are preserved with correct sizes and weights.
     @ViewBuilder
     private func fullMarkdownText(_ content: String) -> some View {
         // Normalize: single \n → \n\n so markdown sees paragraph breaks, not spaces.
@@ -1541,8 +1537,13 @@ private struct MessageBubble: View {
         let attributed = Self.styledFullMarkdown(normalized, sources: message.sources, styleCitations: styleCitations)
         if let attributed {
             Text(attributed)
+                .lineSpacing(2)
+                .foregroundStyle(.primary)
         } else {
             Text(content)
+                .font(.system(size: 16))
+                .lineSpacing(2)
+                .foregroundStyle(.primary)
         }
     }
 
@@ -2499,7 +2500,7 @@ struct AIChatConfigSheet: View {
                 } header: {
                     Text("Model")
                 } footer: {
-                    Text("Models are routed via OpenRouter. To update the available list, edit the availableModels array in AIChatConfigSheet.swift, or override PRIMARY_MODEL in TaskAppConfig.plist.")
+                    Text("Models are routed via OpenRouter.")
                 }
             }
             .navigationTitle("AI Settings")
@@ -2754,6 +2755,67 @@ private extension Array {
             arr.swapAt(i, j)
         }
         return arr
+    }
+}
+
+// MARK: - FullScreenComposeView
+
+/// Full-screen text editor for composing long prompts.
+/// Presented as a sheet from the expand button in the chat input box.
+private struct FullScreenComposeView: View {
+    @Binding var inputText: String
+    let onSend: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        NavigationStack {
+            ZStack(alignment: .bottomTrailing) {
+                TextEditor(text: $inputText)
+                    .font(.system(size: 16))
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                    .scrollContentBackground(.hidden)
+                    .background(AppTheme.backgroundTop)
+                    .focused($isFocused)
+
+                // Send button floating over the editor — only shows when there's text
+                if !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Button(action: onSend) {
+                        Image(systemName: "arrow.up")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 36, height: 36)
+                    }
+                    .buttonStyle(AppPrimaryButtonStyle())
+                    .clipShape(Circle())
+                    .padding(.trailing, 20)
+                    .padding(.bottom, 20)
+                    .transition(.scale.combined(with: .opacity))
+                }
+            }
+            .background(AppTheme.backgroundTop)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Close") { dismiss() }
+                        .font(.system(size: 15))
+                }
+                ToolbarItem(placement: .principal) {
+                    Text("Compose")
+                        .font(.system(size: 15, weight: .semibold))
+                }
+            }
+        }
+        .task {
+            // Delay focus until the sheet's presentation animation finishes (~300ms).
+            // Setting isFocused = true during the animation triggers competing keyboard
+            // animations and causes a visible 5-second hang on sheet open.
+            try? await Task.sleep(for: .milliseconds(350))
+            isFocused = true
+        }
+        .animation(.snappy(duration: 0.15), value: inputText.isEmpty)
     }
 }
 

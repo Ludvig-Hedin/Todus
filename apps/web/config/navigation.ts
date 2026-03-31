@@ -2,8 +2,6 @@ import {
   Archive,
   Bin,
   ExclamationCircle,
-  Folder,
-  Inbox,
   SettingsGear,
   Stars,
   Tabs,
@@ -14,9 +12,17 @@ import {
   Plane2,
   LockIcon,
   Clock,
+  Mail,
 } from '@/components/icons/icons';
-import { MessageSquareIcon } from 'lucide-react';
+import { MessageSquareIcon, Home, CheckSquare2, CalendarDays, Search } from 'lucide-react';
 import { m } from '@/paraglide/messages';
+
+// Child items inside an expandable nav group (e.g. Email → Inbox/Drafts/Sent)
+export interface NavChildItem {
+  id?: string;
+  title: string;
+  url: string;
+}
 
 export interface NavItem {
   id?: string;
@@ -29,9 +35,12 @@ export interface NavItem {
   disabled?: boolean;
   target?: string;
   shortcut?: string;
+  /** When set, the item renders as a collapsible group with these child links */
+  children?: NavChildItem[];
 }
 
 interface NavSection {
+  id?: string;
   title: string;
   items: NavItem[];
 }
@@ -47,33 +56,67 @@ export const navigationConfig: Record<string, NavConfig> = {
     path: '/mail',
     sections: [
       {
+        // Primary nav — Home, Tasks, Email (expandable), Calendar
+        // Mirrors macOS sidebar order
+        id: 'primary',
         title: '',
         items: [
           {
-            id: 'inbox',
-            title: m['navigation.sidebar.inbox'](),
+            id: 'home',
+            title: m['navigation.sidebar.home'](),
+            url: '/mail/home',
+            icon: Home,
+            shortcut: 'g + h',
+          },
+          {
+            id: 'tasks',
+            title: m['navigation.sidebar.tasks'](),
+            url: '/mail/tasks',
+            // Use lucide CheckSquare2 — cleaner than the custom CircleCheck SVG
+            icon: CheckSquare2,
+            shortcut: 'g + k',
+          },
+          {
+            id: 'email',
+            title: 'Email',
             url: '/mail/inbox',
-            icon: Inbox,
-            shortcut: 'g + i',
+            icon: Mail,
+            // Inbox/Drafts/Sent nested under collapsible Email parent (matches macOS)
+            children: [
+              { id: 'inbox', title: m['navigation.sidebar.inbox'](), url: '/mail/inbox' },
+              { id: 'drafts', title: m['navigation.sidebar.drafts'](), url: '/mail/draft' },
+              { id: 'sent', title: m['navigation.sidebar.sent'](), url: '/mail/sent' },
+            ],
           },
           {
-            id: 'drafts',
-            title: m['navigation.sidebar.drafts'](),
-            url: '/mail/draft',
-            icon: Folder,
-            shortcut: 'g + d',
-          },
-          {
-            id: 'sent',
-            title: m['navigation.sidebar.sent'](),
-            url: '/mail/sent',
-            icon: Plane2,
-            shortcut: 'g + t',
+            id: 'calendar',
+            title: m['navigation.sidebar.calendar'](),
+            url: '/mail/calendar',
+            // Use lucide CalendarDays — cleaner lines than custom SVG
+            icon: CalendarDays,
+            shortcut: 'g + c',
           },
         ],
       },
       {
-        title: 'More',
+        // Utility — Search only. AI Chat is FAB-only, not a sidebar nav item.
+        id: 'extras',
+        title: '',
+        items: [
+          {
+            id: 'search',
+            title: m['navigation.sidebar.search'](),
+            url: '/mail/search',
+            // Use lucide Search — consistent with lucide icon set
+            icon: Search,
+            shortcut: 'g + f',
+          },
+        ],
+      },
+      {
+        // Archive / cleanup folders — de-emphasised, unlabeled
+        id: 'archive',
+        title: '',
         items: [
           {
             id: 'archive',
@@ -103,35 +146,6 @@ export const navigationConfig: Record<string, NavConfig> = {
           },
         ],
       },
-      // {
-      //   title: "Categories",
-      //   items: [
-      //     {
-      //       title: "Social",
-      //       url: "/mail/inbox?category=social",
-      //       icon: UsersIcon,
-      //       badge: 972,
-      //     },
-      //     {
-      //       title: "Updates",
-      //       url: "/mail/inbox?category=updates",
-      //       icon: BellIcon,
-      //       badge: 342,
-      //     },
-      //     {
-      //       title: "Forums",
-      //       url: "/mail/inbox?category=forums",
-      //       icon: MessageCircleIcon,
-      //       badge: 128,
-      //     },
-      //     {
-      //       title: "Shopping",
-      //       url: "/mail/inbox?category=shopping",
-      //       icon: CartIcon,
-      //       badge: 8,
-      //     },
-      //   ],
-      // },
     ],
   },
   settings: {
@@ -157,6 +171,11 @@ export const navigationConfig: Record<string, NavConfig> = {
             title: m['navigation.settings.connections'](),
             url: '/settings/connections',
             icon: Users,
+          },
+          {
+            title: m['navigation.settings.security'](),
+            url: '/settings/security',
+            icon: LockIcon,
           },
           {
             title: m['navigation.settings.privacy'](),
@@ -189,23 +208,6 @@ export const navigationConfig: Record<string, NavConfig> = {
             icon: Tabs,
             shortcut: '?',
           },
-          // {
-          //   title: 'navigation.settings.signatures',
-          //   url: '/settings/signatures',
-          //   icon: MessageSquareIcon,
-          //   disabled: true,
-          // },
-          // {
-          //   title: 'navigation.settings.shortcuts',
-          //   url: '/settings/shortcuts',
-          //   icon: Tabs,
-          //   disabled: true,
-          // },
-          // {
-          //   title: "Notifications",
-          //   url: "/settings/notifications",
-          //   icon: BellIcon,
-          // },
           {
             title: m['navigation.settings.deleteAccount'](),
             url: '/settings/danger-zone',

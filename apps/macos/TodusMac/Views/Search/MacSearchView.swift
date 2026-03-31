@@ -9,7 +9,15 @@ struct MacSearchView: View {
     @Query(filter: #Predicate<TaskRecord> { !$0.completed },
            sort: \TaskRecord.createdAt, order: .reverse) private var tasks: [TaskRecord]
 
+    var onCreateTask: () -> Void = {}
+    var onComposeEmail: () -> Void = {}
+    var onCreateEvent: () -> Void = {}
+    var onOpenTasks: () -> Void = {}
+    var onOpenCalendarEvent: (Date) -> Void = { _ in }
+    var onOpenEmailThread: (String) -> Void = { _ in }
+
     @State private var searchText = ""
+    @State private var calendarEvents: [CalendarEvent] = []
     @FocusState private var isFocused: Bool
 
     var body: some View {
@@ -57,12 +65,23 @@ struct MacSearchView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onAppear { isFocused = true }
+        .task {
+            await loadContextData()
+        }
     }
 
     // MARK: - Recommended Content (before query)
 
     private var recommendedContent: some View {
         VStack(alignment: .leading, spacing: MacTheme.spacing16) {
+            if !suggestedSearches.isEmpty {
+                searchSection(title: "SUGGESTED SEARCHES", icon: "sparkles") {
+                    ForEach(Array(suggestedSearches.enumerated()), id: \.offset) { _, suggestion in
+                        suggestionRow(suggestion)
+                    }
+                }
+            }
+
             // Recent tasks
             if !tasks.isEmpty {
                 searchSection(title: "RECENT TASKS", icon: "checkmark.square") {
@@ -72,7 +91,10 @@ struct MacSearchView: View {
                             iconColor: task.status.tintColor,
                             title: task.title,
                             subtitle: task.dueDate.map { "Due \($0.formatted(.dateTime.month(.abbreviated).day()))" } ?? "No due date",
-                            type: "Task"
+                            type: "Task",
+                            action: {
+                                onOpenTasks()
+                            }
                         )
                     }
                 }
@@ -87,7 +109,31 @@ struct MacSearchView: View {
                             iconColor: thread.unread ? MacTheme.accent : MacTheme.mutedText,
                             title: thread.subject,
                             subtitle: "From \(thread.from.name)",
-                            type: "Email"
+                            type: "Email",
+                            action: {
+                                onOpenEmailThread(thread.id)
+                            }
+                        )
+                    }
+                }
+            }
+
+            if !calendarEvents.isEmpty {
+                searchSection(title: "RECENT EVENTS", icon: "calendar") {
+                    ForEach(calendarEvents.prefix(4)) { event in
+                        searchRow(
+                            icon: event.isAllDay ? "calendar.badge.clock" : "calendar",
+                            iconColor: Color(
+                                red: event.calendarColorRed,
+                                green: event.calendarColorGreen,
+                                blue: event.calendarColorBlue
+                            ),
+                            title: event.title,
+                            subtitle: eventSubtitle(for: event),
+                            type: "Event",
+                            action: {
+                                onOpenCalendarEvent(event.startDate)
+                            }
                         )
                     }
                 }
@@ -95,17 +141,44 @@ struct MacSearchView: View {
 
             // Quick actions
             searchSection(title: "QUICK ACTIONS", icon: "bolt") {
-                searchRow(icon: "plus.circle", iconColor: MacTheme.accent, title: "Create a new task", subtitle: "Add to your task list", type: "Action")
-                searchRow(icon: "envelope", iconColor: .blue, title: "Compose email", subtitle: "Write a new message", type: "Action")
-                searchRow(icon: "calendar.badge.plus", iconColor: .orange, title: "New event", subtitle: "Add to your calendar", type: "Action")
+                searchRow(
+                    icon: "plus.circle",
+                    iconColor: MacTheme.accent,
+                    title: "Create a new task",
+                    subtitle: "Add to your task list",
+                    type: "Action",
+                    action: {
+                        onCreateTask()
+                    }
+                )
+                searchRow(
+                    icon: "envelope",
+                    iconColor: .blue,
+                    title: "Compose email",
+                    subtitle: "Write a new message",
+                    type: "Action",
+                    action: {
+                        onComposeEmail()
+                    }
+                )
+                searchRow(
+                    icon: "calendar.badge.plus",
+                    iconColor: .orange,
+                    title: "New event",
+                    subtitle: "Add to your calendar",
+                    type: "Action",
+                    action: {
+                        onCreateEvent()
+                    }
+                )
             }
 
-            if tasks.isEmpty && services.emailService.threads.isEmpty {
+            if tasks.isEmpty && services.emailService.threads.isEmpty && calendarEvents.isEmpty {
                 VStack(spacing: MacTheme.spacing8) {
                     Image(systemName: "sparkle.magnifyingglass")
                         .font(.system(size: 24, weight: .light))
                         .foregroundStyle(MacTheme.mutedText.opacity(0.5))
-                    Text("Start typing to search")
+                    Text("Search tasks, emails, and calendar events")
                         .font(.system(size: 13))
                         .foregroundStyle(MacTheme.textSecondary)
                 }
@@ -128,6 +201,10 @@ struct MacSearchView: View {
             $0.from.name.lowercased().contains(query) ||
             $0.snippet.lowercased().contains(query)
         }
+        let matchingEvents = calendarEvents.filter {
+            $0.title.lowercased().contains(query) ||
+            $0.calendarName.lowercased().contains(query)
+        }
 
         return VStack(alignment: .leading, spacing: MacTheme.spacing16) {
             if !matchingTasks.isEmpty {
@@ -138,7 +215,10 @@ struct MacSearchView: View {
                             iconColor: task.status.tintColor,
                             title: task.title,
                             subtitle: task.dueDate.map { "Due \($0.formatted(.dateTime.month(.abbreviated).day()))" } ?? "No due date",
-                            type: "Task"
+                            type: "Task",
+                            action: {
+                                onOpenTasks()
+                            }
                         )
                     }
                 }
@@ -152,13 +232,37 @@ struct MacSearchView: View {
                             iconColor: thread.unread ? MacTheme.accent : MacTheme.mutedText,
                             title: thread.subject,
                             subtitle: "From \(thread.from.name)",
-                            type: "Email"
+                            type: "Email",
+                            action: {
+                                onOpenEmailThread(thread.id)
+                            }
                         )
                     }
                 }
             }
 
-            if matchingTasks.isEmpty && matchingEmails.isEmpty {
+            if !matchingEvents.isEmpty {
+                searchSection(title: "EVENTS", icon: "calendar") {
+                    ForEach(matchingEvents.prefix(5)) { event in
+                        searchRow(
+                            icon: event.isAllDay ? "calendar.badge.clock" : "calendar",
+                            iconColor: Color(
+                                red: event.calendarColorRed,
+                                green: event.calendarColorGreen,
+                                blue: event.calendarColorBlue
+                            ),
+                            title: event.title,
+                            subtitle: eventSubtitle(for: event),
+                            type: "Event",
+                            action: {
+                                onOpenCalendarEvent(event.startDate)
+                            }
+                        )
+                    }
+                }
+            }
+
+            if matchingTasks.isEmpty && matchingEmails.isEmpty && matchingEvents.isEmpty {
                 VStack(spacing: MacTheme.spacing8) {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 24, weight: .light))
@@ -166,6 +270,10 @@ struct MacSearchView: View {
                     Text("No results for \"\(searchText)\"")
                         .font(.system(size: 13))
                         .foregroundStyle(MacTheme.textSecondary)
+
+                    Text("Try a task title, sender name, or event name.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(MacTheme.mutedText)
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.top, MacTheme.spacing24)
@@ -174,6 +282,16 @@ struct MacSearchView: View {
     }
 
     // MARK: - Components
+
+    private struct SearchSuggestion: Identifiable {
+        var id: String {
+            title + "|" + subtitle + "|" + icon
+        }
+        let title: String
+        let subtitle: String
+        let icon: String
+        let action: () -> Void
+    }
 
     private func searchSection<Content: View>(title: String, icon: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: MacTheme.spacing6) {
@@ -198,8 +316,16 @@ struct MacSearchView: View {
         }
     }
 
-    private func searchRow(icon: String, iconColor: Color, title: String, subtitle: String, type: String) -> some View {
-        HStack(spacing: MacTheme.spacing8) {
+    @ViewBuilder
+    private func searchRow(
+        icon: String,
+        iconColor: Color,
+        title: String,
+        subtitle: String,
+        type: String,
+        action: (() -> Void)? = nil
+    ) -> some View {
+        let row = HStack(spacing: MacTheme.spacing8) {
             Image(systemName: icon)
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(iconColor)
@@ -228,5 +354,126 @@ struct MacSearchView: View {
         }
         .padding(.horizontal, MacTheme.spacing12)
         .padding(.vertical, MacTheme.spacing8)
+        .contentShape(Rectangle())
+
+        if let action {
+            Button {
+                action()
+                dismiss()
+            } label: {
+                row
+            }
+            .buttonStyle(.plain)
+            .focusEffectDisabled()
+            .pointerStyle(.link)
+        } else {
+            row
+        }
+    }
+
+    private var suggestedSearches: [SearchSuggestion] {
+        var suggestions: [SearchSuggestion] = []
+
+        if let task = tasks.first {
+            suggestions.append(SearchSuggestion(
+                title: task.title,
+                subtitle: "Recent task",
+                icon: task.status.systemImage,
+                action: { searchText = task.title }
+            ))
+        }
+
+        if let thread = services.emailService.threads.first {
+            suggestions.append(SearchSuggestion(
+                title: thread.subject,
+                subtitle: "Recent email",
+                icon: thread.unread ? "envelope.badge" : "envelope.open",
+                action: { searchText = thread.subject }
+            ))
+        }
+
+        if let event = calendarEvents.first {
+            suggestions.append(SearchSuggestion(
+                title: event.title,
+                subtitle: "Recent event",
+                icon: event.isAllDay ? "calendar.badge.clock" : "calendar",
+                action: { searchText = event.title }
+            ))
+        }
+
+        return suggestions
+    }
+
+    private func suggestionRow(_ suggestion: SearchSuggestion) -> some View {
+        Button {
+            suggestion.action()
+        } label: {
+            HStack(spacing: MacTheme.spacing8) {
+                Image(systemName: suggestion.icon)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(MacTheme.accent)
+                    .frame(width: 20)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(suggestion.title)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(MacTheme.textPrimary)
+                        .lineLimit(1)
+
+                    Text(suggestion.subtitle)
+                        .font(.system(size: 11))
+                        .foregroundStyle(MacTheme.textSecondary)
+                        .lineLimit(1)
+                }
+
+                Spacer()
+
+                Image(systemName: "arrow.up.left")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(MacTheme.mutedText)
+            }
+            .padding(.horizontal, MacTheme.spacing12)
+            .padding(.vertical, MacTheme.spacing8)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .focusEffectDisabled()
+        .pointerStyle(.link)
+    }
+
+    private func eventSubtitle(for event: CalendarEvent) -> String {
+        if event.isAllDay {
+            return event.calendarName + " • All day"
+        }
+        return event.calendarName + " • " + event.startDate.formatted(.dateTime.month(.abbreviated).day().hour().minute())
+    }
+
+    private func loadContextData() async {
+        await loadEmailThreadsIfNeeded()
+        await loadCalendarEventsIfNeeded()
+    }
+
+    private func loadEmailThreadsIfNeeded() async {
+        if !services.emailService.hasConnection {
+            await services.emailService.checkConnection()
+        }
+
+        guard services.emailService.hasConnection, services.emailService.threads.isEmpty else {
+            return
+        }
+
+        await services.emailService.loadThreads(refresh: true)
+    }
+
+    private func loadCalendarEventsIfNeeded() async {
+        guard services.calendarService.canReadEvents() else {
+            calendarEvents = []
+            return
+        }
+
+        let cal = Calendar.current
+        let start = cal.date(byAdding: .day, value: -30, to: Date()) ?? Date()
+        let end = cal.date(byAdding: .day, value: 180, to: Date()) ?? Date()
+        calendarEvents = await services.calendarService.events(from: start, to: end)
     }
 }

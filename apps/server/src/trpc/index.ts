@@ -19,6 +19,7 @@ import { mailRouter } from './routes/mail';
 import { bimiRouter } from './routes/bimi';
 import type { HonoContext } from '../ctx';
 import { tasksRouter, foldersRouter } from './routes/tasks';
+import { sessionsRouter } from './routes/sessions';
 import { aiRouter } from './routes/ai';
 import { router } from './trpc';
 
@@ -36,6 +37,7 @@ export const appRouter = router({
   mentions: mentionsRouter,
   notes: notesRouter,
   shortcut: shortcutRouter,
+  sessions: sessionsRouter,
   settings: settingsRouter,
   user: userRouter,
   templates: templatesRouter,

@@ -1,6 +1,6 @@
 # Todus — Agent Configuration
 
-> For all AI coding agents (Claude, Cursor, Gemini, Copilot, etc.). Last updated: March 27, 2026.
+> For all AI coding agents (Claude, Cursor, Gemini, Copilot, etc.). Last updated: March 31, 2026.
 
 Todus is a unified productivity app — email, calendar, tasks, and AI assistant in one app. Built as a **pnpm + Turborepo** monorepo.
 
@@ -23,31 +23,71 @@ Todus is a unified productivity app — email, calendar, tasks, and AI assistant
 
 ```bash
 # Development
-pnpm go               # Start DB + all apps
-pnpm dev              # Start web + backend dev servers
-pnpm docker:db:up     # Start PostgreSQL in Docker
-pnpm ios:simulator    # iOS simulator
-cd apps/macos && xcodegen generate && open TodusMac.xcodeproj  # macOS native app
+pnpm go                         # Start Docker DB + web + backend
+pnpm dev                        # Start web + backend dev servers
+pnpm web                        # Alias for web + backend dev servers
+pnpm mail                       # Start the web app only
+pnpm docker:db:up               # Start PostgreSQL in Docker
+pnpm docker:db:stop             # Stop PostgreSQL
+pnpm docker:db:down             # Remove PostgreSQL container
+pnpm docker:db:clean            # Remove PostgreSQL container and volumes
+pnpm ios                        # Start the iOS app
+pnpm ios:simulator              # Launch the iOS simulator flow
+pnpm ios:build:preview          # Build iOS preview artifact
+pnpm ios:build:production       # Build iOS production artifact
+pnpm macos                      # Start the macOS app
+pnpm android                    # Start the Android app
+pnpm scripts                    # Run repo scripts via tsx
 
 # Database (Drizzle ORM)
-pnpm db:generate      # Generate migration from schema changes
-pnpm db:migrate       # Apply migrations
-pnpm db:studio        # Drizzle Studio GUI
+pnpm db:generate                # Generate migration from schema changes
+pnpm db:migrate                 # Apply migrations
+pnpm db:push                    # Push schema changes directly
+pnpm db:studio                  # Drizzle Studio GUI
 
 # Build & Deploy
-pnpm build            # Build all packages
-pnpm deploy:frontend  # Deploy web to Cloudflare
-pnpm deploy:backend   # Deploy backend to Cloudflare Workers
+pnpm build                      # Build all packages
+pnpm build:frontend             # Build the web app only
+pnpm deploy:frontend            # Deploy web to Cloudflare
+pnpm deploy:backend             # Deploy backend to Cloudflare Workers
+pnpm sentry:sourcemaps          # Upload frontend source maps
+
+# Evaluations and parity
+pnpm test:ai                    # Run backend AI tests
+pnpm eval                       # Run backend evals
+pnpm eval:dev                   # Run backend evals in dev mode
+pnpm eval:ci                    # Run backend evals in CI mode
+pnpm parity:screenshots:check   # Compare screenshot parity
+pnpm parity:screenshots:sync    # Sync screenshot logs
+pnpm parity:screenshots:capture:ios
+pnpm parity:screenshots:capture:ios:auto
+pnpm parity:screenshots:capture:android:auto
+pnpm parity:screenshots:capture:macos:auto
 
 # Quality
-pnpm lint             # ESLint
-pnpm format           # Prettier
-pnpm test             # Run tests
-pnpm test -- -t "name" # Single test
+pnpm precommit                 # Local pre-commit lint gate
+pnpm lint                      # ESLint
+pnpm format                    # Prettier write for app code
+pnpm check                     # Format check + lint
+pnpm check:format              # Prettier check
+pnpm test                      # Run tests
+pnpm test:watch                # Watch tests
+pnpm test:coverage             # Coverage run
+pnpm test:ui                   # UI test runner
+pnpm test -- -t "name"         # Single test
 ```
 
 ### Important Restrictions
-- **NEVER run project-wide lint/format commands** (`pnpm check`, `pnpm lint`, `pnpm format`) — these touch the entire codebase. Only lint/format specific files you changed.
+- **NEVER run project-wide lint/format commands** (`pnpm check`, `pnpm lint`, `pnpm format`) — these touch the entire codebase. Only lint/format specific files you changed. Use file-scoped formatting or targeted test commands instead.
+
+### Current Workflow Notes
+- Prefer `pnpm go` when you need the full local stack; it brings up Docker Postgres before the app processes.
+- Use `pnpm dev` for the web/backend loop when the database is already running.
+- Use `pnpm mail` when only the web frontend needs to move.
+- Use `pnpm ios:simulator` for simulator debugging, but `pnpm ios` is the lighter app-start command.
+- Use `pnpm macos` for the native macOS shell; the old Electron-based flow is obsolete.
+- When adding schema changes, keep the order `db:generate` -> review migration -> `db:migrate` or `db:push` as appropriate.
+- Keep progress docs current: update `CHANGELOG.md`, `TASK.md`, `PLANNING.md`, or `ROADMAP.md` when work changes behavior or architecture.
 
 ---
 
@@ -61,6 +101,7 @@ pnpm test -- -t "name" # Single test
 - **Durable Objects:** ZeroDriver, ZeroAgent, ZeroDB, ZeroMCP, ShardRegistry, WorkflowRunner, ThreadSyncWorker
 - **Infrastructure:** KV namespaces, Queues, Workflows for async email sync
 - **Deploy:** `pnpm deploy:backend` → Wrangler (`wrangler.jsonc`)
+- **Dev utilities:** `pnpm test:ai`, `pnpm eval`, `pnpm eval:dev`, `pnpm eval:ci`
 
 ### tRPC Routes
 Routes mirror filenames in `src/trpc/routes/`: `mail`, `ai`, `settings`, `connections`, `labels`, `categories`, `drafts`, `notes`, `tasks`, `templates`, `user`, `avatar`, `bimi`, `brain`, `cookies`, `label`, `logging`, `meet`, `shortcut`
@@ -80,6 +121,7 @@ Routes mirror filenames in `src/trpc/routes/`: `mail`, `ai`, `settings`, `connec
 - **Auth client:** `lib/auth-client.ts` — exports `signIn`, `signUp`, `signOut`, `useSession`
 - **API calls:** tRPC client via `@trpc/tanstack-react-query`
 - **Env vars:** Vite prefix `VITE_PUBLIC_*`; `VITE_PUBLIC_BACKEND_URL` points to the server
+- **Build/deploy:** `pnpm build:frontend`, `pnpm deploy:frontend`, `pnpm sentry:sourcemaps`
 
 Main mail UI route: `/mail/:folder`
 
@@ -128,6 +170,7 @@ Todus/
 - **API calls:** `TodosAPIClient` wraps URLSession, adds Bearer token, talks tRPC-over-HTTP (POST `/api/trpc/{procedure}`, Superjson format)
 - **Auth:** Native Apple Sign In → ID token → backend. Google via ASWebAuthenticationSession → backend OAuth → deep link callback. Email OTP via Resend.
 - **DO NOT use WKWebView fetch for cross-origin API calls** — use native URLSession instead.
+- **Build commands:** `pnpm ios`, `pnpm ios:simulator`, `pnpm ios:build:preview`, `pnpm ios:build:production`
 
 ---
 

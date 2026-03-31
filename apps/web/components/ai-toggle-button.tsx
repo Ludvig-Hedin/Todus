@@ -2,19 +2,20 @@ import { Tooltip, TooltipTrigger, TooltipContent } from './ui/tooltip';
 import { useAISidebar } from './ui/ai-sidebar';
 import { Button } from './ui/button';
 
-// AI Toggle Button Component
+// Fixed circular FAB that opens the AI assistant popup.
+// Circular (rounded-full) with subtle glass-card feel and soft drop shadow.
 const AIToggleButton = () => {
   const { toggleOpen: toggleAISidebar, open: isSidebarOpen } = useAISidebar();
 
   return (
     !isSidebarOpen && (
-      <div className="fixed bottom-4 right-4 z-50">
+      <div className="fixed bottom-5 right-5 z-50">
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
-              variant="outline"
+              variant="ghost"
               size="icon"
-              className="dark:bg-sidebar border h-12 w-12 rounded-lg"
+              className="h-11 w-11 rounded-full border border-border/50 bg-background/95 shadow-md backdrop-blur-sm transition-all hover:shadow-lg"
               onClick={(e) => {
                 if (!isSidebarOpen) {
                   e.stopPropagation();
@@ -26,21 +27,21 @@ const AIToggleButton = () => {
                 <img
                   src="/black-icon.svg"
                   alt="AI Assistant"
-                  width={22}
-                  height={22}
+                  width={20}
+                  height={20}
                   className="block dark:hidden"
                 />
                 <img
                   src="/white-icon.svg"
                   alt="AI Assistant"
-                  width={22}
-                  height={22}
+                  width={20}
+                  height={20}
                   className="hidden dark:block"
                 />
               </div>
             </Button>
           </TooltipTrigger>
-          <TooltipContent>Toggle AI Assistant</TooltipContent>
+          <TooltipContent side="left">AI Assistant</TooltipContent>
         </Tooltip>
       </div>
     )

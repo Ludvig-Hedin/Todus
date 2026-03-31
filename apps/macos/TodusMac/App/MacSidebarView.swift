@@ -137,8 +137,7 @@ struct MacSidebarView: View {
                 // Name — menu trigger. tint(.primary.opacity(0.5)) prevents the
                 // borderlessButton disclosure chevron from rendering in blue accent color.
                 Menu {
-                    Button("Profile") {}
-                    Button("Settings") { onOpenSettings() }
+                    Button("Profile") { onOpenSettings() }
                     Divider()
                     Button("Log Out", role: .destructive) {
                         services.signOut()
@@ -194,15 +193,9 @@ struct MacSidebarView: View {
         }
     }
 
-    // Email footer: labels + compose shortcut
+    // Email footer: compose shortcut only — labels removed (not connected to real data)
     private var emailFooter: some View {
         VStack(alignment: .leading, spacing: 6) {
-            sectionHeader("Labels")
-
-            LabelRow(color: .red, name: "Important")
-            LabelRow(color: .blue, name: "Work")
-            LabelRow(color: .green, name: "Personal")
-
             Button(action: onCompose) {
                 HStack(spacing: 6) {
                     Image(systemName: "plus")
@@ -211,7 +204,6 @@ struct MacSidebarView: View {
                         .font(.system(size: 12, weight: .medium))
                 }
                 .foregroundStyle(.secondary)
-                .padding(.top, 4)
             }
             .buttonStyle(.plain)
             .focusEffectDisabled()
@@ -221,42 +213,23 @@ struct MacSidebarView: View {
         .transition(.opacity)
     }
 
-    // Calendar footer: connected calendars + mini month grid
+    // Calendar footer: mini month grid only — hardcoded calendar sources removed
     private var calendarFooter: some View {
         VStack(alignment: .leading, spacing: 8) {
-            // Connected calendars
-            VStack(alignment: .leading, spacing: 4) {
-                sectionHeader("Calendars")
-
-                LabelRow(color: .blue, name: "Personal", showToggle: true)
-                LabelRow(color: .green, name: "Work", showToggle: true)
-                LabelRow(color: .orange, name: "Holidays", showToggle: true)
-            }
-
             // Mini month calendar
             MiniCalendarView { date in
                 // Navigate to calendar section — the date itself is visual-only
                 // since MacCalendarView owns its own selectedDate state
                 onCalendarDayTap?(date)
             }
-            .padding(.top, 4)
         }
         .padding(.horizontal, 10)
         .transition(.opacity)
     }
 
-    // Tasks footer: quick filters
+    // Tasks footer: removed non-functional Quick Filters — MacTasksView has its own filter toolbar
     private var tasksFooter: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            sectionHeader("Quick Filters")
-
-            FilterRow(icon: "tray.full", title: "All Tasks")
-            FilterRow(icon: "sun.max", title: "Today")
-            FilterRow(icon: "calendar.badge.clock", title: "Upcoming")
-            FilterRow(icon: "checkmark.circle", title: "Completed")
-        }
-        .padding(.horizontal, 10)
-        .transition(.opacity)
+        EmptyView()
     }
 
     private func sectionHeader(_ title: String) -> some View {
@@ -444,90 +417,6 @@ private struct SidebarChildItemButton: View {
         if isSelected { return Color.primary.opacity(0.07) }
         if isHovered { return Color.primary.opacity(0.04) }
         return .clear
-    }
-}
-
-// MARK: - Footer Components
-
-/// Colored dot + label row used for email labels and calendar sources — pill hover
-private struct LabelRow: View {
-    let color: Color
-    let name: String
-    var showToggle: Bool = false
-
-    @State private var isEnabled = true
-    @State private var isHovered = false
-
-    var body: some View {
-        Button {
-            if showToggle {
-                withAnimation(.easeOut(duration: 0.15)) {
-                    isEnabled.toggle()
-                }
-            }
-        } label: {
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(color.opacity(isEnabled ? 0.8 : 0.25))
-                    .frame(width: 8, height: 8)
-
-                Text(name)
-                    .font(.system(size: 12, weight: .regular))
-                    .foregroundStyle(Color.primary.opacity(isEnabled ? 0.7 : 0.35))
-
-                Spacer(minLength: 0)
-            }
-            .padding(.vertical, 4)
-            .padding(.horizontal, 8)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(isHovered ? Color.primary.opacity(0.05) : .clear)
-            )
-        }
-        .buttonStyle(.plain)
-        .focusEffectDisabled()
-        .pointerStyle(.link)
-        .onHover { isHovered = $0 }
-        .animation(.easeOut(duration: 0.1), value: isHovered)
-    }
-}
-
-/// Quick filter row for the tasks footer — pill-shaped hover highlight
-private struct FilterRow: View {
-    let icon: String
-    let title: String
-    var action: (() -> Void)? = nil
-
-    @State private var isHovered = false
-
-    var body: some View {
-        Button {
-            action?()
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: icon)
-                    .font(.system(size: 11, weight: .regular))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 14)
-
-                Text(title)
-                    .font(.system(size: 12, weight: .regular))
-                    .foregroundStyle(.primary.opacity(0.65))
-
-                Spacer(minLength: 0)
-            }
-            .padding(.vertical, 4)
-            .padding(.horizontal, 8)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(isHovered ? Color.primary.opacity(0.05) : .clear)
-            )
-        }
-        .buttonStyle(.plain)
-        .focusEffectDisabled()
-        .pointerStyle(.link)
-        .onHover { isHovered = $0 }
-        .animation(.easeOut(duration: 0.1), value: isHovered)
     }
 }
 
