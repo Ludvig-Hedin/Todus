@@ -5,6 +5,7 @@ Last updated: 2026-03-31
 ## Current Web/Server Fix Batch
 
 - `DONE` Web task mutations now invalidate all `tasks.list` TanStack caches via `trpc.tasks.list.queryFilter()` (tasks page, home, calendar, TaskItem).
+- `DONE` Fixed the web root error boundary hook-order violation by moving Sentry/error-reporting side effects into a dedicated child component.
 - `IN_PROGRESS` Apply targeted fixes for AI profile prompt safety, session freshness filtering, navigation i18n, and device logout UX.
 - `PENDING` Verify whether the web settings-general AI profile fields exist in this branch before adding localization keys for them.
 
@@ -112,17 +113,17 @@ All marked DONE — these are WebView-based, not truly native.
 
 ### N3 Mail Core (Highest Priority)
 
-| ID    | Task                                                      | Status  | Definition of Done                                                                                                    |
-| ----- | --------------------------------------------------------- | ------- | --------------------------------------------------------------------------------------------------------------------- |
-| N3-01 | Build native mail sidebar with folder list + counts       | DONE    | Sidebar renders folders from tRPC (mocked for N3-01, implemented correctly in N3-04)                                  |
-| N3-02 | Build thread list screen with FlashList                   | DONE    | Thread list loads Dummy data using FlashList, ready for N3-04                                                         |
-| N3-03 | Build thread detail screen with message rendering         | DONE    | Messages render with HTML content auto-resizing WebView per-message                                                   |
-| N3-04 | Implement thread actions (star/archive/delete/spam/label) | DONE    | All actions work with optimistic updates                                                                              |
-| N3-05 | Implement search with filters                             | DONE    | Implemented folder + unread/starred/attachment filters in native search modal                                         |
-| N3-06 | Build mail shell layout (sidebar + list + detail)         | DONE    | Adaptive split shell implemented: permanent sidebar + list/detail on iPad/macOS, stacked routing on iPhone            |
-| N3-07 | Wire optimistic updates with rollback                     | DONE    | Optimistic cache updates + rollback implemented for archive/delete/spam/star actions                                  |
-| N3-08 | Add swipe actions for thread list items                   | DONE    | Swipe direction handling fixed and wired correctly to archive/delete actions                                          |
-| N3-09 | Add M3 tests                                              | DONE    | Added iOS unit coverage for optimistic thread cache behavior (`optimisticThreadCache.test.ts`) and verified in iOS test suite |
+| ID    | Task                                                      | Status | Definition of Done                                                                                                            |
+| ----- | --------------------------------------------------------- | ------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| N3-01 | Build native mail sidebar with folder list + counts       | DONE   | Sidebar renders folders from tRPC (mocked for N3-01, implemented correctly in N3-04)                                          |
+| N3-02 | Build thread list screen with FlashList                   | DONE   | Thread list loads Dummy data using FlashList, ready for N3-04                                                                 |
+| N3-03 | Build thread detail screen with message rendering         | DONE   | Messages render with HTML content auto-resizing WebView per-message                                                           |
+| N3-04 | Implement thread actions (star/archive/delete/spam/label) | DONE   | All actions work with optimistic updates                                                                                      |
+| N3-05 | Implement search with filters                             | DONE   | Implemented folder + unread/starred/attachment filters in native search modal                                                 |
+| N3-06 | Build mail shell layout (sidebar + list + detail)         | DONE   | Adaptive split shell implemented: permanent sidebar + list/detail on iPad/macOS, stacked routing on iPhone                    |
+| N3-07 | Wire optimistic updates with rollback                     | DONE   | Optimistic cache updates + rollback implemented for archive/delete/spam/star actions                                          |
+| N3-08 | Add swipe actions for thread list items                   | DONE   | Swipe direction handling fixed and wired correctly to archive/delete actions                                                  |
+| N3-09 | Add M3 tests                                              | DONE   | Added iOS unit coverage for optimistic thread cache behavior (`optimisticThreadCache.test.ts`) and verified in iOS test suite |
 
 ### N4 Compose + Drafts
 
@@ -140,25 +141,25 @@ All marked DONE — these are WebView-based, not truly native.
 
 ### N5 Settings
 
-| ID    | Task                                          | Status  | Definition of Done                                                                                                                                       |
-| ----- | --------------------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| N5-01 | Build settings shell with navigation          | DONE    | Settings hub now routes to all parity sections with native stack entries                                                                                 |
-| N5-02 | Build all 11 settings screens as native forms | DONE    | Native form parity implemented across general/appearance/categories/notifications/privacy/security/shortcuts/danger-zone plus upgraded existing sections |
-| N5-03 | Implement connections management              | DONE    | Set default, disconnect, reconnect (web handoff), and add-account entry point implemented                                                                |
-| N5-04 | Implement labels CRUD with color picker       | DONE    | Create/edit/delete label flows with color selection implemented in native settings                                                                       |
-| N5-05 | Implement danger zone with confirmations      | DONE    | Confirmation-gated account deletion flow implemented with destructive confirm dialog                                                                     |
-| N5-06 | Add M5 tests                                  | DONE    | Added iOS unit coverage for settings category state logic (`categoriesSettingsUtils.test.ts`) and refactored settings categories screen to use tested helpers |
+| ID    | Task                                          | Status | Definition of Done                                                                                                                                            |
+| ----- | --------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| N5-01 | Build settings shell with navigation          | DONE   | Settings hub now routes to all parity sections with native stack entries                                                                                      |
+| N5-02 | Build all 11 settings screens as native forms | DONE   | Native form parity implemented across general/appearance/categories/notifications/privacy/security/shortcuts/danger-zone plus upgraded existing sections      |
+| N5-03 | Implement connections management              | DONE   | Set default, disconnect, reconnect (web handoff), and add-account entry point implemented                                                                     |
+| N5-04 | Implement labels CRUD with color picker       | DONE   | Create/edit/delete label flows with color selection implemented in native settings                                                                            |
+| N5-05 | Implement danger zone with confirmations      | DONE   | Confirmation-gated account deletion flow implemented with destructive confirm dialog                                                                          |
+| N5-06 | Add M5 tests                                  | DONE   | Added iOS unit coverage for settings category state logic (`categoriesSettingsUtils.test.ts`) and refactored settings categories screen to use tested helpers |
 
 ### N6 AI + Voice + Integrations
 
-| ID    | Task                                         | Status  | Definition of Done                                                                                                                      |
-| ----- | -------------------------------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| N6-01 | Build AI chat panel with streaming responses | DONE    | Native assistant screen added with working AI send/receive and streamed response rendering                                              |
-| N6-02 | Implement voice with ElevenLabs              | DONE    | Delivered native-equivalent voice parity with dictation (`expo-av` + `trpc.ai.transcribeAudio`), response playback (`expo-speech`), auto-read, and hands-free loop UX in assistant |
-| N6-03 | Integrate PostHog analytics                  | DONE    | Native PostHog bootstrap, screen tracking, identify, and key mail events are wired for parity                                           |
-| N6-04 | Integrate Sentry crash reporting             | DONE    | Native Sentry init + boundary/query capture hooks + expo plugin wiring added                                                            |
-| N6-05 | Implement notes panel                        | DONE    | Thread detail now includes native notes CRUD + pin/unpin backed by `trpc.notes.*`                                                       |
-| N6-06 | Add M6 tests                                 | DONE    | Added iOS unit coverage for assistant streaming helpers and notes sorting logic                                                         |
+| ID    | Task                                         | Status | Definition of Done                                                                                                                                                                 |
+| ----- | -------------------------------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| N6-01 | Build AI chat panel with streaming responses | DONE   | Native assistant screen added with working AI send/receive and streamed response rendering                                                                                         |
+| N6-02 | Implement voice with ElevenLabs              | DONE   | Delivered native-equivalent voice parity with dictation (`expo-av` + `trpc.ai.transcribeAudio`), response playback (`expo-speech`), auto-read, and hands-free loop UX in assistant |
+| N6-03 | Integrate PostHog analytics                  | DONE   | Native PostHog bootstrap, screen tracking, identify, and key mail events are wired for parity                                                                                      |
+| N6-04 | Integrate Sentry crash reporting             | DONE   | Native Sentry init + boundary/query capture hooks + expo plugin wiring added                                                                                                       |
+| N6-05 | Implement notes panel                        | DONE   | Thread detail now includes native notes CRUD + pin/unpin backed by `trpc.notes.*`                                                                                                  |
+| N6-06 | Add M6 tests                                 | DONE   | Added iOS unit coverage for assistant streaming helpers and notes sorting logic                                                                                                    |
 
 ### N7 Public Pages + Remaining Screens
 
@@ -172,14 +173,14 @@ All marked DONE — these are WebView-based, not truly native.
 
 ### N8 Polish, Performance, Release
 
-| ID    | Task                                                         | Status  | Definition of Done                                                                                                                                   |
-| ----- | ------------------------------------------------------------ | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| N8-01 | Visual regression pass (screenshots all screens)             | DONE    | Screenshot scaffolding + verifier are in place and coverage passes for iOS scope (`web` + `ios`: `46/46`) |
-| N8-02 | Performance optimization (list scroll, startup, transitions) | DONE    | Added query stale/gc tuning, list virtualization tuning, and row memoization to reduce scroll jank and refetch churn                                 |
-| N8-03 | Accessibility pass (VoiceOver, TalkBack, keyboard nav)       | DONE    | Added accessibility labels/roles/states across critical mail shell, thread actions, sidebar, and settings navigation flows                           |
-| N8-04 | Release pipeline setup (TestFlight, Play Console, macOS)     | DONE    | Added GitHub Actions native release pipeline (`.github/workflows/native-release.yml`) with QA gates + dispatchable EAS build/submit orchestration    |
-| N8-05 | Deprecate WebView wrapper app flows                          | DONE    | Removed deprecated public-route WebView wrappers (`apps/ios/app/(public)/*`) and shared wrapper component (`PublicWebRouteScreen`)                   |
-| N8-06 | Final QA and signoff                                         | DONE    | iOS-native stream signoff complete: parity features implemented, iOS build/tests pass, and screenshot evidence is complete for iOS scope (`46/46`) |
+| ID    | Task                                                         | Status | Definition of Done                                                                                                                                 |
+| ----- | ------------------------------------------------------------ | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| N8-01 | Visual regression pass (screenshots all screens)             | DONE   | Screenshot scaffolding + verifier are in place and coverage passes for iOS scope (`web` + `ios`: `46/46`)                                          |
+| N8-02 | Performance optimization (list scroll, startup, transitions) | DONE   | Added query stale/gc tuning, list virtualization tuning, and row memoization to reduce scroll jank and refetch churn                               |
+| N8-03 | Accessibility pass (VoiceOver, TalkBack, keyboard nav)       | DONE   | Added accessibility labels/roles/states across critical mail shell, thread actions, sidebar, and settings navigation flows                         |
+| N8-04 | Release pipeline setup (TestFlight, Play Console, macOS)     | DONE   | Added GitHub Actions native release pipeline (`.github/workflows/native-release.yml`) with QA gates + dispatchable EAS build/submit orchestration  |
+| N8-05 | Deprecate WebView wrapper app flows                          | DONE   | Removed deprecated public-route WebView wrappers (`apps/ios/app/(public)/*`) and shared wrapper component (`PublicWebRouteScreen`)                 |
+| N8-06 | Final QA and signoff                                         | DONE   | iOS-native stream signoff complete: parity features implemented, iOS build/tests pass, and screenshot evidence is complete for iOS scope (`46/46`) |
 
 ---
 
@@ -377,19 +378,19 @@ All marked DONE — these are WebView-based, not truly native.
 
 ## Parity Gap Tasks (2026-03-01)
 
-| ID     | Task                                                                                                                                      | Status  | Notes                                                                                                                                                               |
-| ------ | ----------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| PG-001 | Implement native public route set parity (`/`, `/home`, `/about`, `/terms`, `/pricing`, `/privacy`, `/contributors`, `/developer`, `/hr`) | DONE    | Completed historically; these public WebView wrapper routes were later deprecated/removed in `N8-05` as part of native wrapper-flow cleanup                         |
-| PG-002 | Add native `/signup` parity flow                                                                                                          | DONE    | Added native auth signup route/screen in `apps/ios/app/(auth)/signup.tsx` and wired it in `apps/ios/app/(auth)/_layout.tsx`                                      |
-| PG-003 | Complete native mail shell parity for `/mail/:folder`                                                                                     | DONE    | Category tabs + bulk selection + command palette/search entry points now implemented in native mail shell                                                           |
-| PG-004 | Implement `/mail/create` and `/mail/under-construction/:path` parity behaviors                                                            | DONE    | Native create redirect now forwards web-style prefill params to compose; under-construction fallback now matches web behavior                                       |
-| PG-005 | Rebuild native compose parity (`/mail/compose`)                                                                                           | DONE    | Compose parity shipped with rich text, attachments, drafts, reply/reply-all/forward, undo-send, schedule send, and templates                                        |
-| PG-006 | Add native mailto parity (`/api/mailto-handler`)                                                                                          | DONE    | Native `/api/mailto-handler` parses mailto payloads, attempts draft creation, and opens compose with fallback params + `draftId` when available                     |
-| PG-007 | Complete settings parity for missing sections                                                                                             | DONE    | Native forms added for `/settings/categories`, `/settings/notifications`, `/settings/privacy`, `/settings/security`, `/settings/shortcuts`, `/settings/danger-zone` |
-| PG-008 | Upgrade native existing settings sections from partial to full parity                                                                     | DONE    | `/settings/general`, `/settings/appearance`, `/settings/connections`, `/settings/labels` upgraded with parity-focused forms/actions                                 |
-| PG-009 | Implement labels/categories CRUD + assignment parity in native                                                                            | DONE    | Labels CRUD + color selection and category default/order/filter editing implemented                                                                                 |
-| PG-010 | Implement native AI assistant and voice parity                                                                                            | DONE    | Native assistant now has practical parity for iOS workflows: streaming chat, dictation + transcription, playback, auto-read, hands-free loop, and auth-bypass-safe fallback UX |
-| PG-011 | Implement native integrations parity: PostHog + Dub + Sentry + Autumn                                                                     | DONE    | Autumn billing customer/checkout/portal native integration added; Dub attribution stays server-side through existing better-auth plugin used by native auth flow    |
-| PG-012 | Establish screenshot-driven visual regression proof in `/parity_screenshots/`                                                             | DONE    | Naming convention + manifest + diff log + verifier are implemented, and required iOS-scope coverage passes (`web` + `ios`: `46/46`) |
-| PG-013 | Build parity-focused automated tests (unit/integration/E2E)                                                                               | DONE    | Added Autumn integration tests to iOS unit suite and documented RC E2E/manual parity workflow script in `apps/ios/TEST_PLAN_PARITY.md`                              |
-| PG-014 | Resolve macOS architecture blocker                                                                                                        | DONE    | De-scoped from this stream because current migration goal is iOS-native parity (`apps/ios`); macOS architecture work is tracked separately outside this iOS backlog |
+| ID     | Task                                                                                                                                      | Status | Notes                                                                                                                                                                          |
+| ------ | ----------------------------------------------------------------------------------------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| PG-001 | Implement native public route set parity (`/`, `/home`, `/about`, `/terms`, `/pricing`, `/privacy`, `/contributors`, `/developer`, `/hr`) | DONE   | Completed historically; these public WebView wrapper routes were later deprecated/removed in `N8-05` as part of native wrapper-flow cleanup                                    |
+| PG-002 | Add native `/signup` parity flow                                                                                                          | DONE   | Added native auth signup route/screen in `apps/ios/app/(auth)/signup.tsx` and wired it in `apps/ios/app/(auth)/_layout.tsx`                                                    |
+| PG-003 | Complete native mail shell parity for `/mail/:folder`                                                                                     | DONE   | Category tabs + bulk selection + command palette/search entry points now implemented in native mail shell                                                                      |
+| PG-004 | Implement `/mail/create` and `/mail/under-construction/:path` parity behaviors                                                            | DONE   | Native create redirect now forwards web-style prefill params to compose; under-construction fallback now matches web behavior                                                  |
+| PG-005 | Rebuild native compose parity (`/mail/compose`)                                                                                           | DONE   | Compose parity shipped with rich text, attachments, drafts, reply/reply-all/forward, undo-send, schedule send, and templates                                                   |
+| PG-006 | Add native mailto parity (`/api/mailto-handler`)                                                                                          | DONE   | Native `/api/mailto-handler` parses mailto payloads, attempts draft creation, and opens compose with fallback params + `draftId` when available                                |
+| PG-007 | Complete settings parity for missing sections                                                                                             | DONE   | Native forms added for `/settings/categories`, `/settings/notifications`, `/settings/privacy`, `/settings/security`, `/settings/shortcuts`, `/settings/danger-zone`            |
+| PG-008 | Upgrade native existing settings sections from partial to full parity                                                                     | DONE   | `/settings/general`, `/settings/appearance`, `/settings/connections`, `/settings/labels` upgraded with parity-focused forms/actions                                            |
+| PG-009 | Implement labels/categories CRUD + assignment parity in native                                                                            | DONE   | Labels CRUD + color selection and category default/order/filter editing implemented                                                                                            |
+| PG-010 | Implement native AI assistant and voice parity                                                                                            | DONE   | Native assistant now has practical parity for iOS workflows: streaming chat, dictation + transcription, playback, auto-read, hands-free loop, and auth-bypass-safe fallback UX |
+| PG-011 | Implement native integrations parity: PostHog + Dub + Sentry + Autumn                                                                     | DONE   | Autumn billing customer/checkout/portal native integration added; Dub attribution stays server-side through existing better-auth plugin used by native auth flow               |
+| PG-012 | Establish screenshot-driven visual regression proof in `/parity_screenshots/`                                                             | DONE   | Naming convention + manifest + diff log + verifier are implemented, and required iOS-scope coverage passes (`web` + `ios`: `46/46`)                                            |
+| PG-013 | Build parity-focused automated tests (unit/integration/E2E)                                                                               | DONE   | Added Autumn integration tests to iOS unit suite and documented RC E2E/manual parity workflow script in `apps/ios/TEST_PLAN_PARITY.md`                                         |
+| PG-014 | Resolve macOS architecture blocker                                                                                                        | DONE   | De-scoped from this stream because current migration goal is iOS-native parity (`apps/ios`); macOS architecture work is tracked separately outside this iOS backlog            |

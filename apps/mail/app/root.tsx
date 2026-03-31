@@ -186,23 +186,17 @@ export default function App() {
   return <Outlet />;
 }
 
-export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
-  let message = 'Oops!';
-  let details = 'An unexpected error occurred.';
-  let stack: string | undefined;
-
-  if (isRouteErrorResponse(error)) {
-    message = error.status === 404 ? '404' : 'Error';
-    details =
-      error.status === 404 ? 'The requested page could not be found.' : error.statusText || details;
-    if (error.status === 404) {
-      return <NotFound />;
-    }
-  } else if (import.meta.env.DEV && error && error instanceof Error) {
-    details = error.message;
-    stack = error.stack;
-  }
-
+function ErrorBoundaryContent({
+  error,
+  message,
+  details,
+  stack,
+}: {
+  error: unknown;
+  message: string;
+  details: string;
+  stack?: string;
+}) {
   useEffect(() => {
     console.error(error);
     console.error({ message, details, stack });
@@ -269,6 +263,26 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
       </div>
     </div>
   );
+}
+
+export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
+  let message = 'Oops!';
+  let details = 'An unexpected error occurred.';
+  let stack: string | undefined;
+
+  if (isRouteErrorResponse(error)) {
+    message = error.status === 404 ? '404' : 'Error';
+    details =
+      error.status === 404 ? 'The requested page could not be found.' : error.statusText || details;
+    if (error.status === 404) {
+      return <NotFound />;
+    }
+  } else if (import.meta.env.DEV && error && error instanceof Error) {
+    details = error.message;
+    stack = error.stack;
+  }
+
+  return <ErrorBoundaryContent error={error} message={message} details={details} stack={stack} />;
 }
 
 function NotFound() {

@@ -1,10 +1,17 @@
 # Project Changelog
 
+## [2026-03-31] Fix — web root error boundary hook order
+
+- Split the root error boundary in `apps/mail/app/root.tsx` so the 404 branch returns before any hooks and the Sentry/reporting side effects live in a dedicated child component. This removes the conditional hook call that violated `react-hooks/rules-of-hooks`.
+
+**Files:** `apps/mail/app/root.tsx`, `TASK.md`
+
 ## [2026-03-31] UX Polish — cross-platform UX fixes (iOS, macOS, Web)
 
 Comprehensive UX pass addressing discoverability, friction, and honesty gaps across all three live platforms.
 
 ### macOS
+
 - **Removed non-functional Quick Filters** from tasks sidebar footer — buttons had nil closures and did nothing (`MacSidebarView.swift`)
 - **Removed hardcoded email labels & calendar sources** from sidebar footer — "Important/Work/Personal" labels and calendar source pills were static UI not backed by real data (`MacSidebarView.swift`)
 - **Removed non-functional toolbar filter menus** — email (All Mail/Unread/Flagged) and tasks (All/Today/Upcoming/Completed) filters had empty closures; "Mark All Read" is the only remaining email toolbar action (`MacRootView.swift`)
@@ -12,11 +19,13 @@ Comprehensive UX pass addressing discoverability, friction, and honesty gaps acr
 - **Confirmed Email and AI Assistant are already separate sections** in `MacSettingsView.swift` — no change needed
 
 ### iOS
+
 - **Split Settings: "Email & AI" → separate "Email" + "AI Assistant" sections** — reduces cognitive load; unrelated settings no longer grouped (`SettingsView.swift`)
 - **Replaced horizontal-scroll sessions table with vertical cards** — mobile-friendly layout with "This device" badge and per-session log out (`SettingsView.swift`)
 - **Added skeleton loading state to email inbox** — differentiates loading vs empty vs error; `.redacted(reason: .placeholder)` blocks shown during initial fetch (`EmailInboxView.swift`)
 
 ### Web
+
 - **Honest Calendar page labeling** — title changed from "Calendar" to "Tasks by Date" with "Calendar events coming soon" badge; misleading "Connect Google Calendar" link removed (`calendar/page.tsx`)
 - **Quick Actions on Search page** — initial empty state now shows inline task-create field (type + Enter) and "Compose new email" button, matching macOS quick-action pattern (`search/page.tsx`)
 
@@ -50,6 +59,7 @@ Comprehensive UX pass addressing discoverability, friction, and honesty gaps acr
 ## [2026-03-31] Feature — web: Full iOS/macOS visual parity pass (Tasks board/table, Home redesign, Chat history, Calendar quick-add)
 
 ### Tasks page (`/mail/tasks`) — full rewrite
+
 - **View mode picker**: segmented control (List / Board / Table) at top right
 - **Horizontal folder pill strip**: scrollable row of pills replaces old sidebar layout — "All" + each folder + "+" add folder button
 - **Board view** (kanban): 3 draggable columns (To Do / Doing / Done) using `@dnd-kit/core`. Drag cards between columns to update `status` via `tasks.update`. `DragOverlay` renders the card while dragging.
@@ -59,6 +69,7 @@ Comprehensive UX pass addressing discoverability, friction, and honesty gaps acr
 - **TypeScript fix**: `isDueDateWarning` now accepts `string | Date | null | undefined` since tRPC can return `Date` objects
 
 ### Home page (`/mail/home`) — redesign
+
 - **Section headers**: iOS-style `SectionHeader` component — icon + title + count badge + "See all" link + optional "+" button
 - **Today's Events section**: "Connect Google Calendar" CTA card (dashed border, links to Settings → Connections). No fake data shown since backend Calendar API isn't wired yet.
 - **Sections**: Events → Due Tasks → Recent Emails (matches iOS order)
@@ -66,6 +77,7 @@ Comprehensive UX pass addressing discoverability, friction, and honesty gaps acr
 - **Greeting**: larger `text-[22px]` heading with date subtitle
 
 ### Chat page (`/mail/chat`) — conversation history + markdown
+
 - **Left sidebar** (hidden on mobile): `w-56` conversation list from `ai.listConversations`. Each row shows title + relative date. Active row highlighted with `bg-accent`.
 - **Load conversation**: clicking a past chat loads its messages via `ai.getConversation` and restores to `setMessages()`
 - **Auto-save**: on first assistant response (not mid-stream), saves conversation with title = first 60 chars of user's first message via `ai.saveConversation`
@@ -74,6 +86,7 @@ Comprehensive UX pass addressing discoverability, friction, and honesty gaps acr
 - **AI bubble style**: `border bg-card` instead of plain `bg-muted` for visual separation
 
 ### Calendar page (`/mail/calendar`) — polish + features
+
 - **Inline quick-add row**: always-visible input at top of day panel — Enter creates task with `dueDate = selectedDate`
 - **Connect Google Calendar CTA**: dashed-border card in left sidebar below week overview, links to Settings → Connections
 - **Week overview**: dates with tasks show count badge
@@ -81,6 +94,7 @@ Comprehensive UX pass addressing discoverability, friction, and honesty gaps acr
 - **Header**: slimmer `py-3.5` consistent with other page headers
 
 **Files:**
+
 - `apps/web/app/(routes)/mail/tasks/page.tsx` — full rewrite
 - `apps/web/app/(routes)/mail/home/page.tsx` — full rewrite
 - `apps/web/app/(routes)/mail/chat/page.tsx` — full rewrite
@@ -123,7 +137,6 @@ Comprehensive UX pass addressing discoverability, friction, and honesty gaps acr
 - New writes still use the namespaced keychain entry, but upgrade installs now fall back to the previous storage shape so persisted bearer tokens and AI chat history survive the rollout.
 
 **Files:** `packages/swift-auth/Sources/TodusAuth/KeychainHelper.swift`
-
 
 ## [2026-03-30] Feature — active sessions management in `apps/web`, iOS, and macOS
 
@@ -232,6 +245,7 @@ Comprehensive UX pass addressing discoverability, friction, and honesty gaps acr
 - Also switched the macOS delete-account flow to the same helper so it leaves the app in a clean post-sign-out state.
 
 **Files:**
+
 - `apps/macos/TodusMac/App/MacAppServices.swift`
 - `apps/macos/TodusMac/Views/Settings/MacSettingsView.swift`
 - `apps/macos/TodusMac/App/MacSidebarView.swift`
@@ -239,11 +253,13 @@ Comprehensive UX pass addressing discoverability, friction, and honesty gaps acr
 ## [2026-03-30] Fix — macOS/iOS native apps: user profile not loading after OAuth login
 
 **Root cause (3 layers):**
+
 1. Better Auth's HTTP `/auth/get-session` returns `null` for bearer-token requests (200 status, body: `null`)
 2. The Hono middleware's JWT fallback tried to verify the 32-char session token as a JWT → threw silently
 3. Variable shadowing: `const session = await auth.api.getSession()` shadowed the Drizzle `session` schema table, so the session token DB lookup used the wrong object
 
 **Fix:**
+
 - Renamed middleware variable to `authSession` to avoid shadowing the Drizzle `session` schema import
 - Added session token DB lookup fallback: when JWT verification fails, looks up the raw token in the `session` table and resolves the user
 - Added `GET /api/auth/me` endpoint that returns `c.var.sessionUser` from middleware context
@@ -252,6 +268,7 @@ Comprehensive UX pass addressing discoverability, friction, and honesty gaps acr
 - Added `.task { fetchUserProfile() }` to MacSettingsView
 
 **Files:**
+
 - `apps/server/src/main.ts` — `authSession` rename, session token lookup fallback, `/api/auth/me` endpoint
 - `packages/swift-auth/Sources/TodusAuth/AuthService.swift` — Use `/auth/me`, debug logging
 - `apps/macos/TodusMac/App/MacRootView.swift` — `.task(id: isAuthenticated)` for profile fetch
@@ -318,6 +335,7 @@ Comprehensive UX pass addressing discoverability, friction, and honesty gaps acr
 **Problem:** Two competing input systems (CaptureComposer in tasks tab + CreateSheet global overlay) overlapped visually. CaptureComposer sat under the tab bar and was unusable. CreateSheet lacked attachments, voice, and slash commands.
 
 **Solution:** Removed CaptureComposer from tasks tab entirely. Merged all its features into CreateSheet:
+
 - Attachments (photo picker, camera, file picker) with inline thumbnails
 - Voice transcription (VoiceInputButton)
 - Slash commands (/due-today, /due-tomorrow, /due-next-week, /in-one-hour)
@@ -325,12 +343,14 @@ Comprehensive UX pass addressing discoverability, friction, and honesty gaps acr
 - Keyboard-aware positioning
 
 **Visual improvements:**
+
 - Scrim opacity 0.10 → 0.45 (clearly distinguishable modal overlay)
 - Text input 28pt → 16pt (compact, not oversized)
 - Default type always "Auto" (AI decides) regardless of which tab
 - Tight, clean toolbar with folder/date/voice/send in a single row
 
 **Files:**
+
 - `CreateSheet.swift` — Major rewrite with all merged features
 - `TasksTabView.swift` — Removed CaptureComposer and keyboard observer
 - `MainTabView.swift` — Removed defaultType parameter and method
@@ -341,12 +361,14 @@ Comprehensive UX pass addressing discoverability, friction, and honesty gaps acr
 **Root cause:** Better Auth's HTTP `/auth/get-session` endpoint returns `null` for bearer-token-authenticated requests. The Hono middleware's `auth.api.getSession()` call resolves bearer tokens correctly (tRPC routes work), but the HTTP handler doesn't — so `fetchUserProfile()` always got `null` back.
 
 **Fix:**
+
 - Added `/api/auth/me` endpoint on backend that returns `c.var.sessionUser` from the middleware context (which properly resolves bearer tokens)
 - Updated `fetchUserProfile()` in shared AuthService to use `/api/auth/me` instead of `/api/auth/get-session`
 - Added `.task(id: isAuthenticated)` to MacRootView so profile fetch re-runs after login (not just on initial view appear)
 - Added `.task { fetchUserProfile() }` to MacSettingsView to refresh on settings open
 
 **Files:**
+
 - `apps/server/src/main.ts` — New `/api/auth/me` endpoint
 - `packages/swift-auth/Sources/TodusAuth/AuthService.swift` — Use `/auth/me`, added debug logging
 - `apps/macos/TodusMac/App/MacRootView.swift` — `.task(id: isAuthenticated)` for profile fetch
@@ -378,11 +400,13 @@ Comprehensive UX pass addressing discoverability, friction, and honesty gaps acr
 Conversations now sync to the backend via tRPC, enabling cross-device and cross-reinstall persistence.
 
 ### Backend
+
 - **New table:** `mail0_ai_conversation` (id, userId, title, messages JSONB, timestamps)
 - **New tRPC endpoints:** `ai.listConversations`, `ai.getConversation`, `ai.saveConversation`, `ai.deleteConversation`
 - **Migration:** `0039_brainy_junta.sql`
 
 ### iOS & macOS
+
 - Conversations synced to backend on save/delete (fire-and-forget)
 - On launch: loads local cache first, then merges with backend
 - Local cache moved from UserDefaults → Keychain (survives reinstall)
@@ -415,6 +439,7 @@ Resolved the current macOS Xcode warnings/errors blocking the `TodusMac` build:
 - removed ineffective `nonisolated(unsafe)` storage annotations from `MacVoiceController` and updated the speech callback to hop back to the main actor
 
 **Files changed:**
+
 - `apps/macos/TodusMac/Views/Settings/MacSettingsView.swift`
 - `apps/macos/TodusMac/Views/AI/MacAssistantPanel.swift`
 
@@ -431,11 +456,13 @@ Resolved the current macOS Xcode warnings/errors blocking the `TodusMac` build:
 ## [2026-03-30] Fix — iOS AI chat session expired error & cross-reinstall persistence
 
 ### Session expired despite being logged in
+
 - **Root cause:** `AIChatService` returned "Session expired" immediately on HTTP 401 without attempting a silent session refresh. `TodosAPIClient` already handled this correctly.
 - **Fix:** On 401, attempt `authService.attemptSilentRefresh()` first. If refresh succeeds, prompt user to retry. If it fails, mark `isSessionExpired = true` for proper re-auth flow.
 - **File:** `apps/ios/Todus/Todus/Services/AI/AIChatService.swift`
 
 ### Chat history lost on reinstall
+
 - **Root cause:** Conversations stored in `UserDefaults` which is wiped when the app is uninstalled.
 - **Fix:** Moved conversation persistence to Keychain (`KeychainHelper.saveData`/`readData`), which survives app reinstalls. Includes automatic migration from old `UserDefaults` storage.
 - **Files:** `packages/swift-auth/Sources/TodusAuth/KeychainHelper.swift` (added Data methods), `apps/ios/Todus/Todus/Services/AI/AIChatService.swift`
@@ -445,10 +472,12 @@ Resolved the current macOS Xcode warnings/errors blocking the `TodusMac` build:
 **Root cause:** macOS app never called `fetchUserProfile()` on launch or when settings opened. The iOS app calls it in both `RootView.task{}` and `SettingsView.task{}`, but the macOS equivalents were missing these calls. The only profile fetch happened in `completeAuthentication()`'s fire-and-forget `Task{}`, which could silently fail during the auth→main view transition.
 
 **Fix:** Added `fetchUserProfile()` calls to match iOS behavior:
+
 - `MacRootView.swift` — new `.task{}` that fetches profile on app start
 - `MacSettingsView.swift` — new `.task{}` that refreshes profile when settings opens
 
 **Files changed:**
+
 - `apps/macos/TodusMac/App/MacRootView.swift` — Added `.task { await services.authService.fetchUserProfile() }`
 - `apps/macos/TodusMac/Views/Settings/MacSettingsView.swift` — Added `.task { await services.authService.fetchUserProfile() }`
 
@@ -463,6 +492,7 @@ Five targeted UX improvements to the iOS AI chat input area:
 - **File-only send**: Users can attach and send files/images without any text; auto-generates "View the attached file" prompt when sending attachments alone
 
 **Files changed:**
+
 - `apps/ios/Todus/Todus/Features/AI/AIChatView.swift` — All five changes in inputSection, chatInputBox, toolbarContent, sendMessage(), ChatVoiceInputButton
 
 ## [2026-03-30] Enhancement — Resizable & movable AI assistant panels
@@ -476,6 +506,7 @@ Made both floating and side pane assistant panels user-resizable:
 - **Icon consistency**: AssistantButton uses `sparkles` icon matching iOS
 
 **Files changed:**
+
 - `MacAssistantPanel.swift` — Added `floatingSize`, `floatingOffset`, resize handle overlay, `.frame()` and `.offset()` modifiers
 - `MacRootView.swift` — Added `sidePaneWidth` state, draggable resize divider with `NSCursor.resizeLeftRight`, removed fixed floating frame
 
@@ -489,6 +520,7 @@ Resolved the latest Xcode compile errors in both native targets:
 - verified both targets build successfully with `xcodebuild` for the iOS simulator and macOS
 
 **Files changed:**
+
 - `apps/ios/Todus/Todus/Features/AI/CardViews.swift`
 - `apps/ios/Todus/Todus/Features/Voice/VoiceChatViewModel.swift`
 - `apps/ios/Todus/Todus/Features/Voice/VoiceInputButton.swift`
@@ -518,6 +550,7 @@ Second pass to match the iOS AIChatView pixel-for-pixel. Key additions:
 - **Wider panel**: Floating 400×560 (was 380×520), side pane 380 (was 360) for more breathing room
 
 **Files changed:**
+
 - `MacAssistantPanel.swift` — Complete rewrite with ~900 lines of iOS-parity UI
 - `MacRootView.swift` — Passes `selection` to panel for page context chip
 - `Info.plist` — Added microphone and speech recognition usage descriptions
@@ -527,11 +560,13 @@ Second pass to match the iOS AIChatView pixel-for-pixel. Key additions:
 Complete rewrite of the macOS AI assistant to achieve 100% feature parity with the iOS app. Replaced the placeholder `.sheet()` modal with an inline chat panel supporting two display modes.
 
 ### Display Modes
+
 - **Floating mode**: draggable overlay window (380×520) anchored bottom-right, stays open while navigating
 - **Side pane mode**: docked 360px panel on the right edge, integrated into the main layout
 - Toggle between modes via header button; ⌘L toggles open/close; FAB hides when panel is open
 
 ### Streaming & Tool Calls (iOS parity)
+
 - Full SSE streaming with 40ms token batching for smooth typewriter animation
 - Tool call processing: `create_task`, `update_task`, `delete_task`, `create_calendar_event`, `send_email`
 - Task CRUD mutations applied directly to SwiftData via ModelContext
@@ -539,16 +574,19 @@ Complete rewrite of the macOS AI assistant to achieve 100% feature parity with t
 - Email sending via EmailService
 
 ### Web Search & Reasoning
+
 - `search_status` SSE events show animated search indicator with rotating status text
 - `sources` SSE events rendered as clickable source chips (opens URL in browser)
 - `reasoning` / `reasoning_done` events displayed in collapsible disclosure group
 
 ### Conversation History
+
 - Full conversation persistence to UserDefaults (50-conversation cap)
 - History popover for browsing and resuming past conversations
 - New conversation button, auto-save on panel hide
 
 ### UI Polish
+
 - Inline-only markdown during streaming for performance, full CommonMark after streaming ends
 - Action row per message: retry (removes dependent turns) + copy with checkmark feedback
 - Model picker (gpt-4.1, o4-mini, gpt-4.1-mini) in header
@@ -556,10 +594,12 @@ Complete rewrite of the macOS AI assistant to achieve 100% feature parity with t
 - Suggestion chips for empty state quick prompts
 
 **Files created:**
+
 - `apps/macos/TodusMac/Services/AI/MacAIChatService.swift` — full AI chat service with SSE, tool calls, history, retry
 - `apps/macos/TodusMac/Views/AI/MacAssistantPanel.swift` — polished chat panel with dual display modes
 
 **Files changed:**
+
 - `apps/macos/TodusMac/App/MacAppServices.swift` — added `aiChatService` with calendarService dependency
 - `apps/macos/TodusMac/App/MacRootView.swift` — replaced `.sheet()` with inline floating/sidepane panel
 - `apps/macos/TodusMac.xcodeproj/project.pbxproj` — registered new files and groups
@@ -570,9 +610,10 @@ Resolved three correctness issues in the native iOS AI chat flow that surfaced d
 
 - saved AI conversations now persist mention references alongside message text, so reopened chats keep task/thread/event IDs available for follow-up turns
 - retrying an older assistant response now removes later dependent turns before replaying, preventing contradictory branched history from being sent back to the backend
-- assistant replies that only contain a ```ui-spec``` block now clear the raw fenced JSON from the visible message body and render only the generated UI
+- assistant replies that only contain a `ui-spec` block now clear the raw fenced JSON from the visible message body and render only the generated UI
 
 **Files changed:**
+
 - `apps/ios/Todus/Todus/Domain/AIChatConversation.swift`
 - `apps/ios/Todus/Todus/Services/AI/AIChatService.swift`
 - `apps/ios/Todus/Todus/Features/AI/AIChatMessage.swift`
@@ -588,6 +629,7 @@ Resolved a second set of AI chat state issues found during follow-up review.
 - assistant action rows now remain visible for spec-only replies that render native UI cards, while the copy action is disabled when there is no plain text payload to copy
 
 **Files changed:**
+
 - `apps/ios/Todus/Todus/Services/AI/AIChatService.swift`
 - `apps/ios/Todus/Todus/Features/AI/AIChatView.swift`
 - `apps/ios/Todus/TASK.md`
@@ -603,6 +645,7 @@ Resolved the current native iOS AI chat regression where every prompt failed imm
 - preserved existing streaming, search, reasoning, and tool-call handling in the AI chat service
 
 **Files changed:**
+
 - `apps/ios/Todus/Todus/Services/AI/AIChatService.swift`
 - `apps/ios/Todus/Todus/Services/Notifications/NotificationDigestService.swift`
 - `apps/ios/Todus/Todus/Features/AI/AIChatView.swift`
@@ -618,6 +661,7 @@ Resolved the current Xcode build failures in the native iOS app:
 - verified the project builds successfully with `xcodebuild -project apps/ios/Todus/Todus.xcodeproj -scheme Todus -destination 'generic/platform=iOS Simulator' build`
 
 **Files changed:**
+
 - `apps/ios/Todus/Todus/Features/AI/ChatUISpecView.swift`
 - `apps/ios/Todus/Todus/Features/Calendar/EKWrapper.swift`
 - `apps/ios/Todus/status_ios.md`
@@ -626,6 +670,7 @@ Resolved the current Xcode build failures in the native iOS app:
 ## [2026-03-29] Feature — Native macOS shell scaffold replaces Electron wrapper
 
 ### Summary
+
 Replaced the legacy Electron-based `apps/macos` wrapper with a standalone SwiftUI macOS app scaffold driven by XcodeGen.
 
 This first native macOS pass is intentionally shell-only:
@@ -640,6 +685,7 @@ This first native macOS pass is intentionally shell-only:
 - updated macOS status tracking to reflect shell completion and the remaining Xcode license blocker for CLI build verification
 
 **Files changed:**
+
 - `apps/macos/README.md`
 - `apps/macos/project.yml`
 - `apps/macos/TodusMac/App/TodusMacApp.swift`
@@ -666,6 +712,7 @@ ChatUISpec.swift, ChatUISpecView.swift, and CardViews.swift were removed from th
 ## [2026-03-29] Fix — iOS Xcode build environment reset for CalendarKit registration hangs
 
 ### Summary
+
 Investigated repeated Xcode GUI hangs around:
 
 - `RegisterExecutionPolicyException ... CalendarKit.o`
@@ -674,12 +721,14 @@ Investigated repeated Xcode GUI hangs around:
 This was not caused by CalendarKit source code itself. The package is a simple SwiftPM dependency with no nested package dependencies or binary artifacts. A clean rebuild showed the hang correlated with local Xcode/macOS environment state after manual cache cleanup.
 
 **Root cause found:**
+
 - Xcode had been configured to use custom build output paths:
   - `~/XcodeDerivedData/Todus`
   - `~/Desktop/Build/Intermediates.noindex`
 - After caches were manually deleted, those non-default locations interacted badly with execution-policy registration (`syspolicyd`) and later with a corrupted `XCBuildData/build.db`.
 
 **Fixes applied:**
+
 - Reset Xcode build location preferences back to default DerivedData behavior
 - Cleared Todus DerivedData and SwiftPM caches
 - Re-resolved package dependencies so CalendarKit was checked out fresh
@@ -687,10 +736,12 @@ This was not caused by CalendarKit source code itself. The package is a simple S
 - Excluded `**/archived/**` from the iOS target so clean builds do not pull in stale duplicate files like `Navigation/archived/CustomTabBar.swift`
 
 **What this proved:**
+
 - `RegisterExecutionPolicyException` for CalendarKit now completes in a clean isolated build path
 - The remaining failures after the reset were ordinary project/source issues surfaced by a true clean build, not CalendarKit registration hangs
 
 **Files changed:**
+
 - `apps/ios/Todus/project.yml`
 - `apps/ios/Todus/Todus.xcodeproj/project.pbxproj`
 - `apps/ios/Todus/status_ios.md`
@@ -698,6 +749,7 @@ This was not caused by CalendarKit source code itself. The package is a simple S
 ## [2026-03-29] Cross-platform code quality fixes — iOS, web, gitignore
 
 ### Summary
+
 Batch of code quality fixes across iOS and web apps:
 
 - **`.gitignore`**: Added `.deriveddata/` and `DerivedData/` to prevent Xcode build artifacts from being committed
@@ -714,6 +766,7 @@ Batch of code quality fixes across iOS and web apps:
 - **`signatures/page.tsx`**: Replaced hardcoded title/description with i18n message calls
 
 **Files changed:**
+
 - `.gitignore`
 - `apps/ios/Todus/Todus.xcodeproj/Info.plist`
 - `apps/ios/Todus/Todus.xcodeproj/project.pbxproj`
@@ -732,6 +785,7 @@ Batch of code quality fixes across iOS and web apps:
 ## [2026-03-29] iOS UX Fixes — Auth links, onboarding copy, action grouping, create sheet, search indicator, empty states, send error, session confirm, AI detent, settings regrouping
 
 ### Summary
+
 Batch of iOS UX improvements across 9 files:
 
 - **I13 AuthView**: Terms of Service and Privacy Policy are now tappable links opening todus.app/terms and todus.app/privacy
@@ -746,6 +800,7 @@ Batch of iOS UX improvements across 9 files:
 - **I9 SettingsView**: Merged 9 sections into 4 logical groups (Preferences, Email & AI, Notifications & Privacy, About)
 
 **Files changed:**
+
 - `apps/ios/Todus/Todus/Features/Auth/AuthView.swift`
 - `apps/ios/Todus/Todus/App/GmailOnboardingView.swift`
 - `apps/ios/Todus/Todus/Features/Email/EmailThreadView.swift`
@@ -759,30 +814,36 @@ Batch of iOS UX improvements across 9 files:
 ## [2026-03-29] Fix — Buffer early WebSocket messages in voice proxy
 
 ### Summary
+
 In the `/ai/voice-ws` WebSocket proxy, `serverWs.accept()` was called before the upstream Gemini connection was established and forwarding handlers attached. Any client messages arriving during the Gemini `fetch()` would be silently dropped (e.g. the setup config message). Added an early-buffering message handler that queues messages until upstream is ready, then flushes them in order before switching to direct forwarding.
 
 **Files changed:**
+
 - `apps/server/src/routes/ai.ts` — Attach buffering handler immediately after `serverWs.accept()`, flush + switch to direct forwarding after `upstream.accept()`
 
 ## [2026-03-29] Fix — Persist Mention IDs Across Follow-up Chat Turns
 
 ### Summary
+
 Mentions (e.g. `@thread X`, `@task Y`) only resolved for the turn they were inserted in. The underlying entity IDs were stored in a transient `currentTurnMentions` array that was cleared after each stream, while prior messages were serialized as plain text. A multi-turn flow like "summarize @thread X" → "reply to it" would lose the resolved thread ID on the second turn.
 
 **Fix:** Added a `mentions: [RichInputMentionRef]` property to `AIChatMessage` so each user message persists its mention refs. `buildPayload` now collects de-duplicated mentions from ALL user messages in the conversation history (not just the current turn), ensuring entity IDs remain resolvable across follow-up turns.
 
 **Files changed:**
+
 - `apps/ios/Todus/Todus/Features/AI/AIChatMessage.swift` — Added `mentions` property and init parameter
 - `apps/ios/Todus/Todus/Services/AI/AIChatService.swift` — Store mentions on user message at send time; `buildPayload` collects mentions from all user messages with de-duplication
 
 ## [2026-03-29] Security Fix — Voice Chat API Key No Longer Sent to Clients
 
 ### Summary
+
 The `POST /ai/voice-token` endpoint returned the raw `GOOGLE_GENERATIVE_AI_API_KEY` to any authenticated user. This was a credential leak — users could extract the long-lived key and call Gemini directly outside the app. The `expiresAt` field was just a client-side hint with no server enforcement.
 
 **Fix:** Replaced the REST token endpoint with a **WebSocket proxy** (`GET /ai/voice-ws`). The backend now accepts a WebSocket upgrade from the iOS client (authenticated via the existing Bearer token), opens a separate WebSocket to Gemini with the API key server-side, and transparently forwards all messages bidirectionally. The API key never reaches the client.
 
 **Files changed:**
+
 - `apps/server/src/routes/ai.ts` — Replaced `POST /voice-token` with `GET /voice-ws` WebSocket proxy
 - `apps/ios/Todus/Todus/Services/Voice/VoiceProvider.swift` — Protocol: `connect(token:config:)` → `connect(endpoint:authToken:config:)`
 - `apps/ios/Todus/Todus/Services/Voice/GeminiLiveProvider.swift` — Connects to backend proxy URL with Authorization header instead of Gemini directly
@@ -793,6 +854,7 @@ The `POST /ai/voice-token` endpoint returned the raw `GOOGLE_GENERATIVE_AI_API_K
 ## [2026-03-29] Voice Chat Bug Fixes — Double Disconnect, Data Race, Robustness
 
 ### Summary
+
 Fixed two critical bugs and multiple robustness issues in the Live Voice Chat feature:
 
 **Bug 1 — Double disconnect duplicates chat messages:** Both Close/End Call buttons called `disconnect()` then `dismiss()`, triggering `onDisappear` which called `disconnect()` again. Without an early-return guard, `finalizedTurns` was iterated twice, duplicating all voice messages in chat history. Fix: added `guard connectionState != .disconnected` at top of `disconnect()` and clear `finalizedTurns` after writing.
@@ -800,6 +862,7 @@ Fixed two critical bugs and multiple robustness issues in the Live Voice Chat fe
 **Bug 2 — Data race on `isMicMuted`:** The `@MainActor`-isolated `isMicMuted` was read from the audio processing thread in the `installTap` callback and the DispatchSource timer. Fix: added a lock-protected `_micMutedAtomic` Bool that audio threads read, synced from `toggleMute()`.
 
 **Additional fixes:**
+
 - Simplified redundant `connect()` guard that only matched `.failed("")` instead of any `.failed` case
 - Provider is now disconnected if audio capture setup fails after a successful connection
 - `sendText()` now checks connection state before sending
@@ -815,6 +878,7 @@ Fixed two critical bugs and multiple robustness issues in the Live Voice Chat fe
 - Added `:focus-visible` keyboard focus styles for `.editor-suggestion-item` (WCAG 2.1 AA accessibility)
 
 ### Updated Files
+
 - `apps/ios/Todus/Todus/Features/Voice/VoiceChatViewModel.swift` — disconnect guard, clear finalizedTurns, thread-safe mic flag, connect guard simplification, audio capture failure cleanup, sendText connection check, tool call tracking, converter fix
 - `apps/ios/Todus/Todus/Services/Voice/AudioPlayerManager.swift` — safe init, synchronized isPlaying, buffer completion tracking
 - `apps/ios/Todus/Todus/Services/Voice/GeminiLiveProvider.swift` — reusable event stream, URLSession lifecycle, throw on not-connected, receive loop cleanup, goAway state fix, sendJSON guard
@@ -823,31 +887,38 @@ Fixed two critical bugs and multiple robustness issues in the Live Voice Chat fe
 - `apps/mail/components/create/prosemirror.css` — focus-visible keyboard accessibility
 
 ### Skipped (verified not real bugs)
+
 - VoiceTokenService race condition: class is `@MainActor`, so calls are serialized by the actor executor
 - Raw API key in `/ai/voice-token`: Gemini Live requires direct client WebSocket — no way to proxy bidirectionally without a full relay server
 
 ## [2026-03-28] iOS compose mention follow-up fixes
 
 ### Summary
+
 Reviewed the current iOS mention/slash-command compose changes and fixed two issues that were still present in the live code: email compose body focus was no longer wired to the existing `focusedField` state, and person mention suggestions could surface a different top-10 subset between runs because they were truncated before applying a stable sort.
 
 ### Updated Files
+
 - `apps/ios/Todus/Todus/Features/Email/EmailComposeView.swift` — restored body-editor focus by passing explicit focus state into `RichComposerInput`, and sorted grouped senders by a stable name/email key before `prefix(10)`.
 - `apps/ios/Todus/Todus/Features/Tasks/CaptureComposer.swift` — added optional focus control to `RichComposerInput` / `PasteHandlingTextInput` while preserving default auto-focus behavior for other existing callers.
 
 ### User-facing impact
+
 - Opening compose now correctly places the keyboard in the body when `To` and `Subject` are already populated.
 - Person mention suggestions in compose now remain stable and predictable across launches and rebuilds.
 
 ## [2026-03-28] Live Voice Chat — Gemini Live API Integration
 
 ### Summary
+
 Production-quality bidirectional voice chat with AI assistant using Gemini Live API. Provider-agnostic architecture (protocol abstraction for future OpenAI Realtime support). No API keys in the iOS binary — backend mints short-lived tokens. Full tool call support (create tasks, send emails, create calendar events) during voice sessions.
 
 ### Backend (`apps/server/src/routes/ai.ts`)
+
 - Added `POST /ai/voice-token` endpoint: returns `GOOGLE_GENERATIVE_AI_API_KEY` with 5-minute TTL and model name, gated by Bearer auth
 
 ### iOS — New Files
+
 - `Services/Voice/VoiceProvider.swift` — Protocol + enums (`VoiceConnectionState`, `TranscriptRole`, `VoiceSessionEvent`) + `VoiceSessionConfig` struct
 - `Services/Voice/GeminiLiveProvider.swift` — WebSocket implementation using native `URLSessionWebSocketTask`, handles Gemini Live bidirectional protocol
 - `Services/Voice/VoiceTokenService.swift` — Fetches and caches tokens from backend
@@ -856,12 +927,14 @@ Production-quality bidirectional voice chat with AI assistant using Gemini Live 
 - `Features/Voice/VoiceChatModalView.swift` — Full-screen modal: transcript area, animated listening/speaking indicator, mic mute/end call controls
 
 ### iOS — Modified Files
+
 - `AIChatService.swift` — Added `appendVoiceExchange()`, `buildSystemPromptForVoice()`, `processVoiceToolCall()`, `voiceToolDeclarations()`
 - `AIChatMessage.swift` — Added `MessageSource` enum (.text/.voice) with `source` property
 - `AIChatView.swift` — Added waveform button (AI gradient) in both expanded/compact chat input modes + `.fullScreenCover` for voice modal
 - `AppServices.swift` — Added `VoiceTokenService` registration
 
 ### Architecture Notes
+
 - Voice transcripts stay local in the modal; only finalized exchanges are written to main chat history on disconnect
 - Tool calls route through existing `AIChatService` pipeline
 - Audio: capture PCM16 @ 16kHz via AVAudioEngine → 100ms chunks → WebSocket; playback PCM16 @ 24kHz
@@ -871,9 +944,11 @@ Production-quality bidirectional voice chat with AI assistant using Gemini Live 
 ## [2026-03-28] Web Search + Inline Citations + Reasoning UI in AI Chat
 
 ### Summary
+
 Full ChatGPT/Perplexity-style search + reasoning UX in the AI chat. When a user asks a factual question, the backend searches the web via Perplexity, streams sources as custom SSE events, and the iOS app renders a "Searching the web…" indicator, source pills, tappable citation superscripts, and a collapsible reasoning box. Reasoning models (deepseek-r1, o1, etc.) get a dedicated thinking UI with auto-collapse.
 
 ### Backend (`apps/server/src/routes/ai.ts`)
+
 - Added `shouldSearchWeb()` heuristic to detect queries needing web information
 - Added `performWebSearch()` — Tavily primary (pure search API, 1k free/mo, real snippets), Perplexity sonar fallback (no SDK needed — raw `fetch` for both). Gracefully returns empty if neither key is configured.
 - Added `injectSearchContext()` to format sources + citation instructions into the LLM prompt
@@ -882,15 +957,18 @@ Full ChatGPT/Perplexity-style search + reasoning UX in the AI chat. When a user 
 - Added `TAVILY_API_KEY` to `env.ts` type definitions
 
 ### iOS Model (`AIChatMessage.swift`)
+
 - Added `WebSource` struct (url, title, snippet, domain computed property)
 - Extended `AIChatMessage` with: `sources`, `searchQueries`, `searchState` (SearchPhase enum), `reasoningContent`, `reasoningDurationMs`
 
 ### iOS Service (`AIChatService.swift`)
+
 - Added `SSECustomEvent` and `SSESourcePayload` decode structs
 - Modified SSE parsing loop to try custom event decode before OpenRouter chunk decode (backward compatible)
 - Added `handleCustomEvent()` method to update message search/source/reasoning state
 
 ### iOS UI (`AIChatView.swift`)
+
 - Added `SearchingIndicator` view: spinning globe + "Searching the web…" + query text
 - Added `SourceChipsView`: horizontal ScrollView of capsule pills with favicon + domain, tappable to open URL
 - Modified `assistantBubble` to render search indicator and source chips above the answer content
@@ -899,11 +977,13 @@ Full ChatGPT/Perplexity-style search + reasoning UX in the AI chat. When a user 
 ### V2 Additions (same session)
 
 **Backend:**
+
 - Improved `shouldSearchWeb()` heuristic: skips task/email/calendar commands, filters short messages, two-tier check (time-sensitive vs factual questions vs own-data queries)
 - Added reasoning token extraction from OpenRouter SSE (`delta.reasoning_content` / `delta.reasoning`) for reasoning models (deepseek-r1, o1, o3-mini)
 - Re-emits reasoning tokens as custom `reasoning` events + `reasoning_done` with duration
 
 **iOS UI:**
+
 - `ReasoningBox`: collapsible thinking/reasoning box with pulsing brain icon, auto-expands while streaming, auto-collapses 0.8s after completion, tap header to toggle, shows "Thought for Xs"
 - `SourceDetailSheet`: tap any source chip to expand a detail sheet with full title, domain, snippet, and "Open in Safari" button. Long-press for context menu (open in Safari, copy URL)
 - Source chips now show citation number badges `[1]`, `[2]` alongside favicon + domain
@@ -911,6 +991,7 @@ Full ChatGPT/Perplexity-style search + reasoning UX in the AI chat. When a user 
 - Citation links open directly in Safari when tapped
 
 ### Architecture Decision
+
 - Single SSE stream with custom event types (backward compatible — old clients silently skip unknown JSON)
 - Backend-orchestrated search (client doesn't need to know about search providers)
 - Smart heuristic search trigger with command filtering (skips task/email/calendar ops)
@@ -918,9 +999,11 @@ Full ChatGPT/Perplexity-style search + reasoning UX in the AI chat. When a user 
 ## [2026-03-28] Comprehensive SEO Overhaul — From Zero to Indexed
 
 ### Summary
+
 todus.app had zero Google-indexed pages. This overhaul adds all missing SEO infrastructure, creates competitor comparison pages and a blog for organic traffic, and enables pre-rendering so Google sees real HTML content.
 
 ### New Files
+
 - `apps/mail/public/robots.txt` — Crawler directives (allow public, disallow /mail/, /settings/)
 - `apps/mail/public/sitemap.xml` — All public URLs for search engine discovery
 - `apps/mail/app/(full-width)/compare/[competitor]/page.tsx` — Data-driven comparison pages (vs Superhuman, Shortwave, Spark, Motion)
@@ -929,6 +1012,7 @@ todus.app had zero Google-indexed pages. This overhaul adds all missing SEO infr
 - `SEO-AUDIT.md` — Full audit findings, implementation status, and content calendar
 
 ### Updated Files
+
 - `apps/mail/lib/site-config.ts` — New title, description, Twitter cards, JSON-LD schemas (Organization, SoftwareApplication, FAQPage), 25+ target keywords
 - `apps/mail/app/root.tsx` — Canonical URL, Twitter cards, keywords meta, robots meta, JSON-LD structured data, apple-touch-icon, preconnect/dns-prefetch
 - `apps/mail/react-router.config.ts` — Pre-render 16 public pages for SEO (static HTML at build time)
@@ -937,6 +1021,7 @@ todus.app had zero Google-indexed pages. This overhaul adds all missing SEO infr
 - `apps/mail/app/(full-width)/pricing.tsx` — Page-specific SEO meta tags
 
 ### SEO Elements Added
+
 - Title tag: "Todus — AI Email, Calendar & Tasks in One App"
 - Meta description with value prop and YC credibility
 - 25+ target keywords in meta tag
@@ -951,6 +1036,7 @@ todus.app had zero Google-indexed pages. This overhaul adds all missing SEO infr
 - Pre-rendered HTML for all 16 public pages
 
 ### Verification
+
 - Build succeeds: `pnpm --filter mail build` completes with all 16 pages pre-rendered
 - Pre-rendered HTML verified to contain all meta tags, structured data, and visible content
 
@@ -959,6 +1045,7 @@ todus.app had zero Google-indexed pages. This overhaul adds all missing SEO infr
 ## [2026-03-28] Cross-platform mentions and slash commands
 
 ### New Features
+
 - **Shared mention model**: Added shared `MentionKind` / `MentionRef` types in `packages/shared` so web, server, and iOS use the same structured mention payload.
 - **Server mention search**: Added `mentions.search` tRPC route for task, thread, and person lookup with grouped results and stable IDs. Event mentions remain feature-gated on web until a web provider exists.
 - **AI mention context**: `/ai/chat` and the web agent route now accept optional `mentions` arrays and inject compact structured mention context into the current user turn before model execution.
@@ -968,10 +1055,12 @@ todus.app had zero Google-indexed pages. This overhaul adds all missing SEO infr
 - **iOS mention-aware AI requests**: Native AI chat now collects mention refs and includes them in the backend payload alongside the visible user message.
 
 ### Architectural Notes
+
 - **Shared slash semantics**: iOS task capture now derives slash actions from the same shared command model used by the new rich input surfaces instead of maintaining a one-off command list.
 - **Compose signature command**: Email compose now supports `/signature` using the currently active native signature.
 
 ### Verification
+
 - `pnpm --filter @zero/mail exec tsc --noEmit --pretty false` narrowed to the edited mail files reports no errors.
 - `pnpm --filter @zero/server exec tsc --noEmit --pretty false` narrowed to the edited server files reports one pre-existing unrelated overload error in `apps/server/src/routes/agent/index.ts`.
 - `xcodebuild -project apps/ios/Todus/Todus.xcodeproj -scheme Todus -configuration Debug -sdk iphonesimulator -derivedDataPath /tmp/todus-codex-derived-data build CODE_SIGNING_ALLOWED=NO` was started to validate the edited Swift files in an isolated build directory.
@@ -979,6 +1068,7 @@ todus.app had zero Google-indexed pages. This overhaul adds all missing SEO infr
 ## [2026-03-27] iOS — Single `NotificationService`, action IDs aligned with `TodosApp`
 
 ### Bug Fix / Architecture
+
 - **Removed duplicate `NotificationService`**: Only `Services/Notifications/NotificationService.swift` is compiled now; the old `Resources/NotificationService.swift` copy (different `Action` string constants) is deleted. Xcode file reference moved to `Services/Notifications/`. Action identifiers remain `TASK_COMPLETE` / `TASK_SNOOZE`, matching `UNNotificationAction` registration and `AppDelegate` in `TodosApp.swift`.
 - **Merged behavior**: 1-hour-before-due scheduling, `TASK_REMINDER` category, async permission request before scheduling (from the former Resources implementation), plus `clearAll` / `cancel(withIdentifiers:)` helpers.
 
@@ -987,15 +1077,18 @@ todus.app had zero Google-indexed pages. This overhaul adds all missing SEO infr
 ## [2026-03-27] iOS — Global search, task search bar visibility, touch targets, UI polish
 
 ### New Features
+
 - **Global search sheet**: Magnifying glass button added as first item in `AppTopHeader` action pill. Opens a full-screen sheet (`GlobalSearchView`) that searches tasks (SwiftData), emails (in-memory threads), calendar events, and people — all local, no extra network calls. Tap results to deep-navigate.
 - **Touch targets expanded**: Added `minTouchTarget()` extension (`frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())`) and applied to all small buttons across the app — search clear buttons, sort menu, email thread actions, board column controls, AI chat send/stop/config, voice buttons, attachment delete. Skipped dense equal-width rows (view mode picker, tab bar) to avoid conflicts.
 
 ### Bug Fixes / Visual Improvements
+
 - **Task search bar visibility**: Changed background from `surfaceSecondary.opacity(0.55)` (nearly invisible) to `surfacePrimary` (full opacity), and border from `cardBorder` to `strongBorder` — clearly visible in both light and dark mode.
 - **Avatar resized and made circular**: `AppTopHeader` avatar is now 34×34pt `Circle()` (was 40×40 `RoundedRectangle`), matching the height of the action pill beside it.
 - **Calendar header overlap fixed**: `CalendarContainerView` now accepts `topInset: CGFloat` and applies it via `additionalSafeAreaInsets.top` on the `CalendarViewController`, pushing CalendarKit's scroll content below the SwiftUI `AppTopHeader` overlay.
 
 ### Files Changed
+
 - `DesignSystem/AppTheme.swift` — minTouchTarget extension, avatar → circle, global search button + sheet in actionsPill
 - `Features/Tasks/TasksTabView.swift` — search bar background/border fix + touch targets
 - `Features/Search/GlobalSearchView.swift` — **NEW** — full global search sheet
@@ -1008,13 +1101,16 @@ todus.app had zero Google-indexed pages. This overhaul adds all missing SEO infr
 ## [2026-03-27] iOS — AI-powered Notification Center
 
 ### New Feature
+
 - **Notification Center sheet**: Tapping the bell icon in the app header now opens a notification center sheet (was: opened iOS system notification settings). The sheet shows an AI-generated digest of tasks due, upcoming calendar events, and important unread emails — grouped by type with priority indicators and tap-to-navigate actions.
 
 ### Architecture
+
 - **NotificationDigestService** (`Services/Notifications/`): Sends local task/event/email data to `/ai/chat` with a specialized system prompt. Uses non-streaming mode for simpler JSON response parsing.
 - **NotificationCenterView** (`Features/Notifications/`): SwiftUI sheet with loading skeleton, error/empty states, and grouped notification cards following existing HomeView design patterns.
 
 ### Files Changed
+
 - `AppTheme.swift` — Bell button now opens NotificationCenterView sheet instead of system settings
 - `NotificationDigestService.swift` — **NEW** — AI digest backend integration
 - `NotificationCenterView.swift` — **NEW** — Notification center sheet UI
@@ -1024,14 +1120,17 @@ todus.app had zero Google-indexed pages. This overhaul adds all missing SEO infr
 ## [2026-03-27] iOS — Fix Gmail connection persistence + Connect/Permission view consistency
 
 ### Bug Fixes
+
 - **Gmail connection not persisting after onboarding**: `GmailOnboardingView` now calls `emailService.checkConnection()` + `loadThreads()` after OAuth, so the email tab reflects the connected state immediately.
 - **`hasConnection` default changed from `true` to `false`**: Prevents a brief flash of the thread list before `checkConnection()` runs on first load.
 
 ### Visual Consistency
+
 - **EmailConnectView**: Rewritten to match `GmailOnboardingView` exactly — uses `GmailIconView(size: 88)` icon, `AppPrimaryButtonStyle()` button with `GmailIconView(size: 20)` inline, same spacing/typography.
 - **CalendarPermissionView**: Rewritten to match onboarding styling — uses `AppleCalendarIconView(size: 88)` instead of generic SF Symbol, `AppPrimaryButtonStyle()` buttons, same layout pattern.
 
 ### Files Changed
+
 - `GmailOnboardingView.swift` — Added `checkConnection()` + `loadThreads()` after successful OAuth
 - `EmailConnectView.swift` — Full rewrite to match onboarding styling
 - `CalendarPermissionView.swift` — Full rewrite to match onboarding styling
@@ -1042,9 +1141,11 @@ todus.app had zero Google-indexed pages. This overhaul adds all missing SEO infr
 ## [2026-03-27] iOS Tasks — Color System, Scroll Fix, Visual Overhaul
 
 ### Bug Fixes
+
 - **Board column scroll**: Columns now have internal vertical `ScrollView` so card overflow scrolls instead of being clipped. Header stays sticky above the scroll area.
 
 ### Design Overhaul — All Task Views
+
 - **Consistent tinted status system**: Todo = muted gray, Doing = muted blue, Done = muted green. Applied across board columns, table rows, list tags, and calendar headers.
 - **Board columns**: Each column has a very subtle tinted background (0.025 opacity) and tinted border (0.08 opacity). Drop highlight intensifies the tint. Column gap tightened (12→10). Dashed add-task button at bottom.
 - **Board cards**: Left-edge color indicator bar per status. Priority flag icons. Overdue dates in red, today in amber. Completed tasks show strikethrough with dimmed text. Thinner border (0.5px).
@@ -1053,6 +1154,7 @@ todus.app had zero Google-indexed pages. This overhaul adds all missing SEO infr
 - **List view (TaskRowView)**: Status tags now use tinted backgrounds matching their column color. Due date tags are color-coded (red=overdue, amber=today). Priority tags use colored flag icons. All tags use consistent 5pt radius with 0.5px tinted borders. Row corner radius refined (16→14).
 
 ### Files Changed
+
 - `BoardView.swift` — Column gap 12→10
 - `BoardColumnView.swift` — Vertical scroll for cards, sticky header, tinted column bg/border, dashed add-task button
 - `BoardTaskCard.swift` — Left-edge color bar, priority flags, due date coloring, strikethrough for completed
@@ -1063,6 +1165,7 @@ todus.app had zero Google-indexed pages. This overhaul adds all missing SEO infr
 ## [2026-03-27] iOS Board View — Drag/Drop, Inline Add, UI Polish
 
 ### Features
+
 - **Drag & drop tasks between columns**: Drop destination with animated status change and visual drop highlight using column tint colors.
 - **Tap column empty area to add task**: Tapping anywhere in a column's empty space opens an inline add field at the top of the card list.
 - **+ button in column headers**: Quick-add button in the top-right of each column header, tinted with the column's accent color.
@@ -1071,6 +1174,7 @@ todus.app had zero Google-indexed pages. This overhaul adds all missing SEO infr
 - **`captureInStatus()` method**: New `TaskCaptureService` method for creating tasks directly into a specific status column with full sync.
 
 ### UI Polish
+
 - **Column tint colors**: Each `TaskStatus` now has a subtle accent color (slate for Todo, blue for Doing, green for Done) and a status icon.
 - **Tighter spacing**: Reduced column width (272→264), card padding (12→10/9), card corner radius (16→10), column corner radius (16→14).
 - **Refined typography**: Smaller, denser text (13→12pt cards, 13→12pt headers), tighter tracking, softer foreground opacity.
@@ -1078,6 +1182,7 @@ todus.app had zero Google-indexed pages. This overhaul adds all missing SEO infr
 - **Removed heavy shadows**: Cards use clean border-only styling instead of glassCard with drop shadows.
 
 ### Files Changed
+
 - `apps/ios/Todus/Todus/Domain/TaskStatus.swift` — Added `tintColor`, `systemImage` properties
 - `apps/ios/Todus/Todus/Services/Tasks/TaskCaptureService.swift` — Added `captureInStatus()` method
 - `apps/ios/Todus/Todus/Features/Tasks/BoardColumnView.swift` — Full rewrite with inline add, + button, add-task button, refined styling
@@ -1087,18 +1192,21 @@ todus.app had zero Google-indexed pages. This overhaul adds all missing SEO infr
 ## [2026-03-27] Mem0 Integration — Persistent AI Memory
 
 ### New Feature
+
 - **`apps/server/src/lib/mem0.ts`** (NEW): Mem0 REST API client with multi-layer caching (in-memory → KV → API). Provides `addMemories`, `searchMemories`, `getAllMemories`, `getCachedMemories`, `preloadMemories`, `invalidateMemoryCache`, and `formatMemoriesForPrompt`.
 - **`apps/server/src/env.ts`**: Added `MEM0_API_KEY` to `ZeroEnv` type. Set via Cloudflare dashboard secrets.
 - **`apps/server/src/routes/ai.ts`**: Integrated Mem0 into `/ai/chat` (iOS flow). Injects cached memories into system prompt. Captures assistant response via TransformStream tee and stores conversation in Mem0 post-stream.
 - **`apps/server/src/routes/agent/index.ts`**: Integrated Mem0 into ZeroAgent (web flow). Preloads memories on WebSocket connect (background). Injects cached memories into system prompt (0ms). Stores conversation in Mem0 after response (fire-and-forget).
 
 ### Architecture
+
 - **Zero latency**: Memories are preloaded on WebSocket connect / KV-cached. Hot path reads are 0ms (in-memory) or <5ms (KV). No Mem0 API calls block the user.
 - **Cross-platform**: Both web and iOS share the same `user_id` (Better Auth user.id), so memories cross-pollinate.
 - **Graceful degradation**: All Mem0 calls are try/catch wrapped. If Mem0 is down or unconfigured, AI works normally without memory.
 - **No iOS changes needed**: Backend handles all Mem0 integration server-side.
 
 ### Setup Required
+
 - Add `MEM0_API_KEY` as a Cloudflare secret (dashboard) and in `.env` for local dev.
 - Sign up at https://app.mem0.ai to get an API key.
 
@@ -1107,6 +1215,7 @@ todus.app had zero Google-indexed pages. This overhaul adds all missing SEO infr
 ## [2026-03-27] Open source — secret hygiene & CI
 
 ### Security (contributor-facing)
+
 - **Audited repo**: No real API keys or OAuth secrets found in tracked source; secrets belong in `.env` / `.dev.vars` / `wrangler secret` (all gitignored or dashboard-only).
 - **`apps/server/wrangler.jsonc` (local)**: Removed numeric placeholders for `ELEVENLABS_API_KEY` and `VOICE_SECRET` (empty in `vars`); clarified dev JWT placeholder string. Added comment that real secrets must not live in committed `vars`.
 - **`apps/server/src/env.ts`**: `JWT_SECRET` / `ELEVENLABS_API_KEY` typings widened to `string` (no fake literals).
@@ -1119,6 +1228,7 @@ todus.app had zero Google-indexed pages. This overhaul adds all missing SEO infr
 ## [2026-03-27] iOS Code Review — View Layer Fixes (Batch 2)
 
 ### Bug Fixes & Improvements
+
 - **CalendarViewController.swift**: Added `inFlightDates` Set to prevent duplicate background EventKit fetches for the same day during rapid scrolling.
 - **EmailConnectView.swift**: Added `@State isLoading` and `errorMessage`, wrapped Task in do-catch, disabled button while loading.
 - **EmailRowView.swift**: Replaced hardcoded `Color.blue` with `AppTheme.accentBlue` for the unread indicator. Added combined accessibility label.
@@ -1132,6 +1242,7 @@ todus.app had zero Google-indexed pages. This overhaul adds all missing SEO infr
 - **Archived CustomTabBar.swift**: Added accessibility labels to AI/create action buttons and tab buttons. Fixed `glassEffect(in:)` → `glassEffect(.regular, in:)` to match correct iOS 26 API. Removed ineffective `.tracking()` from Image views.
 
 ### Files Changed
+
 - `Features/Calendar/CalendarViewController.swift`
 - `Features/Calendar/CalendarPermissionView.swift`
 - `Features/Email/EmailConnectView.swift`
@@ -1150,6 +1261,7 @@ todus.app had zero Google-indexed pages. This overhaul adds all missing SEO infr
 ## [2026-03-27] iOS Code Review Follow-up Fixes
 
 ### Bug Fixes & Hardening
+
 - **AppServices.swift**: Persist migrated signatures to UserDefaults after legacy migration (prevents re-migration on every launch). Added logging for JSONEncoder failures in signatures didSet.
 - **TodosApp.swift**: Moved `appDelegate.modelContainer` assignment into `initializeApp()` before @State properties are set, eliminating notification race condition. Replaced `try?` with `do/catch` + logging for context.save() and notification scheduling.
 - **EmailModels.swift**: Replaced `UUID().uuidString` fallback in EmailAttachment with deterministic ID based on filename+size. Changed date parsing fallback from `Date()` to `Date.distantPast` with logging.
@@ -1159,6 +1271,7 @@ todus.app had zero Google-indexed pages. This overhaul adds all missing SEO infr
 - **NotificationService.swift**: `scheduleTaskReminder` now properly checks/requests authorization before scheduling notifications.
 
 ### Files
+
 - `App/AppServices.swift` — signature migration persistence + error logging
 - `App/TodosApp.swift` — notification race fix + error logging
 - `Domain/EmailModels.swift` — deterministic attachment IDs + date fallback
@@ -1170,6 +1283,7 @@ todus.app had zero Google-indexed pages. This overhaul adds all missing SEO infr
 ## [2026-03-27] iOS Settings — Email Signatures sub-page
 
 ### Feature: Full Signature Management
+
 - **`SignaturesView`**: List showing all signatures with a checkmark on the active one. "None" row at top to disable signatures. Swipe-to-delete on each row. "+" toolbar button to create new. Each row navigates to the editor.
 - **`SignatureEditorView`**: Name field + TextEditor for body + "Use as active signature" toggle + Delete button. Presented as a sheet for new signatures, pushed page for editing.
 - **SettingsView**: Replaced the signature toggle + inline textfield with a `NavigationLink` to `SignaturesView`. Shows the active signature name (or "Off") as the row's value hint.
@@ -1177,6 +1291,7 @@ todus.app had zero Google-indexed pages. This overhaul adds all missing SEO infr
 - **`EmailSignature` model**: `Codable + Identifiable + Sendable` struct in `Domain/EmailModels.swift`.
 
 ### Files
+
 - `Domain/EmailModels.swift` — EmailSignature struct
 - `App/AppServices.swift` — signatures/selectedSignatureID storage + migration
 - `Features/Settings/SignaturesView.swift` — NEW (SignaturesView + SignatureEditorView)
@@ -1186,25 +1301,30 @@ todus.app had zero Google-indexed pages. This overhaul adds all missing SEO infr
 ## [2026-03-27] iOS Splash screen redesign + brand icon fixes
 
 ### Splash Screen
+
 - **Before**: Plain "Todus" text + spinner — no visual identity.
 - **After**: Branded rounded-square app icon mark (checklist SF Symbol, 96pt) + "Todus" title (rounded bold) + spinner below. (`TodosApp.swift`)
 
 ### Brand Icon Fixes
+
 - **AppleRemindersLogo clipping**: Previous `rowSpacing = h * 0.27` caused total content (1.14h) to overflow the frame, clipping the orange 3rd row. Reduced to `h * 0.11`; all 3 rows now fit at every size. (`BrandIcons.swift`)
 - **AppleRemindersIconView**: Refactored to use `AppIconContainer` (same pattern as GmailIconView) — white rounded-rect background with proper breathing room. No more stretching to fill the frame.
 - **AppIconContainer padding**: Inner icon frame reduced from `size * 0.72` to `size * 0.62` — ~19% padding on each side so icons feel airy.
 
 ### Files
+
 - `apps/ios/Todus/Todus/App/TodosApp.swift` — branded splash
 - `apps/ios/Todus/Todus/DesignSystem/BrandIcons.swift` — spacing fix, padding fix, AppleRemindersIconView refactor
 
 ## [2026-03-27] iOS — Fix 9s Startup Black Screen & Runtime Hangs
 
 ### Startup Black Screen Fix (CRITICAL)
+
 - **TodosApp**: Deferred `AppServices` and `ModelContainer` initialization from synchronous `init()` to async `.task` context. Shows a branded splash screen immediately while services initialize in the background. Previously all 12+ services + SwiftData schema reconciliation ran synchronously before the first frame, causing a 9+ second black screen.
 - **AIChatService**: Deferred `loadPersistedConversations()` (JSON deserialization from UserDefaults) to an async Task instead of running synchronously during init.
 
 ### Runtime Hang Fixes (from earlier session)
+
 - Cached expensive computed properties (`buckets`, `tasksDueToday`, `filteredThreads`, `visibleTasks`, `tasksByStatus`) across 5 views to prevent recalculation on every body evaluation.
 - Parallelized startup operations in RootView (auth upgrade + reminders setup).
 - Fixed settings sheet binding with proper `@Bindable` pattern.
@@ -1214,12 +1334,14 @@ todus.app had zero Google-indexed pages. This overhaul adds all missing SEO infr
 ## [2026-03-27] iOS — Swift 6 concurrency build fixes (Todus)
 
 ### Fixed (Xcode / Swift 6)
+
 - **`TodosApp.swift`**: Removed ineffective `@preconcurrency` on `UNUserNotificationCenterDelegate`. Snooze handling now uses a `Sendable` `SnoozeContentSnapshot` and rebuilds `userInfo` as `["taskID": taskIDString]` on the main actor (avoids sending `UNNotificationContent` / non-Sendable dictionaries across isolation).
 - **`CalendarViewController.swift`**: EventKit access completions use a `@Sendable` closure that only schedules `Task { @MainActor [weak self] in ... }`, fixing `EKEventStoreRequestAccessCompletionHandler` data-race diagnostics.
 - **`SenderAvatarView.swift`**: Initials avatar background color no longer uses `String.hashValue` (unstable across launches). Uses the same deterministic UTF-16 / JS `<<` algorithm as web `getAvatarColorIndex` in `bimi-avatar.tsx`.
 - **`Services/Notifications/NotificationService.swift`**: Snooze now schedules via `enqueueTaskReminder(fireDate:)` at `now + 1h` instead of a synthetic `dueDate` passed through `scheduleTaskReminder` (avoids confusing stacked offsets; behavior unchanged).
 
 ### Files
+
 - `apps/ios/Todus/Todus/App/TodosApp.swift`
 - `apps/ios/Todus/Todus/Features/Calendar/CalendarViewController.swift`
 - `apps/ios/Todus/Todus/Features/Email/SenderAvatarView.swift`
@@ -1230,18 +1352,21 @@ todus.app had zero Google-indexed pages. This overhaul adds all missing SEO infr
 ## [2026-03-27] PRD rewrite + iOS feature implementation (Phases 1–6)
 
 ### Documentation
+
 - **PRD.md rewritten** as pure product spec — removed all architecture/code, added User Flows, Empty & Error States, Notifications, AI Interaction Model, Settings Screen Spec, Database Schema Revisions sections
 - **AGENTS.md rewritten** from scratch — agent-agnostic architecture reference for all AI coding agents (Claude, Cursor, Gemini, etc.)
 - **CLAUDE.md updated** — added iOS app detail (services layer, auth flows, data layer), fixed auth providers list
 - **APPS_ARCHITECTURE.md updated** — fixed stale Expo/React Native and Next.js references
 
 ### iOS: Phase 1 — Empty & Error States
+
 - New `CalendarPermissionView.swift` — shown when calendar access is denied/not-determined
 - New `NetworkMonitor.swift` — NWPathMonitor wrapper with offline banner in MainTabView
 - `AIChatView` — added AI unreachable error state with retry button
 - `HomeView` — composite "Get Started" card when all sections empty
 
 ### iOS: Phase 2 — Settings Screen Completion
+
 - **Delete account** — double confirmation (dialog → type "DELETE" alert), backend call + local wipe
 - **Disconnect Gmail** — confirmation dialog, calls `connections.delete` tRPC
 - **AI tone picker** — Professional/Casual/Concise preference injected into system prompt
@@ -1249,28 +1374,33 @@ todus.app had zero Google-indexed pages. This overhaul adds all missing SEO infr
 - New API methods: `TodosAPIClient.deleteAccount()`, `TodosAPIClient.disconnectEmail()`
 
 ### iOS: Phase 3 — AI Context Awareness
+
 - `AIChatView` suggestions now tab-aware (Home/Tasks/Email/Calendar each show relevant prompts)
 - `AppServices.currentTab` tracks active tab, synced by MainTabView
 - AI tone preference synced to `AIChatService.toneInstruction` and injected into system prompt
 
 ### iOS: Phase 4 — Session Handling
+
 - `TodosAPIClient` now attempts silent refresh on 401 before marking session expired
 - `AuthService.isSessionExpired` flag + `attemptSilentRefresh()` method
 - Orange "Session expired — Sign in again" banner in MainTabView
 
 ### iOS: Phase 5 — Local Notifications
+
 - New `NotificationService.swift` — UNUserNotificationCenter wrapper with TASK_REMINDER category
 - Action buttons: Complete (marks task done) and Snooze 1h (reschedules)
 - `TaskCaptureService` schedules/cancels notifications on task create/update/complete/delete
 - `TodosApp.swift` — AppDelegate adapter for notification action handling
 
 ### iOS: Phase 6 — Database Schema Changes
+
 - Added `emailThreadId` and `eventId` columns to task table in `schema.ts`
 - Added indexes: `task_email_thread_id_idx`, `task_event_id_idx`
 - Updated `TaskRecord.swift` with new optional properties
 - Updated tRPC routes (create, update, sync) to accept and persist both fields
 
 ### Files Changed
+
 - `PRD.md`, `AGENTS.md`, `CLAUDE.md`, `APPS_ARCHITECTURE.md`
 - `apps/ios/Todus/Todus/App/AppServices.swift`
 - `apps/ios/Todus/Todus/App/TodosApp.swift`
@@ -1294,6 +1424,7 @@ todus.app had zero Google-indexed pages. This overhaul adds all missing SEO infr
 ## [2026-03-27] Review follow-up — OTP fallback, compose draft carry-over, and iOS sync/status fixes
 
 ### Fixed
+
 - **OTP fallback is now dev-only**: The server no longer retries all failed OTP sends through `resend.dev`. Fallback is restricted to the owner mailbox in non-production environments so normal users are not routed into an impossible delivery path.
 - **CreateSheet email drafts now preserve typed text**: Choosing the Email route from the universal create modal now carries the entered text into `EmailComposeView(body:)` instead of discarding it.
 - **Reminders sync direction now affects behavior**: The selected direction now governs both initial bootstrap sync/import and live task mutations, so `From Reminders` no longer pushes app changes back out and `To Reminders` no longer imports reminders into Todus.
@@ -1303,6 +1434,7 @@ todus.app had zero Google-indexed pages. This overhaul adds all missing SEO infr
 - **Todus simulator build blockers were resolved**: The Xcode target now includes `NetworkMonitor.swift` and `CalendarPermissionView.swift`, and the tracked `CustomTabBar.swift` has been brought back in sync with the implementation expected by `MainTabView`.
 
 ### Files
+
 - `apps/server/src/lib/auth.ts`
 - `apps/ios/Todus/Todus/App/AppServices.swift`
 - `apps/ios/Todus/Todus/Services/Reminders/RemindersSyncState.swift`
@@ -1317,6 +1449,7 @@ todus.app had zero Google-indexed pages. This overhaul adds all missing SEO infr
 ## [2026-03-27] iOS Create Flow — custom modal overlay + adaptive inputs by type/tab
 
 ### Changed
+
 - **`+` action now opens a modal overlay (not system sheet)**: Replaced the old `sheet`-based create UI with an in-app modal overlay that matches the compact floating style.
 - **Adaptive create form by selected type**:
   - **Auto**: smart routing (date text -> event, email intent -> email, otherwise task)
@@ -1331,12 +1464,14 @@ todus.app had zero Google-indexed pages. This overhaul adds all missing SEO infr
 - **Folder selector default**: Defaults to `Inbox` (no folder) as requested.
 
 ### Files
+
 - `apps/ios/Todus/Todus/Navigation/MainTabView.swift`
 - `apps/ios/Todus/Todus/Navigation/CreateSheet.swift`
 
 ## [2026-03-27] iOS Tab Screens — unified top header across all tabs
 
 ### Changed
+
 - **Shared top header**: Added a reusable `AppTopHeader` for tab root screens with:
   - user avatar on the top-left (profile image or initials fallback),
   - large page title below,
@@ -1351,6 +1486,7 @@ todus.app had zero Google-indexed pages. This overhaul adds all missing SEO infr
   - Calendar
 
 ### Files
+
 - `apps/ios/Todus/Todus/DesignSystem/AppTheme.swift`
 - `apps/ios/Todus/Todus/Features/Home/HomeView.swift`
 - `apps/ios/Todus/Todus/Features/Tasks/TasksTabView.swift`
@@ -1360,15 +1496,18 @@ todus.app had zero Google-indexed pages. This overhaul adds all missing SEO infr
 ## [2026-03-27] iOS Calendar — create events on tap (no long-press required)
 
 ### Fixed
+
 - **Tap-to-create on timeline**: Tapping an empty time slot in the calendar now immediately starts creating a new event.
 - **Long-press still supported**: Existing long-press creation behavior remains available.
 
 ### Files
+
 - `apps/ios/Todus/Todus/Features/Calendar/CalendarViewController.swift`
 
 ## [2026-03-27] iOS Onboarding — visual restyle + real provider logos
 
 ### Changed
+
 - **Onboarding visual refresh**: Restyled onboarding layouts to match the app's current spacing, typography, and button rhythm used elsewhere in iOS.
 - **Real provider logos**: Replaced generic SF Symbol icons with the same branded provider icons used in Settings:
   - Gmail onboarding now uses `GmailIconView`
@@ -1376,25 +1515,30 @@ todus.app had zero Google-indexed pages. This overhaul adds all missing SEO infr
 - **Primary CTA alignment**: Added small provider logos inside the primary connect buttons for stronger visual consistency and recognizability.
 
 ### Files
+
 - `apps/ios/Todus/Todus/App/GmailOnboardingView.swift`
 - `apps/ios/Todus/Todus/Features/Settings/RemindersSetupView.swift`
 
 ## [2026-03-27] iOS Auth, AI Sheet, and Inbox Avatars — autofill + interactive half sheet + robust fallbacks
 
 ### Auth
+
 - **Email OTP autofill improvements**: Login email field now uses iOS email autofill hints (`textContentType(.emailAddress)`) and supports submit from keyboard. OTP field keeps native one-time-code autofill and uses a done submit label.
 
 ### AI Chat Sheet
+
 - **Half-page AI sheet**: AI chat now opens with a 50% height detent and can expand to full screen.
 - **Background remains interactive at half detent**: Enabled background interaction up to the half detent so underlying page context remains visible and scrollable while the AI sheet is half-open.
 
 ### Inbox Avatars
+
 - **No more blank avatar slots**: Sender avatar view now always renders initials with a colored circle as a guaranteed base layer.
 - **More resilient fallbacks**: Added local domain fallback URL waterfall (`/favicon.ico`, `apple-touch-icon`, DuckDuckGo icon API, Google S2 favicon) when backend avatar resolution is slow/fails.
 - **Subdomain and edge-case handling**: Added normalization + root-domain extraction with common multi-part TLD support (`co.uk`, `com.au`, etc.) and `www.` host variants.
 - **Cache normalization**: Avatar cache now keys by normalized lowercase email to avoid misses from casing/whitespace differences.
 
 ### Files
+
 - `apps/ios/Todus/Todus/Features/Auth/AuthView.swift`
 - `apps/ios/Todus/Todus/Navigation/MainTabView.swift`
 - `apps/ios/Todus/Todus/Features/Email/SenderAvatarView.swift`
@@ -1402,6 +1546,7 @@ todus.app had zero Google-indexed pages. This overhaul adds all missing SEO infr
 ## [2026-03-27] iOS — Custom glass tab bar (two-pill layout)
 
 ### Changed
+
 - **Replaced system TabView** with a fully custom tab bar using `safeAreaInset(edge: .bottom)` — eliminates `tabViewBottomAccessory` full-width stretching issues entirely.
 - **Two-pill layout**: left pill (4 nav tabs, fills width) + right pill (AI + Create, fixed size). Active tab shows filled icon + subtle blue rounded-rect indicator.
 - **Glass material**: iOS 26 uses `.glassEffect(in: Capsule())` (Liquid Glass); iOS 17/18 uses `.ultraThinMaterial` capsule + drop shadow.
@@ -1410,40 +1555,49 @@ todus.app had zero Google-indexed pages. This overhaul adds all missing SEO infr
 - **Content inset**: `safeAreaInset` pushes all content up automatically — no manual padding needed per-view.
 
 ### Files
+
 - `apps/ios/Todus/Todus/Navigation/CustomTabBar.swift` ← new
 - `apps/ios/Todus/Todus/Navigation/MainTabView.swift` — stripped to content+safeAreaInset only
 
 ## [2026-03-27] iOS Settings — Native logout confirmation modal
 
 ### Changed
+
 - **Logout confirmation**: Added native iOS confirmation dialog before signing out from the Settings account section. Tapping "Log out" now first shows a destructive confirm step with cancel option.
 
 ### Files
+
 - `apps/ios/Todus/Todus/Features/Settings/SettingsView.swift`
 
 ## [2026-03-27] iOS Settings overhaul — Google avatar, functional toggles, sync direction, brand icon fix
 
 ### Account Section
+
 - **Google avatar + name**: Account card now shows AsyncImage from Google profile URL, display name, and email. Falls back to letter-initial circle if no image. `fetchUserProfile()` called on auth completion and when settings opens.
 - **Logout moved into account card**: Removed standalone logout section; logout button now lives inside the Account section card.
 - **Removed "Signed in" badge**: Email address shown below name instead.
 
 ### Email Section (functional toggles)
+
 - **Swipe Gestures**: Toggle now bound to `services.swipeGesturesEnabled` (was static).
 - **Email Signature**: Toggle bound to `services.signatureEnabled`; inline text field appears when enabled, bound to `services.signatureText`.
 - **Thread Grouping**: Toggle bound to `services.threadGroupingEnabled` (was `.constant(true)`).
 
 ### Reminders Sync Direction
+
 - **`RemindersSyncDirection` enum** added to `SyncModels.swift`: `.twoWay`, `.toReminders`, `.fromReminders` with titles, subtitles, icons.
 - **RemindersSetupView**: Added inline picker for sync direction (shown when sync is enabled).
 
 ### Icons on all settings items
+
 - Added `Label(_, systemImage:)` to AI, Preferences, About, Privacy sections.
 
 ### Brand Icon Fix
+
 - Added `.aspectRatio(1, contentMode: .fit)` to `GmailIconView`, `AppleCalendarIconView`, `AppleRemindersIconView` to prevent stretching.
 
 ### Files
+
 - `apps/ios/Todus/Todus/Features/Settings/SettingsView.swift` — Full rewrite
 - `apps/ios/Todus/Todus/Features/Settings/RemindersSetupView.swift` — Sync direction picker
 - `apps/ios/Todus/Todus/Domain/SyncModels.swift` — RemindersSyncDirection enum
@@ -1453,12 +1607,14 @@ todus.app had zero Google-indexed pages. This overhaul adds all missing SEO infr
 ## [2026-03-27] iOS Email — Clean minimal redesign, glass buttons, star + mark-unread
 
 ### Thread View
+
 - **Header redesign**: Glass icon buttons (34×34) for back, star, mark-as-unread, archive, trash. Subject + sender name shown inline. Star derived from thread labels; toggles optimistically.
 - **Mark as unread**: Taps `markAsUnread` + dismisses to inbox so the row shows unread immediately.
 - **Cleaner message bubbles**: Sender row is a tap target for collapse; body has an inset section with hairline divider. Softer `rowStroke` border.
 - **Header material**: `.ultraThinMaterial` with divider overlay.
 
 ### Inbox
+
 - **Row separators**: `listRowSeparator(.visible)` with `AppTheme.divider` tint.
 - **Loading indicator**: Inline spinner next to "Inbox" title during refresh.
 - **Glass search bar**: `.glassEffect(in:)` on iOS 26; surface card fallback.
@@ -1466,6 +1622,7 @@ todus.app had zero Google-indexed pages. This overhaul adds all missing SEO infr
 - **Settings button**: Now uses `LiquidGlassButtonStyle`.
 
 ### Files
+
 - `apps/ios/Todus/Todus/Features/Email/EmailThreadView.swift`
 - `apps/ios/Todus/Todus/Features/Email/EmailInboxView.swift`
 - `apps/ios/Todus/Todus/Features/Email/EmailRowView.swift`
@@ -1473,13 +1630,16 @@ todus.app had zero Google-indexed pages. This overhaul adds all missing SEO infr
 ## [2026-03-27] iOS Settings — Full overhaul with brand icons, better appearance, more options
 
 ### Bug Fix
+
 - **Settings buttons now work**: `hasSeenOnboarding` on `AuthService` changed from a computed UserDefaults property to a stored `@Observable` var. SwiftUI now detects the change and `RootView` correctly switches to `AuthView` when the user logs out or taps "Sign in". Previously, no observable change occurred when `authState` was already `.guest`. (`AuthService.swift`)
 - **Cards visible in light mode**: `AppTheme.backgroundBottom/Top` changed from `0.99` to `0.94` in light mode, matching iOS `systemGroupedBackground`. List cells (white) now contrast clearly against the gray background. Dark mode surface raised slightly `0.09 → 0.11` to reduce harsh contrast. (`AppTheme.swift`)
 
 ### Feature: Brand Icons
+
 - **`BrandIcons.swift`** (new): `GmailLogo` — pixel-accurate SVG-path recreation using `Canvas` + five filled paths (blue/green/yellow/red/dark-red). `AppleCalendarLogo` — red header + large day number. `AppleRemindersLogo` — three coloured dot rows. All wrapped in `AppIconContainer` with iOS-style rounded-rect background and shadow. (`BrandIcons.swift`)
 
 ### Feature: Improved Settings UI
+
 - **Appearance selector**: Replaced `.segmented` picker with three visual preview cards (mini mock-UI swatch + icon + label). Selection shows blue border + checkmark. (`SettingsView.swift`)
 - **Account section**: Avatar circle with email initial, green/orange status dot, cleaner layout.
 - **Connected Services**: Proper brand icons with connection status. Apple Calendar shows "Connect" button when not authorized.
@@ -1490,24 +1650,30 @@ todus.app had zero Google-indexed pages. This overhaul adds all missing SEO infr
 ## [2026-03-27] iOS Thread View — Auto-height body, swipe back, liquid glass, AI summary
 
 ### Bug Fix
+
 - **Email body no longer clipped**: Replaced fixed `maxHeight: 600` frame with dynamic WKWebView height measurement (`document.documentElement.scrollHeight` via `evaluateJavaScript`). Two-pass measurement (immediate + 700ms delay) handles late-loading images. Emails now expand to full content height.
 - **`markAsRead` reliability**: Replaced `async let _ = markAsRead` with a named `async let` plus explicit `await` so the read request is not dropped (Swift structured-concurrency pitfall, see Swift #62027).
 - **WKWebView flicker**: `EmailHTMLView.updateUIView` only calls `loadHTMLString` when raw `html` changes, not when height measurement updates state — avoids redundant reloads per message.
 
 ### Feature: Swipe-to-go-back
+
 - **`SwipeBackEnabler`** (new in `AppTheme.swift`): `UIViewControllerRepresentable` that re-enables `interactivePopGestureRecognizer` after `.navigationBarBackButtonHidden(true)`. Applied to `EmailThreadView`.
 
 ### Feature: Liquid Glass Reply Button
+
 - **`LiquidGlassButtonStyle`** (new in `AppTheme.swift`): Uses `.glassEffect(in:)` on iOS 26+, falls back to surface+border card on older iOS. Reply bar uses this style.
 
 ### Feature: AI Summary Card
+
 - **`AISummaryCard`**: Collapsible summary at the top of the thread. Calls `brain.generateSummary` tRPC endpoint (uses `@cf/facebook/bart-large-cnn` — Cloudflare Workers AI, free tier). Only shown when the brain has vectorized the thread. Styled with a purple accent border matching the web app.
 
 ### Refactor
+
 - `MessageBubble` now uses `SenderAvatarView` (size: 32) instead of its own initials/color logic.
 - `EmailHTMLView` extracted into `ExpandingEmailHTMLView` wrapper — cleaner height state management.
 
 ### Files
+
 - `apps/ios/Todus/Todus/Features/Email/EmailThreadView.swift`
 - `apps/ios/Todus/Todus/DesignSystem/AppTheme.swift`
 - `apps/ios/Todus/Todus/Features/Email/SenderAvatarView.swift` (added `size` param)
@@ -1515,46 +1681,56 @@ todus.app had zero Google-indexed pages. This overhaul adds all missing SEO infr
 ## [2026-03-27] iOS Inbox — Real Sender Avatars with Fallback Chain
 
 ### Feature
+
 - **`SenderAvatarView`**: New SwiftUI component that resolves real sender avatars via the existing backend `avatar.getByEmail` tRPC endpoint (Google People API → domain favicon → fallbacks → initials).
 - **`AvatarCache`**: `@Observable` singleton that deduplicates in-flight requests and caches results for the session. Views re-render automatically when a cache entry arrives.
 - **Waterfall fallback**: `AsyncImage` tries URLs in priority order; advances to next on load failure, ending at initials + deterministic color circle if all fail.
 - **Subdomain handling**: Handled by the backend — `auth.supabase.com` resolves to the Supabase root-domain logo.
 
 ### Files
+
 - `apps/ios/Todus/Todus/Features/Email/SenderAvatarView.swift` (**new** — add to Xcode project)
 - `apps/ios/Todus/Todus/Features/Email/EmailRowView.swift` — replaced inline initials avatar with `SenderAvatarView`
 
 ## [2026-03-27] iOS Tab Bar — HIG-Compliant Layout, Calendar Fix, Floating Action Pill
 
 ### Structural Fix
+
 - **Separated tabs from actions**: Removed `tabViewBottomAccessory` and `safeAreaInset` accessory patterns. Both caused the action buttons to stretch full-width and merge visually with the tab bar, violating Apple HIG (tabs = navigation, actions ≠ tabs).
 - **Floating action pill**: AI and Create buttons now live in a compact vertical pill (~44×88pt, glass material) that floats bottom-right above the tab bar — clearly a separate control, not a tab.
 
 ### Calendar Clipping Fix
+
 - **Removed double NavigationStack**: `CalendarContainerView` creates its own `UINavigationController` internally. Wrapping it in another `NavigationStack` from `tabContent(for:)` broke safe-area propagation, causing the bottom ~30% of calendar content to be clipped behind the tab bar.
 
 ### Tint Color Fix
+
 - **`AppTheme.accentBlue`**: Changed from `Color(red: 0.25, green: 0.48, blue: 1.0)` (purple-shifted) to `Color.blue` (system iOS blue, matches `AppPrimaryButtonStyle`).
 
 ### Files Updated
+
 - `apps/ios/Todus/Todus/Navigation/MainTabView.swift`
 - `apps/ios/Todus/Todus/DesignSystem/AppTheme.swift`
 
 ## [2026-03-26] UX Fixes — Usability, Touch Support & Discoverability
 
 ### Critical Fixes
+
 - **Security settings**: Replaced non-functional 2FA toggle and Delete Account button with clear "Coming soon" state. Prevents users from thinking they've enabled security features that don't exist yet. (`settings/security/page.tsx`)
 - **Thread action toolbar touch support**: Action buttons (star, archive, delete) now visible when a thread is selected/focused, not just on hover. Touch devices (tablets, phones) can now access these core actions. Added `@media (pointer: coarse)` CSS rule for broader touch support. (`mail-list.tsx`, `globals.css`)
 
 ### High-Impact Improvements
+
 - **CC/BCC toggle visibility**: Replaced invisible plain-text Cc/Bcc buttons with styled toggle buttons that show active state (blue highlight when enabled). Much more discoverable in compose view. (`email-composer.tsx`)
 - **Keyboard shortcuts overlay**: New `?` key shortcut opens a grouped, scrollable dialog showing all keyboard shortcuts organized by scope (Navigation, Global, Mail List, Thread, Compose). Replaces the old behavior of navigating away to settings. (`keyboard-shortcuts-dialog.tsx`, `hotkey-provider-wrapper.tsx`)
 - **Context-sensitive empty states**: Mail list empty state now shows "No results found" with "clear filters" action when searching, vs. "No emails in this folder yet" when the folder is genuinely empty. (`mail-list.tsx`)
 
 ### Medium Fixes
+
 - **iOS swipe-to-go-back**: Restored native swipe-back gesture in `EmailThreadView` by using `.navigationBarBackButtonHidden(true)` instead of `.toolbar(.hidden)`. Custom back button still renders, but iOS swipe gesture now works. (`EmailThreadView.swift`)
 
 ### Verified Working (no changes needed)
+
 - **Undo toasts**: Archive/delete already have undo toasts with delayed execution — confirmed working via `createPendingAction` in `use-optimistic-actions.ts`.
 - **Connections page**: Legitimate user-facing feature (manage connected email accounts), not debug info.
 - **Category selection**: Uses dropdown with checkmarks — clear selected state already present.
@@ -1562,6 +1738,7 @@ todus.app had zero Google-indexed pages. This overhaul adds all missing SEO infr
 ## [2026-03-26] iOS Performance — Fix Hangs & UI Freezes
 
 ### Computed Property Caching (HIGH impact)
+
 - **CalendarTaskView**: `buckets` computed property now cached in `@State`, recomputed only on `allTasks`/`searchText`/`selectedFolderID` changes instead of every body evaluation.
 - **HomeView**: `tasksDueToday` cached in `@State`, recomputed on `allTasks` change.
 - **EmailInboxView**: `filteredThreads` cached in `@State`, recomputed on `searchText`/`threads` change.
@@ -1569,33 +1746,40 @@ todus.app had zero Google-indexed pages. This overhaul adds all missing SEO infr
 - **BoardView**: `filteredTasks(for:)` (called 4x per render) replaced with pre-grouped `@State` dictionary computed once.
 
 ### Startup Parallelization
+
 - **RootView**: Auth upgrade and reminders setup now run concurrently via separate `.task` modifiers instead of sequentially.
 
 ### Settings Sheet Binding
+
 - **MainTabView**: Replaced inline `Binding(get:set:)` with proper `@Bindable` pattern for `showsSettings`.
 
 ### Email Service Optimization
+
 - **EmailService**: Batched parallel thread fetches into groups of 8 (was 30 simultaneous requests).
 
 ### Bug Fixes
+
 - **EmailModels**: Fixed `EmailMessage` and `EmailAttachment` `Codable` → `Decodable` (they're only decoded from API responses, custom `CodingKeys` prevented `Encodable` synthesis).
 - **EmailThread**: Added `Equatable` conformance for `.onChange(of:)` support.
 
 ## [2026-03-26] UI Polish — Refined Design Tokens, Typography & Visual Consistency
 
 ### Design Token Refinements (globals.css)
+
 - **Softened foreground colors**: Light mode foreground moved from near-pure-black `hsl(240 10% 3.9%)` to softer `hsl(240 6% 13%)`. Dark mode foreground eased to `hsl(0 0% 93%)`.
 - **Warmed backgrounds**: Light bg shifted to `hsl(0 0% 99%)`, dark bg to `hsl(240 4% 7.5%)`. Static hex colors use slightly warm grays instead of pure blacks.
 - **Tightened typography**: Base letter-spacing set to `-0.011em`, headings to `-0.02em`. Body line-height `1.5`, heading line-height `1.2`. Font smoothing enabled globally.
 - **Softer borders/rings**: Border and ring values use slightly more neutral hues with lower saturation.
 
 ### Component Updates
+
 - **button.tsx**: Text tightened to `13px`, transitions smoothed to `150ms`.
 - **card.tsx**: Rounded from `2xl` to `xl`, shadow softened. Card title from `2xl` to `lg`. Padding tightened from `p-6` to `p-5`.
 - **input.tsx**: Height from `h-10` to `h-9`, rounded from `xl` to `lg`, text `13px`.
 - **settings-card.tsx**: Removed hardcoded `panelLight/panelDark` for `transparent`. Tighter spacing.
 
 ### Sidebar Refinements
+
 - **Removed purple upgrade button** (`#8B5CF6` → `mainBlue`). Tighter spacing and smaller text.
 - **Compose button**: Uses `mainBlue` token. Smoother transition.
 - **Sidebar padding**: Reduced from `px-4` to `px-3` for tighter layout.
@@ -1603,15 +1787,18 @@ todus.app had zero Google-indexed pages. This overhaul adds all missing SEO infr
 - **Hover states**: Replaced hardcoded `bg-subtleWhite`/`dark:bg-[#202020]` with `bg-accent` token.
 
 ### Navigation & User Area
+
 - **Replaced 20+ hardcoded hex colors** (`dark:bg-[#131313]`, `dark:bg-[#141414]`, `text-black dark:text-white`, etc.) with semantic tokens (`bg-popover`, `bg-card`, `text-foreground`, `bg-background`).
 - **Tighter user info section**: Reduced spacing between name, email, and verification badge.
 
 ### Login Page
+
 - **Tighter layout**: Narrowed max-width to `340px`, reduced padding and heading sizes.
 - **Typography**: Headings from `2xl` to `xl`, links from `text-xs` to `11px`.
 - **Showcase panel**: Rounded from `2.5rem` to `2xl`, softened border/shadow.
 
 ### Mail List (thread items)
+
 - **Hover**: Replaced `bg-offsetLight`/`dark:bg-primary/5` with `bg-accent/60` + `transition-colors`.
 - **Action bar**: Tightened from `rounded-xl p-1 gap-1` to `rounded-lg p-0.5 gap-0.5` with softer shadow.
 - **Unread dot**: Smaller (`1.5` from `2`), uses `mainBlue` token.
@@ -1620,21 +1807,25 @@ todus.app had zero Google-indexed pages. This overhaul adds all missing SEO infr
 - **Removed all hardcoded tooltip backgrounds** (`bg-white dark:bg-[#1A1A1A]`).
 
 ### Thread Display
+
 - **Container**: Replaced `bg-panelLight dark:bg-panelDark` with `bg-card`.
 - **All action buttons**: Replaced `bg-white dark:bg-[#313131]`/`hover:bg-gray-100 dark:hover:bg-[#404040]` with `bg-card hover:bg-accent`.
 - **Reply button**: Cleaner token-based styling.
 - **Empty state**: Tighter text sizes, token-based colors.
 
 ### Settings Layout
+
 - **Replaced all hardcoded border/bg colors** with `border-border/60` and `bg-card`.
 - **Slightly tighter padding** and reduced shadow.
 
 ### iOS Refinements
+
 - **AppTheme.swift**: Slightly adjusted dark mode background from `0.04` to `0.05` white, surface values nudged 1% lighter. Border opacities reduced for subtlety. Shadow reduced from `0.08` to `0.06`.
 - **EmailInboxView**: Inbox header font `28→24` with tighter tracking. Search bar corners `16→12`, thinner border.
 - **EmailThreadView**: Subject font `17→16` with tracking. Reply bar height `44→42`, corners `14→12`.
 
 ### Files Updated
+
 - `apps/mail/app/globals.css`
 - `apps/mail/components/ui/button.tsx`
 - `apps/mail/components/ui/card.tsx`
