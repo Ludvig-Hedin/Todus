@@ -47,6 +47,35 @@ export const session = createTable(
   ],
 );
 
+export const sessionMetadata = createTable(
+  'session_metadata',
+  {
+    sessionId: text('session_id')
+      .primaryKey()
+      .references(() => session.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    deviceLabel: text('device_label'),
+    deviceType: text('device_type'),
+    osName: text('os_name'),
+    browserName: text('browser_name'),
+    city: text('city'),
+    region: text('region'),
+    country: text('country'),
+    lastSeenAt: timestamp('last_seen_at').notNull().defaultNow(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at')
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (t) => [
+    index('session_metadata_user_id_idx').on(t.userId),
+    index('session_metadata_updated_at_idx').on(t.updatedAt),
+  ],
+);
+
 export const account = createTable(
   'account',
   {

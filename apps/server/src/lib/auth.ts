@@ -22,71 +22,71 @@ import { type EProviders } from '../types';
 import { createDriver } from './driver';
 import { Autumn } from 'autumn-js';
 import { createDb } from '../db';
-import { Effect } from 'effect';
 import { env } from '../env';
 import { Dub } from 'dub';
 
-const scheduleCampaign = (userInfo: { address: string; name: string }) =>
-  Effect.gen(function* () {
-    const name = userInfo.name || 'there';
-    const resendService = resend();
+const scheduleCampaign = async (userInfo: { address: string; name: string }) => {
+  const name = userInfo.name || 'there';
+  const resendService = resend();
 
-    const sendEmail = (subject: string, react: unknown, scheduledAt?: string) =>
-      Effect.promise(() =>
-        resendService.emails
-          .send({
-            from: 'Todus <onboarding@todus.app>',
-            to: userInfo.address,
-            subject,
-            react: react as any,
-            ...(scheduledAt && { scheduledAt }),
-          })
-          .then(() => void 0),
-      );
+  const emails = [
+    {
+      subject: 'Welcome to Todus',
+      react: WelcomeEmail({ name }),
+      scheduledAt: undefined,
+    },
+    {
+      subject: 'Todus Pro is here',
+      react: TodusProEmail({ name }),
+      scheduledAt: 'in 1 day',
+    },
+    {
+      subject: 'Auto-labeling is here 🎉📥',
+      react: AutoLabelingEmail({ name }),
+      scheduledAt: 'in 2 days',
+    },
+    {
+      subject: 'AI Writing Assistant is here 🤖💬',
+      react: AIWritingAssistantEmail({ name }),
+      scheduledAt: 'in 3 days',
+    },
+    {
+      subject: 'Shortcuts are here 🔧🚀',
+      react: ShortcutsEmail({ name }),
+      scheduledAt: 'in 4 days',
+    },
+    {
+      subject: 'Categories are here 📂🔍',
+      react: CategoriesEmail({ name }),
+      scheduledAt: 'in 5 days',
+    },
+    {
+      subject: 'Super Search is here 🔍🚀',
+      react: SuperSearchEmail({ name }),
+      scheduledAt: 'in 6 days',
+    },
+  ];
 
-    const emails = [
-      {
-        subject: 'Welcome to Todus',
-        react: WelcomeEmail({ name }),
-        scheduledAt: undefined,
-      },
-      {
-        subject: 'Todus Pro is here',
-        react: TodusProEmail({ name }),
-        scheduledAt: 'in 1 day',
-      },
-      {
-        subject: 'Auto-labeling is here 🎉📥',
-        react: AutoLabelingEmail({ name }),
-        scheduledAt: 'in 2 days',
-      },
-      {
-        subject: 'AI Writing Assistant is here 🤖💬',
-        react: AIWritingAssistantEmail({ name }),
-        scheduledAt: 'in 3 days',
-      },
-      {
-        subject: 'Shortcuts are here 🔧🚀',
-        react: ShortcutsEmail({ name }),
-        scheduledAt: 'in 4 days',
-      },
-      {
-        subject: 'Categories are here 📂🔍',
-        react: CategoriesEmail({ name }),
-        scheduledAt: 'in 5 days',
-      },
-      {
-        subject: 'Super Search is here 🔍🚀',
-        react: SuperSearchEmail({ name }),
-        scheduledAt: 'in 6 days',
-      },
-    ];
-
-    yield* Effect.all(
-      emails.map((email) => sendEmail(email.subject, email.react, email.scheduledAt)),
-      { concurrency: 'unbounded' },
-    );
-  });
+  await Promise.allSettled(
+    emails.map(async (email) => {
+      try {
+        await resendService.emails.send({
+          from: 'Todus <onboarding@todus.app>',
+          to: userInfo.address,
+          subject: email.subject,
+          react: email.react as any,
+          ...(email.scheduledAt ? { scheduledAt: email.scheduledAt } : {}),
+        });
+      } catch (error) {
+        console.error('[CAMPAIGN] Failed to send onboarding email', {
+          to: userInfo.address,
+          subject: email.subject,
+          error,
+        });
+      }
+    }),
+  );
+};
 
 const connectionHandlerHook = async (account: Account) => {
   // Apple is an identity-only provider (used for authentication via native
@@ -150,18 +150,17 @@ const connectionHandlerHook = async (account: Account) => {
     updatingInfo,
   );
 
-  const settingsRow = await db.findUserSettings(account.userId);
+  const settingsRow = await db.findUserSettings();
   const currentSettings = settingsRow?.settings ?? defaultUserSettings;
   if (!currentSettings.welcomeEmailSent) {
-    if (env.NODE_ENV === 'production') {
-      await Effect.runPromise(
-        scheduleCampaign({ address: userInfo.address, name: userInfo.name || 'there' }),
-      );
-    }
-    await db.updateUserSettings(account.userId, {
+    await db.updateUserSettings({
       ...currentSettings,
       welcomeEmailSent: true,
     });
+
+    if (env.NODE_ENV === 'production') {
+      await scheduleCampaign({ address: userInfo.address, name: userInfo.name || 'there' });
+    }
   }
 
   if (env.GOOGLE_S_ACCOUNT && env.GOOGLE_S_ACCOUNT !== '{}') {

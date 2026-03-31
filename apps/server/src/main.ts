@@ -684,8 +684,8 @@ const api = new Hono<HonoContext>()
         // raw session token stored in the session table. Resolving this directly is
         // more reliable than reconstructing a signed cookie on the fly.
         if (!resolved) {
+          const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
           try {
-            const { db } = createDb(env.HYPERDRIVE.connectionString);
             const [activeSession] = await db
               .select({ userId: session.userId })
               .from(session)
@@ -708,8 +708,15 @@ const api = new Hono<HonoContext>()
                 });
               }
             }
-          } catch {
-            // Raw session token DB lookup failed
+          } catch (err) {
+            const error = err instanceof Error ? err : new Error(String(err));
+            console.error('[auth/mobile-token] Raw session token DB lookup failed', error);
+            TraceContext.completeSpan(traceId, tokenSpan.id, {
+              success: false,
+              error: error.message,
+            });
+          } finally {
+            await conn.end();
           }
         }
 
@@ -839,7 +846,11 @@ const api = new Hono<HonoContext>()
     // Build the deep link URL for the native app
     const redirectUrl = c.req.query('redirect') || 'todus://auth-callback';
     const separator = redirectUrl.includes('?') ? '&' : '?';
-    const deepLink = `${redirectUrl}${separator}token=${encodeURIComponent(jwtToken.token)}`;
+    const sessionIdParam = session.session.id
+      ? `&sessionId=${encodeURIComponent(session.session.id)}`
+      : '';
+    const deepLink =
+      `${redirectUrl}${separator}token=${encodeURIComponent(jwtToken.token)}${sessionIdParam}`;
 
     // Return an HTML page that triggers the deep link via JavaScript.
     // This is more reliable than a 302 redirect for custom URL schemes on iOS.

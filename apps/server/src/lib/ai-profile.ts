@@ -1,3 +1,5 @@
+import { getZeroDB } from './server-utils';
+
 type AIProfileSource = {
   contextAboutYou?: string | null;
   customPrompt?: string | null;
@@ -21,3 +23,13 @@ export const buildAIProfilePrompt = (source?: AIProfileSource) => {
   return sections.join('\n\n');
 };
 
+export async function getSharedAIProfilePromptForUser(userId: string) {
+  try {
+    const zeroDB = await getZeroDB(userId);
+    const settings = await zeroDB.findUserSettings();
+    return buildAIProfilePrompt(settings?.settings);
+  } catch (error) {
+    console.warn('[AIProfile] Failed to load shared AI profile prompt:', error);
+    return '';
+  }
+}
