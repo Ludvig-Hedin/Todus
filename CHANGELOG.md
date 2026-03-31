@@ -1,5 +1,148 @@
 # Project Changelog
 
+## [2026-03-31] UX Polish — cross-platform UX fixes (iOS, macOS, Web)
+
+Comprehensive UX pass addressing discoverability, friction, and honesty gaps across all three live platforms.
+
+### macOS
+- **Removed non-functional Quick Filters** from tasks sidebar footer — buttons had nil closures and did nothing (`MacSidebarView.swift`)
+- **Removed hardcoded email labels & calendar sources** from sidebar footer — "Important/Work/Personal" labels and calendar source pills were static UI not backed by real data (`MacSidebarView.swift`)
+- **Removed non-functional toolbar filter menus** — email (All Mail/Unread/Flagged) and tasks (All/Today/Upcoming/Completed) filters had empty closures; "Mark All Read" is the only remaining email toolbar action (`MacRootView.swift`)
+- **Removed dead notification bell** — popover showed hardcoded "No new notifications." placeholder (`MacRootView.swift`)
+- **Confirmed Email and AI Assistant are already separate sections** in `MacSettingsView.swift` — no change needed
+
+### iOS
+- **Split Settings: "Email & AI" → separate "Email" + "AI Assistant" sections** — reduces cognitive load; unrelated settings no longer grouped (`SettingsView.swift`)
+- **Replaced horizontal-scroll sessions table with vertical cards** — mobile-friendly layout with "This device" badge and per-session log out (`SettingsView.swift`)
+- **Added skeleton loading state to email inbox** — differentiates loading vs empty vs error; `.redacted(reason: .placeholder)` blocks shown during initial fetch (`EmailInboxView.swift`)
+
+### Web
+- **Honest Calendar page labeling** — title changed from "Calendar" to "Tasks by Date" with "Calendar events coming soon" badge; misleading "Connect Google Calendar" link removed (`calendar/page.tsx`)
+- **Quick Actions on Search page** — initial empty state now shows inline task-create field (type + Enter) and "Compose new email" button, matching macOS quick-action pattern (`search/page.tsx`)
+
+**Files:** `apps/macos/TodusMac/App/MacSidebarView.swift`, `apps/macos/TodusMac/App/MacRootView.swift`, `apps/ios/Todus/Todus/Features/Settings/SettingsView.swift`, `apps/ios/Todus/Todus/Features/Email/EmailInboxView.swift`, `apps/web/app/(routes)/mail/calendar/page.tsx`, `apps/web/app/(routes)/mail/search/page.tsx`
+
+## [2026-03-31] Refactor — `resolveCurrentSessionId` Bearer guard clarity
+
+- Replaced `!authHeader?.startsWith('Bearer ')` with `!authHeader || !authHeader.startsWith('Bearer ')` in `apps/server/src/trpc/routes/sessions.ts`. Behavior is unchanged (null/empty headers still take the hint/early-return path only), but the guard matches the real invariant before `authHeader.slice()` and narrows types explicitly.
+
+**Files:** `apps/server/src/trpc/routes/sessions.ts`
+
+## [2026-03-31] Fix — 3 targeted bugs: security nav, AI priority enum, prompt ordering
+
+- **Security nav missing**: Added `navigation.settings.security` entry to `apps/web/config/navigation.ts` so the Active Sessions page (`/settings/security`) is reachable from the settings sidebar. Route and i18n key already existed; the nav link was the only missing piece.
+- **Stale 'urgent' priority in AI tool definitions**: Removed `'urgent'` from the priority enum in both `create_task` and `update_task` tool definitions in `apps/server/src/routes/ai.ts`. The server tRPC schema (`tasks.ts`) only accepts `['none','low','medium','high']`; any AI-generated `priority: 'urgent'` would fail validation.
+- **AI profile prepended before system prompt**: Flipped ordering in `apps/server/src/routes/agent/index.ts` (ZeroAgent) and `apps/server/src/routes/ai.ts` (`/ai/chat` and `/ai/call`) so the base system instructions appear first and user profile context is appended after, ensuring core rules are not shadowed by user content.
+
+**User-facing:** Security page now appears in settings sidebar. AI task creation with priority no longer silently fails. AI assistant behavior is more stable when users set custom profiles.
+
+**Files:** `apps/web/config/navigation.ts`, `apps/server/src/routes/ai.ts`, `apps/server/src/routes/agent/index.ts`
+
+## [2026-03-31] Fix — server auth: prevent repeated onboarding email campaigns
+
+- Persist the `welcomeEmailSent` guard before dispatching onboarding campaigns so a partial Resend failure can no longer replay the entire sequence on the next login.
+- Made onboarding campaign dispatch best-effort per email so one failed scheduled message does not block the rest of the sequence or reopen the send gate.
+
+**User-facing:** New and returning users should stop receiving repeated "Welcome", "Todus Pro is here", and related onboarding emails on every login.
+
+**Files:** `apps/server/src/lib/auth.ts`, `TASK.md`
+
+## [2026-03-31] Feature — web: Full iOS/macOS visual parity pass (Tasks board/table, Home redesign, Chat history, Calendar quick-add)
+
+### Tasks page (`/mail/tasks`) — full rewrite
+- **View mode picker**: segmented control (List / Board / Table) at top right
+- **Horizontal folder pill strip**: scrollable row of pills replaces old sidebar layout — "All" + each folder + "+" add folder button
+- **Board view** (kanban): 3 draggable columns (To Do / Doing / Done) using `@dnd-kit/core`. Drag cards between columns to update `status` via `tasks.update`. `DragOverlay` renders the card while dragging.
+- **Table view**: compact single-line `<table>` rows (checkbox, title, priority, status, due, folder, menu) — dense Linear-style view
+- **Quick-add row**: inline text input at top of list view — Enter creates task with current folder pre-selected
+- **Task detail Sheet**: clicking a task title opens a `<Sheet side="right">` with full metadata (title, description, priority, status, due date, folder), edit + delete buttons
+- **TypeScript fix**: `isDueDateWarning` now accepts `string | Date | null | undefined` since tRPC can return `Date` objects
+
+### Home page (`/mail/home`) — redesign
+- **Section headers**: iOS-style `SectionHeader` component — icon + title + count badge + "See all" link + optional "+" button
+- **Today's Events section**: "Connect Google Calendar" CTA card (dashed border, links to Settings → Connections). No fake data shown since backend Calendar API isn't wired yet.
+- **Sections**: Events → Due Tasks → Recent Emails (matches iOS order)
+- **Card containers**: each section wrapped in `rounded-xl border bg-card px-4 py-4`
+- **Greeting**: larger `text-[22px]` heading with date subtitle
+
+### Chat page (`/mail/chat`) — conversation history + markdown
+- **Left sidebar** (hidden on mobile): `w-56` conversation list from `ai.listConversations`. Each row shows title + relative date. Active row highlighted with `bg-accent`.
+- **Load conversation**: clicking a past chat loads its messages via `ai.getConversation` and restores to `setMessages()`
+- **Auto-save**: on first assistant response (not mid-stream), saves conversation with title = first 60 chars of user's first message via `ai.saveConversation`
+- **Delete**: hover → MoreHorizontal → dropdown → Delete triggers `ai.deleteConversation`, refreshes sidebar
+- **Markdown**: AI responses rendered with `react-markdown` + `remark-gfm` inside `prose prose-sm dark:prose-invert` container (wrapped in div — react-markdown v10 doesn't accept className directly)
+- **AI bubble style**: `border bg-card` instead of plain `bg-muted` for visual separation
+
+### Calendar page (`/mail/calendar`) — polish + features
+- **Inline quick-add row**: always-visible input at top of day panel — Enter creates task with `dueDate = selectedDate`
+- **Connect Google Calendar CTA**: dashed-border card in left sidebar below week overview, links to Settings → Connections
+- **Week overview**: dates with tasks show count badge
+- **Empty state**: shows link to Tasks page
+- **Header**: slimmer `py-3.5` consistent with other page headers
+
+**Files:**
+- `apps/web/app/(routes)/mail/tasks/page.tsx` — full rewrite
+- `apps/web/app/(routes)/mail/home/page.tsx` — full rewrite
+- `apps/web/app/(routes)/mail/chat/page.tsx` — full rewrite
+- `apps/web/app/(routes)/mail/calendar/page.tsx` — full rewrite
+- `apps/web/config/navigation.ts` — Email expandable parent + icon updates
+- `apps/web/components/ui/nav-main.tsx` — NavItemExpandable, NavChildRow, removed feedback link
+- `apps/web/components/ui/app-sidebar.tsx` — removed dead badge mutations
+- `apps/web/components/ai-toggle-button.tsx` — circular FAB polish
+
+## [2026-03-30] Feature — web: iOS/macOS feature parity (Folders, AI Chat, Global Search)
+
+- **Task Folders**: Tasks page now has a folder sidebar (create/rename/delete folders, filter tasks by folder, move tasks to folders via dropdown). Backend `folders.list/create/update/delete` tRPC routes fully wired.
+- **AI Chat page** (`/mail/chat`): Standalone full-page chat using `useAgent` + `useAgentChat` from Cloudflare `agents` SDK. Connects to `ZeroAgent` Durable Object via WebSocket. Example queries, streaming indicator, stop button.
+- **Global Search page** (`/mail/search`): Searches both emails (via `mail.listThreads` with `q` param) and tasks (via `tasks.list` with `search` param) simultaneously. Tabbed result view (All / Emails / Tasks), debounced input, empty/loading states.
+- **Navigation**: Added AI Chat and Search items to sidebar "Organize" section with keyboard shortcuts. Added `navigation.sidebar.chat` and `navigation.sidebar.search` i18n keys.
+- **Routes**: Registered `/mail/chat` and `/mail/search` in `routes.ts`.
+
+**Files:** `apps/web/app/(routes)/mail/tasks/page.tsx`, `apps/web/app/(routes)/mail/chat/page.tsx` (new), `apps/web/app/(routes)/mail/search/page.tsx` (new), `apps/web/app/routes.ts`, `apps/web/config/navigation.ts`, `apps/web/messages/en.json`
+
+## [2026-03-31] Fix — web: invalidate all `tasks.list` queries after task mutations
+
+- Task updates from mail home, calendar, and shared `TaskItem` now call `queryClient.invalidateQueries(trpc.tasks.list.queryFilter())` so every cached `tasks.list` variant (filters, sort, limit) refetches instead of only the one matching a fixed `queryKey({ limit: N })`.
+- Mail tasks page `invalidate()` uses the same `queryFilter()` pattern (replacing a path-prefix `predicate` that relied on reference equality between fresh and cached `queryKey[0]` arrays).
+
+**User-facing:** Lists and filters stay in sync after toggling or editing tasks from any surface.
+
+**Files:** `apps/web/app/(routes)/mail/tasks/page.tsx`, `apps/web/app/(routes)/mail/home/page.tsx`, `apps/web/app/(routes)/mail/calendar/page.tsx`, `apps/web/components/tasks/task-item.tsx`, `apps/web/task-item.tsx`
+
+## [2026-03-31] Fix — iOS AI chat: transcribe freeze, full-screen hang, expand button visibility
+
+- Fixed transcribe button freezing the UI by moving `AVAudioSession.setActive` off the main actor with `Task.detached` in `VoiceController.beginAudioSession()`.
+- Fixed full-screen compose button causing a 5-second hang by delaying `isFocused = true` until after the sheet presentation animation completes (~350ms).
+- Full-screen expand button is now only shown when the text input has reached its maximum height (≥118pt), hiding it when the input is empty or single-line.
+
+**Files:** `apps/ios/Todus/Todus/Features/Voice/VoiceInputButton.swift`, `apps/ios/Todus/Todus/Features/AI/AIChatView.swift`
+
+## [2026-03-31] Fix — shared keychain auth remains backward compatible
+
+- Restored backward-compatible reads for legacy account-only Keychain items after adding the bundle service namespace.
+- New writes still use the namespaced keychain entry, but upgrade installs now fall back to the previous storage shape so persisted bearer tokens and AI chat history survive the rollout.
+
+**Files:** `packages/swift-auth/Sources/TodusAuth/KeychainHelper.swift`
+
+
+## [2026-03-30] Feature — active sessions management in `apps/web`, iOS, and macOS
+
+- Added a new backend `sessions` tRPC router with `list`, `revoke`, and `revokeAll`, backed by a new `mail0_session_metadata` table for coarse device/location metadata and last-seen tracking.
+- Replaced the `apps/web` security placeholder with a real Active Sessions table showing `Device`, `Location`, `Created`, `Updated`, and per-session `Log out`, plus a `Log out all devices` action.
+- Added matching Active Sessions management UI to iOS and macOS settings so signed-in devices can be reviewed and revoked from native clients too.
+- Improved native current-session detection by resolving raw Better Auth session tokens from the session table when cookie session lookup is unavailable, and by forwarding the Better Auth `session.id` through the native OAuth handoff for JWT-based native sessions.
+- Intentionally left cross-device live sync work out of this change set; that architecture remains a separate follow-up because it touches tasks, settings, AI state, and native persistence broadly.
+
+**Files:** `apps/server/src/db/schema.ts`, `apps/server/src/db/migrations/0040_stiff_living_lightning.sql`, `apps/server/src/main.ts`, `apps/server/src/trpc/index.ts`, `apps/server/src/trpc/routes/sessions.ts`, `apps/web/app/(routes)/settings/security/page.tsx`, `apps/ios/Todus/Todus/Services/API/TodosAPIClient.swift`, `apps/ios/Todus/Todus/Features/Settings/SettingsView.swift`, `apps/macos/TodusMac/Services/API/TodosAPIClient.swift`, `apps/macos/TodusMac/Views/Settings/MacSettingsView.swift`, `packages/swift-auth/Sources/TodusAuth/AuthService.swift`, `TASK.md`
+
+## [2026-03-30] Fix — archived RN parity and safety cleanup
+
+- Hardened the archived RN auth, settings, and mail flows against stale optimistic state, unhandled URL opening errors, and unsafe persistence failures.
+- Removed raw email from native PostHog identification, added safer Postgres healthcheck behavior in production compose, and closed Hyperdrive connections in the server auth token path.
+- Updated shared compose/mail helpers and several settings screens to handle loading, error, and accessibility cases more defensively.
+
+**Files:** `apps/server/src/main.ts`, `docker-compose.prod.yaml`, `apps/archived/archived-rn/...`
+
 ## [2026-03-30] Fix — native Google OAuth now returns a JWT bearer token for iOS/macOS
 
 - Updated `/api/auth/mobile-token` to mint a JWT via Better Auth's `jwt()` plugin (`auth.api.getToken`) instead of forwarding the raw session token from the browser session.
@@ -277,7 +420,7 @@ Resolved the current macOS Xcode warnings/errors blocking the `TodusMac` build:
 
 ## [2026-03-30] Fix — `@zero/web` index route & routing parity with `apps/mail`
 
-**Symptom:** Visiting `http://localhost:3200/` showed a non-interactive calendar stub with no sidebar or mail chrome.
+**Symptom:** Visiting `http://localhost:3000/` showed a non-interactive calendar stub with no sidebar or mail chrome.
 
 **Root cause:** `react-router.config.ts` uses `appDirectory: 'app'`, so `index('page.tsx')` resolves to **`app/page.tsx`**, which had been a placeholder calendar — not the marketing `HomeContent` shell from `apps/mail`. The experimental `app-layout.tsx` wrapper also did not apply to `/`, so the index never matched the unified shell.
 

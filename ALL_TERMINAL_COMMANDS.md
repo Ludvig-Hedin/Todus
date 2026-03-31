@@ -164,7 +164,7 @@ npm run dev
 
 # To run the new Unified Web App (@zero/web) specifically:
 pnpm run --filter=@zero/web dev
-# It is configured to run on Port 3200.
+# It is configured to run on Port 0.
 ```
 
 This will typically start the server on `http://localhost:3000`.
