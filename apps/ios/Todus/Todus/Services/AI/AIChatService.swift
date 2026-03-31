@@ -18,6 +18,10 @@ final class AIChatService {
 
     /// Title for the current conversation — set from first user message.
     var chatTitle: String? = nil
+    /// Folder for the currently active conversation, saved alongside history.
+    var currentConversationFolderID: UUID? = nil
+    /// Identifier for the currently active conversation, used for move/save updates.
+    var currentConversationID: UUID? = nil
 
     /// Currently active model, selectable by the user at runtime.
     var selectedModel: String {
@@ -286,6 +290,8 @@ final class AIChatService {
         }
         messages.removeAll()
         chatTitle = nil
+        currentConversationFolderID = nil
+        currentConversationID = nil
         errorMessage = nil
         isConversationSaved = true
         currentTurnMentions = []
@@ -315,11 +321,23 @@ final class AIChatService {
             )
         }
         chatTitle = conversation.title
+        currentConversationID = conversation.id
+        currentConversationFolderID = conversation.folderID
         errorMessage = nil
         currentTurnMentions = []
         lastSubmittedMentions = []
         // Already persisted — don't duplicate on next autosave
         isConversationSaved = true
+    }
+
+    func moveConversation(_ conversation: AIChatConversation, to folderID: UUID?) {
+        guard let index = savedConversations.firstIndex(where: { $0.id == conversation.id }) else { return }
+        savedConversations[index].folderID = folderID
+        persistConversationsLocally()
+        Task { await syncSaveConversation(savedConversations[index]) }
+        if currentConversationID == conversation.id {
+            currentConversationFolderID = folderID
+        }
     }
 
     /// Creates a duplicated working copy of the current conversation while preserving
@@ -1043,6 +1061,7 @@ final class AIChatService {
             id: UUID(),
             title: chatTitle ?? "Untitled",
             createdAt: Date(),
+            folderID: currentConversationFolderID,
             messages: messages.map {
                 AIChatConversation.SavedMessage(
                     role: $0.role == .user ? "user" : "assistant",
@@ -1052,6 +1071,7 @@ final class AIChatService {
             }
         )
         savedConversations.insert(saved, at: 0)
+        currentConversationID = saved.id
         // Cap history at 50 conversations
         if savedConversations.count > 50 { savedConversations.removeLast() }
         persistConversationsLocally()
@@ -1110,6 +1130,7 @@ final class AIChatService {
 
     private struct RemoteConversation: Decodable {
         let id: String
+        let folderId: String?
         let title: String
         let createdAt: Date
         let updatedAt: Date
@@ -1176,6 +1197,7 @@ final class AIChatService {
                 id: uuid,
                 title: remote.title,
                 createdAt: remote.createdAt,
+                folderID: remote.folderId.flatMap(UUID.init(uuidString:)),
                 messages: remote.messages ?? []
             )
         } catch {
@@ -1190,12 +1212,14 @@ final class AIChatService {
             let id: String
             let title: String
             let messages: [AIChatConversation.SavedMessage]
+            let folderId: String?
             let createdAt: String
         }
         let input = SaveInput(
             id: conversation.id.uuidString,
             title: conversation.title,
             messages: conversation.messages,
+            folderId: conversation.folderID?.uuidString,
             createdAt: ISO8601DateFormatter().string(from: conversation.createdAt)
         )
         do {

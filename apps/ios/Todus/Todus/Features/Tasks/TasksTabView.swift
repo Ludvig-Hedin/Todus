@@ -54,6 +54,9 @@ struct TasksTabView: View {
             }
         }
         .toolbar(.hidden, for: .navigationBar)
+        .task {
+            await services.captureService.syncSharedFolders(in: modelContext)
+        }
         // Deep navigation from AI chat cards — open task detail sheet
         .onAppear { consumePendingTaskNavigation() }
         .onChange(of: services.pendingTaskId) { _, _ in consumePendingTaskNavigation() }

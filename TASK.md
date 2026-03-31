@@ -2,6 +2,15 @@
 
 Last updated: 2026-03-31
 
+## Unified Folders Expansion
+
+- `DONE` Expanded the folder concept across tasks, saved AI chats, and calendar events so each item type can now be filed into shared user folders.
+- `DONE` Kept email provider folders/labels separate and unchanged, preserving the existing mail folder model.
+- `DONE` Added cross-platform chat folder filtering, move actions, folder badges, and shared folder sync on web, iOS, and macOS.
+- `DONE` Added calendar event folder sidecar storage and folder move actions in the native event surfaces.
+- `DONE` Added server-backed AI conversation folder storage plus migration coverage for the new folder metadata.
+- `DONE` Verified the native implementations with successful iOS and macOS builds.
+
 ## Current Web/Server Fix Batch
 
 - `DONE` Shipped a focused web mail UX pass: non-blocking inbox connection setup, onboarding sequencing, clearer search/filter wording, better empty-state guidance, more discoverable list actions, and a stronger thread action hierarchy.

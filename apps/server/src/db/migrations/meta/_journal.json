@@ -295,6 +295,13 @@
       "when": 1774907141994,
       "tag": "0040_stiff_living_lightning",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1774991081126,
+      "tag": "0041_lame_emma_frost",
+      "breakpoints": true
     }
   ]
 }

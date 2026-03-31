@@ -14,6 +14,7 @@ struct CalendarEvent: Identifiable, Sendable {
     let calendarColorGreen: Double
     let calendarColorBlue: Double
     let calendarName: String
+    let folderID: UUID?
 }
 
 /// Shared calendar service actor that manages a single EKEventStore instance.
@@ -21,6 +22,7 @@ struct CalendarEvent: Identifiable, Sendable {
 /// Actor isolation prevents main-thread blocking.
 actor CalendarService {
     private lazy var eventStore = EKEventStore()
+    private let folderMapKey = "com.todus.macos.calendar.eventFolderMap"
 
     /// Request full access to calendar events. Returns true if authorized.
     func requestAccess() async -> Bool {
@@ -49,7 +51,7 @@ actor CalendarService {
     /// multiple calendar sources like iCloud + Google both showing "Långfredagen").
     func events(from startDate: Date, to endDate: Date) -> [CalendarEvent] {
         let predicate = eventStore.predicateForEvents(withStart: startDate, end: endDate, calendars: nil)
-        let all = eventStore.events(matching: predicate).map { $0.toCalendarEvent() }
+        let all = eventStore.events(matching: predicate).map { $0.toCalendarEvent(folderID: folderID(for: $0.eventIdentifier)) }
 
         // Deduplicate all-day events only: same title on the same day can appear
         // from multiple calendar sources, but timed events should remain distinct.
@@ -72,18 +74,43 @@ actor CalendarService {
     }
 
     /// Create a new event with the given title and optional dates.
-    func createEvent(title: String, startDate: Date, endDate: Date? = nil) throws {
+    func createEvent(title: String, startDate: Date, endDate: Date? = nil, folderID: UUID? = nil) throws {
         let event = EKEvent(eventStore: eventStore)
         event.title = title
         event.startDate = startDate
         event.endDate = endDate ?? startDate.addingTimeInterval(3600)
         event.calendar = eventStore.defaultCalendarForNewEvents
         try eventStore.save(event, span: .thisEvent)
+        if let folderID, let identifier = event.eventIdentifier {
+            setFolderID(folderID, for: identifier)
+        }
+    }
+
+    func setFolderID(_ folderID: UUID?, for eventIdentifier: String?) {
+        guard let eventIdentifier else { return }
+        var map = folderMap
+        if let folderID {
+            map[eventIdentifier] = folderID.uuidString
+        } else {
+            map.removeValue(forKey: eventIdentifier)
+        }
+        folderMap = map
+    }
+
+    private func folderID(for eventIdentifier: String?) -> UUID? {
+        guard let eventIdentifier,
+              let raw = folderMap[eventIdentifier] else { return nil }
+        return UUID(uuidString: raw)
+    }
+
+    private var folderMap: [String: String] {
+        get { UserDefaults.standard.dictionary(forKey: folderMapKey) as? [String: String] ?? [:] }
+        set { UserDefaults.standard.set(newValue, forKey: folderMapKey) }
     }
 }
 
 private extension EKEvent {
-    func toCalendarEvent() -> CalendarEvent {
+    func toCalendarEvent(folderID: UUID?) -> CalendarEvent {
         // Extract actual RGB from the calendar's CGColor, falling back to system blue
         let (r, g, b): (Double, Double, Double) = {
             guard let cgColor = calendar?.cgColor,
@@ -103,7 +130,8 @@ private extension EKEvent {
             calendarColorRed: r,
             calendarColorGreen: g,
             calendarColorBlue: b,
-            calendarName: calendar?.title ?? "Calendar"
+            calendarName: calendar?.title ?? "Calendar",
+            folderID: folderID
         )
     }
 }

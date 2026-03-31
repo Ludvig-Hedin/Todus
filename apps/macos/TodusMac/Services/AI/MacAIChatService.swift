@@ -17,6 +17,8 @@ final class MacAIChatService {
     var isStreaming: Bool = false
     var errorMessage: String?
     var chatTitle: String? = nil
+    var currentConversationID: UUID? = nil
+    var currentConversationFolderID: UUID? = nil
 
     /// Currently active model, selectable by the user at runtime.
     var selectedModel: String {
@@ -181,6 +183,8 @@ final class MacAIChatService {
         if isStreaming { cancelStream() }
         messages.removeAll()
         chatTitle = nil
+        currentConversationID = nil
+        currentConversationFolderID = nil
         errorMessage = nil
         isConversationSaved = true
     }
@@ -203,8 +207,20 @@ final class MacAIChatService {
             )
         }
         chatTitle = conversation.title
+        currentConversationID = conversation.id
+        currentConversationFolderID = conversation.folderID
         errorMessage = nil
         isConversationSaved = true
+    }
+
+    func moveConversation(_ conversation: MacChatConversation, to folderID: UUID?) {
+        guard let index = savedConversations.firstIndex(where: { $0.id == conversation.id }) else { return }
+        savedConversations[index].folderID = folderID
+        persistConversationsLocally()
+        Task { await syncSaveConversation(savedConversations[index]) }
+        if currentConversationID == conversation.id {
+            currentConversationFolderID = folderID
+        }
     }
 
     /// Delete a saved conversation from history (local + backend).
@@ -665,6 +681,7 @@ final class MacAIChatService {
             id: UUID(),
             title: chatTitle ?? "Untitled",
             createdAt: Date(),
+            folderID: currentConversationFolderID,
             messages: messages.map {
                 MacChatConversation.SavedMessage(
                     role: $0.role == .user ? "user" : "assistant",
@@ -673,6 +690,7 @@ final class MacAIChatService {
             }
         )
         savedConversations.insert(saved, at: 0)
+        currentConversationID = saved.id
         if savedConversations.count > 50 { savedConversations.removeLast() }
         persistConversationsLocally()
         Task { await syncSaveConversation(saved) }
@@ -728,6 +746,7 @@ final class MacAIChatService {
 
     private struct RemoteConversation: Decodable {
         let id: String
+        let folderId: String?
         let title: String
         let createdAt: Date
         let updatedAt: Date
@@ -787,6 +806,7 @@ final class MacAIChatService {
                 id: uuid,
                 title: remote.title,
                 createdAt: remote.createdAt,
+                folderID: remote.folderId.flatMap(UUID.init(uuidString:)),
                 messages: remote.messages ?? []
             )
         } catch {
@@ -799,12 +819,14 @@ final class MacAIChatService {
             let id: String
             let title: String
             let messages: [MacChatConversation.SavedMessage]
+            let folderId: String?
             let createdAt: String
         }
         let input = SaveInput(
             id: conversation.id.uuidString,
             title: conversation.title,
             messages: conversation.messages,
+            folderId: conversation.folderID?.uuidString,
             createdAt: ISO8601DateFormatter().string(from: conversation.createdAt)
         )
         do {
@@ -948,6 +970,7 @@ struct MacChatConversation: Identifiable, Codable {
     let id: UUID
     var title: String
     let createdAt: Date
+    var folderID: UUID?
     var messages: [SavedMessage]
 
     struct SavedMessage: Codable {

@@ -2278,19 +2278,85 @@ private struct BlinkingCursor: View {
 /// new-chat button top-right, search bar pinned to bottom — matches the reference design.
 struct ChatHistoryView: View {
     @Environment(AppServices.self) private var services
+    @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
+    @Query(sort: \FolderRecord.createdAt) private var folders: [FolderRecord]
 
     @State private var searchText = ""
+    @State private var folderFilter: String = "all"
+    @State private var movingConversation: AIChatConversation?
 
     private var chatService: AIChatService { services.aiChatService }
     /// Shared formatter — creating one per row per render is wasteful
     private let relativeDateFormatter = RelativeDateTimeFormatter()
 
     private var filtered: [AIChatConversation] {
-        guard !searchText.isEmpty else { return chatService.savedConversations }
-        return chatService.savedConversations.filter {
-            $0.title.localizedCaseInsensitiveContains(searchText)
+        chatService.savedConversations.filter { convo in
+            let matchesFolder: Bool = {
+                switch folderFilter {
+                case "all":
+                    return true
+                case "unfiled":
+                    return convo.folderID == nil
+                default:
+                    return convo.folderID?.uuidString == folderFilter
+                }
+            }()
+
+            guard matchesFolder else { return false }
+            guard !searchText.isEmpty else { return true }
+            return convo.title.localizedCaseInsensitiveContains(searchText)
         }
+    }
+
+    private var folderFilterButtons: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                folderFilterButton(title: "All", systemImage: "tray", filter: "all", count: chatService.savedConversations.count)
+                folderFilterButton(title: "Unfiled", systemImage: "folder", filter: "unfiled", count: chatService.savedConversations.filter { $0.folderID == nil }.count)
+                ForEach(folders) { folder in
+                    folderFilterButton(
+                        title: folder.name,
+                        systemImage: "folder.fill",
+                        filter: folder.id.uuidString,
+                        count: chatService.savedConversations.filter { $0.folderID == folder.id }.count
+                    )
+                }
+            }
+            .padding(.horizontal, 20)
+        }
+    }
+
+    private func folderFilterButton(title: String, systemImage: String, filter: String, count: Int) -> some View {
+        Button {
+            folderFilter = filter
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 10, weight: .semibold))
+                Text(title)
+                    .font(.system(size: 12, weight: .semibold))
+                    .lineLimit(1)
+                Text("\(count)")
+                    .font(.system(size: 10, weight: .semibold))
+                    .opacity(0.7)
+            }
+            .foregroundStyle(folderFilter == filter ? AppTheme.accentBlue : AppTheme.mutedText)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(folderFilter == filter ? AppTheme.accentBlue.opacity(0.12) : AppTheme.surfacePrimary, in: Capsule())
+            .overlay(Capsule().stroke(folderFilter == filter ? AppTheme.accentBlue.opacity(0.22) : AppTheme.cardBorder, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func folderName(for folderID: UUID?) -> String? {
+        guard let folderID else { return nil }
+        return folders.first(where: { $0.id == folderID })?.name
+    }
+
+    private func moveConversation(_ conversation: AIChatConversation, to folderID: UUID?) {
+        chatService.moveConversation(conversation, to: folderID)
     }
 
     var body: some View {
@@ -2321,10 +2387,13 @@ struct ChatHistoryView: View {
             .padding(.top, 20)
             .padding(.bottom, 12)
 
+            folderFilterButtons
+                .padding(.bottom, 8)
+
             Divider().opacity(0.3)
 
             // Conversation list or empty state
-            if chatService.savedConversations.isEmpty {
+            if filtered.isEmpty {
                 emptyState
             } else {
                 List {
@@ -2333,20 +2402,56 @@ struct ChatHistoryView: View {
                             chatService.loadConversation(conv)
                             dismiss()
                         } label: {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(conv.title)
-                                    .font(.system(size: 15, weight: .semibold))
-                                    .tracking(-0.2)
-                                    .foregroundStyle(.primary)
-                                    .lineLimit(1)
-                                Text(relativeDateFormatter.localizedString(for: conv.createdAt, relativeTo: Date()))
+                            HStack(alignment: .top, spacing: 10) {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(conv.title)
+                                        .font(.system(size: 15, weight: .semibold))
+                                        .tracking(-0.2)
+                                        .foregroundStyle(.primary)
+                                        .lineLimit(1)
+                                    HStack(spacing: 6) {
+                                        Text(relativeDateFormatter.localizedString(for: conv.createdAt, relativeTo: Date()))
+                                        if let folderName = folderName(for: conv.folderID) {
+                                            Text("•")
+                                            Label(folderName, systemImage: "folder")
+                                        }
+                                    }
                                     .font(.system(size: 12, weight: .medium))
                                     .foregroundStyle(AppTheme.mutedText)
+                                }
+                                Spacer()
+                                Menu {
+                                    Button("Unfiled") {
+                                        moveConversation(conv, to: nil)
+                                    }
+                                    if !folders.isEmpty {
+                                        Divider()
+                                    }
+                                    ForEach(folders) { folder in
+                                        Button(folder.name) {
+                                            moveConversation(conv, to: folder.id)
+                                        }
+                                    }
+                                } label: {
+                                    Image(systemName: "ellipsis")
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(AppTheme.mutedText)
+                                        .frame(width: 24, height: 24)
+                                }
+                                .menuStyle(.borderlessButton)
                             }
                             .padding(.vertical, 4)
                         }
                         .buttonStyle(.plain)
                         .listRowBackground(Color.clear)
+                        .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                            Button {
+                                movingConversation = conv
+                            } label: {
+                                Label("Move", systemImage: "folder")
+                            }
+                            .tint(AppTheme.accentBlue)
+                        }
                         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                             Button(role: .destructive) {
                                 chatService.deleteConversation(conv)
@@ -2384,8 +2489,37 @@ struct ChatHistoryView: View {
             .padding(.horizontal, 16)
             .padding(.bottom, 16)
         }
+        .task {
+            await services.captureService.syncSharedFolders(in: modelContext)
+        }
         // Background matches main chat sheet — set via presentationBackground at call site
         .background(AppTheme.backgroundTop.ignoresSafeArea())
+        .confirmationDialog(
+            "Move Conversation",
+            isPresented: Binding(
+                get: { movingConversation != nil },
+                set: { if !$0 { movingConversation = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Unfiled") {
+                if let conversation = movingConversation {
+                    moveConversation(conversation, to: nil)
+                }
+                movingConversation = nil
+            }
+            ForEach(folders) { folder in
+                Button(folder.name) {
+                    if let conversation = movingConversation {
+                        moveConversation(conversation, to: folder.id)
+                    }
+                    movingConversation = nil
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                movingConversation = nil
+            }
+        }
     }
 
     private var emptyState: some View {

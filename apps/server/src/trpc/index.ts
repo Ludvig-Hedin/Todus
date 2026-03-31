@@ -19,7 +19,10 @@ import { mailRouter } from './routes/mail';
 import { bimiRouter } from './routes/bimi';
 import type { HonoContext } from '../ctx';
 import { tasksRouter, foldersRouter } from './routes/tasks';
+import { calendarRouter } from './routes/calendar';
 import { sessionsRouter } from './routes/sessions';
+import { sharingRouter } from './routes/sharing';
+import { groupsRouter } from './routes/groups';
 import { aiRouter } from './routes/ai';
 import { router } from './trpc';
 
@@ -28,10 +31,12 @@ export const appRouter = router({
   avatar: avatarRouter,
   bimi: bimiRouter,
   brain: brainRouter,
+  calendar: calendarRouter,
   categories: categoriesRouter,
   connections: connectionsRouter,
   cookiePreferences: cookiePreferencesRouter,
   drafts: draftsRouter,
+  groups: groupsRouter,
   labels: labelsRouter,
   mail: mailRouter,
   mentions: mentionsRouter,
@@ -39,6 +44,7 @@ export const appRouter = router({
   shortcut: shortcutRouter,
   sessions: sessionsRouter,
   settings: settingsRouter,
+  sharing: sharingRouter,
   user: userRouter,
   templates: templatesRouter,
   meet: meetRouter,

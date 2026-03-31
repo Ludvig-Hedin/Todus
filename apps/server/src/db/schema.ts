@@ -408,6 +408,7 @@ export const aiConversation = createTable(
     userId: text('user_id')
       .notNull()
       .references(() => user.id, { onDelete: 'cascade' }),
+    folderId: text('folder_id').references(() => taskFolder.id, { onDelete: 'set null' }),
     title: text('title').notNull().default(''),
     // Full conversation stored as JSON array of {role, content, mentions?}
     messages: jsonb('messages').notNull().default('[]'),
@@ -416,6 +417,111 @@ export const aiConversation = createTable(
   },
   (t) => [
     index('ai_conversation_user_id_idx').on(t.userId),
+    index('ai_conversation_folder_id_idx').on(t.folderId),
     index('ai_conversation_updated_at_idx').on(t.updatedAt),
+  ],
+);
+
+// ─── Shared Conversations ─────────────────────────────────────────────────────
+// A frozen, public (or password-protected) snapshot of an aiConversation.
+// Access control is enforced at the tRPC layer — the table itself has no RLS.
+export const sharedConversation = createTable(
+  'shared_conversation',
+  {
+    id: text('id').primaryKey(),
+    ownerUserId: text('owner_user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    conversationId: text('conversation_id')
+      .notNull()
+      .references(() => aiConversation.id, { onDelete: 'cascade' }),
+    // Short URL-safe slug used in /share/[slug]
+    slug: text('slug').notNull().unique(),
+    title: text('title').notNull().default(''),
+    // PBKDF2-derived hash via Web Crypto API (100k iterations, SHA-256). null = no password.
+    passwordHash: text('password_hash'),
+    // Base64-encoded 16-byte random salt, stored alongside hash
+    passwordSalt: text('password_salt'),
+    expiresAt: timestamp('expires_at'),    // null = never expires
+    revokedAt: timestamp('revoked_at'),    // null = active; set to disable the link
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at')
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (t) => [
+    index('shared_conversation_owner_idx').on(t.ownerUserId),
+    index('shared_conversation_slug_idx').on(t.slug),
+    index('shared_conversation_conversation_id_idx').on(t.conversationId),
+  ],
+);
+
+// ─── Group Chats ──────────────────────────────────────────────────────────────
+// Multi-user rooms where multiple humans share a conversation with the AI.
+
+export const group = createTable(
+  'group',
+  {
+    id: text('id').primaryKey(),
+    ownerUserId: text('owner_user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    slug: text('slug').notNull().unique(),                // display URL: /g/[slug]
+    inviteToken: text('invite_token').notNull().unique(), // opaque join token
+    // 'mention' = AI responds only when @ai appears; 'always' = responds to every message
+    aiMode: text('ai_mode').$type<'mention' | 'always'>().notNull().default('mention'),
+    maxMembers: integer('max_members').notNull().default(20),
+    deletedAt: timestamp('deleted_at'),                   // soft-delete
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at')
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (t) => [
+    index('group_owner_idx').on(t.ownerUserId),
+    index('group_slug_idx').on(t.slug),
+    index('group_invite_token_idx').on(t.inviteToken),
+    index('group_deleted_at_idx').on(t.deletedAt),
+  ],
+);
+
+export const groupMember = createTable(
+  'group_member',
+  {
+    groupId: text('group_id')
+      .notNull()
+      .references(() => group.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    role: text('role').$type<'owner' | 'member'>().notNull().default('member'),
+    joinedAt: timestamp('joined_at').notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.groupId, t.userId] }),
+    index('group_member_user_id_idx').on(t.userId),
+  ],
+);
+
+export const groupMessage = createTable(
+  'group_message',
+  {
+    id: text('id').primaryKey(),
+    groupId: text('group_id')
+      .notNull()
+      .references(() => group.id, { onDelete: 'cascade' }),
+    senderUserId: text('sender_user_id')
+      .references(() => user.id, { onDelete: 'set null' }), // null for AI / system messages
+    senderType: text('sender_type').$type<'user' | 'ai' | 'system'>().notNull(),
+    content: text('content').notNull(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    index('group_message_group_id_idx').on(t.groupId),
+    // Composite index supports paginated queries ordered by (groupId, createdAt)
+    index('group_message_group_created_idx').on(t.groupId, t.createdAt),
   ],
 );

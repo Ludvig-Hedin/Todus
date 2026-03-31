@@ -280,7 +280,8 @@ final class AppServices {
             syncService: syncService,
             authStore: authStore,
             remindersSyncService: remindersSyncService,
-            remindersSyncState: remindersSyncState
+            remindersSyncState: remindersSyncState,
+            apiClient: apiClient
         )
         self.captureService = captureService
         captureService.notificationService = self.notificationService

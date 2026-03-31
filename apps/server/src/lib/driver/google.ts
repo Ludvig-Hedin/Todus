@@ -65,6 +65,8 @@ export class GoogleMailManager implements MailManager {
       'https://www.googleapis.com/auth/contacts.other.readonly',
       'https://www.googleapis.com/auth/userinfo.profile',
       'https://www.googleapis.com/auth/userinfo.email',
+      // Calendar read access — required for Google Calendar event sync
+      'https://www.googleapis.com/auth/calendar.readonly',
     ].join(' ');
   }
   public async listHistory<T>(historyId: string): Promise<{ history: T[]; historyId: string }> {

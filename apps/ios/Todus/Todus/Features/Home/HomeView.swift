@@ -5,6 +5,7 @@ import EventKit
 /// The Home / Today tab — a dashboard showing upcoming events, due tasks, and recent emails.
 struct HomeView: View {
     @Environment(AppServices.self) private var services
+    @Query(sort: \FolderRecord.createdAt) private var folders: [FolderRecord]
 
     // Tasks due today — SwiftData live query (excludes completed tasks)
     @Query(filter: #Predicate<TaskRecord> { task in
@@ -126,6 +127,16 @@ struct HomeView: View {
                         .lineLimit(1)
                         .foregroundStyle(.primary)
 
+                    if let folderName = folderName(for: event.folderID) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "folder")
+                                .font(.system(size: 11, weight: .medium))
+                            Text(folderName)
+                                .font(.system(size: 12))
+                        }
+                        .foregroundStyle(.secondary)
+                    }
+
                     if event.isAllDay {
                         Text("All day")
                             .font(.system(size: 12))
@@ -152,6 +163,19 @@ struct HomeView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            Button("Unfiled") {
+                moveEvent(event, to: nil)
+            }
+            if !folders.isEmpty {
+                Divider()
+            }
+            ForEach(folders) { folder in
+                Button(folder.name) {
+                    moveEvent(event, to: folder.id)
+                }
+            }
+        }
     }
 
     // MARK: - Tasks Section
@@ -163,6 +187,18 @@ struct HomeView: View {
         tasksDueToday = allTasks.filter { task in
             guard let dueDate = task.dueDate else { return false }
             return dueDate >= today && dueDate < tomorrow
+        }
+    }
+
+    private func folderName(for folderID: UUID?) -> String? {
+        guard let folderID else { return nil }
+        return folders.first(where: { $0.id == folderID })?.name
+    }
+
+    private func moveEvent(_ event: CalendarEvent, to folderID: UUID?) {
+        Task {
+            await services.calendarService.setFolderID(folderID, for: event.id)
+            await loadTodaysEvents()
         }
     }
 

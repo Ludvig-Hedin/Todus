@@ -96,6 +96,9 @@ struct MacCreateSheet: View {
             }
             isFocused = true
         }
+        .task {
+            await services.syncSharedFolders(in: modelContext)
+        }
     }
 
     // MARK: - Type Picker
@@ -237,7 +240,7 @@ struct MacCreateSheet: View {
     }
 
     private var showsFolderPicker: Bool {
-        selectedType == .auto || selectedType == .task
+        selectedType == .auto || selectedType == .task || selectedType == .event
     }
 
     private var showsDatePicker: Bool {
@@ -308,7 +311,8 @@ struct MacCreateSheet: View {
             try await services.calendarService.createEvent(
                 title: input,
                 startDate: startDate,
-                endDate: startDate.addingTimeInterval(3600)
+                endDate: startDate.addingTimeInterval(3600),
+                folderID: selectedFolder?.id
             )
         } catch {
             // Fallback to task

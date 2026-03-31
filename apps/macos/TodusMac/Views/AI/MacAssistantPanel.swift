@@ -135,6 +135,7 @@ private final class MacVoiceController {
 struct MacAssistantPanel: View {
     @Environment(MacAppServices.self) private var services
     @Environment(\.modelContext) private var modelContext
+    @Query(sort: \FolderRecord.createdAt) private var folders: [FolderRecord]
     @Query(filter: #Predicate<TaskRecord> { !$0.completed }) private var allTasks: [TaskRecord]
 
     @Binding var isPresented: Bool
@@ -145,6 +146,8 @@ struct MacAssistantPanel: View {
     @State private var inputText = ""
     @State private var showsHistory = false
     @State private var showsPromptLibrary = false
+    @State private var folderFilter: String = "all"
+    @State private var movingConversation: MacChatConversation?
 
     // Page context pill — auto-set from currentSelection, user can remove
     @State private var pageContextAttached = true
@@ -172,6 +175,67 @@ struct MacAssistantPanel: View {
     @State private var renameText = ""
 
     private var chatService: MacAIChatService { services.aiChatService }
+
+    private var filteredConversations: [MacChatConversation] {
+        chatService.savedConversations.filter { convo in
+            let folderMatches: Bool = {
+                switch folderFilter {
+                case "all":
+                    return true
+                case "unfiled":
+                    return convo.folderID == nil
+                default:
+                    return convo.folderID?.uuidString == folderFilter
+                }
+            }()
+
+            guard folderMatches else { return false }
+            return true
+        }
+    }
+
+    private func folderName(for folderID: UUID?) -> String? {
+        guard let folderID else { return nil }
+        return folders.first(where: { $0.id == folderID })?.name
+    }
+
+    private func moveConversation(_ conversation: MacChatConversation, to folderID: UUID?) {
+        chatService.moveConversation(conversation, to: folderID)
+    }
+
+    private func historyFilterButton(title: String, systemImage: String, filter: String) -> some View {
+        let count: Int = {
+            switch filter {
+            case "all":
+                return chatService.savedConversations.count
+            case "unfiled":
+                return chatService.savedConversations.filter { $0.folderID == nil }.count
+            default:
+                guard let folderID = UUID(uuidString: filter) else { return 0 }
+                return chatService.savedConversations.filter { $0.folderID == folderID }.count
+            }
+        }()
+        return Button {
+            folderFilter = filter
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 10, weight: .semibold))
+                Text(title)
+                    .font(.system(size: 12, weight: .semibold))
+                    .lineLimit(1)
+                Text("\(count)")
+                    .font(.system(size: 10, weight: .semibold))
+                    .opacity(0.7)
+            }
+            .foregroundStyle(folderFilter == filter ? MacTheme.accent : .secondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(folderFilter == filter ? MacTheme.accent.opacity(0.12) : MacTheme.surfaceCard, in: Capsule())
+            .overlay(Capsule().stroke(folderFilter == filter ? MacTheme.accent.opacity(0.25) : MacTheme.cardBorder, lineWidth: 0.5))
+        }
+        .buttonStyle(.plain)
+    }
 
     /// Dark panel background — matches iOS AppTheme.backgroundTop
     private let panelBackground = Color(light: Color(white: 0.98), dark: Color(white: 0.08))
@@ -257,6 +321,9 @@ struct MacAssistantPanel: View {
                 thinkingIndex = (thinkingIndex + 1) % thinkingPhrases.count
             }
         }
+        .task {
+            await services.syncSharedFolders(in: modelContext)
+        }
         // Auto-save conversation when panel hides
         .onChange(of: isPresented) { _, visible in
             if !visible { chatService.autosave() }
@@ -272,6 +339,32 @@ struct MacAssistantPanel: View {
         .onAppear {
             let draft = UserDefaults.standard.string(forKey: "mac_ai_draft_input") ?? ""
             if inputText.isEmpty { inputText = draft }
+        }
+        .confirmationDialog(
+            "Move Conversation",
+            isPresented: Binding(
+                get: { movingConversation != nil },
+                set: { if !$0 { movingConversation = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Unfiled") {
+                if let conversation = movingConversation {
+                    moveConversation(conversation, to: nil)
+                }
+                movingConversation = nil
+            }
+            ForEach(folders) { folder in
+                Button(folder.name) {
+                    if let conversation = movingConversation {
+                        moveConversation(conversation, to: folder.id)
+                    }
+                    movingConversation = nil
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                movingConversation = nil
+            }
         }
         // History popover
         .popover(isPresented: $showsHistory, arrowEdge: .bottom) {
@@ -754,9 +847,21 @@ struct MacAssistantPanel: View {
             .padding(.top, 14)
             .padding(.bottom, 8)
 
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    historyFilterButton(title: "All", systemImage: "tray", filter: "all")
+                    historyFilterButton(title: "Unfiled", systemImage: "folder", filter: "unfiled")
+                    ForEach(folders) { folder in
+                        historyFilterButton(title: folder.name, systemImage: "folder.fill", filter: folder.id.uuidString)
+                    }
+                }
+                .padding(.horizontal, 14)
+            }
+            .padding(.bottom, 8)
+
             Divider().opacity(0.3)
 
-            if chatService.savedConversations.isEmpty {
+            if filteredConversations.isEmpty {
                 VStack(spacing: 8) {
                     Spacer()
                     Image(systemName: "bubble.left.and.bubble.right")
@@ -771,19 +876,47 @@ struct MacAssistantPanel: View {
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 2) {
-                        ForEach(chatService.savedConversations) { convo in
+                        ForEach(filteredConversations) { convo in
                             Button {
                                 chatService.loadConversation(convo)
                                 showsHistory = false
                             } label: {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(convo.title)
-                                        .font(.system(size: 12, weight: .medium))
-                                        .foregroundStyle(.primary)
-                                        .lineLimit(1)
-                                    Text(convo.createdAt.formatted(date: .abbreviated, time: .shortened))
+                                HStack(alignment: .top, spacing: 8) {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(convo.title)
+                                            .font(.system(size: 12, weight: .medium))
+                                            .foregroundStyle(.primary)
+                                            .lineLimit(1)
+                                        HStack(spacing: 4) {
+                                            Text(convo.createdAt.formatted(date: .abbreviated, time: .shortened))
+                                            if let folderName = folderName(for: convo.folderID) {
+                                                Text("•")
+                                                Label(folderName, systemImage: "folder")
+                                            }
+                                        }
                                         .font(.system(size: 10))
                                         .foregroundStyle(.tertiary)
+                                    }
+                                    Spacer()
+                                    Menu {
+                                        Button("Unfiled") {
+                                            moveConversation(convo, to: nil)
+                                        }
+                                        if !folders.isEmpty {
+                                            Divider()
+                                        }
+                                        ForEach(folders) { folder in
+                                            Button(folder.name) {
+                                                moveConversation(convo, to: folder.id)
+                                            }
+                                        }
+                                    } label: {
+                                        Image(systemName: "ellipsis")
+                                            .font(.system(size: 12, weight: .semibold))
+                                            .foregroundStyle(.tertiary)
+                                            .frame(width: 22, height: 22)
+                                    }
+                                    .menuStyle(.borderlessButton)
                                 }
                                 .padding(.horizontal, 14)
                                 .padding(.vertical, 8)
@@ -791,6 +924,21 @@ struct MacAssistantPanel: View {
                                 .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
+                            .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                                Button {
+                                    movingConversation = convo
+                                } label: {
+                                    Label("Move", systemImage: "folder")
+                                }
+                                .tint(MacTheme.accent)
+                            }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                Button(role: .destructive) {
+                                    chatService.deleteConversation(convo)
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                            }
                         }
                     }
                 }

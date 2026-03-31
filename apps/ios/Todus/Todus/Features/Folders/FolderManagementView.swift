@@ -59,6 +59,9 @@ struct FolderManagementView: View {
         .background(AppTheme.backgroundTop)
         .navigationTitle("Folders")
         .navigationBarTitleDisplayMode(.inline)
+        .task {
+            await services.captureService.syncSharedFolders(in: modelContext)
+        }
         // Inline rename alert
         .alert("Rename Folder", isPresented: Binding(
             get: { editingFolder != nil },
@@ -126,18 +129,11 @@ struct FolderManagementView: View {
         guard let folder = editingFolder else { return }
         let cleanedName = editName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanedName.isEmpty else { return }
-        folder.name = cleanedName
-        try? modelContext.save()
+        services.captureService.renameFolder(folder, to: cleanedName, in: modelContext)
         editingFolder = nil
     }
 
     private func deleteFolder(_ folder: FolderRecord) {
-        // Unlink tasks from this folder before deleting
-        let allTasks = (try? modelContext.fetch(FetchDescriptor<TaskRecord>())) ?? []
-        for task in allTasks where task.folder?.id == folder.id {
-            task.folder = nil
-        }
-        modelContext.delete(folder)
-        try? modelContext.save()
+        services.captureService.deleteFolder(folder, in: modelContext)
     }
 }

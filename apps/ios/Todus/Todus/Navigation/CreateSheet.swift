@@ -63,6 +63,9 @@ struct CreateSheet: View {
         .animation(.snappy(duration: 0.18), value: showsSlashMenu)
         .animation(.snappy(duration: 0.15), value: isPickingAttachment)
         .animation(.snappy(duration: 0.2), value: selectedType)
+        .task {
+            await services.captureService.syncSharedFolders(in: modelContext)
+        }
         .onAppear {
             // Always default to auto — AI decides the type
             selectedType = .auto
@@ -501,7 +504,7 @@ struct CreateSheet: View {
     }
 
     private var showsFolderPicker: Bool {
-        selectedType == .auto || selectedType == .task
+        selectedType == .auto || selectedType == .task || selectedType == .event
     }
 
     private var showsDatePicker: Bool {
@@ -570,7 +573,8 @@ struct CreateSheet: View {
             try await services.calendarService.createEvent(
                 title: input,
                 startDate: startDate,
-                endDate: startDate.addingTimeInterval(3600)
+                endDate: startDate.addingTimeInterval(3600),
+                folderID: selectedFolder?.id
             )
         } catch {
             createTask(input, attachments: attachments)

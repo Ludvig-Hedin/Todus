@@ -8,6 +8,7 @@ final class TaskCaptureService {
     private let authStore: AuthSessionStore
     private let remindersSyncService: AppleRemindersSyncService
     private let remindersSyncState: RemindersSyncState
+    private let apiClient: TodosAPIClient
 
     /// Optional notification service — set after init by AppServices.
     /// Schedules local reminders when tasks have due dates.
@@ -20,13 +21,15 @@ final class TaskCaptureService {
         syncService: SyncService,
         authStore: AuthSessionStore,
         remindersSyncService: AppleRemindersSyncService,
-        remindersSyncState: RemindersSyncState
+        remindersSyncState: RemindersSyncState,
+        apiClient: TodosAPIClient
     ) {
         self.parser = parser
         self.syncService = syncService
         self.authStore = authStore
         self.remindersSyncService = remindersSyncService
         self.remindersSyncState = remindersSyncState
+        self.apiClient = apiClient
     }
 
     /// Captures one or more tasks from raw text, optionally with attachment filenames,
@@ -240,7 +243,109 @@ final class TaskCaptureService {
         let folder = FolderRecord(name: cleanedName)
         context.insert(folder)
         try? context.save()
+        Task { await syncFolderCreate(folder) }
         return folder
+    }
+
+    func renameFolder(_ folder: FolderRecord, to name: String, in context: ModelContext) {
+        let cleanedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanedName.isEmpty else { return }
+
+        folder.name = cleanedName
+        try? context.save()
+        Task { await syncFolderUpdate(folder) }
+    }
+
+    func deleteFolder(_ folder: FolderRecord, in context: ModelContext) {
+        let allTasks = (try? context.fetch(FetchDescriptor<TaskRecord>())) ?? []
+        for task in allTasks where task.folder?.id == folder.id {
+            task.folder = nil
+        }
+        context.delete(folder)
+        try? context.save()
+        Task { await syncFolderDelete(folder.id.uuidString) }
+    }
+
+    func syncSharedFolders(in context: ModelContext) async {
+        struct FolderListResponse: Decodable {
+            let folders: [RemoteFolder]
+        }
+
+        struct RemoteFolder: Decodable {
+            let id: String
+            let name: String
+            let createdAt: Date
+        }
+
+        do {
+            let response: FolderListResponse = try await apiClient.trpcQuery("folders.list")
+            let remoteFolders = response.folders
+            let localFolders = (try? context.fetch(FetchDescriptor<FolderRecord>())) ?? []
+            var foldersByID = Dictionary(uniqueKeysWithValues: localFolders.map { ($0.id.uuidString, $0) })
+
+            for remote in remoteFolders {
+                guard let uuid = UUID(uuidString: remote.id) else { continue }
+                if let local = foldersByID[remote.id] {
+                    local.name = remote.name
+                    local.createdAt = remote.createdAt
+                } else {
+                    let folder = FolderRecord(id: uuid, name: remote.name, createdAt: remote.createdAt)
+                    context.insert(folder)
+                    foldersByID[remote.id] = folder
+                }
+            }
+
+            try? context.save()
+        } catch {
+            // Folder sync is best-effort; local folders remain usable offline.
+        }
+    }
+
+    private func syncFolderCreate(_ folder: FolderRecord) async {
+        struct CreateInput: Encodable {
+            let id: String
+            let name: String
+        }
+
+        do {
+            let _: EmptyResponse = try await apiClient.trpcMutation(
+                "folders.create",
+                input: CreateInput(id: folder.id.uuidString, name: folder.name)
+            )
+        } catch {
+            // Best-effort sync only.
+        }
+    }
+
+    private func syncFolderUpdate(_ folder: FolderRecord) async {
+        struct UpdateInput: Encodable {
+            let id: String
+            let name: String
+        }
+
+        do {
+            let _: EmptyResponse = try await apiClient.trpcMutation(
+                "folders.update",
+                input: UpdateInput(id: folder.id.uuidString, name: folder.name)
+            )
+        } catch {
+            // Best-effort sync only.
+        }
+    }
+
+    private func syncFolderDelete(_ folderID: String) async {
+        struct DeleteInput: Encodable {
+            let id: String
+        }
+
+        do {
+            let _: EmptyResponse = try await apiClient.trpcMutation(
+                "folders.delete",
+                input: DeleteInput(id: folderID)
+            )
+        } catch {
+            // Best-effort sync only.
+        }
     }
 
     nonisolated static func splitInputLines(_ rawText: String) -> [String] {

@@ -8,6 +8,7 @@ struct AIChatConversation: Identifiable, Codable {
     let id: UUID
     var title: String
     let createdAt: Date
+    var folderID: UUID?
 
     /// Flat array of saved messages with enough metadata to preserve follow-up references
     /// when a saved conversation is later reopened.

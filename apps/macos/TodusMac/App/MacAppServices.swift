@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import SwiftData
 
 /// Centralized service container for the macOS app.
 /// Holds auth, API client, email, calendar, and network services.
@@ -84,6 +85,41 @@ final class MacAppServices {
             )
         } catch {
             print("[MacAppServices] Failed to save shared AI profile: \(error)")
+        }
+    }
+
+    func syncSharedFolders(in context: ModelContext) async {
+        struct FolderListResponse: Decodable {
+            let folders: [RemoteFolder]
+        }
+
+        struct RemoteFolder: Decodable {
+            let id: String
+            let name: String
+            let createdAt: Date
+        }
+
+        do {
+            let response: FolderListResponse = try await apiClient.trpcQuery("folders.list")
+            let remoteFolders = response.folders
+            let localFolders = (try? context.fetch(FetchDescriptor<FolderRecord>())) ?? []
+            var foldersByID = Dictionary(uniqueKeysWithValues: localFolders.map { ($0.id.uuidString, $0) })
+
+            for remote in remoteFolders {
+                guard let uuid = UUID(uuidString: remote.id) else { continue }
+                if let local = foldersByID[remote.id] {
+                    local.name = remote.name
+                    local.createdAt = remote.createdAt
+                } else {
+                    let folder = FolderRecord(id: uuid, name: remote.name, createdAt: remote.createdAt)
+                    context.insert(folder)
+                    foldersByID[remote.id] = folder
+                }
+            }
+
+            try? context.save()
+        } catch {
+            // Best-effort sync; local folders remain usable.
         }
     }
 

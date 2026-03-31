@@ -37,6 +37,9 @@ struct MacTasksView: View {
             }
         }
         .onAppear { recomputeTasks() }
+        .task {
+            await services.syncSharedFolders(in: modelContext)
+        }
         .onChange(of: allTasks) { recomputeTasks() }
         .onChange(of: searchText) { recomputeTasks() }
         .onChange(of: sortOrder) { recomputeTasks() }

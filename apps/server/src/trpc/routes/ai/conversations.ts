@@ -1,4 +1,4 @@
-import { aiConversation } from '../../../db/schema';
+import { aiConversation, taskFolder } from '../../../db/schema';
 import { privateProcedure } from '../../trpc';
 import { createDb } from '../../../db';
 import { eq, and, desc } from 'drizzle-orm';
@@ -32,6 +32,7 @@ export const listConversations = privateProcedure.query(async ({ ctx }) => {
     const conversations = await db
       .select({
         id: aiConversation.id,
+        folderId: aiConversation.folderId,
         title: aiConversation.title,
         createdAt: aiConversation.createdAt,
         updatedAt: aiConversation.updatedAt,
@@ -70,6 +71,7 @@ export const saveConversation = privateProcedure
       id: z.string(),
       title: z.string(),
       messages: z.array(savedMessageSchema),
+      folderId: z.string().nullable().optional(),
       createdAt: z.string().datetime().optional(),
     }),
   )
@@ -77,6 +79,21 @@ export const saveConversation = privateProcedure
     const { db, conn } = getDb();
     try {
       const now = new Date();
+      if (input.folderId != null) {
+        const [folder] = await db
+          .select({ id: taskFolder.id })
+          .from(taskFolder)
+          .where(and(eq(taskFolder.id, input.folderId), eq(taskFolder.userId, ctx.sessionUser.id)))
+          .limit(1);
+
+        if (!folder) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'Folder not found.',
+          });
+        }
+      }
+
       const [existingConversation] = await db
         .select({
           userId: aiConversation.userId,
@@ -98,6 +115,7 @@ export const saveConversation = privateProcedure
           .set({
             title: input.title,
             messages: input.messages,
+            folderId: input.folderId ?? null,
             updatedAt: now,
           })
           .where(and(eq(aiConversation.id, input.id), eq(aiConversation.userId, ctx.sessionUser.id)))
@@ -113,6 +131,7 @@ export const saveConversation = privateProcedure
         await db.insert(aiConversation).values({
           id: input.id,
           userId: ctx.sessionUser.id,
+          folderId: input.folderId ?? null,
           title: input.title,
           messages: input.messages,
           createdAt: input.createdAt ? new Date(input.createdAt) : now,

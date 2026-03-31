@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 import EventKit
 
 /// Calendar view — Day, Week, Month, and Year modes.
@@ -10,6 +11,7 @@ import EventKit
 /// - Glass/material segmented control for view mode switching
 struct MacCalendarView: View {
     @Environment(MacAppServices.self) private var services
+    @Query(sort: \FolderRecord.createdAt) private var folders: [FolderRecord]
 
     @Binding var viewMode: String
     @Binding var selectedDate: Date
@@ -186,6 +188,11 @@ struct MacCalendarView: View {
         default:
             return selectedDate.formatted(.dateTime.month(.wide).year())
         }
+    }
+
+    private func folderName(for folderID: UUID?) -> String? {
+        guard let folderID else { return nil }
+        return folders.first(where: { $0.id == folderID })?.name
     }
 
     /// Fully circular chevron nav button — same surface color as picker & Today button
@@ -869,6 +876,30 @@ struct MacCalendarView: View {
             Label(event.calendarName, systemImage: "calendar")
                 .font(.system(size: 12))
                 .foregroundStyle(MacTheme.textSecondary)
+
+            if let folderName = folderName(for: event.folderID) {
+                Label(folderName, systemImage: "folder")
+                    .font(.system(size: 12))
+                    .foregroundStyle(MacTheme.textSecondary)
+            }
+
+            Menu {
+                Button("Unfiled") {
+                    moveEvent(event, to: nil)
+                }
+                if !folders.isEmpty {
+                    Divider()
+                }
+                ForEach(folders) { folder in
+                    Button(folder.name) {
+                        moveEvent(event, to: folder.id)
+                    }
+                }
+            } label: {
+                Label("Move to Folder", systemImage: "folder")
+                    .font(.system(size: 12))
+            }
+            .menuStyle(.borderlessButton)
         }
         .padding(14)
         .frame(minWidth: 220, alignment: .leading)
@@ -941,6 +972,13 @@ struct MacCalendarView: View {
         events = await services.calendarService.events(from: start, to: end)
         isLoading = false
     }
+
+    private func moveEvent(_ event: CalendarEvent, to folderID: UUID?) {
+        Task {
+            await services.calendarService.setFolderID(folderID, for: event.id)
+            await loadEvents()
+        }
+    }
 }
 
 // MARK: - Apple Calendar-Style Glass Segmented Control
@@ -996,4 +1034,3 @@ struct CalendarViewModePicker: View {
         )
     }
 }
-

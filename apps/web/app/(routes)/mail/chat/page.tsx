@@ -4,7 +4,7 @@
  * Auto-save: on first assistant response, saves conversation with title = first 60 chars of user message.
  * Markdown: AI responses rendered with react-markdown + remark-gfm.
  */
-import { useRef, useEffect, useState, useCallback } from 'react';
+import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { useAgent } from 'agents/react';
 import { useAgentChat } from 'agents/ai-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -26,11 +26,16 @@ import {
   MessageSquare,
   Trash2,
   MoreHorizontal,
+  FolderIcon,
 } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import type { Route } from './+types/page';
@@ -50,6 +55,28 @@ const EXAMPLE_QUERIES = [
   'Create a task to reply to the latest invoice',
 ];
 
+type ChatMessageRecord = {
+  role: 'user' | 'assistant';
+  content: string;
+  mentions?: Array<{ id: string; type: string; label: string }>;
+};
+
+function extractTextContent(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+
+  return content
+    .map((part) => {
+      if (typeof part === 'string') return part;
+      if (part && typeof part === 'object' && 'text' in part) {
+        const text = (part as { text?: unknown }).text;
+        return typeof text === 'string' ? text : '';
+      }
+      return '';
+    })
+    .join('');
+}
+
 // Stable UUID generator (crypto.randomUUID fallback)
 function newId() {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
@@ -65,16 +92,40 @@ export default function ChatPage() {
 
   // Active conversation ID in memory — not persisted to URL to keep it simple
   const [conversationId, setConversationId] = useState<string>(() => newId());
+  const [conversationFolderId, setConversationFolderId] = useState<string | null>(null);
   // Whether the current session has been saved to backend yet
   const [isSaved, setIsSaved] = useState(false);
+  const [folderFilter, setFolderFilter] = useState<'all' | 'unfiled' | string>('all');
   // Tracks previous user message count to detect new messages and reset isSaved
   const prevUserMsgCountRef = useRef(0);
+
+  const { data: foldersData } = useQuery(trpc.folders.list.queryOptions());
+  const folders = foldersData?.folders ?? [];
 
   // Fetch conversation list for sidebar
   const { data: conversationsData, refetch: refetchConversations } = useQuery(
     trpc.ai.listConversations.queryOptions(),
   );
   const conversations = conversationsData?.conversations ?? [];
+  const visibleConversations = conversations.filter((convo) => {
+    if (folderFilter === 'all') return true;
+    if (folderFilter === 'unfiled') return !convo.folderId;
+    return convo.folderId === folderFilter;
+  });
+  const conversationCounts = useMemo(() => {
+    const counts = {
+      all: conversations.length,
+      unfiled: conversations.filter((convo) => !convo.folderId).length,
+      folders: new Map<string, number>(),
+    };
+
+    for (const convo of conversations) {
+      if (!convo.folderId) continue;
+      counts.folders.set(convo.folderId, (counts.folders.get(convo.folderId) ?? 0) + 1);
+    }
+
+    return counts;
+  }, [conversations]);
 
   // Save / update a conversation
   const saveConversation = useMutation(trpc.ai.saveConversation.mutationOptions());
@@ -85,6 +136,51 @@ export default function ChatPage() {
       void refetchConversations();
     },
   });
+
+  const resolveConversationFolderName = useCallback(
+    (folderId: string | null) => {
+      if (!folderId) return 'Unfiled';
+      return folders.find((folder) => folder.id === folderId)?.name ?? 'Folder';
+    },
+    [folders],
+  );
+
+  const handleConversationFolderMove = useCallback(
+    async (id: string, folderId: string | null) => {
+      try {
+        const convo = await queryClient.fetchQuery(trpc.ai.getConversation.queryOptions({ id }));
+        if (!convo?.messages) return;
+
+        const messages = Array.isArray(convo.messages) ? (convo.messages as ChatMessageRecord[]) : [];
+        const createdAt =
+          convo.createdAt instanceof Date
+            ? convo.createdAt.toISOString()
+            : new Date(convo.createdAt).toISOString();
+
+        saveConversation.mutate(
+          {
+            id: convo.id,
+            title: convo.title,
+            messages,
+            folderId,
+            createdAt,
+          },
+          {
+            onSuccess: () => {
+              void refetchConversations();
+              if (conversationId === id) {
+                setConversationFolderId(folderId);
+              }
+            },
+          },
+        );
+      } catch (err) {
+        console.error('Failed to move conversation:', err);
+        toast.error('Failed to move conversation.');
+      }
+    },
+    [conversationId, queryClient, refetchConversations, saveConversation, trpc.ai.getConversation],
+  );
 
   // Connect to the ZeroAgent Durable Object via WebSocket
   const agent = useAgent({
@@ -142,26 +238,20 @@ export default function ChatPage() {
     const title = (() => {
       if (!rawContent) return 'New conversation';
       if (typeof rawContent === 'string') return rawContent.slice(0, 60).trim() || 'New conversation';
-      if (Array.isArray(rawContent)) {
-        const text = rawContent
-          .map((p: { text?: string }) => (typeof p === 'string' ? p : (p.text ?? '')))
-          .join('')
-          .trim();
-        return text.slice(0, 60) || 'New conversation';
-      }
-      return 'New conversation';
+      const text = extractTextContent(rawContent).trim();
+      return text.slice(0, 60) || 'New conversation';
     })();
 
     // Serialize messages for storage — extract text content only
     const serialized = messages
       .filter((m) => m.role === 'user' || m.role === 'assistant')
-      .map((m) => ({
-        role: m.role,
-        content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
+      .map<ChatMessageRecord>((m) => ({
+        role: m.role as 'user' | 'assistant',
+        content: typeof m.content === 'string' ? m.content : extractTextContent(m.content),
       }));
 
     saveConversation.mutate(
-      { id: conversationId, title, messages: serialized },
+      { id: conversationId, title, messages: serialized, folderId: conversationFolderId },
       {
         onSuccess: () => {
           setIsSaved(true);
@@ -177,9 +267,10 @@ export default function ChatPage() {
   const handleNewChat = useCallback(() => {
     setMessages([]);
     setConversationId(newId());
+    setConversationFolderId(folderFilter === 'all' || folderFilter === 'unfiled' ? null : folderFilter);
     setIsSaved(false);
     prevUserMsgCountRef.current = 0;
-  }, [setMessages]);
+  }, [folderFilter, setMessages]);
 
   // Load a past conversation — show its messages in read-only mode
   const handleLoadConversation = useCallback(
@@ -192,16 +283,17 @@ export default function ChatPage() {
         if (!result?.messages) return;
 
         // Build message objects compatible with useAgentChat
-        const loaded = (result.messages as Array<{ role: string; content: string }>).map(
-          (m, i) => ({
-            id: `loaded-${id}-${i}`,
-            role: m.role as 'user' | 'assistant',
-            content: m.content,
-            parts: [{ type: 'text' as const, text: m.content }],
-          }),
-        );
+          const loaded = (Array.isArray(result.messages) ? result.messages : []).map(
+            (m, i) => ({
+              id: `loaded-${id}-${i}`,
+              role: m.role as 'user' | 'assistant',
+              content: String(m.content ?? ''),
+              parts: [{ type: 'text' as const, text: String(m.content ?? '') }],
+            }),
+          );
         setMessages(loaded);
         setConversationId(id);
+        setConversationFolderId(result.folderId ?? null);
         setIsSaved(true);
       } catch (err) {
         console.error('Failed to load conversation:', err);
@@ -249,27 +341,78 @@ export default function ChatPage() {
     <div className="flex h-screen overflow-hidden bg-background">
       {/* ── Conversation History Sidebar ─────────────────────────────────── */}
       <aside className="hidden w-56 shrink-0 flex-col border-r bg-sidebar md:flex">
-        <div className="flex items-center justify-between px-3 py-3.5 border-b">
-          <span className="text-[13px] font-semibold">Chats</span>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7"
-            onClick={handleNewChat}
-            title="New chat"
-          >
-            <Plus className="h-3.5 w-3.5" />
-          </Button>
+        <div className="border-b px-3 py-3">
+          <div className="flex items-center justify-between">
+            <span className="text-[13px] font-semibold">Chats</span>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={handleNewChat}
+              title="New chat"
+            >
+              <Plus className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            <button
+              type="button"
+              onClick={() => setFolderFilter('all')}
+              className={cn(
+                'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors',
+                folderFilter === 'all'
+                  ? 'border-accent/20 bg-accent/10 text-accent-foreground'
+                  : 'border-border bg-background text-muted-foreground hover:bg-accent/50',
+              )}
+            >
+              <MessageSquare className="h-3 w-3" />
+              All
+              <span className="text-[10px] opacity-70">{conversationCounts.all}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setFolderFilter('unfiled')}
+              className={cn(
+                'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors',
+                folderFilter === 'unfiled'
+                  ? 'border-accent/20 bg-accent/10 text-accent-foreground'
+                  : 'border-border bg-background text-muted-foreground hover:bg-accent/50',
+              )}
+            >
+              <FolderIcon className="h-3 w-3" />
+              Unfiled
+              <span className="text-[10px] opacity-70">{conversationCounts.unfiled}</span>
+            </button>
+            {folders.map((folder) => (
+              <button
+                key={folder.id}
+                type="button"
+                onClick={() => setFolderFilter(folder.id)}
+                className={cn(
+                  'inline-flex max-w-full items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors',
+                  folderFilter === folder.id
+                    ? 'border-accent/20 bg-accent/10 text-accent-foreground'
+                    : 'border-border bg-background text-muted-foreground hover:bg-accent/50',
+                )}
+              >
+                <FolderIcon className="h-3 w-3" />
+                <span className="truncate">{folder.name}</span>
+                <span className="text-[10px] opacity-70">
+                  {conversationCounts.folders.get(folder.id) ?? 0}
+                </span>
+              </button>
+            ))}
+          </div>
         </div>
 
         <ScrollArea className="flex-1 py-1">
-          {conversations.length === 0 ? (
+          {visibleConversations.length === 0 ? (
             <div className="flex flex-col items-center gap-1 px-4 py-8 text-center">
               <MessageSquare className="h-6 w-6 text-muted-foreground/40" />
               <p className="text-[12px] text-muted-foreground">No saved chats yet</p>
             </div>
           ) : (
-            conversations.map((convo) => {
+            visibleConversations.map((convo) => {
               const isActive = convo.id === conversationId;
               return (
                 <div
@@ -293,11 +436,22 @@ export default function ChatPage() {
                     <p className="truncate text-[12px] font-medium leading-snug">
                       {convo.title}
                     </p>
-                    <p className="text-[11px] text-muted-foreground">
-                      {convo.updatedAt
-                        ? formatDistanceToNow(new Date(convo.updatedAt), { addSuffix: true })
-                        : ''}
-                    </p>
+                    <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                      <span>
+                        {convo.updatedAt
+                          ? formatDistanceToNow(new Date(convo.updatedAt), { addSuffix: true })
+                          : ''}
+                      </span>
+                      {convo.folderId ? (
+                        <>
+                          <span className="opacity-50">•</span>
+                          <span className="inline-flex items-center gap-1">
+                            <FolderIcon className="h-3 w-3" />
+                            {resolveConversationFolderName(convo.folderId)}
+                          </span>
+                        </>
+                      ) : null}
+                    </div>
                   </div>
                   {/* Delete via dropdown — only visible on hover */}
                   <div className="invisible shrink-0 group-hover:visible">
@@ -313,6 +467,29 @@ export default function ChatPage() {
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end" className="w-32">
+                        <DropdownMenuSub>
+                          <DropdownMenuSubTrigger>
+                            <FolderIcon className="mr-2 h-3.5 w-3.5" />
+                            Move to
+                          </DropdownMenuSubTrigger>
+                          <DropdownMenuSubContent className="w-44">
+                            <DropdownMenuItem onClick={() => void handleConversationFolderMove(convo.id, null)}>
+                              <FolderIcon className="mr-2 h-3.5 w-3.5" />
+                              Unfiled
+                            </DropdownMenuItem>
+                            {folders.length > 0 ? <DropdownMenuSeparator /> : null}
+                            {folders.map((folder) => (
+                              <DropdownMenuItem
+                                key={folder.id}
+                                onClick={() => void handleConversationFolderMove(convo.id, folder.id)}
+                              >
+                                <FolderIcon className="mr-2 h-3.5 w-3.5" />
+                                {folder.name}
+                              </DropdownMenuItem>
+                            ))}
+                          </DropdownMenuSubContent>
+                        </DropdownMenuSub>
+                        <DropdownMenuSeparator />
                         <DropdownMenuItem
                           className="text-destructive focus:text-destructive"
                           onClick={(e) => handleDeleteConversation(convo.id, e)}
@@ -336,6 +513,12 @@ export default function ChatPage() {
         <div className="flex items-center justify-between border-b px-6 py-3.5">
           <div className="flex items-center gap-2">
             <h1 className="text-[15px] font-semibold">AI Assistant</h1>
+            {conversationFolderId ? (
+              <span className="inline-flex items-center gap-1 rounded-full border border-border bg-muted/60 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+                <FolderIcon className="h-3 w-3" />
+                {resolveConversationFolderName(conversationFolderId)}
+              </span>
+            ) : null}
           </div>
           {messages.length > 0 && (
             <Button variant="outline" size="sm" className="h-7 gap-1.5 text-[12px]" onClick={handleNewChat}>
