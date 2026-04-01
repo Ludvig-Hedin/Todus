@@ -98,6 +98,13 @@ struct MacSidebarView: View {
                     action: { selection = .meetings }
                 )
 
+                SidebarItemButton(
+                    title: "Docs",
+                    systemImage: "doc.text",
+                    isSelected: selection == .docs,
+                    action: { selection = .docs }
+                )
+
                 // Calendar — expandable with sub-sections
                 // Parent is NOT highlighted when expanded (only the child sub-link is)
                 SidebarItemButton(
