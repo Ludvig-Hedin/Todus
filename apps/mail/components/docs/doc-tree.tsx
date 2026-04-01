@@ -40,8 +40,8 @@ function WorkspaceSection({
   const createDoc = useMutation({
     ...trpc.docs.create.mutationOptions(),
     onSuccess: (result) => {
-      // Invalidate docs list so the new page appears in the tree
-      void queryClient.invalidateQueries(trpc.docs.list.queryFilter());
+      // Invalidate only this workspace's docs list so the new page appears in the tree
+      void queryClient.invalidateQueries(trpc.docs.list.queryFilter({ workspaceId: workspace.id }));
       // Navigate immediately to the newly created doc
       onSelectDoc(result.doc.id);
     },

@@ -3,7 +3,7 @@
  * and an empty-state prompt on the right.
  * Navigating to a doc from the tree takes you to /mail/docs/:id.
  */
-import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from 'react-resizable-panels';
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
 import { DocTree } from '@/components/docs/doc-tree';
 import { FileText, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -27,7 +27,7 @@ export default function DocsPage() {
 
   // Fetch workspaces so we can guard the "New page" button — a doc requires a workspace.
   const { data: workspacesData } = useQuery(trpc.docs.workspaces.list.queryOptions());
-  const firstWorkspaceId = workspacesData?.[0]?.id;
+  const firstWorkspaceId = workspacesData?.workspaces?.[0]?.id;
 
   // Quick-create a doc from the empty state's "New page" button.
   // Must pass a workspaceId — enforced by checking firstWorkspaceId before rendering the button.
