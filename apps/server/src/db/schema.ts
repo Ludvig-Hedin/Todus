@@ -683,7 +683,9 @@ export const doc = createTable(
     // Self-referential FK for nested pages (null = root-level doc within its workspace).
     // Explicit return type annotation is required to satisfy TypeScript's circular reference check.
     // eslint-disable-next-line @typescript-eslint/no-use-before-define
-    parentId: text('parent_id').references((): AnyPgColumn => doc.id, { onDelete: 'cascade' }),
+    // Using 'set null' instead of 'cascade' to avoid constraint violations on self-referential FK
+    // when deleting a subtree. Recursive deletion is handled in the tRPC route instead.
+    parentId: text('parent_id').references((): AnyPgColumn => doc.id, { onDelete: 'set null' }),
     title: text('title').notNull().default('Untitled'),
     // Tiptap JSONContent stored as jsonb; null until the user writes something
     content: jsonb('content'),
@@ -705,5 +707,7 @@ export const doc = createTable(
     index('doc_user_id_idx').on(t.userId),
     index('doc_workspace_id_idx').on(t.workspaceId),
     index('doc_parent_id_idx').on(t.parentId),
+    // Index on updatedAt to support efficient "recently modified" queries and sorting
+    index('doc_updated_at_idx').on(t.updatedAt),
   ],
 );
