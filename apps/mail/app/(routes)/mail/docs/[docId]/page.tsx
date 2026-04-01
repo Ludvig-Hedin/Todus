@@ -22,13 +22,17 @@ import { Editor as TiptapEditor } from '@tiptap/react';
 import type { JSONContent } from 'novel';
 import { useRef, useCallback, useState, useEffect } from 'react';
 
-// ─── Simple inline debounce (lodash-es is not in deps) ───────────────────────
-function debounce<T extends (...args: never[]) => void>(fn: T, delay: number) {
+// ─── Simple inline debounce with .cancel() support (lodash-es is not in deps) ─
+// The .cancel() method is used in a cleanup effect to flush any pending save
+// when the component unmounts or docId changes, preventing stale mutations.
+function debounce<T extends (...args: Parameters<T>) => void>(fn: T, delay: number) {
   let timer: ReturnType<typeof setTimeout>;
-  return (...args: Parameters<T>) => {
+  const debounced = (...args: Parameters<T>) => {
     clearTimeout(timer);
     timer = setTimeout(() => fn(...args), delay);
   };
+  debounced.cancel = () => clearTimeout(timer);
+  return debounced;
 }
 
 export default function DocEditorPage() {
@@ -45,6 +49,15 @@ export default function DocEditorPage() {
   // ── Capture the Tiptap editor instance so we can call .getJSON()/.getText() ─
   const editorRef = useRef<TiptapEditor | null>(null);
 
+  // Clear the editor ref on unmount to avoid holding a reference to a destroyed
+  // Tiptap instance, which could cause runtime errors if a pending async callback
+  // fires after the component is gone.
+  useEffect(() => {
+    return () => {
+      editorRef.current = null;
+    };
+  }, []);
+
   // ── Server state ─────────────────────────────────────────────────────────────
   const { data, isLoading, isError } = useQuery({
     ...trpc.docs.get.queryOptions({ id: docId! }),
@@ -52,6 +65,13 @@ export default function DocEditorPage() {
   });
 
   const doc = (data as { doc: Record<string, unknown> } | undefined)?.doc;
+
+  // Reset title state when navigating to a different doc so the previous doc's
+  // title doesn't flash before the new doc loads.
+  useEffect(() => {
+    titleInitialized.current = false;
+    setTitle('');
+  }, [docId]);
 
   // Seed local title once the doc loads for the first time.
   // TanStack Query v5 removed onSuccess from useQuery — use useEffect instead.
@@ -96,6 +116,12 @@ export default function DocEditorPage() {
     }, 1000),
     [docId],
   );
+
+  // Cancel any pending debounced save on unmount to prevent stale mutations
+  // after the component has been removed from the tree.
+  useEffect(() => {
+    return () => debouncedSave.cancel();
+  }, [debouncedSave]);
 
   // ─────────────────────────────────────────────────────────────────────────────
 
@@ -178,6 +204,7 @@ export default function DocEditorPage() {
             onEditorReady={(editor) => {
               editorRef.current = editor;
             }}
+            placeholder="Write something..."
             hideToolbar={false}
           />
         </div>

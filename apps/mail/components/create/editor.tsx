@@ -105,6 +105,7 @@ export default function Editor({
   senderInfo,
   myInfo,
   readOnly,
+  onEditorReady,
 }: EditorProps) {
   const [state, dispatch] = useReducer(editorReducer, {
     openNode: false,
@@ -302,6 +303,9 @@ export default function Editor({
           }}
           onCreate={({ editor: ed }) => {
             setEditor(ed);
+            // Notify parent that the editor instance is ready so callers can
+            // capture the ref and call .getJSON()/.getText() directly.
+            onEditorReady?.(ed);
           }}
           onDestroy={() => {
             setEditor(null);
