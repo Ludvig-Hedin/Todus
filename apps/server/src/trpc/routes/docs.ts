@@ -1,3 +1,4 @@
+import { TRPCError } from '@trpc/server';
 import { docWorkspace, doc } from '../../db/schema';
 import { privateProcedure, router } from '../trpc';
 import { createDb } from '../../db';
@@ -29,7 +30,7 @@ export const docWorkspacesRouter = router({
   create: privateProcedure
     .input(
       z.object({
-        name: z.string(),
+        name: z.string().min(1),
         emoji: z.string().optional(),
       }),
     )
@@ -62,7 +63,7 @@ export const docWorkspacesRouter = router({
       z.object({
         id: z.string(),
         name: z.string().optional(),
-        emoji: z.string().optional(),
+        emoji: z.string().nullable().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -81,7 +82,7 @@ export const docWorkspacesRouter = router({
           .returning();
 
         if (!updated) {
-          throw new Error('Workspace not found');
+          throw new TRPCError({ code: 'NOT_FOUND', message: 'Workspace not found' });
         }
 
         return { workspace: updated };
@@ -156,7 +157,7 @@ export const docsRouter = router({
           .where(and(eq(doc.id, input.id), eq(doc.userId, ctx.sessionUser.id)));
 
         if (!found) {
-          throw new Error('Doc not found');
+          throw new TRPCError({ code: 'NOT_FOUND', message: 'Doc not found' });
         }
 
         return { doc: found };
@@ -175,8 +176,18 @@ export const docsRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      const userId = ctx.sessionUser.id;
       const { db, conn } = getDb();
       try {
+        // Verify the workspace belongs to this user before creating a doc in it
+        if (input.workspaceId) {
+          const [ws] = await db
+            .select({ id: docWorkspace.id })
+            .from(docWorkspace)
+            .where(and(eq(docWorkspace.id, input.workspaceId), eq(docWorkspace.userId, userId)));
+          if (!ws) throw new TRPCError({ code: 'FORBIDDEN', message: 'Workspace not found' });
+        }
+
         const id = crypto.randomUUID();
         const now = new Date();
 
@@ -184,7 +195,7 @@ export const docsRouter = router({
           .insert(doc)
           .values({
             id,
-            userId: ctx.sessionUser.id,
+            userId,
             workspaceId: input.workspaceId ?? null,
             parentId: input.parentId ?? null,
             title: input.title ?? 'Untitled',
@@ -211,11 +222,11 @@ export const docsRouter = router({
         // content is Tiptap JSONContent — accept any shape
         content: z.any().optional(),
         contentText: z.string().optional(),
-        emoji: z.string().optional(),
+        emoji: z.string().nullable().optional(),
         order: z.number().optional(),
-        linkedThreadId: z.string().optional(),
-        linkedEventId: z.string().optional(),
-        linkedTaskId: z.string().optional(),
+        linkedThreadId: z.string().nullable().optional(),
+        linkedEventId: z.string().nullable().optional(),
+        linkedTaskId: z.string().nullable().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -240,7 +251,7 @@ export const docsRouter = router({
           .returning();
 
         if (!updated) {
-          throw new Error('Doc not found');
+          throw new TRPCError({ code: 'NOT_FOUND', message: 'Doc not found' });
         }
 
         return { doc: updated };
@@ -268,7 +279,7 @@ export const docsRouter = router({
     }),
 
   search: privateProcedure
-    .input(z.object({ query: z.string() }))
+    .input(z.object({ query: z.string().min(1).max(200) }))
     .query(async ({ ctx, input }) => {
       const { db, conn } = getDb();
       try {
