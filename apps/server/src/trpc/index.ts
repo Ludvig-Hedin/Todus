@@ -24,6 +24,7 @@ import { sessionsRouter } from './routes/sessions';
 import { sharingRouter } from './routes/sharing';
 import { groupsRouter } from './routes/groups';
 import { mailAssistantRouter } from './routes/mail-assistant';
+import { docsRouter } from './routes/docs';
 import { aiRouter } from './routes/ai';
 import { router } from './trpc';
 
@@ -53,6 +54,7 @@ export const appRouter = router({
   logging: loggingRouter,
   tasks: tasksRouter,
   folders: foldersRouter,
+  docs: docsRouter,
 });
 
 export type AppRouter = typeof appRouter;
