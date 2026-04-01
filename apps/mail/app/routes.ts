@@ -43,6 +43,8 @@ export default [
         route('/under-construction/:path', '(routes)/mail/under-construction/[path]/page.tsx'),
         route('/meetings', '(routes)/mail/meetings/page.tsx'),
         route('/meetings/:meetingId', '(routes)/mail/meetings/[meetingId]/page.tsx'),
+        route('/docs', '(routes)/mail/docs/page.tsx'),
+        route('/docs/:docId', '(routes)/mail/docs/[docId]/page.tsx'),
         route('/:folder', '(routes)/mail/[folder]/page.tsx'),
       ]),
     ),
