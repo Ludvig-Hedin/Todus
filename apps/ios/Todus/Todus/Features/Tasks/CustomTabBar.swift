@@ -16,6 +16,8 @@ struct CustomTabBar: View {
     var hasUpcomingCalendarEvent: Bool = false
     var onAI: () -> Void
     var onCreate: () -> Void
+    /// Called when the user taps the overflow (ellipsis) button to open the More sheet.
+    var onMore: (() -> Void)? = nil
 
     /// Namespace for the matched geometry sliding indicator
     @Namespace private var tabIndicator
@@ -115,6 +117,16 @@ struct CustomTabBar: View {
                     .font(iconFont)
                     .foregroundStyle(.primary)
                     .frame(width: 54, height: 46)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(TabButtonStyle())
+
+            // More button — overflow entry point (Docs, future items)
+            Button { onMore?() } label: {
+                Image(systemName: "ellipsis")
+                    .font(iconFont)
+                    .foregroundStyle(Color(UIColor.secondaryLabel))
+                    .frame(width: 44, height: 46)
                     .contentShape(Rectangle())
             }
             .buttonStyle(TabButtonStyle())

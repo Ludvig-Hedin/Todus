@@ -18,6 +18,8 @@ struct MainTabView: View {
 
     @State private var showCreateSheet = false
     @State private var showAIChat     = false
+    /// Controls the More overflow sheet (Docs, future items)
+    @State private var showMoreSheet  = false
 
     /// Wire to EventKit / CalendarService when ready.
     @State private var hasUpcomingCalendarEvent = false
@@ -82,7 +84,8 @@ struct MainTabView: View {
                         withAnimation(.snappy(duration: 0.2)) {
                             showCreateSheet = true
                         }
-                    }
+                    },
+                    onMore: { showMoreSheet = true }
                 )
                 .padding(.horizontal, 16)
                 .padding(.top, 12)   // breathing room between scrollable content and the bar
@@ -124,6 +127,11 @@ struct MainTabView: View {
                         .presentationDragIndicator(.visible)
                         .preferredColorScheme(services.appearancePreference.colorScheme)
                 }
+            }
+            // More sheet — overflow navigation (Docs, future items)
+            .sheet(isPresented: $showMoreSheet) {
+                MoreSheetView()
+                    .preferredColorScheme(services.appearancePreference.colorScheme)
             }
             // React to tab navigation requests from child views (e.g. HomeView).
             .onChange(of: services.navigateTo) { _, newTab in
