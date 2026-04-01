@@ -9,6 +9,7 @@ import {
   unique,
   index,
 } from 'drizzle-orm/pg-core';
+import type { AnyPgColumn } from 'drizzle-orm/pg-core';
 import { defaultUserSettings } from '../lib/schemas';
 
 export const createTable = pgTableCreator((name) => `mail0_${name}`);
@@ -643,5 +644,66 @@ export const groupMessage = createTable(
     index('group_message_sender_user_id_idx').on(t.senderUserId),
     // Composite index supports paginated queries ordered by (groupId, createdAt)
     index('group_message_group_created_idx').on(t.groupId, t.createdAt),
+  ],
+);
+
+// ─── Docs ─────────────────────────────────────────────────────────────────────
+// Notion-style document workspaces and pages. Each workspace belongs to a user
+// and holds a tree of docs (nested via self-referential parentId). Content is
+// stored as Tiptap JSONContent (jsonb) alongside a plaintext mirror for search.
+
+export const docWorkspace = createTable(
+  'doc_workspace',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    // Optional workspace icon displayed in the sidebar
+    emoji: text('emoji'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at')
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (t) => [index('doc_workspace_user_id_idx').on(t.userId)],
+);
+
+export const doc = createTable(
+  'doc',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    // Optional: null means the doc lives at the top level outside any workspace
+    workspaceId: text('workspace_id').references(() => docWorkspace.id, { onDelete: 'cascade' }),
+    // Self-referential FK for nested pages (null = root-level doc within its workspace).
+    // Explicit return type annotation is required to satisfy TypeScript's circular reference check.
+    // eslint-disable-next-line @typescript-eslint/no-use-before-define
+    parentId: text('parent_id').references((): AnyPgColumn => doc.id, { onDelete: 'cascade' }),
+    title: text('title').notNull().default('Untitled'),
+    // Tiptap JSONContent stored as jsonb; null until the user writes something
+    content: jsonb('content'),
+    // Plaintext mirror of content for full-text search without parsing jsonb
+    contentText: text('content_text'),
+    emoji: text('emoji'),
+    order: integer('order').notNull().default(0),
+    // Cross-entity links — nullable, no FK (threads/events/tasks are external)
+    linkedThreadId: text('linked_thread_id'),
+    linkedEventId: text('linked_event_id'),
+    linkedTaskId: text('linked_task_id'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at')
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (t) => [
+    index('doc_user_id_idx').on(t.userId),
+    index('doc_workspace_id_idx').on(t.workspaceId),
+    index('doc_parent_id_idx').on(t.parentId),
   ],
 );

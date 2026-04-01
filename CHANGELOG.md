@@ -23,6 +23,14 @@ Root cause: `/auth/mobile-token` minted JWTs via Better Auth's `jwt()` plugin wh
 - **schemas.ts**: `mergeUserSettings` now keeps `categories` typed as full `MailCategory[]` while still allowing nested partial updates elsewhere.
 - **MacMeetingsView.swift**: Sync icon rotation now initializes correctly when the meetings view appears during an in-flight sync.
 
+## [2026-04-01] Feat — Add docWorkspace + doc DB schema tables (apps/server/src/db/schema.ts)
+
+Added two new Drizzle ORM tables for the Docs feature:
+- `mail0_doc_workspace` — user-owned workspace container with optional emoji, createdAt/updatedAt
+- `mail0_doc` — Notion-style page with self-referential parentId for nesting, Tiptap JSONContent storage, plaintext search mirror, cross-entity link columns, and three indexes
+Added `import type { AnyPgColumn }` to satisfy TypeScript's circular reference check on the self-referential FK.
+Migration NOT applied — run `pnpm db:generate && pnpm db:migrate` to apply.
+
 ## [2026-04-01] Fix — Code quality and bug fixes across all platforms
 
 Batch of ~50 fixes across iOS, macOS, web, and server layers covering security, stability, and UX.
