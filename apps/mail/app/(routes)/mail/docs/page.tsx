@@ -9,7 +9,7 @@ import { FileText, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useNavigate } from 'react-router';
 import { useTRPC } from '@/providers/query-provider';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { authProxy } from '@/lib/auth-proxy';
 import type { Route } from './+types/page';
 
@@ -25,8 +25,12 @@ export default function DocsPage() {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
 
+  // Fetch workspaces so we can guard the "New page" button — a doc requires a workspace.
+  const { data: workspacesData } = useQuery(trpc.docs.workspaces.list.queryOptions());
+  const firstWorkspaceId = workspacesData?.[0]?.id;
+
   // Quick-create a doc from the empty state's "New page" button.
-  // We don't tie it to a specific workspace here — the user can organize later.
+  // Must pass a workspaceId — enforced by checking firstWorkspaceId before rendering the button.
   const createDoc = useMutation({
     ...trpc.docs.create.mutationOptions(),
     onSuccess: (result) => {
@@ -54,16 +58,24 @@ export default function DocsPage() {
               Pick a page from the sidebar, or create a new one.
             </p>
           </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="gap-1.5"
-            onClick={() => createDoc.mutate({ title: 'Untitled' })}
-            disabled={createDoc.isPending}
-          >
-            <Plus className="h-4 w-4" />
-            New page
-          </Button>
+          {firstWorkspaceId ? (
+            // Workspace exists — allow quick-creating a new doc from here
+            <Button
+              variant="ghost"
+              size="sm"
+              className="gap-1.5"
+              onClick={() => createDoc.mutate({ workspaceId: firstWorkspaceId, title: 'Untitled' })}
+              disabled={createDoc.isPending}
+            >
+              <Plus className="h-4 w-4" />
+              New page
+            </Button>
+          ) : (
+            // No workspaces yet — guide the user to create one first via the left panel
+            <p className="text-muted-foreground text-sm">
+              Create a workspace first using the + button on the left.
+            </p>
+          )}
         </div>
       </ResizablePanel>
     </ResizablePanelGroup>
