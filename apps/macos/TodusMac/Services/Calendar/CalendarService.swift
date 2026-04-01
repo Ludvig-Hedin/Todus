@@ -107,6 +107,18 @@ actor CalendarService {
         get { UserDefaults.standard.dictionary(forKey: folderMapKey) as? [String: String] ?? [:] }
         set { UserDefaults.standard.set(newValue, forKey: folderMapKey) }
     }
+
+    /// Remove stale entries from the folder map whose EKEvent no longer exists.
+    /// Call periodically (e.g. on app foreground) to prevent unbounded growth.
+    /// Skips pruning when calendar access is revoked to avoid wiping all associations.
+    func pruneFolderMap() {
+        guard canReadEvents() else { return }
+        var map = folderMap
+        let staleKeys = map.keys.filter { eventStore.event(withIdentifier: $0) == nil }
+        guard !staleKeys.isEmpty else { return }
+        for key in staleKeys { map.removeValue(forKey: key) }
+        folderMap = map
+    }
 }
 
 private extension EKEvent {

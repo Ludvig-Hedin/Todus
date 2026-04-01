@@ -94,9 +94,11 @@ struct EmailInboxView: View {
             }
         }
         .onChange(of: selectedFolder) { _, newFolder in
-            // Clear search and reload fresh when folder changes
-            searchText = ""
+            // Clear search and cancel any pending debounce task.
+            // Setting searchText="" here would normally trigger onChange(of: searchText),
+            // but the debounce task is cancelled first so no redundant load fires.
             searchDebounceTask?.cancel()
+            searchText = ""
             Task { await emailService.loadThreads(folder: newFolder.rawValue, refresh: true) }
         }
         .navigationDestination(item: $selectedThreadId) { threadId in

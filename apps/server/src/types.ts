@@ -236,6 +236,9 @@ export enum Tools {
   InboxRag = 'inboxRag',
   BuildGmailSearchQuery = 'buildGmailSearchQuery',
   GetCurrentDate = 'getCurrentDate',
+  ListMeetings = 'listMeetings',
+  GetMeetingSummary = 'getMeetingSummary',
+  SearchMeetingTranscript = 'searchMeetingTranscript',
 }
 
 export type AppContext = Context<{ Bindings: Env }>;

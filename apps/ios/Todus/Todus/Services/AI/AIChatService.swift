@@ -334,7 +334,10 @@ final class AIChatService {
         guard let index = savedConversations.firstIndex(where: { $0.id == conversation.id }) else { return }
         savedConversations[index].folderID = folderID
         persistConversationsLocally()
-        Task { await syncSaveConversation(savedConversations[index]) }
+        // Capture value before spawning Task — index into savedConversations may change
+        // if the array is mutated before the async block runs.
+        let updatedConversation = savedConversations[index]
+        Task { await syncSaveConversation(updatedConversation) }
         if currentConversationID == conversation.id {
             currentConversationFolderID = folderID
         }

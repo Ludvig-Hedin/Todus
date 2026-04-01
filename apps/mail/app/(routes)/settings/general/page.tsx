@@ -142,7 +142,8 @@ export default function GeneralPage() {
   //   const { revalidate } = useRevalidator();
 
   const form = useForm<z.infer<typeof userSettingsSchema>>({
-    resolver: zodResolver(userSettingsSchema as never),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    resolver: zodResolver(userSettingsSchema as any),
     defaultValues: {
       language: locale,
       timezone: getBrowserTimezone(),

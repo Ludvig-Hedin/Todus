@@ -56,7 +56,7 @@ enum CalendarSection: String, CaseIterable, Hashable {
 }
 
 enum MacPrimarySelection: Hashable {
-    case home, tasks, email(EmailSection), calendar(CalendarSection)
+    case home, tasks, email(EmailSection), calendar(CalendarSection), meetings
 
     var title: String {
         switch self {
@@ -64,6 +64,7 @@ enum MacPrimarySelection: Hashable {
         case .tasks: "Tasks"
         case .email(let section): section.title
         case .calendar(let section): section.title
+        case .meetings: "Meetings"
         }
     }
 
@@ -74,6 +75,7 @@ enum MacPrimarySelection: Hashable {
         case .tasks: "tasks"
         case .email: "email"
         case .calendar: "calendar"
+        case .meetings: "meetings"
         }
     }
 }
@@ -450,6 +452,9 @@ struct MacRootView: View {
                 Button("") { selection = .calendar(.all) }
                     .keyboardShortcut("4", modifiers: .command)
 
+                Button("") { selection = .meetings }
+                    .keyboardShortcut("5", modifiers: .command)
+
                 // ⌘⇧M — Mark all read (email)
                 Button("") {
                     if selection.category == "email" {
@@ -533,6 +538,8 @@ struct MacRootView: View {
             MacEmailInboxView(folder: section.rawValue)
         case .calendar:
             MacCalendarView(viewMode: $calendarViewMode, selectedDate: $calendarSelectedDate)
+        case .meetings:
+            MacMeetingsView()
         }
     }
 

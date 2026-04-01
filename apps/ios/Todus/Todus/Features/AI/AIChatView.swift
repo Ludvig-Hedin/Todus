@@ -4,6 +4,12 @@ import PhotosUI
 import AVFoundation
 import Speech
 
+/// Identifiable wrapper used by .sheet(item:) to guarantee the share sheet
+/// only appears when a conversation ID is actually available.
+private struct ShareConversationID: Identifiable {
+    let id: String
+}
+
 // MARK: - AIChatView
 
 /// Full-screen chat sheet. Streams AI responses with live markdown rendering and typewriter animation.
@@ -35,6 +41,8 @@ struct AIChatView: View {
     @State private var showsRenameAlert = false
     @State private var renameText = ""
     @State private var showsPromptLibrary = false
+    // ShareConversationSheet — use .sheet(item:) so blank sheet cannot appear when ID is nil
+    @State private var shareSheetConversationId: ShareConversationID? = nil
 
     // Suggestion expansion — "Show more" / "Refresh" / "Back"
     @State private var suggestionsExpanded = false
@@ -154,6 +162,14 @@ struct AIChatView: View {
                 .presentationDragIndicator(.visible)
                 .presentationBackground(AppTheme.backgroundTop)
                 .preferredColorScheme(services.appearancePreference.colorScheme)
+        }
+        // Share conversation sheet — creates a shareable public link
+        .sheet(item: $shareSheetConversationId) { item in
+            ShareConversationSheet(
+                conversationId: item.id,
+                conversationTitle: chatService.chatTitle ?? "AI conversation"
+            )
+            .preferredColorScheme(services.appearancePreference.colorScheme)
         }
         // Delete confirmation dialog
         .confirmationDialog("Delete this conversation?", isPresented: $showsDeleteConfirm, titleVisibility: .visible) {
@@ -323,9 +339,14 @@ struct AIChatView: View {
                         Label("Duplicate", systemImage: "plus.square.on.square")
                     }
 
-                    // Share
+                    // Share — opens ShareConversationSheet to create a public link,
+                    // falls back to UIActivityViewController when no conversation is saved yet
                     Button {
-                        shareConversation()
+                        if let id = chatService.currentConversationID?.uuidString {
+                            shareSheetConversationId = ShareConversationID(id: id)
+                        } else {
+                            shareConversation()
+                        }
                     } label: {
                         Label("Share", systemImage: "square.and.arrow.up")
                     }
@@ -541,6 +562,21 @@ struct AIChatView: View {
                 ("clock.badge.checkmark",      "When is my next free 2-hour window?"),
                 ("person.badge.plus",          "Help me prepare for my next meeting"),
                 ("sun.max",                    "Plan my ideal workday schedule"),
+            ]
+        case .meetings:
+            pinned = [
+                ("video",                      "Summarize my upcoming meetings"),
+                ("doc.text.magnifyingglass",   "What meetings already have recaps or action items?"),
+                ("calendar.badge.plus",        "Which meetings should I sync from calendar?"),
+            ]
+            extended = [
+                ("person.2",                   "Which meetings need a note taker scheduled?"),
+                ("checkmark.circle",           "Turn meeting action items into tasks"),
+                ("clock.arrow.trianglehead.counterclockwise.rotate.90", "What did I miss in recent meetings?"),
+                ("sparkles",                   "Generate a recap for my latest meeting"),
+                ("questionmark.bubble",        "Help me prepare questions for the next meeting"),
+                ("link",                       "Find meetings with Google Meet links"),
+                ("waveform.path.ecg",          "Show me meetings that still need follow-up"),
             ]
         case .tasks:
             if activeCount == 0 {
@@ -2438,7 +2474,7 @@ struct ChatHistoryView: View {
                                         .foregroundStyle(AppTheme.mutedText)
                                         .frame(width: 24, height: 24)
                                 }
-                                .menuStyle(.borderlessButton)
+                                // .menuStyle(.borderlessButton) removed — macOS-only API
                             }
                             .padding(.vertical, 4)
                         }

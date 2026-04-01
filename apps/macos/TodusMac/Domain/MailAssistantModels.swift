@@ -105,7 +105,27 @@ struct MailAssistantNudge: Codable, Identifiable, Sendable {
     let count: Int
     let threadIds: [String]
 
-    var id: String { "\(type.rawValue)-\(title)" }
+    // Stable stored id — avoids id changing when title changes mid-decode
+    let id: String
+
+    enum CodingKeys: String, CodingKey {
+        case type, title, description, count, threadIds, id
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        type = try c.decode(AssistantNudgeType.self, forKey: .type)
+        title = try c.decode(String.self, forKey: .title)
+        description = try c.decode(String.self, forKey: .description)
+        count = try c.decode(Int.self, forKey: .count)
+        threadIds = try c.decode([String].self, forKey: .threadIds)
+        // Use server-provided id if present, otherwise derive from type + title
+        if let serverId = try? c.decode(String.self, forKey: .id), !serverId.isEmpty {
+            id = serverId
+        } else {
+            id = "\(type.rawValue)-\(title)"
+        }
+    }
 }
 
 struct MailAssistantDraftResult: Codable, Sendable {
@@ -115,8 +135,8 @@ struct MailAssistantDraftResult: Codable, Sendable {
     let preview: String?
 }
 
-struct MailAssistantSettingsResponse: Decodable {
-    struct Settings: Decodable {
+struct MailAssistantSettingsResponse: Decodable, Sendable {
+    struct Settings: Decodable, Sendable {
         let contextAboutYou: String
         let customPrompt: String
         let assistantAutomationPolicy: AssistantAutomationPolicy

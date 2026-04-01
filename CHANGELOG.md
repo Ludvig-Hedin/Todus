@@ -1,5 +1,122 @@
 # Project Changelog
 
+## [2026-04-01] Fix — Code quality and bug fixes across all platforms
+
+Batch of ~50 fixes across iOS, macOS, web, and server layers covering security, stability, and UX.
+
+### Server (`apps/server`)
+- **env.ts**: Made `RECALL_WEBHOOK_SECRET` optional (`?`)
+- **recall.ts**: Wrapped `JSON.parse` in try-catch for cleaner parse error messages
+- **recall-webhook.ts**: Implemented full HMAC-SHA256 signature verification with production warning when secret is not set; made media and transcript inserts idempotent via `onConflictDoUpdate`/`onConflictDoNothing`; transcript event only sets status to `ready` when transcript fetch succeeds; handles null `recallSegmentId` segments separately to avoid dedup failures on retry; read body once to avoid double-consume
+- **schema.ts**: Added `.unique()` to `recallMediaId` and `recallSegmentId` columns
+- **Migration 0043**: Adds unique constraints for `recall_media_id` and `recall_segment_id`
+- **meet.ts**: LIKE wildcard escaping for search; `scheduleBot` cleans up orphaned bot on DB failure; `deleteMeeting` checks for active bot before deleting; Invalid Date guard in `syncFromCalendar`; N+1 eliminated in `syncFromCalendar` — batch-fetch all existing meetings via `inArray` before the loop
+- **tools.ts (agent)**: Fixed SQL injection in `searchMeetingTranscriptTool` — LIKE wildcards now escaped; fixed meeting tools type to avoid `undefined` in ToolSet
+- **mail-assistant.ts**: Added TODO comment for hardcoded UTC timezone
+
+### iOS (`apps/ios`)
+- **GroupChatView.swift**: URL-encodes invite token; surfaces `joinGroup`/`leaveGroup` errors via alerts; only clears token on success
+- **ShareConversationSheet.swift**: Added `@MainActor` to `createLink()`; removed redundant `MainActor.run {}`
+- **SharedConversationView.swift**: `unlock()` only sets `wrongPassword = true` for auth failures (401/403/password errors)
+- **EmailThreadView.swift**: `handleDraftReply` only sets `assistantDraftSeed` when `result.created == true`; `AssistantPill` uses `Color(.systemBackground)` for dark mode
+- **AIChatView.swift**: Share sheet uses `.sheet(item:)` with `ShareConversationID` to prevent blank sheet
+- **SettingsView.swift**: Auto-send toggle shows confirmation dialog before enabling
+- **MeetingDetailView.swift**: Added error alerts for `generateSummary`/`scheduleBot`; stable `@State AVPlayer`
+- **MeetingsListView.swift**: Added error state with retry button
+- **MeetingsService.swift**: Added `loadError` property; removed `private` from `GenerateSummaryResponse`
+
+### macOS (`apps/macos`)
+- **MailAssistantModels.swift**: Added `Sendable` to `MailAssistantSettingsResponse`/`Settings`; stable stored `id` for `MailAssistantNudge`
+- **GroupChatService.swift**: Replaced all `apiClient!` force-unwraps with guard-let; `createGroup` matches by returned id; per-iteration `guard let self` in polling loop
+- **ShareConversationService.swift**: Replaced all `apiClient!` force-unwraps with guard-let
+- **MacEmailInboxView.swift**: Disabled nudge button when `threadIds.isEmpty`
+- **MacEmailThreadView.swift**: `onDismiss` clears `assistantDraftSeed`; `handleDraftReply` only shows notice when draft NOT created; renamed "Extract tasks" → "Extract task"
+- **CalendarService.swift**: `pruneFolderMap` guards against calendar permission revocation
+- **MacAssistantPanel.swift**: Closes share panel when `currentConversationID` becomes nil
+- **MacMeetingDetailView.swift**: Added error alerts; stable `@State AVPlayer`; `scheduleBot` returns Bool for error detection
+- **MacMeetingsView.swift**: Added "Upcoming" category for future meetings beyond this week; added error state when `loadError` is set and list is empty (with Retry button)
+- **MeetingsService.swift**: Added `loadError`; removed `private` from `GenerateSummaryResponse`
+
+### Web (`apps/mail`)
+- **mail-display.tsx**: Refresh button handler wrapped in try-catch with `toast.error`
+- **chat/page.tsx**: Added `onError` handler to `saveConversation`; `handleDeleteConversation` moves `handleNewChat()` to `onSuccess`
+- **search/page.tsx**: Safe date parsing with `isValid()` for thread and task dates
+- **tasks/page.tsx**: Added `aria-label` to search and quick-add inputs; `quickAddValue` cleared only on mutation success; removed stale `setDetailTask` spread
+- **settings/general/page.tsx**: Replaced `as never` TypeScript cast with `as any` + eslint-disable comment
+- **calendar/page.tsx**: Fixed inaccurate "±1 day buffer" comment
+- **home/page.tsx**: `timeLabel` guards against null `startTime`/`endTime` values
+
+---
+
+## [2026-04-01] Feature — Meetings hub with Recall.ai integration
+
+Full meetings feature across all platforms: calendar sync, Recall.ai bot recording, AI recaps, transcript Q&A, and second-brain integration.
+
+### Backend (`apps/server`)
+- **DB schema** (`schema.ts`): Added 4 tables — `meetIntegration`, `meeting`, `meetingMedia`, `meetingTranscript` with indexes.
+- **Migration**: `0042_absurd_emma_frost.sql` generated.
+- **Recall.ai client** (`lib/recall.ts`): `createRecallBot`, `getBotStatus`, `cancelBot`, `getBotTranscript` with retry logic.
+- **Webhook** (`routes/recall-webhook.ts`): Handles `bot.status_change`, `recording.done`, `transcript.done` events.
+- **tRPC meet router** (`trpc/routes/meet.ts`): `listMeetings`, `getMeeting`, `createMeeting`, `deleteMeeting`, `scheduleBot`, `cancelBot`, `generateSummary`, `askQuestion`, `syncFromCalendar`, `getIntegration`, `upsertIntegration`.
+- **AI tools** (`routes/agent/tools.ts`): Added `listMeetings`, `getMeetingSummary`, `searchMeetingTranscript` tools for second-brain AI access.
+- **Env** (`env.ts`): Added `RECALL_API_KEY`, `RECALL_API_BASE_URL`, `RECALL_WEBHOOK_SECRET`.
+- **Types** (`types.ts`): Added `ListMeetings`, `GetMeetingSummary`, `SearchMeetingTranscript` to Tools enum.
+
+### Web (`apps/mail`)
+- **Routes** (`routes.ts`): Added `/mail/meetings` and `/mail/meetings/:meetingId`.
+- **Navigation** (`config/navigation.ts`): Added "Meetings" with Video icon and `g + m` shortcut.
+- **List page** (`meetings/page.tsx`): Time-grouped list, status filters, search, calendar sync button, empty state.
+- **Detail page** (`meetings/[meetingId]/page.tsx`): Video player, AI recap, action items, transcript viewer, Q&A chat.
+
+### macOS (`apps/macos`)
+- **Navigation**: Added `.meetings` case to `MacPrimarySelection`, sidebar button, ⌘5 shortcut.
+- **Service** (`Services/Meetings/MeetingsService.swift`): Full tRPC client for meetings CRUD + AI.
+- **Views**: `MacMeetingsView.swift` (split list+detail), `MacMeetingDetailView.swift` (video, recap, transcript, Q&A).
+- **Registration**: Added `meetingsService` to `MacAppServices`.
+
+### iOS (`apps/ios`)
+- **Navigation**: Added `.meetings` to `AppTab`, tab content in `MainTabView`.
+- **Service** (`Services/Meetings/MeetingsService.swift`): Full tRPC client matching macOS.
+- **Views**: `MeetingsListView.swift` (grouped list with search), `MeetingDetailView.swift` (video, recap, transcript, Q&A).
+- **Registration**: Added `meetingsService` to `AppServices`.
+
+## [2026-04-01] Fix — Code review bug-fix batch
+
+### CHANGELOG
+- Corrected "4 branches" → "5 branches" in iOS EmailInboxView entry.
+
+### Backend (`apps/server`)
+- `calendar.ts`: Added `scopeMissing: false` to non-Google early returns in `events` and `calendars` procedures so the shape is consistent.
+- `settings.ts`: `save` mutation now validates existing settings through `userSettingsSchema.safeParse` before merging, eliminating the unsafe `as UserSettings` cast.
+- `groups.ts`: `generateToken()` now uses URL-safe base64 (replaces `+`→`-`, `/`→`_` instead of stripping) for reliable 16-char output. `create` and `join` wrapped in transactions. `regenerateInvite` now calls `requireActiveGroup`. `listMessages` uses compound `timestamp:id` cursor. `generateGroupAIResponse` opens its own DB connection so it can run safely in a background `waitUntil` after the request connection closes.
+- `sharing.ts`: Added `passwordSalt` guard in `get` and `import`. `update` now filters out revoked shares. `import` is now rate-limited. Rate-limiter comment clarified (per-IP bucketing handled by middleware).
+- `mail-assistant.ts`: `listAssistantActivity` wraps `JSON.parse` in try/catch per key. `createGoogleCalendarEvent` adds `timeZone: 'UTC'` to start/end. Draft subject fallback changed from `undefined` to `'No Subject'`.
+- `migrations/0041`: Removed 3 redundant B-tree indexes (`group_slug_idx`, `group_invite_token_idx`, `shared_conversation_slug_idx`) that duplicated existing UNIQUE constraints.
+
+### Web (`apps/mail`)
+- `calendar/page.tsx`: Removed redundant ternary `e.allDay ? new Date(e.startTime) : new Date(e.startTime)`.
+- `mail-list.tsx`: Empty-inbox state now checks `!isConnectionLoading` to prevent flash before connection loads.
+- `settings/sharing/page.tsx`: Added `'use client'` directive; clipboard `writeText` now properly awaited with error toast fallback.
+- `group-chat-view.tsx`: `handleSend` restores message text on mutation error; `copyInviteLink` awaits clipboard with error toast.
+- `share-conversation-modal.tsx`: `handleCopy` awaits clipboard with error toast; success message is conditional on visibility.
+- `group-join/[token]/page.tsx`: Added `onError` handler and inline error message for join mutation.
+- `share/[slug]/page.tsx`: Added `onError` handler and inline error message for import mutation.
+
+### iOS (`apps/ios`)
+- `AIChatView.swift`: Removed `.menuStyle(.borderlessButton)` — macOS-only API.
+- `AIChatService.swift`: `moveConversation` captures value before spawning async `Task` to avoid stale index.
+- `CalendarService.swift`: Replaced `hashValue` with stable packed-RGB extraction from CGColor components.
+- `TaskCaptureService.swift`: Captures `folderId` before `context.delete`; marks unlinked tasks `.pendingUpload`.
+- `EmailInboxView.swift`: Folder-change handler cancels debounce task before clearing `searchText` to prevent redundant `loadThreads` call.
+- `ShareConversationSheet.swift`: Password validation guard added; `expiresInDays` now uses `apiValue` computed property.
+- `GroupChatService.swift`: Replaced all `apiClient!` force-unwraps with a throwing `client()` helper; `createGroup` now matches returned group by id; added `GroupChatServiceError`.
+- `ShareConversationService.swift`: Replaced `apiClient!` force-unwraps with `client()` helper; added `ShareConversationServiceError`.
+
+### macOS (`apps/macos`)
+- `MacAppServices.swift`: `syncSharedFolders` now guards on `authService.isAuthenticated`.
+- `MacAssistantPanel.swift`: Removed `.swipeActions` (no-op in `ScrollView+LazyVStack`); moved Delete into ellipsis Menu.
+- `CalendarService.swift`: Added `pruneFolderMap()` to remove stale event entries from UserDefaults.
+
 ## [2026-03-31] Feature — Proactive Mail Assistant across web + iOS + macOS
 
 ### Backend — shared assistant layer + settings policy

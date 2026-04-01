@@ -173,6 +173,8 @@ struct MacAssistantPanel: View {
     // Rename conversation
     @State private var showsRenameAlert = false
     @State private var renameText = ""
+    // Share conversation panel — creates a public shareable link
+    @State private var showsSharePanel = false
 
     private var chatService: MacAIChatService { services.aiChatService }
 
@@ -376,6 +378,20 @@ struct MacAssistantPanel: View {
             promptLibraryContent
                 .frame(width: 320, height: 420)
         }
+        // Share conversation popover — creates a public shareable link
+        .popover(isPresented: $showsSharePanel, arrowEdge: .bottom) {
+            if let id = chatService.currentConversationID?.uuidString {
+                MacShareConversationPanel(
+                    conversationId: id,
+                    conversationTitle: chatService.chatTitle ?? "AI conversation"
+                )
+                .environment(services)
+            }
+        }
+        // Close share panel when the conversation ID disappears (e.g. after a new chat)
+        .onChange(of: chatService.currentConversationID) { _, newID in
+            if newID == nil { showsSharePanel = false }
+        }
         // Rename alert
         .alert("Rename Conversation", isPresented: $showsRenameAlert) {
             TextField("Title", text: $renameText)
@@ -467,6 +483,13 @@ struct MacAssistantPanel: View {
                         NSPasteboard.general.setString(chatService.conversationAsMarkdown(), forType: .string)
                     } label: {
                         Label("Copy Conversation", systemImage: "doc.on.doc")
+                    }
+
+                    // Share — creates a public shareable link (requires saved conversation)
+                    if chatService.currentConversationID != nil {
+                        Button { showsSharePanel = true } label: {
+                            Label("Share Conversation…", systemImage: "square.and.arrow.up")
+                        }
                     }
 
                     Divider()
@@ -898,6 +921,8 @@ struct MacAssistantPanel: View {
                                         .foregroundStyle(.tertiary)
                                     }
                                     Spacer()
+                                    // swipeActions removed — they only work inside List, not ScrollView+LazyVStack.
+                                    // Move and Delete are exposed via the ellipsis Menu instead.
                                     Menu {
                                         Button("Unfiled") {
                                             moveConversation(convo, to: nil)
@@ -909,6 +934,12 @@ struct MacAssistantPanel: View {
                                             Button(folder.name) {
                                                 moveConversation(convo, to: folder.id)
                                             }
+                                        }
+                                        Divider()
+                                        Button(role: .destructive) {
+                                            chatService.deleteConversation(convo)
+                                        } label: {
+                                            Label("Delete", systemImage: "trash")
                                         }
                                     } label: {
                                         Image(systemName: "ellipsis")
@@ -924,21 +955,6 @@ struct MacAssistantPanel: View {
                                 .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
-                            .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                                Button {
-                                    movingConversation = convo
-                                } label: {
-                                    Label("Move", systemImage: "folder")
-                                }
-                                .tint(MacTheme.accent)
-                            }
-                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                Button(role: .destructive) {
-                                    chatService.deleteConversation(convo)
-                                } label: {
-                                    Label("Delete", systemImage: "trash")
-                                }
-                            }
                         }
                     }
                 }
@@ -1131,6 +1147,7 @@ struct MacAssistantPanel: View {
         case .tasks: return "checkmark.circle.fill"
         case .email: return "envelope.fill"
         case .calendar: return "calendar"
+        case .meetings: return "video.fill"
         }
     }
 

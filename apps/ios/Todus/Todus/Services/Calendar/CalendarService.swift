@@ -120,7 +120,19 @@ private extension EKEvent {
             startDate: startDate,
             endDate: endDate,
             isAllDay: isAllDay,
-            calendarColor: UInt(calendar?.cgColor?.hashValue ?? 0),
+            // Extract a stable packed-RGB UInt from the calendar color.
+            // hashValue is unstable across launches; use the actual RGB components instead.
+            calendarColor: {
+                guard let cgColor = calendar?.cgColor,
+                      let converted = cgColor.converted(to: CGColorSpace(name: CGColorSpace.sRGB)!, intent: .defaultIntent, options: nil),
+                      let comps = converted.components, comps.count >= 3 else {
+                    return 0x5B8DEF // default blue
+                }
+                let r = UInt(max(0, min(255, Int(comps[0] * 255))))
+                let g = UInt(max(0, min(255, Int(comps[1] * 255))))
+                let b = UInt(max(0, min(255, Int(comps[2] * 255))))
+                return (r << 16) | (g << 8) | b
+            }(),
             folderID: folderID
         )
     }

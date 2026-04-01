@@ -6,6 +6,7 @@ enum AppTab: String, CaseIterable, Identifiable, Hashable {
     case tasks
     case email
     case calendar
+    case meetings
 
     var id: String { rawValue }
 
@@ -16,6 +17,7 @@ enum AppTab: String, CaseIterable, Identifiable, Hashable {
         case .tasks:    return "Tasks"
         case .email:    return "Email"
         case .calendar: return "Calendar"
+        case .meetings: return "Meetings"
         }
     }
 
@@ -26,6 +28,7 @@ enum AppTab: String, CaseIterable, Identifiable, Hashable {
         case .tasks:    return "checklist"
         case .email:    return "envelope.fill"
         case .calendar: return "calendar.badge.plus"
+        case .meetings: return "video.fill"
         }
     }
 
@@ -37,6 +40,7 @@ enum AppTab: String, CaseIterable, Identifiable, Hashable {
         case .tasks:    return "checklist"
         case .email:    return "envelope"
         case .calendar: return hasEvent ? "calendar.badge" : "calendar"
+        case .meetings: return "video"
         }
     }
 

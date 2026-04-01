@@ -8,6 +8,8 @@ struct MacSidebarView: View {
     @Binding var selection: MacPrimarySelection
     @Binding var isEmailExpanded: Bool
     @Binding var isCalendarExpanded: Bool
+    /// Currently active group chat ID — nil when no group is open
+    @Binding var selectedGroupId: String?
     let onOpenSettings: () -> Void
     let onCompose: () -> Void
 
@@ -59,9 +61,27 @@ struct MacSidebarView: View {
 
                 if isEmailExpanded {
                     VStack(alignment: .leading, spacing: 1) {
-                        ForEach(EmailSection.allCases, id: \.self) { section in
+                        // Primary folders: Inbox, Drafts, Sent
+                        ForEach(EmailSection.allCases.filter(\.isPrimary), id: \.self) { section in
                             SidebarChildItemButton(
                                 title: section.title,
+                                systemImage: section.systemImage,
+                                isSelected: selection == .email(section),
+                                action: { selection = .email(section) }
+                            )
+                        }
+                        // Divider between primary and secondary folders
+                        Rectangle()
+                            .fill(Color.primary.opacity(0.08))
+                            .frame(height: 0.5)
+                            .padding(.leading, 36)
+                            .padding(.trailing, 4)
+                            .padding(.vertical, 3)
+                        // Secondary folders: Archive, Snoozed, Spam, Trash
+                        ForEach(EmailSection.allCases.filter { !$0.isPrimary }, id: \.self) { section in
+                            SidebarChildItemButton(
+                                title: section.title,
+                                systemImage: section.systemImage,
                                 isSelected: selection == .email(section),
                                 action: { selection = .email(section) }
                             )
@@ -70,6 +90,13 @@ struct MacSidebarView: View {
                     // Use opacity-only so sub-items don't slide over sibling rows during animation
                     .transition(.opacity)
                 }
+
+                SidebarItemButton(
+                    title: "Meetings",
+                    systemImage: "video",
+                    isSelected: selection == .meetings,
+                    action: { selection = .meetings }
+                )
 
                 // Calendar — expandable with sub-sections
                 // Parent is NOT highlighted when expanded (only the child sub-link is)
@@ -101,6 +128,16 @@ struct MacSidebarView: View {
                     .transition(.opacity)
                 }
             }
+
+            // Thin separator before Groups section
+            Rectangle()
+                .fill(Color.primary.opacity(0.07))
+                .frame(height: 0.5)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 6)
+
+            // Group chats section
+            MacGroupListSection(selectedGroupId: $selectedGroupId)
 
             Spacer(minLength: 12)
 
@@ -383,6 +420,7 @@ private struct SidebarItemButton: View {
 
 private struct SidebarChildItemButton: View {
     let title: String
+    var systemImage: String? = nil
     let isSelected: Bool
     let action: () -> Void
 
@@ -390,14 +428,22 @@ private struct SidebarChildItemButton: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 0) {
+            HStack(spacing: 6) {
+                if let icon = systemImage {
+                    // Icon slot — fixed width keeps text left-edges aligned across all rows
+                    Image(systemName: icon)
+                        .font(.system(size: 11, weight: .regular))
+                        .foregroundStyle(isSelected ? Color.accentColor : Color.primary.opacity(0.4))
+                        .frame(width: 14, alignment: .center)
+                }
                 Text(title)
                     .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
                     .foregroundStyle(isSelected ? Color.primary : Color.primary.opacity(0.6))
 
                 Spacer(minLength: 0)
             }
-            .padding(.leading, 36)
+            // Indent from left: 26pt fixed + optional icon width keeps text aligned with title-only rows
+            .padding(.leading, systemImage != nil ? 26 : 36)
             .padding(.trailing, 10)
             .padding(.vertical, 6)
             .background(

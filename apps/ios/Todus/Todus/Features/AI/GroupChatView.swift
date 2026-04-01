@@ -11,6 +11,7 @@ struct GroupListView: View {
     @State private var selectedGroupId: String? = nil
     @State private var joinToken: String = ""
     @State private var showJoinAlert = false
+    @State private var joinError: String? = nil
 
     private var groupService: GroupChatService { services.groupChatService }
 
@@ -117,16 +118,25 @@ struct GroupListView: View {
         } message: {
             Text("Paste the invite token from a group invite link.")
         }
+        // Join error alert
+        .alert("Could not join group", isPresented: Binding(
+            get: { joinError != nil },
+            set: { if !$0 { joinError = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(joinError ?? "")
+        }
     }
 
     private func joinGroup() async {
         let token = joinToken.trimmingCharacters(in: .whitespacesAndNewlines)
-        joinToken = ""
         guard !token.isEmpty else { return }
         do {
             _ = try await groupService.joinGroup(token: token)
+            joinToken = ""  // Only clear on success
         } catch {
-            // Silently fail — toast would require additional infra
+            joinError = error.localizedDescription
         }
     }
 }
@@ -221,6 +231,7 @@ struct GroupChatView: View {
     @State private var isSending = false
     @State private var showInviteCopied = false
     @State private var showLeaveConfirm = false
+    @State private var leaveError: String? = nil
 
     private var groupService: GroupChatService { services.groupChatService }
     private var groupName: String { groupService.currentGroupDetails?.name ?? "Group" }
@@ -259,6 +270,14 @@ struct GroupChatView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("You will no longer receive messages from this group.")
+        }
+        .alert("Could not leave group", isPresented: Binding(
+            get: { leaveError != nil },
+            set: { if !$0 { leaveError = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(leaveError ?? "")
         }
     }
 
@@ -363,7 +382,9 @@ struct GroupChatView: View {
                 // Copy invite link
                 Button {
                     if let token = groupService.currentGroupDetails?.inviteToken {
-                        let inviteUrl = "https://todus.app/g/\(token)"
+                        // Percent-encode token so special characters don't break the URL
+                        let encoded = token.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? token
+                        let inviteUrl = "https://todus.app/g/\(encoded)"
                         UIPasteboard.general.string = inviteUrl
                         showInviteCopied = true
                         DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
@@ -415,7 +436,8 @@ struct GroupChatView: View {
             try await groupService.leaveGroup(groupId: groupId)
             dismiss()
         } catch {
-            // Group owner cannot leave — show nothing for now
+            // Show error for all failures; the backend returns a clear message for owner-cannot-leave
+            leaveError = error.localizedDescription
         }
     }
 }

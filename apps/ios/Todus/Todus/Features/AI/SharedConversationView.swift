@@ -181,7 +181,15 @@ struct SharedConversationView: View {
                 phase = .loaded
             }
         } catch {
-            wrongPassword = true
+            // Only show "wrong password" UI for auth failures;
+            // other errors (network, server) transition to the error phase.
+            let message = error.localizedDescription.lowercased()
+            if message.contains("unauthorized") || message.contains("forbidden")
+                || message.contains("password") || message.contains("403") {
+                wrongPassword = true
+            } else {
+                phase = .error(error.localizedDescription)
+            }
         }
     }
 }

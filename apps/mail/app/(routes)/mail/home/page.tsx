@@ -386,7 +386,9 @@ function EmailThreadRow({ threadId }: { threadId: string }) {
 function CalendarEventRow({ event }: { event: CalendarEvent }) {
   const timeLabel = event.allDay
     ? 'All day'
-    : `${format(new Date(event.startTime), 'h:mm a')} - ${format(new Date(event.endTime), 'h:mm a')}`;
+    : event.startTime && event.endTime
+      ? `${format(new Date(event.startTime), 'h:mm a')} - ${format(new Date(event.endTime), 'h:mm a')}`
+      : null;
 
   const content = (
     <div

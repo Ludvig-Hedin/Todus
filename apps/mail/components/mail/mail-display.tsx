@@ -539,16 +539,20 @@ const MailAssistantCard = ({
             className="h-7 gap-1.5 rounded-full px-2.5 text-[11px]"
             onClick={async (e) => {
               e.stopPropagation();
-              await assistantQuery.refetch();
-              if (threadId) {
-                await logActivity({
-                  threadId,
-                  type: 'summary_viewed',
-                  summary: assistant.summary,
-                  metadata: { source: 'manual-refresh' },
-                });
+              try {
+                await assistantQuery.refetch();
+                if (threadId) {
+                  await logActivity({
+                    threadId,
+                    type: 'summary_viewed',
+                    summary: assistant.summary,
+                    metadata: { source: 'manual-refresh' },
+                  });
+                }
+                toast.success('Assistant refreshed');
+              } catch {
+                toast.error('Failed to refresh assistant. Please try again.');
               }
-              toast.success('Assistant refreshed');
             }}
           >
             <ChevronDown className="h-3.5 w-3.5 -rotate-90" />

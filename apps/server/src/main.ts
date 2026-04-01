@@ -48,6 +48,7 @@ import { initTracing } from './lib/tracing';
 import type { HonoContext } from './ctx';
 import { createDb, type DB } from './db';
 import { createAuth } from './lib/auth';
+import { recallWebhookRouter } from './routes/recall-webhook';
 import { aiRouter } from './routes/ai';
 import { appRouter } from './trpc';
 import { cors } from 'hono/cors';
@@ -805,6 +806,7 @@ const api = new Hono<HonoContext>()
     c.set('auth', undefined as any);
   })
   .route('/ai', aiRouter)
+  .route('/webhooks/recall', recallWebhookRouter)
   .route('/autumn', autumnApi)
   .route('/public', publicRouter)
   .get('/auth/me', async (c) => {

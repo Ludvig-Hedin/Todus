@@ -5,6 +5,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Environment(AppServices.self) private var services
+    @State private var showsAutoSendConfirm = false
     @State private var showsLogoutConfirmation = false
     @State private var showsDeleteConfirmation = false
     @State private var showsDeleteAlert = false
@@ -844,6 +845,7 @@ struct SessionsSettingsView: View {
 /// main settings list, where they caused awkward inline scrolling on iPhone.
 struct AIAssistantSettingsView: View {
     @Environment(AppServices.self) private var services
+    @State private var showsAutoSendConfirm = false
 
     var body: some View {
         @Bindable var ai = services.aiChatService
@@ -935,13 +937,32 @@ struct AIAssistantSettingsView: View {
                     )
                 )
 
+                // Auto-send requires explicit opt-in confirmation before enabling
                 Toggle(
                     "Enable low-risk auto-send experiment",
                     isOn: Binding(
                         get: { services.assistantAutomationPolicy.autoSendExperimentEnabled },
-                        set: { services.assistantAutomationPolicy.autoSendExperimentEnabled = $0 }
+                        set: { newValue in
+                            if newValue {
+                                showsAutoSendConfirm = true
+                            } else {
+                                services.assistantAutomationPolicy.autoSendExperimentEnabled = false
+                            }
+                        }
                     )
                 )
+                .confirmationDialog(
+                    "Enable Auto-Send?",
+                    isPresented: $showsAutoSendConfirm,
+                    titleVisibility: .visible
+                ) {
+                    Button("Enable Auto-Send", role: .destructive) {
+                        services.assistantAutomationPolicy.autoSendExperimentEnabled = true
+                    }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("The assistant may send low-risk replies on your behalf without further confirmation. You can turn this off at any time.")
+                }
             } header: {
                 Text("Mail Assistant")
             } footer: {

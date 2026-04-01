@@ -257,13 +257,17 @@ final class TaskCaptureService {
     }
 
     func deleteFolder(_ folder: FolderRecord, in context: ModelContext) {
+        // Capture the folder id before deletion so the background task can still reference it
+        let folderId = folder.id.uuidString
         let allTasks = (try? context.fetch(FetchDescriptor<TaskRecord>())) ?? []
         for task in allTasks where task.folder?.id == folder.id {
             task.folder = nil
+            // Mark unlinked tasks as needing sync so they no longer reference the deleted folder
+            task.syncState = .pendingUpload
         }
         context.delete(folder)
         try? context.save()
-        Task { await syncFolderDelete(folder.id.uuidString) }
+        Task { await syncFolderDelete(folderId) }
     }
 
     func syncSharedFolders(in context: ModelContext) async {

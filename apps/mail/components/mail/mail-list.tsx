@@ -937,7 +937,7 @@ export const MailList = memo(
   function MailList() {
     const { folder } = useParams<{ folder: string }>();
     const { data: settingsData } = useSettings();
-    const { data: activeConnection } = useActiveConnection();
+    const { data: activeConnection, isLoading: isConnectionLoading } = useActiveConnection();
     const [, setThreadId] = useQueryState('threadId');
     const [, setDraftId] = useQueryState('draftId');
     const [searchValue, setSearchValue] = useSearchValue();
@@ -1278,7 +1278,7 @@ export const MailList = memo(
                       </div>
                     ))}
                   </div>
-                ) : !activeConnection ? (
+                ) : !isConnectionLoading && !activeConnection ? (
                   <div className="flex w-full items-center justify-center">
                     <div className="flex max-w-sm flex-col items-center justify-center gap-2 text-center">
                       <EmptyStateIcon width={200} height={200} />

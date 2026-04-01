@@ -19,7 +19,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { authProxy } from '@/lib/auth-proxy';
 import type { Route } from './+types/page';
-import { format } from 'date-fns';
+import { format, isValid } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
@@ -260,11 +260,12 @@ function EmailResult({ thread }: EmailResultProps) {
           <p className="text-muted-foreground mt-0.5 line-clamp-1 text-xs">{thread.snippet}</p>
         )}
       </div>
-      {thread.latestMessageSentAt && (
-        <span className="text-muted-foreground shrink-0 text-[11px]">
-          {format(new Date(thread.latestMessageSentAt), 'MMM d')}
-        </span>
-      )}
+      {thread.latestMessageSentAt && (() => {
+        const d = new Date(thread.latestMessageSentAt);
+        return isValid(d) ? (
+          <span className="text-muted-foreground shrink-0 text-[11px]">{format(d, 'MMM d')}</span>
+        ) : null;
+      })()}
     </Link>
   );
 }
@@ -311,12 +312,15 @@ function TaskResult({ task }: { task: Task }) {
               {task.priority}
             </Badge>
           )}
-          {task.dueDate && (
-            <span className="text-muted-foreground flex items-center gap-1 text-[10px]">
-              <CalendarIcon className="h-3 w-3" />
-              {format(new Date(task.dueDate), 'MMM d')}
-            </span>
-          )}
+          {task.dueDate && (() => {
+            const d = new Date(task.dueDate);
+            return isValid(d) ? (
+              <span className="text-muted-foreground flex items-center gap-1 text-[10px]">
+                <CalendarIcon className="h-3 w-3" />
+                {format(d, 'MMM d')}
+              </span>
+            ) : null;
+          })()}
         </div>
       </div>
     </Link>

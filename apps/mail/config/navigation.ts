@@ -13,7 +13,7 @@ import {
   Clock,
   Mail,
 } from '@/components/icons/icons';
-import { CalendarDays, CheckSquare2, Home, MessageSquareIcon, Search } from 'lucide-react';
+import { CalendarDays, CheckSquare2, Home, MessageSquareIcon, Search, Video } from 'lucide-react';
 import type { ComponentType, SVGProps } from 'react';
 import { m } from '@/paraglide/messages';
 
@@ -101,6 +101,13 @@ export const navigationConfig: Record<string, NavConfig> = {
             url: '/mail/calendar',
             icon: CalendarDays,
             shortcut: 'g + c',
+          },
+          {
+            id: 'meetings',
+            title: 'Meetings',
+            url: '/mail/meetings',
+            icon: Video,
+            shortcut: 'g + m',
           },
         ],
       },

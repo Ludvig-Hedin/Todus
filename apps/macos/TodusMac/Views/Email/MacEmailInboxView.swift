@@ -93,6 +93,7 @@ struct MacEmailInboxView: View {
                     .background(Color.purple.opacity(0.07), in: RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous))
                 }
                 .buttonStyle(.plain)
+                .disabled(nudge.threadIds.isEmpty)
             }
         }
     }

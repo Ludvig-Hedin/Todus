@@ -330,6 +330,124 @@ export const oauthConsent = createTable(
   ],
 );
 
+// ─── Meeting & Recording Tables ──────────────────────────────────────────
+// Recall.ai-powered meeting recordings, transcripts, and AI recaps.
+
+export const meetIntegration = createTable(
+  'meet_integration',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' })
+      .unique(),
+    botName: text('bot_name').notNull().default('Note Taker'),
+    isEnabled: boolean('is_enabled').notNull().default(true),
+    autoJoin: boolean('auto_join').notNull().default(false),
+    joinEarlyMinutes: integer('join_early_minutes').notNull().default(1),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at')
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (t) => [index('meet_integration_user_id_idx').on(t.userId)],
+);
+
+export const meeting = createTable(
+  'meeting',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    integrationId: text('integration_id').references(() => meetIntegration.id, {
+      onDelete: 'set null',
+    }),
+    googleEventId: text('google_event_id'),
+    calendarId: text('calendar_id'),
+    title: text('title').notNull(),
+    description: text('description'),
+    meetUrl: text('meet_url').notNull(),
+    startsAt: timestamp('starts_at').notNull(),
+    endsAt: timestamp('ends_at'),
+    recallBotId: text('recall_bot_id'),
+    recallMeetingId: text('recall_meeting_id'),
+    botJoinedAt: timestamp('bot_joined_at'),
+    botLeftAt: timestamp('bot_left_at'),
+    status: text('status')
+      .$type<'scheduled' | 'bot_joining' | 'recording' | 'processing' | 'ready' | 'failed' | 'cancelled'>()
+      .notNull()
+      .default('scheduled'),
+    errorMessage: text('error_message'),
+    participants: jsonb('participants'),
+    aiSummary: text('ai_summary'),
+    actionItems: jsonb('action_items'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at')
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (t) => [
+    index('meeting_user_id_idx').on(t.userId),
+    index('meeting_status_idx').on(t.status),
+    index('meeting_recall_bot_id_idx').on(t.recallBotId),
+    index('meeting_starts_at_idx').on(t.startsAt),
+    index('meeting_user_status_idx').on(t.userId, t.status),
+    index('meeting_google_event_idx').on(t.userId, t.googleEventId),
+  ],
+);
+
+export const meetingMedia = createTable(
+  'meeting_media',
+  {
+    id: text('id').primaryKey(),
+    meetingId: text('meeting_id')
+      .notNull()
+      .references(() => meeting.id, { onDelete: 'cascade' }),
+    mediaType: text('media_type')
+      .$type<'audio_mixed' | 'video_mixed' | 'transcript'>()
+      .notNull(),
+    recallMediaId: text('recall_media_id').unique(),
+    url: text('url').notNull(),
+    fileName: text('file_name'),
+    fileSize: integer('file_size'),
+    duration: integer('duration'),
+    isReady: boolean('is_ready').notNull().default(false),
+    readyAt: timestamp('ready_at'),
+    metadata: jsonb('metadata'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    index('meeting_media_meeting_id_idx').on(t.meetingId),
+    index('meeting_media_type_idx').on(t.mediaType),
+  ],
+);
+
+export const meetingTranscript = createTable(
+  'meeting_transcript',
+  {
+    id: text('id').primaryKey(),
+    meetingId: text('meeting_id')
+      .notNull()
+      .references(() => meeting.id, { onDelete: 'cascade' }),
+    startTime: integer('start_time').notNull(),
+    endTime: integer('end_time'),
+    speakerName: text('speaker_name').notNull(),
+    speakerId: text('speaker_id'),
+    text: text('text').notNull(),
+    confidence: text('confidence'),
+    isFromRealtime: boolean('is_from_realtime').notNull().default(false),
+    recallSegmentId: text('recall_segment_id').unique(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    index('meeting_transcript_meeting_id_idx').on(t.meetingId),
+    index('meeting_transcript_meeting_time_idx').on(t.meetingId, t.startTime),
+  ],
+);
+
 // ─── Task Management Tables ────────────────────────────────────────────
 // Used by the unified iOS/macOS app for task + folder sync.
 

@@ -349,6 +349,7 @@ async function createGoogleCalendarEvent(
       summary: payload.title,
       location: payload.location ?? undefined,
       description: payload.notes ?? undefined,
+      // TODO: replace 'UTC' with the user's actual timezone once it's stored per user
       start: { dateTime: payload.startAt, timeZone: 'UTC' },
       end: { dateTime: payload.endAt, timeZone: 'UTC' },
     }),

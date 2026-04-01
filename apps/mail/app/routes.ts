@@ -41,6 +41,8 @@ export default [
         route('/create', '(routes)/mail/create/page.tsx'),
         route('/compose', '(routes)/mail/compose/page.tsx'),
         route('/under-construction/:path', '(routes)/mail/under-construction/[path]/page.tsx'),
+        route('/meetings', '(routes)/mail/meetings/page.tsx'),
+        route('/meetings/:meetingId', '(routes)/mail/meetings/[meetingId]/page.tsx'),
         route('/:folder', '(routes)/mail/[folder]/page.tsx'),
       ]),
     ),

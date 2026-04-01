@@ -3,7 +3,9 @@ import { buildAIProfilePrompt } from '../../lib/ai-profile';
 import { getThread, getZeroAgent, getZeroDB } from '../../lib/server-utils';
 import type { IGetThreadResponse } from '../../lib/driver/types';
 import { composeEmail } from '../../trpc/routes/ai/compose';
+import { meeting, meetingTranscript, connection } from '../../db/schema';
 import { perplexity } from '@ai-sdk/perplexity';
+import { eq, desc, and, like } from 'drizzle-orm';
 import { colors } from '../../lib/prompts';
 import { openai } from '@ai-sdk/openai';
 import { generateText, tool } from 'ai';
@@ -471,6 +473,144 @@ const getCurrentDate = () =>
     },
   });
 
+// ── Meeting tools — gives the AI "second brain" access to meeting recaps ──
+
+const listMeetingsTool = (userId: string) =>
+  tool({
+    description:
+      'List the user\'s recent meetings with their status and AI summary. Use this to answer questions like "What meetings did I have this week?" or "Summarize my latest meeting".',
+    parameters: z.object({
+      limit: z.number().default(10).describe('Max number of meetings to return'),
+      status: z.string().optional().describe('Filter by status: scheduled, recording, ready, failed'),
+    }),
+    execute: async ({ limit, status }) => {
+      const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
+      try {
+        const conditions = [eq(meeting.userId, userId)];
+        if (status) conditions.push(eq(meeting.status, status as any));
+
+        const meetings = await db
+          .select({
+            id: meeting.id,
+            title: meeting.title,
+            startsAt: meeting.startsAt,
+            status: meeting.status,
+            aiSummary: meeting.aiSummary,
+          })
+          .from(meeting)
+          .where(and(...conditions))
+          .orderBy(desc(meeting.startsAt))
+          .limit(limit);
+
+        return meetings.map((m) => ({
+          id: m.id,
+          title: m.title,
+          startsAt: m.startsAt?.toISOString(),
+          status: m.status,
+          hasSummary: !!m.aiSummary,
+          summary: m.aiSummary ? m.aiSummary.slice(0, 500) : null,
+        }));
+      } finally {
+        await conn.end();
+      }
+    },
+  });
+
+const getMeetingSummaryTool = (userId: string) =>
+  tool({
+    description:
+      'Get the full AI summary and action items for a specific meeting. Use after listing meetings to get detailed recap.',
+    parameters: z.object({
+      meetingId: z.string().describe('The meeting ID to get the summary for'),
+    }),
+    execute: async ({ meetingId }) => {
+      const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
+      try {
+        const [m] = await db
+          .select()
+          .from(meeting)
+          .where(and(eq(meeting.id, meetingId), eq(meeting.userId, userId)))
+          .limit(1);
+
+        if (!m) return { error: 'Meeting not found' };
+
+        return {
+          id: m.id,
+          title: m.title,
+          startsAt: m.startsAt?.toISOString(),
+          status: m.status,
+          summary: m.aiSummary,
+          actionItems: m.actionItems,
+          participants: m.participants,
+        };
+      } finally {
+        await conn.end();
+      }
+    },
+  });
+
+const searchMeetingTranscriptTool = (userId: string) =>
+  tool({
+    description:
+      'Search through meeting transcripts for specific content. Use to find what was said about a topic across meetings.',
+    parameters: z.object({
+      query: z.string().describe('The search term to find in transcripts'),
+      meetingId: z.string().optional().describe('Optional: limit search to a specific meeting'),
+      limit: z.number().default(20).describe('Max number of transcript segments to return'),
+    }),
+    execute: async ({ query, meetingId, limit }) => {
+      const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
+      try {
+        // Get user's meetings first to enforce access control
+        const userMeetings = await db
+          .select({ id: meeting.id, title: meeting.title })
+          .from(meeting)
+          .where(
+            meetingId
+              ? and(eq(meeting.id, meetingId), eq(meeting.userId, userId))
+              : eq(meeting.userId, userId),
+          );
+
+        if (userMeetings.length === 0) return { segments: [], message: 'No meetings found' };
+
+        const meetingIds = userMeetings.map((m) => m.id);
+        const meetingTitleMap = Object.fromEntries(userMeetings.map((m) => [m.id, m.title]));
+
+        // Escape SQL LIKE wildcards in user-supplied search string
+        const escapedQuery = query.replace(/[%_\\]/g, '\\$&');
+
+        // Search transcript segments — use LIKE for text search
+        const segments = await db
+          .select()
+          .from(meetingTranscript)
+          .where(
+            and(
+              meetingIds.length === 1
+                ? eq(meetingTranscript.meetingId, meetingIds[0]!)
+                : undefined,
+              like(meetingTranscript.text, `%${escapedQuery}%`),
+            ),
+          )
+          .limit(limit);
+
+        // Filter to only user's meetings (security)
+        const filtered = segments.filter((s) => meetingIds.includes(s.meetingId));
+
+        return {
+          segments: filtered.map((s) => ({
+            meetingId: s.meetingId,
+            meetingTitle: meetingTitleMap[s.meetingId] ?? 'Unknown',
+            speaker: s.speakerName,
+            text: s.text,
+            timestamp: s.startTime,
+          })),
+        };
+      } finally {
+        await conn.end();
+      }
+    },
+  });
+
 export const webSearch = () =>
   tool({
     description: 'Search the web for information using Perplexity AI',
@@ -499,6 +639,33 @@ export const webSearch = () =>
   });
 
 export const tools = async (connectionId: string, ragEffect: boolean = false) => {
+  // Resolve userId from connectionId for meeting tools
+  let userId: string | null = null;
+  try {
+    const { db: lookupDb, conn: lookupConn } = createDb(env.HYPERDRIVE.connectionString);
+    try {
+      const [connRow] = await lookupDb
+        .select({ userId: connection.userId })
+        .from(connection)
+        .where(eq(connection.id, connectionId))
+        .limit(1);
+      userId = connRow?.userId ?? null;
+    } finally {
+      await lookupConn.end();
+    }
+  } catch {
+    // Best effort — meeting tools won't be available if lookup fails
+  }
+
+  // Build meeting tools dynamically — only include when userId is resolved
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const meetingTools: Record<string, any> = {};
+  if (userId) {
+    meetingTools[Tools.ListMeetings] = listMeetingsTool(userId);
+    meetingTools[Tools.GetMeetingSummary] = getMeetingSummaryTool(userId);
+    meetingTools[Tools.SearchMeetingTranscript] = searchMeetingTranscriptTool(userId);
+  }
+
   const _tools = {
     [Tools.GetThread]: getEmail(),
     [Tools.GetThreadSummary]: getThreadSummary(connectionId),
@@ -515,6 +682,7 @@ export const tools = async (connectionId: string, ragEffect: boolean = false) =>
     [Tools.BuildGmailSearchQuery]: buildGmailSearchQuery(connectionId),
     [Tools.GetCurrentDate]: getCurrentDate(),
     [Tools.WebSearch]: webSearch(),
+    ...meetingTools,
     [Tools.InboxRag]: tool({
       description:
         'Search the inbox for emails using natural language. Returns only an array of threadIds.',

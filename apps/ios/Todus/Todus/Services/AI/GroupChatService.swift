@@ -68,63 +68,69 @@ final class GroupChatService {
 
     // MARK: - Groups CRUD
 
+    private func client() throws -> TodosAPIClient {
+        guard let client = apiClient else { throw GroupChatServiceError.missingAPIClient }
+        return client
+    }
+
     func loadMyGroups() async throws {
-        myGroups = try await apiClient!.trpcQuery("groups.listMine")
+        myGroups = try await client().trpcQuery("groups.listMine")
     }
 
     func createGroup(name: String, aiMode: String = "mention") async throws -> GroupSummary {
         struct Input: Encodable { let name: String; let aiMode: String }
         struct CreateResponse: Decodable { let id: String; let slug: String; let inviteToken: String }
-        let _: CreateResponse = try await apiClient!.trpcMutation("groups.create", input: Input(name: name, aiMode: aiMode))
+        let response: CreateResponse = try await client().trpcMutation("groups.create", input: Input(name: name, aiMode: aiMode))
         try await loadMyGroups()
-        guard let group = myGroups.last ?? myGroups.first else {
-            throw URLError(.badServerResponse)
+        // Match the newly created group by id from the server response
+        guard let group = myGroups.first(where: { $0.id == response.id }) else {
+            throw GroupChatServiceError.groupNotFound
         }
         return group
     }
 
     func getGroupByInvite(token: String) async throws -> GroupInviteInfo {
         struct Input: Encodable { let token: String }
-        return try await apiClient!.trpcQuery("groups.getByInvite", input: Input(token: token))
+        return try await client().trpcQuery("groups.getByInvite", input: Input(token: token))
     }
 
     func joinGroup(token: String) async throws -> String {
         struct Input: Encodable { let token: String }
         struct JoinResponse: Decodable { let groupId: String; let alreadyMember: Bool }
-        let response: JoinResponse = try await apiClient!.trpcMutation("groups.join", input: Input(token: token))
+        let response: JoinResponse = try await client().trpcMutation("groups.join", input: Input(token: token))
         try await loadMyGroups()
         return response.groupId
     }
 
     func leaveGroup(groupId: String) async throws {
         struct Input: Encodable { let groupId: String }
-        let _: EmptyResponse = try await apiClient!.trpcMutation("groups.leave", input: Input(groupId: groupId))
+        let _: EmptyResponse = try await client().trpcMutation("groups.leave", input: Input(groupId: groupId))
         try await loadMyGroups()
     }
 
     func deleteGroup(groupId: String) async throws {
         struct Input: Encodable { let groupId: String }
-        let _: EmptyResponse = try await apiClient!.trpcMutation("groups.delete", input: Input(groupId: groupId))
+        let _: EmptyResponse = try await client().trpcMutation("groups.delete", input: Input(groupId: groupId))
         try await loadMyGroups()
     }
 
     func loadGroupDetails(groupId: String) async throws {
         struct Input: Encodable { let groupId: String }
-        currentGroupDetails = try await apiClient!.trpcQuery("groups.get", input: Input(groupId: groupId))
+        currentGroupDetails = try await client().trpcQuery("groups.get", input: Input(groupId: groupId))
     }
 
     // MARK: - Messages
 
     func loadMessages(groupId: String) async throws {
         struct Input: Encodable { let groupId: String; let limit: Int }
-        let page: MessagePage = try await apiClient!.trpcQuery("groups.listMessages", input: Input(groupId: groupId, limit: 50))
+        let page: MessagePage = try await client().trpcQuery("groups.listMessages", input: Input(groupId: groupId, limit: 50))
         currentMessages = page.messages
     }
 
     func sendMessage(groupId: String, content: String) async throws {
         struct Input: Encodable { let groupId: String; let content: String }
         struct SendResponse: Decodable { let id: String }
-        let _: SendResponse = try await apiClient!.trpcMutation("groups.sendMessage", input: Input(groupId: groupId, content: content))
+        let _: SendResponse = try await client().trpcMutation("groups.sendMessage", input: Input(groupId: groupId, content: content))
     }
 
     // MARK: - Polling
@@ -156,6 +162,20 @@ final class GroupChatService {
         pollingTask?.cancel()
         pollingTask = nil
         isPolling = false
+    }
+}
+
+// MARK: - Errors
+
+enum GroupChatServiceError: Error, LocalizedError {
+    case missingAPIClient
+    case groupNotFound
+
+    var errorDescription: String? {
+        switch self {
+        case .missingAPIClient: return "API client is not available."
+        case .groupNotFound: return "The created group could not be found."
+        }
     }
 }
 

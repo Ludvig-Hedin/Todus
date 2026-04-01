@@ -113,6 +113,12 @@ export type ZeroEnv = {
   APPLE_PRIVATE_KEY: string;
   /** Mem0 API key for persistent AI memory — set via Cloudflare secrets, never in client code */
   MEM0_API_KEY: string;
+  /** Recall.ai API key for meeting bot / recording */
+  RECALL_API_KEY: string;
+  /** Recall.ai API base URL (default: us-west-2) */
+  RECALL_API_BASE_URL: string;
+  /** Optional shared secret for verifying Recall.ai webhook signatures */
+  RECALL_WEBHOOK_SECRET?: string;
 };
 
 export const env = new Proxy(_env as ZeroEnv, {

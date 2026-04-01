@@ -137,7 +137,7 @@ export const calendarRouter = router({
 
       // Only Google connections have Calendar API access
       if (activeConnection.providerId !== 'google') {
-        return { events: [] };
+        return { events: [], scopeMissing: false };
       }
 
       if (!activeConnection.refreshToken) {
@@ -193,7 +193,7 @@ export const calendarRouter = router({
     const { activeConnection } = ctx;
 
     if (activeConnection.providerId !== 'google') {
-      return { calendars: [] };
+      return { calendars: [], scopeMissing: false };
     }
 
     if (!activeConnection.refreshToken) {

@@ -54,14 +54,13 @@ ALTER TABLE "mail0_group_message" ADD CONSTRAINT "mail0_group_message_sender_use
 ALTER TABLE "mail0_shared_conversation" ADD CONSTRAINT "mail0_shared_conversation_owner_user_id_mail0_user_id_fk" FOREIGN KEY ("owner_user_id") REFERENCES "public"."mail0_user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "mail0_shared_conversation" ADD CONSTRAINT "mail0_shared_conversation_conversation_id_mail0_ai_conversation_id_fk" FOREIGN KEY ("conversation_id") REFERENCES "public"."mail0_ai_conversation"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "group_owner_idx" ON "mail0_group" USING btree ("owner_user_id");--> statement-breakpoint
-CREATE INDEX "group_slug_idx" ON "mail0_group" USING btree ("slug");--> statement-breakpoint
-CREATE INDEX "group_invite_token_idx" ON "mail0_group" USING btree ("invite_token");--> statement-breakpoint
+-- group_slug_idx and group_invite_token_idx removed: redundant with the UNIQUE constraints above
 CREATE INDEX "group_deleted_at_idx" ON "mail0_group" USING btree ("deleted_at");--> statement-breakpoint
 CREATE INDEX "group_member_user_id_idx" ON "mail0_group_member" USING btree ("user_id");--> statement-breakpoint
 CREATE INDEX "group_message_group_id_idx" ON "mail0_group_message" USING btree ("group_id");--> statement-breakpoint
 CREATE INDEX "group_message_group_created_idx" ON "mail0_group_message" USING btree ("group_id","created_at");--> statement-breakpoint
 CREATE INDEX "shared_conversation_owner_idx" ON "mail0_shared_conversation" USING btree ("owner_user_id");--> statement-breakpoint
-CREATE INDEX "shared_conversation_slug_idx" ON "mail0_shared_conversation" USING btree ("slug");--> statement-breakpoint
+-- shared_conversation_slug_idx removed: redundant with the UNIQUE constraint above
 CREATE INDEX "shared_conversation_conversation_id_idx" ON "mail0_shared_conversation" USING btree ("conversation_id");--> statement-breakpoint
 ALTER TABLE "mail0_ai_conversation" ADD CONSTRAINT "mail0_ai_conversation_folder_id_mail0_task_folder_id_fk" FOREIGN KEY ("folder_id") REFERENCES "public"."mail0_task_folder"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "ai_conversation_folder_id_idx" ON "mail0_ai_conversation" USING btree ("folder_id");

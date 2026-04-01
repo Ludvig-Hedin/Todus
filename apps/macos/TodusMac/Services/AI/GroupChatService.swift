@@ -60,10 +60,13 @@ final class GroupChatService {
     }
 
     func loadMyGroups() async throws {
-        myGroups = try await apiClient!.trpcQuery("groups.listMine")
+        guard let client = apiClient else { throw URLError(.userAuthenticationRequired) }
+        myGroups = try await client.trpcQuery("groups.listMine")
     }
 
     func createGroup(name: String, aiMode: String = "mention") async throws -> GroupSummary {
+        guard let client = apiClient else { throw URLError(.userAuthenticationRequired) }
+
         struct Input: Encodable {
             let name: String
             let aiMode: String
@@ -75,12 +78,13 @@ final class GroupChatService {
             let inviteToken: String
         }
 
-        let _: CreateResponse = try await apiClient!.trpcMutation(
+        let createResp: CreateResponse = try await client.trpcMutation(
             "groups.create",
             input: Input(name: name, aiMode: aiMode)
         )
         try await loadMyGroups()
-        guard let createdGroup = myGroups.last ?? myGroups.first else {
+        // Match by the id returned from the server — don't rely on list ordering
+        guard let createdGroup = myGroups.first(where: { $0.id == createResp.id }) else {
             throw URLError(.badServerResponse)
         }
         return createdGroup
@@ -91,7 +95,8 @@ final class GroupChatService {
             let token: String
         }
 
-        return try await apiClient!.trpcQuery("groups.getByInvite", input: Input(token: token))
+        guard let client = apiClient else { throw URLError(.userAuthenticationRequired) }
+        return try await client.trpcQuery("groups.getByInvite", input: Input(token: token))
     }
 
     func joinGroup(token: String) async throws -> String {
@@ -104,7 +109,8 @@ final class GroupChatService {
             let alreadyMember: Bool
         }
 
-        let response: JoinResponse = try await apiClient!.trpcMutation(
+        guard let client = apiClient else { throw URLError(.userAuthenticationRequired) }
+        let response: JoinResponse = try await client.trpcMutation(
             "groups.join",
             input: Input(token: token)
         )
@@ -117,7 +123,8 @@ final class GroupChatService {
             let groupId: String
         }
 
-        let _: EmptyResponse = try await apiClient!.trpcMutation(
+        guard let client = apiClient else { throw URLError(.userAuthenticationRequired) }
+        let _: EmptyResponse = try await client.trpcMutation(
             "groups.leave",
             input: Input(groupId: groupId)
         )
@@ -125,11 +132,12 @@ final class GroupChatService {
     }
 
     func deleteGroup(groupId: String) async throws {
+        guard let client = apiClient else { throw URLError(.userAuthenticationRequired) }
         struct Input: Encodable {
             let groupId: String
         }
 
-        let _: EmptyResponse = try await apiClient!.trpcMutation(
+        let _: EmptyResponse = try await client.trpcMutation(
             "groups.delete",
             input: Input(groupId: groupId)
         )
@@ -137,20 +145,22 @@ final class GroupChatService {
     }
 
     func loadGroupDetails(groupId: String) async throws {
+        guard let client = apiClient else { throw URLError(.userAuthenticationRequired) }
         struct Input: Encodable {
             let groupId: String
         }
 
-        currentGroupDetails = try await apiClient!.trpcQuery("groups.get", input: Input(groupId: groupId))
+        currentGroupDetails = try await client.trpcQuery("groups.get", input: Input(groupId: groupId))
     }
 
     func loadMessages(groupId: String) async throws {
+        guard let client = apiClient else { throw URLError(.userAuthenticationRequired) }
         struct Input: Encodable {
             let groupId: String
             let limit: Int
         }
 
-        let page: MessagePage = try await apiClient!.trpcQuery(
+        let page: MessagePage = try await client.trpcQuery(
             "groups.listMessages",
             input: Input(groupId: groupId, limit: 50)
         )
@@ -158,6 +168,7 @@ final class GroupChatService {
     }
 
     func sendMessage(groupId: String, content: String) async throws {
+        guard let client = apiClient else { throw URLError(.userAuthenticationRequired) }
         struct Input: Encodable {
             let groupId: String
             let content: String
@@ -167,7 +178,7 @@ final class GroupChatService {
             let id: String
         }
 
-        let _: SendResponse = try await apiClient!.trpcMutation(
+        let _: SendResponse = try await client.trpcMutation(
             "groups.sendMessage",
             input: Input(groupId: groupId, content: content)
         )
@@ -177,16 +188,16 @@ final class GroupChatService {
         stopPolling()
         isPolling = true
         pollingTask = Task { [weak self] in
-            guard let self else { return }
             while !Task.isCancelled {
+                // Re-check self each iteration — service may be deallocated between polls
+                guard let self else { break }
                 do {
                     try await self.loadMessages(groupId: groupId)
-                } catch {
-                }
+                } catch { }
                 try? await Task.sleep(for: .seconds(5))
             }
-            await MainActor.run {
-                self.isPolling = false
+            await MainActor.run { [weak self] in
+                self?.isPolling = false
             }
         }
     }

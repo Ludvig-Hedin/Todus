@@ -51,6 +51,8 @@ struct ShareConversationSheet: View {
             case .month: return "30 days"
             }
         }
+        /// Value sent to the API — "never" maps to "never" for the server, numeric cases pass through.
+        var apiValue: String { rawValue }
     }
 
     var body: some View {
@@ -213,8 +215,16 @@ struct ShareConversationSheet: View {
 
     // MARK: - Actions
 
+    @MainActor
     private func createLink() async {
         guard !isLoading else { return }
+
+        // Validate that a password is provided when protected visibility is chosen
+        if visibility == .protected && password.isEmpty {
+            errorMessage = "Please enter a password for the protected link."
+            return
+        }
+
         isLoading = true
         errorMessage = nil
         defer { isLoading = false }
@@ -222,17 +232,15 @@ struct ShareConversationSheet: View {
         let input = ShareCreateInput(
             conversationId: conversationId,
             title: title.isEmpty ? conversationTitle : title,
-            password: visibility == .protected ? (password.isEmpty ? nil : password) : nil,
-            expiresInDays: expiresInDays.rawValue
+            password: visibility == .protected ? password : nil,
+            expiresInDays: expiresInDays.apiValue
         )
 
         do {
             let result = try await shareService.createShare(input)
-            await MainActor.run { createdSlug = result.slug }
+            createdSlug = result.slug
         } catch {
-            await MainActor.run {
-                errorMessage = error.localizedDescription
-            }
+            errorMessage = error.localizedDescription
         }
     }
 }

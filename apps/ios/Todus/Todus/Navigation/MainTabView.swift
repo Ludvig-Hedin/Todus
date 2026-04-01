@@ -212,6 +212,8 @@ struct MainTabView: View {
         // ignoresSafeArea(.container, edges: .bottom) lets CalendarKit's scroll view
         // extend under the tab bar, matching the iOS Calendar app behaviour.
         // If calendar permission denied/not-determined, show CalendarPermissionView instead.
+        case .meetings:
+            NavigationStack { MeetingsListView() }
         case .calendar:
             if calendarPermissionGranted {
                 ZStack(alignment: .top) {

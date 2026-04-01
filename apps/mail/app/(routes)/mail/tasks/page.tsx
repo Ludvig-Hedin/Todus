@@ -194,7 +194,7 @@ export default function TasksPage() {
     ...trpc.tasks.update.mutationOptions(),
     onSuccess: () => {
       invalidateTasks();
-      if (detailTask) setDetailTask((prev) => (prev ? { ...prev } : null));
+      // Don't spread stale prev — invalidateTasks() will bring fresh data via query
     },
   });
   const deleteMutation = useMutation({
@@ -269,13 +269,15 @@ export default function TasksPage() {
 
   const handleQuickAdd = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && quickAddValue.trim()) {
-      createMutation.mutate({
-        title: quickAddValue.trim(),
-        status: statusFilter !== 'all' ? statusFilter : 'todo',
-        priority: 'none',
-        folderId: activeFolderId,
-      });
-      setQuickAddValue('');
+      createMutation.mutate(
+        {
+          title: quickAddValue.trim(),
+          status: statusFilter !== 'all' ? statusFilter : 'todo',
+          priority: 'none',
+          folderId: activeFolderId,
+        },
+        { onSuccess: () => setQuickAddValue('') },
+      );
     }
   };
 
@@ -502,6 +504,7 @@ export default function TasksPage() {
               value={searchText}
               onChange={(e) => setSearchText(e.target.value)}
               placeholder="Search tasks…"
+              aria-label="Search tasks"
               className="bg-muted/50 placeholder:text-muted-foreground focus:ring-ring h-8 w-full rounded-full border px-3 text-[13px] focus:outline-none focus:ring-1"
             />
           </div>
@@ -720,6 +723,7 @@ function ListContent({
             onChange={(e) => setQuickAddValue(e.target.value)}
             onKeyDown={onQuickAdd}
             placeholder="Add a task… (press Enter)"
+            aria-label="Quick add task"
             className="placeholder:text-muted-foreground flex-1 bg-transparent text-sm outline-none"
           />
         </div>

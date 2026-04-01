@@ -46,6 +46,18 @@ struct ShareListItem: Decodable, Identifiable {
     let status: String  // "active" | "expired" | "revoked"
 }
 
+// MARK: - Errors
+
+enum ShareConversationServiceError: Error, LocalizedError {
+    case missingAPIClient
+
+    var errorDescription: String? {
+        switch self {
+        case .missingAPIClient: return "API client is not available."
+        }
+    }
+}
+
 // MARK: - Service
 
 /// Manages creation, retrieval, and management of shared AI conversation links.
@@ -59,31 +71,36 @@ final class ShareConversationService {
         self.apiClient = apiClient
     }
 
+    private func client() throws -> TodosAPIClient {
+        guard let client = apiClient else { throw ShareConversationServiceError.missingAPIClient }
+        return client
+    }
+
     /// Create a new share link for a conversation owned by the authenticated user.
     func createShare(_ input: ShareCreateInput) async throws -> ShareCreateResponse {
-        try await apiClient!.trpcMutation("sharing.create", input: input)
+        try await client().trpcMutation("sharing.create", input: input)
     }
 
     /// Fetch the snapshot for a share slug.
     /// Returns `passwordRequired: true` if the link is protected and no password is provided.
     func getShare(slug: String, password: String? = nil) async throws -> ShareGetResponse {
-        try await apiClient!.trpcQuery("sharing.get", input: ShareGetInput(slug: slug, password: password))
+        try await client().trpcQuery("sharing.get", input: ShareGetInput(slug: slug, password: password))
     }
 
     /// Import a shared conversation as a new conversation owned by the current user.
     func importShare(slug: String, password: String? = nil) async throws -> ShareImportResponse {
         struct Input: Encodable { let slug: String; let password: String? }
-        return try await apiClient!.trpcMutation("sharing.import", input: Input(slug: slug, password: password))
+        return try await client().trpcMutation("sharing.import", input: Input(slug: slug, password: password))
     }
 
     /// List all share links created by the current user.
     func listMyShares() async throws -> [ShareListItem] {
-        try await apiClient!.trpcQuery("sharing.listMine")
+        try await client().trpcQuery("sharing.listMine")
     }
 
     /// Immediately revoke a share link so it can no longer be accessed.
     func revokeShare(id: String) async throws {
         struct Input: Encodable { let id: String }
-        let _: EmptyResponse = try await apiClient!.trpcMutation("sharing.revoke", input: Input(id: id))
+        let _: EmptyResponse = try await client().trpcMutation("sharing.revoke", input: Input(id: id))
     }
 }

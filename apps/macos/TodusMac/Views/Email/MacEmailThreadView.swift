@@ -77,7 +77,7 @@ struct MacEmailThreadView: View {
         .task {
             await loadThread()
         }
-        .sheet(isPresented: $showCompose) {
+        .sheet(isPresented: $showCompose, onDismiss: { assistantDraftSeed = "" }) {
             if let lastMessage = detail?.messages.last {
                 MacEmailComposeView(replyTo: lastMessage, threadId: threadId, body: assistantDraftSeed)
                     .frame(minWidth: 520, minHeight: 380)
@@ -180,11 +180,14 @@ struct MacEmailThreadView: View {
             return
         }
 
-        assistantDraftSeed = result.preview ?? ""
-        assistantNotice = result.reason
         if result.created {
+            // Draft was just created — seed the compose sheet and open it
+            assistantDraftSeed = result.preview ?? ""
             showCompose = true
             await refreshAssistant()
+        } else {
+            // Draft already exists or was skipped — surface the reason as a notice
+            assistantNotice = result.reason
         }
     }
 
@@ -404,7 +407,7 @@ private struct MacMailAssistantCard: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             HStack(spacing: 8) {
-                Button("Extract tasks") {
+                Button("Extract task") {
                     if let firstTask = assistant.suggestedTasks.first {
                         Task { await onCreateTask(firstTask) }
                     }

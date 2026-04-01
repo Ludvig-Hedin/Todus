@@ -22,6 +22,7 @@ final class MacAppServices {
     let aiChatService: MacAIChatService
     let shareConversationService: ShareConversationService
     let groupChatService: GroupChatService
+    let meetingsService: MeetingsService
     private let defaults = UserDefaults.standard
     var showsAssistantPanel = false
 
@@ -76,6 +77,7 @@ final class MacAppServices {
         )
         self.shareConversationService = ShareConversationService(apiClient: api)
         self.groupChatService = GroupChatService(apiClient: api)
+        self.meetingsService = MeetingsService(apiClient: api)
         self.aiChatService.contextAboutYou = contextAboutYou
         self.aiChatService.customInstructions = customInstructions
     }

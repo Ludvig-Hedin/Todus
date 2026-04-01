@@ -65,8 +65,7 @@ export default function CalendarPage() {
   const tasks = useMemo(() => tasksData?.tasks ?? [], [tasksData]);
 
   // ── Google Calendar events ─────────────────────────────────────────────────
-  // Fetch events for the displayed month ±1 day buffer so day-boundary edge
-  // cases don't drop events. Refetches automatically when displayMonth changes.
+  // Fetch events for the full displayed month. Refetches automatically when displayMonth changes.
   const eventsTimeMin = startOfMonth(displayMonth).toISOString();
   const eventsTimeMax = endOfMonth(displayMonth).toISOString();
 

@@ -113,6 +113,8 @@ final class AppServices {
     let groupChatService: GroupChatService
     /// Voice endpoint service — provides the backend WS proxy URL (API key stays server-side)
     let voiceTokenService: VoiceTokenService
+    /// Meetings service — fetches/syncs meetings from backend
+    let meetingsService: MeetingsService
     private let defaults: UserDefaults
 
     var selectedViewMode: TaskViewMode
@@ -310,6 +312,7 @@ final class AppServices {
         self.shareConversationService = ShareConversationService(apiClient: apiClient)
         self.groupChatService = GroupChatService(apiClient: apiClient)
         self.voiceTokenService = VoiceTokenService(authService: authService, backendURL: backendURL)
+        self.meetingsService = MeetingsService(apiClient: apiClient)
 
         let storedAppearance = defaults.string(forKey: Keys.appearancePreference)
             .flatMap(AppAppearancePreference.init(rawValue:))

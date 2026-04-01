@@ -251,6 +251,9 @@ export default function ChatPage() {
           setIsSaved(true);
           void refetchConversations();
         },
+        onError: (err) => {
+          console.error('Failed to auto-save conversation:', err);
+        },
       },
     );
     // Intentionally not exhaustive — only re-run when message count, loading, or isSaved changes
@@ -298,11 +301,17 @@ export default function ChatPage() {
   const handleDeleteConversation = useCallback(
     (id: string, e: React.MouseEvent) => {
       e.stopPropagation();
-      deleteConversation.mutate({ id });
-      // If the deleted conversation is the active one, start fresh
-      if (id === conversationId) {
-        handleNewChat();
-      }
+      deleteConversation.mutate(
+        { id },
+        {
+          onSuccess: () => {
+            // Only start fresh after successful deletion to avoid UI flicker on failure
+            if (id === conversationId) {
+              handleNewChat();
+            }
+          },
+        },
+      );
     },
     [conversationId, deleteConversation, handleNewChat],
   );

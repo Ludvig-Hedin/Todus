@@ -10,6 +10,8 @@ struct TodosApp: App {
     @State private var services: AppServices?
     @State private var modelContainer: ModelContainer?
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    /// Slug from a todus://share?slug=... deep link — presents SharedConversationView when set
+    @State private var sharedConversationSlug: String? = nil
 
     var body: some Scene {
         WindowGroup {
@@ -20,6 +22,19 @@ struct TodosApp: App {
                     .onOpenURL { url in
                         services.authService.handleAuthCallback(url: url)
                         services.authStore.handleIncomingAuthCallback(url: url)
+                        // todus://share?slug=abc123 — open shared conversation viewer
+                        if url.host == "share",
+                           let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+                           let slug = components.queryItems?.first(where: { $0.name == "slug" })?.value {
+                            sharedConversationSlug = slug
+                        }
+                    }
+                    .sheet(item: Binding(
+                        get: { sharedConversationSlug.map { SlugWrapper(slug: $0) } },
+                        set: { sharedConversationSlug = $0?.slug }
+                    )) { wrapper in
+                        SharedConversationView(slug: wrapper.slug)
+                            .environment(services)
                     }
                     .tint(AppTheme.accent)
                     .preferredColorScheme(services.appearancePreference.colorScheme)
@@ -99,6 +114,13 @@ struct TodosApp: App {
             }
         }
     }
+}
+
+/// Identifiable wrapper for a share slug — used to drive the SharedConversationView sheet
+/// from a `todus://share?slug=...` deep link.
+private struct SlugWrapper: Identifiable {
+    let slug: String
+    var id: String { slug }
 }
 
 /// Text fields copied from `UNNotificationContent` before crossing to the main actor.

@@ -108,11 +108,14 @@ struct EmailThreadView: View {
             return
         }
 
-        assistantDraftSeed = result.preview
-        assistantNotice = result.reason
         if result.created {
+            // Draft was just created — seed compose and open it
+            assistantDraftSeed = result.preview
             showCompose = true
             await refreshAssistant()
+        } else {
+            // Draft already exists or was skipped — surface the reason
+            assistantNotice = result.reason
         }
     }
 
@@ -433,7 +436,7 @@ private struct AssistantPill: View {
             .foregroundStyle(.secondary)
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
-            .background(Color.white.opacity(0.7), in: Capsule(style: .continuous))
+            .background(Color(.systemBackground).opacity(0.7), in: Capsule(style: .continuous))
     }
 }
 

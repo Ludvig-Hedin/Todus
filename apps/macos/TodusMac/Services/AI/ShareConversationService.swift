@@ -53,38 +53,43 @@ final class ShareConversationService {
     }
 
     func createShare(_ input: ShareCreateInput) async throws -> ShareCreateResponse {
-        try await apiClient!.trpcMutation("sharing.create", input: input)
+        guard let client = apiClient else { throw URLError(.userAuthenticationRequired) }
+        return try await client.trpcMutation("sharing.create", input: input)
     }
 
     func getShare(slug: String, password: String? = nil) async throws -> ShareGetResponse {
-        try await apiClient!.trpcQuery(
+        guard let client = apiClient else { throw URLError(.userAuthenticationRequired) }
+        return try await client.trpcQuery(
             "sharing.get",
             input: ShareGetInput(slug: slug, password: password)
         )
     }
 
     func importShare(slug: String, password: String? = nil) async throws -> ShareImportResponse {
+        guard let client = apiClient else { throw URLError(.userAuthenticationRequired) }
         struct Input: Encodable {
             let slug: String
             let password: String?
         }
 
-        return try await apiClient!.trpcMutation(
+        return try await client.trpcMutation(
             "sharing.import",
             input: Input(slug: slug, password: password)
         )
     }
 
     func listMyShares() async throws -> [ShareListItem] {
-        try await apiClient!.trpcQuery("sharing.listMine")
+        guard let client = apiClient else { throw URLError(.userAuthenticationRequired) }
+        return try await client.trpcQuery("sharing.listMine")
     }
 
     func revokeShare(id: String) async throws {
+        guard let client = apiClient else { throw URLError(.userAuthenticationRequired) }
         struct Input: Encodable {
             let id: String
         }
 
-        let _: EmptyResponse = try await apiClient!.trpcMutation(
+        let _: EmptyResponse = try await client.trpcMutation(
             "sharing.revoke",
             input: Input(id: id)
         )
