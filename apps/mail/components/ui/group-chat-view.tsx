@@ -81,6 +81,10 @@ export function GroupChatView({ groupId }: Props) {
 
   const copyInviteLink = async () => {
     if (!group) return;
+    if (typeof group.inviteToken !== 'string' || !group.inviteToken.trim()) {
+      toast.error('Invite link is not available yet.');
+      return;
+    }
     const url = `${window.location.origin}/g/${group.inviteToken}`;
     try {
       await navigator.clipboard.writeText(url);

@@ -86,7 +86,9 @@ export default function SharedConversationPage() {
             </p>
           </div>
           <Input
+            id="shared-conversation-password"
             type="password"
+            aria-label="Enter password"
             placeholder="Enter password"
             value={passwordInput}
             onChange={(e) => setPasswordInput(e.target.value)}
@@ -106,7 +108,16 @@ export default function SharedConversationPage() {
 
   if (!data || data.passwordRequired) return null;
 
-  const messages = data.messages as Array<{ role: string; content: string }>;
+  const messages = Array.isArray(data.messages)
+    ? data.messages.flatMap((item) =>
+        item &&
+        typeof item === 'object' &&
+        typeof item.role === 'string' &&
+        typeof item.content === 'string'
+          ? [{ role: item.role, content: item.content }]
+          : [],
+      )
+    : [];
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-10">

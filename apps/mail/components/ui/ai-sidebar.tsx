@@ -455,7 +455,7 @@ function AISidebar({ className }: AISidebarProps) {
 
   const agent = useAgent({
     agent: 'ZeroAgent',
-    name: activeConnection?.id ? String(activeConnection.id) : 'general',
+    name: String(activeConnection?.id ?? 'general'),
     host: `${import.meta.env.VITE_PUBLIC_BACKEND_URL}`,
     onError: (e) => console.log(e),
     onMessage,
@@ -631,6 +631,7 @@ function AISidebar({ className }: AISidebarProps) {
                   activeGroupId={groupId}
                   onBackFromGroup={() => setGroupId(null)}
                   currentConversationId={currentConversationId}
+                  currentConversationTitle={currentConversationTitle}
                 />
                 <div className="relative flex-1 overflow-hidden">
                   {groupId ? (

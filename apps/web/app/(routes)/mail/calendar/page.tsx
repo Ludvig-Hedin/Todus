@@ -77,8 +77,8 @@ export default function CalendarPage() {
   // ── Google Calendar events ─────────────────────────────────────────────────
   // Fetch events for the displayed month ±1 day buffer so day-boundary edge
   // cases don't drop events. Refetches automatically when displayMonth changes.
-  const eventsTimeMin = startOfMonth(displayMonth).toISOString();
-  const eventsTimeMax = endOfMonth(displayMonth).toISOString();
+  const eventsTimeMin = addDays(startOfMonth(displayMonth), -1).toISOString();
+  const eventsTimeMax = addDays(endOfMonth(displayMonth), 1).toISOString();
 
   const { data: eventsData, isLoading: eventsLoading } = useQuery(
     trpc.calendar.events.queryOptions({
@@ -133,12 +133,21 @@ export default function CalendarPage() {
 
   // Events for the selected date, sorted by start time
   const selectedDateEvents = useMemo(() => {
+    const selectedDateKey = format(selectedDate, 'yyyy-MM-dd');
+
     return calendarEvents
-      .filter((e) => {
-        const d = e.allDay ? new Date(e.startTime) : new Date(e.startTime);
-        return isSameDay(d, selectedDate);
+      .filter((event) => {
+        if (event.allDay && /^\d{4}-\d{2}-\d{2}$/.test(event.startTime)) {
+          return event.startTime === selectedDateKey;
+        }
+
+        const parsed = new Date(event.startTime);
+        return !Number.isNaN(parsed.getTime()) && isSameDay(parsed, selectedDate);
       })
-      .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+      .sort((a, b) => {
+        if (a.allDay !== b.allDay) return a.allDay ? -1 : 1;
+        return new Date(a.startTime).getTime() - new Date(b.startTime).getTime();
+      });
   }, [calendarEvents, selectedDate]);
 
   // Tasks for the selected date
@@ -393,7 +402,19 @@ function CalendarEventRow({ event }: { event: CalendarEvent }) {
     ? 'All day'
     : (() => {
         const start = new Date(event.startTime);
+        if (Number.isNaN(start.getTime())) {
+          return 'Time unknown';
+        }
+
+        if (!event.endTime) {
+          return format(start, 'h:mm a');
+        }
+
         const end = new Date(event.endTime);
+        if (Number.isNaN(end.getTime())) {
+          return format(start, 'h:mm a');
+        }
+
         return `${format(start, 'h:mm a')} – ${format(end, 'h:mm a')}`;
       })();
 

@@ -81,6 +81,20 @@ function newId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
+function toSafeISOString(value: unknown, fallback: Date = new Date()) {
+  const fallbackISOString = fallback.toISOString();
+  if (value == null) return fallbackISOString;
+
+  const date =
+    value instanceof Date
+      ? value
+      : typeof value === 'string' || typeof value === 'number'
+        ? new Date(value)
+        : null;
+
+  return date && !Number.isNaN(date.getTime()) ? date.toISOString() : fallbackISOString;
+}
+
 export default function ChatPage() {
   const { data: activeConnection } = useActiveConnection();
   const trpc = useTRPC();
@@ -152,10 +166,7 @@ export default function ChatPage() {
         const messages = Array.isArray(convo.messages)
           ? (convo.messages as ChatMessageRecord[])
           : [];
-        const createdAt =
-          convo.createdAt instanceof Date
-            ? convo.createdAt.toISOString()
-            : new Date(convo.createdAt).toISOString();
+        const createdAt = toSafeISOString(convo.createdAt);
 
         saveConversation.mutate(
           {
@@ -185,7 +196,7 @@ export default function ChatPage() {
   // Connect to the ZeroAgent Durable Object via WebSocket
   const agent = useAgent({
     agent: 'ZeroAgent',
-    name: activeConnection?.id ? String(activeConnection.id) : 'general',
+    name: String(activeConnection?.id ?? 'general'),
     host: `${import.meta.env.VITE_PUBLIC_BACKEND_URL}`,
     onError: (e) => console.error('Agent error:', e),
   });
@@ -589,19 +600,25 @@ export default function ChatPage() {
                       >
                         {isUser
                           ? // User messages: plain text with whitespace-pre-wrap
-                            textParts.map((part) => {
+                            textParts.map((part, idx) => {
                               const text = 'text' in part ? (part as { text: string }).text : '';
                               return text ? (
-                                <p key={`${message.id}-user-${text.slice(0, 24)}`} className="whitespace-pre-wrap">
+                                <p
+                                  key={`${message.id}-user-${idx}-${text.slice(0, 24)}`}
+                                  className="whitespace-pre-wrap"
+                                >
                                   {text}
                                 </p>
                               ) : null;
                             })
                           : // AI messages render as plain text in the current web client.
-                            textParts.map((part) => {
+                            textParts.map((part, idx) => {
                               const text = 'text' in part ? (part as { text: string }).text : '';
                               return text ? (
-                                <p key={`${message.id}-assistant-${text.slice(0, 24)}`} className="whitespace-pre-wrap">
+                                <p
+                                  key={`${message.id}-assistant-${idx}-${text.slice(0, 24)}`}
+                                  className="whitespace-pre-wrap"
+                                >
                                   {text}
                                 </p>
                               ) : null;

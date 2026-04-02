@@ -10,6 +10,7 @@ import {
   format,
   isSameDay,
   startOfWeek,
+  endOfWeek,
   addDays,
   isToday,
   startOfMonth,
@@ -30,6 +31,7 @@ import { authProxy } from '@/lib/auth-proxy';
 import type { Route } from './+types/page';
 import { Link } from 'react-router';
 import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
 
 type Task = Outputs['tasks']['list']['tasks'][number];
 type CalendarEvent = Outputs['calendar']['events']['events'][number];
@@ -65,9 +67,15 @@ export default function CalendarPage() {
   const tasks = useMemo(() => tasksData?.tasks ?? [], [tasksData]);
 
   // ── Google Calendar events ─────────────────────────────────────────────────
-  // Fetch events for the full displayed month. Refetches automatically when displayMonth changes.
-  const eventsTimeMin = startOfMonth(displayMonth).toISOString();
-  const eventsTimeMax = endOfMonth(displayMonth).toISOString();
+  // Fetch events for the displayed month plus the visible "This week" range so
+  // adjacent-month days in the week overview still show event indicators.
+  const visibleWeekStart = startOfWeek(new Date(), { weekStartsOn: 1 });
+  const visibleWeekEnd = endOfWeek(new Date(), { weekStartsOn: 1 });
+  const monthStart = startOfMonth(displayMonth);
+  const monthEnd = endOfMonth(displayMonth);
+  const eventsTimeMin =
+    (monthStart < visibleWeekStart ? monthStart : visibleWeekStart).toISOString();
+  const eventsTimeMax = (monthEnd > visibleWeekEnd ? monthEnd : visibleWeekEnd).toISOString();
 
   const { data: eventsData, isLoading: eventsLoading } = useQuery(
     trpc.calendar.events.queryOptions({
@@ -161,10 +169,15 @@ export default function CalendarPage() {
   };
 
   const handleConnectGoogleCalendar = useCallback(async () => {
-    await authClient.linkSocial({
-      provider: 'google',
-      callbackURL: window.location.href,
-    });
+    try {
+      await authClient.linkSocial({
+        provider: 'google',
+        callbackURL: window.location.href,
+      });
+    } catch (error) {
+      console.error('Failed to connect Google Calendar:', error);
+      toast.error('Could not connect Google Calendar.');
+    }
   }, []);
 
   const hasContent = selectedDateEvents.length > 0 || selectedDateTasks.length > 0;
