@@ -280,9 +280,6 @@ struct EmailThreadView: View {
                                 )
                             )
                         },
-                        onCreateEvent: {
-                            await handleCreateEvent()
-                        },
                         onAskAssistant: openAssistant,
                         onResearch: openAssistant
                     )
@@ -378,8 +375,10 @@ private struct MailAssistantCard: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     Button("Extract tasks") {
-                        if let firstTask = assistant.suggestedTasks.first {
-                            Task { await onCreateTask(firstTask) }
+                        Task {
+                            for suggestion in assistant.suggestedTasks {
+                                await onCreateTask(suggestion)
+                            }
                         }
                     }
                     .buttonStyle(.borderedProminent)
@@ -445,7 +444,6 @@ private struct AssistantPill: View {
 private struct MessageBubble: View {
     let message: EmailMessage
     let onCreateTask: () async -> Void
-    let onCreateEvent: () async -> Void
     let onAskAssistant: () -> Void
     let onResearch: () -> Void
     @State private var isExpanded = true
@@ -508,11 +506,6 @@ private struct MessageBubble: View {
                 HStack(spacing: 8) {
                     Button("Task") {
                         Task { await onCreateTask() }
-                    }
-                    .buttonStyle(.bordered)
-
-                    Button("Event") {
-                        Task { await onCreateEvent() }
                     }
                     .buttonStyle(.bordered)
 

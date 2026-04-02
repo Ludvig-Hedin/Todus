@@ -50,10 +50,12 @@ struct ShareListItem: Decodable, Identifiable {
 
 enum ShareConversationServiceError: Error, LocalizedError {
     case missingAPIClient
+    case authenticationFailed
 
     var errorDescription: String? {
         switch self {
         case .missingAPIClient: return "API client is not available."
+        case .authenticationFailed: return "Authentication failed."
         }
     }
 }
@@ -65,6 +67,8 @@ enum ShareConversationServiceError: Error, LocalizedError {
 @MainActor
 @Observable
 final class ShareConversationService {
+    typealias AuthError = ShareConversationServiceError
+
     private weak var apiClient: TodosAPIClient?
 
     init(apiClient: TodosAPIClient) {
@@ -84,7 +88,15 @@ final class ShareConversationService {
     /// Fetch the snapshot for a share slug.
     /// Returns `passwordRequired: true` if the link is protected and no password is provided.
     func getShare(slug: String, password: String? = nil) async throws -> ShareGetResponse {
-        try await client().trpcQuery("sharing.get", input: ShareGetInput(slug: slug, password: password))
+        do {
+            return try await client().trpcQuery("sharing.get", input: ShareGetInput(slug: slug, password: password))
+        } catch APIError.unauthorized {
+            throw ShareConversationServiceError.authenticationFailed
+        } catch let APIError.httpError(statusCode, _) where statusCode == 401 || statusCode == 403 {
+            throw ShareConversationServiceError.authenticationFailed
+        } catch {
+            throw error
+        }
     }
 
     /// Import a shared conversation as a new conversation owned by the current user.
