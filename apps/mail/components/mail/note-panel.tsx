@@ -56,6 +56,14 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useTRPC } from '@/providers/query-provider';
@@ -245,6 +253,7 @@ export function NotesPanel({ threadId, open, onOpenChange, showTrigger = true }:
   const [isAddingNewNote, setIsAddingNewNote] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedColor, setSelectedColor] = useState('default');
+  const [noteToDelete, setNoteToDelete] = useState<Note | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -359,15 +368,21 @@ export function NotesPanel({ threadId, open, onOpenChange, showTrigger = true }:
   };
 
   const confirmDeleteNote = (noteId: string) => {
-    // Replaced bugged Dialog with reliable native confirmation
-    if (window.confirm('Are you sure you want to delete this note?')) {
-      const promise = handleDeleteNote(noteId);
-      toast.promise(promise, {
-        loading: m['common.actions.loading'](),
-        success: m['common.notes.noteDeleted'](),
-        error: m['common.notes.errors.failedToDeleteNote'](),
-      });
-    }
+    setNoteToDelete(notes.find((note) => note.id === noteId) ?? null);
+  };
+
+  const handleConfirmDeleteNote = () => {
+    if (!noteToDelete) return;
+
+    const noteId = noteToDelete.id;
+    setNoteToDelete(null);
+
+    const promise = handleDeleteNote(noteId);
+    toast.promise(promise, {
+      loading: m['common.actions.loading'](),
+      success: m['common.notes.noteDeleted'](),
+      error: m['common.notes.errors.failedToDeleteNote'](),
+    });
   };
 
   const handleCopyNote = (content: string) => {
@@ -837,6 +852,31 @@ export function NotesPanel({ threadId, open, onOpenChange, showTrigger = true }:
                 </div>
               </div>
             )}
+
+            <Dialog
+              open={!!noteToDelete}
+              onOpenChange={(open) => {
+                if (!open) setNoteToDelete(null);
+              }}
+            >
+              <DialogContent showOverlay className="max-w-sm">
+                <DialogHeader>
+                  <DialogTitle>Delete note?</DialogTitle>
+                  <DialogDescription>
+                    This will permanently remove the note from the thread.
+                  </DialogDescription>
+                </DialogHeader>
+
+                <DialogFooter className="gap-2">
+                  <Button variant="ghost" onClick={() => setNoteToDelete(null)}>
+                    Cancel
+                  </Button>
+                  <Button variant="destructive" onClick={() => void handleConfirmDeleteNote()}>
+                    Delete
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
           </div>
         </div>
       )}

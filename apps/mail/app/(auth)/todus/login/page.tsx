@@ -1,43 +1,9 @@
-import { Form, FormControl, FormField, FormItem, FormLabel } from '@/components/ui/form';
 import { Apple, GoogleColor as Google } from '@/components/icons/icons';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { signIn } from '@/lib/auth-client';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { useForm } from 'react-hook-form';
-import { Link } from 'react-router';
+import { signIn } from '@/lib/auth-client';
 import { toast } from 'sonner';
-import { z } from 'zod';
-
-const formSchema = z.object({
-  email: z.string().email({ message: 'Please enter a valid email address' }),
-  password: z.string().min(6, { message: 'Password must be at least 6 characters' }),
-});
 
 export default function LoginTodus() {
-  const form = useForm<z.infer<typeof formSchema>>({
-    resolver: zodResolver(formSchema as any),
-    defaultValues: {
-      email: '',
-      password: '',
-    },
-  });
-
-  function onSubmit(values: z.infer<typeof formSchema>) {
-    toast.promise(
-      signIn.email({
-        email: values.email,
-        password: values.password,
-        callbackURL: '/mail/inbox',
-      }),
-      {
-        loading: 'Signing in...',
-        success: 'Signed in successfully',
-        error: (err) => err?.message || 'Sign-in failed. Email/password login may not be enabled.',
-      },
-    );
-  }
-
   function handleGoogleSignIn() {
     toast.promise(
       signIn.social({
@@ -67,11 +33,7 @@ export default function LoginTodus() {
       {/* Left Column - Form */}
       <div className="flex w-full flex-col lg:w-1/2 p-8 md:p-10 xl:p-14">
         <div className="flex items-center gap-2 mb-auto">
-          <img
-            src="/brand-logo.png"
-            alt="Todus Logo"
-            className="h-7 w-7"
-          />
+          <img src="/brand-logo.png" alt="Todus Logo" className="h-7 w-7" />
           <span className="text-[15px] font-semibold tracking-tight text-foreground">Todus</span>
         </div>
 
@@ -107,77 +69,6 @@ export default function LoginTodus() {
               Continue with Apple
             </Button>
           </div>
-
-          {false && (
-            <>
-              <div className="relative mb-4">
-                <div className="absolute inset-0 flex items-center">
-                  <span className="w-full border-t border-border" />
-                </div>
-                <div className="relative flex justify-center text-xs uppercase">
-                  <span className="bg-background px-2 text-muted-foreground">or</span>
-                </div>
-              </div>
-
-              <Form {...form}>
-                <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-                  <FormField
-                    control={form.control}
-                    name="email"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Email</FormLabel>
-                        <FormControl>
-                          <Input
-                            placeholder="email@example.com"
-                            {...field}
-                          />
-                        </FormControl>
-                      </FormItem>
-                    )}
-                  />
-
-                  <FormField
-                    control={form.control}
-                    name="password"
-                    render={({ field }) => (
-                      <FormItem>
-                        <div className="flex items-center justify-between">
-                          <FormLabel>Password</FormLabel>
-                          <Link
-                            to="/forgot-password"
-                            className="text-muted-foreground text-xs hover:text-foreground"
-                          >
-                            Forgot your password?
-                          </Link>
-                        </div>
-                        <FormControl>
-                          <Input
-                            type="password"
-                            placeholder="••••••••"
-                            {...field}
-                          />
-                        </FormControl>
-                      </FormItem>
-                    )}
-                  />
-
-                  <Button type="submit" className="w-full">
-                    Login
-                  </Button>
-
-                  <div className="mt-6 text-center text-sm">
-                    <p className="text-muted-foreground">
-                      Don't have an account?{' '}
-                      <a href="/signup" className="font-medium underline underline-offset-4 hover:text-foreground">
-                        Sign up
-                      </a>
-                    </p>
-                  </div>
-                </form>
-              </Form>
-            </>
-          )}
         </div>
 
         <footer className="mt-auto">

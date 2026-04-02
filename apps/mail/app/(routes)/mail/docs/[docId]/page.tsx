@@ -26,7 +26,7 @@ import {
   ResizableHandle,
 } from '@/components/ui/resizable';
 import { DocTree } from '@/components/docs/doc-tree';
-import { Editor } from '@/components/create/editor';
+import Editor from '@/components/create/editor';
 import { Editor as TiptapEditor } from '@tiptap/react';
 import type { JSONContent } from 'novel';
 import { useRef, useCallback, useState, useEffect } from 'react';
