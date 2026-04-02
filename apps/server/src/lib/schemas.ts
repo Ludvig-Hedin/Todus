@@ -186,9 +186,19 @@ export const defaultUserSettings: UserSettings = {
   assistantAutomationPolicy: defaultAssistantAutomationPolicy,
 };
 
+type DeepPartial<T> = T extends Array<infer U>
+  ? Array<DeepPartial<U>>
+  : T extends object
+    ? { [P in keyof T]?: DeepPartial<T[P]> }
+    : T;
+
+type UserSettingsMergeInput = Omit<DeepPartial<UserSettings>, 'categories'> & {
+  categories?: MailCategory[];
+};
+
 export const mergeUserSettings = (
-  current: Partial<UserSettings> | undefined,
-  incoming: Partial<UserSettings>,
+  current: UserSettingsMergeInput | undefined,
+  incoming: UserSettingsMergeInput,
 ): UserSettings => {
   return userSettingsSchema.parse({
     ...defaultUserSettings,

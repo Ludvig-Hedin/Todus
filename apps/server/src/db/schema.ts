@@ -351,7 +351,7 @@ export const meetIntegration = createTable(
       .defaultNow()
       .$onUpdate(() => new Date()),
   },
-  (t) => [index('meet_integration_user_id_idx').on(t.userId)],
+  () => [],
 );
 
 export const meeting = createTable(
@@ -391,6 +391,7 @@ export const meeting = createTable(
   },
   (t) => [
     index('meeting_user_id_idx').on(t.userId),
+    index('meeting_integration_id_idx').on(t.integrationId),
     index('meeting_status_idx').on(t.status),
     index('meeting_recall_bot_id_idx').on(t.recallBotId),
     index('meeting_starts_at_idx').on(t.startsAt),
@@ -639,6 +640,7 @@ export const groupMessage = createTable(
   },
   (t) => [
     index('group_message_group_id_idx').on(t.groupId),
+    index('group_message_sender_user_id_idx').on(t.senderUserId),
     // Composite index supports paginated queries ordered by (groupId, createdAt)
     index('group_message_group_created_idx').on(t.groupId, t.createdAt),
   ],

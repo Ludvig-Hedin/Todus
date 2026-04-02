@@ -69,7 +69,6 @@ ALTER TABLE "mail0_meeting" ADD CONSTRAINT "mail0_meeting_user_id_mail0_user_id_
 ALTER TABLE "mail0_meeting" ADD CONSTRAINT "mail0_meeting_integration_id_mail0_meet_integration_id_fk" FOREIGN KEY ("integration_id") REFERENCES "public"."mail0_meet_integration"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "mail0_meeting_media" ADD CONSTRAINT "mail0_meeting_media_meeting_id_mail0_meeting_id_fk" FOREIGN KEY ("meeting_id") REFERENCES "public"."mail0_meeting"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "mail0_meeting_transcript" ADD CONSTRAINT "mail0_meeting_transcript_meeting_id_mail0_meeting_id_fk" FOREIGN KEY ("meeting_id") REFERENCES "public"."mail0_meeting"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-CREATE INDEX "meet_integration_user_id_idx" ON "mail0_meet_integration" USING btree ("user_id");--> statement-breakpoint
 CREATE INDEX "meeting_user_id_idx" ON "mail0_meeting" USING btree ("user_id");--> statement-breakpoint
 CREATE INDEX "meeting_status_idx" ON "mail0_meeting" USING btree ("status");--> statement-breakpoint
 CREATE INDEX "meeting_recall_bot_id_idx" ON "mail0_meeting" USING btree ("recall_bot_id");--> statement-breakpoint
