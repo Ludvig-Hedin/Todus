@@ -11,6 +11,15 @@
 import { useParams, useNavigate, Link } from 'react-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTRPC } from '@/providers/query-provider';
+import { authProxy } from '@/lib/auth-proxy';
+import type { Route } from './+types/page';
+
+// Auth guard — redirect to login if no session
+export async function clientLoader({ request }: Route.ClientLoaderArgs) {
+  const session = await authProxy.api.getSession({ headers: request.headers });
+  if (!session) return Response.redirect(`${import.meta.env.VITE_PUBLIC_APP_URL}/login`);
+  return {};
+}
 import {
   ResizablePanelGroup,
   ResizablePanel,
