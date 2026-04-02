@@ -167,20 +167,32 @@ export const calendarRouter = router({
 
       const events = (data.items ?? [])
         .filter((e) => e.status !== 'cancelled')
-        .map((e) => ({
-          id: e.id,
-          title: e.summary ?? '(No title)',
-          description: e.description ?? null,
-          location: e.location ?? null,
-          // All-day events use `date` (no time); timed events use `dateTime`
-          startTime: e.start.dateTime ?? e.start.date ?? '',
-          endTime: e.end.dateTime ?? e.end.date ?? '',
-          allDay: !e.start.dateTime,
-          color: e.colorId ? (GOOGLE_CALENDAR_COLORS[e.colorId] ?? '#5484ed') : '#5484ed',
-          htmlLink: e.htmlLink ?? null,
-          organizer: e.organizer?.displayName ?? e.organizer?.email ?? null,
-          isOrganizer: e.organizer?.self ?? false,
-        }));
+        .flatMap((e) => {
+          const startTime = e.start.dateTime ?? e.start.date;
+          const endTime = e.end.dateTime ?? e.end.date;
+          if (!startTime || !endTime) {
+            console.warn('[calendar.events] Skipping event with missing bounds', {
+              id: e.id,
+              summary: e.summary,
+            });
+            return [];
+          }
+
+          return [{
+            id: e.id,
+            title: e.summary ?? '(No title)',
+            description: e.description ?? null,
+            location: e.location ?? null,
+            // All-day events use `date` (no time); timed events use `dateTime`
+            startTime,
+            endTime,
+            allDay: !e.start.dateTime,
+            color: e.colorId ? (GOOGLE_CALENDAR_COLORS[e.colorId] ?? '#5484ed') : '#5484ed',
+            htmlLink: e.htmlLink ?? null,
+            organizer: e.organizer?.displayName ?? e.organizer?.email ?? null,
+            isOrganizer: e.organizer?.self ?? false,
+          }];
+        });
 
       return { events, scopeMissing: false };
     }),

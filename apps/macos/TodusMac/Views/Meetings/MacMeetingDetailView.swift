@@ -1,9 +1,16 @@
 import SwiftUI
 import AVKit
 
-/// Meeting detail — video player, AI recap, action items, transcript, Q&A.
-struct MeetingDetailView: View {
-    @Environment(AppServices.self) private var services
+private struct QAChatMessage: Identifiable {
+    let id = UUID()
+    let role: String
+    let content: String
+}
+
+// MARK: - Meeting Detail View
+
+struct MacMeetingDetailView: View {
+    @Environment(MacAppServices.self) private var services
 
     let meetingId: String
 
@@ -13,24 +20,17 @@ struct MeetingDetailView: View {
     @State private var isSchedulingBot = false
     @State private var actionError: String? = nil
 
-    // Stable AVPlayer — avoids recreating on every body render
+    // Stable AVPlayer — recreated only when URL changes, not on every render
     @State private var player: AVPlayer? = nil
     @State private var playerUrl: URL? = nil
 
-    // Q&A
-    @State private var qaMessages: [(role: String, content: String)] = []
+    // Q&A state
+    @State private var qaMessages: [QAChatMessage] = []
     @State private var qaInput = ""
     @State private var isAskingQuestion = false
 
-    // Transcript
-    @State private var showFullTranscript = false
-
-    private var videoURL: URL? {
-        guard let rawURL = meeting?.media?.first(where: { $0.mediaType == "video_mixed" })?.url else {
-            return nil
-        }
-        return URL(string: rawURL)
-    }
+    // Transcript expansion
+    @State private var isTranscriptExpanded = false
 
     var body: some View {
         Group {
@@ -42,32 +42,20 @@ struct MeetingDetailView: View {
                     VStack(alignment: .leading, spacing: 20) {
                         headerSection(meeting)
 
-                        // Error
+                        // Error banner
                         if meeting.status == "failed", let error = meeting.errorMessage {
                             errorBanner(error)
                         }
 
-                        // Video — AVPlayer stored in state so it survives re-renders
-                        if let url = videoURL {
-                            VideoPlayer(player: player)
-                                .aspectRatio(16/9, contentMode: .fit)
-                                .clipShape(RoundedRectangle(cornerRadius: 12))
-                                .onAppear {
-                                    if playerUrl != url {
-                                        playerUrl = url
-                                        player = AVPlayer(url: url)
-                                    }
-                                }
-                                .onChange(of: videoURL) { _, newValue in
-                                    guard playerUrl != newValue else { return }
-                                    playerUrl = newValue
-                                    player = newValue.map(AVPlayer.init(url:))
-                                }
+                        // Video player
+                        if let videoUrl = meeting.media?.first(where: { $0.mediaType == "video_mixed" })?.url,
+                           let url = URL(string: videoUrl) {
+                            videoPlayer(url: url)
                         }
 
-                        // Processing placeholder
+                        // Processing state
                         if meeting.status == "recording" || meeting.status == "processing" {
-                            processingView(meeting.status)
+                            processingPlaceholder(status: meeting.status)
                         }
 
                         // AI Summary
@@ -81,33 +69,26 @@ struct MeetingDetailView: View {
                         // Transcript
                         if let segments = meeting.transcript, !segments.isEmpty {
                             transcriptSection(segments)
+
+                            // Q&A
                             qaSection
                         }
                     }
-                    .padding(16)
+                    .padding(24)
                 }
             } else {
-                ContentUnavailableView("Meeting not found", systemImage: "exclamationmark.triangle")
-            }
-        }
-        .navigationTitle(meeting?.title ?? "Meeting")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            if let meeting, meeting.status == "scheduled", meeting.recallBotId == nil {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        Task { await scheduleBot() }
-                    } label: {
-                        if isSchedulingBot {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Label("Send Bot", systemImage: "person.wave.2")
-                        }
-                    }
-                    .disabled(isSchedulingBot)
+                VStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.system(size: 24))
+                        .foregroundStyle(.tertiary)
+                    Text("Meeting not found")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
+        .background(MacTheme.contentBackground)
         .alert("Error", isPresented: Binding(
             get: { actionError != nil },
             set: { if !$0 { actionError = nil } }
@@ -116,7 +97,9 @@ struct MeetingDetailView: View {
         } message: {
             Text(actionError ?? "")
         }
-        .task { await loadMeeting() }
+        .task {
+            await loadMeeting()
+        }
     }
 
     // MARK: - Sections
@@ -124,53 +107,97 @@ struct MeetingDetailView: View {
     private func headerSection(_ meeting: MeetingDetailResponse) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
+                Text(meeting.title)
+                    .font(.system(size: 18, weight: .semibold))
+
+                Spacer()
+
+                // Status badge
                 Text(statusLabel(meeting.status))
-                    .font(.caption)
-                    .fontWeight(.medium)
+                    .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(statusColor(meeting.status))
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
-                    .background(statusColor(meeting.status).opacity(0.12), in: Capsule())
+                    .background(statusColor(meeting.status).opacity(0.1), in: Capsule())
 
-                Spacer()
+                // Schedule bot button for meetings without one
+                if meeting.status == "scheduled" && meeting.recallBotId == nil {
+                    Button {
+                        Task { await scheduleBot() }
+                    } label: {
+                        HStack(spacing: 4) {
+                            if isSchedulingBot {
+                                ProgressView().controlSize(.mini)
+                            } else {
+                                Image(systemName: "person.wave.2")
+                                    .font(.system(size: 11))
+                            }
+                            Text("Send Note Taker")
+                                .font(.system(size: 11, weight: .medium))
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(Color.accentColor.opacity(0.12), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isSchedulingBot)
+                }
             }
 
-            Label(
-                meeting.startsAt.formatted(date: .long, time: .shortened),
-                systemImage: "clock"
-            )
-            .font(.subheadline)
-            .foregroundStyle(.secondary)
+            HStack(spacing: 12) {
+                Label(
+                    meeting.startsAt.formatted(date: .long, time: .shortened),
+                    systemImage: "clock"
+                )
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+            }
         }
     }
 
     private func errorBanner(_ message: String) -> some View {
-        HStack(alignment: .top, spacing: 8) {
+        HStack(spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(.red)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Recording failed")
-                    .font(.subheadline.weight(.medium))
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.red)
                 Text(message)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.red.opacity(0.8))
             }
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+        .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
     }
 
-    private func processingView(_ status: String) -> some View {
-        VStack(spacing: 10) {
+    private func videoPlayer(url: URL) -> some View {
+        VideoPlayer(player: player)
+            .aspectRatio(16/9, contentMode: .fit)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .task(id: url) {
+                if playerUrl != url {
+                    playerUrl = url
+                    player = AVPlayer(url: url)
+                }
+            }
+    }
+
+    private func processingPlaceholder(status: String) -> some View {
+        VStack(spacing: 8) {
             ProgressView()
-            Text(status == "recording" ? "Recording in progress..." : "Processing recording...")
-                .font(.subheadline.weight(.medium))
+            Text(status == "recording" ? "Meeting is being recorded..." : "Processing recording...")
+                .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(.secondary)
+            Text("The recap will be available once processing completes.")
+                .font(.system(size: 11))
+                .foregroundStyle(.tertiary)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 40)
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+        .background(Color.primary.opacity(0.03), in: RoundedRectangle(cornerRadius: 8))
     }
 
     private func summarySection(_ meeting: MeetingDetailResponse) -> some View {
@@ -178,20 +205,22 @@ struct MeetingDetailView: View {
             if let summary = meeting.aiSummary {
                 VStack(alignment: .leading, spacing: 8) {
                     Label("AI Recap", systemImage: "sparkles")
-                        .font(.subheadline.weight(.semibold))
+                        .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(.purple)
 
                     Text(summary)
-                        .font(.subheadline)
+                        .font(.system(size: 12))
                         .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
                 }
                 .padding(14)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.purple.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
-            } else if meeting.transcript != nil && !(meeting.transcript?.isEmpty ?? true) {
+                .background(Color.purple.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.purple.opacity(0.1)))
+            } else if meeting.transcript != nil && !meeting.transcript!.isEmpty {
                 HStack {
-                    Label("Generate AI recap", systemImage: "sparkles")
-                        .font(.subheadline)
+                    Label("Generate AI recap from transcript", systemImage: "sparkles")
+                        .font(.system(size: 12))
                         .foregroundStyle(.secondary)
 
                     Spacer()
@@ -199,11 +228,15 @@ struct MeetingDetailView: View {
                     Button {
                         Task { await generateSummary() }
                     } label: {
-                        if isGeneratingSummary {
-                            ProgressView().controlSize(.small)
-                        } else {
+                        HStack(spacing: 4) {
+                            if isGeneratingSummary {
+                                ProgressView().controlSize(.mini)
+                            } else {
+                                Image(systemName: "sparkles")
+                                    .font(.system(size: 11))
+                            }
                             Text("Generate")
-                                .font(.subheadline.weight(.medium))
+                                .font(.system(size: 11, weight: .medium))
                         }
                     }
                     .buttonStyle(.borderedProminent)
@@ -211,7 +244,8 @@ struct MeetingDetailView: View {
                     .disabled(isGeneratingSummary)
                 }
                 .padding(14)
-                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+                .background(Color.primary.opacity(0.03), in: RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(0.06)))
             }
         }
     }
@@ -219,7 +253,7 @@ struct MeetingDetailView: View {
     private func actionItemsSection(_ items: [MeetingActionItem]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Label("Action Items", systemImage: "checklist")
-                .font(.subheadline.weight(.semibold))
+                .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.blue)
 
             ForEach(Array(items.enumerated()), id: \.offset) { _, item in
@@ -227,14 +261,15 @@ struct MeetingDetailView: View {
                     Image(systemName: "circle")
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary)
-                        .padding(.top, 3)
+                        .padding(.top, 2)
 
-                    VStack(alignment: .leading, spacing: 1) {
+                    VStack(alignment: .leading, spacing: 2) {
                         Text(item.task)
-                            .font(.subheadline)
+                            .font(.system(size: 12))
+
                         if let owner = item.owner {
-                            Text(owner)
-                                .font(.caption)
+                            Text("Owner: \(owner)")
+                                .font(.system(size: 10))
                                 .foregroundStyle(.tertiary)
                         }
                     }
@@ -243,48 +278,54 @@ struct MeetingDetailView: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.blue.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
+        .background(Color.blue.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.blue.opacity(0.1)))
     }
 
     private func transcriptSection(_ segments: [MeetingTranscriptSegment]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Label("Transcript (\(segments.count))", systemImage: "text.quote")
-                    .font(.subheadline.weight(.semibold))
+                Label("Transcript (\(segments.count) segments)", systemImage: "text.quote")
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.green)
 
                 Spacer()
 
-                if segments.count > 15 {
-                    Button(showFullTranscript ? "Less" : "All") {
-                        withAnimation { showFullTranscript.toggle() }
+                if segments.count > 20 {
+                    Button(isTranscriptExpanded ? "Show less" : "Show all") {
+                        withAnimation { isTranscriptExpanded.toggle() }
                     }
-                    .font(.caption)
+                    .font(.system(size: 11))
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.accentColor)
                 }
             }
 
-            let displaySegments = showFullTranscript ? segments : Array(segments.prefix(15))
+            let displaySegments = isTranscriptExpanded ? segments : Array(segments.prefix(20))
             ForEach(displaySegments) { seg in
-                HStack(alignment: .top, spacing: 8) {
+                HStack(alignment: .top, spacing: 10) {
                     Text(formatMs(seg.startTime))
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(.tertiary)
-                        .frame(width: 36, alignment: .trailing)
+                        .frame(width: 44, alignment: .trailing)
 
                     VStack(alignment: .leading, spacing: 1) {
                         Text(seg.speakerName)
-                            .font(.caption.weight(.semibold))
+                            .font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(.blue)
+
                         Text(seg.text)
-                            .font(.caption)
+                            .font(.system(size: 12))
                             .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
                     }
                 }
             }
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.green.opacity(0.04), in: RoundedRectangle(cornerRadius: 12))
+        .background(Color.green.opacity(0.03), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.green.opacity(0.1)))
     }
 
     // MARK: - Q&A
@@ -292,25 +333,27 @@ struct MeetingDetailView: View {
     private var qaSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Label("Ask about this meeting", systemImage: "sparkles")
-                .font(.subheadline.weight(.semibold))
+                .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.purple)
 
             if !qaMessages.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
-                    ForEach(Array(qaMessages.enumerated()), id: \.offset) { _, msg in
+                    ForEach(qaMessages) { msg in
                         HStack {
                             if msg.role == "user" { Spacer() }
 
                             Text(msg.content)
-                                .font(.caption)
-                                .padding(8)
+                                .font(.system(size: 12))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
                                 .background(
                                     msg.role == "user"
                                         ? Color.accentColor.opacity(0.15)
-                                        : Color(.secondarySystemBackground),
+                                        : Color.primary.opacity(0.05),
                                     in: RoundedRectangle(cornerRadius: 8)
                                 )
-                                .frame(maxWidth: 260, alignment: msg.role == "user" ? .trailing : .leading)
+                                .frame(maxWidth: 400, alignment: msg.role == "user" ? .trailing : .leading)
+                                .textSelection(.enabled)
 
                             if msg.role == "assistant" { Spacer() }
                         }
@@ -323,25 +366,32 @@ struct MeetingDetailView: View {
                         }
                     }
                 }
+                .padding(8)
+                .background(Color.primary.opacity(0.02), in: RoundedRectangle(cornerRadius: 8))
             }
 
-            HStack(spacing: 8) {
-                TextField("Ask a question...", text: $qaInput)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.subheadline)
+            HStack(spacing: 6) {
+                TextField("What were the key decisions?", text: $qaInput)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+                    .padding(8)
+                    .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
                     .onSubmit { Task { await askQuestion() } }
 
                 Button {
                     Task { await askQuestion() }
                 } label: {
                     Image(systemName: "arrow.up.circle.fill")
-                        .font(.title2)
+                        .font(.system(size: 20))
+                        .foregroundStyle(.accentColor)
                 }
+                .buttonStyle(.plain)
                 .disabled(qaInput.trimmingCharacters(in: .whitespaces).isEmpty || isAskingQuestion)
             }
         }
         .padding(14)
-        .background(Color.purple.opacity(0.04), in: RoundedRectangle(cornerRadius: 12))
+        .background(Color.purple.opacity(0.03), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.purple.opacity(0.1)))
     }
 
     // MARK: - Actions
@@ -374,13 +424,13 @@ struct MeetingDetailView: View {
         let q = qaInput.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty else { return }
         qaInput = ""
-        qaMessages.append((role: "user", content: q))
+        qaMessages.append(QAChatMessage(role: "user", content: q))
         isAskingQuestion = true
 
         if let answer = await services.meetingsService.askQuestion(meetingId: meetingId, question: q) {
-            qaMessages.append((role: "assistant", content: answer))
+            qaMessages.append(QAChatMessage(role: "assistant", content: answer))
         } else {
-            qaMessages.append((role: "assistant", content: "Sorry, I couldn't answer that."))
+            qaMessages.append(QAChatMessage(role: "assistant", content: "Sorry, I could not answer that question."))
         }
         isAskingQuestion = false
     }
@@ -388,8 +438,10 @@ struct MeetingDetailView: View {
     // MARK: - Helpers
 
     private func formatMs(_ ms: Int) -> String {
-        let s = ms / 1000
-        return String(format: "%d:%02d", s / 60, s % 60)
+        let totalSeconds = ms / 1000
+        let minutes = totalSeconds / 60
+        let seconds = totalSeconds % 60
+        return String(format: "%d:%02d", minutes, seconds)
     }
 
     private func statusLabel(_ status: String) -> String {

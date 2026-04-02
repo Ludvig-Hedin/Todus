@@ -1,5 +1,21 @@
 # Project Changelog
 
+## [2026-04-02] Fix — Native app session expiration after inactivity
+
+Root cause: `/auth/mobile-token` minted JWTs via Better Auth's `jwt()` plugin which defaults to **15-minute expiration**. After 15 minutes, the JWT expired and all three backend resolution strategies failed (JWT verify, DB lookup, cookie rehydration). No working token refresh mechanism existed — `attemptSilentRefresh()` called `/api/auth/get-session` which can't resolve bearer tokens.
+
+### Server (`apps/server`)
+- **main.ts**: `/auth/mobile-token` now returns the raw session token (`session.session.token`) instead of minting a JWT. Raw tokens are stored in the session table with 30-day expiry and resolve through Better Auth's full pipeline (session extension via `updateAge`, token rotation via `set-auth-token` header).
+
+### Shared Auth (`packages/swift-auth`)
+- **AuthService.swift**: `attemptSilentRefresh()` now calls `/api/auth/me` (which resolves bearer tokens) instead of `/api/auth/get-session` (which only works with cookies).
+
+### Additional fixes
+- **MacAppServices.swift**: Shared folder sync now propagates local fetch failures instead of silently falling back to an empty folder list.
+- **nav-main.tsx**: `NavItemExpandable` now receives `isUrlActive` explicitly, fixing a runtime reference error in expandable navigation items.
+- **schemas.ts**: `mergeUserSettings` now keeps `categories` typed as full `MailCategory[]` while still allowing nested partial updates elsewhere.
+- **MacMeetingsView.swift**: Sync icon rotation now initializes correctly when the meetings view appears during an in-flight sync.
+
 ## [2026-04-01] Fix — Code quality and bug fixes across all platforms
 
 Batch of ~50 fixes across iOS, macOS, web, and server layers covering security, stability, and UX.
@@ -11,8 +27,13 @@ Batch of ~50 fixes across iOS, macOS, web, and server layers covering security, 
 - **schema.ts**: Added `.unique()` to `recallMediaId` and `recallSegmentId` columns
 - **Migration 0043**: Adds unique constraints for `recall_media_id` and `recall_segment_id`
 - **meet.ts**: LIKE wildcard escaping for search; `scheduleBot` cleans up orphaned bot on DB failure; `deleteMeeting` checks for active bot before deleting; Invalid Date guard in `syncFromCalendar`; N+1 eliminated in `syncFromCalendar` — batch-fetch all existing meetings via `inArray` before the loop
-- **tools.ts (agent)**: Fixed SQL injection in `searchMeetingTranscriptTool` — LIKE wildcards now escaped; fixed meeting tools type to avoid `undefined` in ToolSet
 - **mail-assistant.ts**: Added TODO comment for hardcoded UTC timezone
+
+### Security
+- **Severity: critical** — Fixed a SQL injection vulnerability in `searchMeetingTranscriptTool` in `apps/server/src/routes/agent/tools.ts`. The vulnerable transcript search path now escapes LIKE wildcards before building the query, preventing potential arbitrary query modification and transcript data exfiltration from attacker-controlled search input. Affected released versions: all released builds containing the original meetings transcript tool before the 2026-04-01 fix. Immediate upgrade required: **yes**.
+
+### Fixes
+- **tools.ts (agent)**: Fixed meeting tools type to avoid `undefined` in `ToolSet`
 
 ### iOS (`apps/ios`)
 - **GroupChatView.swift**: URL-encodes invite token; surfaces `joinGroup`/`leaveGroup` errors via alerts; only clears token on success

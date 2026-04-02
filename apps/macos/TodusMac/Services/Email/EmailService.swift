@@ -159,7 +159,7 @@ final class EmailService {
         do {
             return try await api.trpcQuery("mailAssistant.getThread", input: AssistantThreadInput(threadId: threadId))
         } catch {
-            print("[MacEmailService] loadAssistant error: \(error)")
+            print("[EmailService] loadAssistant error: \(error)")
             return nil
         }
     }
@@ -172,7 +172,7 @@ final class EmailService {
             )
             assistantNudges = response.nudges
         } catch {
-            print("[MacEmailService] loadAssistantNudges error: \(error)")
+            print("[EmailService] loadAssistantNudges error: \(error)")
         }
     }
 
@@ -184,7 +184,7 @@ final class EmailService {
             )
             return true
         } catch {
-            print("[MacEmailService] createAssistantTask error: \(error)")
+            print("[EmailService] createAssistantTask error: \(error)")
             return false
         }
     }
@@ -199,7 +199,7 @@ final class EmailService {
             )
             return true
         } catch {
-            print("[MacEmailService] createAssistantEvent error: \(error)")
+            print("[EmailService] createAssistantEvent error: \(error)")
             return false
         }
     }
@@ -211,7 +211,7 @@ final class EmailService {
                 input: MailAssistantDraftInput(threadId: threadId, openInComposer: true)
             )
         } catch {
-            print("[MacEmailService] generateAssistantDraft error: \(error)")
+            print("[EmailService] generateAssistantDraft error: \(error)")
             return nil
         }
     }

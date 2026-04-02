@@ -15,7 +15,6 @@ struct SharedConversationView: View {
     @State private var title: String = ""
     @State private var messages: [[String: String]] = []
     @State private var passwordInput: String = ""
-    @State private var submittedPassword: String? = nil
     @State private var isUnlocking = false
     @State private var wrongPassword = false
 
@@ -170,7 +169,6 @@ struct SharedConversationView: View {
         isUnlocking = true
         wrongPassword = false
         defer { isUnlocking = false }
-        submittedPassword = passwordInput
         do {
             let response = try await shareService.getShare(slug: slug, password: passwordInput)
             if response.passwordRequired == true {
@@ -180,16 +178,27 @@ struct SharedConversationView: View {
                 messages = response.messages ?? []
                 phase = .loaded
             }
-        } catch {
-            // Only show "wrong password" UI for auth failures;
-            // other errors (network, server) transition to the error phase.
-            let message = error.localizedDescription.lowercased()
-            if message.contains("unauthorized") || message.contains("forbidden")
-                || message.contains("password") || message.contains("403") {
+        } catch let authError as ShareConversationService.AuthError {
+            if case .authenticationFailed = authError {
                 wrongPassword = true
             } else {
-                phase = .error(error.localizedDescription)
+                phase = .error(authError.localizedDescription)
             }
+        } catch let urlError as URLError where urlError.code == .userAuthenticationRequired {
+            wrongPassword = true
+        } catch let apiError as APIError {
+            switch apiError {
+            case .unauthorized:
+                wrongPassword = true
+            case .httpError(let statusCode, _) where statusCode == 401 || statusCode == 403:
+                wrongPassword = true
+            default:
+                phase = .error(apiError.localizedDescription)
+            }
+        } catch let nsError as NSError where nsError.code == 401 || nsError.code == 403 {
+            wrongPassword = true
+        } catch {
+            phase = .error(error.localizedDescription)
         }
     }
 }

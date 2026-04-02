@@ -165,7 +165,8 @@ export const meetRouter = router({
         if (input.search) {
           // Escape SQL LIKE wildcards in the user-supplied search string
           const escaped = input.search.replace(/[%_\\]/g, '\\$&');
-          conditions.push(like(meeting.title, `%${escaped}%`));
+          const pattern = `%${escaped}%`;
+          conditions.push(sql`${meeting.title} LIKE ${pattern} ESCAPE '\\'`);
         }
         if (input.from) conditions.push(gte(meeting.startsAt, new Date(input.from)));
         if (input.to) conditions.push(lte(meeting.startsAt, new Date(input.to)));
@@ -356,7 +357,7 @@ export const meetRouter = router({
             .update(meeting)
             .set({
               recallBotId: result.id,
-              recallMeetingId: result.meeting_url_id || result.id,
+              recallMeetingId: result.meeting_url_id ?? result.id,
               status: startAtISO ? 'scheduled' : 'bot_joining',
             })
             .where(eq(meeting.id, meetingRow.id))
@@ -622,7 +623,7 @@ ${transcriptText.slice(0, 30000)}`; // Cap at ~30k chars to stay within context
           .where(eq(connectionTable.id, googleConn.id));
       }
 
-      // Fetch calendar events for the next 7 days
+      // Fetch calendar events for the 7 days before and after now (14-day window)
       const now = new Date();
       const weekLater = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
       const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
@@ -737,6 +738,8 @@ ${transcriptText.slice(0, 30000)}`; // Cap at ~30k chars to stay within context
             endsAt,
             participants: event.attendees || null,
             status: 'scheduled',
+            createdAt: new Date(),
+            updatedAt: new Date(),
           });
           synced++;
         }

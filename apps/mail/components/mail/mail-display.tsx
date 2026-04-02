@@ -576,7 +576,13 @@ const MailAssistantCard = ({
           type="button"
           size="sm"
           className="h-8 rounded-full px-3"
-          onClick={() => void (assistant.suggestedTasks[0] && handleCreateTask(assistant.suggestedTasks[0]))}
+          onClick={() =>
+            void (async () => {
+              for (const suggestion of assistant.suggestedTasks) {
+                await handleCreateTask(suggestion);
+              }
+            })()
+          }
           disabled={!assistant.suggestedTasks.length || isCreatingTask}
         >
           <ListTodo className="mr-1 h-3.5 w-3.5" />

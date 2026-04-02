@@ -209,13 +209,7 @@ export default function TasksPage() {
     ...trpc.folders.update.mutationOptions(),
     onSuccess: () => void queryClient.invalidateQueries(trpc.folders.list.queryFilter()),
   });
-  const deleteFolderMutation = useMutation({
-    ...trpc.folders.delete.mutationOptions(),
-    onSuccess: () => {
-      void queryClient.invalidateQueries(trpc.folders.list.queryFilter());
-      if (activeFolderId === editingFolder?.id) setActiveFolderId(null);
-    },
-  });
+  const deleteFolderMutation = useMutation(trpc.folders.delete.mutationOptions());
 
   const openCreate = (prefillStatus?: TaskStatus, prefillDate?: Date) => {
     setEditingTask(null);
@@ -414,9 +408,10 @@ export default function TasksPage() {
       </div>
 
       {/* ── Folder Pill Strip ── */}
-      {folders.length > 0 && (
-        <div className="shrink-0 border-b">
-          <div className="scrollbar-none flex items-center gap-1.5 overflow-x-auto px-5 py-2">
+      <div className="shrink-0 border-b">
+        <div className="scrollbar-none flex items-center gap-1.5 overflow-x-auto px-5 py-2">
+          {folders.length > 0 && (
+            <>
             {/* All */}
             <button
               type="button"
@@ -469,8 +464,16 @@ export default function TasksPage() {
                     <DropdownMenuItem
                       className="text-destructive focus:text-destructive"
                       onClick={() => {
-                        setEditingFolder(folder);
-                        deleteFolderMutation.mutate({ id: folder.id });
+                        deleteFolderMutation.mutate(
+                          { id: folder.id },
+                          {
+                            onSuccess: () => {
+                              void queryClient.invalidateQueries(trpc.folders.list.queryFilter());
+                              if (activeFolderId === folder.id) setActiveFolderId(null);
+                              if (editingFolder?.id === folder.id) setEditingFolder(null);
+                            },
+                          },
+                        );
                       }}
                     >
                       <Trash2 className="mr-2 h-3.5 w-3.5" /> Delete
@@ -479,6 +482,8 @@ export default function TasksPage() {
                 </DropdownMenu>
               </div>
             ))}
+            </>
+          )}
             {/* New folder */}
             <button
               type="button"
@@ -492,9 +497,8 @@ export default function TasksPage() {
               <FolderPlus className="h-3 w-3" />
               Add folder
             </button>
-          </div>
         </div>
-      )}
+      </div>
 
       {/* ── Search + Filter Bar (List / Table only) ── */}
       {viewMode !== 'board' && (
@@ -1376,14 +1380,19 @@ function TaskDetailPanel({
               </span>
             </div>
           )}
-          {task.createdAt && (
-            <div className="flex items-center justify-between">
-              <span className="text-muted-foreground text-xs">Created</span>
-              <span className="text-muted-foreground text-xs">
-                {format(new Date(task.createdAt), 'PPP')}
-              </span>
-            </div>
-          )}
+          {(() => {
+            const createdAt =
+              typeof task.createdAt === 'string' && task.createdAt.trim()
+                ? new Date(task.createdAt)
+                : null;
+
+            return createdAt && !Number.isNaN(createdAt.getTime()) ? (
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground text-xs">Created</span>
+                <span className="text-muted-foreground text-xs">{format(createdAt, 'PPP')}</span>
+              </div>
+            ) : null;
+          })()}
         </div>
 
         {/* Actions */}

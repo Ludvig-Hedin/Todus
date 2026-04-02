@@ -169,7 +169,9 @@ export function NavMain({ items }: NavMainProps) {
                     <NavItemExpandable
                       key={item.url}
                       {...item}
+                      children={item.children}
                       href={getHref(item)}
+                      isUrlActive={isUrlActive}
                       isActive={
                         item.children.some((child) => isUrlActive(child.url)) ||
                         isUrlActive(item.url)
@@ -221,7 +223,13 @@ export function NavMain({ items }: NavMainProps) {
   );
 }
 
-function NavItemExpandable(item: NavItemProps & { href: string; children: NavChildItem[] }) {
+function NavItemExpandable(
+  item: NavItemProps & {
+    href: string;
+    children: NavChildItem[];
+    isUrlActive: (url: string) => boolean;
+  },
+) {
   const { state, setOpenMobile } = useSidebar();
   const { clearAllFilters } = useCommandPalette();
   const { data: stats } = useStats();
@@ -264,6 +272,7 @@ function NavItemExpandable(item: NavItemProps & { href: string; children: NavChi
               key={child.url}
               child={child}
               stats={stats}
+              isUrlActive={item.isUrlActive}
               onNavigate={() => {
                 clearAllFilters();
                 setOpenMobile(false);
@@ -279,14 +288,15 @@ function NavItemExpandable(item: NavItemProps & { href: string; children: NavChi
 function NavChildRow({
   child,
   stats,
+  isUrlActive,
   onNavigate,
 }: {
   child: NavChildItem;
   stats: ReturnType<typeof useStats>['data'];
+  isUrlActive: (url: string) => boolean;
   onNavigate: () => void;
 }) {
-  const location = useLocation();
-  const isActive = location.pathname === child.url;
+  const isActive = isUrlActive(child.url);
   const stat = stats?.find((entry) => entry.label?.toLowerCase() === child.id?.toLowerCase());
   const badge = child.badge ?? stat?.count;
 

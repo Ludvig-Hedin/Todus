@@ -750,7 +750,7 @@ const PersonRow = memo(function PersonRow({
 const PeopleList = memo(function PeopleList({
   onSelectPerson,
 }: {
-  onSelectPerson: (email: string) => void;
+  onSelectPerson: (email: string, name: string | null) => void;
 }) {
   const { folder } = useParams<{ folder: string }>();
   const trpc = useTRPC();
@@ -800,7 +800,7 @@ const PeopleList = memo(function PeopleList({
         <PersonRow
           key={sender.email}
           sender={sender}
-          onClick={() => onSelectPerson(sender.email)}
+          onClick={() => onSelectPerson(sender.email, sender.name)}
         />
       ))}
     </div>
@@ -851,7 +851,7 @@ const PersonThreadsView = memo(function PersonThreadsView({
           className="hover:bg-accent/50 flex items-center gap-1 rounded-md px-2 py-1.5 text-sm transition-colors"
         >
           <ChevronLeft className="h-4 w-4" />
-          <span>People</span>
+          <span>{m['mail.list.toggle.people']()}</span>
         </button>
         <div className="flex items-center gap-2">
           <BimiAvatar
@@ -946,6 +946,7 @@ export const MailList = memo(
     // People view state — persisted in URL so refresh preserves position
     const [viewMode, setViewMode] = useQueryState('viewMode');
     const [personEmail, setPersonEmail] = useQueryState('personEmail');
+    const [personName, setPersonName] = useQueryState('personName');
     const isPeopleView = viewMode === 'people';
 
     // Only show the toggle for inbox (meaningful to group by sender)
@@ -1207,9 +1208,10 @@ export const MailList = memo(
                   onClick={() => {
                     void setViewMode(null);
                     void setPersonEmail(null);
+                    void setPersonName(null);
                   }}
                 >
-                  Threads
+                  {m['mail.list.toggle.threads']()}
                 </button>
                 <button
                   type="button"
@@ -1222,16 +1224,17 @@ export const MailList = memo(
                   onClick={() => {
                     void setViewMode('people');
                     void setPersonEmail(null);
+                    void setPersonName(null);
                   }}
                 >
-                  People
+                  {m['mail.list.toggle.people']()}
                 </button>
               </div>
             </div>
             <p className="text-muted-foreground mt-2 px-1 text-xs leading-relaxed">
               {isPeopleView
-                ? 'Group inbox threads by sender when you want to review a relationship instead of individual emails.'
-                : 'Switch to People to group your inbox by sender and scan conversations faster.'}
+                ? m['mail.list.toggleDescription.people']()
+                : m['mail.list.toggleDescription.threads']()}
             </p>
           </div>
         )}
@@ -1240,9 +1243,21 @@ export const MailList = memo(
         {isPeopleView && (
           <div className="flex h-[calc(100%-44px)] flex-col">
             {personEmail ? (
-              <PersonThreadsView email={personEmail} onBack={() => setPersonEmail(null)} />
+              <PersonThreadsView
+                email={personEmail}
+                name={personName}
+                onBack={() => {
+                  void setPersonEmail(null);
+                  void setPersonName(null);
+                }}
+              />
             ) : (
-              <PeopleList onSelectPerson={(email) => setPersonEmail(email)} />
+              <PeopleList
+                onSelectPerson={(email, name) => {
+                  void setPersonEmail(email);
+                  void setPersonName(name ?? email);
+                }}
+              />
             )}
           </div>
         )}
@@ -1298,27 +1313,27 @@ export const MailList = memo(
                       <div className="mt-5">
                         <p className="text-base font-medium">
                           {isFiltering
-                            ? 'No matching threads'
+                            ? m['mail.list.empty.filtered.title']()
                             : folder === FOLDERS.INBOX
-                              ? 'Your inbox is clear'
-                              : 'Nothing here yet'}
+                              ? m['mail.list.empty.inbox.title']()
+                              : m['mail.list.empty.other.title']()}
                         </p>
                         <p className="text-muted-foreground mt-1 text-[13px]">
                           {isFiltering ? (
                             <>
-                              Try a different search or{' '}
+                              {m['mail.list.empty.filtered.descriptionPrefix']()}{' '}
                               <button
                                 type="button"
                                 className="cursor-pointer underline"
                                 onClick={clearFilters}
                               >
-                                clear filters
+                                {m['mail.list.empty.filtered.clearFilters']()}
                               </button>
                             </>
                           ) : folder === FOLDERS.INBOX ? (
-                            'New mail will appear here as soon as your inbox syncs.'
+                            m['mail.list.empty.inbox.description']()
                           ) : (
-                            'Move messages here, or head back to inbox to keep processing mail.'
+                            m['mail.list.empty.other.description']()
                           )}
                         </p>
                       </div>

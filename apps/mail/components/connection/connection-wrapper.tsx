@@ -5,6 +5,7 @@ import { emailProviders } from '@/lib/constants';
 import { authClient } from '@/lib/auth-client';
 import { Button } from '../ui/button';
 import { X } from 'lucide-react';
+import { toast } from 'sonner';
 
 const DISMISS_KEY = 'dismissedConnectionPrompt';
 
@@ -18,14 +19,23 @@ export const ConnectionWrapper = () => {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    setDismissed(localStorage.getItem(DISMISS_KEY) === 'true');
+    try {
+      setDismissed(localStorage.getItem(DISMISS_KEY) === 'true');
+    } catch (error) {
+      console.warn('Failed to read dismissed connection prompt state:', error);
+      setDismissed(false);
+    }
   }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
     if (!hasNoConnections) {
-      localStorage.removeItem(DISMISS_KEY);
+      try {
+        localStorage.removeItem(DISMISS_KEY);
+      } catch (error) {
+        console.warn('Failed to clear dismissed connection prompt state:', error);
+      }
       setDismissed(false);
     }
   }, [hasNoConnections]);
@@ -40,12 +50,22 @@ export const ConnectionWrapper = () => {
             key={provider.name}
             variant="outline"
             className="h-11 justify-start gap-3 rounded-xl border shadow-none"
-            onClick={async () =>
-              await authClient.linkSocial({
-                provider: provider.providerId,
-                callbackURL: `${window.location.origin}${location.pathname}`,
-              })
-            }
+            onClick={async () => {
+              const callbackURL = `${window.location.origin}${location.pathname}`;
+              try {
+                await authClient.linkSocial({
+                  provider: provider.providerId,
+                  callbackURL,
+                });
+              } catch (error) {
+                console.error('Failed to link social provider:', {
+                  provider: provider.providerId,
+                  callbackURL,
+                  error,
+                });
+                toast.error(`Could not connect ${provider.name}.`);
+              }
+            }}
           >
             <Icon className="size-5!" />
             <span>{provider.name}</span>

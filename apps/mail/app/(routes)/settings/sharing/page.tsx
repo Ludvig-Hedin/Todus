@@ -131,5 +131,15 @@ function StatusBadge({ status }: { status: string }) {
   if (status === 'expired') {
     return <Badge variant="secondary" className="text-xs">Expired</Badge>;
   }
-  return <Badge variant="destructive" className="text-xs">Revoked</Badge>;
+  if (status === 'revoked') {
+    return <Badge variant="destructive" className="text-xs">Revoked</Badge>;
+  }
+  if (status === 'pending') {
+    return <Badge variant="secondary" className="text-xs">Pending</Badge>;
+  }
+  if (status === 'draft') {
+    return <Badge variant="secondary" className="text-xs">Draft</Badge>;
+  }
+  const label = status.trim() ? `${status.charAt(0).toUpperCase()}${status.slice(1)}` : 'Unknown';
+  return <Badge variant="secondary" className="text-xs">{label}</Badge>;
 }

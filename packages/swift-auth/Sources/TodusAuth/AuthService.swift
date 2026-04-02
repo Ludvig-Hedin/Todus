@@ -594,11 +594,13 @@ public final class AuthService: NSObject {
         }
     }
 
-    /// Attempt a silent session refresh by calling get-session with the current token.
+    /// Attempt a silent session refresh by calling /auth/me with the current token.
     /// Returns true if the session is still valid, false if it's expired.
+    /// Uses /auth/me instead of /auth/get-session because the latter doesn't resolve
+    /// bearer tokens — it only works with cookie-based sessions.
     public func attemptSilentRefresh() async -> Bool {
         guard let token = bearerToken else { return false }
-        let url = backendURL.appendingPathComponent("api/auth/get-session")
+        let url = backendURL.appendingPathComponent("api/auth/me")
         var request = URLRequest(url: url)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         // Origin required by Better Auth CSRF middleware on all requests

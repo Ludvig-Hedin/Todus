@@ -128,7 +128,8 @@ struct MeetingsListView: View {
         for m in services.meetingsService.meetings {
             if calendar.isDateInToday(m.startsAt) {
                 todayItems.append(m)
-            } else if calendar.isDate(m.startsAt, equalTo: today, toGranularity: .weekOfYear) {
+            } else if calendar.isDate(m.startsAt, equalTo: today, toGranularity: .weekOfYear)
+                && calendar.isDate(m.startsAt, equalTo: today, toGranularity: .year) {
                 thisWeekItems.append(m)
             } else if m.startsAt > today {
                 upcomingItems.append(m)
@@ -182,6 +183,7 @@ struct MeetingRowView: View {
                 Image(systemName: "sparkles")
                     .font(.system(size: 12))
                     .foregroundStyle(.purple.opacity(0.7))
+                    .accessibilityLabel("AI summary available")
             }
 
             Text(statusLabel)

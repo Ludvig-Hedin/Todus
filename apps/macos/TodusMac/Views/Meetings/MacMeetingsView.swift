@@ -8,6 +8,20 @@ struct MacMeetingsView: View {
     @State private var selectedMeetingId: String? = nil
     @State private var searchText = ""
     @State private var statusFilter: String? = nil
+    @State private var rotationAngle = 0.0
+
+    private func updateSyncRotation(isSyncing: Bool) {
+        if isSyncing {
+            rotationAngle = 0
+            withAnimation(.linear(duration: 1).repeatForever(autoreverses: false)) {
+                rotationAngle = 360
+            }
+        } else {
+            withAnimation(.easeOut(duration: 0.2)) {
+                rotationAngle = 0
+            }
+        }
+    }
 
     var body: some View {
         HSplitView {
@@ -27,6 +41,12 @@ struct MacMeetingsView: View {
         }
         .task {
             await services.meetingsService.loadMeetings()
+        }
+        .onAppear {
+            updateSyncRotation(isSyncing: services.meetingsService.isSyncing)
+        }
+        .onChange(of: services.meetingsService.isSyncing) { _, isSyncing in
+            updateSyncRotation(isSyncing: isSyncing)
         }
     }
 
@@ -48,13 +68,7 @@ struct MacMeetingsView: View {
                     Image(systemName: services.meetingsService.isSyncing ? "arrow.triangle.2.circlepath" : "arrow.clockwise")
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
-                        .rotationEffect(.degrees(services.meetingsService.isSyncing ? 360 : 0))
-                        .animation(
-                            services.meetingsService.isSyncing
-                                ? .linear(duration: 1).repeatForever(autoreverses: false)
-                                : .default,
-                            value: services.meetingsService.isSyncing
-                        )
+                        .rotationEffect(.degrees(rotationAngle))
                 }
                 .buttonStyle(.plain)
                 .help("Sync from Google Calendar")
@@ -125,12 +139,7 @@ struct MacMeetingsView: View {
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 20)
                     Button("Retry") {
-                        Task {
-                            await services.meetingsService.loadMeetings(
-                                status: statusFilter,
-                                search: searchText.isEmpty ? nil : searchText
-                            )
-                        }
+                        Task { await services.meetingsService.loadMeetings() }
                     }
                     .controlSize(.small)
                 }

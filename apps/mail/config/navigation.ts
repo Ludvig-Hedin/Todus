@@ -60,21 +60,21 @@ export const navigationConfig: Record<string, NavConfig> = {
         items: [
           {
             id: 'home',
-            title: 'Home',
+            title: m['navigation.sidebar.home'](),
             url: '/mail/home',
             icon: Home,
             shortcut: 'g + h',
           },
           {
             id: 'tasks',
-            title: 'Tasks',
+            title: m['navigation.sidebar.tasks'](),
             url: '/mail/tasks',
             icon: CheckSquare2,
             shortcut: 'g + k',
           },
           {
             id: 'email',
-            title: 'Email',
+            title: m['navigation.sidebar.email'](),
             url: '/mail/inbox',
             icon: Mail,
             children: [
@@ -97,14 +97,14 @@ export const navigationConfig: Record<string, NavConfig> = {
           },
           {
             id: 'calendar',
-            title: 'Calendar',
+            title: m['navigation.sidebar.calendar'](),
             url: '/mail/calendar',
             icon: CalendarDays,
             shortcut: 'g + c',
           },
           {
             id: 'meetings',
-            title: 'Meetings',
+            title: m['navigation.sidebar.meetings'](),
             url: '/mail/meetings',
             icon: Video,
             shortcut: 'g + m',
@@ -117,14 +117,14 @@ export const navigationConfig: Record<string, NavConfig> = {
         items: [
           {
             id: 'search',
-            title: 'Search',
+            title: m['navigation.sidebar.search'](),
             url: '/mail/search',
             icon: Search,
             shortcut: 'g + f',
           },
           {
             id: 'chat',
-            title: 'AI Assistant',
+            title: m['navigation.sidebar.chat'](),
             url: '/mail/chat',
             icon: MessageSquareIcon,
             shortcut: 'g + /',

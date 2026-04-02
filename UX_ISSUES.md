@@ -87,7 +87,7 @@ Last updated: 2026-03-31
 **Platforms:** iOS
 **File:** `apps/ios/Todus/Todus/Features/Email/EmailInboxView.swift`
 **Problem:** No distinction between loading, truly empty, and error states.
-**Fix:** Added `loadingState` branch with deterministic skeleton rows (`.redacted(reason: .placeholder)`). Body now branches: no-connection → loading skeleton (first load) → empty state → thread list.
+**Fix:** Full 4-state branching: no-connection → loading skeleton (first load) → **error state** (exclamationmark.triangle, error message, Try Again button) → empty state (folder icon + title + optional subtitle) → thread list. Empty state further branches: search-empty ("No results for X", Clear Search) vs folder-empty (Refresh). Fixed `searchBar.onSubmit` missing `folder:` parameter bug.
 **Status:** ✅ DONE
 
 ---
@@ -110,19 +110,54 @@ Last updated: 2026-03-31
 
 ---
 
-## Structural (Future Work)
+## Structural
 
 ### [S1] Web Calendar: Implement real calendar integration
-Real time-grid view with Google Calendar events. Backend Calendar API needed first.
+**Status:** ✅ DONE
+- **Backend**: New `calendarRouter` at `apps/server/src/trpc/routes/calendar.ts` — `events` query calls Google Calendar API v3 using `OAuth2Client` (auto-refresh) + `fetch`. Returns events with title, startTime, endTime, allDay, color, location, description, htmlLink. Handles 403 (missing `calendar.readonly` scope) by returning `{ events: [], scopeMissing: true }` instead of throwing.
+- **Scope**: Added `https://www.googleapis.com/auth/calendar.readonly` to Google driver's `getScope()` — new auth flows get it automatically.
+- **Web**: Calendar page now fetches `trpc.calendar.events` for the displayed month range. Right panel shows real events (colored left border, time, location) above tasks. Week overview shows blue dots on days with events. If `scopeMissing = true`, a "Connect Google Calendar" banner with a re-auth button appears. Page title reverted from "Tasks by Date" back to "Calendar" now that real events are shown.
+
+**Files:** `apps/server/src/trpc/routes/calendar.ts`, `apps/server/src/trpc/index.ts`, `apps/server/src/lib/driver/google.ts`, `apps/web/app/(routes)/mail/calendar/page.tsx`
+
+---
 
 ### [S2] Guided onboarding for web and macOS
-First-run screen like iOS GmailOnboardingView/RemindersOnboardingView.
+**Status:** ✅ DONE (pre-existing)
+- macOS: `MacHomeView` already has `getStartedSection` — shows three action cards (Create task / Connect Gmail / Check calendar) when user has no data. Gmail connection is prompted inline in the email view via `connectPrompt`.
+- iOS: `GmailOnboardingView` + `RemindersOnboardingView` gate the main tab bar on first run.
+
+---
 
 ### [S3] iOS Settings: Full navigation-based restructure
-Split into sub-pages via NavigationLink (Account, Connections, Appearance, Email, AI, Notifications, Security, About).
+**Status:** ✅ DONE
+- `activeSessionsSection` replaced by `sessionsNavigationSection` — a single NavigationLink row with a session-count badge. Full session management moved to `SessionsSettingsView` (loads its own data, handles revoke/revoke-all, signs out if current session revoked).
+- `aiAssistantSection` (with two large inline TextEditors) replaced by `aiAssistantNavigationSection` — a NavigationLink row. AI settings moved to `AIAssistantSettingsView` with proper section headers and footers. `saveSharedAIProfile()` called on `.onDisappear`.
+- `preferencesAndAppearanceSection` replaced by `preferencesSection` + "Appearance" NavigationLink. Appearance moved to `AppearanceSettingsView` with a vertical list layout (swatch + title + subtitle + checkmark) instead of the cramped three-column picker.
+- Main settings page now has 8 clean sections — no more large inline editors or wide layout components.
+
+**Files:** `apps/ios/Todus/Todus/Features/Settings/SettingsView.swift`
+
+---
 
 ### [S4] Email folder parity: Add Archive/Snoozed/Spam/Trash to iOS and macOS
-Currently only web surfaces these folders.
+**Status:** ✅ DONE
+- **macOS**: Added `archive`, `snoozed`, `spam`, `bin` cases to `EmailSection` enum in `MacRootView.swift`. Each has a title and SF Symbol. Sidebar shows primary folders (Inbox/Drafts/Sent) above a divider, secondary folders below. `SidebarChildItemButton` updated to accept optional `systemImage` parameter. `MacEmailInboxView(folder: section.rawValue)` already passes the folder string to the backend.
+- **iOS**: Added `EmailFolder` private enum to `EmailInboxView.swift` with all 7 folders (inbox/drafts/sent/archive/snoozed/spam/bin). Header title now taps to open a `Menu` picker showing primary and secondary folders with icons. Folder changes trigger thread reload. Empty state shows folder-specific icon and title.
+
+**Files:** `apps/macos/TodusMac/App/MacRootView.swift`, `apps/macos/TodusMac/App/MacSidebarView.swift`, `apps/ios/Todus/Todus/Features/Email/EmailInboxView.swift`
+
+---
 
 ### [S5] Voice input on web
-Port iOS voice chat capabilities to web.
+**Status:** ✅ DONE (pre-existing)
+`VoiceButton` component exists at `apps/web/components/voice-button.tsx` and is rendered inside the AI chat panel (`apps/web/components/create/ai-chat.tsx`). Uses ElevenLabs with email thread context awareness.
+
+---
+
+### [C2] Web Home: Distinguish "not connected" from "no data" empty states
+**Status:** ✅ DONE
+- **Calendar section**: Now queries `trpc.calendar.events` for today's range. Shows real events with colored left border, time, and location. If `scopeMissing = true` (token lacks `calendar.readonly`), shows a re-auth button. If no events: "No events today". No longer shows a misleading static "Connect Google Calendar" CTA regardless of connection state.
+- **Email section**: Now checks `threadsQuery.isError` (backend throws `NOT_FOUND` when no Gmail connection is linked). On error → "Connect Gmail" CTA linking to `/settings/connections`. On success with empty list → "Your inbox is empty".
+
+**Files:** `apps/web/app/(routes)/mail/home/page.tsx`

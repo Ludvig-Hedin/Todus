@@ -105,7 +105,40 @@ struct MailAssistantNudge: Codable, Identifiable, Sendable {
     let count: Int
     let threadIds: [String]
 
-    var id: String { "\(type.rawValue)-\(title)" }
+    /// Stable stored id — matches server when present; otherwise derived from type + title (same as macOS).
+    let id: String
+
+    enum CodingKeys: String, CodingKey {
+        case type, title, description, count, threadIds, id
+    }
+
+    init(
+        type: AssistantNudgeType,
+        title: String,
+        description: String,
+        count: Int,
+        threadIds: [String],
+        id: String? = nil
+    ) {
+        self.type = type
+        self.title = title
+        self.description = description
+        self.count = count
+        self.threadIds = threadIds
+        self.id = (id?.isEmpty == false ? id : nil) ?? "\(type.rawValue)-\(title)"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            type: try c.decode(AssistantNudgeType.self, forKey: .type),
+            title: try c.decode(String.self, forKey: .title),
+            description: try c.decode(String.self, forKey: .description),
+            count: try c.decode(Int.self, forKey: .count),
+            threadIds: try c.decode([String].self, forKey: .threadIds),
+            id: try? c.decode(String.self, forKey: .id)
+        )
+    }
 }
 
 struct MailAssistantDraftResult: Codable, Sendable {

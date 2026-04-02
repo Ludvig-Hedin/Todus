@@ -208,11 +208,18 @@ export const sharingRouter = router({
           .where(eq(aiConversation.id, share.conversationId))
           .limit(1);
 
+        if (!convo) {
+          throw new TRPCError({
+            code: 'NOT_FOUND',
+            message: 'The source conversation for this share is no longer available.',
+          });
+        }
+
         return {
           passwordRequired: false as const,
           title: share.title,
           createdAt: share.createdAt,
-          messages: (convo?.messages as Array<{ role: string; content: string }>) ?? [],
+          messages: (convo.messages as Array<{ role: string; content: string }>) ?? [],
         };
       } finally {
         await conn.end();
@@ -325,7 +332,7 @@ export const sharingRouter = router({
     .mutation(async ({ ctx, input }) => {
       const { db, conn } = getDb();
       try {
-        await db
+        const updated = await db
           .update(sharedConversation)
           .set({ revokedAt: new Date() })
           .where(
@@ -333,8 +340,9 @@ export const sharingRouter = router({
               eq(sharedConversation.id, input.id),
               eq(sharedConversation.ownerUserId, ctx.sessionUser.id),
             ),
-          );
-        return { success: true };
+          )
+          .returning({ id: sharedConversation.id });
+        return { success: updated.length > 0 };
       } finally {
         await conn.end();
       }
@@ -375,7 +383,7 @@ export const sharingRouter = router({
         }
 
         // Revoked shares must not be modifiable
-        await db
+        const updated = await db
           .update(sharedConversation)
           .set(updates)
           .where(
@@ -384,9 +392,10 @@ export const sharingRouter = router({
               eq(sharedConversation.ownerUserId, ctx.sessionUser.id),
               isNull(sharedConversation.revokedAt),
             ),
-          );
+          )
+          .returning({ id: sharedConversation.id });
 
-        return { success: true };
+        return { success: updated.length > 0 };
       } finally {
         await conn.end();
       }

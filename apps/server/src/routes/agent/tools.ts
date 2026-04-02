@@ -5,7 +5,7 @@ import type { IGetThreadResponse } from '../../lib/driver/types';
 import { composeEmail } from '../../trpc/routes/ai/compose';
 import { meeting, meetingTranscript, connection } from '../../db/schema';
 import { perplexity } from '@ai-sdk/perplexity';
-import { eq, desc, and, like } from 'drizzle-orm';
+import { eq, desc, and, like, inArray } from 'drizzle-orm';
 import { colors } from '../../lib/prompts';
 import { openai } from '@ai-sdk/openai';
 import { generateText, tool } from 'ai';
@@ -580,24 +580,19 @@ const searchMeetingTranscriptTool = (userId: string) =>
         const escapedQuery = query.replace(/[%_\\]/g, '\\$&');
 
         // Search transcript segments — use LIKE for text search
+        const meetingFilter =
+          meetingIds.length === 1
+            ? eq(meetingTranscript.meetingId, meetingIds[0]!)
+            : inArray(meetingTranscript.meetingId, meetingIds);
+
         const segments = await db
           .select()
           .from(meetingTranscript)
-          .where(
-            and(
-              meetingIds.length === 1
-                ? eq(meetingTranscript.meetingId, meetingIds[0]!)
-                : undefined,
-              like(meetingTranscript.text, `%${escapedQuery}%`),
-            ),
-          )
+          .where(and(meetingFilter, like(meetingTranscript.text, `%${escapedQuery}%`)))
           .limit(limit);
 
-        // Filter to only user's meetings (security)
-        const filtered = segments.filter((s) => meetingIds.includes(s.meetingId));
-
         return {
-          segments: filtered.map((s) => ({
+          segments: segments.map((s) => ({
             meetingId: s.meetingId,
             meetingTitle: meetingTitleMap[s.meetingId] ?? 'Unknown',
             speaker: s.speakerName,

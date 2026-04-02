@@ -110,14 +110,18 @@ export const saveConversation = privateProcedure
       }
 
       if (existingConversation) {
+        const updateData: Record<string, unknown> = {
+          title: input.title,
+          messages: input.messages,
+          updatedAt: now,
+        };
+        if (input.folderId !== undefined) {
+          updateData.folderId = input.folderId ?? null;
+        }
+
         const [updated] = await db
           .update(aiConversation)
-          .set({
-            title: input.title,
-            messages: input.messages,
-            folderId: input.folderId ?? null,
-            updatedAt: now,
-          })
+          .set(updateData)
           .where(and(eq(aiConversation.id, input.id), eq(aiConversation.userId, ctx.sessionUser.id)))
           .returning({ id: aiConversation.id });
 

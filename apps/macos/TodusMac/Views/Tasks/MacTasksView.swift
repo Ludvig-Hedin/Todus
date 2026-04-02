@@ -38,7 +38,11 @@ struct MacTasksView: View {
         }
         .onAppear { recomputeTasks() }
         .task {
-            await services.syncSharedFolders(in: modelContext)
+            do {
+                try await services.syncSharedFolders(in: modelContext)
+            } catch {
+                print("[MacTasksView] Failed to sync shared folders: \(error)")
+            }
         }
         .onChange(of: allTasks) { recomputeTasks() }
         .onChange(of: searchText) { recomputeTasks() }

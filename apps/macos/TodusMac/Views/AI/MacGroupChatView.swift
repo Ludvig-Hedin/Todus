@@ -229,7 +229,6 @@ struct MacGroupListSection: View {
     @Binding var selectedGroupId: String?
 
     @State private var showCreateSheet = false
-    @State private var joinToken: String = ""
     @State private var showJoinSheet = false
 
     private var groupService: GroupChatService { services.groupChatService }

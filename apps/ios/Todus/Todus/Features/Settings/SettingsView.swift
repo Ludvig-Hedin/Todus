@@ -5,7 +5,6 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Environment(AppServices.self) private var services
-    @State private var showsAutoSendConfirm = false
     @State private var showsLogoutConfirmation = false
     @State private var showsDeleteConfirmation = false
     @State private var showsDeleteAlert = false

@@ -324,7 +324,11 @@ struct MacAssistantPanel: View {
             }
         }
         .task {
-            await services.syncSharedFolders(in: modelContext)
+            do {
+                try await services.syncSharedFolders(in: modelContext)
+            } catch {
+                print("[MacAssistantPanel] Failed to sync shared folders: \(error)")
+            }
         }
         // Auto-save conversation when panel hides
         .onChange(of: isPresented) { _, visible in

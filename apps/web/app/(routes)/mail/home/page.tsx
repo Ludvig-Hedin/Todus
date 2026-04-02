@@ -5,7 +5,7 @@
  */
 import { useMemo } from 'react';
 import { useInfiniteQuery, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { formatDistanceToNow, isToday, format } from 'date-fns';
+import { formatDistanceToNow, isToday, format, startOfDay, endOfDay } from 'date-fns';
 import { Link } from 'react-router';
 import {
   ArrowRight,
@@ -17,19 +17,27 @@ import {
   CheckSquare2,
   Mail,
   ExternalLink,
+  Clock,
+  MapPin,
 } from 'lucide-react';
 import { useTRPC } from '@/providers/query-provider';
 import { authProxy } from '@/lib/auth-proxy';
-import { useSession } from '@/lib/auth-client';
+import { authClient, useSession } from '@/lib/auth-client';
 import { useThread } from '@/hooks/use-threads';
 import { Button } from '@/components/ui/button';
-import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import type { Route } from './+types/page';
 import type { Outputs } from '@zero/server/trpc';
 
 type Task = Outputs['tasks']['list']['tasks'][number];
+type CalendarEvent = NonNullable<Outputs['calendar']['events']['events']>[number];
+
+function isNotFoundTrpcError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const data = 'data' in error ? (error as { data?: { code?: string } }).data : undefined;
+  return data?.code === 'NOT_FOUND';
+}
 
 // Auth guard
 export async function clientLoader({ request }: Route.ClientLoaderArgs) {
@@ -139,6 +147,20 @@ export default function HomePage() {
     onSuccess: () => void queryClient.invalidateQueries(trpc.tasks.list.queryFilter()),
   });
 
+  // Today's calendar events
+  const todayStart = startOfDay(new Date()).toISOString();
+  const todayEnd = endOfDay(new Date()).toISOString();
+  const {
+    data: eventsData,
+    isLoading: eventsLoading,
+    isError: eventsError,
+    error: eventsErrorValue,
+  } = useQuery(
+    trpc.calendar.events.queryOptions({ timeMin: todayStart, timeMax: todayEnd }),
+  );
+  const todayEvents = eventsData?.events ?? [];
+  const calendarScopeMissing = eventsData?.scopeMissing ?? false;
+
   // Recent inbox threads — first page, 3 items
   const threadsQuery = useInfiniteQuery(
     trpc.mail.listThreads.infiniteQueryOptions(
@@ -154,6 +176,8 @@ export default function HomePage() {
     () => (threadsQuery.data?.pages[0]?.threads ?? []).slice(0, 3).map((t) => t.id),
     [threadsQuery.data],
   );
+  const calendarConnectionNotFound = isNotFoundTrpcError(eventsErrorValue);
+  const inboxConnectionNotFound = isNotFoundTrpcError(threadsQuery.error);
 
   return (
     <div className="flex h-screen flex-col overflow-y-auto bg-background">
@@ -169,27 +193,84 @@ export default function HomePage() {
         </div>
 
         <div className="flex flex-col gap-4">
-          {/* ── Today's Events (Calendar CTA) ─────────────────────────────── */}
+          {/* ── Today's Events ────────────────────────────────────────────── */}
           <Section>
             <SectionHeader
               icon={CalendarDays}
               title="Today's Events"
+              count={todayEvents.length}
               linkTo="/mail/calendar"
             />
-            {/* Calendar events require a backend Google Calendar integration — show CTA */}
-            <Link
-              to="/settings/connections"
-              className="flex items-center gap-3 rounded-lg border border-dashed bg-muted/30 px-4 py-3.5 transition-colors hover:bg-muted/50"
-            >
-              <CalendarDays className="h-5 w-5 shrink-0 text-muted-foreground" />
-              <div className="min-w-0 flex-1">
-                <p className="text-[13px] font-medium">Connect Google Calendar</p>
-                <p className="text-[12px] text-muted-foreground">
-                  See today's events here once connected.
-                </p>
+            {eventsLoading ? (
+              <div className="flex flex-col gap-2">
+                {Array.from({ length: 2 }).map((_, i) => (
+                  <div key={i} className="h-10 animate-pulse rounded-lg bg-muted/50" />
+                ))}
               </div>
-              <ExternalLink className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-            </Link>
+            ) : calendarConnectionNotFound ? (
+              /* No Google account linked — prompt to connect */
+              <Link
+                to="/settings/connections"
+                className="flex items-center gap-3 rounded-lg border border-dashed bg-muted/30 px-4 py-3.5 transition-colors hover:bg-muted/50"
+              >
+                <CalendarDays className="h-5 w-5 shrink-0 text-muted-foreground" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-[13px] font-medium">Connect Google Calendar</p>
+                  <p className="text-[12px] text-muted-foreground">
+                    See today's events here once connected.
+                  </p>
+                </div>
+                <ExternalLink className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              </Link>
+            ) : eventsError ? (
+              <div className="flex flex-col items-center gap-2 py-3 text-center">
+                <CalendarDays className="h-7 w-7 text-muted-foreground/40" />
+                <p className="text-[13px] font-medium">Could not load events</p>
+                <p className="text-[12px] text-muted-foreground">
+                  Try again in a moment.
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={() =>
+                    void queryClient.invalidateQueries(
+                      trpc.calendar.events.queryFilter({ timeMin: todayStart, timeMax: todayEnd }),
+                    )
+                  }
+                >
+                  Retry
+                </Button>
+              </div>
+            ) : calendarScopeMissing ? (
+              /* Connected but calendar scope not yet granted — prompt re-auth */
+              <button
+                type="button"
+                onClick={() => authClient.linkSocial({ provider: 'google', callbackURL: '/mail/home' })}
+                className="flex w-full items-center gap-3 rounded-lg border border-dashed bg-muted/30 px-4 py-3.5 text-left transition-colors hover:bg-muted/50"
+              >
+                <CalendarDays className="h-5 w-5 shrink-0 text-muted-foreground" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-[13px] font-medium">Allow calendar access</p>
+                  <p className="text-[12px] text-muted-foreground">
+                    Grant the calendar permission to see today's events.
+                  </p>
+                </div>
+                <ExternalLink className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              </button>
+            ) : todayEvents.length === 0 ? (
+              <div className="flex flex-col items-center gap-2 py-3 text-center">
+                <CalendarDays className="h-7 w-7 text-muted-foreground/40" />
+                <p className="text-[13px] text-muted-foreground">No events today</p>
+              </div>
+            ) : (
+              <div className="flex flex-col divide-y divide-border/60">
+                {todayEvents.map((event) => (
+                  <CalendarEventRow key={event.id} event={event} />
+                ))}
+              </div>
+            )}
           </Section>
 
           {/* ── Due Tasks ──────────────────────────────────────────────────── */}
@@ -247,6 +328,38 @@ export default function HomePage() {
                 {Array.from({ length: 3 }).map((_, i) => (
                   <div key={i} className="h-11 animate-pulse rounded-lg bg-muted/50" />
                 ))}
+              </div>
+            ) : inboxConnectionNotFound ? (
+              /* Backend throws NOT_FOUND when no Gmail connection — prompt to connect */
+              <Link
+                to="/settings/connections"
+                className="flex items-center gap-3 rounded-lg border border-dashed bg-muted/30 px-4 py-3.5 transition-colors hover:bg-muted/50"
+              >
+                <Mail className="h-5 w-5 shrink-0 text-muted-foreground" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-[13px] font-medium">Connect Gmail</p>
+                  <p className="text-[12px] text-muted-foreground">
+                    See your recent emails here once connected.
+                  </p>
+                </div>
+                <ExternalLink className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              </Link>
+            ) : threadsQuery.isError ? (
+              <div className="flex flex-col items-center gap-2 py-3 text-center">
+                <Mail className="h-7 w-7 text-muted-foreground/40" />
+                <p className="text-[13px] font-medium">Could not load emails</p>
+                <p className="text-[12px] text-muted-foreground">
+                  Try again in a moment.
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={() => void threadsQuery.refetch()}
+                >
+                  Retry
+                </Button>
               </div>
             ) : recentThreadIds.length === 0 ? (
               <div className="flex flex-col items-center gap-2 py-3 text-center">
@@ -312,6 +425,65 @@ function TaskItem({ task, onToggle }: { task: Task; onToggle: () => void }) {
       )}
     </div>
   );
+}
+
+// ─── CalendarEventRow ─────────────────────────────────────────────────────────
+// Compact event row with colored left border + time + optional location
+
+function CalendarEventRow({ event }: { event: CalendarEvent }) {
+  const timeLabel = event.allDay
+    ? 'All day'
+    : (() => {
+        const start = event.startTime ? new Date(event.startTime) : null;
+        const end = event.endTime ? new Date(event.endTime) : null;
+
+        if (!start || Number.isNaN(start.getTime())) {
+          return 'Time unknown';
+        }
+
+        if (!end || Number.isNaN(end.getTime())) {
+          return format(start, 'h:mm a');
+        }
+
+        return `${format(start, 'h:mm a')} – ${format(end, 'h:mm a')}`;
+      })();
+
+  const row = (
+    <div
+      className="flex items-start gap-3 py-2.5"
+      style={{ borderLeft: `3px solid ${event.color ?? '#5484ed'}`, paddingLeft: '10px' }}
+    >
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-[13px] font-medium">{event.title}</p>
+        <div className="mt-0.5 flex items-center gap-2">
+          <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+            <Clock className="h-3 w-3 shrink-0" />
+            {timeLabel}
+          </span>
+          {event.location && (
+            <span className="flex items-center gap-1 truncate text-[11px] text-muted-foreground">
+              <MapPin className="h-3 w-3 shrink-0" />
+              {event.location}
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
+  if (event.htmlLink) {
+    return (
+      <a
+        href={event.htmlLink}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="-mx-1 block rounded-lg px-1 transition-colors hover:bg-accent/40"
+      >
+        {row}
+      </a>
+    );
+  }
+  return <div className="-mx-1 px-1">{row}</div>;
 }
 
 // ─── EmailThreadRow ────────────────────────────────────────────────────────────

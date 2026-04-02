@@ -60,12 +60,14 @@ actor CalendarService {
 
     /// Fetch events for a given date range, returned as sendable CalendarEvent structs.
     func events(from startDate: Date, to endDate: Date) -> [CalendarEvent] {
+        pruneStaleFolderMapEntries()
         let predicate = eventStore.predicateForEvents(withStart: startDate, end: endDate, calendars: nil)
         return eventStore.events(matching: predicate).map { $0.toCalendarEvent(folderID: folderID(for: $0.eventIdentifier)) }
     }
 
     /// Fetch today's events (from midnight to midnight).
     func todaysEvents() -> [CalendarEvent] {
+        pruneStaleFolderMapEntries()
         let calendar = Calendar.current
         let startOfDay = calendar.startOfDay(for: Date())
         let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay) ?? startOfDay
@@ -110,6 +112,30 @@ actor CalendarService {
             UserDefaults.standard.set(newValue, forKey: folderMapKey)
         }
     }
+
+    private func pruneStaleFolderMapEntries() {
+        guard canReadEvents() else { return }
+
+        let existingIdentifiers = Set(
+            eventStore
+                .events(
+                    matching: eventStore.predicateForEvents(
+                        withStart: .distantPast,
+                        end: .distantFuture,
+                        calendars: nil
+                    )
+                )
+                .compactMap(\.eventIdentifier)
+        )
+
+        guard !existingIdentifiers.isEmpty else { return }
+
+        let currentMap = folderMap
+        let prunedMap = currentMap.filter { existingIdentifiers.contains($0.key) }
+        if prunedMap.count != currentMap.count {
+            folderMap = prunedMap
+        }
+    }
 }
 
 private extension EKEvent {
@@ -124,7 +150,8 @@ private extension EKEvent {
             // hashValue is unstable across launches; use the actual RGB components instead.
             calendarColor: {
                 guard let cgColor = calendar?.cgColor,
-                      let converted = cgColor.converted(to: CGColorSpace(name: CGColorSpace.sRGB)!, intent: .defaultIntent, options: nil),
+                      let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+                      let converted = cgColor.converted(to: colorSpace, intent: .defaultIntent, options: nil),
                       let comps = converted.components, comps.count >= 3 else {
                     return 0x5B8DEF // default blue
                 }

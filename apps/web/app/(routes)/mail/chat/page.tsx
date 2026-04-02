@@ -152,10 +152,15 @@ export default function ChatPage() {
         if (!convo?.messages) return;
 
         const messages = Array.isArray(convo.messages) ? (convo.messages as ChatMessageRecord[]) : [];
-        const createdAt =
+        const createdAtDate =
           convo.createdAt instanceof Date
-            ? convo.createdAt.toISOString()
-            : new Date(convo.createdAt).toISOString();
+            ? convo.createdAt
+            : convo.createdAt
+              ? new Date(convo.createdAt)
+              : new Date();
+        const createdAt = Number.isNaN(createdAtDate.getTime())
+          ? new Date().toISOString()
+          : createdAtDate.toISOString();
 
         saveConversation.mutate(
           {
@@ -282,14 +287,19 @@ export default function ChatPage() {
         );
         if (!result?.messages) return;
 
-        // Build message objects compatible with useAgentChat
+        // Build message objects compatible with useAgentChat.
+        // Use extractTextContent so non-string content (e.g. tool-call arrays) doesn't
+        // stringify as "[object Object]".
           const loaded = (Array.isArray(result.messages) ? result.messages : []).map(
-            (m, i) => ({
-              id: `loaded-${id}-${i}`,
-              role: m.role as 'user' | 'assistant',
-              content: String(m.content ?? ''),
-              parts: [{ type: 'text' as const, text: String(m.content ?? '') }],
-            }),
+            (m, i) => {
+              const text = extractTextContent(m.content);
+              return {
+                id: `loaded-${id}-${i}`,
+                role: m.role as 'user' | 'assistant',
+                content: text,
+                parts: [{ type: 'text' as const, text }],
+              };
+            },
           );
         setMessages(loaded);
         setConversationId(id);

@@ -67,14 +67,9 @@ final class ShareConversationService {
 
     func importShare(slug: String, password: String? = nil) async throws -> ShareImportResponse {
         guard let client = apiClient else { throw URLError(.userAuthenticationRequired) }
-        struct Input: Encodable {
-            let slug: String
-            let password: String?
-        }
-
         return try await client.trpcMutation(
             "sharing.import",
-            input: Input(slug: slug, password: password)
+            input: ShareGetInput(slug: slug, password: password)
         )
     }
 
