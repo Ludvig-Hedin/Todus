@@ -6,7 +6,8 @@ import {
 } from '../trpc';
 import { Ratelimit } from '@upstash/ratelimit';
 import { createDb } from '../../db';
-import { eq, and, isNull, desc, lt, inArray } from 'drizzle-orm';
+import { eq, and, isNull, desc, lt, inArray, or } from 'drizzle-orm';
+import { parseGroupMessagesCursor } from './groups-cursor';
 import { env } from '../../env';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
@@ -379,15 +380,14 @@ export const groupsRouter = router({
         const baseWhere = eq(groupMessage.groupId, input.groupId);
         let cursorFilter: ReturnType<typeof and> | undefined;
         if (input.cursor) {
-          const [ts, id] = input.cursor.split(':');
-          const cursorDate = new Date(ts!);
-          // Fetch rows strictly before the cursor timestamp, OR rows at the exact
-          // same timestamp with a lexicographically smaller id to handle ties.
+          const { cursorDate, cursorId } = parseGroupMessagesCursor(input.cursor);
           cursorFilter = and(
             baseWhere,
-            lt(groupMessage.createdAt, cursorDate),
+            or(
+              lt(groupMessage.createdAt, cursorDate),
+              and(eq(groupMessage.createdAt, cursorDate), lt(groupMessage.id, cursorId!)),
+            ),
           ) as ReturnType<typeof and>;
-          void id; // id component reserved for future tie-breaking at DB level
         }
         const whereClause = cursorFilter ?? baseWhere;
 

@@ -821,10 +821,17 @@ const api = new Hono<HonoContext>()
     return c.json({ user });
   })
   .get('/auth/mobile-token', async (c) => {
-    // Bridge endpoint: converts a cookie-based web session into a JWT bearer token
+    // Bridge endpoint: converts a cookie-based web session into a raw session token
     // for the iOS/macOS apps. Called from the system browser after web login.
     // The system browser has the session cookie, so we can read the session
-    // and mint the JWT exposed by Better Auth's jwt() plugin for native use.
+    // and return the raw session token for native bearer auth.
+    //
+    // IMPORTANT: Returns the raw session token (NOT a JWT) because:
+    // - JWTs minted by the jwt() plugin expire after 15 minutes by default
+    // - Raw session tokens are stored in the session table with 30-day expiry
+    // - The bearer plugin resolves raw tokens through Better Auth's full pipeline,
+    //   enabling session extension (updateAge) and token rotation (set-auth-token header)
+    // - Raw tokens can be revoked server-side by deleting the session row
     //
     // IMPORTANT: We return an HTML page with a JavaScript redirect instead of
     // a 302 redirect. iOS's ASWebAuthenticationSession (used by expo-web-browser)
@@ -837,13 +844,11 @@ const api = new Hono<HonoContext>()
       // No session — redirect back to web login
       return c.redirect(`${env.VITE_PUBLIC_APP_URL}/login?error=no_session`);
     }
-    const jwtToken = await auth.api.getToken({
-      headers: c.req.raw.headers,
-    });
 
-    if (!jwtToken?.token) {
-      return c.redirect(`${env.VITE_PUBLIC_APP_URL}/login?error=no_native_token`);
-    }
+    // Use the raw session token instead of minting a JWT.
+    // Raw tokens persist in the session table for 30 days and are resolved by
+    // the bearer plugin + Strategy 2 (direct DB lookup) in the auth middleware.
+    const nativeToken = session.session.token;
 
     // Build the deep link URL for the native app
     const redirectUrl = c.req.query('redirect') || 'todus://auth-callback';
@@ -852,7 +857,7 @@ const api = new Hono<HonoContext>()
       ? `&sessionId=${encodeURIComponent(session.session.id)}`
       : '';
     const deepLink =
-      `${redirectUrl}${separator}token=${encodeURIComponent(jwtToken.token)}${sessionIdParam}`;
+      `${redirectUrl}${separator}token=${encodeURIComponent(nativeToken)}${sessionIdParam}`;
 
     // Return an HTML page that triggers the deep link via JavaScript.
     // This is more reliable than a 302 redirect for custom URL schemes on iOS.

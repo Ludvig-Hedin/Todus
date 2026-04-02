@@ -7,6 +7,7 @@ import { env } from '../../env';
 import { and, desc, eq } from 'drizzle-orm';
 import { OAuth2Client } from 'google-auth-library';
 import { stripHtml } from 'string-strip-html';
+import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 
 const assistantActivityTypeSchema = z.enum([
@@ -228,7 +229,12 @@ function extractEventSuggestion(subject: string, text: string, baseDate: Date): 
     );
     if (monthDay) {
       const parsed = new Date(`${monthDay[1]} ${monthDay[2]}, ${baseDate.getFullYear()}`);
-      if (!Number.isNaN(parsed.getTime())) start = parsed;
+      if (!Number.isNaN(parsed.getTime())) {
+        if (parsed < baseDate) {
+          parsed.setFullYear(parsed.getFullYear() + 1);
+        }
+        start = parsed;
+      }
     }
   }
 
@@ -334,7 +340,20 @@ async function createGoogleCalendarEvent(
 ) {
   const auth = new OAuth2Client(env.GOOGLE_CLIENT_ID, env.GOOGLE_CLIENT_SECRET);
   auth.setCredentials({ refresh_token: refreshToken });
-  const { token } = await auth.getAccessToken();
+  let token: string | null | undefined;
+  try {
+    ({ token } = await auth.getAccessToken());
+  } catch (error) {
+    const maskedToken = refreshToken.length > 8
+      ? `${refreshToken.slice(0, 4)}...${refreshToken.slice(-4)}`
+      : '[redacted]';
+    const message = error instanceof Error ? error.message : String(error);
+    console.error('[mail-assistant] Could not refresh Google token', {
+      refreshToken: maskedToken,
+      error: message,
+    });
+    throw new Error(`Could not refresh Google token: ${message}`);
+  }
   if (!token) {
     throw new Error('Could not refresh Google token');
   }
@@ -529,6 +548,10 @@ export const mailAssistantRouter = router({
       const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
       try {
         const now = new Date();
+        const dueDate =
+          input.task.dueDate && !Number.isNaN(Date.parse(input.task.dueDate))
+            ? new Date(input.task.dueDate)
+            : null;
         const [created] = await db
           .insert(task)
           .values({
@@ -538,7 +561,7 @@ export const mailAssistantRouter = router({
             description: input.task.description ?? '',
             status: 'todo',
             priority: input.task.priority,
-            dueDate: input.task.dueDate ? new Date(input.task.dueDate) : null,
+            dueDate,
             folderId: null,
             reminderIdentifier: null,
             emailThreadId: input.threadId,
@@ -643,8 +666,16 @@ export const mailAssistantRouter = router({
         connectionId: activeConnection.id,
       });
 
+      const recipientEmail = latest?.sender?.email?.trim();
+      if (!recipientEmail) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Could not determine a recipient email address for this draft.',
+        });
+      }
+
       const draftPayload = {
-        to: latest?.sender?.email || '',
+        to: recipientEmail,
         cc:
           latest?.cc
             ?.map((recipient) => recipient.email)
