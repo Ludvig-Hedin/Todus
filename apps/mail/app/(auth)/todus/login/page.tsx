@@ -69,6 +69,73 @@ export default function LoginTodus() {
               Continue with Apple
             </Button>
           </div>
+
+          {/*
+            Legacy email/password auth kept here for future re-enable.
+
+            <div className="relative mb-4">
+              <div className="absolute inset-0 flex items-center">
+                <span className="w-full border-t border-border" />
+              </div>
+              <div className="relative flex justify-center text-xs uppercase">
+                <span className="bg-background px-2 text-muted-foreground">or</span>
+              </div>
+            </div>
+
+            <Form {...form}>
+              <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+                <FormField
+                  control={form.control}
+                  name="email"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Email</FormLabel>
+                      <FormControl>
+                        <Input placeholder="email@example.com" {...field} />
+                      </FormControl>
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="password"
+                  render={({ field }) => (
+                    <FormItem>
+                      <div className="flex items-center justify-between">
+                        <FormLabel>Password</FormLabel>
+                        <Link
+                          to="/forgot-password"
+                          className="text-muted-foreground text-xs hover:text-foreground"
+                        >
+                          Forgot your password?
+                        </Link>
+                      </div>
+                      <FormControl>
+                        <Input type="password" placeholder="••••••••" {...field} />
+                      </FormControl>
+                    </FormItem>
+                  )}
+                />
+
+                <Button type="submit" className="w-full">
+                  Login
+                </Button>
+
+                <div className="mt-6 text-center text-sm">
+                  <p className="text-muted-foreground">
+                    Don't have an account?{' '}
+                    <a
+                      href="/signup"
+                      className="font-medium underline underline-offset-4 hover:text-foreground"
+                    >
+                      Sign up
+                    </a>
+                  </p>
+                </div>
+              </form>
+            </Form>
+          */}
         </div>
 
         <footer className="mt-auto">
