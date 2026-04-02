@@ -1,5 +1,12 @@
 # Project Changelog
 
+## [2026-04-03] Fix — Native meetings follow-up regressions
+
+### Native meetings (`apps/ios`, `apps/macos`)
+- **MeetingDetailView.swift / MacMeetingDetailView.swift**: Detail refreshes after `generateSummary` and `scheduleBot` now preserve the current content instead of blanking the whole screen behind a full-screen loading spinner.
+- **iOS MeetingsService.swift**: Calendar sync and bot scheduling now reload meetings with the current search/status filters preserved, so the visible list stays consistent with the active search field.
+- **MacMeetingsView.swift**: Reordered grouped meeting sections to `Today → This Week → Upcoming → Earlier`, matching iOS and prioritizing the most time-sensitive meetings first.
+
 ## [2026-04-02] Fix — Native app session expiration after inactivity
 
 Root cause: `/auth/mobile-token` minted JWTs via Better Auth's `jwt()` plugin which defaults to **15-minute expiration**. After 15 minutes, the JWT expired and all three backend resolution strategies failed (JWT verify, DB lookup, cookie rehydration). No working token refresh mechanism existed — `attemptSilentRefresh()` called `/api/auth/get-session` which can't resolve bearer tokens.

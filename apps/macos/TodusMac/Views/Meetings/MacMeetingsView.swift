@@ -255,9 +255,9 @@ struct MacMeetingsView: View {
         }
 
         var groups: [MeetingGroup] = []
-        if !upcomingItems.isEmpty { groups.append(MeetingGroup(title: "Upcoming", meetings: upcomingItems)) }
         if !todayItems.isEmpty { groups.append(MeetingGroup(title: "Today", meetings: todayItems)) }
         if !thisWeekItems.isEmpty { groups.append(MeetingGroup(title: "This Week", meetings: thisWeekItems)) }
+        if !upcomingItems.isEmpty { groups.append(MeetingGroup(title: "Upcoming", meetings: upcomingItems)) }
         if !earlierItems.isEmpty { groups.append(MeetingGroup(title: "Earlier", meetings: earlierItems)) }
         return groups
     }

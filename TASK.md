@@ -13,6 +13,7 @@ Last updated: 2026-03-31
 
 ## Current Web/Server Fix Batch
 
+- `DONE` Fixed native meetings follow-up regressions: detail refreshes no longer flash a full-screen spinner during recap/bot actions, iOS meeting sync preserves the active filters/search state, and macOS meeting group ordering now matches iOS with Today first.
 - `DONE` Added a shared `mailAssistant` backend domain with per-thread recommendations, inbox nudges, task/event apply actions, draft generation, and lightweight assistant activity logging.
 - `DONE` Added nested `assistantAutomationPolicy` settings defaults and backward-compatible settings merges for summaries, suggestions, nudges, auto-drafts, and the opt-in auto-send experiment.
 - `DONE` Shipped visible proactive mail assistant surfaces in the web thread view and inbox list, including thread summaries, task/event suggestions, draft actions, inline assistant buttons, and inbox nudges.

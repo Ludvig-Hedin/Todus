@@ -116,7 +116,7 @@ struct MeetingDetailView: View {
         } message: {
             Text(actionError ?? "")
         }
-        .task { await loadMeeting() }
+        .task { await loadMeeting(showLoading: true) }
     }
 
     // MARK: - Sections
@@ -346,8 +346,10 @@ struct MeetingDetailView: View {
 
     // MARK: - Actions
 
-    private func loadMeeting() async {
-        isLoading = true
+    private func loadMeeting(showLoading: Bool = false) async {
+        if showLoading {
+            isLoading = true
+        }
         meeting = await services.meetingsService.getMeeting(id: meetingId)
         isLoading = false
     }

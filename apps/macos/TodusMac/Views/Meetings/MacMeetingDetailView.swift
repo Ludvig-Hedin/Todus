@@ -98,7 +98,7 @@ struct MacMeetingDetailView: View {
             Text(actionError ?? "")
         }
         .task {
-            await loadMeeting()
+            await loadMeeting(showLoading: true)
         }
     }
 
@@ -396,8 +396,10 @@ struct MacMeetingDetailView: View {
 
     // MARK: - Actions
 
-    private func loadMeeting() async {
-        isLoading = true
+    private func loadMeeting(showLoading: Bool = false) async {
+        if showLoading {
+            isLoading = true
+        }
         meeting = await services.meetingsService.getMeeting(id: meetingId)
         isLoading = false
     }
