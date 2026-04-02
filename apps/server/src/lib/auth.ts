@@ -20,6 +20,7 @@ import { disableBrainFunction } from './brain';
 import { APIError } from 'better-auth/api';
 import { type EProviders } from '../types';
 import { createDriver } from './driver';
+import type { ReactNode } from 'react';
 import { Autumn } from 'autumn-js';
 import { createDb } from '../db';
 import { env } from '../env';
@@ -32,37 +33,37 @@ const scheduleCampaign = async (userInfo: { address: string; name: string }) => 
   const emails = [
     {
       subject: 'Welcome to Todus',
-      react: WelcomeEmail({ name }),
+      react: WelcomeEmail({ name }) as ReactNode,
       scheduledAt: undefined,
     },
     {
       subject: 'Todus Pro is here',
-      react: TodusProEmail({ name }),
+      react: TodusProEmail({ name }) as ReactNode,
       scheduledAt: 'in 1 day',
     },
     {
       subject: 'Auto-labeling is here 🎉📥',
-      react: AutoLabelingEmail({ name }),
+      react: AutoLabelingEmail({ name }) as ReactNode,
       scheduledAt: 'in 2 days',
     },
     {
       subject: 'AI Writing Assistant is here 🤖💬',
-      react: AIWritingAssistantEmail({ name }),
+      react: AIWritingAssistantEmail({ name }) as ReactNode,
       scheduledAt: 'in 3 days',
     },
     {
       subject: 'Shortcuts are here 🔧🚀',
-      react: ShortcutsEmail({ name }),
+      react: ShortcutsEmail({ name }) as ReactNode,
       scheduledAt: 'in 4 days',
     },
     {
       subject: 'Categories are here 📂🔍',
-      react: CategoriesEmail({ name }),
+      react: CategoriesEmail({ name }) as ReactNode,
       scheduledAt: 'in 5 days',
     },
     {
       subject: 'Super Search is here 🔍🚀',
-      react: SuperSearchEmail({ name }),
+      react: SuperSearchEmail({ name }) as ReactNode,
       scheduledAt: 'in 6 days',
     },
   ];
@@ -70,13 +71,18 @@ const scheduleCampaign = async (userInfo: { address: string; name: string }) => 
   await Promise.allSettled(
     emails.map(async (email) => {
       try {
-        await resendService.emails.send({
-          from: 'Todus <onboarding@todus.app>',
-          to: userInfo.address,
-          subject: email.subject,
-          react: email.react as any,
-          ...(email.scheduledAt ? { scheduledAt: email.scheduledAt } : {}),
-        });
+        await resendService.emails.send(
+          {
+            from: 'Todus <onboarding@todus.app>',
+            to: userInfo.address,
+            subject: email.subject,
+            react: email.react,
+            ...(email.scheduledAt ? { scheduledAt: email.scheduledAt } : {}),
+          },
+          {
+            idempotencyKey: `onboarding:${userInfo.address}:${email.subject}:${email.scheduledAt ?? 'immediate'}`,
+          },
+        );
       } catch (error) {
         console.error('[CAMPAIGN] Failed to send onboarding email', {
           to: userInfo.address,
@@ -88,7 +94,10 @@ const scheduleCampaign = async (userInfo: { address: string; name: string }) => 
   );
 };
 
-const connectionHandlerHook = async (account: Account) => {
+const syncConnectionFromAccount = async (
+  account: Account,
+  options: { scheduleOnboardingCampaign: boolean },
+) => {
   // Apple is an identity-only provider (used for authentication via native
   // Sign in with Apple). It doesn't grant email access tokens like Google does,
   // so we skip the connection setup which requires OAuth access/refresh tokens.
@@ -152,7 +161,10 @@ const connectionHandlerHook = async (account: Account) => {
 
   const settingsRow = await db.findUserSettings();
   const currentSettings = settingsRow?.settings ?? defaultUserSettings;
-  if (!currentSettings.welcomeEmailSent) {
+  const shouldScheduleCampaign =
+    options.scheduleOnboardingCampaign && !currentSettings.welcomeEmailSent;
+
+  if (shouldScheduleCampaign) {
     await db.updateUserSettings({
       ...currentSettings,
       welcomeEmailSent: true,
@@ -171,14 +183,20 @@ const connectionHandlerHook = async (account: Account) => {
   }
 };
 
+const accountCreateHook = async (account: Account) => {
+  await syncConnectionFromAccount(account, { scheduleOnboardingCampaign: true });
+};
+
+const accountUpdateHook = async (account: Account) => {
+  await syncConnectionFromAccount(account, { scheduleOnboardingCampaign: false });
+};
+
 export const createAuth = () => {
   const twilioClient = twilio();
 
   // Only enable Dub analytics if API key is configured — without it, the
   // dubAnalytics plugin throws during social sign-in and causes 500 errors
-  const dubPlugins = env.DUB_API_KEY
-    ? [dubAnalytics({ dubClient: new Dub() })]
-    : [];
+  const dubPlugins = env.DUB_API_KEY ? [dubAnalytics({ dubClient: new Dub() })] : [];
 
   return betterAuth({
     plugins: [
@@ -208,7 +226,9 @@ export const createAuth = () => {
         sendVerificationOTP: async ({ email, otp, type }) => {
           // Mask email PII in logs: show first char + domain only
           const maskedEmail = email.replace(/^(.).*@/, '$1***@');
-          console.log(`[EMAIL_OTP] Sending OTP to ${maskedEmail}, type=${type}, code length=${otp.length}`);
+          console.log(
+            `[EMAIL_OTP] Sending OTP to ${maskedEmail}, type=${type}, code length=${otp.length}`,
+          );
           const resendClient = resend();
           const otpHtml = `
             <div style="font-family: system-ui, -apple-system, sans-serif; max-width: 400px; margin: 0 auto; padding: 40px 20px;">
@@ -227,12 +247,17 @@ export const createAuth = () => {
               subject: 'Your Todus verification code',
               html: otpHtml,
             });
-            console.log(`[EMAIL_OTP] Email sent successfully via todus.app to ${maskedEmail}`, JSON.stringify(result));
+            console.log(
+              `[EMAIL_OTP] Email sent successfully via todus.app to ${maskedEmail}`,
+              JSON.stringify(result),
+            );
             return;
           } catch (primaryError) {
             const msg = primaryError instanceof Error ? primaryError.message : String(primaryError);
             // Fall through to test domain if todus.app domain is not yet verified
-            console.warn(`[EMAIL_OTP] Primary sender failed (todus.app), attempting fallback. Error: ${msg}`);
+            console.warn(
+              `[EMAIL_OTP] Primary sender failed (todus.app), attempting fallback. Error: ${msg}`,
+            );
           }
 
           const canUseDevFallback =
@@ -253,10 +278,16 @@ export const createAuth = () => {
               subject: 'Your Todus verification code',
               html: otpHtml,
             });
-            console.log(`[EMAIL_OTP] Email sent via resend.dev fallback to ${maskedEmail}`, JSON.stringify(result));
+            console.log(
+              `[EMAIL_OTP] Email sent via resend.dev fallback to ${maskedEmail}`,
+              JSON.stringify(result),
+            );
           } catch (fallbackError) {
-            const msg = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
-            console.error(`[EMAIL_OTP] Both senders failed for ${maskedEmail}. Fallback error: ${msg}`);
+            const msg =
+              fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
+            console.error(
+              `[EMAIL_OTP] Both senders failed for ${maskedEmail}. Fallback error: ${msg}`,
+            );
             throw new APIError('INTERNAL_SERVER_ERROR', {
               message: 'Failed to send verification email. Please try again later.',
             });
@@ -331,10 +362,10 @@ export const createAuth = () => {
     databaseHooks: {
       account: {
         create: {
-          after: connectionHandlerHook,
+          after: accountCreateHook,
         },
         update: {
-          after: connectionHandlerHook,
+          after: accountUpdateHook,
         },
       },
     },
