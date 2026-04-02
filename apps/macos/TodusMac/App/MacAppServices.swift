@@ -112,7 +112,7 @@ final class MacAppServices {
         }
     }
 
-    func syncSharedFolders(in context: ModelContext) async {
+    func syncSharedFolders(in context: ModelContext) async throws {
         guard authService.isAuthenticated else { return }
 
         struct FolderListResponse: Decodable {
@@ -125,28 +125,27 @@ final class MacAppServices {
             let createdAt: Date
         }
 
-        do {
-            let response: FolderListResponse = try await apiClient.trpcQuery("folders.list")
-            let remoteFolders = response.folders
-            let localFolders = (try? context.fetch(FetchDescriptor<FolderRecord>())) ?? []
-            var foldersByID = Dictionary(uniqueKeysWithValues: localFolders.map { ($0.id.uuidString, $0) })
+        let response: FolderListResponse = try await apiClient.trpcQuery("folders.list")
+        let remoteFolders = response.folders
+        let localFolders = try context.fetch(FetchDescriptor<FolderRecord>())
+        var foldersByID = Dictionary(
+            uniqueKeysWithValues: localFolders.map { ($0.id.uuidString.lowercased(), $0) }
+        )
 
-            for remote in remoteFolders {
-                guard let uuid = UUID(uuidString: remote.id) else { continue }
-                if let local = foldersByID[remote.id] {
-                    local.name = remote.name
-                    local.createdAt = remote.createdAt
-                } else {
-                    let folder = FolderRecord(id: uuid, name: remote.name, createdAt: remote.createdAt)
-                    context.insert(folder)
-                    foldersByID[remote.id] = folder
-                }
+        for remote in remoteFolders {
+            let normalizedID = remote.id.lowercased()
+            guard let uuid = UUID(uuidString: remote.id) else { continue }
+            if let local = foldersByID[normalizedID] {
+                local.name = remote.name
+                local.createdAt = remote.createdAt
+            } else {
+                let folder = FolderRecord(id: uuid, name: remote.name, createdAt: remote.createdAt)
+                context.insert(folder)
+                foldersByID[normalizedID] = folder
             }
-
-            try? context.save()
-        } catch {
-            // Best-effort sync; local folders remain usable.
         }
+
+        try context.save()
     }
 
     func signOut() {

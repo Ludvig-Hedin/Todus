@@ -215,10 +215,12 @@ final class MacAIChatService {
 
     func moveConversation(_ conversation: MacChatConversation, to folderID: UUID?) {
         guard let index = savedConversations.firstIndex(where: { $0.id == conversation.id }) else { return }
-        savedConversations[index].folderID = folderID
+        var convo = savedConversations[index]
+        convo.folderID = folderID
+        savedConversations[index] = convo
         persistConversationsLocally()
-        Task { await syncSaveConversation(savedConversations[index]) }
-        if currentConversationID == conversation.id {
+        Task { await syncSaveConversation(convo) }
+        if currentConversationID == convo.id {
             currentConversationFolderID = folderID
         }
     }

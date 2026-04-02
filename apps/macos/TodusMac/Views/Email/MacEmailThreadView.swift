@@ -187,7 +187,10 @@ struct MacEmailThreadView: View {
             await refreshAssistant()
         } else {
             // Draft already exists or was skipped — surface the reason as a notice
-            assistantNotice = result.reason
+            assistantNotice =
+                result.reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? "Draft already exists or was skipped."
+                : result.reason
         }
     }
 
@@ -452,7 +455,10 @@ private struct MacAssistantPill: View {
             .foregroundStyle(MacTheme.textSecondary)
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
-            .background(Color.white.opacity(0.65), in: Capsule(style: .continuous))
+            .background(
+                Color(nsColor: .controlBackgroundColor).opacity(0.85),
+                in: Capsule(style: .continuous)
+            )
     }
 }
 

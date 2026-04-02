@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import AppKit
 
 /// macOS Settings panel — presented as a full-window overlay with dimmed backdrop.
 /// Click outside or press Escape to dismiss.
@@ -22,6 +23,7 @@ struct MacSettingsView: View {
     @State private var isLoadingSessions = false
     @State private var isRevokingAllSessions = false
     @State private var revokingSessionIDs: Set<String> = []
+    @State private var showAutoSendConfirmation = false
 
     // Preferences
     @AppStorage("preferredColorScheme") private var preferredColorScheme = "system"
@@ -76,6 +78,18 @@ struct MacSettingsView: View {
         }
         .task {
             await loadActiveSessions()
+        }
+        .confirmationDialog(
+            "Enable low-risk auto-send?",
+            isPresented: $showAutoSendConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Enable") {
+                services.assistantAutomationPolicy.autoSendExperimentEnabled = true
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Only narrow, high-confidence acknowledgements and confirmations become eligible. Review the experiment notes before turning this on.")
         }
         // Logout confirmation
         .confirmationDialog(
@@ -638,14 +652,41 @@ struct MacSettingsView: View {
 
                 cardDivider
 
-                settingsToggle(
-                    icon: "paperplane",
-                    label: "Enable low-risk auto-send experiment",
-                    isOn: Binding(
-                        get: { services.assistantAutomationPolicy.autoSendExperimentEnabled },
-                        set: { services.assistantAutomationPolicy.autoSendExperimentEnabled = $0 }
+                VStack(alignment: .leading, spacing: 6) {
+                    settingsToggle(
+                        icon: "paperplane",
+                        label: "Enable low-risk auto-send experiment",
+                        isOn: Binding(
+                            get: { services.assistantAutomationPolicy.autoSendExperimentEnabled },
+                            set: { newValue in
+                                if newValue {
+                                    if services.assistantAutomationPolicy.autoSendExperimentEnabled {
+                                        return
+                                    }
+                                    showAutoSendConfirmation = true
+                                } else {
+                                    services.assistantAutomationPolicy.autoSendExperimentEnabled = false
+                                }
+                            }
+                        )
                     )
-                )
+
+                    HStack(spacing: 6) {
+                        Text("Only narrow, high-confidence acknowledgements and confirmations become eligible for automatic send.")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(MacTheme.textSecondary)
+                        Spacer()
+                        Button("Experiment notes") {
+                            guard let url = URL(string: "https://todus.app/blog/ai-email-assistant-guide") else { return }
+                            NSWorkspace.shared.open(url)
+                        }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 11.5, weight: .medium))
+                        .foregroundStyle(MacTheme.accent)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 2)
+                }
 
                 cardDivider
 

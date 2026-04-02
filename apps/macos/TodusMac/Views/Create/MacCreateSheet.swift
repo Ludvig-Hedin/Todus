@@ -97,7 +97,11 @@ struct MacCreateSheet: View {
             isFocused = true
         }
         .task {
-            await services.syncSharedFolders(in: modelContext)
+            do {
+                try await services.syncSharedFolders(in: modelContext)
+            } catch {
+                print("[MacCreateSheet] Failed to sync shared folders: \(error)")
+            }
         }
     }
 

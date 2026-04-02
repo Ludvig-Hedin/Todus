@@ -86,7 +86,10 @@ struct MacEmailInboxView: View {
                             .foregroundStyle(MacTheme.textSecondary)
                             .padding(.horizontal, 8)
                             .padding(.vertical, 4)
-                            .background(Color.white.opacity(0.65), in: Capsule(style: .continuous))
+                            .background(
+                                Color(nsColor: .controlBackgroundColor).opacity(0.85),
+                                in: Capsule(style: .continuous)
+                            )
                     }
                     .padding(MacTheme.spacing12)
                     .frame(maxWidth: .infinity, alignment: .leading)

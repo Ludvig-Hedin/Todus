@@ -266,6 +266,9 @@ struct MacRootView: View {
             }
         }
         .animation(.snappy(duration: 0.2), value: isSettingsPresented)
+        .onChange(of: selection) { _, _ in
+            selectedGroupId = nil
+        }
     }
 
     /// The NavigationSplitView with detail content, toolbar, and sheets.

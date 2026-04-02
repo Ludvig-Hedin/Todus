@@ -159,7 +159,8 @@ struct MacShareConversationPanel: View {
                 .padding(.vertical, 7)
             }
             .buttonStyle(.borderedProminent)
-            .disabled(isLoading)
+            // Prevent creating a "protected" share with no password set
+            .disabled(isLoading || (visibility == .protected && password.isEmpty))
         }
         .padding(16)
     }
@@ -199,6 +200,11 @@ struct MacShareConversationPanel: View {
 
     private func createLink() async {
         guard !isLoading else { return }
+        // Require a non-empty password when creating a password-protected link
+        if visibility == .protected && password.isEmpty {
+            errorMessage = "Please enter a password."
+            return
+        }
         isLoading = true
         errorMessage = nil
         defer { isLoading = false }

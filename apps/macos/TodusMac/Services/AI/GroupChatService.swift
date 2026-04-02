@@ -182,6 +182,7 @@ final class GroupChatService {
             "groups.sendMessage",
             input: Input(groupId: groupId, content: content)
         )
+        try await loadMessages(groupId: groupId)
     }
 
     func startPolling(groupId: String) {
