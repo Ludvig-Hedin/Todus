@@ -426,7 +426,9 @@
       "feedback": "Feedback",
       "settings": "Instellingen",
       "voice": "Spraakassistent",
-      "snoozed": "Uitgesteld"
+      "snoozed": "Uitgesteld",
+      "meetings": "Meetings",
+      "docs": "Docs"
     },
     "settings": {
       "general": "Algemeen",
