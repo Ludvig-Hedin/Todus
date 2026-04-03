@@ -1,7 +1,4 @@
 import {
-  Archive,
-  Bin,
-  ExclamationCircle,
   SettingsGear,
   Stars,
   Tabs,
@@ -9,33 +6,39 @@ import {
   ArrowLeft,
   Danger,
   Sheet,
-  Plane2,
   LockIcon,
-  Clock,
   Mail,
 } from '@/components/icons/icons';
-import { MessageSquareIcon, Home, CheckSquare2, CalendarDays, Search } from 'lucide-react';
+import {
+  CalendarDays,
+  CheckSquare2,
+  FileText,
+  Home,
+  MessageSquareIcon,
+  Search,
+  Video,
+} from 'lucide-react';
+import type { ComponentType, SVGProps } from 'react';
 import { m } from '@/paraglide/messages';
 
-// Child items inside an expandable nav group (e.g. Email → Inbox/Drafts/Sent)
 export interface NavChildItem {
   id?: string;
   title: string;
   url: string;
+  badge?: number;
 }
 
 export interface NavItem {
   id?: string;
   title: string;
   url: string;
-  icon: React.ComponentType<any>;
+  icon: ComponentType<SVGProps<SVGSVGElement>>;
   badge?: number;
   isBackButton?: boolean;
   isSettingsButton?: boolean;
   disabled?: boolean;
   target?: string;
   shortcut?: string;
-  /** When set, the item renders as a collapsible group with these child links */
   children?: NavChildItem[];
 }
 
@@ -56,8 +59,6 @@ export const navigationConfig: Record<string, NavConfig> = {
     path: '/mail',
     sections: [
       {
-        // Primary nav — Home, Tasks, Email (expandable), Calendar
-        // Mirrors macOS sidebar order
         id: 'primary',
         title: '',
         items: [
@@ -72,34 +73,76 @@ export const navigationConfig: Record<string, NavConfig> = {
             id: 'tasks',
             title: m['navigation.sidebar.tasks'](),
             url: '/mail/tasks',
-            // Use lucide CheckSquare2 — cleaner than the custom CircleCheck SVG
             icon: CheckSquare2,
             shortcut: 'g + k',
           },
           {
             id: 'email',
-            title: 'Email',
+            title: m['navigation.sidebar.email'](),
             url: '/mail/inbox',
             icon: Mail,
-            // Inbox/Drafts/Sent nested under collapsible Email parent (matches macOS)
             children: [
-              { id: 'inbox', title: m['navigation.sidebar.inbox'](), url: '/mail/inbox' },
-              { id: 'drafts', title: m['navigation.sidebar.drafts'](), url: '/mail/draft' },
-              { id: 'sent', title: m['navigation.sidebar.sent'](), url: '/mail/sent' },
+              {
+                id: 'inbox',
+                title: m['navigation.sidebar.inbox'](),
+                url: '/mail/inbox',
+              },
+              {
+                id: 'drafts',
+                title: m['navigation.sidebar.drafts'](),
+                url: '/mail/draft',
+              },
+              {
+                id: 'sent',
+                title: m['navigation.sidebar.sent'](),
+                url: '/mail/sent',
+              },
+              {
+                id: 'archive',
+                title: m['navigation.sidebar.archive'](),
+                url: '/mail/archive',
+              },
+              {
+                id: 'snoozed',
+                title: m['navigation.sidebar.snoozed'](),
+                url: '/mail/snoozed',
+              },
+              {
+                id: 'spam',
+                title: m['navigation.sidebar.spam'](),
+                url: '/mail/spam',
+              },
+              {
+                id: 'bin',
+                title: m['navigation.sidebar.bin'](),
+                url: '/mail/bin',
+              },
             ],
           },
           {
             id: 'calendar',
             title: m['navigation.sidebar.calendar'](),
             url: '/mail/calendar',
-            // Use lucide CalendarDays — cleaner lines than custom SVG
             icon: CalendarDays,
             shortcut: 'g + c',
+          },
+          {
+            id: 'meetings',
+            title: m['navigation.sidebar.meetings'](),
+            url: '/mail/meetings',
+            icon: Video,
+            shortcut: 'g + m',
+          },
+          {
+            id: 'docs',
+            title: 'Docs',
+            url: '/mail/docs',
+            icon: FileText,
+            shortcut: 'g + d',
           },
         ],
       },
       {
-        // Utility — Search only. AI Chat is FAB-only, not a sidebar nav item.
         id: 'extras',
         title: '',
         items: [
@@ -107,42 +150,15 @@ export const navigationConfig: Record<string, NavConfig> = {
             id: 'search',
             title: m['navigation.sidebar.search'](),
             url: '/mail/search',
-            // Use lucide Search — consistent with lucide icon set
             icon: Search,
             shortcut: 'g + f',
           },
-        ],
-      },
-      {
-        // Archive / cleanup folders — de-emphasised, unlabeled
-        id: 'archive',
-        title: '',
-        items: [
           {
-            id: 'archive',
-            title: m['navigation.sidebar.archive'](),
-            url: '/mail/archive',
-            icon: Archive,
-            shortcut: 'g + a',
-          },
-          {
-            id: 'snoozed',
-            title: m['navigation.sidebar.snoozed'](),
-            url: '/mail/snoozed',
-            icon: Clock,
-            shortcut: 'g + z',
-          },
-          {
-            id: 'spam',
-            title: m['navigation.sidebar.spam'](),
-            url: '/mail/spam',
-            icon: ExclamationCircle,
-          },
-          {
-            id: 'trash',
-            title: m['navigation.sidebar.bin'](),
-            url: '/mail/bin',
-            icon: Bin,
+            id: 'chat',
+            title: m['navigation.sidebar.chat'](),
+            url: '/mail/chat',
+            icon: MessageSquareIcon,
+            shortcut: 'g + /',
           },
         ],
       },
@@ -171,11 +187,6 @@ export const navigationConfig: Record<string, NavConfig> = {
             title: m['navigation.settings.connections'](),
             url: '/settings/connections',
             icon: Users,
-          },
-          {
-            title: m['navigation.settings.security'](),
-            url: '/settings/security',
-            icon: LockIcon,
           },
           {
             title: m['navigation.settings.privacy'](),
@@ -207,6 +218,11 @@ export const navigationConfig: Record<string, NavConfig> = {
             url: '/settings/shortcuts',
             icon: Tabs,
             shortcut: '?',
+          },
+          {
+            title: m['navigation.sidebar.meetings'](),
+            url: '/settings/meetings',
+            icon: Video,
           },
           {
             title: m['navigation.settings.deleteAccount'](),

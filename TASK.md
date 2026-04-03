@@ -1,6 +1,6 @@
 # Migration Backlog
 
-Last updated: 2026-03-31
+Last updated: 2026-04-04
 
 ## Unified Folders Expansion
 
@@ -13,6 +13,9 @@ Last updated: 2026-03-31
 
 ## Current Web/Server Fix Batch
 
+- `DONE` Realigned `apps/web` to the newer web implementation that had accidentally landed in `apps/mail`, keeping `apps/mail` unchanged and verifying the synced `apps/web` build passes.
+- `DONE` Shipped the first web/server performance pass for instant-feeling mail and tasks: inbox rows now render from thread summaries instead of per-row `mail.get` calls, thread detail is predictively prefetched, startup warmup preloads inbox/tasks/calendar/settings data, task mutations now patch cached task lists directly, and cached-first surfaces now show a subtle background-refresh indicator while data revalidates.
+- `DONE` Extended the loading-state pass to native iOS and macOS: cached inbox/home/calendar surfaces now keep warm content visible during refresh and show compact updating badges, while task tabs surface background shared-folder sync instead of looking idle.
 - `DONE` Shipped a native onboarding + task clarity pass across iOS and macOS: onboarding steps are easier to complete without removing any pages, task views now use labeled toggles, local `Add Task` actions are visible in native task surfaces, and macOS task detail editing now includes folder selection.
 - `DONE` Shipped a native Home/Tasks/Email UX remediation pass across iOS and macOS: Home now separates loading from empty states and exposes partial-setup guidance, iOS Tasks search/sort is consistent across all modes with clearer mode semantics, and Email now foregrounds mailbox orientation and actual message reading before AI assistance on both platforms.
 - `DONE` Tightened native email mailbox UX on iOS and macOS: folder-specific empty states, no premature `Connect Gmail` flash during connection checks, macOS sender-avatar resolution, and faster macOS folder switching via in-memory mailbox caching.
@@ -442,3 +445,9 @@ All marked DONE — these are WebView-based, not truly native.
 - Upgraded the web sidebar to surface native-style primary navigation with expandable Email children instead of inbox-only navigation.
 - Ported existing parity page implementations from the legacy web app into the active `apps/mail` app and validated them with targeted ESLint plus a successful `pnpm --filter @zero/mail build`.
 - Build still emits pre-existing workspace warnings from unrelated files and reference/archived tsconfig parsing; these were not introduced by this parity work.
+
+## Web Performance Follow-up (2026-04-04)
+
+- Corrected the loading-state work to the actual web app under `apps/web` after the earlier pass hit the wrong frontend surface.
+- Added subtle background-refresh indicators for inbox, home, tasks, and calendar so cached data stays visible while refresh status remains explicit.
+- Stopped invalidating restored web inbox cache on startup and switched the web home recent-email panel to use thread summary data directly instead of extra per-row thread fetches.

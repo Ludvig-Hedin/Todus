@@ -2,32 +2,8 @@
  * Chat page — iOS/macOS parity.
  * Left sidebar: conversation history (ai.listConversations), new chat button.
  * Auto-save: on first assistant response, saves conversation with title = first 60 chars of user message.
- * Markdown: AI responses rendered with react-markdown + remark-gfm.
+ * Responses render as plain text to match the current web dependency surface.
  */
-import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
-import { useAgent } from 'agents/react';
-import { useAgentChat } from 'agents/ai-react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { formatDistanceToNow } from 'date-fns';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import { toast } from 'sonner';
-import { authProxy } from '@/lib/auth-proxy';
-import { useActiveConnection } from '@/hooks/use-connections';
-import { useTRPC } from '@/providers/query-provider';
-import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { cn } from '@/lib/utils';
-import {
-  SendHorizontal,
-  StopCircle,
-  Plus,
-  MessageSquare,
-  Trash2,
-  MoreHorizontal,
-  FolderIcon,
-} from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -38,7 +14,29 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+  SendHorizontal,
+  StopCircle,
+  Plus,
+  MessageSquare,
+  Trash2,
+  MoreHorizontal,
+  FolderIcon,
+} from 'lucide-react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
+import { useActiveConnection } from '@/hooks/use-connections';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { useTRPC } from '@/providers/query-provider';
+import { Textarea } from '@/components/ui/textarea';
+import { Button } from '@/components/ui/button';
+import { useAgentChat } from 'agents/ai-react';
+import { formatDistanceToNow } from 'date-fns';
+import { authProxy } from '@/lib/auth-proxy';
 import type { Route } from './+types/page';
+import { useAgent } from 'agents/react';
+import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
 
 // Auth guard
 export async function clientLoader({ request }: Route.ClientLoaderArgs) {
@@ -83,6 +81,20 @@ function newId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
+function toSafeISOString(value: unknown, fallback: Date = new Date()) {
+  const fallbackISOString = fallback.toISOString();
+  if (value == null) return fallbackISOString;
+
+  const date =
+    value instanceof Date
+      ? value
+      : typeof value === 'string' || typeof value === 'number'
+        ? new Date(value)
+        : null;
+
+  return date && !Number.isNaN(date.getTime()) ? date.toISOString() : fallbackISOString;
+}
+
 export default function ChatPage() {
   const { data: activeConnection } = useActiveConnection();
   const trpc = useTRPC();
@@ -100,13 +112,13 @@ export default function ChatPage() {
   const prevUserMsgCountRef = useRef(0);
 
   const { data: foldersData } = useQuery(trpc.folders.list.queryOptions());
-  const folders = foldersData?.folders ?? [];
+  const folders = useMemo(() => foldersData?.folders ?? [], [foldersData]);
 
   // Fetch conversation list for sidebar
   const { data: conversationsData, refetch: refetchConversations } = useQuery(
     trpc.ai.listConversations.queryOptions(),
   );
-  const conversations = conversationsData?.conversations ?? [];
+  const conversations = useMemo(() => conversationsData?.conversations ?? [], [conversationsData]);
   const visibleConversations = conversations.filter((convo) => {
     if (folderFilter === 'all') return true;
     if (folderFilter === 'unfiled') return !convo.folderId;
@@ -151,16 +163,10 @@ export default function ChatPage() {
         const convo = await queryClient.fetchQuery(trpc.ai.getConversation.queryOptions({ id }));
         if (!convo?.messages) return;
 
-        const messages = Array.isArray(convo.messages) ? (convo.messages as ChatMessageRecord[]) : [];
-        const createdAtDate =
-          convo.createdAt instanceof Date
-            ? convo.createdAt
-            : convo.createdAt
-              ? new Date(convo.createdAt)
-              : new Date();
-        const createdAt = Number.isNaN(createdAtDate.getTime())
-          ? new Date().toISOString()
-          : createdAtDate.toISOString();
+        const messages = Array.isArray(convo.messages)
+          ? (convo.messages as ChatMessageRecord[])
+          : [];
+        const createdAt = toSafeISOString(convo.createdAt);
 
         saveConversation.mutate(
           {
@@ -190,24 +196,17 @@ export default function ChatPage() {
   // Connect to the ZeroAgent Durable Object via WebSocket
   const agent = useAgent({
     agent: 'ZeroAgent',
-    name: activeConnection?.id ? String(activeConnection.id) : 'general',
+    name: String(activeConnection?.id ?? 'general'),
     host: `${import.meta.env.VITE_PUBLIC_BACKEND_URL}`,
     onError: (e) => console.error('Agent error:', e),
   });
 
-  const {
-    messages,
-    input,
-    handleInputChange,
-    handleSubmit,
-    status,
-    stop,
-    setMessages,
-  } = useAgentChat({
-    agent,
-    maxSteps: 10,
-    getInitialMessages: async () => [],
-  });
+  const { messages, input, handleInputChange, handleSubmit, status, stop, setMessages } =
+    useAgentChat({
+      agent,
+      maxSteps: 10,
+      getInitialMessages: async () => [],
+    });
 
   const isLoading = status === 'submitted' || status === 'streaming';
 
@@ -223,7 +222,7 @@ export default function ChatPage() {
       prevUserMsgCountRef.current = userCount;
       setIsSaved(false);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages.length]);
 
   // Auto-save conversation after each assistant response (once per exchange via isSaved guard).
@@ -233,16 +232,17 @@ export default function ChatPage() {
     if (isSaved) return;
 
     const assistantMessages = messages.filter((m) => m.role === 'assistant');
-    const userMessages = messages.filter((m) => m.role === 'user');
+    const firstUserMessage = messages.find((m) => m.role === 'user');
 
     // Only trigger once we have at least one assistant reply and we're not mid-stream
     if (assistantMessages.length === 0 || isLoading) return;
 
     // Defensively extract title — content may be a string or an array of content parts
-    const rawContent = userMessages[0]?.content;
+    const rawContent = firstUserMessage?.content;
     const title = (() => {
       if (!rawContent) return 'New conversation';
-      if (typeof rawContent === 'string') return rawContent.slice(0, 60).trim() || 'New conversation';
+      if (typeof rawContent === 'string')
+        return rawContent.slice(0, 60).trim() || 'New conversation';
       const text = extractTextContent(rawContent).trim();
       return text.slice(0, 60) || 'New conversation';
     })();
@@ -262,17 +262,22 @@ export default function ChatPage() {
           setIsSaved(true);
           void refetchConversations();
         },
+        onError: (err) => {
+          console.error('Failed to auto-save conversation:', err);
+        },
       },
     );
-  // Intentionally not exhaustive — only re-run when message count, loading, or isSaved changes
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Intentionally not exhaustive — only re-run when message count, loading, or isSaved changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages.length, isLoading, isSaved]);
 
   // Start a brand new chat session
   const handleNewChat = useCallback(() => {
     setMessages([]);
     setConversationId(newId());
-    setConversationFolderId(folderFilter === 'all' || folderFilter === 'unfiled' ? null : folderFilter);
+    setConversationFolderId(
+      folderFilter === 'all' || folderFilter === 'unfiled' ? null : folderFilter,
+    );
     setIsSaved(false);
     prevUserMsgCountRef.current = 0;
   }, [folderFilter, setMessages]);
@@ -282,25 +287,16 @@ export default function ChatPage() {
     async (id: string) => {
       try {
         // Fetch full conversation from backend
-        const result = await queryClient.fetchQuery(
-          trpc.ai.getConversation.queryOptions({ id }),
-        );
+        const result = await queryClient.fetchQuery(trpc.ai.getConversation.queryOptions({ id }));
         if (!result?.messages) return;
 
-        // Build message objects compatible with useAgentChat.
-        // Use extractTextContent so non-string content (e.g. tool-call arrays) doesn't
-        // stringify as "[object Object]".
-          const loaded = (Array.isArray(result.messages) ? result.messages : []).map(
-            (m, i) => {
-              const text = extractTextContent(m.content);
-              return {
-                id: `loaded-${id}-${i}`,
-                role: m.role as 'user' | 'assistant',
-                content: text,
-                parts: [{ type: 'text' as const, text }],
-              };
-            },
-          );
+        // Build message objects compatible with useAgentChat
+        const loaded = (Array.isArray(result.messages) ? result.messages : []).map((m, i) => ({
+          id: `loaded-${id}-${i}`,
+          role: m.role as 'user' | 'assistant',
+          content: String(m.content ?? ''),
+          parts: [{ type: 'text' as const, text: String(m.content ?? '') }],
+        }));
         setMessages(loaded);
         setConversationId(id);
         setConversationFolderId(result.folderId ?? null);
@@ -316,11 +312,17 @@ export default function ChatPage() {
   const handleDeleteConversation = useCallback(
     (id: string, e: React.MouseEvent) => {
       e.stopPropagation();
-      deleteConversation.mutate({ id });
-      // If the deleted conversation is the active one, start fresh
-      if (id === conversationId) {
-        handleNewChat();
-      }
+      deleteConversation.mutate(
+        { id },
+        {
+          onSuccess: () => {
+            // Only start fresh after successful deletion to avoid UI flicker on failure
+            if (id === conversationId) {
+              handleNewChat();
+            }
+          },
+        },
+      );
     },
     [conversationId, deleteConversation, handleNewChat],
   );
@@ -348,9 +350,9 @@ export default function ChatPage() {
   };
 
   return (
-    <div className="flex h-screen overflow-hidden bg-background">
+    <div className="bg-background flex h-screen overflow-hidden">
       {/* ── Conversation History Sidebar ─────────────────────────────────── */}
-      <aside className="hidden w-56 shrink-0 flex-col border-r bg-sidebar md:flex">
+      <aside className="bg-sidebar hidden w-56 shrink-0 flex-col border-r md:flex">
         <div className="border-b px-3 py-3">
           <div className="flex items-center justify-between">
             <span className="text-[13px] font-semibold">Chats</span>
@@ -418,8 +420,8 @@ export default function ChatPage() {
         <ScrollArea className="flex-1 py-1">
           {visibleConversations.length === 0 ? (
             <div className="flex flex-col items-center gap-1 px-4 py-8 text-center">
-              <MessageSquare className="h-6 w-6 text-muted-foreground/40" />
-              <p className="text-[12px] text-muted-foreground">No saved chats yet</p>
+              <MessageSquare className="text-muted-foreground/40 h-6 w-6" />
+              <p className="text-muted-foreground text-[12px]">No saved chats yet</p>
             </div>
           ) : (
             visibleConversations.map((convo) => {
@@ -443,10 +445,8 @@ export default function ChatPage() {
                   }}
                 >
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-[12px] font-medium leading-snug">
-                      {convo.title}
-                    </p>
-                    <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                    <p className="truncate text-[12px] font-medium leading-snug">{convo.title}</p>
+                    <div className="text-muted-foreground flex items-center gap-1.5 text-[11px]">
                       <span>
                         {convo.updatedAt
                           ? formatDistanceToNow(new Date(convo.updatedAt), { addSuffix: true })
@@ -483,7 +483,9 @@ export default function ChatPage() {
                             Move to
                           </DropdownMenuSubTrigger>
                           <DropdownMenuSubContent className="w-44">
-                            <DropdownMenuItem onClick={() => void handleConversationFolderMove(convo.id, null)}>
+                            <DropdownMenuItem
+                              onClick={() => void handleConversationFolderMove(convo.id, null)}
+                            >
                               <FolderIcon className="mr-2 h-3.5 w-3.5" />
                               Unfiled
                             </DropdownMenuItem>
@@ -491,7 +493,9 @@ export default function ChatPage() {
                             {folders.map((folder) => (
                               <DropdownMenuItem
                                 key={folder.id}
-                                onClick={() => void handleConversationFolderMove(convo.id, folder.id)}
+                                onClick={() =>
+                                  void handleConversationFolderMove(convo.id, folder.id)
+                                }
                               >
                                 <FolderIcon className="mr-2 h-3.5 w-3.5" />
                                 {folder.name}
@@ -524,14 +528,19 @@ export default function ChatPage() {
           <div className="flex items-center gap-2">
             <h1 className="text-[15px] font-semibold">AI Assistant</h1>
             {conversationFolderId ? (
-              <span className="inline-flex items-center gap-1 rounded-full border border-border bg-muted/60 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+              <span className="border-border bg-muted/60 text-muted-foreground inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium">
                 <FolderIcon className="h-3 w-3" />
                 {resolveConversationFolderName(conversationFolderId)}
               </span>
             ) : null}
           </div>
           {messages.length > 0 && (
-            <Button variant="outline" size="sm" className="h-7 gap-1.5 text-[12px]" onClick={handleNewChat}>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 gap-1.5 text-[12px]"
+              onClick={handleNewChat}
+            >
               <Plus className="h-3.5 w-3.5" />
               New chat
             </Button>
@@ -548,16 +557,16 @@ export default function ChatPage() {
                 <img src="/white-icon.svg" alt="AI" className="hidden h-full w-full dark:block" />
               </div>
               <p className="mb-1 text-[15px] font-semibold">Ask anything about your emails</p>
-              <p className="mb-7 max-w-sm text-center text-[13px] text-muted-foreground">
+              <p className="text-muted-foreground mb-7 max-w-sm text-center text-[13px]">
                 Use natural language to search, organize, and act on your inbox.
               </p>
-              <div className="flex flex-wrap justify-center gap-2 max-w-lg">
+              <div className="flex max-w-lg flex-wrap justify-center gap-2">
                 {EXAMPLE_QUERIES.map((query) => (
                   <button
                     key={query}
                     type="button"
                     onClick={() => handleExampleClick(query)}
-                    className="rounded-lg border border-border bg-muted/50 px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                    className="border-border bg-muted/50 text-muted-foreground hover:bg-accent hover:text-foreground rounded-lg border px-3 py-1.5 text-[12px] transition-colors"
                   >
                     {query}
                   </button>
@@ -586,36 +595,34 @@ export default function ChatPage() {
                           'max-w-[82%] rounded-2xl px-4 py-2.5 text-[13px] leading-relaxed',
                           isUser
                             ? 'bg-primary text-primary-foreground'
-                            : 'border bg-card text-foreground',
+                            : 'bg-card text-foreground border',
                         )}
                       >
-                        {isUser ? (
-                          // User messages: plain text with whitespace-pre-wrap
-                          textParts.map((part, i) => {
-                            const text = 'text' in part ? (part as { text: string }).text : '';
-                            return text ? (
-                              <p key={i} className="whitespace-pre-wrap">
-                                {text}
-                              </p>
-                            ) : null;
-                          })
-                        ) : (
-                          // AI messages: markdown rendered with react-markdown + remark-gfm.
-                          // Wrapped in a div because react-markdown v10 doesn't accept className directly.
-                          textParts.map((part, i) => {
-                            const text = 'text' in part ? (part as { text: string }).text : '';
-                            return text ? (
-                              <div
-                                key={i}
-                                className="prose prose-sm dark:prose-invert max-w-none [&_code]:text-[12px] [&_pre]:overflow-x-auto"
-                              >
-                                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {isUser
+                          ? // User messages: plain text with whitespace-pre-wrap
+                            textParts.map((part, idx) => {
+                              const text = 'text' in part ? (part as { text: string }).text : '';
+                              return text ? (
+                                <p
+                                  key={`${message.id}-user-${idx}-${text.slice(0, 24)}`}
+                                  className="whitespace-pre-wrap"
+                                >
                                   {text}
-                                </ReactMarkdown>
-                              </div>
-                            ) : null;
-                          })
-                        )}
+                                </p>
+                              ) : null;
+                            })
+                          : // AI messages render as plain text in the current web client.
+                            textParts.map((part, idx) => {
+                              const text = 'text' in part ? (part as { text: string }).text : '';
+                              return text ? (
+                                <p
+                                  key={`${message.id}-assistant-${idx}-${text.slice(0, 24)}`}
+                                  className="whitespace-pre-wrap"
+                                >
+                                  {text}
+                                </p>
+                              ) : null;
+                            })}
                       </div>
                     </div>
                   );
@@ -624,11 +631,11 @@ export default function ChatPage() {
                 {/* Typing indicator (animated dots) */}
                 {isLoading && (
                   <div className="flex justify-start">
-                    <div className="rounded-2xl border bg-card px-4 py-3">
+                    <div className="bg-card rounded-2xl border px-4 py-3">
                       <div className="flex gap-1">
-                        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground/60 [animation-delay:-0.3s]" />
-                        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground/60 [animation-delay:-0.15s]" />
-                        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground/60" />
+                        <span className="bg-muted-foreground/60 h-1.5 w-1.5 animate-bounce rounded-full [animation-delay:-0.3s]" />
+                        <span className="bg-muted-foreground/60 h-1.5 w-1.5 animate-bounce rounded-full [animation-delay:-0.15s]" />
+                        <span className="bg-muted-foreground/60 h-1.5 w-1.5 animate-bounce rounded-full" />
                       </div>
                     </div>
                   </div>
@@ -643,7 +650,7 @@ export default function ChatPage() {
         <div className="border-t p-4">
           <div className="mx-auto max-w-2xl">
             <form onSubmit={handleSubmit}>
-              <div className="flex items-end gap-2 rounded-xl border border-input bg-background px-4 py-2 focus-within:ring-1 focus-within:ring-ring">
+              <div className="border-input bg-background focus-within:ring-ring flex items-end gap-2 rounded-xl border px-4 py-2 focus-within:ring-1">
                 <Textarea
                   ref={textareaRef}
                   value={input}
@@ -676,7 +683,7 @@ export default function ChatPage() {
                 )}
               </div>
             </form>
-            <p className="mt-2 text-center text-[11px] text-muted-foreground">
+            <p className="text-muted-foreground mt-2 text-center text-[11px]">
               AI can make mistakes. Verify important information.
             </p>
           </div>

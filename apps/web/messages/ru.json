@@ -62,7 +62,7 @@
     "themes": { "dark": "Тёмный", "light": "Светлый", "system": "Системный" },
     "commandPalette": {
       "title": "Команда",
-      "description": "Быстрый запуск команд и навигация",
+      "description": "Быстрый доступ к командам",
       "placeholder": "Введите команду или поиск...",
       "noResults": "Нет результатов",
       "groups": {
@@ -73,7 +73,7 @@
         "navigation": "Навигация"
       },
       "commands": {
-        "goToInbox": "Перейти во Входящие",
+      "goToInbox": "Перейти во Входящие",
         "goToDrafts": "Перейти в Черновики",
         "goToSent": "Перейти в Отправленные",
         "goToSpam": "Перейти в Спам",
@@ -252,10 +252,8 @@
           "declarations": ["input count", "local countPlural = count: plural"],
           "selectors": ["countPlural"],
           "match": {
-            "countPlural=0": "# заметок",
+            "countPlural=0": "Добавьте заметки",
             "countPlural=one": "# заметка",
-            "countPlural=few": "# заметки",
-            "countPlural=many": "# заметок",
             "countPlural=other": "# заметок"
           }
         }
@@ -317,10 +315,8 @@
           "declarations": ["input count", "local countPlural = count: plural"],
           "selectors": ["countPlural"],
           "match": {
-            "countPlural=0": "ответов",
+            "countPlural=0": "ответы",
             "countPlural=one": "# ответ",
-            "countPlural=few": "# ответа",
-            "countPlural=many": "# ответов",
             "countPlural=other": "# ответов"
           }
         }

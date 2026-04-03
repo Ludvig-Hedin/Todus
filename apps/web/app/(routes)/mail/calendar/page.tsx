@@ -6,40 +6,34 @@
  * If the user's Google token lacks the `calendar.readonly` scope (older auth),
  * a "Connect Google Calendar" prompt appears instead of events.
  */
-import { useState, useMemo, useRef, useCallback } from 'react';
-import { Link } from 'react-router';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   format,
   isSameDay,
   startOfWeek,
+  endOfWeek,
   addDays,
   isToday,
   startOfMonth,
   endOfMonth,
-  addMonths,
-  subMonths,
 } from 'date-fns';
-import {
-  CalendarIcon,
-  CheckCircle2,
-  Circle,
-  Plus,
-  Clock,
-  MapPin,
-  RefreshCw,
-} from 'lucide-react';
-import { useTRPC } from '@/providers/query-provider';
-import { authClient } from '@/lib/auth-client';
-import { authProxy } from '@/lib/auth-proxy';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Calendar } from '@/components/ui/calendar';
-import { Badge } from '@/components/ui/badge';
+import { CalendarIcon, CheckCircle2, Circle, Plus, Clock, MapPin, RefreshCw } from 'lucide-react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useState, useMemo, useRef, useCallback } from 'react';
 import { Separator } from '@/components/ui/separator';
-import { cn } from '@/lib/utils';
-import type { Route } from './+types/page';
+import { useTRPC } from '@/providers/query-provider';
+import { BackgroundRefreshIndicator } from '@/components/ui/background-refresh-indicator';
+import { Calendar } from '@/components/ui/calendar';
 import type { Outputs } from '@zero/server/trpc';
+import { Button } from '@/components/ui/button';
+import { authClient } from '@/lib/auth-client';
+import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
+import { authProxy } from '@/lib/auth-proxy';
+import type { Route } from './+types/page';
+import { Link } from 'react-router';
+import { cn } from '@/lib/utils';
+import { upsertTaskInTaskCaches } from '@/lib/task-cache';
+import { toast } from 'sonner';
 
 type Task = Outputs['tasks']['list']['tasks'][number];
 type CalendarEvent = Outputs['calendar']['events']['events'][number];
@@ -69,37 +63,56 @@ export default function CalendarPage() {
   const quickAddRef = useRef<HTMLInputElement>(null);
 
   // ── Tasks ──────────────────────────────────────────────────────────────────
-  const { data: tasksData, isLoading: tasksLoading } = useQuery(
-    trpc.tasks.list.queryOptions({ limit: 500 }),
+  const { data: tasksData, isLoading: tasksLoading, isFetching: isFetchingTasks } = useQuery(
+    trpc.tasks.list.queryOptions(
+      { limit: 500 },
+      {
+        staleTime: 1000 * 60 * 5,
+        refetchOnMount: false,
+      },
+    ),
   );
-  const tasks = tasksData?.tasks ?? [];
+  const tasks = useMemo(() => tasksData?.tasks ?? [], [tasksData]);
 
   // ── Google Calendar events ─────────────────────────────────────────────────
-  // Fetch events for the displayed month ±1 day buffer so day-boundary edge
-  // cases don't drop events. Refetches automatically when displayMonth changes.
-  const eventsTimeMin = addDays(startOfMonth(displayMonth), -1).toISOString();
-  const eventsTimeMax = addDays(endOfMonth(displayMonth), 1).toISOString();
+  // Fetch events for the displayed month plus the visible "This week" range so
+  // adjacent-month days in the week overview still show event indicators.
+  const visibleWeekStart = startOfWeek(new Date(), { weekStartsOn: 1 });
+  const visibleWeekEnd = endOfWeek(new Date(), { weekStartsOn: 1 });
+  const monthStart = startOfMonth(displayMonth);
+  const monthEnd = endOfMonth(displayMonth);
+  const eventsTimeMin =
+    (monthStart < visibleWeekStart ? monthStart : visibleWeekStart).toISOString();
+  const eventsTimeMax = (monthEnd > visibleWeekEnd ? monthEnd : visibleWeekEnd).toISOString();
 
-  const { data: eventsData, isLoading: eventsLoading } = useQuery(
-    trpc.calendar.events.queryOptions({
-      timeMin: eventsTimeMin,
-      timeMax: eventsTimeMax,
-    }),
+  const { data: eventsData, isLoading: eventsLoading, isFetching: isFetchingEvents } = useQuery(
+    trpc.calendar.events.queryOptions(
+      {
+        timeMin: eventsTimeMin,
+        timeMax: eventsTimeMax,
+      },
+      {
+        staleTime: 1000 * 60 * 3,
+        refetchOnMount: false,
+      },
+    ),
   );
-  const calendarEvents: CalendarEvent[] = eventsData?.events ?? [];
+  const calendarEvents = useMemo<CalendarEvent[]>(() => eventsData?.events ?? [], [eventsData]);
   // scopeMissing = true means the token lacks calendar.readonly (needs re-auth)
   const scopeMissing = eventsData?.scopeMissing ?? false;
 
   // ── Mutations ──────────────────────────────────────────────────────────────
   const updateTask = useMutation({
     ...trpc.tasks.update.mutationOptions(),
-    onSuccess: () => void queryClient.invalidateQueries(trpc.tasks.list.queryFilter()),
+    onSuccess: ({ task }) => {
+      upsertTaskInTaskCaches(queryClient, task);
+    },
   });
 
   const createTask = useMutation({
     ...trpc.tasks.create.mutationOptions(),
-    onSuccess: () => {
-      void queryClient.invalidateQueries(trpc.tasks.list.queryFilter());
+    onSuccess: ({ task }) => {
+      upsertTaskInTaskCaches(queryClient, task);
       setQuickAdd('');
       quickAddRef.current?.focus();
     },
@@ -133,21 +146,12 @@ export default function CalendarPage() {
 
   // Events for the selected date, sorted by start time
   const selectedDateEvents = useMemo(() => {
-    const selectedDateKey = format(selectedDate, 'yyyy-MM-dd');
-
     return calendarEvents
-      .filter((event) => {
-        if (event.allDay && /^\d{4}-\d{2}-\d{2}$/.test(event.startTime)) {
-          return event.startTime === selectedDateKey;
-        }
-
-        const parsed = new Date(event.startTime);
-        return !Number.isNaN(parsed.getTime()) && isSameDay(parsed, selectedDate);
+      .filter((e) => {
+        const d = e.allDay ? new Date(e.startTime) : new Date(e.startTime);
+        return isSameDay(d, selectedDate);
       })
-      .sort((a, b) => {
-        if (a.allDay !== b.allDay) return a.allDay ? -1 : 1;
-        return new Date(a.startTime).getTime() - new Date(b.startTime).getTime();
-      });
+      .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
   }, [calendarEvents, selectedDate]);
 
   // Tasks for the selected date
@@ -161,9 +165,7 @@ export default function CalendarPage() {
     return Array.from({ length: 7 }, (_, i) => {
       const day = addDays(start, i);
       const key = format(day, 'yyyy-MM-dd');
-      const dayTasks = tasks.filter(
-        (t) => t.dueDate && isSameDay(new Date(t.dueDate), day),
-      );
+      const dayTasks = tasks.filter((t) => t.dueDate && isSameDay(new Date(t.dueDate), day));
       const hasEvent = datesWithEvents.has(key);
       return { day, tasks: dayTasks, hasEvent };
     });
@@ -183,21 +185,32 @@ export default function CalendarPage() {
   };
 
   const handleConnectGoogleCalendar = useCallback(async () => {
-    await authClient.linkSocial({
-      provider: 'google',
-      callbackURL: window.location.href,
-    });
+    try {
+      await authClient.linkSocial({
+        provider: 'google',
+        callbackURL: window.location.href,
+      });
+    } catch (error) {
+      console.error('Failed to connect Google Calendar:', error);
+      toast.error('Could not connect Google Calendar.');
+    }
   }, []);
 
   const hasContent = selectedDateEvents.length > 0 || selectedDateTasks.length > 0;
   const selectedDateLabel = isToday(selectedDate) ? 'Today' : format(selectedDate, 'EEEE, MMMM d');
+  const isBackgroundRefreshing =
+    (!!tasksData && !tasksLoading && isFetchingTasks) ||
+    (!!eventsData && !eventsLoading && isFetchingEvents);
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-background">
+    <div className="bg-background flex h-screen flex-col overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between border-b px-6 py-3.5">
         <div className="flex items-center gap-2.5">
           <h1 className="text-[15px] font-semibold">Calendar</h1>
+          {isBackgroundRefreshing ? (
+            <BackgroundRefreshIndicator label="Updating calendar" />
+          ) : null}
           {scopeMissing && (
             <span className="rounded-full bg-yellow-100 px-2 py-0.5 text-[11px] font-medium text-yellow-700 dark:bg-yellow-950/40 dark:text-yellow-400">
               Events need permission
@@ -230,7 +243,7 @@ export default function CalendarPage() {
 
           {/* This week overview */}
           <div>
-            <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            <p className="text-muted-foreground mb-2 text-[11px] font-semibold uppercase tracking-wide">
               This week
             </p>
             <div className="flex flex-col gap-0.5">
@@ -240,16 +253,14 @@ export default function CalendarPage() {
                   type="button"
                   onClick={() => setSelectedDate(day)}
                   className={cn(
-                    'flex items-center justify-between rounded-lg px-2 py-1.5 text-left text-[13px] transition-colors hover:bg-accent',
+                    'hover:bg-accent flex items-center justify-between rounded-lg px-2 py-1.5 text-left text-[13px] transition-colors',
                     isSameDay(day, selectedDate) && 'bg-accent font-medium',
                     isToday(day) && 'text-primary',
                   )}
                 >
                   <span>{format(day, 'EEE, MMM d')}</span>
                   <div className="flex items-center gap-1">
-                    {hasEvent && (
-                      <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />
-                    )}
+                    {hasEvent && <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />}
                     {dayTasks.length > 0 && (
                       <Badge variant="secondary" className="h-4 min-w-[1rem] px-1 text-[10px]">
                         {dayTasks.length}
@@ -265,14 +276,14 @@ export default function CalendarPage() {
           {scopeMissing && (
             <>
               <Separator className="my-3" />
-              <div className="flex flex-col gap-3 rounded-lg border border-dashed bg-muted/20 px-3 py-3">
+              <div className="bg-muted/20 flex flex-col gap-3 rounded-lg border border-dashed px-3 py-3">
                 <div className="flex items-start gap-2.5">
-                  <CalendarIcon className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground/60" />
+                  <CalendarIcon className="text-muted-foreground/60 mt-0.5 h-4 w-4 shrink-0" />
                   <div className="min-w-0 flex-1">
-                    <p className="text-[12px] font-medium leading-tight text-muted-foreground">
+                    <p className="text-muted-foreground text-[12px] font-medium leading-tight">
                       Google Calendar needs permission
                     </p>
-                    <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground/70">
+                    <p className="text-muted-foreground/70 mt-0.5 text-[11px] leading-snug">
                       Re-connect your Google account to grant calendar access.
                     </p>
                   </div>
@@ -295,7 +306,7 @@ export default function CalendarPage() {
         <div className="flex flex-1 flex-col overflow-hidden">
           {/* Day header */}
           <div className="flex items-center gap-2 border-b px-6 py-3.5">
-            <CalendarIcon className="h-4 w-4 text-muted-foreground" />
+            <CalendarIcon className="text-muted-foreground h-4 w-4" />
             <h2 className="text-[14px] font-semibold">{selectedDateLabel}</h2>
             {selectedDateEvents.length > 0 && (
               <Badge variant="secondary" className="h-5 text-[11px]">
@@ -311,8 +322,8 @@ export default function CalendarPage() {
 
           <div className="flex-1 overflow-y-auto px-6 py-4">
             {/* Quick-add row — always visible, prefills due date to selected day */}
-            <div className="mb-4 flex items-center gap-2 rounded-xl border bg-card px-4 py-2.5">
-              <Plus className="h-4 w-4 shrink-0 text-muted-foreground" />
+            <div className="bg-card mb-4 flex items-center gap-2 rounded-xl border px-4 py-2.5">
+              <Plus className="text-muted-foreground h-4 w-4 shrink-0" />
               <Input
                 ref={quickAddRef}
                 value={quickAdd}
@@ -326,20 +337,20 @@ export default function CalendarPage() {
 
             {eventsLoading || tasksLoading ? (
               <div className="flex flex-col gap-2">
-                {Array.from({ length: 3 }).map((_, i) => (
-                  <div key={i} className="h-16 animate-pulse rounded-xl bg-muted/50" />
+                {['calendar-skeleton-1', 'calendar-skeleton-2', 'calendar-skeleton-3'].map((key) => (
+                  <div key={key} className="bg-muted/50 h-16 animate-pulse rounded-xl" />
                 ))}
               </div>
             ) : !hasContent ? (
               <div className="flex flex-col items-center gap-3 py-12 text-center">
-                <div className="flex h-11 w-11 items-center justify-center rounded-full bg-muted">
-                  <CalendarIcon className="h-5 w-5 text-muted-foreground" />
+                <div className="bg-muted flex h-11 w-11 items-center justify-center rounded-full">
+                  <CalendarIcon className="text-muted-foreground h-5 w-5" />
                 </div>
                 <div>
                   <p className="text-[13px] font-medium">
                     {scopeMissing ? 'No tasks for this day' : 'Nothing scheduled'}
                   </p>
-                  <p className="text-[12px] text-muted-foreground">
+                  <p className="text-muted-foreground text-[12px]">
                     Type above to quickly add a task, or go to{' '}
                     <Link to="/mail/tasks" className="underline">
                       Tasks
@@ -353,7 +364,7 @@ export default function CalendarPage() {
                 {/* Calendar events section */}
                 {selectedDateEvents.length > 0 && (
                   <div>
-                    <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    <p className="text-muted-foreground mb-2 text-[11px] font-semibold uppercase tracking-wide">
                       Events
                     </p>
                     <div className="flex flex-col gap-2">
@@ -367,7 +378,7 @@ export default function CalendarPage() {
                 {/* Tasks section */}
                 {selectedDateTasks.length > 0 && (
                   <div>
-                    <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    <p className="text-muted-foreground mb-2 text-[11px] font-semibold uppercase tracking-wide">
                       Tasks
                     </p>
                     <div className="flex flex-col gap-2">
@@ -402,30 +413,18 @@ function CalendarEventRow({ event }: { event: CalendarEvent }) {
     ? 'All day'
     : (() => {
         const start = new Date(event.startTime);
-        if (Number.isNaN(start.getTime())) {
-          return 'Time unknown';
-        }
-
-        if (!event.endTime) {
-          return format(start, 'h:mm a');
-        }
-
         const end = new Date(event.endTime);
-        if (Number.isNaN(end.getTime())) {
-          return format(start, 'h:mm a');
-        }
-
         return `${format(start, 'h:mm a')} – ${format(end, 'h:mm a')}`;
       })();
 
   const content = (
     <div
-      className="flex items-start gap-3 rounded-xl border border-border bg-card p-4 transition-colors hover:bg-accent/20"
+      className="border-border bg-card hover:bg-accent/20 flex items-start gap-3 rounded-xl border p-4 transition-colors"
       style={{ borderLeftColor: event.color, borderLeftWidth: 3 }}
     >
       <div className="min-w-0 flex-1">
         <p className="text-[13px] font-medium">{event.title}</p>
-        <div className="mt-1 flex flex-wrap items-center gap-3 text-[12px] text-muted-foreground">
+        <div className="text-muted-foreground mt-1 flex flex-wrap items-center gap-3 text-[12px]">
           <span className="flex items-center gap-1">
             <Clock className="h-3 w-3" />
             {timeLabel}
@@ -438,7 +437,7 @@ function CalendarEventRow({ event }: { event: CalendarEvent }) {
           )}
         </div>
         {event.description && (
-          <p className="mt-1.5 line-clamp-2 text-[11px] text-muted-foreground">
+          <p className="text-muted-foreground mt-1.5 line-clamp-2 text-[11px]">
             {event.description}
           </p>
         )}
@@ -465,32 +464,29 @@ function CalendarTaskRow({ task, onToggle }: { task: Task; onToggle: () => void 
   return (
     <div
       className={cn(
-        'flex items-start gap-3 rounded-xl border border-border bg-card p-4 transition-colors hover:bg-accent/20',
+        'border-border bg-card hover:bg-accent/20 flex items-start gap-3 rounded-xl border p-4 transition-colors',
         isDone && 'opacity-60',
       )}
     >
       <button
         type="button"
         onClick={onToggle}
-        className="mt-0.5 shrink-0 text-muted-foreground transition-colors hover:text-primary"
+        className="text-muted-foreground hover:text-primary mt-0.5 shrink-0 transition-colors"
       >
         {isDone ? (
-          <CheckCircle2 className="h-5 w-5 text-primary" />
+          <CheckCircle2 className="text-primary h-5 w-5" />
         ) : (
           <Circle className="h-5 w-5" />
         )}
       </button>
       <div className="min-w-0 flex-1">
         <p
-          className={cn(
-            'text-[13px] font-medium',
-            isDone && 'text-muted-foreground line-through',
-          )}
+          className={cn('text-[13px] font-medium', isDone && 'text-muted-foreground line-through')}
         >
           {task.title}
         </p>
         {task.description && (
-          <p className="mt-0.5 line-clamp-1 text-[12px] text-muted-foreground">
+          <p className="text-muted-foreground mt-0.5 line-clamp-1 text-[12px]">
             {task.description}
           </p>
         )}

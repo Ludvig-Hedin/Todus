@@ -6,6 +6,82 @@
 - Blocking: None for the second-brain scope documented below.
 - Informational: Per-file verification details belong in CI logs instead of duplicated release notes.
 
+## [2026-04-04] Web App Catch-Up Sync — Mirror `apps/mail` into `apps/web`
+
+### Web (`apps/web`)
+- **Canonical source restored:** Synced the newer web-facing changes that had been applied in `apps/mail` over to `apps/web`, while intentionally leaving `apps/mail` unchanged.
+- **Route parity:** Brought `apps/web` up to date with the newer route/layout surface from `apps/mail`, including docs, meetings, sharing, and group-join/chat related pages.
+- **UI parity:** Mirrored the latest mail/home/tasks/search/settings/navigation/sidebar/thread-view updates so `apps/web` matches the newer app behavior and information architecture already present in `apps/mail`.
+- **Multi-account and refresh UX parity:** Carried over the connection filter provider, background refresh indicator, optimistic cache/task updates, and related mailbox/thread rendering changes that had diverged.
+- **Translations:** Synced the localized message catalogs that the newer web surfaces depend on.
+
+### Verification
+- `pnpm --filter @zero/web build` [Passed]
+
+## [2026-04-04] Multi-Account Support — Backend, Web, iOS, macOS
+
+### Backend (`apps/server`)
+- **Schema:** Added `color` column to `connection` table (migration `0047_connection_color.sql`) for per-account visual differentiation.
+- **Middleware:** New `multiConnectionProcedure` in `trpc.ts` that resolves ALL user connections (not just default) for multi-account endpoints.
+- **`mail.listThreadsMulti`:** New endpoint that fetches threads from multiple connections in parallel, merges and sorts by date, returns threads tagged with `connectionId/connectionEmail/connectionColor`, handles partial failures gracefully.
+- **`calendar.eventsMulti`:** New endpoint that fetches calendar events from all Google connections in parallel, merges and sorts by start time.
+- **`connections.updateColor`:** New mutation to update a connection's display color.
+- **`connections.list/getDefault`:** Now includes `color` field in response (auto-assigned from palette if not set).
+
+### Web (`apps/mail`)
+- **ConnectionFilterProvider:** New React context (`providers/connection-filter-provider.tsx`) managing which connections are visible, persisted to localStorage. Default: all enabled.
+- **nav-user.tsx:** Evolved account avatars from click-to-switch to click-to-toggle-visibility. Each account shows a colored ring (connection color) when enabled, reduced opacity when hidden. Right-click context menu for "Set as default". Star icon on default account.
+- **use-threads.ts:** Updated to call `listThreadsMulti` when multiple connections are enabled (unified view), falls back to original `listThreads` for single-connection efficiency.
+- **mail-list.tsx:** Added colored dot indicator on thread rows when in unified multi-account view, with tooltip showing account email.
+- **email-composer.tsx:** Enhanced "From:" picker to show all connected accounts with colored dots alongside aliases.
+
+### Shared Auth (`packages/swift-auth`)
+- **AuthService:** Added `linkSocialAccount(provider:)` method for linking additional OAuth accounts to an existing authenticated user via ASWebAuthenticationSession.
+- **AuthError:** Added `notAuthenticated` and `networkError` cases.
+
+## [2026-04-03] iOS — Multi-account connections service and inbox filtering
+
+### iOS (`apps/ios/Todus`)
+- **ConnectionsService:** New `@Observable` service (`Services/API/ConnectionsService.swift`) that fetches connected email accounts from the `connections.list` tRPC route, manages enabled/disabled filter state per account in UserDefaults, and exposes toggle/enableAll/setDefault/deleteConnection APIs.
+- **AppServices:** Added `connectionsService` property so all views can access it via `@Environment(AppServices.self)`.
+- **Settings — dynamic connections list:** The Connected Services section now shows a dynamic list of connected accounts from the backend (with colored circles, provider names, email addresses, and connection status) instead of the hardcoded Gmail row. Includes an "Add Account" button. Falls back to the legacy Gmail row when connections haven't loaded yet.
+- **EmailInboxView — multi-account filter chips:** When 2+ accounts are connected, a horizontal chip bar appears below the folder quick-switch row. Each chip shows a colored dot and truncated email; tapping toggles that account's visibility. An "All" chip selects all accounts.
+
+## [2026-04-03] macOS — Multi-account connections service and sidebar integration
+
+### macOS (`apps/macos`)
+- **ConnectionsService:** New `@Observable` service that fetches connected email accounts from the `connections.list` tRPC route, tracks enabled/disabled state per account in UserDefaults, and exposes toggle/enableAll/setDefault APIs.
+- **MacAppServices:** Added `connectionsService` property so all views can access it via `@Environment`.
+- **Sidebar accounts:** When multiple accounts are connected, the Email section shows per-account rows with colored dots and toggleable checkmarks. The sidebar footer shows a row of small colored avatar circles for quick multi-account switching.
+
+## [2026-04-03] Performance — Summary-driven inbox and warmer caches
+
+### Web (`apps/mail`)
+- **Summary-driven inbox rows:** Mail list rows now render from `mail.listThreads` summary data instead of issuing `mail.get` for every visible row, removing the inbox N+1 fetch pattern that made folder loads feel slow.
+- **Predictive thread warming:** The inbox now prefetches the selected thread, nearby threads, and hovered rows so opening a conversation is usually warm by the time the user clicks it.
+- **Persisted cache no longer self-invalidates:** Restored inbox cache is kept available on startup instead of being immediately invalidated after hydration, which improves perceived speed after reloads and app restarts.
+- **Visible background refresh state:** Cached-first mail, home, tasks, and calendar surfaces now show a subtle updating indicator while background revalidation is running so fast cached paints still communicate that fresher data is on the way.
+- **App-start warmup:** Client providers now warm settings, folders, inbox, tasks, and today's calendar window during idle time after the active connection resolves.
+- **Task cache patching:** Web task create/update/delete flows now patch cached task queries directly on the tasks page, home page, calendar page, and search page instead of relying on broad refetches.
+
+### Native (`apps/ios`, `apps/macos`)
+- **Cached refresh indicators across key surfaces:** iOS and macOS inbox, home, calendar, and tasks surfaces now show a compact `Updating` or `Syncing` badge when cached content is already visible and a background refresh is running.
+- **No cached-content flicker on Home:** Native Home events and recent-email sections now keep their warmed content on screen during refresh instead of swapping back to a blocking loading card.
+- **Shared-folder sync visibility:** Native task tabs now expose the background shared-folder sync state so task data can stay interactive while sync progress remains visible.
+
+### Backend (`apps/server`)
+- **Thread summaries from the local thread store:** `mail.listThreads` now returns richer summary rows for DB-backed folder browsing, including sender, subject, timestamps, label-derived flags, and cache timestamps.
+- **Search summary hydration:** Provider-backed search results are hydrated with cached thread detail when summary fields are missing, so search results still render meaningful preview data without regressing the fast folder-browsing path.
+
+### Verification
+- `pnpm exec tsc --noEmit -p apps/mail/tsconfig.json | rg "mail-list|use-optimistic-actions|client-providers|query-provider|use-threads|task-cache|mail/search/page|mail/tasks/page|mail/home/page|mail/calendar/page"` [No matches]
+- `pnpm exec tsc --noEmit -p apps/server/tsconfig.json | rg "lib/driver/types|routes/agent/index|routes/agent/db/index|trpc/routes/mail.ts"` [Still reports pre-existing errors in unrelated sections of `routes/agent/index.ts` and `routes/mail.ts`]
+
+## [2026-04-03] Infra — Drizzle migration journal
+
+- **`apps/server/src/db/migrations/meta/_journal.json`:** Added missing entries for `0044_pale_luminals` and `0045_meeting_retention_guardrails` so `drizzle-kit migrate` runs them before `0046_assistant_second_brain`.
+- **Note:** If the database was updated with `db:push` (or similar) while `__drizzle_migrations` only tracked through `0040`, `pnpm db:migrate` can fail with `relation "mail0_group" already exists`. Fix by inserting the SHA-256 hashes for already-applied migration SQL files into `drizzle.__drizzle_migrations` (matching `created_at` from the journal), or by resetting the local Docker Postgres volume when data loss is acceptable.
+
 ## [2026-04-03] AI — Second-brain briefing, open loops, and prepared work
 
 ### Backend (`apps/server`)
@@ -62,6 +138,7 @@
 - **Onboarding feedback states:** Gmail and Reminders onboarding now surface inline helper/error messaging so failed connection or denied-permission states are understandable instead of silent.
 - **Tasks discoverability:** The Tasks page now exposes a local `Add Task` action in the header, removes the old standalone current-view chip, and uses labeled mode toggles instead of icon-only buttons.
 - **Tasks clarity:** Non-list task modes now explicitly tell users that completed tasks stay in List, list empty-state copy points to the real creation path, and task-row metadata has a clearer hierarchy with due date/status emphasized over folder noise.
+- **Board scrolling:** The board view now scrolls vertically and horizontally as separate axes instead of allowing free-form canvas panning.
 
 ### macOS (`apps/macos`)
 - **Onboarding copy refresh:** Auth, Gmail, Calendar, and startup onboarding now use the same workspace framing as iOS, clearer outcome-based skip copy, and inline guidance that reduces setup anxiety.
@@ -2898,3 +2975,5 @@ todus.app had zero Google-indexed pages. This overhaul adds all missing SEO infr
 [2026-04-03] [UX Fix] Tightened the native iOS Tasks surface by slimming the search/sort controls, reducing task-row padding, and redesigning Calendar mode into a due-date timeline with bucketed cards so it reads differently from List. User-facing change. (apps/ios/Todus/Todus/Features/Tasks/TasksTabView.swift, apps/ios/Todus/Todus/Features/Tasks/TaskRowView.swift, apps/ios/Todus/Todus/Features/Tasks/CalendarTaskView.swift).
 
 [2026-04-03] [UI Polish] Refined the native iOS Tasks board into a more product-like kanban surface with quieter monochrome columns, tighter card typography, clearer empty/add states, a stronger board header treatment, and a more explicit board-mode icon. User-facing change. (apps/ios/Todus/Todus/Features/Tasks/BoardView.swift, apps/ios/Todus/Todus/Features/Tasks/BoardColumnView.swift, apps/ios/Todus/Todus/Features/Tasks/BoardTaskCard.swift, apps/ios/Todus/Todus/Domain/TaskViewMode.swift).
+
+[2026-04-04] [UX Fix] Corrected the cached-refresh loading-state work to target the real web app in `apps/web`, added subtle background update badges across inbox, home, tasks, and calendar, stopped invalidating restored inbox cache on startup, and switched the web home recent-mail panel to render from thread summaries instead of per-row thread fetches. User-facing and architectural change. (apps/web/components/ui/background-refresh-indicator.tsx, apps/web/components/mail/mail-list.tsx, apps/web/app/(routes)/mail/home/page.tsx, apps/web/app/(routes)/mail/tasks/page.tsx, apps/web/app/(routes)/mail/calendar/page.tsx, apps/web/providers/query-provider.tsx).

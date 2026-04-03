@@ -1,14 +1,12 @@
-// Voice secret is loaded from Vite env — it is bundled into the client. Prefer a
-// server-only check for anything that must stay confidential (see SECURITY.md).
+// Server tool wrapper using secure session cookies instead of exposed voice secret
 export async function callServerTool(action: string, payload: unknown, caller: string) {
   const base = import.meta.env.VITE_PUBLIC_SERVER_URL;
-  const voiceSecret = import.meta.env.VITE_PUBLIC_VOICE_SECRET;
 
   const res = await fetch(`${base}/api/ai/do/${action}`, {
     method: 'POST',
+    credentials: 'include', // <-- Authenticate securely via session cookie
     headers: {
       'Content-Type': 'application/json',
-      'X-Voice-Secret': voiceSecret,
       'X-Caller': caller,
     },
     body: JSON.stringify(payload ?? {}),

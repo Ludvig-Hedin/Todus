@@ -9,6 +9,7 @@ import {
   BanknoteIcon,
   RefreshCcw,
   Trash2,
+  Star,
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -17,7 +18,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { useConnectionFilter } from '@/providers/connection-filter-provider';
 import { useActiveConnection, useConnections } from '@/hooks/use-connections';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -127,10 +135,12 @@ export function NavUser() {
   }, [activeConnection]);
 
   const { data: activeAccount } = useActiveConnection();
+  const { enabledConnectionIds, toggleConnection, totalConnections } = useConnectionFilter();
 
   useEffect(() => setIsRendered(true), []);
 
-  const handleAccountSwitch = (connectionId: string) => async () => {
+  /** Set a connection as the default (for compose "from" address) */
+  const handleSetDefault = (connectionId: string) => async () => {
     if (connectionId === activeConnection?.id) return;
 
     try {
@@ -147,6 +157,13 @@ export function NavUser() {
     } finally {
       setLoading(false);
     }
+  };
+
+  /** Toggle a connection's visibility in the unified view (click behavior) */
+  const handleToggleVisibility = (connectionId: string) => () => {
+    // If only one connection total, toggle is meaningless — act as set-default
+    if (totalConnections <= 1) return;
+    toggleConnection(connectionId);
   };
 
   const handleLogout = async () => {
@@ -254,12 +271,19 @@ export function NavUser() {
 
                     {data?.connections
                       ?.filter((connection) => connection.id !== activeConnection?.id)
-                      .map((connection) => (
+                      .map((connection) => {
+                        const isEnabled = enabledConnectionIds.has(connection.id);
+                        return (
                         <DropdownMenuItem
                           key={connection.id}
-                          onClick={handleAccountSwitch(connection.id)}
+                          onClick={handleToggleVisibility(connection.id)}
                           className="flex cursor-pointer items-center gap-3 py-1"
+                          style={{ opacity: isEnabled ? 1 : 0.5 }}
                         >
+                          <div
+                            className="size-2 shrink-0 rounded-full"
+                            style={{ backgroundColor: connection.color ?? '#007AFF' }}
+                          />
                           <Avatar className="size-7 rounded-lg">
                             <AvatarImage
                               className="rounded-lg"
@@ -286,7 +310,8 @@ export function NavUser() {
                             )}
                           </div>
                         </DropdownMenuItem>
-                      ))}
+                        );
+                      })}
                     <AddConnectionDialog />
 
                     <DropdownMenuSeparator className="my-1" />
@@ -388,37 +413,80 @@ export function NavUser() {
         ) : (
           <div className="flex w-full items-center justify-between">
             <div className="flex items-center gap-2">
-              {data && activeAccount ? (
-                <div
-                  key={activeAccount.id}
-                  onClick={handleAccountSwitch(activeAccount.id)}
-                  className={`flex cursor-pointer items-center ${
-                    activeAccount.id === activeConnection?.id && data.connections.length > 1
-                      ? 'outline-mainBlue rounded-[5px] outline outline-2'
-                      : ''
-                  }`}
-                >
-                  <div className="relative">
-                    <Avatar className="size-7 rounded-[5px]">
-                      <AvatarImage
-                        className="rounded-[5px]"
-                        src={activeAccount.picture || undefined}
-                        alt={activeAccount.name || activeAccount.email}
-                      />
-                      <AvatarFallback className="rounded-[5px] text-[10px]">
-                        {(activeAccount.name || activeAccount.email)
-                          .split(' ')
-                          .map((n) => n[0])
-                          .join('')
-                          .toUpperCase()
-                          .slice(0, 2)}
-                      </AvatarFallback>
-                    </Avatar>
-                    {activeAccount.id === activeConnection?.id && data.connections.length > 1 && (
-                      <CircleCheck className="fill-mainBlue absolute -bottom-2 -right-2 size-4 rounded-full bg-background" />
-                    )}
-                  </div>
-                </div>
+              {data ? (
+                data.connections.slice(0, 4).map((connection) => {
+                  const isEnabled = enabledConnectionIds.has(connection.id);
+                  const isDefault = connection.id === activeConnection?.id;
+                  const connectionColor = connection.color ?? '#007AFF';
+
+                  return (
+                    <ContextMenu key={connection.id}>
+                      <ContextMenuTrigger asChild>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <div
+                              onClick={handleToggleVisibility(connection.id)}
+                              className="flex cursor-pointer items-center"
+                              style={{
+                                opacity: isEnabled ? 1 : 0.35,
+                              }}
+                            >
+                              <div className="relative">
+                                <Avatar
+                                  className="size-7 rounded-[5px]"
+                                  style={
+                                    isEnabled && data.connections.length > 1
+                                      ? { outline: `2px solid ${connectionColor}`, outlineOffset: '1px' }
+                                      : undefined
+                                  }
+                                >
+                                  <AvatarImage
+                                    className="rounded-[5px]"
+                                    src={connection.picture || undefined}
+                                    alt={connection.name || connection.email}
+                                  />
+                                  <AvatarFallback className="rounded-[5px] text-[10px]">
+                                    {(connection.name || connection.email)
+                                      .split(' ')
+                                      .map((n: string) => n[0])
+                                      .join('')
+                                      .toUpperCase()
+                                      .slice(0, 2)}
+                                  </AvatarFallback>
+                                </Avatar>
+                                {isDefault && data.connections.length > 1 && (
+                                  <Star
+                                    className="absolute -bottom-1.5 -right-1.5 size-3 rounded-full bg-background"
+                                    style={{ fill: connectionColor, color: connectionColor }}
+                                  />
+                                )}
+                              </div>
+                            </div>
+                          </TooltipTrigger>
+                          <TooltipContent className="text-muted-foreground text-xs">
+                            <div>
+                              <p>{connection.email}</p>
+                              {data.connections.length > 1 && (
+                                <p className="text-[10px] opacity-60">
+                                  Click to {isEnabled ? 'hide' : 'show'} · Right-click for more
+                                </p>
+                              )}
+                            </div>
+                          </TooltipContent>
+                        </Tooltip>
+                      </ContextMenuTrigger>
+                      <ContextMenuContent>
+                        <ContextMenuItem onClick={handleSetDefault(connection.id)} disabled={isDefault}>
+                          <Star className="mr-2 size-4" />
+                          {isDefault ? 'Default account' : 'Set as default'}
+                        </ContextMenuItem>
+                        <ContextMenuItem onClick={handleToggleVisibility(connection.id)} disabled={totalConnections <= 1}>
+                          {isEnabled ? 'Hide from inbox' : 'Show in inbox'}
+                        </ContextMenuItem>
+                      </ContextMenuContent>
+                    </ContextMenu>
+                  );
+                })
               ) : (
                 <div className="flex cursor-pointer items-center">
                   <div className="relative">
@@ -426,50 +494,12 @@ export function NavUser() {
                   </div>
                 </div>
               )}
-              {otherConnections.slice(0, 2).map((connection) => (
-                <Tooltip key={connection.id}>
-                  <TooltipTrigger asChild>
-                    <div
-                      onClick={handleAccountSwitch(connection.id)}
-                      className={`flex cursor-pointer items-center ${
-                        connection.id === activeConnection?.id && otherConnections.length > 1
-                          ? 'outline-mainBlue rounded-[5px] outline outline-2'
-                          : ''
-                      }`}
-                    >
-                      <div className="relative">
-                        <Avatar className="size-7 rounded-[5px]">
-                          <AvatarImage
-                            className="rounded-[5px]"
-                            src={connection.picture || undefined}
-                            alt={connection.name || connection.email}
-                          />
-                          <AvatarFallback className="rounded-[5px] text-[10px]">
-                            {(connection.name || connection.email)
-                              .split(' ')
-                              .map((n) => n[0])
-                              .join('')
-                              .toUpperCase()
-                              .slice(0, 2)}
-                          </AvatarFallback>
-                        </Avatar>
-                        {connection.id === activeConnection?.id && otherConnections.length > 1 && (
-                          <CircleCheck className="fill-mainBlue absolute -bottom-2 -right-2 size-4 rounded-full bg-white dark:bg-background" />
-                        )}
-                      </div>
-                    </div>
-                  </TooltipTrigger>
-                  <TooltipContent className="text-muted-foreground text-xs">
-                    {connection.email}
-                  </TooltipContent>
-                </Tooltip>
-              ))}
 
-              {otherConnections.length > 3 && (
+              {data && data.connections.length > 4 && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <button className="hover:bg-muted flex h-7 w-7 cursor-pointer items-center justify-center rounded-[5px]">
-                      <span className="text-[10px]">+{otherConnections.length - 3}</span>
+                      <span className="text-[10px]">+{data.connections.length - 4}</span>
                     </button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent
@@ -478,39 +508,47 @@ export function NavUser() {
                     side={'bottom'}
                     sideOffset={8}
                   >
-                    {otherConnections.slice(3).map((connection) => (
-                      <DropdownMenuItem
-                        key={connection.id}
-                        onClick={handleAccountSwitch(connection.id)}
-                        className="flex cursor-pointer items-center gap-3 py-1"
-                      >
-                        <Avatar className="size-7 rounded-lg">
-                          <AvatarImage
-                            className="rounded-lg"
-                            src={connection.picture || undefined}
-                            alt={connection.name || connection.email}
+                    {data.connections.slice(4).map((connection) => {
+                      const isEnabled = enabledConnectionIds.has(connection.id);
+                      return (
+                        <DropdownMenuItem
+                          key={connection.id}
+                          onClick={handleToggleVisibility(connection.id)}
+                          className="flex cursor-pointer items-center gap-3 py-1"
+                          style={{ opacity: isEnabled ? 1 : 0.5 }}
+                        >
+                          <div
+                            className="size-2 rounded-full"
+                            style={{ backgroundColor: connection.color ?? '#007AFF' }}
                           />
-                          <AvatarFallback className="rounded-lg text-[10px]">
-                            {(connection.name || connection.email)
-                              .split(' ')
-                              .map((n) => n[0])
-                              .join('')
-                              .toUpperCase()
-                              .slice(0, 2)}
-                          </AvatarFallback>
-                        </Avatar>
-                        <div className="-space-y-0.5">
-                          <p className="text-[12px]">{connection.name || connection.email}</p>
-                          {connection.name && (
-                            <p className="text-muted-foreground text-[11px]">
-                              {connection.email.length > 25
-                                ? `${connection.email.slice(0, 25)}...`
-                                : connection.email}
-                            </p>
-                          )}
-                        </div>
-                      </DropdownMenuItem>
-                    ))}
+                          <Avatar className="size-7 rounded-lg">
+                            <AvatarImage
+                              className="rounded-lg"
+                              src={connection.picture || undefined}
+                              alt={connection.name || connection.email}
+                            />
+                            <AvatarFallback className="rounded-lg text-[10px]">
+                              {(connection.name || connection.email)
+                                .split(' ')
+                                .map((n) => n[0])
+                                .join('')
+                                .toUpperCase()
+                                .slice(0, 2)}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div className="-space-y-0.5">
+                            <p className="text-[12px]">{connection.name || connection.email}</p>
+                            {connection.name && (
+                              <p className="text-muted-foreground text-[11px]">
+                                {connection.email.length > 25
+                                  ? `${connection.email.slice(0, 25)}...`
+                                  : connection.email}
+                              </p>
+                            )}
+                          </div>
+                        </DropdownMenuItem>
+                      );
+                    })}
                   </DropdownMenuContent>
                 </DropdownMenu>
               )}

@@ -63,6 +63,7 @@ import { toast } from 'sonner';
 type CommandPaletteContext = {
   activeFilters: ActiveFilter[];
   clearAllFilters: () => void;
+  openPalette: () => void;
 };
 
 interface CommandItem {
@@ -194,6 +195,11 @@ export function CommandPalette({ children }: { children: React.ReactNode }) {
   const [commandInputValue, setCommandInputValue] = useState('');
   const navigate = useNavigate();
   const { pathname } = useLocation();
+  const currentFolder = useMemo(() => {
+    if (searchValue.folder) return searchValue.folder;
+    const match = pathname.match(/^\/mail\/([^/?]+)/);
+    return match?.[1] ?? 'inbox';
+  }, [pathname, searchValue.folder]);
 
   const { userLabels = [] } = useLabels();
   const trpc = useTRPC();
@@ -845,6 +851,40 @@ export function CommandPalette({ children }: { children: React.ReactNode }) {
             </>
           )}
         </CommandEmpty>
+
+        {/* Recent emails shown when no input — mirrors macOS search modal */}
+        {!commandInputValue && threads && Array.isArray(threads) && threads.length > 0 && (
+          <>
+            <CommandGroup heading="Recent Emails">
+              {(threads as any[]).slice(0, 4).map((thread: any) => (
+                <CommandItem
+                  key={thread.id}
+                  onSelect={() =>
+                    runCommand(() => navigate(`/mail/${currentFolder}?threadId=${thread.id}`))
+                  }
+                >
+                  <Mail className="h-4 w-4 shrink-0 opacity-60" />
+                  <div className="ml-2 flex min-w-0 flex-1 flex-col">
+                    <span className="truncate text-sm font-medium">
+                      {thread.subject || 'No Subject'}
+                    </span>
+                    <span className="text-muted-foreground truncate text-xs">
+                      {thread.from?.name || thread.from?.email || ''}
+                    </span>
+                  </div>
+                  <Badge
+                    variant="secondary"
+                    className="text-muted-foreground ml-2 shrink-0 rounded-full border-none bg-transparent text-[10px]"
+                  >
+                    Email
+                  </Badge>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+            <Separator />
+          </>
+        )}
+
         {allCommands.map((group, groupIndex) => (
           <Fragment key={group.group}>
             {group.items.length > 0 && (
@@ -976,7 +1016,7 @@ export function CommandPalette({ children }: { children: React.ReactNode }) {
                     runCommand(() => {
                       try {
                         if (thread && thread.id) {
-                          navigate(`/inbox?threadId=${thread.id}`);
+                          navigate(`/mail/${currentFolder}?threadId=${thread.id}`);
                         }
                       } catch (error) {
                         console.error('Error navigating to thread:', error);
@@ -1876,6 +1916,7 @@ export function CommandPalette({ children }: { children: React.ReactNode }) {
       value={{
         activeFilters,
         clearAllFilters,
+        openPalette: () => setOpen('true'),
       }}
     >
       <CommandDialog

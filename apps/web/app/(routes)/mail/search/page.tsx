@@ -1,18 +1,28 @@
-import { useState, useEffect, useRef } from 'react';
+import {
+  Search,
+  CalendarIcon,
+  CheckCircle2,
+  Circle,
+  Mail,
+  Loader2,
+  Plus,
+  Pencil,
+} from 'lucide-react';
 import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Link, useNavigate } from 'react-router';
-import { format } from 'date-fns';
-import { Search, CalendarIcon, CheckCircle2, Circle, Mail, Loader2, Plus, Pencil } from 'lucide-react';
-import { toast } from 'sonner';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useTRPC } from '@/providers/query-provider';
-import { authProxy } from '@/lib/auth-proxy';
+import { useState, useEffect, useRef } from 'react';
+import type { Outputs } from '@zero/server/trpc';
+import { Link, useNavigate } from 'react-router';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
+import { authProxy } from '@/lib/auth-proxy';
+import { upsertTaskInTaskCaches } from '@/lib/task-cache';
 import type { Route } from './+types/page';
-import type { Outputs } from '@zero/server/trpc';
+import { format, isValid } from 'date-fns';
+import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
 
 type Task = Outputs['tasks']['list']['tasks'][number];
 
@@ -56,8 +66,8 @@ export default function SearchPage() {
   // Create task mutation — used for inline quick-add from search
   const createTask = useMutation({
     ...trpc.tasks.create.mutationOptions(),
-    onSuccess: () => {
-      void queryClient.invalidateQueries(trpc.tasks.list.queryFilter());
+    onSuccess: ({ task }) => {
+      upsertTaskInTaskCaches(queryClient, task);
       setQuickTaskTitle('');
       quickTaskRef.current?.focus();
     },
@@ -81,7 +91,11 @@ export default function SearchPage() {
   const { data: tasksData, isLoading: tasksLoading } = useQuery(
     trpc.tasks.list.queryOptions(
       { search: debouncedQuery || undefined, limit: 20 },
-      { enabled: debouncedQuery.length > 0 && tab !== 'emails' },
+      {
+        enabled: debouncedQuery.length > 0 && tab !== 'emails',
+        staleTime: 1000 * 60 * 2,
+        refetchOnMount: false,
+      },
     ),
   );
   const tasks = tasksData?.tasks ?? [];
@@ -102,7 +116,8 @@ export default function SearchPage() {
 
   const isLoading = (tab !== 'emails' && tasksLoading) || (tab !== 'tasks' && threadsLoading);
 
-  const showEmptyState = debouncedQuery.length > 0 && !isLoading && tasks.length === 0 && threads.length === 0;
+  const showEmptyState =
+    debouncedQuery.length > 0 && !isLoading && tasks.length === 0 && threads.length === 0;
   const showPlaceholder = debouncedQuery.length === 0;
 
   const taskCount = tasks.length;
@@ -110,18 +125,18 @@ export default function SearchPage() {
   const totalCount = taskCount + emailCount;
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-background">
+    <div className="bg-background flex h-screen flex-col overflow-hidden">
       {/* Header */}
       <div className="border-b px-6 py-4">
         <h1 className="mb-3 text-xl font-semibold tracking-tight">Search</h1>
         <div className="relative">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Search className="text-muted-foreground absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2" />
           <Input
             autoFocus
             placeholder="Search emails, tasks..."
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            className="pl-9 h-10"
+            className="h-10 pl-9"
           />
         </div>
       </div>
@@ -131,13 +146,13 @@ export default function SearchPage() {
         <div className="border-b px-6 py-2">
           <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
             <TabsList className="h-8">
-              <TabsTrigger value="all" className="text-xs px-3">
+              <TabsTrigger value="all" className="px-3 text-xs">
                 All {totalCount > 0 && `(${totalCount})`}
               </TabsTrigger>
-              <TabsTrigger value="emails" className="text-xs px-3">
+              <TabsTrigger value="emails" className="px-3 text-xs">
                 Emails {emailCount > 0 && `(${emailCount})`}
               </TabsTrigger>
-              <TabsTrigger value="tasks" className="text-xs px-3">
+              <TabsTrigger value="tasks" className="px-3 text-xs">
                 Tasks {taskCount > 0 && `(${taskCount})`}
               </TabsTrigger>
             </TabsList>
@@ -150,13 +165,13 @@ export default function SearchPage() {
         {showPlaceholder ? (
           // Initial state — quick-create shortcuts (matches macOS search quick actions)
           <div className="mx-auto w-full max-w-lg pt-6">
-            <p className="mb-4 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            <p className="text-muted-foreground mb-4 text-[11px] font-semibold uppercase tracking-wide">
               Quick Actions
             </p>
             <div className="flex flex-col gap-3">
               {/* Inline quick-add task — type title, press Enter */}
-              <div className="flex items-center gap-3 rounded-xl border bg-card px-4 py-3">
-                <Plus className="h-4 w-4 shrink-0 text-muted-foreground" />
+              <div className="bg-card flex items-center gap-3 rounded-xl border px-4 py-3">
+                <Plus className="text-muted-foreground h-4 w-4 shrink-0" />
                 <Input
                   ref={quickTaskRef}
                   value={quickTaskTitle}
@@ -167,7 +182,7 @@ export default function SearchPage() {
                   disabled={createTask.isPending}
                 />
                 {createTask.isPending && (
-                  <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
+                  <Loader2 className="text-muted-foreground h-3.5 w-3.5 shrink-0 animate-spin" />
                 )}
               </div>
 
@@ -177,30 +192,30 @@ export default function SearchPage() {
                 className="h-auto justify-start gap-3 rounded-xl px-4 py-3 text-left"
                 onClick={() => navigate('/mail/compose')}
               >
-                <Pencil className="h-4 w-4 shrink-0 text-muted-foreground" />
-                <span className="text-[13px] font-normal text-foreground">Compose new email…</span>
+                <Pencil className="text-muted-foreground h-4 w-4 shrink-0" />
+                <span className="text-foreground text-[13px] font-normal">Compose new email…</span>
               </Button>
             </div>
 
-            <p className="mt-8 text-center text-[12px] text-muted-foreground">
+            <p className="text-muted-foreground mt-8 text-center text-[12px]">
               Or type above to search emails and tasks
             </p>
           </div>
         ) : isLoading ? (
           <div className="flex h-32 items-center justify-center">
-            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            <Loader2 className="text-muted-foreground h-5 w-5 animate-spin" />
           </div>
         ) : showEmptyState ? (
           <div className="flex h-32 flex-col items-center justify-center gap-2 text-center">
-            <p className="font-medium">No results for "{debouncedQuery}"</p>
-            <p className="text-sm text-muted-foreground">Try a different search term</p>
+            <p className="font-medium">No results for &quot;{debouncedQuery}&quot;</p>
+            <p className="text-muted-foreground text-sm">Try a different search term</p>
           </div>
         ) : (
           <div className="flex flex-col gap-6">
             {/* Emails section */}
             {tab !== 'tasks' && threads.length > 0 && (
               <section>
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                <p className="text-muted-foreground mb-2 text-xs font-semibold uppercase tracking-wide">
                   Emails
                 </p>
                 <div className="flex flex-col gap-1">
@@ -214,7 +229,7 @@ export default function SearchPage() {
             {/* Tasks section */}
             {tab !== 'emails' && tasks.length > 0 && (
               <section>
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                <p className="text-muted-foreground mb-2 text-xs font-semibold uppercase tracking-wide">
                   Tasks
                 </p>
                 <div className="flex flex-col gap-1">
@@ -234,27 +249,33 @@ export default function SearchPage() {
 // ─── EmailResult ────────────────────────────────────────────────────────────
 
 interface EmailResultProps {
-  thread: { id: string; subject?: string; snippet?: string; latestMessageSentAt?: string };
+  thread: {
+    id: string;
+    latestSubject?: string | null;
+    snippet?: string | null;
+    latestReceivedOn?: string | null;
+  };
 }
 
 function EmailResult({ thread }: EmailResultProps) {
   return (
     <Link
       to={`/mail/inbox?threadId=${thread.id}`}
-      className="flex items-start gap-3 rounded-xl border border-border bg-card p-3.5 transition-colors hover:bg-accent/20"
+      className="border-border bg-card hover:bg-accent/20 flex items-start gap-3 rounded-xl border p-3.5 transition-colors"
     >
-      <Mail className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+      <Mail className="text-muted-foreground mt-0.5 h-4 w-4 shrink-0" />
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium">{thread.subject || '(no subject)'}</p>
+        <p className="truncate text-sm font-medium">{thread.latestSubject || '(no subject)'}</p>
         {thread.snippet && (
-          <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">{thread.snippet}</p>
+          <p className="text-muted-foreground mt-0.5 line-clamp-1 text-xs">{thread.snippet}</p>
         )}
       </div>
-      {thread.latestMessageSentAt && (
-        <span className="shrink-0 text-[11px] text-muted-foreground">
-          {format(new Date(thread.latestMessageSentAt), 'MMM d')}
-        </span>
-      )}
+      {thread.latestReceivedOn && (() => {
+        const d = new Date(thread.latestReceivedOn);
+        return isValid(d) ? (
+          <span className="text-muted-foreground shrink-0 text-[11px]">{format(d, 'MMM d')}</span>
+        ) : null;
+      })()}
     </Link>
   );
 }
@@ -268,37 +289,48 @@ function TaskResult({ task }: { task: Task }) {
     <Link
       to="/mail/tasks"
       className={cn(
-        'flex items-start gap-3 rounded-xl border border-border bg-card p-3.5 transition-colors hover:bg-accent/20',
+        'border-border bg-card hover:bg-accent/20 flex items-start gap-3 rounded-xl border p-3.5 transition-colors',
         isDone && 'opacity-60',
       )}
     >
       {isDone ? (
-        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+        <CheckCircle2 className="text-primary mt-0.5 h-4 w-4 shrink-0" />
       ) : (
-        <Circle className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+        <Circle className="text-muted-foreground mt-0.5 h-4 w-4 shrink-0" />
       )}
       <div className="min-w-0 flex-1">
-        <p className={cn('truncate text-sm font-medium', isDone && 'line-through text-muted-foreground')}>
+        <p
+          className={cn(
+            'truncate text-sm font-medium',
+            isDone && 'text-muted-foreground line-through',
+          )}
+        >
           {task.title}
         </p>
         {task.description && (
-          <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">{task.description}</p>
+          <p className="text-muted-foreground mt-0.5 line-clamp-1 text-xs">{task.description}</p>
         )}
         <div className="mt-1.5 flex items-center gap-2">
           {task.priority !== 'none' && (
             <Badge
               variant="secondary"
-              className={cn('h-4 rounded px-1.5 text-[10px] font-medium border-0', PRIORITY_CLASS[task.priority] ?? '')}
+              className={cn(
+                'h-4 rounded border-0 px-1.5 text-[10px] font-medium',
+                PRIORITY_CLASS[task.priority] ?? '',
+              )}
             >
               {task.priority}
             </Badge>
           )}
-          {task.dueDate && (
-            <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
-              <CalendarIcon className="h-3 w-3" />
-              {format(new Date(task.dueDate), 'MMM d')}
-            </span>
-          )}
+          {task.dueDate && (() => {
+            const d = new Date(task.dueDate);
+            return isValid(d) ? (
+              <span className="text-muted-foreground flex items-center gap-1 text-[10px]">
+                <CalendarIcon className="h-3 w-3" />
+                {format(d, 'MMM d')}
+              </span>
+            ) : null;
+          })()}
         </div>
       </div>
     </Link>

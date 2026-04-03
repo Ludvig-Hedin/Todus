@@ -2,11 +2,10 @@ import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/comp
 import { ArrowsPointingIn, PanelLeftOpen, Phone } from '../icons/icons';
 import { useActiveConnection } from '@/hooks/use-connections';
 import type { MentionRef } from '@zero/shared';
-import { ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
 import { useSearchValue } from '@/hooks/use-search-value';
 import { useState, useEffect, useCallback } from 'react';
 import useSearchLabels from '@/hooks/use-labels-search';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQueryClient, useQuery } from '@tanstack/react-query';
 import { AIChat } from '@/components/create/ai-chat';
 import { useTRPC } from '@/providers/query-provider';
 import { Tools } from '../../../server/src/types';
@@ -17,7 +16,7 @@ import { Button } from '@/components/ui/button';
 import { useHotkeys } from 'react-hotkeys-hook';
 import { useLabels } from '@/hooks/use-labels';
 import { useAgentChat } from 'agents/ai-react';
-import { X, Expand, Plus } from 'lucide-react';
+import { X, Expand, Plus, Share2, Users, ArrowLeft } from 'lucide-react';
 import { IncomingMessageType } from '../party';
 import { Gauge } from '@/components/ui/gauge';
 import { useParams } from 'react-router';
@@ -26,6 +25,8 @@ import { useQueryState } from 'nuqs';
 import { cn } from '@/lib/utils';
 import posthog from 'posthog-js';
 import { toast } from 'sonner';
+import { GroupChatView } from '@/components/ui/group-chat-view';
+import { ShareConversationModal } from '@/components/ui/share-conversation-modal';
 
 interface ChatHeaderProps {
   onClose: () => void;
@@ -35,6 +36,12 @@ interface ChatHeaderProps {
   isPopup: boolean;
   isPro: boolean;
   onNewChat: () => void;
+  /** When a group is active, show back button + group name instead of new-chat button */
+  activeGroupId?: string | null;
+  onBackFromGroup?: () => void;
+  /** Current saved conversation ID — enables the Share button */
+  currentConversationId?: string | null;
+  currentConversationTitle?: string;
 }
 
 function ChatHeader({
@@ -45,9 +52,14 @@ function ChatHeader({
   isPopup,
   isPro,
   onNewChat,
+  activeGroupId,
+  onBackFromGroup,
+  currentConversationId,
+  currentConversationTitle,
 }: ChatHeaderProps) {
   const [, setPricingDialog] = useQueryState('pricingDialog');
   const { chatMessages } = useBilling();
+  const [shareOpen, setShareOpen] = useState(false);
   return (
     <div className="relative flex items-center justify-between px-2.5 pb-[10px] pt-[13px]">
       <TooltipProvider delayDuration={0}>
@@ -156,17 +168,61 @@ function ChatHeader({
 
         <PromptsDialog />
 
-        <TooltipProvider delayDuration={0}>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button onClick={onNewChat} variant="ghost" className="md:h-fit md:px-2">
-                <Plus className="dark:text-iconDark text-iconLight" />
-                <span className="sr-only">New chat</span>
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>New chat</TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
+        {/* Share button — only visible when viewing a saved conversation (not a group) */}
+        {currentConversationId && !activeGroupId && (
+          <>
+            <TooltipProvider delayDuration={0}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    onClick={() => setShareOpen(true)}
+                    variant="ghost"
+                    className="md:h-fit md:px-2"
+                  >
+                    <Share2 className="dark:text-iconDark text-iconLight h-4 w-4" />
+                    <span className="sr-only">Share conversation</span>
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Share conversation</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+            <ShareConversationModal
+              open={shareOpen}
+              onOpenChange={setShareOpen}
+              conversationId={currentConversationId}
+              conversationTitle={currentConversationTitle ?? ''}
+            />
+          </>
+        )}
+
+        {/* Back-to-AI button when inside a group chat */}
+        {activeGroupId && onBackFromGroup && (
+          <TooltipProvider delayDuration={0}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button onClick={onBackFromGroup} variant="ghost" className="md:h-fit md:px-2">
+                  <ArrowLeft className="dark:text-iconDark text-iconLight h-4 w-4" />
+                  <span className="sr-only">Back to AI chat</span>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Back to AI chat</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        )}
+
+        {!activeGroupId && (
+          <TooltipProvider delayDuration={0}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button onClick={onNewChat} variant="ghost" className="md:h-fit md:px-2">
+                  <Plus className="dark:text-iconDark text-iconLight" />
+                  <span className="sr-only">New chat</span>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>New chat</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        )}
       </div>
     </div>
   );
@@ -174,9 +230,6 @@ function ChatHeader({
 
 interface AISidebarProps {
   className?: string;
-  /** When true, suppresses the ResizablePanel (sidebar) render so the component
-   *  can safely be mounted outside a ResizablePanelGroup (e.g. in the mail layout). */
-  popupOnly?: boolean;
 }
 
 type ViewMode = 'sidebar' | 'popup' | 'fullscreen';
@@ -338,12 +391,24 @@ export function useAISidebar() {
   };
 }
 
-function AISidebar({ className, popupOnly }: AISidebarProps) {
+function AISidebar({ className }: AISidebarProps) {
   const { open, setOpen, isFullScreen, setIsFullScreen, toggleViewMode, isSidebar, isPopup } =
     useAISidebar();
   const { isPro, track, refetch: refetchBilling } = useBilling();
   const queryClient = useQueryClient();
+  // groupId query param — when set the sidebar shows GroupChatView instead of AIChat
+  const [groupId, setGroupId] = useQueryState('groupId');
+  // Track the current saved conversation ID to enable the Share button
+  const [currentConversationId, setCurrentConversationId] = useQueryState('conversationId');
   const trpc = useTRPC();
+  // Fetch the title for the active conversation so the ShareModal can prefill it
+  const { data: currentConversationData } = useQuery(
+    trpc.ai.getConversation.queryOptions(
+      { id: currentConversationId! },
+      { enabled: !!currentConversationId },
+    ),
+  );
+  const currentConversationTitle = currentConversationData?.title ?? '';
   const [threadId] = useQueryState('threadId');
   const { folder } = useParams<{ folder: string }>();
   const { refetch: refetchLabels } = useLabels();
@@ -389,7 +454,7 @@ function AISidebar({ className, popupOnly }: AISidebarProps) {
 
   const agent = useAgent({
     agent: 'ZeroAgent',
-    name: activeConnection?.id ? String(activeConnection.id) : 'general',
+    name: String(activeConnection?.id ?? 'general'),
     host: `${import.meta.env.VITE_PUBLIC_BACKEND_URL}`,
     onError: (e) => console.log(e),
     onMessage,
@@ -478,44 +543,43 @@ function AISidebar({ className, popupOnly }: AISidebarProps) {
     setPendingMentions([]);
   }, [chatState]);
 
+  // Don't render if user has no active email connection (all hooks must be called above this)
+  if (!activeConnection?.id) return null;
+
   return (
     <>
       {open && (
         <>
-          {/* Desktop view - visible on md and larger screens.
-              Skipped when popupOnly=true (e.g. mounted outside ResizablePanelGroup). */}
-          {!popupOnly && isSidebar && !isFullScreen && (
-            <>
-              <ResizableHandle className="hidden md:flex w-px bg-transparent" />
-              <ResizablePanel
-                id="ai-sidebar"
-                order={3}
-                defaultSize={24}
-                minSize={24}
-                maxSize={24}
-                className="bg-panelLight dark:bg-panelDark mb-1 mr-1 hidden h-[calc(100dvh-8px)] shadow-sm md:block md:rounded-2xl md:shadow-sm"
-              >
-                <div className={cn('h-[calc(98vh)]', 'flex flex-col', '', className)}>
-                  <div className="flex h-full flex-col">
-                    <ChatHeader
-                      onClose={() => {
-                        setOpen(false);
-                        setIsFullScreen(false);
-                      }}
-                      onToggleFullScreen={() => setIsFullScreen(!isFullScreen)}
-                      onToggleViewMode={toggleViewMode}
-                      isFullScreen={isFullScreen}
-                      isPopup={isPopup}
-                      isPro={isPro ?? false}
-                      onNewChat={handleNewChat}
-                    />
-                    <div className="relative flex-1 overflow-hidden">
-                      <AIChat {...chatState} onMentionsChange={setPendingMentions} />
-                    </div>
-                  </div>
+          {/* Desktop sidebar — fixed right panel, works on all pages */}
+          {isSidebar && !isFullScreen && (
+            <div className="bg-panelLight dark:bg-panelDark fixed top-2 right-1 bottom-1 z-40 hidden w-[360px] flex-col rounded-2xl shadow-sm md:flex">
+              <div className={cn('flex h-full flex-col', className)}>
+                <ChatHeader
+                  onClose={() => {
+                    setOpen(false);
+                    setIsFullScreen(false);
+                  }}
+                  onToggleFullScreen={() => setIsFullScreen(!isFullScreen)}
+                  onToggleViewMode={toggleViewMode}
+                  isFullScreen={isFullScreen}
+                  isPopup={isPopup}
+                  isPro={isPro ?? false}
+                  onNewChat={handleNewChat}
+                  activeGroupId={groupId}
+                  onBackFromGroup={() => setGroupId(null)}
+                  currentConversationId={currentConversationId}
+                  currentConversationTitle={currentConversationTitle}
+                />
+                <div className="relative flex-1 overflow-hidden">
+                  {/* Switch between group chat and regular AI chat based on groupId param */}
+                  {groupId ? (
+                    <GroupChatView groupId={groupId} />
+                  ) : (
+                    <AIChat {...chatState} onMentionsChange={setPendingMentions} />
+                  )}
                 </div>
-              </ResizablePanel>
-            </>
+              </div>
+            </div>
           )}
 
           {/* Popup view - visible on small screens or when popup mode is selected */}
@@ -554,9 +618,17 @@ function AISidebar({ className, popupOnly }: AISidebarProps) {
                   isPopup={isPopup}
                   isPro={isPro ?? false}
                   onNewChat={handleNewChat}
+                  activeGroupId={groupId}
+                  onBackFromGroup={() => setGroupId(null)}
+                  currentConversationId={currentConversationId}
+                  currentConversationTitle={currentConversationTitle}
                 />
                 <div className="relative flex-1 overflow-hidden">
-                  <AIChat {...chatState} onMentionsChange={setPendingMentions} />
+                  {groupId ? (
+                    <GroupChatView groupId={groupId} />
+                  ) : (
+                    <AIChat {...chatState} onMentionsChange={setPendingMentions} />
+                  )}
                 </div>
               </div>
             </div>

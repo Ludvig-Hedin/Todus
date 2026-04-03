@@ -1,6 +1,7 @@
 import { backgroundQueueAtom, isThreadInBackgroundQueueAtom } from '@/store/backgroundQueue';
-import { useInfiniteQuery, useQuery, useMutation } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type { IGetThreadResponse } from '../../server/src/lib/driver/types';
+import { useConnectionFilter } from '@/providers/connection-filter-provider';
 import { useSearchValue } from '@/hooks/use-search-value';
 import { useTRPC } from '@/providers/query-provider';
 import useSearchLabels from './use-labels-search';
@@ -10,7 +11,11 @@ import { useSettings } from './use-settings';
 import { useParams } from 'react-router';
 import { useTheme } from 'next-themes';
 import { useQueryState } from 'nuqs';
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
+
+const THREAD_SUMMARY_STALE_TIME_MS = 1000 * 60 * 5;
+const THREAD_DETAIL_STALE_TIME_MS = 1000 * 60 * 15;
+const THREAD_PREFETCH_COUNT = 3;
 
 export const useThreads = () => {
   const { folder } = useParams<{ folder: string }>();
@@ -19,8 +24,18 @@ export const useThreads = () => {
   const isInQueue = useAtomValue(isThreadInBackgroundQueueAtom);
   const trpc = useTRPC();
   const { labels } = useSearchLabels();
+  const queryClient = useQueryClient();
+  const [selectedThreadId] = useQueryState('threadId');
+  const { enabledConnectionIds, isUnifiedView } = useConnectionFilter();
 
-  const threadsQuery = useInfiniteQuery(
+  // Convert Set to sorted array for stable query key
+  const enabledIds = useMemo(
+    () => [...enabledConnectionIds].sort(),
+    [enabledConnectionIds],
+  );
+
+  // Single-connection mode: use existing listThreads endpoint (backward compatible)
+  const singleConnectionQuery = useInfiniteQuery(
     trpc.mail.listThreads.infiniteQueryOptions(
       {
         q: searchValue.value,
@@ -30,36 +45,100 @@ export const useThreads = () => {
       {
         initialCursor: '',
         getNextPageParam: (lastPage) => lastPage?.nextPageToken ?? null,
-        staleTime: 60 * 1000 * 1, // 1 minute
-        refetchOnMount: true,
-        refetchIntervalInBackground: true,
+        staleTime: THREAD_SUMMARY_STALE_TIME_MS,
+        refetchOnMount: false,
+        refetchOnReconnect: true,
+        enabled: !isUnifiedView,
       },
     ),
   );
 
-  // Flatten threads from all pages and sort by receivedOn date (newest first)
+  // Multi-connection mode: use listThreadsMulti endpoint
+  const multiConnectionQuery = useQuery(
+    trpc.mail.listThreadsMulti.queryOptions(
+      {
+        folder,
+        q: searchValue.value,
+        labelIds: labels,
+        connectionIds: enabledIds,
+      },
+      {
+        staleTime: THREAD_SUMMARY_STALE_TIME_MS,
+        refetchOnMount: false,
+        refetchOnReconnect: true,
+        enabled: isUnifiedView,
+      },
+    ),
+  );
 
+  // Unified thread list regardless of mode
   const threads = useMemo(() => {
-    return threadsQuery.data
-      ? threadsQuery.data.pages
-        .flatMap((e) => e.threads)
-        .filter(Boolean)
-        .filter((e) => !isInQueue(`thread:${e.id}`))
+    if (isUnifiedView) {
+      return multiConnectionQuery.data
+        ? multiConnectionQuery.data.threads
+            .filter(Boolean)
+            .filter((e) => !isInQueue(`thread:${e.id}`))
+        : [];
+    }
+
+    return singleConnectionQuery.data
+      ? singleConnectionQuery.data.pages
+          .flatMap((e) => e.threads)
+          .filter(Boolean)
+          .filter((e) => !isInQueue(`thread:${e.id}`))
       : [];
-  }, [threadsQuery.data, threadsQuery.dataUpdatedAt, isInQueue, backgroundQueue]);
+  }, [
+    isUnifiedView,
+    singleConnectionQuery.data,
+    singleConnectionQuery.dataUpdatedAt,
+    multiConnectionQuery.data,
+    multiConnectionQuery.dataUpdatedAt,
+    isInQueue,
+    backgroundQueue,
+  ]);
+
+  // Combine query states for consistent API
+  const activeQuery = isUnifiedView ? multiConnectionQuery : singleConnectionQuery;
 
   const isEmpty = useMemo(() => threads.length === 0, [threads]);
-  const isReachingEnd =
-    isEmpty ||
-    (threadsQuery.data &&
-      !threadsQuery.data.pages[threadsQuery.data.pages.length - 1]?.nextPageToken);
+  const isReachingEnd = isUnifiedView
+    ? isEmpty || !multiConnectionQuery.data?.nextCursors || Object.keys(multiConnectionQuery.data.nextCursors).length === 0
+    : isEmpty ||
+      (singleConnectionQuery.data &&
+        !singleConnectionQuery.data.pages[singleConnectionQuery.data.pages.length - 1]?.nextPageToken);
 
   const loadMore = async () => {
-    if (threadsQuery.isLoading || threadsQuery.isFetching) return;
-    await threadsQuery.fetchNextPage();
+    if (activeQuery.isLoading || activeQuery.isFetching) return;
+    if (!isUnifiedView) {
+      await singleConnectionQuery.fetchNextPage();
+    }
+    // Multi-connection pagination: re-fetch with updated cursors (handled by next iteration)
   };
 
-  return [threadsQuery, threads, isReachingEnd, loadMore] as const;
+  useEffect(() => {
+    if (!threads.length) return;
+
+    const selectedIndex = selectedThreadId
+      ? threads.findIndex((thread) => thread.id === selectedThreadId)
+      : -1;
+    const startIndex = selectedIndex >= 0 ? selectedIndex : 0;
+    const threadIdsToPrefetch = threads
+      .slice(startIndex, startIndex + THREAD_PREFETCH_COUNT)
+      .map((thread) => thread.id);
+
+    threadIdsToPrefetch.forEach((threadId) => {
+      void queryClient.prefetchQuery(
+        trpc.mail.get.queryOptions(
+          { id: threadId },
+          {
+            staleTime: THREAD_DETAIL_STALE_TIME_MS,
+          },
+        ),
+      );
+    });
+  }, [queryClient, selectedThreadId, threads, trpc]);
+
+  return [activeQuery, threads, isReachingEnd, loadMore] as const;
 };
 
 export const useThread = (threadId: string | null) => {
@@ -77,7 +156,8 @@ export const useThread = (threadId: string | null) => {
       },
       {
         enabled: !!id && !!session?.user?.id,
-        staleTime: 1000 * 60 * 60, // 1 minute
+        staleTime: THREAD_DETAIL_STALE_TIME_MS,
+        refetchOnMount: false,
       },
     ),
   );

@@ -330,7 +330,7 @@
       "moveToInbox": "Mover para a caixa de entrada",
       "deleteFromBin": "Excluir da lixeira",
       "unarchive": "Desarquivar",
-      "archive": "Arquivar",
+      "archive": "Arquivo",
       "moveToBin": "Mover para a lixeira",
       "restoreFromBin": "Restaurar da lixeira",
       "markAsUnread": "Marcar como não lido",
@@ -568,7 +568,7 @@
         "description": "Gerencie suas etiquetas para melhor organização dos seus e-mails."
       },
       "dangerZone": {
-        "title": "Zona de perigo",
+        "title": "Zona de Perigo",
         "description": "Exclua permanentemente sua conta e todos os dados associados.",
         "warning": "Esta ação não pode ser desfeita.",
         "confirmation": "Digite DELETE para confirmar a exclusão da conta",

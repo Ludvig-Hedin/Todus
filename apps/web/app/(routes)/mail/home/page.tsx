@@ -3,10 +3,6 @@
  * Section headers: icon + title + count badge + "+" action button.
  * Sections: Today's Events (Calendar CTA) → Due Tasks → Recent Emails.
  */
-import { useMemo } from 'react';
-import { useInfiniteQuery, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { formatDistanceToNow, isToday, format, startOfDay, endOfDay } from 'date-fns';
-import { Link } from 'react-router';
 import {
   ArrowRight,
   CheckCircle2,
@@ -17,27 +13,27 @@ import {
   CheckSquare2,
   Mail,
   ExternalLink,
-  Clock,
-  MapPin,
 } from 'lucide-react';
-import { useTRPC } from '@/providers/query-provider';
-import { authProxy } from '@/lib/auth-proxy';
+import { useInfiniteQuery, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { formatDistanceToNow, isToday, format, startOfDay, endOfDay } from 'date-fns';
 import { authClient, useSession } from '@/lib/auth-client';
-import { useThread } from '@/hooks/use-threads';
-import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
-import { Badge } from '@/components/ui/badge';
-import type { Route } from './+types/page';
+import { useTRPC } from '@/providers/query-provider';
 import type { Outputs } from '@zero/server/trpc';
+import { Button } from '@/components/ui/button';
+import { BackgroundRefreshIndicator } from '@/components/ui/background-refresh-indicator';
+import { useThread } from '@/hooks/use-threads';
+import { Badge } from '@/components/ui/badge';
+import { useSettings } from '@/hooks/use-settings';
+import { authProxy } from '@/lib/auth-proxy';
+import { upsertTaskInTaskCaches } from '@/lib/task-cache';
+import type { Route } from './+types/page';
+import { Link } from 'react-router';
+import { cn } from '@/lib/utils';
+import { useMemo } from 'react';
 
 type Task = Outputs['tasks']['list']['tasks'][number];
-type CalendarEvent = NonNullable<Outputs['calendar']['events']['events']>[number];
-
-function isNotFoundTrpcError(error: unknown): boolean {
-  if (!error || typeof error !== 'object') return false;
-  const data = 'data' in error ? (error as { data?: { code?: string } }).data : undefined;
-  return data?.code === 'NOT_FOUND';
-}
+type CalendarEvent = Outputs['calendar']['events']['events'][number];
+type AssistantBriefing = Outputs['assistant']['getBriefing'];
 
 // Auth guard
 export async function clientLoader({ request }: Route.ClientLoaderArgs) {
@@ -63,29 +59,32 @@ function SectionHeader({
   count,
   linkTo,
   onAdd,
+  isUpdating = false,
 }: {
   icon: React.ComponentType<{ className?: string }>;
   title: string;
   count?: number;
   linkTo?: string;
   onAdd?: () => void;
+  isUpdating?: boolean;
 }) {
   return (
     <div className="mb-3 flex items-center gap-2">
-      <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
+      <Icon className="text-muted-foreground h-4 w-4 shrink-0" />
       <span className="text-[15px] font-semibold leading-none">{title}</span>
       {typeof count === 'number' && count > 0 && (
-        <span className="rounded-full bg-muted px-1.5 py-0.5 text-[11px] font-bold text-muted-foreground">
+        <span className="bg-muted text-muted-foreground rounded-full px-1.5 py-0.5 text-[11px] font-bold">
           {count}
         </span>
       )}
       <div className="ml-auto flex items-center gap-1">
+        {isUpdating && <BackgroundRefreshIndicator className="mr-1" />}
         {linkTo && (
           <Button
             asChild
             variant="ghost"
             size="sm"
-            className="h-7 gap-1 px-2 text-[12px] text-muted-foreground"
+            className="text-muted-foreground h-7 gap-1 px-2 text-[12px]"
           >
             <Link to={linkTo}>
               See all
@@ -94,12 +93,7 @@ function SectionHeader({
           </Button>
         )}
         {onAdd && (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7"
-            onClick={onAdd}
-          >
+          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onAdd}>
             <Plus className="h-3.5 w-3.5" />
           </Button>
         )}
@@ -111,23 +105,37 @@ function SectionHeader({
 // ─── Section container with card styling ──────────────────────────────────────
 
 function Section({ children, className }: { children: React.ReactNode; className?: string }) {
-  return (
-    <div className={cn('rounded-xl border bg-card px-4 py-4', className)}>
-      {children}
-    </div>
-  );
+  return <div className={cn('bg-card rounded-xl border px-4 py-4', className)}>{children}</div>;
 }
 
 export default function HomePage() {
   const { data: session } = useSession();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
+  const { data: settings } = useSettings();
   const firstName = session?.user?.name?.split(' ')[0] ?? '';
+  const assistantPolicy = settings?.settings.assistantAutomationPolicy;
+  const showHomeBriefing =
+    assistantPolicy?.briefingEnabled !== false && assistantPolicy?.showHomeBriefing !== false;
+
+  const briefingQuery = useQuery(
+    trpc.assistant.getBriefing.queryOptions(undefined, {
+      enabled: showHomeBriefing,
+      staleTime: 60 * 1000,
+    }),
+  );
 
   // Tasks — fetch all, filter client-side for "today or pending"
-  const { data: tasksData, isLoading: tasksLoading } = useQuery(
-    trpc.tasks.list.queryOptions({ limit: 100 }),
+  const { data: tasksData, isLoading: tasksLoading, isFetching: isFetchingTasks } = useQuery(
+    trpc.tasks.list.queryOptions(
+      { limit: 100 },
+      {
+        staleTime: 1000 * 60 * 5,
+        refetchOnMount: false,
+      },
+    ),
   );
+  const isTasksRefreshing = !!tasksData && !tasksLoading && isFetchingTasks;
 
   const todayTasks = useMemo(() => {
     const tasks = tasksData?.tasks ?? [];
@@ -144,22 +152,26 @@ export default function HomePage() {
   // Quick task toggle from home page
   const updateTask = useMutation({
     ...trpc.tasks.update.mutationOptions(),
-    onSuccess: () => void queryClient.invalidateQueries(trpc.tasks.list.queryFilter()),
+    onSuccess: ({ task }) => {
+      upsertTaskInTaskCaches(queryClient, task);
+    },
   });
 
   // Today's calendar events
   const todayStart = startOfDay(new Date()).toISOString();
   const todayEnd = endOfDay(new Date()).toISOString();
-  const {
-    data: eventsData,
-    isLoading: eventsLoading,
-    isError: eventsError,
-    error: eventsErrorValue,
-  } = useQuery(
-    trpc.calendar.events.queryOptions({ timeMin: todayStart, timeMax: todayEnd }),
+  const { data: eventsData, isLoading: eventsLoading, isFetching: isFetchingEvents } = useQuery(
+    trpc.calendar.events.queryOptions(
+      { timeMin: todayStart, timeMax: todayEnd },
+      {
+        staleTime: 1000 * 60 * 3,
+        refetchOnMount: false,
+      },
+    ),
   );
   const todayEvents = eventsData?.events ?? [];
   const calendarScopeMissing = eventsData?.scopeMissing ?? false;
+  const isEventsRefreshing = !!eventsData && !eventsLoading && isFetchingEvents;
 
   // Recent inbox threads — first page, 3 items
   const threadsQuery = useInfiniteQuery(
@@ -176,96 +188,85 @@ export default function HomePage() {
     () => (threadsQuery.data?.pages[0]?.threads ?? []).slice(0, 3).map((t) => t.id),
     [threadsQuery.data],
   );
-  const calendarConnectionNotFound = isNotFoundTrpcError(eventsErrorValue);
-  const inboxConnectionNotFound = isNotFoundTrpcError(threadsQuery.error);
+  const isThreadsRefreshing =
+    !!threadsQuery.data && !threadsQuery.isLoading && threadsQuery.isFetching;
 
   return (
-    <div className="flex h-screen flex-col overflow-y-auto bg-background">
+    <div className="bg-background flex h-screen flex-col overflow-y-auto">
       <div className="mx-auto w-full max-w-2xl px-6 py-8">
         {/* Greeting — first name only, date subtitle */}
         <div className="mb-8">
           <h1 className="text-[22px] font-bold tracking-tight">
-            {getGreeting()}{firstName ? `, ${firstName}` : ''}
+            {getGreeting()}
+            {firstName ? `, ${firstName}` : ''}
           </h1>
-          <p className="mt-0.5 text-[13px] text-muted-foreground">
+          <p className="text-muted-foreground mt-0.5 text-[13px]">
             {format(new Date(), 'EEEE, MMMM d')}
           </p>
         </div>
 
         <div className="flex flex-col gap-4">
+          {showHomeBriefing && (
+            <Section className="space-y-4">
+              <SectionHeader
+                icon={Inbox}
+                title="Assistant Briefing"
+                isUpdating={!!briefingQuery.data && !briefingQuery.isLoading && briefingQuery.isFetching}
+              />
+              {briefingQuery.isLoading ? (
+                <div className="flex flex-col gap-2">
+                  {['briefing-skeleton-1', 'briefing-skeleton-2', 'briefing-skeleton-3'].map(
+                    (key) => (
+                      <div key={key} className="bg-muted/50 h-12 animate-pulse rounded-lg" />
+                    ),
+                  )}
+                </div>
+              ) : briefingQuery.data ? (
+                <AssistantBriefingBlock briefing={briefingQuery.data} />
+              ) : null}
+            </Section>
+          )}
+
           {/* ── Today's Events ────────────────────────────────────────────── */}
-          <Section>
-            <SectionHeader
-              icon={CalendarDays}
-              title="Today's Events"
-              count={todayEvents.length}
-              linkTo="/mail/calendar"
-            />
+            <Section>
+              <SectionHeader
+                icon={CalendarDays}
+                title="Today's Events"
+                count={todayEvents.length}
+                linkTo="/mail/calendar"
+                isUpdating={isEventsRefreshing}
+              />
             {eventsLoading ? (
               <div className="flex flex-col gap-2">
-                {Array.from({ length: 2 }).map((_, i) => (
-                  <div key={i} className="h-10 animate-pulse rounded-lg bg-muted/50" />
+                {['event-skeleton-1', 'event-skeleton-2'].map((key) => (
+                  <div key={key} className="bg-muted/50 h-10 animate-pulse rounded-lg" />
                 ))}
               </div>
-            ) : calendarConnectionNotFound ? (
-              /* No Google account linked — prompt to connect */
-              <Link
-                to="/settings/connections"
-                className="flex items-center gap-3 rounded-lg border border-dashed bg-muted/30 px-4 py-3.5 transition-colors hover:bg-muted/50"
-              >
-                <CalendarDays className="h-5 w-5 shrink-0 text-muted-foreground" />
-                <div className="min-w-0 flex-1">
-                  <p className="text-[13px] font-medium">Connect Google Calendar</p>
-                  <p className="text-[12px] text-muted-foreground">
-                    See today's events here once connected.
-                  </p>
-                </div>
-                <ExternalLink className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-              </Link>
-            ) : eventsError ? (
-              <div className="flex flex-col items-center gap-2 py-3 text-center">
-                <CalendarDays className="h-7 w-7 text-muted-foreground/40" />
-                <p className="text-[13px] font-medium">Could not load events</p>
-                <p className="text-[12px] text-muted-foreground">
-                  Try again in a moment.
-                </p>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-7 text-xs"
-                  onClick={() =>
-                    void queryClient.invalidateQueries(
-                      trpc.calendar.events.queryFilter({ timeMin: todayStart, timeMax: todayEnd }),
-                    )
-                  }
-                >
-                  Retry
-                </Button>
-              </div>
             ) : calendarScopeMissing ? (
-              /* Connected but calendar scope not yet granted — prompt re-auth */
+              /* User connected Google but hasn't granted calendar scope — prompt re-auth */
               <button
                 type="button"
-                onClick={() => authClient.linkSocial({ provider: 'google', callbackURL: '/mail/home' })}
-                className="flex w-full items-center gap-3 rounded-lg border border-dashed bg-muted/30 px-4 py-3.5 text-left transition-colors hover:bg-muted/50"
+                onClick={() =>
+                  authClient.linkSocial({ provider: 'google', callbackURL: '/mail/home' })
+                }
+                className="bg-muted/30 hover:bg-muted/50 flex w-full items-center gap-3 rounded-lg border border-dashed px-4 py-3.5 text-left transition-colors"
               >
-                <CalendarDays className="h-5 w-5 shrink-0 text-muted-foreground" />
+                <CalendarDays className="text-muted-foreground h-5 w-5 shrink-0" />
                 <div className="min-w-0 flex-1">
                   <p className="text-[13px] font-medium">Allow calendar access</p>
-                  <p className="text-[12px] text-muted-foreground">
-                    Grant the calendar permission to see today's events.
+                  <p className="text-muted-foreground text-[12px]">
+                    Grant the calendar permission to see today&apos;s events.
                   </p>
                 </div>
-                <ExternalLink className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                <ExternalLink className="text-muted-foreground h-3.5 w-3.5 shrink-0" />
               </button>
             ) : todayEvents.length === 0 ? (
               <div className="flex flex-col items-center gap-2 py-3 text-center">
-                <CalendarDays className="h-7 w-7 text-muted-foreground/40" />
-                <p className="text-[13px] text-muted-foreground">No events today</p>
+                <CalendarDays className="text-muted-foreground/40 h-7 w-7" />
+                <p className="text-muted-foreground text-[13px]">No events today</p>
               </div>
             ) : (
-              <div className="flex flex-col divide-y divide-border/60">
+              <div className="divide-border/60 flex flex-col divide-y">
                 {todayEvents.map((event) => (
                   <CalendarEventRow key={event.id} event={event} />
                 ))}
@@ -274,23 +275,24 @@ export default function HomePage() {
           </Section>
 
           {/* ── Due Tasks ──────────────────────────────────────────────────── */}
-          <Section>
-            <SectionHeader
-              icon={CheckSquare2}
-              title="Due Tasks"
-              count={todayTasks.length}
-              linkTo="/mail/tasks"
-            />
+            <Section>
+              <SectionHeader
+                icon={CheckSquare2}
+                title="Due Tasks"
+                count={todayTasks.length}
+                linkTo="/mail/tasks"
+                isUpdating={isTasksRefreshing}
+              />
             {tasksLoading ? (
               <div className="flex flex-col gap-2">
-                {Array.from({ length: 3 }).map((_, i) => (
-                  <div key={i} className="h-9 animate-pulse rounded-lg bg-muted/50" />
+                {['task-skeleton-1', 'task-skeleton-2', 'task-skeleton-3'].map((key) => (
+                  <div key={key} className="bg-muted/50 h-9 animate-pulse rounded-lg" />
                 ))}
               </div>
             ) : todayTasks.length === 0 ? (
               <div className="flex flex-col items-center gap-2 py-3 text-center">
-                <CheckCircle2 className="h-7 w-7 text-muted-foreground/40" />
-                <p className="text-[13px] text-muted-foreground">All caught up!</p>
+                <CheckCircle2 className="text-muted-foreground/40 h-7 w-7" />
+                <p className="text-muted-foreground text-[13px]">All caught up!</p>
                 <Button asChild variant="outline" size="sm" className="h-7 text-xs">
                   <Link to="/mail/tasks">
                     <Plus className="mr-1 h-3 w-3" />
@@ -299,7 +301,7 @@ export default function HomePage() {
                 </Button>
               </div>
             ) : (
-              <div className="flex flex-col divide-y divide-border/60">
+              <div className="divide-border/60 flex flex-col divide-y">
                 {todayTasks.map((task) => (
                   <TaskItem
                     key={task.id}
@@ -322,52 +324,21 @@ export default function HomePage() {
               icon={Mail}
               title="Recent Emails"
               linkTo="/mail/inbox"
+              isUpdating={isThreadsRefreshing}
             />
             {threadsQuery.isLoading ? (
               <div className="flex flex-col gap-2">
-                {Array.from({ length: 3 }).map((_, i) => (
-                  <div key={i} className="h-11 animate-pulse rounded-lg bg-muted/50" />
+                {['mail-skeleton-1', 'mail-skeleton-2', 'mail-skeleton-3'].map((key) => (
+                  <div key={key} className="bg-muted/50 h-11 animate-pulse rounded-lg" />
                 ))}
-              </div>
-            ) : inboxConnectionNotFound ? (
-              /* Backend throws NOT_FOUND when no Gmail connection — prompt to connect */
-              <Link
-                to="/settings/connections"
-                className="flex items-center gap-3 rounded-lg border border-dashed bg-muted/30 px-4 py-3.5 transition-colors hover:bg-muted/50"
-              >
-                <Mail className="h-5 w-5 shrink-0 text-muted-foreground" />
-                <div className="min-w-0 flex-1">
-                  <p className="text-[13px] font-medium">Connect Gmail</p>
-                  <p className="text-[12px] text-muted-foreground">
-                    See your recent emails here once connected.
-                  </p>
-                </div>
-                <ExternalLink className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-              </Link>
-            ) : threadsQuery.isError ? (
-              <div className="flex flex-col items-center gap-2 py-3 text-center">
-                <Mail className="h-7 w-7 text-muted-foreground/40" />
-                <p className="text-[13px] font-medium">Could not load emails</p>
-                <p className="text-[12px] text-muted-foreground">
-                  Try again in a moment.
-                </p>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-7 text-xs"
-                  onClick={() => void threadsQuery.refetch()}
-                >
-                  Retry
-                </Button>
               </div>
             ) : recentThreadIds.length === 0 ? (
               <div className="flex flex-col items-center gap-2 py-3 text-center">
-                <Inbox className="h-7 w-7 text-muted-foreground/40" />
-                <p className="text-[13px] text-muted-foreground">Your inbox is empty</p>
+                <Inbox className="text-muted-foreground/40 h-7 w-7" />
+                <p className="text-muted-foreground text-[13px]">Your inbox is empty</p>
               </div>
             ) : (
-              <div className="flex flex-col divide-y divide-border/60">
+              <div className="divide-border/60 flex flex-col divide-y">
                 {recentThreadIds.map((id) => (
                   <EmailThreadRow key={id} threadId={id} />
                 ))}
@@ -389,10 +360,10 @@ function TaskItem({ task, onToggle }: { task: Task; onToggle: () => void }) {
       <button
         type="button"
         onClick={onToggle}
-        className="shrink-0 text-muted-foreground transition-colors hover:text-primary"
+        className="text-muted-foreground hover:text-primary shrink-0 transition-colors"
       >
         {task.status === 'done' ? (
-          <CheckCircle2 className="h-4 w-4 text-primary" />
+          <CheckCircle2 className="text-primary h-4 w-4" />
         ) : (
           <Circle className="h-4 w-4" />
         )}
@@ -407,7 +378,7 @@ function TaskItem({ task, onToggle }: { task: Task; onToggle: () => void }) {
           {task.title}
         </p>
         {task.dueDate && isToday(new Date(task.dueDate)) && (
-          <p className="text-[11px] text-muted-foreground">Due today</p>
+          <p className="text-muted-foreground text-[11px]">Due today</p>
         )}
       </div>
       {task.priority && task.priority !== 'none' && (
@@ -415,9 +386,12 @@ function TaskItem({ task, onToggle }: { task: Task; onToggle: () => void }) {
           variant="secondary"
           className={cn(
             'h-4 shrink-0 border-0 px-1.5 text-[10px] font-medium',
-            task.priority === 'high' && 'bg-red-50 text-red-600 dark:bg-red-950/30 dark:text-red-400',
-            task.priority === 'medium' && 'bg-yellow-50 text-yellow-600 dark:bg-yellow-950/30 dark:text-yellow-400',
-            task.priority === 'low' && 'bg-blue-50 text-blue-600 dark:bg-blue-950/30 dark:text-blue-400',
+            task.priority === 'high' &&
+              'bg-red-50 text-red-600 dark:bg-red-950/30 dark:text-red-400',
+            task.priority === 'medium' &&
+              'bg-yellow-50 text-yellow-600 dark:bg-yellow-950/30 dark:text-yellow-400',
+            task.priority === 'low' &&
+              'bg-blue-50 text-blue-600 dark:bg-blue-950/30 dark:text-blue-400',
           )}
         >
           {task.priority}
@@ -425,65 +399,6 @@ function TaskItem({ task, onToggle }: { task: Task; onToggle: () => void }) {
       )}
     </div>
   );
-}
-
-// ─── CalendarEventRow ─────────────────────────────────────────────────────────
-// Compact event row with colored left border + time + optional location
-
-function CalendarEventRow({ event }: { event: CalendarEvent }) {
-  const timeLabel = event.allDay
-    ? 'All day'
-    : (() => {
-        const start = event.startTime ? new Date(event.startTime) : null;
-        const end = event.endTime ? new Date(event.endTime) : null;
-
-        if (!start || Number.isNaN(start.getTime())) {
-          return 'Time unknown';
-        }
-
-        if (!end || Number.isNaN(end.getTime())) {
-          return format(start, 'h:mm a');
-        }
-
-        return `${format(start, 'h:mm a')} – ${format(end, 'h:mm a')}`;
-      })();
-
-  const row = (
-    <div
-      className="flex items-start gap-3 py-2.5"
-      style={{ borderLeft: `3px solid ${event.color ?? '#5484ed'}`, paddingLeft: '10px' }}
-    >
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-[13px] font-medium">{event.title}</p>
-        <div className="mt-0.5 flex items-center gap-2">
-          <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
-            <Clock className="h-3 w-3 shrink-0" />
-            {timeLabel}
-          </span>
-          {event.location && (
-            <span className="flex items-center gap-1 truncate text-[11px] text-muted-foreground">
-              <MapPin className="h-3 w-3 shrink-0" />
-              {event.location}
-            </span>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-
-  if (event.htmlLink) {
-    return (
-      <a
-        href={event.htmlLink}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="-mx-1 block rounded-lg px-1 transition-colors hover:bg-accent/40"
-      >
-        {row}
-      </a>
-    );
-  }
-  return <div className="-mx-1 px-1">{row}</div>;
 }
 
 // ─── EmailThreadRow ────────────────────────────────────────────────────────────
@@ -494,7 +409,7 @@ function EmailThreadRow({ threadId }: { threadId: string }) {
   const latest = data?.latest;
 
   if (isLoading) {
-    return <div className="h-11 animate-pulse rounded-lg bg-muted/50 my-1" />;
+    return <div className="bg-muted/50 my-1 h-11 animate-pulse rounded-lg" />;
   }
 
   if (!latest) return null;
@@ -509,28 +424,216 @@ function EmailThreadRow({ threadId }: { threadId: string }) {
   return (
     <Link
       to={`/mail/inbox?threadId=${threadId}`}
-      className="-mx-1 flex items-start gap-3 rounded-lg px-1 py-3 transition-colors hover:bg-accent/40"
+      className="hover:bg-accent/40 -mx-1 flex items-start gap-3 rounded-lg px-1 py-3 transition-colors"
     >
       {/* Unread dot */}
       <div className="mt-1.5 shrink-0">
         <div
-          className={cn(
-            'h-2 w-2 rounded-full',
-            latest.unread ? 'bg-primary' : 'bg-transparent',
-          )}
+          className={cn('h-2 w-2 rounded-full', latest.unread ? 'bg-primary' : 'bg-transparent')}
         />
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline justify-between gap-2">
-          <p className={cn('truncate text-[13px]', latest.unread ? 'font-semibold' : 'font-medium')}>
+          <p
+            className={cn('truncate text-[13px]', latest.unread ? 'font-semibold' : 'font-medium')}
+          >
             {senderName}
           </p>
-          {time && (
-            <p className="shrink-0 text-[11px] text-muted-foreground">{time}</p>
-          )}
+          {time && <p className="text-muted-foreground shrink-0 text-[11px]">{time}</p>}
         </div>
-        <p className="truncate text-[12px] text-muted-foreground">{subject}</p>
+        <p className="text-muted-foreground truncate text-[12px]">{subject}</p>
       </div>
     </Link>
+  );
+}
+
+function CalendarEventRow({ event }: { event: CalendarEvent }) {
+  const timeLabel = event.allDay
+    ? 'All day'
+    : event.startTime && event.endTime
+      ? `${format(new Date(event.startTime), 'h:mm a')} - ${format(new Date(event.endTime), 'h:mm a')}`
+      : null;
+
+  const content = (
+    <div
+      className="border-border bg-card hover:bg-accent/20 flex items-start gap-3 rounded-lg border px-3 py-3 transition-colors"
+      style={{ borderLeftColor: event.color, borderLeftWidth: 3 }}
+    >
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-[13px] font-medium">{event.title}</p>
+        <p className="text-muted-foreground mt-0.5 truncate text-[11px]">{timeLabel}</p>
+        {event.location ? (
+          <p className="text-muted-foreground mt-1 truncate text-[11px]">{event.location}</p>
+        ) : null}
+      </div>
+    </div>
+  );
+
+  if (event.htmlLink) {
+    return (
+      <a href={event.htmlLink} target="_blank" rel="noopener noreferrer" className="block">
+        {content}
+      </a>
+    );
+  }
+
+  return content;
+}
+
+function AssistantBriefingBlock({ briefing }: { briefing: AssistantBriefing }) {
+  const priorityCards = [
+    briefing.today.urgentReply
+      ? {
+          title: 'Urgent reply',
+          detail: briefing.today.urgentReply.title,
+          href: briefing.today.urgentReply.threadId
+            ? `/mail/inbox?threadId=${briefing.today.urgentReply.threadId}`
+            : null,
+        }
+      : null,
+    briefing.today.topTask
+      ? {
+          title: 'Top task',
+          detail: briefing.today.topTask.title,
+          href: '/mail/tasks',
+        }
+      : null,
+    briefing.today.nextEvent
+      ? {
+          title: 'Next event',
+          detail: briefing.today.nextEvent.title,
+          href: `/mail/meetings/${briefing.today.nextEvent.id}`,
+        }
+      : null,
+  ].filter(Boolean) as Array<{ title: string; detail: string; href: string | null }>;
+
+  const groupedQueues = [
+    { title: 'Needs You', items: briefing.needsYou, empty: 'No reply or decision blockers right now.' },
+    { title: 'Waiting On', items: briefing.waitingOn, empty: 'Nothing currently tracked as waiting on someone else.' },
+    { title: 'Prepared', items: briefing.prepared, empty: 'No prepared drafts or actions waiting for approval.' },
+  ];
+
+  return (
+    <div className="space-y-4">
+      {priorityCards.length > 0 && (
+        <div className="grid gap-2 sm:grid-cols-3">
+          {priorityCards.map((card) => {
+            const content = (
+              <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-3">
+                <p className="text-muted-foreground text-[10px] font-semibold uppercase tracking-[0.1em]">
+                  {card.title}
+                </p>
+                <p className="mt-1 text-[13px] font-medium tracking-[-0.01em] text-foreground">
+                  {card.detail}
+                </p>
+              </div>
+            );
+
+            return card.href ? (
+              <Link key={card.title} to={card.href} className="block">
+                {content}
+              </Link>
+            ) : (
+              <div key={card.title}>{content}</div>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="grid gap-3 lg:grid-cols-3">
+        {groupedQueues.map((section) => (
+          <div key={section.title} className="space-y-2">
+            <div className="flex items-center justify-between">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+                {section.title}
+              </p>
+              <Badge variant="outline" className="h-5 rounded-full px-1.5 text-[10px]">
+                {section.items.length}
+              </Badge>
+            </div>
+            {section.items.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-border/60 bg-muted/10 px-3 py-3 text-[12px] leading-5 text-muted-foreground">
+                {section.empty}
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {section.items.slice(0, 3).map((item) => {
+                  const href =
+                    'threadId' in item && item.threadId
+                      ? `/mail/inbox?threadId=${item.threadId}`
+                      : 'meetingId' in item && item.meetingId
+                        ? `/mail/meetings/${item.meetingId}`
+                        : null;
+                  const content = (
+                    <div className="rounded-lg border border-border/60 bg-muted/15 px-3 py-3">
+                      <p className="text-[13px] font-medium tracking-[-0.01em] text-foreground">
+                        {item.title}
+                      </p>
+                      <p className="text-muted-foreground mt-1 text-[12px] leading-5">
+                        {item.summary}
+                      </p>
+                    </div>
+                  );
+                  return href ? (
+                    <Link key={item.id} to={href} className="block">
+                      {content}
+                    </Link>
+                  ) : (
+                    <div key={item.id}>{content}</div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {(briefing.upcomingMeetings.length > 0 || briefing.changedSinceLastTime.length > 0) && (
+        <div className="grid gap-3 lg:grid-cols-2">
+          <div className="space-y-2">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+              Upcoming
+            </p>
+            <div className="space-y-2">
+              {briefing.upcomingMeetings.slice(0, 3).map((meeting) => (
+                <Link
+                  key={meeting.id}
+                  to={`/mail/meetings/${meeting.id}`}
+                  className="block rounded-lg border border-border/60 bg-muted/15 px-3 py-3"
+                >
+                  <p className="text-[13px] font-medium tracking-[-0.01em] text-foreground">
+                    {meeting.title}
+                  </p>
+                  <p className="text-muted-foreground mt-1 text-[12px] leading-5">
+                    {format(new Date(meeting.startsAt), 'PPp')}
+                  </p>
+                </Link>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+              Changed Since Last Time
+            </p>
+            <div className="space-y-2">
+              {briefing.changedSinceLastTime.slice(0, 4).map((item) => (
+                <div
+                  key={`${item.type}-${item.id}`}
+                  className="rounded-lg border border-border/60 bg-muted/15 px-3 py-3"
+                >
+                  <p className="text-[13px] font-medium tracking-[-0.01em] text-foreground">
+                    {item.title}
+                  </p>
+                  <p className="text-muted-foreground mt-1 text-[12px] leading-5">
+                    {item.summary}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

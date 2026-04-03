@@ -4,9 +4,19 @@
  * Folder filter: horizontal pill-chip strip at top (replaces sidebar)
  * Task detail: Sheet from right, full info + edit form
  */
-import { useState, useMemo, useRef } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { format, isPast, isToday } from 'date-fns';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuLabel,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent,
+} from '@/components/ui/dropdown-menu';
 import {
   Plus,
   MoreHorizontal,
@@ -35,20 +45,6 @@ import {
   type DragEndEvent,
 } from '@dnd-kit/core';
 import {
-  SortableContext,
-  useSortable,
-  verticalListSortingStrategy,
-} from '@dnd-kit/sortable';
-import { useDroppable } from '@dnd-kit/core';
-import { CSS } from '@dnd-kit/utilities';
-import { useTRPC } from '@/providers/query-provider';
-import { authProxy } from '@/lib/auth-proxy';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
-import { Badge } from '@/components/ui/badge';
-import { Calendar } from '@/components/ui/calendar';
-import {
   Dialog,
   DialogContent,
   DialogHeader,
@@ -56,36 +52,33 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from '@/components/ui/sheet';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuLabel,
-  DropdownMenuSub,
-  DropdownMenuSubTrigger,
-  DropdownMenuSubContent,
-} from '@/components/ui/dropdown-menu';
-import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { cn } from '@/lib/utils';
-import type { Route } from './+types/page';
+import { useTRPC } from '@/providers/query-provider';
+import { BackgroundRefreshIndicator } from '@/components/ui/background-refresh-indicator';
+import { removeTaskFromTaskCaches, upsertTaskInTaskCaches } from '@/lib/task-cache';
+import { Textarea } from '@/components/ui/textarea';
+import { Calendar } from '@/components/ui/calendar';
+import { format, isPast, isToday } from 'date-fns';
+import { useState, useMemo, useRef } from 'react';
 import type { Outputs } from '@zero/server/trpc';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
+import { authProxy } from '@/lib/auth-proxy';
+import { useDroppable } from '@dnd-kit/core';
+import type { Route } from './+types/page';
+import { CSS } from '@dnd-kit/utilities';
+import { cn } from '@/lib/utils';
 
 type Task = Outputs['tasks']['list']['tasks'][number];
 type Folder = Outputs['folders']['list']['folders'][number];
@@ -103,21 +96,27 @@ export async function clientLoader({ request }: Route.ClientLoaderArgs) {
 
 const PRIORITY_CONFIG: Record<TaskPriority, { label: string; className: string }> = {
   none: { label: 'No priority', className: 'text-muted-foreground bg-muted/50' },
-  low: { label: 'Low', className: 'text-blue-600 bg-blue-50 dark:bg-blue-950/30 dark:text-blue-400' },
-  medium: { label: 'Medium', className: 'text-yellow-600 bg-yellow-50 dark:bg-yellow-950/30 dark:text-yellow-400' },
+  low: {
+    label: 'Low',
+    className: 'text-blue-600 bg-blue-50 dark:bg-blue-950/30 dark:text-blue-400',
+  },
+  medium: {
+    label: 'Medium',
+    className: 'text-yellow-600 bg-yellow-50 dark:bg-yellow-950/30 dark:text-yellow-400',
+  },
   high: { label: 'High', className: 'text-red-600 bg-red-50 dark:bg-red-950/30 dark:text-red-400' },
 };
 
 const STATUS_CONFIG: Record<TaskStatus, { label: string; color: string }> = {
-  todo:  { label: 'To Do',  color: 'text-muted-foreground' },
-  doing: { label: 'Doing',  color: 'text-blue-600 dark:text-blue-400' },
-  done:  { label: 'Done',   color: 'text-green-600 dark:text-green-400' },
+  todo: { label: 'To Do', color: 'text-muted-foreground' },
+  doing: { label: 'Doing', color: 'text-blue-600 dark:text-blue-400' },
+  done: { label: 'Done', color: 'text-green-600 dark:text-green-400' },
 };
 
 const BOARD_COLUMNS: { status: TaskStatus; label: string }[] = [
-  { status: 'todo',  label: 'To Do' },
+  { status: 'todo', label: 'To Do' },
   { status: 'doing', label: 'Doing' },
-  { status: 'done',  label: 'Done'  },
+  { status: 'done', label: 'Done' },
 ];
 
 interface TaskFormData {
@@ -130,8 +129,12 @@ interface TaskFormData {
 }
 
 const defaultForm: TaskFormData = {
-  title: '', description: '', status: 'todo', priority: 'none',
-  dueDate: undefined, folderId: null,
+  title: '',
+  description: '',
+  status: 'todo',
+  priority: 'none',
+  dueDate: undefined,
+  folderId: null,
 };
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
@@ -167,7 +170,12 @@ export default function TasksPage() {
   // Board drag state
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
 
-  const { data: foldersData } = useQuery(trpc.folders.list.queryOptions());
+  const { data: foldersData, isFetching: isFetchingFolders } = useQuery(
+    trpc.folders.list.queryOptions(void 0, {
+      staleTime: 1000 * 60 * 30,
+      refetchOnMount: false,
+    }),
+  );
   const folders = foldersData?.folders ?? [];
 
   // For board mode we need all statuses; otherwise filter
@@ -180,27 +188,50 @@ export default function TasksPage() {
     ...(searchText && { search: searchText }),
   };
 
-  const { data, isLoading } = useQuery(trpc.tasks.list.queryOptions(queryInput));
-  const tasks = data?.tasks ?? [];
+  const { data, isLoading, isFetching } = useQuery(
+    trpc.tasks.list.queryOptions(queryInput, {
+      staleTime: 1000 * 60 * 5,
+      refetchOnMount: false,
+    }),
+  );
+  const tasks = useMemo(() => data?.tasks ?? [], [data]);
 
-  const invalidateTasks = () => void queryClient.invalidateQueries(trpc.tasks.list.queryFilter());
-
-  const createMutation = useMutation({ ...trpc.tasks.create.mutationOptions(), onSuccess: invalidateTasks });
-  const updateMutation = useMutation({ ...trpc.tasks.update.mutationOptions(), onSuccess: () => { invalidateTasks(); if (detailTask) setDetailTask((prev) => prev ? { ...prev } : null); } });
-  const deleteMutation = useMutation({ ...trpc.tasks.delete.mutationOptions(), onSuccess: invalidateTasks });
-  const createFolderMutation = useMutation({ ...trpc.folders.create.mutationOptions(), onSuccess: () => void queryClient.invalidateQueries(trpc.folders.list.queryFilter()) });
-  const updateFolderMutation = useMutation({ ...trpc.folders.update.mutationOptions(), onSuccess: () => void queryClient.invalidateQueries(trpc.folders.list.queryFilter()) });
-  const deleteFolderMutation = useMutation({
-    ...trpc.folders.delete.mutationOptions(),
-    onSuccess: () => {
-      void queryClient.invalidateQueries(trpc.folders.list.queryFilter());
-      if (activeFolderId === editingFolder?.id) setActiveFolderId(null);
+  const createMutation = useMutation({
+    ...trpc.tasks.create.mutationOptions(),
+    onSuccess: ({ task }) => {
+      upsertTaskInTaskCaches(queryClient, task);
     },
   });
+  const updateMutation = useMutation({
+    ...trpc.tasks.update.mutationOptions(),
+    onSuccess: ({ task }) => {
+      upsertTaskInTaskCaches(queryClient, task);
+    },
+  });
+  const deleteMutation = useMutation({
+    ...trpc.tasks.delete.mutationOptions(),
+    onSuccess: (_result, variables) => {
+      removeTaskFromTaskCaches(queryClient, variables.id);
+    },
+  });
+  const createFolderMutation = useMutation({
+    ...trpc.folders.create.mutationOptions(),
+    onSuccess: () => void queryClient.invalidateQueries(trpc.folders.list.queryFilter()),
+  });
+  const updateFolderMutation = useMutation({
+    ...trpc.folders.update.mutationOptions(),
+    onSuccess: () => void queryClient.invalidateQueries(trpc.folders.list.queryFilter()),
+  });
+  const deleteFolderMutation = useMutation(trpc.folders.delete.mutationOptions());
 
   const openCreate = (prefillStatus?: TaskStatus, prefillDate?: Date) => {
     setEditingTask(null);
-    setForm({ ...defaultForm, folderId: activeFolderId, status: prefillStatus ?? 'todo', dueDate: prefillDate });
+    setForm({
+      ...defaultForm,
+      folderId: activeFolderId,
+      status: prefillStatus ?? 'todo',
+      dueDate: prefillDate,
+    });
     setDialogOpen(true);
   };
 
@@ -218,18 +249,26 @@ export default function TasksPage() {
   };
 
   const handleToggle = (task: Task) =>
-    updateMutation.mutate({ id: task.id, data: { status: task.status === 'done' ? 'todo' : 'done' } });
+    updateMutation.mutate({
+      id: task.id,
+      data: { status: task.status === 'done' ? 'todo' : 'done' },
+    });
 
   const handleSubmit = () => {
     if (!form.title.trim()) return;
     const payload = {
-      title: form.title.trim(), description: form.description,
-      status: form.status, priority: form.priority,
+      title: form.title.trim(),
+      description: form.description,
+      status: form.status,
+      priority: form.priority,
       dueDate: form.dueDate ? form.dueDate.toISOString() : null,
       folderId: form.folderId,
     };
     if (editingTask) {
-      updateMutation.mutate({ id: editingTask.id, data: payload }, { onSuccess: () => setDialogOpen(false) });
+      updateMutation.mutate(
+        { id: editingTask.id, data: payload },
+        { onSuccess: () => setDialogOpen(false) },
+      );
     } else {
       createMutation.mutate(payload, { onSuccess: () => setDialogOpen(false) });
     }
@@ -237,13 +276,15 @@ export default function TasksPage() {
 
   const handleQuickAdd = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && quickAddValue.trim()) {
-      createMutation.mutate({
-        title: quickAddValue.trim(),
-        status: statusFilter !== 'all' ? statusFilter : 'todo',
-        priority: 'none',
-        folderId: activeFolderId,
-      });
-      setQuickAddValue('');
+      createMutation.mutate(
+        {
+          title: quickAddValue.trim(),
+          status: statusFilter !== 'all' ? statusFilter : 'todo',
+          priority: 'none',
+          folderId: activeFolderId,
+        },
+        { onSuccess: () => setQuickAddValue('') },
+      );
     }
   };
 
@@ -255,12 +296,23 @@ export default function TasksPage() {
     if (editingFolder) {
       updateFolderMutation.mutate(
         { id: editingFolder.id, name: folderName.trim() },
-        { onSuccess: () => { setFolderDialogOpen(false); setFolderName(''); setEditingFolder(null); } },
+        {
+          onSuccess: () => {
+            setFolderDialogOpen(false);
+            setFolderName('');
+            setEditingFolder(null);
+          },
+        },
       );
     } else {
       createFolderMutation.mutate(
         { name: folderName.trim() },
-        { onSuccess: () => { setFolderDialogOpen(false); setFolderName(''); } },
+        {
+          onSuccess: () => {
+            setFolderDialogOpen(false);
+            setFolderName('');
+          },
+        },
       );
     }
   };
@@ -292,6 +344,8 @@ export default function TasksPage() {
   };
 
   const activeTask = activeTaskId ? tasks.find((t) => t.id === activeTaskId) : null;
+  const isBackgroundRefreshing =
+    (!!data && !isLoading && isFetching) || (!!foldersData && isFetchingFolders);
 
   // Board column groups (client-side split)
   const boardGroups = useMemo(() => {
@@ -306,23 +360,34 @@ export default function TasksPage() {
   const activeFolder = folders.find((f) => f.id === activeFolderId);
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-background">
+    <div className="bg-background flex h-screen flex-col overflow-hidden">
       {/* ── Header ── */}
       <div className="flex shrink-0 items-center justify-between border-b px-5 py-3">
-        <h1 className="text-xl font-semibold tracking-tight">
-          {activeFolder ? activeFolder.name : 'Tasks'}
-        </h1>
+        <div className="flex items-center gap-2">
+          <h1 className="text-xl font-semibold tracking-tight">
+            {activeFolder ? activeFolder.name : 'Tasks'}
+          </h1>
+          {isBackgroundRefreshing ? <BackgroundRefreshIndicator label="Updating tasks" /> : null}
+        </div>
         <div className="flex items-center gap-2">
           {/* View mode switcher — matches iOS segmented control */}
-          <div className="flex items-center gap-0.5 rounded-lg border bg-muted/50 p-0.5">
-            {([['list', List], ['board', LayoutGrid], ['table', Table2]] as [ViewMode, typeof List][]).map(([mode, Icon]) => (
+          <div className="bg-muted/50 flex items-center gap-0.5 rounded-lg border p-0.5">
+            {(
+              [
+                ['list', List],
+                ['board', LayoutGrid],
+                ['table', Table2],
+              ] as [ViewMode, typeof List][]
+            ).map(([mode, Icon]) => (
               <button
                 key={mode}
                 type="button"
                 onClick={() => setViewMode(mode)}
                 className={cn(
                   'flex h-7 w-7 items-center justify-center rounded-md transition-colors',
-                  viewMode === mode ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground',
+                  viewMode === mode
+                    ? 'bg-background text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground',
                 )}
               >
                 <Icon className="h-3.5 w-3.5" />
@@ -341,7 +406,10 @@ export default function TasksPage() {
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 <DropdownMenuLabel>Sort by</DropdownMenuLabel>
-                <DropdownMenuRadioGroup value={sortBy} onValueChange={(v) => setSortBy(v as SortBy)}>
+                <DropdownMenuRadioGroup
+                  value={sortBy}
+                  onValueChange={(v) => setSortBy(v as SortBy)}
+                >
                   <DropdownMenuRadioItem value="newest">Newest</DropdownMenuRadioItem>
                   <DropdownMenuRadioItem value="oldest">Oldest</DropdownMenuRadioItem>
                   <DropdownMenuRadioItem value="priority">Priority</DropdownMenuRadioItem>
@@ -358,9 +426,10 @@ export default function TasksPage() {
       </div>
 
       {/* ── Folder Pill Strip ── */}
-      {folders.length > 0 && (
-        <div className="shrink-0 border-b">
-          <div className="flex items-center gap-1.5 overflow-x-auto px-5 py-2 scrollbar-none">
+      <div className="shrink-0 border-b">
+        <div className="scrollbar-none flex items-center gap-1.5 overflow-x-auto px-5 py-2">
+          {folders.length > 0 && (
+            <>
             {/* All */}
             <button
               type="button"
@@ -369,7 +438,7 @@ export default function TasksPage() {
                 'flex shrink-0 items-center gap-1.5 rounded-full border px-3.5 py-1 text-[13px] font-medium transition-colors',
                 activeFolderId === null
                   ? 'border-foreground/20 bg-accent text-accent-foreground'
-                  : 'border-border bg-transparent text-muted-foreground hover:bg-accent/50 hover:text-foreground',
+                  : 'border-border text-muted-foreground hover:bg-accent/50 hover:text-foreground bg-transparent',
               )}
             >
               All
@@ -383,7 +452,7 @@ export default function TasksPage() {
                     'flex items-center gap-1.5 rounded-full border px-3.5 py-1 text-[13px] font-medium transition-colors',
                     activeFolderId === folder.id
                       ? 'border-foreground/20 bg-accent text-accent-foreground'
-                      : 'border-border bg-transparent text-muted-foreground hover:bg-accent/50 hover:text-foreground',
+                      : 'border-border text-muted-foreground hover:bg-accent/50 hover:text-foreground bg-transparent',
                   )}
                 >
                   <FolderIcon className="h-3 w-3" />
@@ -394,35 +463,60 @@ export default function TasksPage() {
                   <DropdownMenuTrigger asChild>
                     <button
                       type="button"
-                      className="absolute -right-1 -top-1 hidden h-4 w-4 items-center justify-center rounded-full bg-muted text-muted-foreground shadow group-hover:flex"
+                      className="bg-muted text-muted-foreground absolute -right-1 -top-1 hidden h-4 w-4 items-center justify-center rounded-full shadow group-hover:flex"
                     >
                       <X className="h-2.5 w-2.5" />
                     </button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent>
-                    <DropdownMenuItem onClick={() => { setEditingFolder(folder); setFolderName(folder.name); setFolderDialogOpen(true); }}>
+                    <DropdownMenuItem
+                      onClick={() => {
+                        setEditingFolder(folder);
+                        setFolderName(folder.name);
+                        setFolderDialogOpen(true);
+                      }}
+                    >
                       <Pencil className="mr-2 h-3.5 w-3.5" /> Rename
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />
-                    <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => { setEditingFolder(folder); deleteFolderMutation.mutate({ id: folder.id }); }}>
+                    <DropdownMenuItem
+                      className="text-destructive focus:text-destructive"
+                      onClick={() => {
+                        deleteFolderMutation.mutate(
+                          { id: folder.id },
+                          {
+                            onSuccess: () => {
+                              void queryClient.invalidateQueries(trpc.folders.list.queryFilter());
+                              if (activeFolderId === folder.id) setActiveFolderId(null);
+                              if (editingFolder?.id === folder.id) setEditingFolder(null);
+                            },
+                          },
+                        );
+                      }}
+                    >
                       <Trash2 className="mr-2 h-3.5 w-3.5" /> Delete
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>
             ))}
+            </>
+          )}
             {/* New folder */}
             <button
               type="button"
-              onClick={() => { setEditingFolder(null); setFolderName(''); setFolderDialogOpen(true); }}
-              className="flex shrink-0 items-center gap-1 rounded-full border border-dashed border-border px-3 py-1 text-[13px] text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
+              onClick={() => {
+                setEditingFolder(null);
+                setFolderName('');
+                setFolderDialogOpen(true);
+              }}
+              className="border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground flex shrink-0 items-center gap-1 rounded-full border border-dashed px-3 py-1 text-[13px] transition-colors"
             >
               <FolderPlus className="h-3 w-3" />
               Add folder
             </button>
-          </div>
         </div>
-      )}
+      </div>
 
       {/* ── Search + Filter Bar (List / Table only) ── */}
       {viewMode !== 'board' && (
@@ -432,11 +526,12 @@ export default function TasksPage() {
               value={searchText}
               onChange={(e) => setSearchText(e.target.value)}
               placeholder="Search tasks…"
-              className="h-8 w-full rounded-full border bg-muted/50 px-3 text-[13px] placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+              aria-label="Search tasks"
+              className="bg-muted/50 placeholder:text-muted-foreground focus:ring-ring h-8 w-full rounded-full border px-3 text-[13px] focus:outline-none focus:ring-1"
             />
           </div>
           {/* Status filter tabs */}
-          <div className="flex items-center gap-0.5 rounded-lg border bg-muted/50 p-0.5">
+          <div className="bg-muted/50 flex items-center gap-0.5 rounded-lg border p-0.5">
             {(['all', 'todo', 'doing', 'done'] as const).map((s) => (
               <button
                 key={s}
@@ -444,7 +539,9 @@ export default function TasksPage() {
                 onClick={() => setStatusFilter(s)}
                 className={cn(
                   'rounded-md px-2.5 py-1 text-[12px] font-medium transition-colors',
-                  statusFilter === s ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground',
+                  statusFilter === s
+                    ? 'bg-background text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground',
                 )}
               >
                 {s === 'all' ? 'All' : STATUS_CONFIG[s].label}
@@ -499,7 +596,14 @@ export default function TasksPage() {
             </div>
             <DragOverlay>
               {activeTask ? (
-                <BoardCard task={activeTask} isDragging folders={folders} onEdit={() => {}} onDelete={() => {}} onOpenDetail={() => {}} />
+                <BoardCard
+                  task={activeTask}
+                  isDragging
+                  folders={folders}
+                  onEdit={() => {}}
+                  onDelete={() => {}}
+                  onOpenDetail={() => {}}
+                />
               ) : null}
             </DragOverlay>
           </DndContext>
@@ -528,7 +632,10 @@ export default function TasksPage() {
               folders={folders}
               onEdit={openEdit}
               onToggle={handleToggle}
-              onDelete={(id) => { deleteMutation.mutate({ id }); setDetailTask(null); }}
+              onDelete={(id) => {
+                deleteMutation.mutate({ id });
+                setDetailTask(null);
+              }}
             />
           )}
         </SheetContent>
@@ -549,17 +656,41 @@ export default function TasksPage() {
       />
 
       {/* ── Folder Dialog ── */}
-      <Dialog open={folderDialogOpen} onOpenChange={(open) => { setFolderDialogOpen(open); if (!open) { setFolderName(''); setEditingFolder(null); } }}>
+      <Dialog
+        open={folderDialogOpen}
+        onOpenChange={(open) => {
+          setFolderDialogOpen(open);
+          if (!open) {
+            setFolderName('');
+            setEditingFolder(null);
+          }
+        }}
+      >
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
             <DialogTitle>{editingFolder ? 'Rename folder' : 'New folder'}</DialogTitle>
           </DialogHeader>
           <div className="py-2">
-            <Input placeholder="Folder name" value={folderName} onChange={(e) => setFolderName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleFolderSubmit()} autoFocus />
+            <Input
+              placeholder="Folder name"
+              value={folderName}
+              onChange={(e) => setFolderName(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleFolderSubmit()}
+              autoFocus
+            />
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setFolderDialogOpen(false)}>Cancel</Button>
-            <Button onClick={handleFolderSubmit} disabled={!folderName.trim() || createFolderMutation.isPending || updateFolderMutation.isPending}>
+            <Button variant="outline" onClick={() => setFolderDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleFolderSubmit}
+              disabled={
+                !folderName.trim() ||
+                createFolderMutation.isPending ||
+                updateFolderMutation.isPending
+              }
+            >
               {editingFolder ? 'Rename' : 'Create folder'}
             </Button>
           </DialogFooter>
@@ -572,46 +703,65 @@ export default function TasksPage() {
 // ─── List Content ─────────────────────────────────────────────────────────────
 
 function ListContent({
-  tasks, folders, isLoading, quickAddValue, setQuickAddValue, quickAddRef,
-  onQuickAdd, onToggle, onEdit, onDelete, onMoveToFolder, onOpenDetail, onOpenCreate, isDueDateWarning,
+  tasks,
+  folders,
+  isLoading,
+  quickAddValue,
+  setQuickAddValue,
+  quickAddRef,
+  onQuickAdd,
+  onToggle,
+  onEdit,
+  onDelete,
+  onMoveToFolder,
+  onOpenDetail,
+  onOpenCreate,
+  isDueDateWarning,
 }: {
-  tasks: Task[]; folders: Folder[]; isLoading: boolean;
-  quickAddValue: string; setQuickAddValue: (v: string) => void;
+  tasks: Task[];
+  folders: Folder[];
+  isLoading: boolean;
+  quickAddValue: string;
+  setQuickAddValue: (v: string) => void;
   quickAddRef: React.RefObject<HTMLInputElement | null>;
   onQuickAdd: (e: React.KeyboardEvent<HTMLInputElement>) => void;
-  onToggle: (t: Task) => void; onEdit: (t: Task) => void;
-  onDelete: (id: string) => void; onMoveToFolder: (taskId: string, folderId: string | null) => void;
-  onOpenDetail: (t: Task) => void; onOpenCreate: () => void;
+  onToggle: (t: Task) => void;
+  onEdit: (t: Task) => void;
+  onDelete: (id: string) => void;
+  onMoveToFolder: (taskId: string, folderId: string | null) => void;
+  onOpenDetail: (t: Task) => void;
+  onOpenCreate: () => void;
   isDueDateWarning: (d: string | Date | null | undefined) => boolean;
 }) {
   return (
     <ScrollArea className="h-full">
       <div className="space-y-1 px-5 py-3">
         {/* Inline quick-add row */}
-        <div className="mb-3 flex items-center gap-2 rounded-xl border border-dashed border-border bg-muted/30 px-3 py-2">
-          <Plus className="h-4 w-4 shrink-0 text-muted-foreground" />
+        <div className="border-border bg-muted/30 mb-3 flex items-center gap-2 rounded-xl border border-dashed px-3 py-2">
+          <Plus className="text-muted-foreground h-4 w-4 shrink-0" />
           <input
             ref={quickAddRef}
             value={quickAddValue}
             onChange={(e) => setQuickAddValue(e.target.value)}
             onKeyDown={onQuickAdd}
             placeholder="Add a task… (press Enter)"
-            className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+            aria-label="Quick add task"
+            className="placeholder:text-muted-foreground flex-1 bg-transparent text-sm outline-none"
           />
         </div>
 
         {isLoading ? (
-          Array.from({ length: 5 }).map((_, i) => (
-            <div key={i} className="h-16 animate-pulse rounded-xl bg-muted/50" />
+          ['list-skeleton-1', 'list-skeleton-2', 'list-skeleton-3', 'list-skeleton-4', 'list-skeleton-5'].map((key) => (
+            <div key={key} className="bg-muted/50 h-16 animate-pulse rounded-xl" />
           ))
         ) : tasks.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
-            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
-              <CheckCircle2 className="h-6 w-6 text-muted-foreground" />
+            <div className="bg-muted flex h-12 w-12 items-center justify-center rounded-full">
+              <CheckCircle2 className="text-muted-foreground h-6 w-6" />
             </div>
             <div>
               <p className="font-medium">No tasks yet</p>
-              <p className="text-sm text-muted-foreground">Create your first task to get started</p>
+              <p className="text-muted-foreground text-sm">Create your first task to get started</p>
             </div>
             <Button onClick={onOpenCreate} size="sm" variant="outline">
               <Plus className="mr-1.5 h-4 w-4" />
@@ -641,12 +791,23 @@ function ListContent({
 // ─── TaskRow (List View) ──────────────────────────────────────────────────────
 
 function TaskRow({
-  task, folders, onToggle, onEdit, onDelete, onMoveToFolder, onOpenDetail, isDueDateWarning,
+  task,
+  folders,
+  onToggle,
+  onEdit,
+  onDelete,
+  onMoveToFolder,
+  onOpenDetail,
+  isDueDateWarning,
 }: {
-  task: Task; folders: Folder[];
-  onToggle: (t: Task) => void; onEdit: (t: Task) => void;
-  onDelete: (id: string) => void; onMoveToFolder: (taskId: string, folderId: string | null) => void;
-  onOpenDetail: (t: Task) => void; isDueDateWarning: boolean;
+  task: Task;
+  folders: Folder[];
+  onToggle: (t: Task) => void;
+  onEdit: (t: Task) => void;
+  onDelete: (id: string) => void;
+  onMoveToFolder: (taskId: string, folderId: string | null) => void;
+  onOpenDetail: (t: Task) => void;
+  isDueDateWarning: boolean;
 }) {
   const isDone = task.status === 'done';
   const priority = task.priority as TaskPriority;
@@ -654,48 +815,70 @@ function TaskRow({
   return (
     <div
       className={cn(
-        'group flex items-start gap-3 rounded-xl border border-border bg-card px-3.5 py-3 transition-colors hover:border-border/80 hover:bg-accent/20',
+        'border-border bg-card hover:border-border/80 hover:bg-accent/20 group flex items-start gap-3 rounded-xl border px-3.5 py-3 transition-colors',
         isDone && 'opacity-60',
       )}
     >
       <button
         type="button"
         onClick={() => onToggle(task)}
-        className="mt-0.5 shrink-0 text-muted-foreground transition-colors hover:text-primary"
+        className="text-muted-foreground hover:text-primary mt-0.5 shrink-0 transition-colors"
       >
-        {isDone ? <CheckCircle2 className="h-4.5 w-4.5 text-primary" /> : <Circle className="h-4.5 w-4.5" />}
+        {isDone ? (
+          <CheckCircle2 className="h-4.5 w-4.5 text-primary" />
+        ) : (
+          <Circle className="h-4.5 w-4.5" />
+        )}
       </button>
 
-      <button
-        type="button"
-        className="min-w-0 flex-1 text-left"
-        onClick={() => onOpenDetail(task)}
-      >
-        <p className={cn('text-sm font-medium leading-snug', isDone && 'text-muted-foreground line-through')}>
+      <button type="button" className="min-w-0 flex-1 text-left" onClick={() => onOpenDetail(task)}>
+        <p
+          className={cn(
+            'text-sm font-medium leading-snug',
+            isDone && 'text-muted-foreground line-through',
+          )}
+        >
           {task.title}
         </p>
         {task.description && (
-          <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">{task.description}</p>
+          <p className="text-muted-foreground mt-0.5 line-clamp-1 text-xs">{task.description}</p>
         )}
         <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
           {priority !== 'none' && (
-            <Badge variant="secondary" className={cn('h-4 rounded-md px-1.5 text-[10px] font-medium border-0', PRIORITY_CONFIG[priority].className)}>
+            <Badge
+              variant="secondary"
+              className={cn(
+                'h-4 rounded-md border-0 px-1.5 text-[10px] font-medium',
+                PRIORITY_CONFIG[priority].className,
+              )}
+            >
               {PRIORITY_CONFIG[priority].label}
             </Badge>
           )}
           {task.status !== 'todo' && (
-            <Badge variant="outline" className={cn('h-4 rounded-md px-1.5 text-[10px] font-medium', STATUS_CONFIG[task.status as TaskStatus]?.color)}>
+            <Badge
+              variant="outline"
+              className={cn(
+                'h-4 rounded-md px-1.5 text-[10px] font-medium',
+                STATUS_CONFIG[task.status as TaskStatus]?.color,
+              )}
+            >
               {STATUS_CONFIG[task.status as TaskStatus]?.label}
             </Badge>
           )}
           {task.dueDate && (
-            <span className={cn('flex items-center gap-0.5 text-[10px] font-medium', isDueDateWarning ? 'text-red-500' : 'text-muted-foreground')}>
+            <span
+              className={cn(
+                'flex items-center gap-0.5 text-[10px] font-medium',
+                isDueDateWarning ? 'text-red-500' : 'text-muted-foreground',
+              )}
+            >
               <CalendarIcon className="h-3 w-3" />
               {isToday(new Date(task.dueDate)) ? 'Today' : format(new Date(task.dueDate), 'MMM d')}
             </span>
           )}
           {task.folderId && folders.length > 0 && (
-            <span className="flex items-center gap-0.5 text-[10px] text-muted-foreground">
+            <span className="text-muted-foreground flex items-center gap-0.5 text-[10px]">
               <FolderIcon className="h-3 w-3" />
               {folders.find((f) => f.id === task.folderId)?.name}
             </span>
@@ -705,29 +888,50 @@ function TaskRow({
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0 opacity-0 group-hover:opacity-100">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 shrink-0 opacity-0 group-hover:opacity-100"
+          >
             <MoreHorizontal className="h-4 w-4" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-44">
-          <DropdownMenuItem onClick={() => onEdit(task)}><Pencil className="mr-2 h-3.5 w-3.5" />Edit</DropdownMenuItem>
+          <DropdownMenuItem onClick={() => onEdit(task)}>
+            <Pencil className="mr-2 h-3.5 w-3.5" />
+            Edit
+          </DropdownMenuItem>
           {folders.length > 0 && (
             <DropdownMenuSub>
-              <DropdownMenuSubTrigger><FolderIcon className="mr-2 h-3.5 w-3.5" />Move to folder</DropdownMenuSubTrigger>
+              <DropdownMenuSubTrigger>
+                <FolderIcon className="mr-2 h-3.5 w-3.5" />
+                Move to folder
+              </DropdownMenuSubTrigger>
               <DropdownMenuSubContent>
-                <DropdownMenuItem onClick={() => onMoveToFolder(task.id, null)}><CheckCircle2 className="mr-2 h-3.5 w-3.5" />No folder</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => onMoveToFolder(task.id, null)}>
+                  <CheckCircle2 className="mr-2 h-3.5 w-3.5" />
+                  No folder
+                </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 {folders.map((folder) => (
-                  <DropdownMenuItem key={folder.id} onClick={() => onMoveToFolder(task.id, folder.id)}>
-                    <FolderIcon className="mr-2 h-3.5 w-3.5" />{folder.name}
+                  <DropdownMenuItem
+                    key={folder.id}
+                    onClick={() => onMoveToFolder(task.id, folder.id)}
+                  >
+                    <FolderIcon className="mr-2 h-3.5 w-3.5" />
+                    {folder.name}
                   </DropdownMenuItem>
                 ))}
               </DropdownMenuSubContent>
             </DropdownMenuSub>
           )}
           <DropdownMenuSeparator />
-          <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => onDelete(task.id)}>
-            <Trash2 className="mr-2 h-3.5 w-3.5" />Delete
+          <DropdownMenuItem
+            className="text-destructive focus:text-destructive"
+            onClick={() => onDelete(task.id)}
+          >
+            <Trash2 className="mr-2 h-3.5 w-3.5" />
+            Delete
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -738,11 +942,23 @@ function TaskRow({
 // ─── Board View ───────────────────────────────────────────────────────────────
 
 function BoardColumn({
-  status, label, tasks, folders, onEdit, onDelete, onOpenDetail, onQuickCreate,
+  status,
+  label,
+  tasks,
+  folders,
+  onEdit,
+  onDelete,
+  onOpenDetail,
+  onQuickCreate,
 }: {
-  status: TaskStatus; label: string; tasks: Task[]; folders: Folder[];
-  onEdit: (t: Task) => void; onDelete: (id: string) => void;
-  onOpenDetail: (t: Task) => void; onQuickCreate: (s: TaskStatus) => void;
+  status: TaskStatus;
+  label: string;
+  tasks: Task[];
+  folders: Folder[];
+  onEdit: (t: Task) => void;
+  onDelete: (id: string) => void;
+  onOpenDetail: (t: Task) => void;
+  onQuickCreate: (s: TaskStatus) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: status });
 
@@ -750,7 +966,7 @@ function BoardColumn({
     <div
       ref={setNodeRef}
       className={cn(
-        'flex h-full w-72 shrink-0 flex-col rounded-xl border bg-muted/30 transition-colors',
+        'bg-muted/30 flex h-full w-72 shrink-0 flex-col rounded-xl border transition-colors',
         isOver && 'border-primary/50 bg-accent/30',
       )}
     >
@@ -758,11 +974,16 @@ function BoardColumn({
       <div className="flex items-center justify-between px-3 py-2.5">
         <div className="flex items-center gap-2">
           <span className="text-[13px] font-semibold">{label}</span>
-          <span className="flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-muted px-1 text-[10px] font-bold text-muted-foreground">
+          <span className="bg-muted text-muted-foreground flex h-4 min-w-[1rem] items-center justify-center rounded-full px-1 text-[10px] font-bold">
             {tasks.length}
           </span>
         </div>
-        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => onQuickCreate(status)}>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-6 w-6"
+          onClick={() => onQuickCreate(status)}
+        >
           <Plus className="h-3.5 w-3.5" />
         </Button>
       </div>
@@ -782,7 +1003,7 @@ function BoardColumn({
               />
             ))}
             {tasks.length === 0 && (
-              <div className="flex h-16 items-center justify-center rounded-lg border border-dashed border-border text-xs text-muted-foreground">
+              <div className="border-border text-muted-foreground flex h-16 items-center justify-center rounded-lg border border-dashed text-xs">
                 Drop tasks here
               </div>
             )}
@@ -794,13 +1015,28 @@ function BoardColumn({
 }
 
 function BoardCard({
-  task, folders, onEdit, onDelete, onOpenDetail, isDragging,
+  task,
+  folders,
+  onEdit,
+  onDelete,
+  onOpenDetail,
+  isDragging,
 }: {
-  task: Task; folders: Folder[];
-  onEdit: (t: Task) => void; onDelete: (id: string) => void;
-  onOpenDetail: (t: Task) => void; isDragging?: boolean;
+  task: Task;
+  folders: Folder[];
+  onEdit: (t: Task) => void;
+  onDelete: (id: string) => void;
+  onOpenDetail: (t: Task) => void;
+  isDragging?: boolean;
 }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging: isSortableDragging } = useSortable({ id: task.id });
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging: isSortableDragging,
+  } = useSortable({ id: task.id });
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -815,8 +1051,8 @@ function BoardCard({
       ref={setNodeRef}
       style={style}
       className={cn(
-        'group relative rounded-lg border border-border bg-card px-3 py-2.5 shadow-sm transition-shadow',
-        isDragging && 'shadow-md rotate-1',
+        'border-border bg-card group relative rounded-lg border px-3 py-2.5 shadow-sm transition-shadow',
+        isDragging && 'rotate-1 shadow-md',
       )}
     >
       {/* Drag handle */}
@@ -825,30 +1061,38 @@ function BoardCard({
         {...listeners}
         className="absolute left-1 top-1/2 -translate-y-1/2 cursor-grab touch-none opacity-0 group-hover:opacity-100"
       >
-        <GripVertical className="h-3.5 w-3.5 text-muted-foreground" />
+        <GripVertical className="text-muted-foreground h-3.5 w-3.5" />
       </div>
 
       <button type="button" className="w-full text-left" onClick={() => onOpenDetail(task)}>
         <p className="text-[13px] font-medium leading-snug">{task.title}</p>
         {task.description && (
-          <p className="mt-0.5 line-clamp-2 text-[11px] text-muted-foreground">{task.description}</p>
+          <p className="text-muted-foreground mt-0.5 line-clamp-2 text-[11px]">
+            {task.description}
+          </p>
         )}
       </button>
 
       <div className="mt-2 flex flex-wrap items-center gap-1.5">
         {priority !== 'none' && (
-          <Badge variant="secondary" className={cn('h-4 rounded px-1.5 text-[10px] font-medium border-0', PRIORITY_CONFIG[priority].className)}>
+          <Badge
+            variant="secondary"
+            className={cn(
+              'h-4 rounded border-0 px-1.5 text-[10px] font-medium',
+              PRIORITY_CONFIG[priority].className,
+            )}
+          >
             {PRIORITY_CONFIG[priority].label}
           </Badge>
         )}
         {task.dueDate && (
-          <span className="flex items-center gap-0.5 text-[10px] text-muted-foreground">
+          <span className="text-muted-foreground flex items-center gap-0.5 text-[10px]">
             <CalendarIcon className="h-3 w-3" />
             {isToday(new Date(task.dueDate)) ? 'Today' : format(new Date(task.dueDate), 'MMM d')}
           </span>
         )}
         {task.folderId && folders.length > 0 && (
-          <span className="flex items-center gap-0.5 text-[10px] text-muted-foreground">
+          <span className="text-muted-foreground flex items-center gap-0.5 text-[10px]">
             <FolderIcon className="h-3 w-3" />
             {folders.find((f) => f.id === task.folderId)?.name}
           </span>
@@ -857,15 +1101,26 @@ function BoardCard({
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon" className="absolute right-1 top-1 h-6 w-6 opacity-0 group-hover:opacity-100">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="absolute right-1 top-1 h-6 w-6 opacity-0 group-hover:opacity-100"
+          >
             <MoreHorizontal className="h-3.5 w-3.5" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-36">
-          <DropdownMenuItem onClick={() => onEdit(task)}><Pencil className="mr-2 h-3.5 w-3.5" />Edit</DropdownMenuItem>
+          <DropdownMenuItem onClick={() => onEdit(task)}>
+            <Pencil className="mr-2 h-3.5 w-3.5" />
+            Edit
+          </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => onDelete(task.id)}>
-            <Trash2 className="mr-2 h-3.5 w-3.5" />Delete
+          <DropdownMenuItem
+            className="text-destructive focus:text-destructive"
+            onClick={() => onDelete(task.id)}
+          >
+            <Trash2 className="mr-2 h-3.5 w-3.5" />
+            Delete
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -876,18 +1131,29 @@ function BoardCard({
 // ─── Table View ───────────────────────────────────────────────────────────────
 
 function TableContent({
-  tasks, folders, isLoading, onToggle, onEdit, onDelete, onMoveToFolder, onOpenCreate,
+  tasks,
+  folders,
+  isLoading,
+  onToggle,
+  onEdit,
+  onDelete,
+  onMoveToFolder,
+  onOpenCreate,
 }: {
-  tasks: Task[]; folders: Folder[]; isLoading: boolean;
-  onToggle: (t: Task) => void; onEdit: (t: Task) => void;
-  onDelete: (id: string) => void; onMoveToFolder: (taskId: string, folderId: string | null) => void;
+  tasks: Task[];
+  folders: Folder[];
+  isLoading: boolean;
+  onToggle: (t: Task) => void;
+  onEdit: (t: Task) => void;
+  onDelete: (id: string) => void;
+  onMoveToFolder: (taskId: string, folderId: string | null) => void;
   onOpenCreate: () => void;
 }) {
   return (
     <ScrollArea className="h-full">
       <table className="w-full text-sm">
         <thead>
-          <tr className="border-b bg-muted/30 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <tr className="bg-muted/30 text-muted-foreground border-b text-left text-[11px] font-semibold uppercase tracking-wide">
             <th className="w-8 px-4 py-2" />
             <th className="px-2 py-2">Title</th>
             <th className="w-24 px-2 py-2">Priority</th>
@@ -898,86 +1164,142 @@ function TableContent({
           </tr>
         </thead>
         <tbody className="divide-y">
-          {isLoading
-            ? Array.from({ length: 6 }).map((_, i) => (
-                <tr key={i}><td colSpan={7}><div className="my-1 mx-4 h-8 animate-pulse rounded bg-muted/50" /></td></tr>
-              ))
-            : tasks.length === 0
-            ? (
-              <tr>
+          {isLoading ? (
+            ['table-skeleton-1', 'table-skeleton-2', 'table-skeleton-3', 'table-skeleton-4', 'table-skeleton-5', 'table-skeleton-6'].map((key) => (
+              <tr key={key}>
                 <td colSpan={7}>
-                  <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
-                    <p className="font-medium text-sm">No tasks</p>
-                    <Button onClick={onOpenCreate} size="sm" variant="outline"><Plus className="mr-1.5 h-4 w-4" />New task</Button>
-                  </div>
+                  <div className="bg-muted/50 mx-4 my-1 h-8 animate-pulse rounded" />
                 </td>
               </tr>
-            )
-            : tasks.map((task) => {
-                const isDone = task.status === 'done';
-                const priority = task.priority as TaskPriority;
-                const folder = folders.find((f) => f.id === task.folderId);
-                return (
-                  <tr key={task.id} className={cn('group hover:bg-accent/20 transition-colors', isDone && 'opacity-50')}>
-                    <td className="px-4 py-2">
-                      <button type="button" onClick={() => onToggle(task)} className="text-muted-foreground hover:text-primary">
-                        {isDone ? <CheckCircle2 className="h-4 w-4 text-primary" /> : <Circle className="h-4 w-4" />}
-                      </button>
-                    </td>
-                    <td className="max-w-0 px-2 py-2">
-                      <p className={cn('truncate text-[13px] font-medium', isDone && 'line-through text-muted-foreground')}>
-                        {task.title}
-                      </p>
-                    </td>
-                    <td className="px-2 py-2">
-                      {priority !== 'none' && (
-                        <Badge variant="secondary" className={cn('h-4 rounded px-1.5 text-[10px] border-0', PRIORITY_CONFIG[priority].className)}>
-                          {PRIORITY_CONFIG[priority].label}
-                        </Badge>
+            ))
+          ) : tasks.length === 0 ? (
+            <tr>
+              <td colSpan={7}>
+                <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
+                  <p className="text-sm font-medium">No tasks</p>
+                  <Button onClick={onOpenCreate} size="sm" variant="outline">
+                    <Plus className="mr-1.5 h-4 w-4" />
+                    New task
+                  </Button>
+                </div>
+              </td>
+            </tr>
+          ) : (
+            tasks.map((task) => {
+              const isDone = task.status === 'done';
+              const priority = task.priority as TaskPriority;
+              const folder = folders.find((f) => f.id === task.folderId);
+              return (
+                <tr
+                  key={task.id}
+                  className={cn(
+                    'hover:bg-accent/20 group transition-colors',
+                    isDone && 'opacity-50',
+                  )}
+                >
+                  <td className="px-4 py-2">
+                    <button
+                      type="button"
+                      onClick={() => onToggle(task)}
+                      className="text-muted-foreground hover:text-primary"
+                    >
+                      {isDone ? (
+                        <CheckCircle2 className="text-primary h-4 w-4" />
+                      ) : (
+                        <Circle className="h-4 w-4" />
                       )}
-                    </td>
-                    <td className={cn('px-2 py-2 text-[12px]', STATUS_CONFIG[task.status as TaskStatus]?.color)}>
-                      {STATUS_CONFIG[task.status as TaskStatus]?.label}
-                    </td>
-                    <td className="px-2 py-2 text-[12px] text-muted-foreground">
-                      {task.dueDate && format(new Date(task.dueDate), 'MMM d')}
-                    </td>
-                    <td className="px-2 py-2 text-[12px] text-muted-foreground">
-                      {folder?.name}
-                    </td>
-                    <td className="px-4 py-2">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon" className="h-6 w-6 opacity-0 group-hover:opacity-100">
-                            <MoreHorizontal className="h-3.5 w-3.5" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-44">
-                          <DropdownMenuItem onClick={() => onEdit(task)}><Pencil className="mr-2 h-3.5 w-3.5" />Edit</DropdownMenuItem>
-                          {folders.length > 0 && (
-                            <DropdownMenuSub>
-                              <DropdownMenuSubTrigger><FolderIcon className="mr-2 h-3.5 w-3.5" />Move to folder</DropdownMenuSubTrigger>
-                              <DropdownMenuSubContent>
-                                <DropdownMenuItem onClick={() => onMoveToFolder(task.id, null)}><CheckCircle2 className="mr-2 h-3.5 w-3.5" />No folder</DropdownMenuItem>
-                                <DropdownMenuSeparator />
-                                {folders.map((folder) => (
-                                  <DropdownMenuItem key={folder.id} onClick={() => onMoveToFolder(task.id, folder.id)}>
-                                    <FolderIcon className="mr-2 h-3.5 w-3.5" />{folder.name}
-                                  </DropdownMenuItem>
-                                ))}
-                              </DropdownMenuSubContent>
-                            </DropdownMenuSub>
-                          )}
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => onDelete(task.id)}>
-                            <Trash2 className="mr-2 h-3.5 w-3.5" />Delete
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </td>
-                  </tr>
-                );
-              })}
+                    </button>
+                  </td>
+                  <td className="max-w-0 px-2 py-2">
+                    <p
+                      className={cn(
+                        'truncate text-[13px] font-medium',
+                        isDone && 'text-muted-foreground line-through',
+                      )}
+                    >
+                      {task.title}
+                    </p>
+                  </td>
+                  <td className="px-2 py-2">
+                    {priority !== 'none' && (
+                      <Badge
+                        variant="secondary"
+                        className={cn(
+                          'h-4 rounded border-0 px-1.5 text-[10px]',
+                          PRIORITY_CONFIG[priority].className,
+                        )}
+                      >
+                        {PRIORITY_CONFIG[priority].label}
+                      </Badge>
+                    )}
+                  </td>
+                  <td
+                    className={cn(
+                      'px-2 py-2 text-[12px]',
+                      STATUS_CONFIG[task.status as TaskStatus]?.color,
+                    )}
+                  >
+                    {STATUS_CONFIG[task.status as TaskStatus]?.label}
+                  </td>
+                  <td className="text-muted-foreground px-2 py-2 text-[12px]">
+                    {task.dueDate && format(new Date(task.dueDate), 'MMM d')}
+                  </td>
+                  <td className="text-muted-foreground px-2 py-2 text-[12px]">{folder?.name}</td>
+                  <td className="px-4 py-2">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6 opacity-0 group-hover:opacity-100"
+                        >
+                          <MoreHorizontal className="h-3.5 w-3.5" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-44">
+                        <DropdownMenuItem onClick={() => onEdit(task)}>
+                          <Pencil className="mr-2 h-3.5 w-3.5" />
+                          Edit
+                        </DropdownMenuItem>
+                        {folders.length > 0 && (
+                          <DropdownMenuSub>
+                            <DropdownMenuSubTrigger>
+                              <FolderIcon className="mr-2 h-3.5 w-3.5" />
+                              Move to folder
+                            </DropdownMenuSubTrigger>
+                            <DropdownMenuSubContent>
+                              <DropdownMenuItem onClick={() => onMoveToFolder(task.id, null)}>
+                                <CheckCircle2 className="mr-2 h-3.5 w-3.5" />
+                                No folder
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              {folders.map((folder) => (
+                                <DropdownMenuItem
+                                  key={folder.id}
+                                  onClick={() => onMoveToFolder(task.id, folder.id)}
+                                >
+                                  <FolderIcon className="mr-2 h-3.5 w-3.5" />
+                                  {folder.name}
+                                </DropdownMenuItem>
+                              ))}
+                            </DropdownMenuSubContent>
+                          </DropdownMenuSub>
+                        )}
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          className="text-destructive focus:text-destructive"
+                          onClick={() => onDelete(task.id)}
+                        >
+                          <Trash2 className="mr-2 h-3.5 w-3.5" />
+                          Delete
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </td>
+                </tr>
+              );
+            })
+          )}
         </tbody>
       </table>
     </ScrollArea>
@@ -987,10 +1309,17 @@ function TableContent({
 // ─── Task Detail Panel ────────────────────────────────────────────────────────
 
 function TaskDetailPanel({
-  task, folders, onEdit, onToggle, onDelete,
+  task,
+  folders,
+  onEdit,
+  onToggle,
+  onDelete,
 }: {
-  task: Task; folders: Folder[];
-  onEdit: (t: Task) => void; onToggle: (t: Task) => void; onDelete: (id: string) => void;
+  task: Task;
+  folders: Folder[];
+  onEdit: (t: Task) => void;
+  onToggle: (t: Task) => void;
+  onDelete: (id: string) => void;
 }) {
   const priority = task.priority as TaskPriority;
   const folder = folders.find((f) => f.id === task.folderId);
@@ -1004,55 +1333,81 @@ function TaskDetailPanel({
       <div className="flex flex-col gap-4">
         {/* Title + toggle */}
         <div className="flex items-start gap-3">
-          <button type="button" onClick={() => onToggle(task)} className="mt-1 shrink-0 text-muted-foreground hover:text-primary">
-            {task.status === 'done' ? <CheckCircle2 className="h-5 w-5 text-primary" /> : <Circle className="h-5 w-5" />}
+          <button
+            type="button"
+            onClick={() => onToggle(task)}
+            className="text-muted-foreground hover:text-primary mt-1 shrink-0"
+          >
+            {task.status === 'done' ? (
+              <CheckCircle2 className="text-primary h-5 w-5" />
+            ) : (
+              <Circle className="h-5 w-5" />
+            )}
           </button>
-          <h2 className={cn('text-base font-semibold leading-snug', task.status === 'done' && 'line-through text-muted-foreground')}>
+          <h2
+            className={cn(
+              'text-base font-semibold leading-snug',
+              task.status === 'done' && 'text-muted-foreground line-through',
+            )}
+          >
             {task.title}
           </h2>
         </div>
 
         {/* Description */}
         {task.description && (
-          <p className="text-sm text-muted-foreground leading-relaxed">{task.description}</p>
+          <p className="text-muted-foreground text-sm leading-relaxed">{task.description}</p>
         )}
 
         {/* Metadata */}
-        <div className="flex flex-col gap-2 rounded-xl border bg-muted/30 p-3 text-sm">
+        <div className="bg-muted/30 flex flex-col gap-2 rounded-xl border p-3 text-sm">
           <div className="flex items-center justify-between">
-            <span className="text-xs text-muted-foreground">Status</span>
-            <span className={cn('text-xs font-medium', STATUS_CONFIG[task.status as TaskStatus]?.color)}>
+            <span className="text-muted-foreground text-xs">Status</span>
+            <span
+              className={cn('text-xs font-medium', STATUS_CONFIG[task.status as TaskStatus]?.color)}
+            >
               {STATUS_CONFIG[task.status as TaskStatus]?.label}
             </span>
           </div>
           {priority !== 'none' && (
             <div className="flex items-center justify-between">
-              <span className="text-xs text-muted-foreground">Priority</span>
-              <Badge variant="secondary" className={cn('h-4 rounded px-1.5 text-[10px] border-0', PRIORITY_CONFIG[priority].className)}>
+              <span className="text-muted-foreground text-xs">Priority</span>
+              <Badge
+                variant="secondary"
+                className={cn(
+                  'h-4 rounded border-0 px-1.5 text-[10px]',
+                  PRIORITY_CONFIG[priority].className,
+                )}
+              >
                 {PRIORITY_CONFIG[priority].label}
               </Badge>
             </div>
           )}
           {task.dueDate && (
             <div className="flex items-center justify-between">
-              <span className="text-xs text-muted-foreground">Due date</span>
+              <span className="text-muted-foreground text-xs">Due date</span>
               <span className="text-xs font-medium">{format(new Date(task.dueDate), 'PPP')}</span>
             </div>
           )}
           {folder && (
             <div className="flex items-center justify-between">
-              <span className="text-xs text-muted-foreground">Folder</span>
+              <span className="text-muted-foreground text-xs">Folder</span>
               <span className="flex items-center gap-1 text-xs font-medium">
-                <FolderIcon className="h-3 w-3" />{folder.name}
+                <FolderIcon className="h-3 w-3" />
+                {folder.name}
               </span>
             </div>
           )}
-          {task.createdAt && (
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-muted-foreground">Created</span>
-              <span className="text-xs text-muted-foreground">{format(new Date(task.createdAt), 'PPP')}</span>
-            </div>
-          )}
+          {(() => {
+            const createdAt = task.createdAt ? new Date(task.createdAt) : null;
+
+            return createdAt && !Number.isNaN(createdAt.getTime()) ? (
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground text-xs">Created</span>
+                <span className="text-muted-foreground text-xs">{format(createdAt, 'PPP')}</span>
+              </div>
+            ) : null;
+          })()}
         </div>
 
         {/* Actions */}
@@ -1073,14 +1428,27 @@ function TaskDetailPanel({
 // ─── Task Dialog ──────────────────────────────────────────────────────────────
 
 function TaskDialog({
-  open, onOpenChange, editingTask, form, setForm, calendarOpen, setCalendarOpen,
-  folders, onSubmit, isPending,
+  open,
+  onOpenChange,
+  editingTask,
+  form,
+  setForm,
+  calendarOpen,
+  setCalendarOpen,
+  folders,
+  onSubmit,
+  isPending,
 }: {
-  open: boolean; onOpenChange: (v: boolean) => void;
-  editingTask: Task | null; form: TaskFormData;
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  editingTask: Task | null;
+  form: TaskFormData;
   setForm: React.Dispatch<React.SetStateAction<TaskFormData>>;
-  calendarOpen: boolean; setCalendarOpen: (v: boolean) => void;
-  folders: Folder[]; onSubmit: () => void; isPending: boolean;
+  calendarOpen: boolean;
+  setCalendarOpen: (v: boolean) => void;
+  folders: Folder[];
+  onSubmit: () => void;
+  isPending: boolean;
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -1105,9 +1473,14 @@ function TaskDialog({
           />
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-medium text-muted-foreground">Priority</label>
-              <Select value={form.priority} onValueChange={(v) => setForm((f) => ({ ...f, priority: v as TaskPriority }))}>
-                <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+              <label className="text-muted-foreground text-xs font-medium">Priority</label>
+              <Select
+                value={form.priority}
+                onValueChange={(v) => setForm((f) => ({ ...f, priority: v as TaskPriority }))}
+              >
+                <SelectTrigger className="h-9 text-sm">
+                  <SelectValue />
+                </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">No priority</SelectItem>
                   <SelectItem value="low">Low</SelectItem>
@@ -1117,9 +1490,14 @@ function TaskDialog({
               </Select>
             </div>
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-medium text-muted-foreground">Status</label>
-              <Select value={form.status} onValueChange={(v) => setForm((f) => ({ ...f, status: v as TaskStatus }))}>
-                <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+              <label className="text-muted-foreground text-xs font-medium">Status</label>
+              <Select
+                value={form.status}
+                onValueChange={(v) => setForm((f) => ({ ...f, status: v as TaskStatus }))}
+              >
+                <SelectTrigger className="h-9 text-sm">
+                  <SelectValue />
+                </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="todo">To Do</SelectItem>
                   <SelectItem value="doing">Doing</SelectItem>
@@ -1130,32 +1508,61 @@ function TaskDialog({
           </div>
           {folders.length > 0 && (
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-medium text-muted-foreground">Folder (optional)</label>
-              <Select value={form.folderId ?? 'none'} onValueChange={(v) => setForm((f) => ({ ...f, folderId: v === 'none' ? null : v }))}>
-                <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+              <label className="text-muted-foreground text-xs font-medium">Folder (optional)</label>
+              <Select
+                value={form.folderId ?? 'none'}
+                onValueChange={(v) => setForm((f) => ({ ...f, folderId: v === 'none' ? null : v }))}
+              >
+                <SelectTrigger className="h-9 text-sm">
+                  <SelectValue />
+                </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">No folder</SelectItem>
                   {folders.map((folder) => (
-                    <SelectItem key={folder.id} value={folder.id}>{folder.name}</SelectItem>
+                    <SelectItem key={folder.id} value={folder.id}>
+                      {folder.name}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
           )}
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-medium text-muted-foreground">Due date (optional)</label>
+            <label className="text-muted-foreground text-xs font-medium">Due date (optional)</label>
             <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
               <PopoverTrigger asChild>
-                <Button variant="outline" className={cn('h-9 justify-start text-left font-normal text-sm', !form.dueDate && 'text-muted-foreground')}>
+                <Button
+                  variant="outline"
+                  className={cn(
+                    'h-9 justify-start text-left text-sm font-normal',
+                    !form.dueDate && 'text-muted-foreground',
+                  )}
+                >
                   <CalendarIcon className="mr-2 h-4 w-4" />
                   {form.dueDate ? format(form.dueDate, 'PPP') : 'Pick a date'}
                 </Button>
               </PopoverTrigger>
               <PopoverContent className="w-auto p-0" align="start">
-                <Calendar mode="single" selected={form.dueDate} onSelect={(d) => { setForm((f) => ({ ...f, dueDate: d })); setCalendarOpen(false); }} initialFocus />
+                <Calendar
+                  mode="single"
+                  selected={form.dueDate}
+                  onSelect={(d) => {
+                    setForm((f) => ({ ...f, dueDate: d }));
+                    setCalendarOpen(false);
+                  }}
+                  initialFocus
+                />
                 {form.dueDate && (
                   <div className="border-t p-2">
-                    <Button variant="ghost" size="sm" className="w-full text-xs text-muted-foreground" onClick={() => { setForm((f) => ({ ...f, dueDate: undefined })); setCalendarOpen(false); }}>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-muted-foreground w-full text-xs"
+                      onClick={() => {
+                        setForm((f) => ({ ...f, dueDate: undefined }));
+                        setCalendarOpen(false);
+                      }}
+                    >
                       Clear date
                     </Button>
                   </div>
@@ -1166,7 +1573,9 @@ function TaskDialog({
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
           <Button onClick={onSubmit} disabled={!form.title.trim() || isPending}>
             {editingTask ? 'Save changes' : 'Create task'}
           </Button>

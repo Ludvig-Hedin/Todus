@@ -55,6 +55,14 @@ import {
   useSortable,
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -73,6 +81,9 @@ import { toast } from 'sonner';
 
 interface NotesPanelProps {
   threadId: string;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  showTrigger?: boolean;
 }
 
 function SortableNote({
@@ -230,18 +241,19 @@ function SortableNote({
   );
 }
 
-export function NotesPanel({ threadId }: NotesPanelProps) {
+export function NotesPanel({ threadId, open, onOpenChange, showTrigger = true }: NotesPanelProps) {
   const {
     data: { notes },
     refetch,
   } = useThreadNotes(threadId);
-  const [isOpen, setIsOpen] = useState(false);
+  const [internalIsOpen, setInternalIsOpen] = useState(false);
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [newNoteContent, setNewNoteContent] = useState('');
   const [editContent, setEditContent] = useState('');
   const [isAddingNewNote, setIsAddingNewNote] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedColor, setSelectedColor] = useState('default');
+  const [noteToDelete, setNoteToDelete] = useState<Note | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -356,7 +368,15 @@ export function NotesPanel({ threadId }: NotesPanelProps) {
   };
 
   const confirmDeleteNote = (noteId: string) => {
-    // TODO: Dialog is bugged? needs to be fixed then implement a confirmation dialog
+    setNoteToDelete(notes.find((note) => note.id === noteId) ?? null);
+  };
+
+  const handleConfirmDeleteNote = () => {
+    if (!noteToDelete) return;
+
+    const noteId = noteToDelete.id;
+    setNoteToDelete(null);
+
     const promise = handleDeleteNote(noteId);
     toast.promise(promise, {
       loading: m['common.actions.loading'](),
@@ -491,38 +511,49 @@ export function NotesPanel({ threadId }: NotesPanelProps) {
     [sortedUnpinnedNotes],
   );
 
+  const isControlled = open !== undefined;
+  const isOpen = isControlled ? open : internalIsOpen;
+  const setIsOpen = (nextOpen: boolean) => {
+    if (!isControlled) {
+      setInternalIsOpen(nextOpen);
+    }
+    onOpenChange?.(nextOpen);
+  };
+
   return (
     <div className="relative" ref={panelRef}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            variant="ghost"
-            size="sm"
-            className={cn(
-              'inline-flex h-7 w-7 items-center justify-center gap-1 overflow-hidden rounded-lg bg-white dark:bg-[#313131]',
-              notes.length > 0 && 'text-amber-500',
-              isOpen && 'bg-white/80 dark:bg-[#313131]/80',
-            )}
-            onClick={() => setIsOpen(!isOpen)}
-          >
-            <StickyNote
+      {showTrigger ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="sm"
               className={cn(
-                'h-4 w-4',
-                notes.length > 0 ? 'fill-amber-200 dark:fill-amber-900' : 'text-[#9A9A9A]',
+                'inline-flex h-7 w-7 items-center justify-center gap-1 overflow-hidden rounded-lg bg-white dark:bg-[#313131]',
+                notes.length > 0 && 'text-amber-500',
+                isOpen && 'bg-white/80 dark:bg-[#313131]/80',
               )}
-            />
-            {notes.length > 0 && (
-              <span className="bg-primary text-primary-foreground absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full text-[10px]">
-                {notes.length}
-              </span>
-            )}
-            <span className="sr-only">{m['common.notes.title']()}</span>
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent side="bottom" className="bg-white dark:bg-[#313131]">
-          <p>{m['common.notes.noteCount']({ count: notes.length })}</p>
-        </TooltipContent>
-      </Tooltip>
+              onClick={() => setIsOpen(!isOpen)}
+            >
+              <StickyNote
+                className={cn(
+                  'h-4 w-4',
+                  notes.length > 0 ? 'fill-amber-200 dark:fill-amber-900' : 'text-[#9A9A9A]',
+                )}
+              />
+              {notes.length > 0 && (
+                <span className="bg-primary text-primary-foreground absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full text-[10px]">
+                  {notes.length}
+                </span>
+              )}
+              <span className="sr-only">{m['common.notes.title']()}</span>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" className="bg-white dark:bg-[#313131]">
+            <p>{m['common.notes.noteCount']({ count: notes.length })}</p>
+          </TooltipContent>
+        </Tooltip>
+      ) : null}
 
       {isOpen && (
         <div
@@ -821,6 +852,29 @@ export function NotesPanel({ threadId }: NotesPanelProps) {
                 </div>
               </div>
             )}
+
+            <Dialog
+              open={!!noteToDelete}
+              onOpenChange={(open) => {
+                if (!open) setNoteToDelete(null);
+              }}
+            >
+              <DialogContent showOverlay className="max-w-sm">
+                <DialogHeader>
+                  <DialogTitle>{m['common.notes.deleteConfirm']()}</DialogTitle>
+                  <DialogDescription>{m['common.notes.deleteConfirmDescription']()}</DialogDescription>
+                </DialogHeader>
+
+                  <DialogFooter className="gap-2">
+                    <Button variant="ghost" onClick={() => setNoteToDelete(null)}>
+                      {m['common.actions.cancel']()}
+                    </Button>
+                    <Button variant="destructive" onClick={() => void handleConfirmDeleteNote()}>
+                      {m['common.notes.actions.delete']()}
+                    </Button>
+                  </DialogFooter>
+              </DialogContent>
+            </Dialog>
           </div>
         </div>
       )}

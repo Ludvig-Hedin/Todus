@@ -101,7 +101,7 @@ export const trpcClient = createTRPCClient<AppRouter>({
       methodOverride: 'POST',
       maxItems: 1,
       fetch: (url, options) =>
-        fetch(url, { ...options, credentials: 'include' }).then((res) => {
+        fetch(url, { ...(options as RequestInit), credentials: 'include' }).then((res) => {
           const currentPath = new URL(window.location.href).pathname;
           const redirectPath = res.headers.get('X-Zero-Redirect');
           if (!parityAuthBypass && !!redirectPath && redirectPath !== currentPath) {
@@ -148,8 +148,6 @@ export function QueryProvider({
             };
           },
         );
-        // invalidate the query, it will refetch when the data is it is being accessed
-        queryClient.invalidateQueries({ queryKey: threadQueryKey });
       }}
     >
       <TRPCProvider trpcClient={trpcClient} queryClient={queryClient}>

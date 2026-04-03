@@ -35,7 +35,7 @@ import { Balancer } from 'react-wrap-balancer';
 import { Navigation } from '../navigation';
 import { useTheme } from 'next-themes';
 import { motion } from 'motion/react';
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { toast } from 'sonner';
 import Footer from './footer';
 import React from 'react';
@@ -61,7 +61,6 @@ export default function HomeContent() {
   const { setTheme } = useTheme();
   const navigate = useNavigate();
   const { data: session } = useSession();
-  const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
     setTheme('dark');
@@ -128,36 +127,23 @@ export default function HomeContent() {
           className="mb-6 lg:hidden"
         >
           <Button
-            disabled={isLoading}
-            onClick={async () => {
-              if (isLoading) return;
+            onClick={() => {
               if (session) {
                 navigate('/mail/inbox');
-                return;
-              }
-              setIsLoading(true);
-              try {
-                const { data, error } = await signIn.social({
-                  provider: 'google',
-                  callbackURL: `${window.location.origin}/mail/inbox`,
-                });
-                if (error) {
-                  toast.error(error.message || 'Sign-in failed');
-                } else if (data?.url) {
-                  window.location.href = data.url;
-                } else {
-                  toast.error('Sign-in failed: missing redirect URL');
-                  console.error('Get Started sign-in: no redirect URL in response', data);
-                }
-              } catch (err) {
-                console.error('Get Started sign-in error:', err);
-                toast.error('Sign-in failed');
-              } finally {
-                setIsLoading(false);
+              } else {
+                toast.promise(
+                  signIn.social({
+                    provider: 'google',
+                    callbackURL: `${window.location.origin}/mail/inbox`,
+                  }),
+                  {
+                    error: 'Login redirect failed',
+                  },
+                );
               }
             }}
           >
-            {isLoading ? 'Signing in...' : 'Get Started'}
+            Get Started
           </Button>
         </motion.div>
       </section>

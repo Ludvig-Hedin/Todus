@@ -4,33 +4,43 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from '../ui/dropdown-menu';
+import {
+  Bell,
+  Lightning,
+  Mail,
+  PencilCompose,
+  ScanEye,
+  Tag,
+  User,
+  X,
+  Search,
+} from '../icons/icons';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { Bell, Lightning, Mail, PencilCompose, ScanEye, Tag, User, X, Search } from '../icons/icons';
-import { useCategorySettings, useDefaultCategoryId } from '@/hooks/use-categories';
 import { ResizablePanel, ResizablePanelGroup, ResizableHandle } from '@/components/ui/resizable';
+import { useCategorySettings, useDefaultCategoryId } from '@/hooks/use-categories';
 import { useCommandPalette } from '../context/command-palette-context';
 import { useHotkeys, useHotkeysContext } from 'react-hotkeys-hook';
 import { ThreadDisplay } from '@/components/mail/thread-display';
-import { useMutation } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useActiveConnection } from '@/hooks/use-connections';
-import { useTRPC } from '@/providers/query-provider';
 import { Check, ChevronDown, RefreshCcw } from 'lucide-react';
 import { useMediaQuery } from '../../hooks/use-media-query';
 import useSearchLabels from '@/hooks/use-labels-search';
 import * as CustomIcons from '@/components/icons/icons';
 import { MailList } from '@/components/mail/mail-list';
 import { useNavigate, useParams } from 'react-router';
+import { useTRPC } from '@/providers/query-provider';
 import { useMail } from '@/components/mail/use-mail';
 import { SidebarToggle } from '../ui/sidebar-toggle';
 import { PricingDialog } from '../ui/pricing-dialog';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { clearBulkSelectionAtom } from './use-mail';
-import AISidebar from '@/components/ui/ai-sidebar';
 import { useThreads } from '@/hooks/use-threads';
-import AIToggleButton from '../ai-toggle-button';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { useSession } from '@/lib/auth-client';
+import { useSettings } from '@/hooks/use-settings';
 import { m } from '@/paraglide/messages';
 import { isMac } from '@/lib/platform';
 import { useQueryState } from 'nuqs';
@@ -41,6 +51,127 @@ const LOCAL_AUTO_SYNC_INTERVAL_MS = 60_000;
 const isLocalAutoSyncEnabled =
   import.meta.env.DEV &&
   String(import.meta.env.VITE_PUBLIC_BACKEND_URL ?? '').includes('localhost');
+
+function MailAssistantNudges({ folder }: { folder: string }) {
+  const trpc = useTRPC();
+  const { data: settings } = useSettings();
+  const [, setThreadId] = useQueryState('threadId');
+  const loopsQuery = useQuery(
+    trpc.assistant.listOpenLoops.queryOptions(
+      { limit: 30 },
+      {
+        enabled:
+          settings?.settings.assistantAutomationPolicy.assistantThreadActionsVisible !== false,
+        staleTime: 60 * 1000,
+      },
+    ),
+  );
+
+  const queueLabels: Record<string, { title: string; description: string }> = {
+    needs_you: {
+      title: 'Needs reply',
+      description: 'Threads where you appear to be the next blocker.',
+    },
+    waiting_on: {
+      title: 'Waiting on others',
+      description: 'Conversations you already moved forward and are now waiting on.',
+    },
+    scheduling: {
+      title: 'Scheduling',
+      description: 'Threads that look like meeting coordination or follow-up scheduling.',
+    },
+    drafts_ready: {
+      title: 'Drafts ready',
+      description: 'Prepared replies or thread drafts ready for review.',
+    },
+    likely_dropped: {
+      title: 'Likely dropped',
+      description: 'Open loops that are at risk of slipping without explicit tracking.',
+    },
+  };
+
+  const groupedQueues = Object.entries(
+    (loopsQuery.data?.loops ?? []).reduce<
+      Record<string, Array<{ queue: string; threadId: string | null; summary: string }>>
+    >((acc, loop) => {
+      if (!acc[loop.queue]) acc[loop.queue] = [];
+      acc[loop.queue].push({
+        queue: loop.queue,
+        threadId: loop.threadId,
+        summary: loop.summary,
+      });
+      return acc;
+    }, {}),
+  )
+    .map(([queue, loops]) => {
+      const metadata = queueLabels[queue];
+      const threadIds = Array.from(
+        new Set(loops.map((loop) => loop.threadId).filter((value): value is string => Boolean(value))),
+      );
+
+      return {
+        queue,
+        title: metadata?.title ?? queue,
+        description: metadata?.description ?? loops[0]?.summary ?? '',
+        count: loops.length,
+        threadIds,
+      };
+    })
+    .filter((queue) => queue.count > 0)
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 5);
+
+  if (!groupedQueues.length) return null;
+
+  return (
+    <div className="px-4 pb-3">
+      <div className="rounded-[18px] border border-border/60 bg-background/95 p-3 shadow-[0_1px_2px_rgba(0,0,0,0.04)] backdrop-blur-sm dark:bg-[#121212]">
+        <div className="mb-2.5 flex items-start justify-between gap-3">
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+              Assistant
+            </p>
+            <p className="mt-1 text-[12px] leading-5 text-muted-foreground">
+              Your assistant grouped the inbox into the queues most likely to need attention.
+            </p>
+          </div>
+          {loopsQuery.isFetching && <RefreshCcw className="text-muted-foreground h-3.5 w-3.5 animate-spin" />}
+        </div>
+
+        <div className="flex flex-col gap-2">
+          {groupedQueues.map((queue) => (
+            <button
+              key={queue.queue}
+              type="button"
+              className="flex w-full items-start justify-between gap-3 rounded-2xl border border-border/50 bg-muted/30 px-3 py-2.5 text-left transition-colors hover:bg-muted/45 dark:bg-[#181818] dark:hover:bg-[#1d1d1d]"
+              onClick={() => {
+                const [firstThreadId] = queue.threadIds;
+                if (firstThreadId) {
+                  setThreadId(firstThreadId);
+                }
+              }}
+            >
+              <div className="space-y-0.5">
+                <p className="text-[13px] font-medium tracking-[-0.01em] text-foreground">
+                  {queue.title}
+                </p>
+                <p className="text-[12px] leading-5 text-muted-foreground">
+                  {queue.description}
+                </p>
+              </div>
+              <Badge
+                variant="outline"
+                className="rounded-full border-border/60 bg-background/80 px-2.5 py-0.5 text-[10px] font-medium text-muted-foreground dark:bg-[#141414]"
+              >
+                {queue.count}
+              </Badge>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // const AutoLabelingSettings = () => {
 //   const trpc = useTRPC();
@@ -414,25 +545,32 @@ export function MailLayout() {
     setMail({ ...mail, bulkSelected: [] });
   }, [mail, setMail]);
 
-  const runLocalAutoSync = useCallback(async (skipWhenHidden: boolean = true) => {
-    if (!isLocalAutoSyncEnabled) return;
-    if (!session?.user?.id || !activeConnection?.id) return;
-    if (skipWhenHidden && typeof document !== 'undefined' && document.visibilityState === 'hidden') {
-      return;
-    }
-    if (localAutoSyncInFlightRef.current) return;
+  const runLocalAutoSync = useCallback(
+    async (skipWhenHidden: boolean = true) => {
+      if (!isLocalAutoSyncEnabled) return;
+      if (!session?.user?.id || !activeConnection?.id) return;
+      if (
+        skipWhenHidden &&
+        typeof document !== 'undefined' &&
+        document.visibilityState === 'hidden'
+      ) {
+        return;
+      }
+      if (localAutoSyncInFlightRef.current) return;
 
-    localAutoSyncInFlightRef.current = true;
+      localAutoSyncInFlightRef.current = true;
 
-    try {
-      await forceSync();
-      await refetchThreads();
-    } catch (error) {
-      console.error('Local auto-sync failed:', error);
-    } finally {
-      localAutoSyncInFlightRef.current = false;
-    }
-  }, [activeConnection?.id, forceSync, refetchThreads, session?.user?.id]);
+      try {
+        await forceSync();
+        await refetchThreads();
+      } catch (error) {
+        console.error('Local auto-sync failed:', error);
+      } finally {
+        localAutoSyncInFlightRef.current = false;
+      }
+    },
+    [activeConnection?.id, forceSync, refetchThreads, session?.user?.id],
+  );
 
   const handleRefetchThreads = useCallback(() => {
     if (isLocalAutoSyncEnabled) {
@@ -495,8 +633,8 @@ export function MailLayout() {
               `bg-panelLight dark:bg-panelDark mb-1 w-fit shadow-sm md:mr-[3px] md:rounded-2xl lg:flex lg:h-[calc(100dvh-8px)] lg:shadow-sm`,
               isDesktop && threadId && 'hidden lg:block',
             )}
-          // onMouseEnter={handleMailListMouseEnter}
-          // onMouseLeave={handleMailListMouseLeave}
+            // onMouseEnter={handleMailListMouseEnter}
+            // onMouseLeave={handleMailListMouseLeave}
           >
             <div className="w-full md:h-[calc(100dvh-10px)]">
               <div className="z-15 sticky top-0 p-4 pb-0">
@@ -517,12 +655,12 @@ export function MailLayout() {
                         <span className="ml-3 hidden truncate pr-20 lg:inline-block">
                           {activeFilters.length > 0
                             ? activeFilters.map((f) => f.display).join(', ')
-                            : 'Search'}
+                            : 'Search or filter mail'}
                         </span>
                         <span className="ml-3 inline-block truncate pr-20 lg:hidden">
                           {activeFilters.length > 0
                             ? `${activeFilters.length} filter${activeFilters.length > 1 ? 's' : ''}`
-                            : 'Search'}
+                            : 'Search mail'}
                         </span>
 
                         <div className="absolute right-2 flex items-center gap-2">
@@ -538,7 +676,7 @@ export function MailLayout() {
                               className="h-6 rounded-full px-2 text-xs"
                               onClick={handleClearFilters}
                             >
-                              Clear
+                              Clear filters
                             </Button>
                           )}
                           <kbd className="bg-muted border-border/40 dark:bg-muted/40 pointer-events-none hidden h-6 select-none items-center gap-1 rounded border px-2 text-xs font-medium opacity-80 sm:flex">
@@ -582,7 +720,7 @@ export function MailLayout() {
                     onClick={handleRefetchThreads}
                     variant="ghost"
                     size="icon"
-                    className="border-none bg-transparent hover:bg-accent/50 h-10 w-10 rounded-full backdrop-blur-sm"
+                    className="hover:bg-accent/50 h-10 w-10 rounded-full border-none bg-transparent backdrop-blur-sm"
                   >
                     <RefreshCcw className="text-muted-foreground h-4 w-4" />
                   </Button>
@@ -599,8 +737,11 @@ export function MailLayout() {
                 />
               </div>
 
-              <div className="z-1 relative h-[calc(100dvh-(2px+2px))] overflow-hidden pt-0 md:h-[calc(100dvh-4rem)]">
-                <MailList />
+              <div className="z-1 relative flex h-[calc(100dvh-(2px+2px))] flex-col overflow-hidden pt-0 md:h-[calc(100dvh-4rem)]">
+                <MailAssistantNudges folder={folder} />
+                <div className="min-h-0 flex-1">
+                  <MailList />
+                </div>
               </div>
             </div>
           </ResizablePanel>
@@ -636,13 +777,9 @@ export function MailLayout() {
             </div>
           )}
 
-          {activeConnection?.id ? <AISidebar /> : null}
-          {activeConnection?.id ? <AIToggleButton /> : null}
         </ResizablePanelGroup>
       </div>
-      {isMobile && (
-        <ComposeFloatingButton />
-      )}
+      {isMobile && <ComposeFloatingButton />}
     </TooltipProvider>
   );
 }
@@ -667,7 +804,7 @@ function ComposeFloatingButton() {
     <button
       onClick={handleCompose}
       aria-label="Compose email"
-      className="fixed bottom-20 right-4 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-mainBlue shadow-lg hover:bg-mainBlue/90 transition-colors md:hidden"
+      className="bg-mainBlue hover:bg-mainBlue/90 fixed bottom-20 right-4 z-50 flex h-14 w-14 items-center justify-center rounded-full shadow-lg transition-colors md:hidden"
     >
       <PencilCompose className="h-5 w-5 fill-white" aria-hidden="true" />
     </button>
@@ -737,8 +874,7 @@ export const Categories = () => {
               className={cn('fill-muted-foreground dark:fill-white', isSelected && 'fill-white')}
             />
           ),
-          colors:
-            'border-0 bg-mainBlue text-white hover:bg-mainBlue/90',
+          colors: 'border-0 bg-mainBlue text-white hover:bg-mainBlue/90',
         };
       case 'Personal':
         return {
@@ -858,14 +994,14 @@ function CategoryDropdown({ isMultiSelectMode }: CategoryDropdownProps) {
           className={cn(
             'text-muted-foreground border-border/40 bg-background/50 hover:bg-accent/30 dark:border-border/20 dark:bg-background/40 flex h-10 min-w-fit items-center gap-2 rounded-lg border px-3 backdrop-blur-sm transition-all',
           )}
-          aria-label="Filter by labels"
+          aria-label="Filter inbox"
           aria-expanded={isOpen}
           aria-haspopup="menu"
         >
           <span className="text-sm font-medium">
             {labels.length > 0
-              ? `${labels.length} View${labels.length > 1 ? 's' : ''}`
-              : m['navigation.settings.categories']()}
+              ? `${labels.length} filter${labels.length > 1 ? 's' : ''}`
+              : 'Filter inbox'}
           </span>
           <ChevronDown
             className={cn(
@@ -891,7 +1027,11 @@ function CategoryDropdown({ isMultiSelectMode }: CategoryDropdownProps) {
               handleLabelChange(category.searchValue);
             }}
             role="menuitemcheckbox"
-            aria-checked={labels.includes(category.id)}
+            aria-checked={
+              category.searchValue === ''
+                ? labels.length === 0
+                : category.searchValue.split(',').some((value) => labels.includes(value))
+            }
           >
             <span className="text-foreground font-medium capitalize">
               {category.name.toLowerCase()}
@@ -900,8 +1040,8 @@ function CategoryDropdown({ isMultiSelectMode }: CategoryDropdownProps) {
             {(category.searchValue === ''
               ? labels.length === 0
               : category.searchValue.split(',').some((val) => labels.includes(val))) && (
-                <Check className="text-primary ml-auto h-4 w-4" />
-              )}
+              <Check className="text-primary ml-auto h-4 w-4" />
+            )}
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>

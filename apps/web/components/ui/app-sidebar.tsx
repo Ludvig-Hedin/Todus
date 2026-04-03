@@ -7,8 +7,6 @@ import {
 } from '@/components/ui/dialog';
 import { Sidebar, SidebarContent, SidebarFooter, SidebarHeader } from '@/components/ui/sidebar';
 import { navigationConfig, bottomNavItems } from '@/config/navigation';
-// import { useTRPC } from '@/providers/query-provider';
-import { APP_NAME } from '@/lib/branding';
 import { useSidebar } from '@/components/ui/sidebar';
 import { CreateEmail } from '../create/create-email';
 // import { useMutation } from '@tanstack/react-query';
@@ -19,8 +17,11 @@ import React, { useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { useSession } from '@/lib/auth-client';
 import { useAIFullScreen } from './ai-sidebar';
+import { useStats } from '@/hooks/use-stats';
 import { useLocation } from 'react-router';
-import { cn } from '@/lib/utils';
+// import { useTRPC } from '@/providers/query-provider';
+import { APP_NAME } from '@/lib/branding';
+import { cn, FOLDERS } from '@/lib/utils';
 import { m } from '@/paraglide/messages';
 // import { Video } from 'lucide-react';
 import { NavUser } from './nav-user';
@@ -40,6 +41,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   });
   const [, setPricingDialog] = useQueryState('pricingDialog');
   const { isFullScreen } = useAIFullScreen();
+  const { data: stats } = useStats();
   const location = useLocation();
   const { data: session } = useSession();
   const { currentSection, navItems } = useMemo(() => {
@@ -50,10 +52,31 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 
     const currentSection = section?.[0] || 'mail';
     if (navigationConfig[currentSection]) {
-      const items = [...navigationConfig[currentSection].sections];
+      const items = navigationConfig[currentSection].sections.map((section) => ({
+        ...section,
+        items: section.items.map((item) => ({
+          ...item,
+          children: item.children?.map((child) => ({ ...child })),
+        })),
+      }));
 
-      // Badges are rendered in NavItem/NavChildRow via useStats() matching item.id —
-      // no manual badge mutation needed here.
+      if (currentSection === 'mail' && stats && stats.length) {
+        const emailItem = items
+          .flatMap((section) => section.items)
+          .find((item) => item.id === 'email');
+
+        if (emailItem?.children) {
+          emailItem.children = emailItem.children.map((child) => ({
+            ...child,
+            badge:
+              child.id === 'inbox'
+                ? stats.find((stat) => stat.label?.toLowerCase() === FOLDERS.INBOX)?.count
+                : child.id === 'sent'
+                  ? stats.find((stat) => stat.label?.toLowerCase() === FOLDERS.SENT)?.count
+                  : undefined,
+          }));
+        }
+      }
 
       return { currentSection, navItems: items };
     } else {
@@ -62,7 +85,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         navItems: [],
       };
     }
-  }, [location.pathname]);
+  }, [location.pathname, stats]);
 
   const showComposeButton = currentSection === 'mail';
   const { state } = useSidebar();
@@ -133,17 +156,15 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               <div className="flex items-start gap-2">
                 <div className="flex-1 space-y-0.5">
                   {/* Use APP_NAME from branding.ts — avoids hardcoded "Todus" diverging from branding source */}
-                  <h3 className="text-[13px] font-semibold text-foreground">
-                    Get {APP_NAME} Pro
-                  </h3>
-                  <p className="text-[12px] leading-snug text-muted-foreground">
+                  <h3 className="text-foreground text-[13px] font-semibold">Get {APP_NAME} Pro</h3>
+                  <p className="text-muted-foreground text-[12px] leading-snug">
                     Unlimited AI chats, auto-labeling, writing assistant, and more.
                   </p>
                 </div>
               </div>
               <button
                 onClick={() => setPricingDialog('true')}
-                className="mt-2.5 inline-flex h-7 w-full items-center justify-center gap-0.5 overflow-hidden rounded-full bg-mainBlue px-2 transition-colors hover:bg-mainBlue/90"
+                className="bg-mainBlue hover:bg-mainBlue/90 mt-2.5 inline-flex h-7 w-full items-center justify-center gap-0.5 overflow-hidden rounded-full px-2 transition-colors"
               >
                 <span className="whitespace-nowrap text-[12px] font-medium leading-none text-white">
                   Start 7 day free trial
@@ -184,11 +205,11 @@ function ComposeButton() {
   };
   return (
     <Dialog open={!!dialogOpen} onOpenChange={handleOpenChange}>
-      <DialogTitle></DialogTitle>
-      <DialogDescription></DialogDescription>
-
       <DialogTrigger asChild>
-        <button type="button" className="relative mb-1 inline-flex h-8 w-full items-center justify-center gap-1 self-stretch overflow-hidden rounded-full bg-mainBlue dark:border-none cursor-pointer hover:bg-mainBlue/90 transition-all duration-150">
+        <button
+          type="button"
+          className="bg-mainBlue hover:bg-mainBlue/90 relative mb-1 inline-flex h-8 w-full cursor-pointer items-center justify-center gap-1 self-stretch overflow-hidden rounded-full transition-all duration-150 dark:border-none"
+        >
           {state === 'collapsed' && !isMobile ? (
             <PencilCompose className="mt-0.5 fill-white text-black" />
           ) : (
@@ -202,7 +223,11 @@ function ComposeButton() {
         </button>
       </DialogTrigger>
 
-      <DialogContent className="h-screen w-screen max-w-none border-none bg-background p-0 shadow-none">
+      <DialogContent className="bg-background h-screen w-screen max-w-none border-none p-0 shadow-none">
+        <DialogTitle className="sr-only">Compose email</DialogTitle>
+        <DialogDescription className="sr-only">
+          Compose a new email message with recipients, subject, body, and attachments.
+        </DialogDescription>
         <CreateEmail />
       </DialogContent>
     </Dialog>

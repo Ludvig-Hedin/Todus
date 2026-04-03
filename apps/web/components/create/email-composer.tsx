@@ -22,6 +22,7 @@ import { TextEffect } from '@/components/motion-primitives/text-effect';
 import { ScheduleSendPicker } from './schedule-send-picker';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useEmailAliases } from '@/hooks/use-email-aliases';
+import { useConnections } from '@/hooks/use-connections';
 import useComposeEditor from '@/hooks/use-compose-editor';
 import { CurvedArrow, Sparkles, X } from '../icons/icons';
 import { gitHubEmojis } from '@tiptap/extension-emoji';
@@ -116,6 +117,7 @@ export function EmailComposer({
   editorClassName,
 }: EmailComposerProps) {
   const { data: aliases } = useEmailAliases();
+  const { data: connectionsData } = useConnections();
   const { data: settings } = useSettings();
   const [showCc, setShowCc] = useState(initialCc.length > 0);
   const [showBcc, setShowBcc] = useState(initialBcc.length > 0);
@@ -756,8 +758,8 @@ export function EmailComposer({
           </div>
         ) : null}
 
-        {/* From */}
-        {aliases && aliases.length > 1 ? (
+        {/* From — show picker when multiple aliases OR multiple connections exist */}
+        {(aliases && aliases.length > 1) || (connectionsData && connectionsData.connections.length > 1) ? (
           <div className="flex items-center gap-2 border-b p-3">
             <p className="text-sm font-medium text-[#8C8C8C]">From:</p>
             <Select
@@ -771,16 +773,33 @@ export function EmailComposer({
                 <SelectValue placeholder="Select an email address" />
               </SelectTrigger>
               <SelectContent className="z-99999">
-                {aliases.map((alias) => (
-                  <SelectItem key={alias.email} value={alias.email}>
-                    <div className="flex flex-row items-center gap-1">
+                {/* Connection emails (each connected account) */}
+                {connectionsData?.connections.map((conn) => (
+                  <SelectItem key={`conn-${conn.id}`} value={conn.email}>
+                    <div className="flex flex-row items-center gap-1.5">
+                      <span
+                        className="size-2 shrink-0 rounded-full"
+                        style={{ backgroundColor: conn.color ?? '#007AFF' }}
+                      />
                       <span className="text-sm">
-                        {alias.name ? `${alias.name} <${alias.email}>` : alias.email}
+                        {conn.name ? `${conn.name} <${conn.email}>` : conn.email}
                       </span>
-                      {alias.primary && <span className="text-xs text-[#8C8C8C]">Primary</span>}
                     </div>
                   </SelectItem>
                 ))}
+                {/* Additional aliases (same-connection aliases not already shown as connections) */}
+                {aliases
+                  ?.filter((alias) => !connectionsData?.connections.some((c) => c.email === alias.email))
+                  .map((alias) => (
+                    <SelectItem key={`alias-${alias.email}`} value={alias.email}>
+                      <div className="flex flex-row items-center gap-1">
+                        <span className="text-sm">
+                          {alias.name ? `${alias.name} <${alias.email}>` : alias.email}
+                        </span>
+                        {alias.primary && <span className="text-xs text-[#8C8C8C]">Primary</span>}
+                      </div>
+                    </SelectItem>
+                  ))}
               </SelectContent>
             </Select>
           </div>

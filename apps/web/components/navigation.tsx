@@ -145,27 +145,19 @@ export function Navigation() {
           <div className="flex gap-2">
             <Button
               className="h-8 bg-white text-black hover:bg-white hover:text-black cursor-pointer"
-              onClick={async () => {
+              onClick={() => {
                 if (session) {
                   navigate('/mail/inbox');
-                  return;
-                }
-                try {
-                  const { data, error } = await signIn.social({
-                    provider: 'google',
-                    callbackURL: `${window.location.origin}/mail/inbox`,
-                  });
-                  if (error) {
-                    toast.error(error.message || 'Sign-in failed');
-                  } else if (data?.url) {
-                    window.location.href = data.url;
-                  } else {
-                    toast.error('Unexpected sign-in response');
-                    console.error('Navigation sign-in: no redirect URL', data);
-                  }
-                } catch (err) {
-                  console.error('Navigation sign-in error:', err);
-                  toast.error('Sign-in failed');
+                } else {
+                  toast.promise(
+                    signIn.social({
+                      provider: 'google',
+                      callbackURL: `${window.location.origin}/mail/inbox`,
+                    }),
+                    {
+                      error: 'Login redirect failed',
+                    },
+                  );
                 }
               }}
             >
