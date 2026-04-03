@@ -35,9 +35,7 @@ import { SidebarToggle } from '../ui/sidebar-toggle';
 import { PricingDialog } from '../ui/pricing-dialog';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { clearBulkSelectionAtom } from './use-mail';
-import AISidebar from '@/components/ui/ai-sidebar';
 import { useThreads } from '@/hooks/use-threads';
-import AIToggleButton from '../ai-toggle-button';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -58,9 +56,9 @@ function MailAssistantNudges({ folder }: { folder: string }) {
   const trpc = useTRPC();
   const { data: settings } = useSettings();
   const [, setThreadId] = useQueryState('threadId');
-  const nudgesQuery = useQuery(
-    trpc.mailAssistant.getInboxNudges.queryOptions(
-      { folder },
+  const loopsQuery = useQuery(
+    trpc.assistant.listOpenLoops.queryOptions(
+      { limit: 30 },
       {
         enabled:
           settings?.settings.assistantAutomationPolicy.assistantThreadActionsVisible !== false,
@@ -69,45 +67,103 @@ function MailAssistantNudges({ folder }: { folder: string }) {
     ),
   );
 
-  const nudges = nudgesQuery.data?.nudges ?? [];
-  if (!nudges.length) return null;
+  const queueLabels: Record<string, { title: string; description: string }> = {
+    needs_you: {
+      title: 'Needs reply',
+      description: 'Threads where you appear to be the next blocker.',
+    },
+    waiting_on: {
+      title: 'Waiting on others',
+      description: 'Conversations you already moved forward and are now waiting on.',
+    },
+    scheduling: {
+      title: 'Scheduling',
+      description: 'Threads that look like meeting coordination or follow-up scheduling.',
+    },
+    drafts_ready: {
+      title: 'Drafts ready',
+      description: 'Prepared replies or thread drafts ready for review.',
+    },
+    likely_dropped: {
+      title: 'Likely dropped',
+      description: 'Open loops that are at risk of slipping without explicit tracking.',
+    },
+  };
+
+  const groupedQueues = Object.entries(
+    (loopsQuery.data?.loops ?? []).reduce<
+      Record<string, Array<{ queue: string; threadId: string | null; summary: string }>>
+    >((acc, loop) => {
+      if (!acc[loop.queue]) acc[loop.queue] = [];
+      acc[loop.queue].push({
+        queue: loop.queue,
+        threadId: loop.threadId,
+        summary: loop.summary,
+      });
+      return acc;
+    }, {}),
+  )
+    .map(([queue, loops]) => {
+      const metadata = queueLabels[queue];
+      const threadIds = Array.from(
+        new Set(loops.map((loop) => loop.threadId).filter((value): value is string => Boolean(value))),
+      );
+
+      return {
+        queue,
+        title: metadata?.title ?? queue,
+        description: metadata?.description ?? loops[0]?.summary ?? '',
+        count: loops.length,
+        threadIds,
+      };
+    })
+    .filter((queue) => queue.count > 0)
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 5);
+
+  if (!groupedQueues.length) return null;
 
   return (
     <div className="px-4 pb-3">
-      <div className="rounded-2xl border border-[#D7CCFF] bg-[#FCFAFF] p-3 dark:border-[#4A3D76] dark:bg-[#1E1A28]">
-        <div className="mb-3 flex items-center justify-between gap-3">
+      <div className="rounded-[18px] border border-border/60 bg-background/95 p-3 shadow-[0_1px_2px_rgba(0,0,0,0.04)] backdrop-blur-sm dark:bg-[#121212]">
+        <div className="mb-2.5 flex items-start justify-between gap-3">
           <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#7C63E6]">
-              Mail Assistant
+            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+              Assistant
             </p>
-            <p className="text-muted-foreground mt-1 text-xs">
-              Proactive nudges pulled from your inbox activity.
+            <p className="mt-1 text-[12px] leading-5 text-muted-foreground">
+              Your assistant grouped the inbox into the queues most likely to need attention.
             </p>
           </div>
-          {nudgesQuery.isFetching && <RefreshCcw className="text-muted-foreground h-3.5 w-3.5 animate-spin" />}
+          {loopsQuery.isFetching && <RefreshCcw className="text-muted-foreground h-3.5 w-3.5 animate-spin" />}
         </div>
 
         <div className="flex flex-col gap-2">
-          {nudges.map((nudge) => (
+          {groupedQueues.map((queue) => (
             <button
-              key={`${nudge.type}-${nudge.title}`}
+              key={queue.queue}
               type="button"
-              className="flex w-full items-start justify-between gap-3 rounded-xl border border-white/60 bg-white/70 px-3 py-3 text-left transition-colors hover:bg-white dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10"
+              className="flex w-full items-start justify-between gap-3 rounded-2xl border border-border/50 bg-muted/30 px-3 py-2.5 text-left transition-colors hover:bg-muted/45 dark:bg-[#181818] dark:hover:bg-[#1d1d1d]"
               onClick={() => {
-                const [firstThreadId] = nudge.threadIds;
+                const [firstThreadId] = queue.threadIds;
                 if (firstThreadId) {
                   setThreadId(firstThreadId);
                 }
               }}
             >
-              <div className="space-y-1">
-                <p className="text-sm font-medium text-black dark:text-white">{nudge.title}</p>
-                <p className="text-xs leading-5 text-[#6B6484] dark:text-[#B3A8D9]">
-                  {nudge.description}
+              <div className="space-y-0.5">
+                <p className="text-[13px] font-medium tracking-[-0.01em] text-foreground">
+                  {queue.title}
+                </p>
+                <p className="text-[12px] leading-5 text-muted-foreground">
+                  {queue.description}
                 </p>
               </div>
-              <Badge variant="secondary" className="rounded-full px-2.5 py-0.5 text-[11px]">
-                {nudge.count}
+              <Badge
+                variant="outline"
+                className="rounded-full border-border/60 bg-background/80 px-2.5 py-0.5 text-[10px] font-medium text-muted-foreground dark:bg-[#141414]"
+              >
+                {queue.count}
               </Badge>
             </button>
           ))}
@@ -721,8 +777,6 @@ export function MailLayout() {
             </div>
           )}
 
-          {activeConnection?.id ? <AISidebar /> : null}
-          {activeConnection?.id ? <AIToggleButton /> : null}
         </ResizablePanelGroup>
       </div>
       {isMobile && <ComposeFloatingButton />}

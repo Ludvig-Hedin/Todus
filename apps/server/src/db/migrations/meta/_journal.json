@@ -316,6 +316,13 @@
       "when": 1775000000000,
       "tag": "0043_recall_unique_constraints",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1775216100000,
+      "tag": "0046_assistant_second_brain",
+      "breakpoints": true
     }
   ]
 }

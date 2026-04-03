@@ -13,12 +13,22 @@ Last updated: 2026-03-31
 
 ## Current Web/Server Fix Batch
 
+- `DONE` Shipped a native onboarding + task clarity pass across iOS and macOS: onboarding steps are easier to complete without removing any pages, task views now use labeled toggles, local `Add Task` actions are visible in native task surfaces, and macOS task detail editing now includes folder selection.
+- `DONE` Shipped a native Home/Tasks/Email UX remediation pass across iOS and macOS: Home now separates loading from empty states and exposes partial-setup guidance, iOS Tasks search/sort is consistent across all modes with clearer mode semantics, and Email now foregrounds mailbox orientation and actual message reading before AI assistance on both platforms.
+- `DONE` Tightened native email mailbox UX on iOS and macOS: folder-specific empty states, no premature `Connect Gmail` flash during connection checks, macOS sender-avatar resolution, and faster macOS folder switching via in-memory mailbox caching.
+- `DONE` Shipped a small native UX clarity pass across iOS and macOS: onboarding progress copy, one-time iOS tab-bar coachmarks, clearer task/email/home/create guidance on iOS, and clearer macOS search/auth/daily-brief wording without changing navigation or removing onboarding steps.
+- `DONE` Hardened native transcribe button teardown on iOS and macOS so speech-recognition stop/final/error callbacks cannot double-stop the audio engine, double-remove taps, or double-submit transcripts.
 - `DONE` Fixed the Cloudflare web build breakage by restoring the doc editor import, replacing the native note delete confirmation with the app's shadcn dialog pattern, and removing dead auth JSX branches that violated Oxlint.
 - `DONE` Fixed native meetings follow-up regressions: detail refreshes no longer flash a full-screen spinner during recap/bot actions, iOS meeting sync preserves the active filters/search state, and macOS meeting group ordering now matches iOS with Today first.
+- `DONE` Removed the stale top-level iOS `MeetingsListView.swift` duplicate so the app uses the active `Meetings/MeetingsListView.swift` implementation with the same `Starting` label as meeting detail.
+- `DONE` Hardened meeting retention and Recall scheduling: inbox cache staleness now triggers background refreshes, tab bar restore falls back to defaults on invalid persisted data, Recall bot scheduling is atomically claimed before API calls, and meeting retention pruning is rate-limited.
 - `DONE` Added a shared `mailAssistant` backend domain with per-thread recommendations, inbox nudges, task/event apply actions, draft generation, and lightweight assistant activity logging.
 - `DONE` Added nested `assistantAutomationPolicy` settings defaults and backward-compatible settings merges for summaries, suggestions, nudges, auto-drafts, and the opt-in auto-send experiment.
 - `DONE` Shipped visible proactive mail assistant surfaces in the web thread view and inbox list, including thread summaries, task/event suggestions, draft actions, inline assistant buttons, and inbox nudges.
 - `DONE` Added native mail assistant thread/inbox surfaces on iOS and macOS plus shared settings toggles for assistant automation preferences.
+- `DONE` Added the second-brain assistant backend domain with durable open loops, prepared actions, people memory, workstream memory, feedback capture, and briefing/change-feed contracts.
+- `DONE` Turned Home into a briefing surface on web, iOS, and macOS with Today priorities, Needs You, Waiting On, and Prepared queues backed by the new assistant domain.
+- `DONE` Expanded assistant settings on web, iOS, and macOS to cover the operating model itself: briefing enablement, Home visibility, waiting-on tracking, people memory, batch approvals, workday timing, and excluded sender/topic patterns.
 - `DONE` Shipped a focused web mail UX pass: non-blocking inbox connection setup, onboarding sequencing, clearer search/filter wording, better empty-state guidance, more discoverable list actions, and a stronger thread action hierarchy.
 - `DONE` Added a one-click share/copy action to the thread AI summary card so users can paste branded thread summaries into email or Slack.
 - `DONE` Web task mutations now invalidate all `tasks.list` TanStack caches via `trpc.tasks.list.queryFilter()` (tasks page, home, calendar, TaskItem).
@@ -34,6 +44,7 @@ Last updated: 2026-03-31
 - `DONE` Verified targeted server/web TypeScript for the changed surfaces after regenerating route types for the web route additions.
 - `DONE` Verified full native builds for iOS and macOS after resolving the remaining meetings + assistant integration compile failures.
 - `DONE` Left unrelated dirty-tree work untouched; the ship scope stays limited to the collaboration/meetings/mail-assistant surfaces already in flight.
+- `DONE` Fixed the stale macOS target graph by restoring `AppLogger.swift` to the Xcode project and clearing the remaining compile regressions surfaced during the second-brain build pass.
 
 ## Active Security Work
 
@@ -399,6 +410,9 @@ All marked DONE — these are WebView-based, not truly native.
 - 2026-03-11 targeted verification: `pnpm --dir apps/ios test:unit` passes after the inbox avatar/theme/header cleanup, and narrowed `tsc --noEmit` output shows no errors for `ThemeContext.tsx`, `SenderAvatar.tsx`, or `apps/ios/app/(app)/(mail)/[folder].tsx`.
 - 2026-03-11 targeted verification: `pnpm --dir apps/ios test:unit` still passes after the inbox list/header redesign, and narrowed `tsc --noEmit` output shows no errors for `ThreadListItem.tsx`, `SenderAvatar.tsx`, `ThemeContext.tsx`, or `apps/ios/app/(app)/(mail)/[folder].tsx`.
 - Targeted formatting checks pass on all files touched in this session.
+- 2026-04-03 follow-up: fixed the notes delete confirmation to use the generated Paraglide key, removed the non-functional meeting notification toggles from the new meetings settings page, added automatic cleanup for expired meeting recordings, and expanded calendar sync so previously imported future meetings are also auto-scheduled for recording. User-facing and architectural change in `apps/mail/components/mail/note-panel.tsx`, `apps/mail/app/(routes)/settings/meetings/page.tsx`, `apps/server/src/trpc/routes/meet.ts`, `apps/server/src/routes/recall-webhook.ts`, and `apps/server/src/lib/meeting-retention.ts`.
+- 2026-04-03 follow-up: tightened the native iOS Tasks controls by reducing the search field and sort chip height, compressed task-row spacing to reduce left padding and card height, and refactored Calendar mode into a timeline-style bucket layout so it is visually and behaviorally distinct from List. User-facing change in `apps/ios/Todus/Todus/Features/Tasks/TasksTabView.swift`, `apps/ios/Todus/Todus/Features/Tasks/TaskRowView.swift`, and `apps/ios/Todus/Todus/Features/Tasks/CalendarTaskView.swift`.
+- 2026-04-03 follow-up: redesigned the native iOS Tasks board with a tighter kanban visual system, quieter monochrome grouping, denser cards, clearer stage headers and empty states, and a more legible board-mode icon in the view toggle. User-facing change in `apps/ios/Todus/Todus/Features/Tasks/BoardView.swift`, `apps/ios/Todus/Todus/Features/Tasks/BoardColumnView.swift`, `apps/ios/Todus/Todus/Features/Tasks/BoardTaskCard.swift`, and `apps/ios/Todus/Todus/Domain/TaskViewMode.swift`.
 
 ---
 

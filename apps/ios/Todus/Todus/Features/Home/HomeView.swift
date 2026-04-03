@@ -14,12 +14,15 @@ struct HomeView: View {
 
     @State private var todaysEvents: [CalendarEvent] = []
     @State private var isLoadingEvents = false
+    @State private var hasLoadedEmailState = false
+    @State private var isLoadingAssistantBriefing = false
 
     // Cached tasks due today — recomputed only when allTasks changes.
     @State private var tasksDueToday: [TaskRecord] = []
 
     // Sheet state
     @State private var selectedTask: TaskRecord? = nil
+    @State private var showDocsSheet = false
 
     var body: some View {
         ZStack {
@@ -35,13 +38,25 @@ struct HomeView: View {
                     VStack(alignment: .leading, spacing: 24) {
                         greetingSection
 
-                        if todaysEvents.isEmpty && tasksDueToday.isEmpty && !services.emailService.hasConnection {
-                            self.getStartedSection
-                        } else {
-                            self.eventsSection
-                            self.tasksSection
-                            self.emailSection
+                        if services.assistantAutomationPolicy.briefingEnabled
+                            && services.assistantAutomationPolicy.showHomeBriefing {
+                            assistantBriefingSection
                         }
+
+                        if todaysEvents.isEmpty && tasksDueToday.isEmpty && !services.emailService.hasConnection {
+                            getStartedSection
+                        } else {
+                            if showSetupCard {
+                                setupCard
+                            }
+
+                            eventsSection
+                            tasksSection
+                            emailSection
+                        }
+
+                        // Pages not pinned to the tab bar — discoverable from Home
+                        moreSection
                         Spacer(minLength: 80)
                     }
                     .padding(.horizontal, 16)
@@ -52,7 +67,7 @@ struct HomeView: View {
         }
         .toolbar(.hidden, for: .navigationBar)
         .task {
-            await loadTodaysEvents()
+            await loadHomeData()
         }
         .onAppear { recomputeTasksDueToday() }
         .onChange(of: allTasks) { recomputeTasksDueToday() }
@@ -61,6 +76,20 @@ struct HomeView: View {
             TaskDetailSheet(task: task)
                 .presentationDragIndicator(.visible)
                 .presentationBackground(AppTheme.backgroundTop)
+        }
+        .sheet(isPresented: $showDocsSheet) {
+            NavigationStack {
+                DocsWebView()
+                    .navigationTitle("Docs")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Done") { showDocsSheet = false }
+                        }
+                    }
+            }
+            .presentationDragIndicator(.visible)
+            .preferredColorScheme(services.appearancePreference.colorScheme)
         }
     }
 
@@ -75,6 +104,59 @@ struct HomeView: View {
                 .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(.secondary)
         }
+    }
+
+    private var needsEmailSetup: Bool {
+        hasLoadedEmailState && !services.emailService.hasConnection
+    }
+
+    private var needsCalendarSetup: Bool {
+        !services.calendarService.canReadEvents()
+    }
+
+    private var showSetupCard: Bool {
+        !(todaysEvents.isEmpty && tasksDueToday.isEmpty && !services.emailService.hasConnection)
+            && (needsEmailSetup || needsCalendarSetup)
+    }
+
+    private var setupCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Finish setup")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.primary)
+
+            Text("Connect the remaining sources so Home can show your full day at a glance.")
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+
+            VStack(spacing: 8) {
+                if needsEmailSetup {
+                    setupRow(
+                        icon: "envelope.fill",
+                        title: "Connect Gmail",
+                        subtitle: "Bring your inbox into Home and Email",
+                        actionTitle: "Open Email",
+                        action: { services.navigateTo = .email }
+                    )
+                }
+
+                if needsCalendarSetup {
+                    setupRow(
+                        icon: "calendar",
+                        title: "Enable Calendar Access",
+                        subtitle: "Show today's events alongside your tasks",
+                        actionTitle: "Open Calendar",
+                        action: { services.navigateTo = .calendar }
+                    )
+                }
+            }
+        }
+        .padding(16)
+        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(AppTheme.cardBorder, lineWidth: 1)
+        )
     }
 
     private var greeting: String {
@@ -96,10 +178,14 @@ struct HomeView: View {
                 title: "Today's Events",
                 icon: "calendar",
                 count: todaysEvents.count,
+                actionTitle: "Open",
+                onOpen: { services.navigateTo = .calendar },
                 onAdd: { services.requestCreateSheet = .event }
             )
 
-            if todaysEvents.isEmpty {
+            if isLoadingEvents {
+                loadingState(message: "Loading today's events")
+            } else if todaysEvents.isEmpty {
                 emptyState(message: "No events today", onTap: { services.navigateTo = .calendar })
             } else {
                 VStack(spacing: 8) {
@@ -178,12 +264,153 @@ struct HomeView: View {
         }
     }
 
+    private var assistantBriefingSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 6) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(AppTheme.mutedText)
+                Text("Assistant Briefing")
+                    .font(.system(size: 15, weight: .semibold))
+            }
+
+            if isLoadingAssistantBriefing && services.emailService.assistantBriefing == nil {
+                loadingState(message: "Preparing your briefing")
+            } else if let briefing = services.emailService.assistantBriefing {
+                VStack(spacing: 10) {
+                    assistantPriorityStrip(briefing)
+                    assistantQueueSection(
+                        title: "Needs You",
+                        items: briefing.needsYou.map { ($0.title, $0.summary, $0.threadId) },
+                        emptyMessage: "No reply or decision blockers right now."
+                    )
+                    assistantQueueSection(
+                        title: "Waiting On",
+                        items: briefing.waitingOn.map { ($0.title, $0.summary, $0.threadId) },
+                        emptyMessage: "Nothing currently tracked as waiting on someone else."
+                    )
+                    assistantQueueSection(
+                        title: "Prepared",
+                        items: briefing.prepared.map { ($0.title, $0.summary, $0.threadId) },
+                        emptyMessage: "No prepared drafts or actions waiting for approval."
+                    )
+                }
+            }
+        }
+    }
+
+    private func assistantPriorityStrip(_ briefing: AssistantBriefing) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                if let urgentReply = briefing.today.urgentReply {
+                    assistantMiniCard(
+                        title: "Urgent reply",
+                        detail: urgentReply.title,
+                        action: { services.navigateTo = .email }
+                    )
+                }
+                if let topTask = briefing.today.topTask {
+                    assistantMiniCard(
+                        title: "Top task",
+                        detail: topTask.title,
+                        action: { services.navigateTo = .tasks }
+                    )
+                }
+                if let nextEvent = briefing.today.nextEvent {
+                    assistantMiniCard(
+                        title: "Next event",
+                        detail: nextEvent.title,
+                        action: { services.navigateTo = .calendar }
+                    )
+                }
+            }
+            .padding(.horizontal, 1)
+        }
+    }
+
+    private func assistantMiniCard(title: String, detail: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(AppTheme.mutedText)
+                    .textCase(.uppercase)
+                Text(detail)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+            }
+            .padding(12)
+            .frame(width: 180, alignment: .leading)
+            .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(AppTheme.cardBorder, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func assistantQueueSection(
+        title: String,
+        items: [(title: String, summary: String, threadId: String?)],
+        emptyMessage: String
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(title)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(AppTheme.mutedText)
+                    .textCase(.uppercase)
+                Spacer()
+                Text("\(items.count)")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(AppTheme.mutedText)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(AppTheme.surfaceSecondary, in: Capsule())
+            }
+
+            if items.isEmpty {
+                emptyState(message: emptyMessage, onTap: {})
+                    .allowsHitTesting(false)
+            } else {
+                VStack(spacing: 8) {
+                    ForEach(Array(items.prefix(3).enumerated()), id: \.offset) { _, item in
+                        Button {
+                            services.navigateTo = .email
+                        } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(item.title)
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(.primary)
+                                    .lineLimit(1)
+                                Text(item.summary)
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                            }
+                            .padding(12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .stroke(AppTheme.cardBorder, lineWidth: 1)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+    }
+
     // MARK: - Tasks Section
 
     private func recomputeTasksDueToday() {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
-        let tomorrow = calendar.date(byAdding: .day, value: 1, to: today)!
+        guard let tomorrow = calendar.date(byAdding: .day, value: 1, to: today) else { return }
         tasksDueToday = allTasks.filter { task in
             guard let dueDate = task.dueDate else { return false }
             return dueDate >= today && dueDate < tomorrow
@@ -209,6 +436,8 @@ struct HomeView: View {
                 title: "Due Today",
                 icon: "checklist",
                 count: tasksDueToday.count,
+                actionTitle: "View all",
+                onOpen: { services.navigateTo = .tasks },
                 onAdd: { services.requestCreateSheet = .task }
             )
 
@@ -237,6 +466,8 @@ struct HomeView: View {
                 title: "Recent Emails",
                 icon: "envelope.fill",
                 count: services.emailService.threads.prefix(3).count,
+                actionTitle: "Open",
+                onOpen: { services.navigateTo = .email },
                 // "+" opens compose sheet if connected, otherwise navigates to email tab to connect
                 onAdd: {
                     if services.emailService.hasConnection {
@@ -248,12 +479,16 @@ struct HomeView: View {
                 }
             )
 
-            if !services.emailService.hasConnection {
+            if !hasLoadedEmailState {
+                loadingState(message: "Checking your inbox")
+            } else if !services.emailService.hasConnection {
                 // Not connected — prompt to connect
                 emptyState(
                     message: "Connect Gmail to see your inbox",
                     onTap: { services.navigateTo = .email }
                 )
+            } else if services.emailService.isLoadingThreads && services.emailService.threads.isEmpty {
+                loadingState(message: "Loading recent emails")
             } else if services.emailService.threads.isEmpty {
                 // Connected but no emails loaded yet
                 emptyState(
@@ -307,6 +542,116 @@ struct HomeView: View {
                 }
             }
         }
+    }
+
+    // MARK: - More Section (pages not in the tab bar)
+
+    /// Shows AppTab pages not pinned to the nav bar, plus the always-available Docs page.
+    /// Keeps the tab bar lean while ensuring every part of the app is reachable from Home.
+    @ViewBuilder
+    private var moreSection: some View {
+        let extraTabs = AppTab.allCases.filter { !services.tabBarTabs.contains($0) && $0 != .home }
+        // Always show this section — Docs is always here even when all tabs are in the bar
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Image(systemName: "square.grid.2x2")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    Text("More pages")
+                        .font(.system(size: 15, weight: .semibold))
+                }
+
+                Text("Features not pinned to your tab bar")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(spacing: 8) {
+                // Dynamic tab-based cards
+                ForEach(extraTabs) { tab in
+                    moreCard(for: tab)
+                }
+
+                // Docs — always present regardless of tab bar configuration
+                docsCard
+            }
+        }
+    }
+
+    private func moreCard(for tab: AppTab) -> some View {
+        Button {
+            if tab == .calendar {
+                // Calendar uses UIKit — navigate to the tab directly
+                services.navigateTo = .calendar
+            } else {
+                services.navigateToSheet = tab
+            }
+        } label: {
+            moreCardContent(
+                icon: tab.activeIcon,
+                title: tab.title,
+                subtitle: tab.description,
+                isSecondary: true
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Docs is not an AppTab (it's a web view), so it always lives here.
+    private var docsCard: some View {
+        Button { showDocsSheet = true } label: {
+            moreCardContent(
+                icon: "doc.text",
+                title: "Docs",
+                subtitle: "Notes and documents",
+                isSecondary: true
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func moreCardContent(
+        icon: String,
+        title: String,
+        subtitle: String,
+        isSecondary: Bool = false
+    ) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: icon)
+                .font(.system(size: 18, weight: .medium))
+                .foregroundStyle(isSecondary ? AppTheme.mutedText : .blue)
+                .frame(width: 36, height: 36)
+                .background(
+                    isSecondary ? AppTheme.surfaceSecondary : Color.blue.opacity(0.1),
+                    in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                )
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(isSecondary ? Color.primary.opacity(0.82) : Color.primary)
+                Text(subtitle)
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(AppTheme.mutedText)
+        }
+        .padding(14)
+        .background(
+            isSecondary ? AppTheme.surfaceSecondary : AppTheme.surfacePrimary,
+            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(AppTheme.cardBorder, lineWidth: 1)
+        )
+        .contentShape(Rectangle())
     }
 
     // MARK: - Get Started (composite empty state)
@@ -382,6 +727,8 @@ struct HomeView: View {
         title: String,
         icon: String,
         count: Int,
+        actionTitle: String,
+        onOpen: @escaping () -> Void,
         onAdd: @escaping () -> Void
     ) -> some View {
         HStack(spacing: 6) {
@@ -399,6 +746,10 @@ struct HomeView: View {
                     .background(AppTheme.surfaceSecondary, in: Capsule())
             }
             Spacer()
+
+            Button(actionTitle, action: onOpen)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(AppTheme.accent)
 
             // Plus button — creates a new item in this category
             Button(action: onAdd) {
@@ -435,12 +786,89 @@ struct HomeView: View {
         .buttonStyle(.plain)
     }
 
+    private func loadingState(message: String) -> some View {
+        HStack(spacing: 10) {
+            ProgressView()
+                .controlSize(.small)
+            Text(message)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .padding(14)
+        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(AppTheme.cardBorder, lineWidth: 1)
+        )
+    }
+
+    private func setupRow(
+        icon: String,
+        title: String,
+        subtitle: String,
+        actionTitle: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(AppTheme.accent)
+                .frame(width: 28, height: 28)
+                .background(AppTheme.surfaceSecondary, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.primary)
+                Text(subtitle)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            Button(actionTitle, action: action)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(AppTheme.accent)
+        }
+    }
+
     private func loadTodaysEvents() async {
+        let trace = PerformanceTrace.beginInterval(
+            PerformanceTrace.loadTodayEvents,
+            message: "HomeView.loadTodaysEvents begin"
+        )
         isLoadingEvents = true
+        defer {
+            isLoadingEvents = false
+            PerformanceTrace.endInterval(
+                PerformanceTrace.loadTodayEvents,
+                trace,
+                message: "HomeView.loadTodaysEvents end count=\(todaysEvents.count)"
+            )
+        }
         if services.calendarService.canReadEvents() {
             todaysEvents = await services.calendarService.todaysEvents()
                 .sorted { $0.startDate < $1.startDate }
         }
-        isLoadingEvents = false
+    }
+
+    private func loadHomeData() async {
+        await services.emailService.checkConnection()
+        hasLoadedEmailState = true
+
+        if services.emailService.hasConnection {
+            await services.emailService.ensureInitialInboxLoaded()
+        }
+
+        await loadTodaysEvents()
+
+        if services.assistantAutomationPolicy.briefingEnabled
+            && services.assistantAutomationPolicy.showHomeBriefing {
+            isLoadingAssistantBriefing = true
+            _ = await services.emailService.loadAssistantBriefing()
+            isLoadingAssistantBriefing = false
+        }
     }
 }

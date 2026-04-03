@@ -9,8 +9,12 @@ import AppKit
 /// Soft rounded cards, left-aligned labels, restrained spacing.
 /// Feature-parity with iOS SettingsView.
 struct MacSettingsView: View {
-    @Binding var isPresented: Bool
+    private enum PrivacyPreference: String {
+        case analytics
+        case crashReports
+    }
 
+    @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Environment(MacAppServices.self) private var services
 
@@ -23,7 +27,9 @@ struct MacSettingsView: View {
     @State private var isLoadingSessions = false
     @State private var isRevokingAllSessions = false
     @State private var revokingSessionIDs: Set<String> = []
+    @State private var settingsError: String?
     @State private var showAutoSendConfirmation = false
+    @State private var excludedSenderPatternsText = ""
 
     // Preferences
     @AppStorage("preferredColorScheme") private var preferredColorScheme = "system"
@@ -36,6 +42,18 @@ struct MacSettingsView: View {
     // Accent color — stored key, resolved via MacTheme.accentColor(for:)
     @AppStorage("mac_accent_color") private var accentColorKey = "blue"
 
+    // General preferences
+    @AppStorage("mac_compact_sidebar") private var compactSidebar = false
+    @AppStorage("mac_show_unread_badge") private var showUnreadBadge = true
+    @AppStorage("mac_focus_mode_enabled") private var focusModeEnabled = false
+
+    // Privacy
+    @AppStorage("mac_analytics_enabled") private var analyticsEnabled = false
+    @AppStorage("mac_crash_reports_enabled") private var crashReportsEnabled = false
+    @AppStorage("mac_privacy_consent_accepted") private var privacyConsentAccepted = false
+    @State private var pendingPrivacyPreference: PrivacyPreference?
+    @State private var showsPrivacyConsentDialog = false
+
     // AI permissions
     @AppStorage("mac_ai_can_read_tasks") private var aiCanReadTasks = true
     @AppStorage("mac_ai_can_write_tasks") private var aiCanWriteTasks = true
@@ -43,6 +61,15 @@ struct MacSettingsView: View {
 
     private var calendarAccessGranted: Bool {
         services.calendarService.canReadEvents()
+    }
+
+    private var isLikelyEURegion: Bool {
+        let region = Locale.current.region?.identifier.uppercased() ?? ""
+        return Self.europeanPrivacyRegions.contains(region)
+    }
+
+    private var needsPrivacyConsentBanner: Bool {
+        isLikelyEURegion && !privacyConsentAccepted
     }
 
     var body: some View {
@@ -56,11 +83,13 @@ struct MacSettingsView: View {
 #if DEBUG
                     authDebugSection
 #endif
+                    generalSection
                     connectedServicesSection
                     appearanceSection
                     emailPreferencesSection
                     aiAssistantSection
                     notificationsSection
+                    privacySection
                     aboutAndLegalSection
                 }
                 .padding(.horizontal, 16)
@@ -75,6 +104,8 @@ struct MacSettingsView: View {
             // Refresh profile data (name, avatar) when settings opens — matches iOS SettingsView
             await services.authService.fetchUserProfile()
             await services.loadSharedAIProfile()
+            excludedSenderPatternsText = services.assistantAutomationPolicy.excludedSenderPatterns
+                .joined(separator: "\n")
         }
         .task {
             await loadActiveSessions()
@@ -90,6 +121,21 @@ struct MacSettingsView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Only narrow, high-confidence acknowledgements and confirmations become eligible. Review the experiment notes before turning this on.")
+        }
+        .confirmationDialog(
+            privacyConsentTitle,
+            isPresented: $showsPrivacyConsentDialog,
+            titleVisibility: .visible
+        ) {
+            Button("Allow") {
+                privacyConsentAccepted = true
+                applyPrivacyPreferenceSelection(true)
+            }
+            Button("Not now", role: .cancel) {
+                pendingPrivacyPreference = nil
+            }
+        } message: {
+            Text(privacyConsentMessage)
         }
         // Logout confirmation
         .confirmationDialog(
@@ -137,6 +183,14 @@ struct MacSettingsView: View {
         } message: {
             Text("You'll stop receiving emails in Todus. You can reconnect anytime.")
         }
+        .alert("Error", isPresented: Binding(
+            get: { settingsError != nil },
+            set: { if !$0 { settingsError = nil } }
+        )) {
+            Button("OK", role: .cancel) { settingsError = nil }
+        } message: {
+            Text(settingsError ?? "")
+        }
     }
 
     // MARK: - Header
@@ -150,7 +204,7 @@ struct MacSettingsView: View {
             Button {
                 Task { @MainActor in
                     await services.saveSharedAIProfile()
-                    withAnimation(.snappy(duration: 0.2)) { isPresented = false }
+                    dismiss()
                 }
             } label: {
                 Image(systemName: "xmark.circle.fill")
@@ -344,6 +398,82 @@ struct MacSettingsView: View {
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
+            }
+        }
+    }
+
+    // MARK: - General
+
+    private var generalSection: some View {
+        settingsGroup(title: "General") {
+            settingsCard {
+                // Startup view — which tab opens when the app launches
+                rowContainer {
+                    Image(systemName: "house")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(MacTheme.mutedText)
+                        .frame(width: 18)
+                    Text("Open on Launch")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(MacTheme.textPrimary)
+                    Spacer()
+                    Picker("", selection: Binding(
+                        get: { services.startupView },
+                        set: { services.startupView = $0 }
+                    )) {
+                        Text("Home").tag("home")
+                        Text("Inbox").tag("inbox")
+                        Text("Tasks").tag("tasks")
+                        Text("Meetings").tag("meetings")
+                    }
+                    .pickerStyle(.menu)
+                    .frame(minWidth: 110)
+                }
+
+                cardDivider
+
+                settingsToggle(icon: "sidebar.left", label: "Compact Sidebar", isOn: $compactSidebar)
+
+                cardDivider
+
+                settingsToggle(icon: "app.badge", label: "Show Unread Badge", isOn: $showUnreadBadge)
+
+                cardDivider
+
+                settingsToggle(icon: "moon.zzz", label: "Focus Mode (hide AI nudges)", isOn: $focusModeEnabled)
+            }
+        }
+    }
+
+    // MARK: - Privacy
+
+    private var privacySection: some View {
+        settingsGroup(title: "Privacy") {
+            settingsCard {
+                if needsPrivacyConsentBanner {
+                    privacyConsentBanner
+                    cardDivider
+                }
+
+                settingsToggle(
+                    icon: "chart.bar",
+                    label: "Send Usage Analytics",
+                    isOn: privacyToggleBinding(.analytics)
+                )
+
+                cardDivider
+
+                settingsToggle(
+                    icon: "exclamationmark.triangle",
+                    label: "Send Crash Reports",
+                    isOn: privacyToggleBinding(.crashReports)
+                )
+
+                cardDivider
+
+                linkRow(icon: "lock.shield", label: "Privacy Policy") {
+                    openURL("https://todus.app/privacy")
+                }
             }
         }
     }
@@ -568,10 +698,35 @@ struct MacSettingsView: View {
                     Spacer()
                     Button("Apply recommended defaults") {
                         services.assistantAutomationPolicy = .recommended
+                        excludedSenderPatternsText = services.assistantAutomationPolicy
+                            .excludedSenderPatterns
+                            .joined(separator: "\n")
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                 }
+
+                cardDivider
+
+                settingsToggle(
+                    icon: "rectangle.stack.badge.person.crop",
+                    label: "Enable assistant briefing engine",
+                    isOn: Binding(
+                        get: { services.assistantAutomationPolicy.briefingEnabled },
+                        set: { services.assistantAutomationPolicy.briefingEnabled = $0 }
+                    )
+                )
+
+                cardDivider
+
+                settingsToggle(
+                    icon: "house",
+                    label: "Show Home briefing",
+                    isOn: Binding(
+                        get: { services.assistantAutomationPolicy.showHomeBriefing },
+                        set: { services.assistantAutomationPolicy.showHomeBriefing = $0 }
+                    )
+                )
 
                 cardDivider
 
@@ -652,6 +807,39 @@ struct MacSettingsView: View {
 
                 cardDivider
 
+                settingsToggle(
+                    icon: "arrow.triangle.branch",
+                    label: "Track waiting-on threads",
+                    isOn: Binding(
+                        get: { services.assistantAutomationPolicy.trackWaitingOnThreads },
+                        set: { services.assistantAutomationPolicy.trackWaitingOnThreads = $0 }
+                    )
+                )
+
+                cardDivider
+
+                settingsToggle(
+                    icon: "person.2",
+                    label: "Build people memory",
+                    isOn: Binding(
+                        get: { services.assistantAutomationPolicy.peopleMemoryEnabled },
+                        set: { services.assistantAutomationPolicy.peopleMemoryEnabled = $0 }
+                    )
+                )
+
+                cardDivider
+
+                settingsToggle(
+                    icon: "square.stack.3d.up",
+                    label: "Batch prepared approvals",
+                    isOn: Binding(
+                        get: { services.assistantAutomationPolicy.batchApprovalEnabled },
+                        set: { services.assistantAutomationPolicy.batchApprovalEnabled = $0 }
+                    )
+                )
+
+                cardDivider
+
                 VStack(alignment: .leading, spacing: 6) {
                     settingsToggle(
                         icon: "paperplane",
@@ -687,6 +875,88 @@ struct MacSettingsView: View {
                     .padding(.horizontal, 12)
                     .padding(.bottom, 2)
                 }
+
+                cardDivider
+
+                rowContainer {
+                    Image(systemName: "sun.max")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(MacTheme.mutedText)
+                        .frame(width: 18)
+                    Text("Workday starts")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(MacTheme.textPrimary)
+                    Spacer()
+                    Picker(
+                        "",
+                        selection: Binding(
+                            get: { services.assistantAutomationPolicy.workdayStartHour },
+                            set: { services.assistantAutomationPolicy.workdayStartHour = $0 }
+                        )
+                    ) {
+                        ForEach(0..<24, id: \.self) { hour in
+                            Text(String(format: "%02d:00", hour)).tag(hour)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .frame(minWidth: 90)
+                }
+
+                cardDivider
+
+                rowContainer {
+                    Image(systemName: "moon")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(MacTheme.mutedText)
+                        .frame(width: 18)
+                    Text("Workday ends")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(MacTheme.textPrimary)
+                    Spacer()
+                    Picker(
+                        "",
+                        selection: Binding(
+                            get: { services.assistantAutomationPolicy.workdayEndHour },
+                            set: { services.assistantAutomationPolicy.workdayEndHour = $0 }
+                        )
+                    ) {
+                        ForEach(0..<24, id: \.self) { hour in
+                            Text(String(format: "%02d:00", hour)).tag(hour)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .frame(minWidth: 90)
+                }
+
+                cardDivider
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Excluded senders and topics")
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .foregroundStyle(MacTheme.textPrimary)
+
+                    TextEditor(text: Binding(
+                        get: { excludedSenderPatternsText },
+                        set: { newValue in
+                            excludedSenderPatternsText = newValue
+                            services.assistantAutomationPolicy.excludedSenderPatterns = newValue
+                                .split(separator: "\n")
+                                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                                .filter { !$0.isEmpty }
+                        }
+                    ))
+                    .font(.system(size: 12))
+                    .frame(minHeight: 88)
+                    .padding(8)
+                    .background(Color.white.opacity(0.04))
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                    Text("One pattern per line. Use this to suppress newsletters, no-reply mail, and other low-value automation from the assistant queues.")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(MacTheme.textSecondary)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
 
                 cardDivider
 
@@ -869,6 +1139,92 @@ struct MacSettingsView: View {
         }
     }
 
+    private var privacyConsentBanner: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Privacy consent required")
+                .font(.system(size: 12.5, weight: .semibold))
+                .foregroundStyle(MacTheme.textPrimary)
+            Text(
+                "Analytics and crash reports stay off until you explicitly allow them. This is especially important for EU users."
+            )
+            .font(.system(size: 11.5))
+            .foregroundStyle(MacTheme.textSecondary)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+    }
+
+    private func privacyToggleBinding(_ preference: PrivacyPreference) -> Binding<Bool> {
+        Binding(
+            get: {
+                switch preference {
+                case .analytics:
+                    return analyticsEnabled
+                case .crashReports:
+                    return crashReportsEnabled
+                }
+            },
+            set: { newValue in
+                if newValue {
+                    if privacyConsentAccepted {
+                        applyPrivacyPreferenceSelection(true, preference: preference)
+                    } else {
+                        pendingPrivacyPreference = preference
+                        showsPrivacyConsentDialog = true
+                    }
+                } else {
+                    applyPrivacyPreferenceSelection(false, preference: preference)
+                }
+            }
+        )
+    }
+
+    private func applyPrivacyPreferenceSelection(_ enabled: Bool, preference: PrivacyPreference? = nil) {
+        guard let preference else {
+            return
+        }
+        switch preference {
+        case .analytics:
+            analyticsEnabled = enabled
+        case .crashReports:
+            crashReportsEnabled = enabled
+        }
+    }
+
+    private func applyPrivacyPreferenceSelection(_ enabled: Bool) {
+        applyPrivacyPreferenceSelection(enabled, preference: pendingPrivacyPreference)
+        pendingPrivacyPreference = nil
+    }
+
+    private var privacyConsentTitle: String {
+        guard let pendingPrivacyPreference else {
+            return "Allow privacy features?"
+        }
+        switch pendingPrivacyPreference {
+        case .analytics:
+            return "Allow usage analytics?"
+        case .crashReports:
+            return "Allow crash reports?"
+        }
+    }
+
+    private var privacyConsentMessage: String {
+        switch pendingPrivacyPreference {
+        case .analytics:
+            return "Usage analytics help us understand feature usage and improve the app. We only turn them on after you confirm."
+        case .crashReports:
+            return "Crash reports help us diagnose failures and stability issues. They stay off until you confirm."
+        case nil:
+            return "This feature remains off until you explicitly confirm."
+        }
+    }
+
+    private static let europeanPrivacyRegions: Set<String> = [
+        "AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR", "HU",
+        "IE", "IT", "LV", "LT", "LU", "MT", "NL", "PL", "PT", "RO", "SK", "SI", "ES",
+        "SE", "IS", "LI", "NO",
+    ]
+
     /// Info row — icon + label on left, value text on right.
     private func infoRow(icon: String, label: String, value: String) -> some View {
         rowContainer {
@@ -983,7 +1339,7 @@ struct MacSettingsView: View {
             let response = try await services.apiClient.listSessions()
             activeSessions = response.sessions
         } catch {
-            print("[Settings] Load sessions failed: \(error)")
+            AppLogger.shared.log("[Settings] Load sessions failed: \(error)")
         }
     }
 
@@ -993,14 +1349,14 @@ struct MacSettingsView: View {
         do {
             try await services.apiClient.deleteAccount()
         } catch {
-            print("[Settings] Delete account failed: \(error)")
+            AppLogger.shared.log("[Settings] Delete account failed: \(error)")
         }
         deleteConfirmText = ""
         services.signOut()
         try? modelContext.delete(model: TaskRecord.self)
         try? modelContext.delete(model: FolderRecord.self)
         try? modelContext.save()
-        isPresented = false
+        dismiss()
     }
 
     private func performDisconnectGmail() async {
@@ -1008,7 +1364,7 @@ struct MacSettingsView: View {
             try await services.apiClient.disconnectEmail()
             await services.emailService.checkConnection()
         } catch {
-            print("[Settings] Disconnect Gmail failed: \(error)")
+            AppLogger.shared.log("[Settings] Disconnect Gmail failed: \(error)")
         }
     }
 
@@ -1021,12 +1377,13 @@ struct MacSettingsView: View {
             await loadActiveSessions()
             if response.revokedCurrent {
                 services.signOut()
-                isPresented = false
+                dismiss()
             } else {
                 await services.authService.fetchUserProfile()
             }
         } catch {
-            print("[Settings] Revoke session failed: \(error)")
+            settingsError = "Could not revoke session. Please try again."
+            AppLogger.shared.log("[Settings] Revoke session failed: \(error)")
         }
     }
 
@@ -1039,12 +1396,13 @@ struct MacSettingsView: View {
             activeSessions = []
             if response.revokedCurrent {
                 services.signOut()
-                isPresented = false
+                dismiss()
             } else {
                 await services.authService.fetchUserProfile()
             }
         } catch {
-            print("[Settings] Revoke all sessions failed: \(error)")
+            settingsError = "Could not revoke sessions. Please try again."
+            AppLogger.shared.log("[Settings] Revoke all sessions failed: \(error)")
         }
     }
 }

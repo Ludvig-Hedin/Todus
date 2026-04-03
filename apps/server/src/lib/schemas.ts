@@ -19,6 +19,14 @@ export const assistantAutomationPolicySchema = z.object({
   smartReplyNudges: z.boolean().default(true),
   smartDeadlineNudges: z.boolean().default(true),
   assistantThreadActionsVisible: z.boolean().default(true),
+  briefingEnabled: z.boolean().default(true),
+  showHomeBriefing: z.boolean().default(true),
+  trackWaitingOnThreads: z.boolean().default(true),
+  peopleMemoryEnabled: z.boolean().default(true),
+  batchApprovalEnabled: z.boolean().default(false),
+  workdayStartHour: z.number().int().min(0).max(23).default(8),
+  workdayEndHour: z.number().int().min(0).max(23).default(18),
+  excludedSenderPatterns: z.array(z.string()).default([]),
   autoSendExperimentEnabled: z.boolean().default(false),
   autoSendAllowedScenarios: z.array(assistantAutoSendScenarioSchema).default(['acknowledgment']),
   autoSendQuietHours: assistantQuietHoursSchema.default({
@@ -37,6 +45,14 @@ export const defaultAssistantAutomationPolicy: AssistantAutomationPolicy = {
   smartReplyNudges: true,
   smartDeadlineNudges: true,
   assistantThreadActionsVisible: true,
+  briefingEnabled: true,
+  showHomeBriefing: true,
+  trackWaitingOnThreads: true,
+  peopleMemoryEnabled: true,
+  batchApprovalEnabled: false,
+  workdayStartHour: 8,
+  workdayEndHour: 18,
+  excludedSenderPatterns: [],
   autoSendExperimentEnabled: false,
   autoSendAllowedScenarios: ['acknowledgment'],
   autoSendQuietHours: {
@@ -44,6 +60,12 @@ export const defaultAssistantAutomationPolicy: AssistantAutomationPolicy = {
     endHour: 7,
   },
 };
+
+export const assistantDefaultExcludedSendersPlaceholder = [
+  'notifications@',
+  'no-reply@',
+  'calendar-notification@',
+].join('\n');
 
 export const serializedFileSchema = z.object({
   name: z.string(),

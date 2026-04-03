@@ -24,6 +24,7 @@ import { Globe, Clock, Mail, InfoIcon } from 'lucide-react';
 import { getLocale, setLocale } from '@/paraglide/runtime';
 import { useState, useEffect, useMemo, memo } from 'react';
 import {
+  assistantDefaultExcludedSendersPlaceholder,
   assistantAutoSendScenarioSchema,
   defaultAssistantAutomationPolicy,
   userSettingsSchema,
@@ -393,6 +394,43 @@ export default function GeneralPage() {
     [],
   );
 
+  const renderAssistantHourField = useCallback(
+    ({
+      field,
+      label,
+      description,
+      fallbackValue,
+    }: {
+      field: any;
+      label: string;
+      description: string;
+      fallbackValue: number;
+    }) => (
+      <FormItem>
+        <FormLabel>{label}</FormLabel>
+        <FormDescription>{description}</FormDescription>
+        <Select
+          onValueChange={(value) => field.onChange(Number(value))}
+          value={String(field.value ?? fallbackValue)}
+        >
+          <FormControl>
+            <SelectTrigger>
+              <SelectValue placeholder="Select hour" />
+            </SelectTrigger>
+          </FormControl>
+          <SelectContent>
+            {Array.from({ length: 24 }, (_, hour) => (
+              <SelectItem key={hour} value={String(hour)}>
+                {hour.toString().padStart(2, '0')}:00
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </FormItem>
+    ),
+    [],
+  );
+
   const applyRecommendedAssistantPreset = useCallback(() => {
     form.setValue('assistantAutomationPolicy', defaultAssistantAutomationPolicy, {
       shouldDirty: true,
@@ -480,6 +518,28 @@ export default function GeneralPage() {
 
               <FormField
                 control={form.control}
+                name="assistantAutomationPolicy.briefingEnabled"
+                render={({ field }) =>
+                  renderAssistantToggleField({
+                    field,
+                    label: 'Enable assistant briefing engine',
+                    description: 'Let Todus continuously prepare open loops, prepared actions, and daily priorities across mail, tasks, and meetings.',
+                  })
+                }
+              />
+              <FormField
+                control={form.control}
+                name="assistantAutomationPolicy.showHomeBriefing"
+                render={({ field }) =>
+                  renderAssistantToggleField({
+                    field,
+                    label: 'Show assistant briefing on Home',
+                    description: 'Surface Today, Needs You, Waiting On, Prepared, and Changed Since Last Time ahead of generic prompts.',
+                  })
+                }
+              />
+              <FormField
+                control={form.control}
                 name="assistantAutomationPolicy.autoSummarizeLongThreads"
                 render={({ field }) =>
                   renderAssistantToggleField({
@@ -557,6 +617,39 @@ export default function GeneralPage() {
               />
               <FormField
                 control={form.control}
+                name="assistantAutomationPolicy.trackWaitingOnThreads"
+                render={({ field }) =>
+                  renderAssistantToggleField({
+                    field,
+                    label: 'Track waiting-on threads',
+                    description: 'Maintain a separate queue for commitments that are blocked on someone else so they do not disappear in the inbox.',
+                  })
+                }
+              />
+              <FormField
+                control={form.control}
+                name="assistantAutomationPolicy.peopleMemoryEnabled"
+                render={({ field }) =>
+                  renderAssistantToggleField({
+                    field,
+                    label: 'Build people memory',
+                    description: 'Remember recent communication, promises, and relationship context for the people you work with most.',
+                  })
+                }
+              />
+              <FormField
+                control={form.control}
+                name="assistantAutomationPolicy.batchApprovalEnabled"
+                render={({ field }) =>
+                  renderAssistantToggleField({
+                    field,
+                    label: 'Batch approvals for prepared actions',
+                    description: 'Let Todus queue drafts, tasks, and follow-ups for approval in batches instead of interrupting you one by one.',
+                  })
+                }
+              />
+              <FormField
+                control={form.control}
                 name="assistantAutomationPolicy.autoSendExperimentEnabled"
                 render={({ field }) =>
                   renderAssistantToggleField({
@@ -570,54 +663,90 @@ export default function GeneralPage() {
               <div className="grid gap-4 md:grid-cols-2">
                 <FormField
                   control={form.control}
+                  name="assistantAutomationPolicy.workdayStartHour"
+                  render={({ field }) =>
+                    renderAssistantHourField({
+                      field,
+                      label: 'Workday starts',
+                      description: 'Used to prioritize what needs you now versus later.',
+                      fallbackValue: defaultAssistantAutomationPolicy.workdayStartHour,
+                    })
+                  }
+                />
+                <FormField
+                  control={form.control}
+                  name="assistantAutomationPolicy.workdayEndHour"
+                  render={({ field }) =>
+                    renderAssistantHourField({
+                      field,
+                      label: 'Workday ends',
+                      description: 'Used for briefing cadence, deadline urgency, and follow-up timing.',
+                      fallbackValue: defaultAssistantAutomationPolicy.workdayEndHour,
+                    })
+                  }
+                />
+              </div>
+
+              <FormField
+                control={form.control}
+                name="assistantAutomationPolicy.excludedSenderPatterns"
+                render={({ field }) => (
+                  <FormItem className="max-w-xl space-y-2">
+                    <FormLabel>Excluded senders and topics</FormLabel>
+                    <FormDescription>
+                      One pattern per line. Use this to suppress open loops and prepared actions for low-value automation or noisy sender classes.
+                    </FormDescription>
+                    <FormControl>
+                      <Textarea
+                        value={(field.value ?? []).join('\n')}
+                        placeholder={assistantDefaultExcludedSendersPlaceholder}
+                        className="min-h-[110px] resize-y"
+                        onChange={(event) => {
+                          field.onChange(
+                            event.target.value
+                              .split('\n')
+                              .map((value) => value.trim())
+                              .filter(Boolean),
+                          );
+                        }}
+                      />
+                    </FormControl>
+                  </FormItem>
+                )}
+              />
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <FormField
+                  control={form.control}
                   name="assistantAutomationPolicy.autoSendQuietHours.startHour"
                   render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Auto-send quiet hours start</FormLabel>
-                      <Select
-                        onValueChange={(value) => field.onChange(Number(value))}
-                        value={String(field.value ?? defaultAssistantAutomationPolicy.autoSendQuietHours.startHour)}
-                      >
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select hour" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          {Array.from({ length: 24 }, (_, hour) => (
-                            <SelectItem key={hour} value={String(hour)}>
-                              {hour.toString().padStart(2, '0')}:00
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </FormItem>
+                    renderAssistantHourField({
+                      field: {
+                        ...field,
+                        value:
+                          field.value ??
+                          defaultAssistantAutomationPolicy.autoSendQuietHours.startHour,
+                      },
+                      label: 'Auto-send quiet hours start',
+                      description: 'The assistant never sends during these hours, even when the experiment is enabled.',
+                      fallbackValue: defaultAssistantAutomationPolicy.autoSendQuietHours.startHour,
+                    })
                   )}
                 />
                 <FormField
                   control={form.control}
                   name="assistantAutomationPolicy.autoSendQuietHours.endHour"
                   render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Auto-send quiet hours end</FormLabel>
-                      <Select
-                        onValueChange={(value) => field.onChange(Number(value))}
-                        value={String(field.value ?? defaultAssistantAutomationPolicy.autoSendQuietHours.endHour)}
-                      >
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select hour" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          {Array.from({ length: 24 }, (_, hour) => (
-                            <SelectItem key={hour} value={String(hour)}>
-                              {hour.toString().padStart(2, '0')}:00
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </FormItem>
+                    renderAssistantHourField({
+                      field: {
+                        ...field,
+                        value:
+                          field.value ?? defaultAssistantAutomationPolicy.autoSendQuietHours.endHour,
+                      },
+                      label: 'Auto-send quiet hours end',
+                      description: 'Use quiet hours to keep even low-risk automation inside working-time boundaries.',
+                      fallbackValue: defaultAssistantAutomationPolicy.autoSendQuietHours.endHour,
+                    })
                   )}
                 />
               </div>

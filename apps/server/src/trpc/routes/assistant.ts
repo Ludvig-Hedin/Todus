@@ -1679,7 +1679,7 @@ export const assistantRouter = router({
           }
         });
 
-        return {
+        return assistantThreadContextSchema.parse({
           threadId: input.threadId,
           subject: analysis.subject,
           summary: analysis.summary,
@@ -1765,7 +1765,7 @@ export const assistantRouter = router({
           openLoops: analysis.openLoops.map(toLoopRow),
           preparedActions: analysis.preparedActions.map(toPreparedActionRow),
           changedSinceLastOpen: unique(changedSinceLastOpen).slice(0, 4),
-        };
+        });
       } finally {
         await conn.end();
       }

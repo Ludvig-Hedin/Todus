@@ -44,6 +44,14 @@ struct AssistantAutomationPolicy: Codable, Sendable {
     var smartReplyNudges: Bool
     var smartDeadlineNudges: Bool
     var assistantThreadActionsVisible: Bool
+    var briefingEnabled: Bool
+    var showHomeBriefing: Bool
+    var trackWaitingOnThreads: Bool
+    var peopleMemoryEnabled: Bool
+    var batchApprovalEnabled: Bool
+    var workdayStartHour: Int
+    var workdayEndHour: Int
+    var excludedSenderPatterns: [String]
     var autoSendExperimentEnabled: Bool
     var autoSendAllowedScenarios: [AssistantAutoSendScenario]
     var autoSendQuietHours: AssistantQuietHours
@@ -56,6 +64,14 @@ struct AssistantAutomationPolicy: Codable, Sendable {
         smartReplyNudges: true,
         smartDeadlineNudges: true,
         assistantThreadActionsVisible: true,
+        briefingEnabled: true,
+        showHomeBriefing: true,
+        trackWaitingOnThreads: true,
+        peopleMemoryEnabled: true,
+        batchApprovalEnabled: false,
+        workdayStartHour: 8,
+        workdayEndHour: 18,
+        excludedSenderPatterns: [],
         autoSendExperimentEnabled: false,
         autoSendAllowedScenarios: [.acknowledgment],
         autoSendQuietHours: .default
@@ -146,6 +162,196 @@ struct MailAssistantDraftResult: Codable, Sendable {
     let created: Bool
     let reason: String
     let preview: String?
+}
+
+struct AssistantEvidence: Codable, Hashable, Sendable {
+    let kind: String
+    let id: String
+    let label: String?
+}
+
+struct AssistantOpenLoop: Codable, Identifiable, Sendable {
+    let id: String
+    let type: String
+    let queue: String
+    let status: String
+    let title: String
+    let summary: String
+    let confidence: Double
+    let reason: String
+    let suggestedActionLabel: String?
+    let threadId: String?
+    let meetingId: String?
+    let personEmail: String?
+    let workstreamKey: String?
+    let lastReviewedAt: String?
+    let snoozedUntil: String?
+    let evidence: [AssistantEvidence]
+}
+
+struct AssistantPreparedAction: Codable, Identifiable, Sendable {
+    let id: String
+    let type: String
+    let status: String
+    let title: String
+    let summary: String
+    let confidence: Double
+    let reason: String
+    let preview: String?
+    let threadId: String?
+    let meetingId: String?
+    let personEmail: String?
+    let workstreamKey: String?
+    let payload: [String: JSONValue]
+    let evidence: [AssistantEvidence]
+}
+
+struct AssistantPersonContext: Codable, Identifiable, Sendable {
+    var id: String { email }
+    let email: String
+    let displayName: String
+    let company: String?
+    let relationshipSummary: String
+    let unresolvedAsks: [String]
+    let promises: [String]
+    let recentThreadIds: [String]
+    let recentMeetingIds: [String]
+    let recentTaskIds: [String]
+    let openLoopCount: Int
+    let lastInteractionAt: String?
+}
+
+struct AssistantMeetingSummary: Codable, Identifiable, Sendable {
+    let id: String
+    let title: String
+    let startsAt: String
+    let status: String
+    let aiSummaryReady: Bool
+}
+
+struct AssistantChangeFeedItem: Codable, Identifiable, Sendable {
+    let id: String
+    let type: String
+    let title: String
+    let summary: String
+    let occurredAt: String
+}
+
+struct AssistantBriefPriority: Codable, Identifiable, Sendable {
+    let kind: String
+    let id: String
+    let title: String
+    let summary: String
+}
+
+struct AssistantBriefing: Codable, Sendable {
+    struct Today: Codable, Sendable {
+        struct TopTask: Codable, Sendable {
+            let id: String
+            let title: String
+            let dueDate: String?
+            let priority: String
+        }
+
+        let nextEvent: AssistantMeetingSummary?
+        let topTask: TopTask?
+        let urgentReply: AssistantOpenLoop?
+    }
+
+    let generatedAt: String
+    let today: Today
+    let topPriorities: [AssistantBriefPriority]
+    let needsYou: [AssistantOpenLoop]
+    let waitingOn: [AssistantOpenLoop]
+    let prepared: [AssistantPreparedAction]
+    let upcomingMeetings: [AssistantMeetingSummary]
+    let changedSinceLastTime: [AssistantChangeFeedItem]
+}
+
+struct AssistantThreadContext: Codable, Sendable {
+    struct Recommendation: Codable, Sendable {
+        let label: String
+        let reason: String
+    }
+
+    struct RelatedTask: Codable, Identifiable, Sendable {
+        let id: String
+        let title: String
+        let status: String
+        let dueDate: String?
+    }
+
+    let threadId: String
+    let subject: String
+    let summary: String
+    let recommendation: Recommendation
+    let waitingState: String
+    let confidence: Double
+    let riskLevel: AssistantRiskLevel
+    let reason: String
+    let replyNeeded: Bool
+    let followUpNeeded: Bool
+    let meetingRequested: Bool
+    let existingDraft: Bool
+    let actionItems: [String]
+    let researchQueries: [String]
+    let suggestedTasks: [MailAssistantSuggestedTask]
+    let suggestedEvent: MailAssistantSuggestedEvent?
+    let relatedTasks: [RelatedTask]
+    let relatedMeetings: [AssistantMeetingSummary]
+    let people: [AssistantPersonContext]
+    let openLoops: [AssistantOpenLoop]
+    let preparedActions: [AssistantPreparedAction]
+    let changedSinceLastOpen: [String]
+}
+
+struct AssistantPreparedActionApplyResult: Codable, Sendable {
+    let success: Bool
+    let actionType: String
+    let createdTaskIds: [String]?
+    let createdEventId: String?
+    let draftId: String?
+    let researchQueries: [String]?
+}
+
+enum JSONValue: Codable, Hashable, Sendable {
+    case string(String)
+    case number(Double)
+    case bool(Bool)
+    case object([String: JSONValue])
+    case array([JSONValue])
+    case null
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if container.decodeNil() {
+            self = .null
+        } else if let value = try? container.decode(Bool.self) {
+            self = .bool(value)
+        } else if let value = try? container.decode(Double.self) {
+            self = .number(value)
+        } else if let value = try? container.decode(String.self) {
+            self = .string(value)
+        } else if let value = try? container.decode([String: JSONValue].self) {
+            self = .object(value)
+        } else if let value = try? container.decode([JSONValue].self) {
+            self = .array(value)
+        } else {
+            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Unsupported JSON value")
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .string(let value): try container.encode(value)
+        case .number(let value): try container.encode(value)
+        case .bool(let value): try container.encode(value)
+        case .object(let value): try container.encode(value)
+        case .array(let value): try container.encode(value)
+        case .null: try container.encodeNil()
+        }
+    }
 }
 
 struct MailAssistantSettingsResponse: Decodable {

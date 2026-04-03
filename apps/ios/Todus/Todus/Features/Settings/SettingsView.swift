@@ -31,6 +31,9 @@ struct SettingsView: View {
                 // Appearance sub-page + small preferences inline
                 preferencesSection
 
+                // Tab bar customization — which pages appear in the floating bar
+                tabBarSection
+
                 // Email preferences — separate from AI to reduce cognitive load
                 emailSection
 
@@ -416,6 +419,29 @@ struct SettingsView: View {
             .tint(.orange)
         } header: {
             Text("Preferences")
+        }
+    }
+
+    // MARK: - Tab Bar Customization
+
+    private var tabBarSection: some View {
+        Section {
+            NavigationLink {
+                TabBarCustomizationView()
+            } label: {
+                HStack {
+                    Label("Tab Bar", systemImage: "square.bottomhalf.filled")
+                    Spacer()
+                    // Preview of current tab count
+                    Text("\(services.tabBarTabs.count) tabs")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                }
+            }
+        } header: {
+            Text("Navigation")
+        } footer: {
+            Text("Choose which pages appear in the floating tab bar (max 4). Pages not shown here are accessible from the Home tab.")
         }
     }
 
@@ -846,6 +872,18 @@ struct AIAssistantSettingsView: View {
     @Environment(AppServices.self) private var services
     @State private var showsAutoSendConfirm = false
 
+    private var excludedSenderPatternsText: Binding<String> {
+        Binding(
+            get: { services.assistantAutomationPolicy.excludedSenderPatterns.joined(separator: "\n") },
+            set: { newValue in
+                services.assistantAutomationPolicy.excludedSenderPatterns = newValue
+                    .split(separator: "\n")
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+            }
+        )
+    }
+
     var body: some View {
         @Bindable var ai = services.aiChatService
         return List {
@@ -879,6 +917,22 @@ struct AIAssistantSettingsView: View {
                 Button("Apply recommended assistant defaults") {
                     services.assistantAutomationPolicy = .recommended
                 }
+
+                Toggle(
+                    "Enable assistant briefing engine",
+                    isOn: Binding(
+                        get: { services.assistantAutomationPolicy.briefingEnabled },
+                        set: { services.assistantAutomationPolicy.briefingEnabled = $0 }
+                    )
+                )
+
+                Toggle(
+                    "Show Home briefing",
+                    isOn: Binding(
+                        get: { services.assistantAutomationPolicy.showHomeBriefing },
+                        set: { services.assistantAutomationPolicy.showHomeBriefing = $0 }
+                    )
+                )
 
                 Toggle(
                     "Auto summarize long threads",
@@ -936,6 +990,30 @@ struct AIAssistantSettingsView: View {
                     )
                 )
 
+                Toggle(
+                    "Track waiting-on threads",
+                    isOn: Binding(
+                        get: { services.assistantAutomationPolicy.trackWaitingOnThreads },
+                        set: { services.assistantAutomationPolicy.trackWaitingOnThreads = $0 }
+                    )
+                )
+
+                Toggle(
+                    "Build people memory",
+                    isOn: Binding(
+                        get: { services.assistantAutomationPolicy.peopleMemoryEnabled },
+                        set: { services.assistantAutomationPolicy.peopleMemoryEnabled = $0 }
+                    )
+                )
+
+                Toggle(
+                    "Batch prepared approvals",
+                    isOn: Binding(
+                        get: { services.assistantAutomationPolicy.batchApprovalEnabled },
+                        set: { services.assistantAutomationPolicy.batchApprovalEnabled = $0 }
+                    )
+                )
+
                 // Auto-send requires explicit opt-in confirmation before enabling
                 Toggle(
                     "Enable low-risk auto-send experiment",
@@ -965,7 +1043,60 @@ struct AIAssistantSettingsView: View {
             } header: {
                 Text("Mail Assistant")
             } footer: {
-                Text("Suggestions and smart nudges are on by default. Auto-send stays off unless you opt in.")
+                Text("Todus can brief, prepare, and track for you by default. Auto-send stays off unless you opt in.")
+            }
+
+            Section {
+                Picker(
+                    "Workday starts",
+                    selection: Binding(
+                        get: { services.assistantAutomationPolicy.workdayStartHour },
+                        set: { services.assistantAutomationPolicy.workdayStartHour = $0 }
+                    )
+                ) {
+                    ForEach(0..<24, id: \.self) { hour in
+                        Text(String(format: "%02d:00", hour)).tag(hour)
+                    }
+                }
+                .pickerStyle(.menu)
+
+                Picker(
+                    "Workday ends",
+                    selection: Binding(
+                        get: { services.assistantAutomationPolicy.workdayEndHour },
+                        set: { services.assistantAutomationPolicy.workdayEndHour = $0 }
+                    )
+                ) {
+                    ForEach(0..<24, id: \.self) { hour in
+                        Text(String(format: "%02d:00", hour)).tag(hour)
+                    }
+                }
+                .pickerStyle(.menu)
+            } header: {
+                Text("Assistant timing")
+            } footer: {
+                Text("Used for urgency, waiting-on tracking, and when Home should surface the most important prepared work.")
+            }
+
+            Section {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Excluded senders and topics")
+                        .font(.system(size: 15, weight: .medium))
+                    TextEditor(text: excludedSenderPatternsText)
+                        .frame(minHeight: 100)
+                        .scrollContentBackground(.hidden)
+                        .padding(8)
+                        .background(Color.secondary.opacity(0.08))
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    Text("One pattern per line. Use this to suppress noisy automation, newsletters, and low-value system mail from the assistant queues.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 4)
+            } header: {
+                Text("Noise filtering")
+            } footer: {
+                Text("Examples: notifications@, no-reply@, calendar-notification@")
             }
 
             Section {

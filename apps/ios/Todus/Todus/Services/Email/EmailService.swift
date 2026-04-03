@@ -19,9 +19,23 @@ final class EmailService {
     var isSending = false
     // Default false — EmailInboxView calls checkConnection() on appear to verify
     var hasConnection = false
+    var isCheckingConnection = false
+    var hasResolvedConnection = false
     var errorMessage: String?
     var nextPageToken: String?
     var assistantNudges: [MailAssistantNudge] = []
+    var assistantBriefing: AssistantBriefing?
+    private var lastConnectionCheckAt: Date?
+    private let connectionCheckInterval: TimeInterval = 30
+
+    // MARK: - Cache keys
+
+    /// UserDefaults keys for the inbox thread cache.
+    /// Only inbox is cached — other folders are small/infrequent enough to skip.
+    private static let cacheDataKey      = "email_inbox_threads_v1"
+    private static let cacheTimestampKey = "email_inbox_threads_v1_ts"
+    /// Stale-after duration: refresh from network after 1 hour, but still show cached data
+    private static let cacheMaxAge: TimeInterval = 3600
 
     // MARK: - Init
 
@@ -70,6 +84,11 @@ final class EmailService {
 
             if refresh {
                 threads = enrichedThreads
+                // Cache the first page of inbox results so the next launch shows content
+                // immediately (no skeleton) while the background refresh completes.
+                if folder == "inbox" && query == nil {
+                    saveCachedThreads(enrichedThreads)
+                }
             } else {
                 threads.append(contentsOf: enrichedThreads)
             }
@@ -77,21 +96,53 @@ final class EmailService {
             if query == nil {
                 await loadAssistantNudges(folder: folder)
             }
-        } catch let error as APIError where error.errorDescription?.contains("Session expired") == true {
+        } catch APIError.unauthorized {
+            // Auth failure — stop trying to load until the user re-authenticates
             hasConnection = false
         } catch {
-            errorMessage = "Failed to load emails."
-            AppLogger.shared.log("[EmailService] loadThreads error: \(error)")
+            if let urlError = error as? URLError {
+                errorMessage = "No internet connection."
+                AppLogger.shared.log("[EmailService] loadThreads network error: \(urlError)")
+            } else {
+                errorMessage = "Failed to load emails. Please try again."
+                AppLogger.shared.log("[EmailService] loadThreads error: \(error)")
+            }
         }
 
         isLoadingThreads = false
     }
 
     func ensureInitialInboxLoaded() async {
+        let trace = PerformanceTrace.beginInterval(
+            PerformanceTrace.loadThreads,
+            message: "EmailService.ensureInitialInboxLoaded begin"
+        )
+        defer {
+            PerformanceTrace.endInterval(
+                PerformanceTrace.loadThreads,
+                trace,
+                message: "EmailService.ensureInitialInboxLoaded end"
+            )
+        }
         await checkConnection()
         guard hasConnection else { return }
-        guard threads.isEmpty else { return }
-        await loadThreads(refresh: true)
+
+        // Populate from disk cache immediately so the inbox shows content without a skeleton.
+        // The view only enters loadingState when `isLoadingThreads && threads.isEmpty`,
+        // so having cached threads bypasses the skeleton entirely.
+        if threads.isEmpty {
+            threads = loadCachedThreads() ?? []
+        }
+
+        if threads.isEmpty {
+            // No cache yet: fetch synchronously so the inbox populates on first launch.
+            await loadThreads(refresh: true)
+        } else if isCacheStale() {
+            // Show stale cache immediately, then refresh in the background.
+            Task { [weak self] in
+                await self?.loadThreads(refresh: true)
+            }
+        }
     }
 
     func resetForSignOut() {
@@ -100,9 +151,15 @@ final class EmailService {
         isLoadingThread = false
         isSending = false
         hasConnection = false
+        isCheckingConnection = false
+        hasResolvedConnection = false
         errorMessage = nil
         nextPageToken = nil
         assistantNudges = []
+        assistantBriefing = nil
+        // Clear disk cache so the next user session starts clean
+        UserDefaults.standard.removeObject(forKey: Self.cacheDataKey)
+        UserDefaults.standard.removeObject(forKey: Self.cacheTimestampKey)
     }
 
     /// Fetches full details for multiple threads in parallel via mail.get.
@@ -183,9 +240,9 @@ final class EmailService {
         }
     }
 
-    func loadAssistant(threadId: String) async -> MailAssistantThread? {
+    func loadAssistant(threadId: String) async -> AssistantThreadContext? {
         do {
-            return try await api.trpcQuery("mailAssistant.getThread", input: AssistantThreadInput(threadId: threadId))
+            return try await api.trpcQuery("assistant.getThreadContext", input: AssistantThreadInput(threadId: threadId))
         } catch {
             AppLogger.shared.log("[EmailService] loadAssistant error: \(error)")
             return nil
@@ -194,13 +251,24 @@ final class EmailService {
 
     func loadAssistantNudges(folder: String = "inbox") async {
         do {
-            let response: MailAssistantNudgesResponse = try await api.trpcQuery(
-                "mailAssistant.getInboxNudges",
-                input: MailAssistantNudgesInput(folder: folder)
+            let response: AssistantOpenLoopsResponse = try await api.trpcQuery(
+                "assistant.listOpenLoops",
+                input: AssistantOpenLoopsInput(limit: 20)
             )
-            assistantNudges = response.nudges
+            assistantNudges = Self.buildNudges(from: response.loops)
         } catch {
             AppLogger.shared.log("[EmailService] loadAssistantNudges error: \(error)")
+        }
+    }
+
+    func loadAssistantBriefing() async -> AssistantBriefing? {
+        do {
+            let briefing: AssistantBriefing = try await api.trpcQuery("assistant.getBriefing")
+            assistantBriefing = briefing
+            return briefing
+        } catch {
+            AppLogger.shared.log("[EmailService] loadAssistantBriefing error: \(error)")
+            return nil
         }
     }
 
@@ -244,13 +312,60 @@ final class EmailService {
         }
     }
 
+    // MARK: - Thread Cache
+
+    /// Returns cached inbox threads if the cache exists, regardless of age.
+    /// Callers decide whether to also trigger a network refresh.
+    private func loadCachedThreads() -> [EmailThread]? {
+        guard let data = UserDefaults.standard.data(forKey: Self.cacheDataKey) else { return nil }
+        return try? JSONDecoder().decode([EmailThread].self, from: data)
+    }
+
+    private func isCacheStale() -> Bool {
+        guard let savedDate = UserDefaults.standard.object(forKey: Self.cacheTimestampKey) as? Date else {
+            return true
+        }
+        return Date().timeIntervalSince(savedDate) > Self.cacheMaxAge
+    }
+
+    /// Persists the inbox thread list to UserDefaults as JSON.
+    /// Called after each successful first-page inbox fetch.
+    private func saveCachedThreads(_ threads: [EmailThread]) {
+        guard let data = try? JSONEncoder().encode(threads) else { return }
+        UserDefaults.standard.set(data, forKey: Self.cacheDataKey)
+        UserDefaults.standard.set(Date(), forKey: Self.cacheTimestampKey)
+    }
+
     // MARK: - Connections
 
     /// Check if the user has any email connections (Gmail/Outlook).
     func checkConnection() async {
+        let now = Date()
+        if let lastConnectionCheckAt,
+           now.timeIntervalSince(lastConnectionCheckAt) < connectionCheckInterval,
+           hasResolvedConnection {
+            return
+        }
+
+        isCheckingConnection = true
+
+        let trace = PerformanceTrace.beginInterval(
+            PerformanceTrace.checkEmailConnection,
+            message: "EmailService.checkConnection begin"
+        )
+        defer {
+            isCheckingConnection = false
+            hasResolvedConnection = true
+            PerformanceTrace.endInterval(
+                PerformanceTrace.checkEmailConnection,
+                trace,
+                message: "EmailService.checkConnection end connected=\(hasConnection)"
+            )
+        }
         do {
             let response: ConnectionsResponse = try await api.trpcQuery("connections.list")
             hasConnection = !response.connections.isEmpty
+            lastConnectionCheckAt = now
         } catch {
             hasConnection = false
         }
@@ -290,7 +405,11 @@ final class EmailService {
                     messageCount: threads[i].messageCount, labels: threads[i].labels
                 )
             }
-        } catch {}
+        } catch {
+            // Surface mutation failures so the user knows the action didn't stick
+            errorMessage = "Could not mark as read. Please try again."
+            AppLogger.shared.log("[EmailService] markAsRead error: \(error)")
+        }
     }
 
     func markAsUnread(ids: [String]) async {
@@ -304,27 +423,66 @@ final class EmailService {
                     messageCount: threads[i].messageCount, labels: threads[i].labels
                 )
             }
-        } catch {}
+        } catch {
+            errorMessage = "Could not mark as unread. Please try again."
+            AppLogger.shared.log("[EmailService] markAsUnread error: \(error)")
+        }
     }
 
     func archiveThreads(ids: [String]) async {
         do {
             let _: EmailEmptyResponse = try await api.trpcMutation("mail.bulkArchive", input: IdsInput(ids: ids))
             threads.removeAll { ids.contains($0.id) }
-        } catch {}
+        } catch {
+            errorMessage = "Could not archive. Please try again."
+            AppLogger.shared.log("[EmailService] archiveThreads error: \(error)")
+        }
     }
 
     func deleteThreads(ids: [String]) async {
         do {
             let _: EmailEmptyResponse = try await api.trpcMutation("mail.bulkDelete", input: IdsInput(ids: ids))
             threads.removeAll { ids.contains($0.id) }
-        } catch {}
+        } catch {
+            errorMessage = "Could not delete. Please try again."
+            AppLogger.shared.log("[EmailService] deleteThreads error: \(error)")
+        }
     }
 
     func toggleStar(ids: [String]) async {
         do {
             let _: SuccessResponse = try await api.trpcMutation("mail.toggleStar", input: IdsInput(ids: ids))
-        } catch {}
+        } catch {
+            errorMessage = "Could not update star. Please try again."
+            AppLogger.shared.log("[EmailService] toggleStar error: \(error)")
+        }
+    }
+}
+
+private extension EmailService {
+    static func buildNudges(from loops: [AssistantOpenLoop]) -> [MailAssistantNudge] {
+        let queueCopy: [String: (AssistantNudgeType, String, String)] = [
+            "needs_you": (.replyNeeded, "Needs reply", "Threads where you appear to be the next blocker."),
+            "waiting_on": (.followUp, "Waiting on others", "Conversations you already moved forward and are now waiting on."),
+            "scheduling": (.meetingRequest, "Scheduling", "Threads that look like meeting coordination or follow-up scheduling."),
+            "drafts_ready": (.draftReady, "Drafts ready", "Prepared replies or thread drafts ready for review."),
+            "likely_dropped": (.followUp, "Likely dropped", "Open loops that are at risk of slipping without explicit tracking."),
+        ]
+
+        let grouped = Dictionary(grouping: loops.filter { $0.status == "open" }, by: \.queue)
+        return grouped.compactMap { queue, queueLoops in
+            guard let metadata = queueCopy[queue] else { return nil }
+            let threadIds = Array(Set(queueLoops.compactMap(\.threadId)))
+            return MailAssistantNudge(
+                type: metadata.0,
+                title: metadata.1,
+                description: metadata.2,
+                count: queueLoops.count,
+                threadIds: threadIds,
+                id: "assistant-\(queue)"
+            )
+        }
+        .sorted { $0.count > $1.count }
     }
 }
 
@@ -368,8 +526,8 @@ private struct MailAssistantDraftInput: Encodable {
     let openInComposer: Bool
 }
 
-private struct MailAssistantNudgesInput: Encodable {
-    let folder: String
+private struct AssistantOpenLoopsInput: Encodable {
+    let limit: Int
 }
 
 private struct MailAssistantCreateTaskInput: Encodable {
@@ -429,8 +587,8 @@ private struct SendResponse: Decodable {
     let success: Bool
 }
 
-private struct MailAssistantNudgesResponse: Decodable {
-    let nudges: [MailAssistantNudge]
+private struct AssistantOpenLoopsResponse: Decodable {
+    let loops: [AssistantOpenLoop]
 }
 
 private struct MailAssistantTaskCreateResponse: Decodable {

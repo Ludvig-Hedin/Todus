@@ -810,7 +810,6 @@ struct MacTaskDetailSheet: View {
         task.status = editedStatus
         task.priority = editedPriority
         task.dueDate = hasDueDate ? editedDueDate : nil
-        task.folderID = selectedFolderID
         task.folder = folders.first(where: { $0.id == selectedFolderID })
         task.updatedAt = .now
         try? modelContext.save()

@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import OSLog
 
 // MARK: - API Response Types
 
@@ -86,6 +87,10 @@ private struct DeleteResponse: Decodable {
 @Observable
 final class MeetingsService {
     private let apiClient: TodosAPIClient
+    private let logger = Logger(
+        subsystem: "com.ludvighedin.todus",
+        category: "MeetingsService"
+    )
 
     var meetings: [MeetingItem] = []
     var isLoading = false
@@ -118,7 +123,7 @@ final class MeetingsService {
             meetings = response.meetings
             loadError = nil
         } catch {
-            print("[MeetingsService] Failed to load meetings: \(error)")
+            logger.error("Failed to load meetings: \(String(describing: error), privacy: .public)")
             loadError = error.localizedDescription
         }
     }
@@ -128,7 +133,7 @@ final class MeetingsService {
         do {
             return try await apiClient.trpcQuery("meet.getMeeting", input: Input(meetingId: id))
         } catch {
-            print("[MeetingsService] Failed to get meeting: \(error)")
+            logger.error("Failed to get meeting: \(String(describing: error), privacy: .public)")
             return nil
         }
     }
@@ -141,7 +146,7 @@ final class MeetingsService {
             let _: SyncResponse = try await apiClient.trpcMutation("meet.syncFromCalendar")
             await loadMeetings(status: currentStatusFilter, search: currentSearchQuery)
         } catch {
-            print("[MeetingsService] Failed to sync from calendar: \(error)")
+            logger.error("Failed to sync from calendar: \(String(describing: error), privacy: .public)")
         }
     }
 
@@ -154,7 +159,7 @@ final class MeetingsService {
             await loadMeetings(status: currentStatusFilter, search: currentSearchQuery)
             return true
         } catch {
-            print("[MeetingsService] Failed to schedule bot: \(error)")
+            logger.error("Failed to schedule bot: \(String(describing: error), privacy: .public)")
             return false
         }
     }
@@ -166,7 +171,7 @@ final class MeetingsService {
                 "meet.generateSummary", input: Input(meetingId: meetingId)
             )
         } catch {
-            print("[MeetingsService] Failed to generate summary: \(error)")
+            logger.error("Failed to generate summary: \(String(describing: error), privacy: .public)")
             return nil
         }
     }
@@ -179,7 +184,7 @@ final class MeetingsService {
             )
             return response.answer
         } catch {
-            print("[MeetingsService] Failed to ask question: \(error)")
+            logger.error("Failed to ask question: \(String(describing: error), privacy: .public)")
             return nil
         }
     }
@@ -193,7 +198,7 @@ final class MeetingsService {
             meetings.removeAll { $0.id == id }
             return true
         } catch {
-            print("[MeetingsService] Failed to delete meeting: \(error)")
+            logger.error("Failed to delete meeting: \(String(describing: error), privacy: .public)")
             return false
         }
     }

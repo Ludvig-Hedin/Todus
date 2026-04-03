@@ -234,6 +234,217 @@ export const userSettings = createTable(
   (t) => [index('user_settings_settings_idx').on(t.settings)],
 );
 
+// ─── Assistant State ─────────────────────────────────────────────────────────
+// Durable second-brain state used by briefings, prepared actions, people memory,
+// and cross-surface assistant context.
+
+export const assistantOpenLoop = createTable(
+  'assistant_open_loop',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    uniqueKey: text('unique_key').notNull(),
+    type: text('type')
+      .$type<
+        | 'needs_reply'
+        | 'waiting_on_other'
+        | 'deadline_risk'
+        | 'meeting_follow_up'
+        | 'decision_needed'
+        | 'draft_ready'
+        | 'research_needed'
+      >()
+      .notNull(),
+    queue: text('queue')
+      .$type<'needs_you' | 'waiting_on' | 'scheduling' | 'drafts_ready' | 'likely_dropped'>()
+      .notNull(),
+    status: text('status').$type<'open' | 'snoozed' | 'done' | 'dismissed'>().notNull().default('open'),
+    title: text('title').notNull(),
+    summary: text('summary').notNull(),
+    confidencePct: integer('confidence_pct').notNull().default(50),
+    reason: text('reason').notNull().default(''),
+    suggestedActionLabel: text('suggested_action_label'),
+    sourceThreadId: text('source_thread_id'),
+    sourceMeetingId: text('source_meeting_id').references(() => meeting.id, { onDelete: 'set null' }),
+    sourceTaskId: text('source_task_id').references(() => task.id, { onDelete: 'set null' }),
+    sourceEventId: text('source_event_id'),
+    personEmail: text('person_email'),
+    workstreamKey: text('workstream_key'),
+    evidence: jsonb('evidence').$type<unknown>().notNull().default([]),
+    snoozedUntil: timestamp('snoozed_until'),
+    lastReviewedAt: timestamp('last_reviewed_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at')
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (t) => [
+    unique().on(t.userId, t.uniqueKey),
+    index('assistant_open_loop_user_id_idx').on(t.userId),
+    index('assistant_open_loop_queue_idx').on(t.userId, t.queue, t.status),
+    index('assistant_open_loop_thread_idx').on(t.sourceThreadId),
+    index('assistant_open_loop_meeting_idx').on(t.sourceMeetingId),
+    index('assistant_open_loop_person_idx').on(t.userId, t.personEmail),
+    index('assistant_open_loop_workstream_idx').on(t.userId, t.workstreamKey),
+    index('assistant_open_loop_updated_at_idx').on(t.updatedAt),
+  ],
+);
+
+export const assistantPreparedAction = createTable(
+  'assistant_prepared_action',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    uniqueKey: text('unique_key').notNull(),
+    type: text('type')
+      .$type<'draft_reply' | 'create_task' | 'create_event' | 'follow_up' | 'research'>()
+      .notNull(),
+    status: text('status')
+      .$type<'pending' | 'approved' | 'applied' | 'dismissed'>()
+      .notNull()
+      .default('pending'),
+    title: text('title').notNull(),
+    summary: text('summary').notNull(),
+    confidencePct: integer('confidence_pct').notNull().default(50),
+    reason: text('reason').notNull().default(''),
+    preview: text('preview'),
+    payload: jsonb('payload').$type<unknown>().notNull().default({}),
+    sourceThreadId: text('source_thread_id'),
+    sourceMeetingId: text('source_meeting_id').references(() => meeting.id, { onDelete: 'set null' }),
+    personEmail: text('person_email'),
+    workstreamKey: text('workstream_key'),
+    evidence: jsonb('evidence').$type<unknown>().notNull().default([]),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at')
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (t) => [
+    unique().on(t.userId, t.uniqueKey),
+    index('assistant_prepared_action_user_id_idx').on(t.userId),
+    index('assistant_prepared_action_status_idx').on(t.userId, t.status),
+    index('assistant_prepared_action_thread_idx').on(t.sourceThreadId),
+    index('assistant_prepared_action_meeting_idx').on(t.sourceMeetingId),
+    index('assistant_prepared_action_workstream_idx').on(t.userId, t.workstreamKey),
+    index('assistant_prepared_action_updated_at_idx').on(t.updatedAt),
+  ],
+);
+
+export const assistantPersonMemory = createTable(
+  'assistant_person_memory',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    email: text('email').notNull(),
+    displayName: text('display_name'),
+    company: text('company'),
+    relationshipSummary: text('relationship_summary').notNull().default(''),
+    unresolvedAsks: jsonb('unresolved_asks').$type<string[]>().notNull().default([]),
+    promises: jsonb('promises').$type<string[]>().notNull().default([]),
+    preferredFollowUpCadenceDays: integer('preferred_follow_up_cadence_days'),
+    recentThreadIds: jsonb('recent_thread_ids').$type<string[]>().notNull().default([]),
+    recentMeetingIds: jsonb('recent_meeting_ids').$type<string[]>().notNull().default([]),
+    recentTaskIds: jsonb('recent_task_ids').$type<string[]>().notNull().default([]),
+    lastInteractionAt: timestamp('last_interaction_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at')
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (t) => [
+    unique().on(t.userId, t.email),
+    index('assistant_person_memory_user_id_idx').on(t.userId),
+    index('assistant_person_memory_email_idx').on(t.userId, t.email),
+    index('assistant_person_memory_last_interaction_idx').on(t.lastInteractionAt),
+  ],
+);
+
+export const assistantWorkstreamMemory = createTable(
+  'assistant_workstream_memory',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    key: text('key').notNull(),
+    title: text('title').notNull(),
+    summary: text('summary').notNull().default(''),
+    status: text('status').notNull().default('active'),
+    pendingDecisions: jsonb('pending_decisions').$type<string[]>().notNull().default([]),
+    risks: jsonb('risks').$type<string[]>().notNull().default([]),
+    relatedPeople: jsonb('related_people').$type<string[]>().notNull().default([]),
+    relatedThreadIds: jsonb('related_thread_ids').$type<string[]>().notNull().default([]),
+    relatedMeetingIds: jsonb('related_meeting_ids').$type<string[]>().notNull().default([]),
+    relatedTaskIds: jsonb('related_task_ids').$type<string[]>().notNull().default([]),
+    nextMilestone: text('next_milestone'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at')
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (t) => [
+    unique().on(t.userId, t.key),
+    index('assistant_workstream_memory_user_id_idx').on(t.userId),
+    index('assistant_workstream_memory_key_idx').on(t.userId, t.key),
+    index('assistant_workstream_memory_updated_at_idx').on(t.updatedAt),
+  ],
+);
+
+export const assistantFeedback = createTable(
+  'assistant_feedback',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    targetType: text('target_type')
+      .$type<'open_loop' | 'prepared_action' | 'person_memory' | 'workstream_memory'>()
+      .notNull(),
+    targetId: text('target_id').notNull(),
+    feedback: text('feedback')
+      .$type<'helpful' | 'not_helpful' | 'too_noisy' | 'wrong' | 'completed'>()
+      .notNull(),
+    note: text('note'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    index('assistant_feedback_user_id_idx').on(t.userId),
+    index('assistant_feedback_target_idx').on(t.targetType, t.targetId),
+  ],
+);
+
+export const assistantBriefingSnapshot = createTable(
+  'assistant_briefing_snapshot',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    snapshotKey: text('snapshot_key').notNull(),
+    payload: jsonb('payload').$type<unknown>().notNull().default({}),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at')
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (t) => [
+    unique().on(t.userId, t.snapshotKey),
+    index('assistant_briefing_snapshot_user_id_idx').on(t.userId),
+    index('assistant_briefing_snapshot_updated_at_idx').on(t.updatedAt),
+  ],
+);
+
 export const writingStyleMatrix = createTable(
   'writing_style_matrix',
   {

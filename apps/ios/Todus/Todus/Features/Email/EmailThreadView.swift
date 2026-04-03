@@ -1,7 +1,22 @@
 import SwiftUI
 import WebKit
 
-/// Displays a full email thread — list of messages with HTML body rendering.
+// MARK: - Scroll Offset Tracking
+
+private struct ScrollOffsetKey: PreferenceKey {
+    nonisolated(unsafe) static var defaultValue: CGFloat = 0
+    nonisolated static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+
+// MARK: - EmailThreadView
+
+/// Full email thread — redesigned with:
+///   - Scrim header (transparent → gradient on scroll) with grouped glass action icons
+///   - Scroll-aware centered title (body text size)
+///   - AI summary (max 3 lines) + contextual action buttons based on AI flags
+///   - Flat message rows with collapsible details
+///   - Free-floating reply bar with bottom scrim gradient
+///   - Custom tab bar hidden via AppServices.hideTabBar
 struct EmailThreadView: View {
     @Environment(AppServices.self) private var services
     @Environment(\.dismiss) private var dismiss
@@ -11,28 +26,48 @@ struct EmailThreadView: View {
     @State private var detail: EmailThreadDetail?
     @State private var isLoading = true
     @State private var showCompose = false
-    /// Tracks star state — initialised from thread labels after load.
+    @State private var composeMode: ComposeMode = .reply
     @State private var isStarred = false
-    /// Tracks read/unread state — starts false (thread is marked read on open).
-    @State private var isUnread = false
-    /// Shared thread-level assistant model for summaries, task extraction, and draft suggestions.
-    @State private var assistantThread: MailAssistantThread? = nil
+    @State private var assistantThread: AssistantThreadContext? = nil
+    @State private var isLoadingAssistant = true
     @State private var assistantDraftSeed: String? = nil
-    /// Guards against accidental delete — trash is the only destructive action in the header.
     @State private var showDeleteConfirmation = false
     @State private var assistantNotice: String?
+    /// Scroll offset drives the scroll-aware header title
+    @State private var scrollOffset: CGFloat = 0
 
     private var emailService: EmailService { services.emailService }
+
+    /// Subject shown in collapsed header when user has scrolled past the title row
+    private var subjectForHeader: String {
+        detail?.messages.first?.subject ?? ""
+    }
+    private var showTitleInHeader: Bool { scrollOffset > 90 }
+
+    enum ComposeMode { case reply, replyAll, forward }
+
+    // AI gradient matching the tab bar sparkles icon
+    private var aiGradient: LinearGradient {
+        LinearGradient(
+            colors: [
+                Color(red: 0x00/255, green: 0xAA/255, blue: 0xF5/255), // #00AAF5
+                Color(red: 0xEF/255, green: 0x00/255, blue: 0xC2/255), // #EF00C2
+                Color(red: 0xFF/255, green: 0x00/255, blue: 0x38/255), // #FF0038
+                Color(red: 0xF9/255, green: 0x9F/255, blue: 0x00/255), // #F99F00
+            ],
+            startPoint: UnitPoint(x: 0.3, y: 0),
+            endPoint: UnitPoint(x: 0.7, y: 1)
+        )
+    }
 
     var body: some View {
         ZStack {
             AppTheme.backgroundTop.ignoresSafeArea()
 
             if isLoading {
-                ProgressView()
-                    .tint(.secondary)
+                ProgressView().tint(.secondary)
             } else if let detail, !detail.messages.isEmpty {
-                threadContent(detail)
+                mainContent(detail)
             } else {
                 VStack(spacing: 10) {
                     Image(systemName: "exclamationmark.triangle")
@@ -45,22 +80,11 @@ struct EmailThreadView: View {
             }
         }
         .navigationBarBackButtonHidden(true)
+        .toolbar(.hidden, for: .tabBar)
         .background { SwipeBackEnabler() }
-        .task {
-            detail = await emailService.loadThread(id: threadId)
-            isLoading = false
-
-            // Derive star state from thread labels
-            isStarred = detail?.labels?.contains(where: {
-                let n = $0.name.uppercased()
-                return n == "STARRED" || n == "\\STARRED"
-            }) ?? false
-
-            async let markReadTask: Void = emailService.markAsRead(ids: [threadId])
-            async let assistant = emailService.loadAssistant(threadId: threadId)
-            assistantThread = await assistant
-            await markReadTask
-        }
+        .onAppear { services.hideTabBar = true }
+        .onDisappear { services.hideTabBar = false }
+        .task { await loadThread() }
         .sheet(isPresented: $showCompose) {
             if let lastMessage = detail?.messages.last {
                 EmailComposeView(replyTo: lastMessage, threadId: threadId, body: assistantDraftSeed)
@@ -72,50 +96,476 @@ struct EmailThreadView: View {
             set: { if !$0 { assistantNotice = nil } }
         )) {
             Button("OK", role: .cancel) {}
-        } message: {
-            Text(assistantNotice ?? "")
+        } message: { Text(assistantNotice ?? "") }
+    }
+
+    // MARK: - Main Layout
+
+    private func mainContent(_ detail: EmailThreadDetail) -> some View {
+        ZStack(alignment: .bottom) {
+            VStack(spacing: 0) {
+                topBar(detail)
+                scrollContent(detail)
+            }
+
+            // Bottom reply bar — free-floating with scrim gradient behind it
+            bottomBar
         }
     }
 
+    // MARK: - Top Bar
+    // Transparent by default. On scroll past the subject, a scrim gradient fades in
+    // and the title appears centered. Action icons grouped in a single glass capsule.
+
+    private func topBar(_ detail: EmailThreadDetail) -> some View {
+        ZStack {
+            HStack(spacing: 10) {
+                // Back button — standalone pill
+                Button { dismiss() } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.primary)
+                        .frame(width: 38, height: 38)
+                }
+                .buttonStyle(LiquidGlassButtonStyle(cornerRadius: 19))
+                .minTouchTarget()
+
+                Spacer()
+
+                // Ask AI button — matches tab bar gradient, standalone circle
+                Button { openAssistant() } label: {
+                    Image(systemName: "lasso.badge.sparkles")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(aiGradient)
+                        .frame(width: 38, height: 38)
+                }
+                .buttonStyle(LiquidGlassButtonStyle(cornerRadius: 19))
+                .minTouchTarget()
+
+                // Grouped action icons in a single glass capsule
+                HStack(spacing: 0) {
+                    Button {
+                        Task { await emailService.markAsUnread(ids: [threadId]); dismiss() }
+                    } label: {
+                        Image(systemName: "envelope.badge")
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundStyle(.primary)
+                            .frame(width: 42, height: 38)
+                    }
+                    .buttonStyle(.plain)
+
+                    Button {
+                        Task { await emailService.archiveThreads(ids: [threadId]); dismiss() }
+                    } label: {
+                        Image(systemName: "archivebox")
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundStyle(.primary)
+                            .frame(width: 42, height: 38)
+                    }
+                    .buttonStyle(.plain)
+
+                    Button { showDeleteConfirmation = true } label: {
+                        Image(systemName: "trash")
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundStyle(AppTheme.danger)
+                            .frame(width: 42, height: 38)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .background(.ultraThinMaterial, in: Capsule(style: .continuous))
+                .overlay(Capsule(style: .continuous).stroke(AppTheme.cardBorder.opacity(0.5), lineWidth: 0.5))
+            }
+
+            // Scroll-aware title — fades in when subject has scrolled off screen
+            if showTitleInHeader {
+                Text(subjectForHeader)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .frame(maxWidth: 200)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: showTitleInHeader)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        // Scrim background — transparent when at top, fades in on scroll
+        .background(
+            LinearGradient(
+                stops: [
+                    .init(color: AppTheme.backgroundTop, location: 0),
+                    .init(color: AppTheme.backgroundTop.opacity(0.85), location: 0.7),
+                    .init(color: AppTheme.backgroundTop.opacity(0), location: 1),
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .opacity(showTitleInHeader ? 1 : 0.3)
+            .animation(.easeInOut(duration: 0.3), value: showTitleInHeader)
+        )
+        .confirmationDialog("Delete this thread?", isPresented: $showDeleteConfirmation, titleVisibility: .visible) {
+            Button("Delete", role: .destructive) {
+                Task { await emailService.deleteThreads(ids: [threadId]); dismiss() }
+            }
+            Button("Cancel", role: .cancel) {}
+        }
+    }
+
+    // MARK: - Scrollable Content
+
+    private func scrollContent(_ detail: EmailThreadDetail) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                // Invisible scroll tracker anchored to the top of the scroll content
+                GeometryReader { geo in
+                    Color.clear
+                        .preference(key: ScrollOffsetKey.self,
+                                    value: -geo.frame(in: .named("threadScroll")).origin.y)
+                }
+                .frame(height: 0)
+
+                // Subject row — full width, star button to the right
+                subjectRow(detail)
+
+                // AI Summary card
+                if services.assistantAutomationPolicy.assistantThreadActionsVisible {
+                    summaryCard
+                        .padding(.horizontal, 16)
+                        .padding(.top, 12)
+                }
+
+                // Contextual action buttons — only show buttons relevant to this thread
+                if services.assistantAutomationPolicy.assistantThreadActionsVisible &&
+                   (assistantThread != nil || isLoadingAssistant) {
+                    actionButtonsRow
+                        .padding(.top, 8)
+                }
+
+                // Flat message list
+                messagesSection(detail)
+                    .padding(.top, 16)
+
+                // Extra bottom padding so content isn't hidden behind the reply bar
+                Color.clear.frame(height: 80)
+            }
+        }
+        .coordinateSpace(name: "threadScroll")
+        .onPreferenceChange(ScrollOffsetKey.self) { value in
+            scrollOffset = value
+        }
+    }
+
+    // MARK: - Subject Row
+
+    private func subjectRow(_ detail: EmailThreadDetail) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text(detail.messages.first?.subject ?? "(no subject)")
+                .font(.system(size: 22, weight: .bold))
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Spacer(minLength: 8)
+
+            // Star button to the right of the subject
+            Button {
+                isStarred.toggle()
+                Task { await emailService.toggleStar(ids: [threadId]) }
+            } label: {
+                Image(systemName: isStarred ? "star.fill" : "star")
+                    .font(.system(size: 20, weight: .regular))
+                    .foregroundStyle(isStarred ? Color.yellow : AppTheme.mutedText)
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 4)
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 16)
+        .padding(.bottom, 4)
+    }
+
+    // MARK: - AI Summary Card
+
+    private var summaryCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Summary")
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(.primary)
+
+            if isLoadingAssistant {
+                VStack(alignment: .leading, spacing: 6) {
+                    RoundedRectangle(cornerRadius: 4).fill(AppTheme.surfaceSecondary).frame(height: 13).frame(maxWidth: .infinity)
+                    RoundedRectangle(cornerRadius: 4).fill(AppTheme.surfaceSecondary).frame(height: 13).frame(maxWidth: 220)
+                }
+            } else if let a = assistantThread {
+                Text(a.recommendation.label)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(AppTheme.mutedText)
+                    .textCase(.uppercase)
+
+                // Summary text — capped at 3 lines to keep it concise
+                if !a.summary.isEmpty {
+                    Text(a.summary)
+                        .font(.system(size: 14))
+                        .foregroundStyle(AppTheme.subtleText)
+                        .lineLimit(3)
+                }
+
+                // Action items as compact bullets (max 3)
+                if !a.actionItems.isEmpty {
+                    VStack(alignment: .leading, spacing: 3) {
+                        ForEach(a.actionItems.prefix(3), id: \.self) { item in
+                            HStack(alignment: .top, spacing: 6) {
+                                Text("·")
+                                    .font(.system(size: 14, weight: .bold))
+                                    .foregroundStyle(AppTheme.mutedText)
+                                Text(item)
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(AppTheme.subtleText)
+                                    .lineLimit(2)
+                            }
+                        }
+                    }
+                }
+
+                // Low-confidence note — only when really uncertain
+                if a.confidence < 0.4, !a.reason.isEmpty {
+                    Text(a.reason)
+                        .font(.system(size: 12))
+                        .foregroundStyle(AppTheme.mutedText)
+                        .lineLimit(2)
+                }
+
+                if let person = a.people.first {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(person.displayName)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.primary)
+                        Text(person.relationshipSummary)
+                            .font(.system(size: 12))
+                            .foregroundStyle(AppTheme.mutedText)
+                            .lineLimit(2)
+                    }
+                }
+
+                if !a.changedSinceLastOpen.isEmpty {
+                    VStack(alignment: .leading, spacing: 3) {
+                        ForEach(a.changedSinceLastOpen.prefix(2), id: \.self) { item in
+                            Text(item)
+                                .font(.system(size: 12))
+                                .foregroundStyle(AppTheme.mutedText)
+                                .lineLimit(2)
+                        }
+                    }
+                }
+            } else {
+                Text("No summary available.")
+                    .font(.system(size: 14))
+                    .foregroundStyle(AppTheme.mutedText)
+            }
+
+            // AI attribution line
+            HStack(spacing: 4) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.tint)
+                Text("Ai · \(Date().formatted(date: .abbreviated, time: .shortened))")
+                    .font(.system(size: 12))
+                    .foregroundStyle(AppTheme.mutedText)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(AppTheme.rowStroke, lineWidth: 1)
+        )
+    }
+
+    // MARK: - Action Buttons Row
+    // Contextual — only shows buttons relevant to this thread based on AI flags.
+    // Uses padding-free ScrollView to avoid right-side clipping.
+
+    private var actionButtonsRow: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                // Contextual buttons based on AI analysis flags:
+
+                // Extract tasks — only when AI found extractable tasks
+                if let a = assistantThread, !a.suggestedTasks.isEmpty {
+                    ThreadActionButton(
+                        label: "Extract task",
+                        icon: "checklist",
+                        isPrimary: true
+                    ) {
+                        if let suggestion = a.suggestedTasks.first {
+                            Task { await handleCreateTask(suggestion) }
+                        }
+                    }
+                }
+
+                // Draft reply — only when AI says reply is needed or draft is eligible
+                if let a = assistantThread,
+                   a.replyNeeded || a.existingDraft || a.preparedActions.contains(where: { $0.type == "draft_reply" }) {
+                    ThreadActionButton(
+                        label: a.existingDraft ? "Review draft" : "Draft reply",
+                        icon: "pencil.line",
+                        isPrimary: a.replyNeeded
+                    ) {
+                        Task { await handleDraftReply() }
+                    }
+                }
+
+                // Book follow-up — only when AI detected follow-up needed
+                if let a = assistantThread, a.followUpNeeded {
+                    ThreadActionButton(label: "Book follow-up", icon: "calendar.badge.plus") {
+                        Task {
+                            let subject = detail?.messages.first?.subject ?? "Email"
+                            await handleCreateTask(MailAssistantSuggestedTask(
+                                title: "Follow up: \(subject)",
+                                description: nil,
+                                priority: "medium",
+                                dueDate: nil
+                            ))
+                        }
+                    }
+                }
+
+                // Create event — only when AI detected a meeting request
+                if let a = assistantThread, a.meetingRequested, a.suggestedEvent != nil {
+                    ThreadActionButton(label: "Create event", icon: "calendar.badge.plus") {
+                        Task { await handleCreateEvent() }
+                    }
+                }
+
+                // Ask AI — always available as a fallback action
+                ThreadActionButton(label: "Ask AI", icon: "sparkles") {
+                    openAssistant()
+                }
+            }
+            .padding(.horizontal, 16) // Inner padding so pills aren't clipped
+            .padding(.vertical, 2)
+        }
+    }
+
+    // MARK: - Messages Section
+
+    private func messagesSection(_ detail: EmailThreadDetail) -> some View {
+        VStack(spacing: 0) {
+            ForEach(Array(detail.messages.enumerated()), id: \.element.id) { index, message in
+                // Last message is always expanded; others start collapsed
+                MessageRow(message: message, expandByDefault: index == detail.messages.count - 1)
+
+                if index < detail.messages.count - 1 {
+                    Divider()
+                        .foregroundStyle(AppTheme.divider)
+                        .padding(.leading, 16 + 36 + 10)
+                }
+            }
+        }
+        .padding(.bottom, 24)
+    }
+
+    // MARK: - Bottom Bar
+    // Free-floating reply buttons with a scrim gradient behind them.
+    // No solid background — content fades out beneath the buttons.
+
+    private var bottomBar: some View {
+        VStack(spacing: 0) {
+            // Scrim gradient that fades content out behind the reply buttons
+            LinearGradient(
+                stops: [
+                    .init(color: AppTheme.backgroundTop.opacity(0), location: 0),
+                    .init(color: AppTheme.backgroundTop.opacity(0.7), location: 0.3),
+                    .init(color: AppTheme.backgroundTop, location: 1),
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .frame(height: 30)
+            .allowsHitTesting(false)
+
+            HStack(spacing: 8) {
+                ForEach([
+                    ("arrowshape.turn.up.left", "Reply"),
+                    ("arrowshape.turn.up.left.2", "Reply all"),
+                    ("arrowshape.turn.up.right", "Forward")
+                ], id: \.1) { icon, label in
+                    Button {
+                        composeMode = label == "Reply" ? .reply : label == "Reply all" ? .replyAll : .forward
+                        showCompose = true
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: icon)
+                                .font(.system(size: 12, weight: .semibold))
+                            Text(label)
+                                .font(.system(size: 14, weight: .semibold))
+                        }
+                        .foregroundStyle(.primary)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 44)
+                    }
+                    .buttonStyle(LiquidGlassButtonStyle(cornerRadius: 12))
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 8)
+            .background(AppTheme.backgroundTop)
+        }
+    }
+
+    // MARK: - Action Handlers
+
+    private func loadThread() async {
+        detail = await emailService.loadThread(id: threadId)
+        isLoading = false
+
+        isStarred = detail?.labels?.contains(where: {
+            let n = $0.name.uppercased()
+            return n == "STARRED" || n == "\\STARRED"
+        }) ?? false
+
+        async let markRead: Void = emailService.markAsRead(ids: [threadId])
+        async let assistant = emailService.loadAssistant(threadId: threadId)
+        assistantThread = await assistant
+        isLoadingAssistant = false
+        await markRead
+    }
+
     private func refreshAssistant() async {
+        isLoadingAssistant = true
         assistantThread = await emailService.loadAssistant(threadId: threadId)
+        isLoadingAssistant = false
     }
 
     private func handleCreateTask(_ suggestion: MailAssistantSuggestedTask) async {
         let success = await emailService.createAssistantTask(threadId: threadId, suggestion: suggestion)
-        assistantNotice = success ? "Task created from this email thread." : "Could not create the task."
-        if success {
-            await refreshAssistant()
-        }
+        assistantNotice = success ? "Task created." : "Could not create the task."
+        if success { await refreshAssistant() }
     }
 
     private func handleCreateEvent() async {
         guard let event = assistantThread?.suggestedEvent else {
-            assistantNotice = "No event suggestion is ready for this thread yet."
+            assistantNotice = "No event suggestion available."
             return
         }
-
         let success = await emailService.createAssistantEvent(threadId: threadId, suggestion: event)
-        assistantNotice = success ? "Calendar event created from this thread." : "Could not create the event."
-        if success {
-            await refreshAssistant()
-        }
+        assistantNotice = success ? "Calendar event created." : "Could not create the event."
+        if success { await refreshAssistant() }
     }
 
     private func handleDraftReply() async {
         guard let result = await emailService.generateAssistantDraft(threadId: threadId) else {
-            assistantNotice = "Could not generate a reply draft."
+            assistantNotice = "Could not generate a draft."
             return
         }
-
         if result.created {
-            // Draft was just created — seed compose and open it
             assistantDraftSeed = result.preview
+            composeMode = .reply
             showCompose = true
             await refreshAssistant()
         } else {
-            // Draft already exists or was skipped — surface the reason
-            assistantNotice = result.reason
+            assistantNotice = result.reason.isEmpty ? "Draft already exists or was skipped." : result.reason
         }
     }
 
@@ -124,407 +574,257 @@ struct EmailThreadView: View {
         services.aiChatService.currentPageContext = "Email thread: \(detail?.messages.first?.subject ?? "Message")"
         services.showsAIChat = true
     }
-
-    // MARK: - Thread Content
-
-    private func threadContent(_ detail: EmailThreadDetail) -> some View {
-        VStack(spacing: 0) {
-            threadHeader(detail)
-            scrollBody(detail)
-            replyBar
-        }
-    }
-
-    // MARK: - Header
-
-    private func threadHeader(_ detail: EmailThreadDetail) -> some View {
-        HStack(spacing: 10) {
-            // Back
-            Button { dismiss() } label: {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.primary)
-                    .frame(width: 34, height: 34)
-            }
-            .buttonStyle(LiquidGlassButtonStyle(cornerRadius: 10))
-            .minTouchTarget()
-
-            // Subject
-            VStack(alignment: .leading, spacing: 1) {
-                Text(detail.messages.first?.subject ?? "")
-                    .font(.system(size: 15, weight: .semibold))
-                    .tracking(-0.2)
-                    .lineLimit(1)
-                if let from = detail.messages.first?.from.name {
-                    Text(from)
-                        .font(.system(size: 12, weight: .regular))
-                        .foregroundStyle(AppTheme.mutedText)
-                        .lineLimit(1)
-                }
-            }
-
-            Spacer(minLength: 4)
-
-            // Action buttons — star, mark-unread, archive, trash
-            HStack(spacing: 6) {
-                // Star
-                Button {
-                    isStarred.toggle()
-                    Task { await emailService.toggleStar(ids: [threadId]) }
-                } label: {
-                    Image(systemName: isStarred ? "star.fill" : "star")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(isStarred ? Color.yellow : Color.primary)
-                        .frame(width: 34, height: 34)
-                }
-                .buttonStyle(LiquidGlassButtonStyle(cornerRadius: 10))
-                .minTouchTarget()
-
-                // Mark as unread
-                Button {
-                    isUnread = true
-                    Task {
-                        await emailService.markAsUnread(ids: [threadId])
-                        dismiss()
-                    }
-                } label: {
-                    Image(systemName: "envelope.badge")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(.primary)
-                        .frame(width: 34, height: 34)
-                }
-                .buttonStyle(LiquidGlassButtonStyle(cornerRadius: 10))
-                .minTouchTarget()
-
-                // Visual divider between non-destructive and destructive action groups
-                Divider()
-                    .frame(height: 20)
-
-                // Archive
-                Button {
-                    Task { await emailService.archiveThreads(ids: [threadId]) }
-                    dismiss()
-                } label: {
-                    Image(systemName: "archivebox")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(.primary)
-                        .frame(width: 34, height: 34)
-                }
-                .buttonStyle(LiquidGlassButtonStyle(cornerRadius: 10))
-                .minTouchTarget()
-
-                // Trash — shows confirmation to prevent accidental deletion on touch
-                Button {
-                    showDeleteConfirmation = true
-                } label: {
-                    Image(systemName: "trash")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(AppTheme.danger)
-                        .frame(width: 34, height: 34)
-                }
-                .buttonStyle(LiquidGlassButtonStyle(cornerRadius: 10))
-                .minTouchTarget()
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(.ultraThinMaterial)
-        .overlay(alignment: .bottom) {
-            Divider().foregroundStyle(AppTheme.divider)
-        }
-        .confirmationDialog("Delete this thread?", isPresented: $showDeleteConfirmation, titleVisibility: .visible) {
-            Button("Delete", role: .destructive) {
-                Task { await emailService.deleteThreads(ids: [threadId]) }
-                dismiss()
-            }
-            Button("Cancel", role: .cancel) {}
-        }
-    }
-
-    // MARK: - Scroll Body
-
-    private func scrollBody(_ detail: EmailThreadDetail) -> some View {
-        ScrollView {
-            LazyVStack(spacing: 0) {
-                if let assistant = assistantThread, services.assistantAutomationPolicy.assistantThreadActionsVisible {
-                    MailAssistantCard(
-                        assistant: assistant,
-                        onSummarize: refreshAssistant,
-                        onCreateTask: { suggestion in
-                            await handleCreateTask(suggestion)
-                        },
-                        onCreateEvent: {
-                            await handleCreateEvent()
-                        },
-                        onDraftReply: {
-                            await handleDraftReply()
-                        },
-                        onAskAssistant: openAssistant,
-                        onResearch: openAssistant
-                    )
-                        .padding(.horizontal, 16)
-                        .padding(.top, 16)
-                        .padding(.bottom, 8)
-                }
-
-                ForEach(Array(detail.messages.enumerated()), id: \.element.id) { index, message in
-                    MessageBubble(
-                        message: message,
-                        onCreateTask: {
-                            await handleCreateTask(
-                                MailAssistantSuggestedTask(
-                                    title: message.subject.isEmpty ? "Email follow-up" : "Follow up: \(message.subject)",
-                                    description: message.plainText,
-                                    priority: "medium",
-                                    dueDate: nil
-                                )
-                            )
-                        },
-                        onAskAssistant: openAssistant,
-                        onResearch: openAssistant
-                    )
-                        .padding(.horizontal, 16)
-                        .padding(.top, index == 0 && assistantThread == nil ? 16 : 8)
-                        .padding(.bottom, index == detail.messages.count - 1 ? 16 : 0)
-                }
-            }
-            .padding(.bottom, 8)
-        }
-    }
-
-    // MARK: - Reply Bar
-
-    private var replyBar: some View {
-        VStack(spacing: 0) {
-            Divider().foregroundStyle(AppTheme.divider)
-            HStack(spacing: 10) {
-                Button {
-                    showCompose = true
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "arrowshape.turn.up.left")
-                            .font(.system(size: 13, weight: .semibold))
-                        Text("Reply")
-                            .font(.system(size: 15, weight: .semibold))
-                    }
-                    .foregroundStyle(.primary)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 44)
-                }
-                .buttonStyle(LiquidGlassButtonStyle(cornerRadius: 12))
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .background(.ultraThinMaterial)
-        }
-    }
 }
 
-// MARK: - Mail Assistant Card
+// MARK: - Thread Action Button
 
-private struct MailAssistantCard: View {
-    let assistant: MailAssistantThread
-    let onSummarize: () async -> Void
-    let onCreateTask: (MailAssistantSuggestedTask) async -> Void
-    let onCreateEvent: () async -> Void
-    let onDraftReply: () async -> Void
-    let onAskAssistant: () -> Void
-    let onResearch: () -> Void
+/// Pill button for the horizontal action strip below the summary card.
+private struct ThreadActionButton: View {
+    let label: String
+    let icon: String
+    var isPrimary: Bool = false
+    let action: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Mail Assistant")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.purple)
-                        .textCase(.uppercase)
-                    HStack(spacing: 8) {
-                        AssistantPill(text: "\(Int(assistant.confidence * 100))% confidence")
-                        AssistantPill(text: "\(assistant.riskLevel.rawValue.capitalized) risk")
-                        if assistant.autoSendCandidate {
-                            AssistantPill(text: "Low-risk auto-send")
-                        }
-                    }
-                }
-                Spacer()
-                Button("Summarize") {
-                    Task { await onSummarize() }
-                }
-                .font(.system(size: 12, weight: .semibold))
-                .buttonStyle(.bordered)
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .semibold))
+                Text(label)
+                    .font(.system(size: 13, weight: .semibold))
             }
-
-            HStack(spacing: 8) {
-                if assistant.replyNeeded { AssistantPill(text: "Needs reply") }
-                if assistant.meetingRequested { AssistantPill(text: "Meeting request") }
-                if !assistant.actionItems.isEmpty { AssistantPill(text: "Action items found") }
-                if assistant.followUpNeeded { AssistantPill(text: "Follow-up suggested") }
-            }
-
-            Text(assistant.summary)
-                .font(.system(size: 14))
-                .foregroundStyle(.primary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            Text(assistant.reason)
-                .font(.system(size: 12))
-                .foregroundStyle(AppTheme.mutedText)
-                .fixedSize(horizontal: false, vertical: true)
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    Button("Extract tasks") {
-                        Task {
-                            for suggestion in assistant.suggestedTasks {
-                                await onCreateTask(suggestion)
-                            }
-                        }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(assistant.suggestedTasks.isEmpty)
-
-                    Button("Create event") {
-                        Task { await onCreateEvent() }
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(assistant.suggestedEvent?.startAt == nil || assistant.suggestedEvent?.endAt == nil)
-
-                    Button(assistant.existingDraft ? "Open draft" : "Draft reply") {
-                        Task { await onDraftReply() }
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(!assistant.draftEligible && !assistant.existingDraft)
-
-                    Button("Ask assistant", action: onAskAssistant)
-                        .buttonStyle(.bordered)
-                    Button("Research", action: onResearch)
-                        .buttonStyle(.bordered)
-                }
-            }
-
-            if !assistant.actionItems.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Detected actions")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                    ForEach(assistant.actionItems, id: \.self) { item in
-                        Text("• \(item)")
-                            .font(.system(size: 13))
-                            .foregroundStyle(.primary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-            }
+            .foregroundStyle(isPrimary ? AppTheme.backgroundTop : Color.primary)
+            .padding(.horizontal, 13)
+            .padding(.vertical, 9)
+            .background(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(isPrimary ? Color.primary : AppTheme.surfacePrimary)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .stroke(isPrimary ? Color.clear : AppTheme.rowStroke, lineWidth: 1)
+            )
         }
-        .padding(14)
-        .background(Color.purple.opacity(0.07), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.purple.opacity(0.2), lineWidth: 1)
-        )
+        .buttonStyle(.plain)
     }
 }
 
-private struct AssistantPill: View {
-    let text: String
+// MARK: - Message Row
 
-    var body: some View {
-        Text(text)
-            .font(.system(size: 11, weight: .medium))
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(Color(.systemBackground).opacity(0.7), in: Capsule(style: .continuous))
-    }
-}
-
-// MARK: - Message Bubble
-
-private struct MessageBubble: View {
+/// Flat message row — no card boxing.
+/// Collapsed: avatar + sender + date + snippet preview.
+/// Expanded: sender details + toggleable From/To/Date card + HTML body + attachments.
+private struct MessageRow: View {
     let message: EmailMessage
-    let onCreateTask: () async -> Void
-    let onAskAssistant: () -> Void
-    let onResearch: () -> Void
-    @State private var isExpanded = true
+    let expandByDefault: Bool
+
+    @State private var isExpanded: Bool
+    @State private var showDetails = false
+
+    init(message: EmailMessage, expandByDefault: Bool) {
+        self.message = message
+        self.expandByDefault = expandByDefault
+        self._isExpanded = State(initialValue: expandByDefault)
+    }
+
+    private var toNames: String {
+        message.to.prefix(2).map(\.name).joined(separator: ", ")
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Sender row
+            // Header row (always visible)
             Button {
                 withAnimation(.snappy(duration: 0.18)) { isExpanded.toggle() }
             } label: {
-                HStack(spacing: 10) {
-                    SenderAvatarView(email: message.from.email, name: message.from.name, size: 34)
+                HStack(alignment: .top, spacing: 10) {
+                    SenderAvatarView(email: message.from.email, name: message.from.name, size: 36)
 
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(message.from.name)
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(.primary)
-                        Text(message.date.formatted(date: .abbreviated, time: .shortened))
-                            .font(.system(size: 11))
-                            .foregroundStyle(AppTheme.mutedText)
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(alignment: .firstTextBaseline) {
+                            Text(message.from.name)
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+
+                            Spacer(minLength: 8)
+
+                            Text(message.date.formatted(date: .abbreviated, time: .shortened))
+                                .font(.system(size: 11))
+                                .foregroundStyle(AppTheme.mutedText)
+                        }
+
+                        if !isExpanded {
+                            // Collapsed preview snippet
+                            Text(message.plainText ?? message.subject)
+                                .font(.system(size: 13))
+                                .foregroundStyle(AppTheme.mutedText)
+                                .lineLimit(1)
+                        } else {
+                            // "To: names" row — tap to toggle details card
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.15)) { showDetails.toggle() }
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Text("To: \(toNames.isEmpty ? "Me" : toNames)")
+                                        .font(.system(size: 12))
+                                        .foregroundStyle(AppTheme.mutedText)
+                                    Image(systemName: showDetails ? "chevron.up" : "chevron.down")
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(AppTheme.mutedText)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
-
-                    Spacer()
-
-                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(AppTheme.mutedText)
                 }
-                .padding(.horizontal, 14)
+                .padding(.horizontal, 16)
                 .padding(.vertical, 12)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
-            // Body
+            // Expanded content
             if isExpanded {
-                Divider()
-                    .foregroundStyle(AppTheme.divider)
-                    .padding(.horizontal, 14)
+                // From / To / Date details card (toggled by "To:" row)
+                if showDetails {
+                    detailsCard
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 10)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
 
+                // Email body
                 if !message.body.isEmpty {
                     ExpandingEmailHTMLView(html: message.body)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 12)
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 8)
                 } else if let plain = message.plainText, !plain.isEmpty {
                     Text(plain)
-                        .font(.system(size: 14))
+                        .font(.system(size: 15))
                         .foregroundStyle(.primary)
+                        .lineSpacing(2)
                         .fixedSize(horizontal: false, vertical: true)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 12)
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 12)
+                        .textSelection(.enabled)
                 } else {
                     Text("No content")
-                        .font(.system(size: 13))
+                        .font(.system(size: 14))
                         .foregroundStyle(AppTheme.mutedText)
                         .italic()
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 12)
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 12)
                 }
 
-                HStack(spacing: 8) {
-                    Button("Task") {
-                        Task { await onCreateTask() }
-                    }
-                    .buttonStyle(.bordered)
-
-                    Button("Ask AI", action: onAskAssistant)
-                        .buttonStyle(.bordered)
-
-                    Button("Research", action: onResearch)
-                        .buttonStyle(.bordered)
+                // Attachments
+                if let attachments = message.attachments, !attachments.isEmpty {
+                    attachmentsView(attachments)
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 14)
                 }
-                .font(.system(size: 12, weight: .semibold))
-                .padding(.horizontal, 14)
-                .padding(.bottom, 12)
             }
         }
-        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    // MARK: - Details Card
+
+    private var detailsCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            detailRow(label: "From", value: message.from.name, secondary: message.from.email)
+            Divider().foregroundStyle(AppTheme.divider).padding(.leading, 12)
+            if let first = message.to.first {
+                detailRow(label: "To", value: first.name, secondary: first.email)
+                Divider().foregroundStyle(AppTheme.divider).padding(.leading, 12)
+            }
+            detailRow(label: "Date", value: message.date.formatted(date: .long, time: .shortened), secondary: nil)
+        }
+        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .stroke(AppTheme.rowStroke, lineWidth: 1)
         )
+    }
+
+    private func detailRow(label: String, value: String, secondary: String?) -> some View {
+        HStack(spacing: 8) {
+            Text(label)
+                .font(.system(size: 12))
+                .foregroundStyle(AppTheme.mutedText)
+                .frame(width: 36, alignment: .leading)
+            Text(value)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+            if let secondary {
+                Spacer(minLength: 4)
+                Text(secondary)
+                    .font(.system(size: 12))
+                    .foregroundStyle(AppTheme.mutedText)
+                    .lineLimit(1)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+    }
+
+    // MARK: - Attachments
+
+    private func attachmentsView(_ attachments: [EmailAttachment]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(attachments) { attachment in
+                HStack(spacing: 10) {
+                    // File type icon
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(attachmentColor(for: attachment.mimeType))
+                        .frame(width: 36, height: 36)
+                        .overlay(
+                            Text(attachmentLabel(for: attachment.mimeType))
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundStyle(.white)
+                        )
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(attachment.filename)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                        Text(formatSize(attachment.size))
+                            .font(.system(size: 11))
+                            .foregroundStyle(AppTheme.mutedText)
+                    }
+                    Spacer()
+                }
+                .padding(10)
+                .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(AppTheme.rowStroke, lineWidth: 1)
+                )
+            }
+        }
+    }
+
+    private func attachmentColor(for mimeType: String) -> Color {
+        if mimeType.contains("pdf") { return .red }
+        if mimeType.contains("image") { return .blue }
+        if mimeType.contains("word") || mimeType.contains("document") { return Color(red: 0.18, green: 0.44, blue: 0.78) }
+        if mimeType.contains("sheet") || mimeType.contains("excel") { return .green }
+        return .gray
+    }
+
+    private func attachmentLabel(for mimeType: String) -> String {
+        if mimeType.contains("pdf") { return "PDF" }
+        if mimeType.contains("image") { return "IMG" }
+        if mimeType.contains("word") { return "DOC" }
+        if mimeType.contains("sheet") || mimeType.contains("excel") { return "XLS" }
+        return "FILE"
+    }
+
+    private func formatSize(_ bytes: Int) -> String {
+        if bytes < 1024 { return "\(bytes) B" }
+        if bytes < 1024 * 1024 { return "\(bytes / 1024) KB" }
+        return String(format: "%.1f MB", Double(bytes) / (1024 * 1024))
     }
 }
 
@@ -580,7 +880,7 @@ struct EmailHTMLView: UIViewRepresentable {
             html, body { margin: 0; padding: 0; overflow-x: hidden; }
             body {
                 font-family: -apple-system, system-ui, sans-serif;
-                font-size: 15px; line-height: 1.55;
+                font-size: 15px; line-height: 1.6;
                 color: #e0e0e0; background: transparent;
                 word-wrap: break-word; overflow-wrap: break-word;
             }

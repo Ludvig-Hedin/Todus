@@ -2,6 +2,7 @@ import SwiftUI
 import SwiftData
 import Speech
 import AVFoundation
+import AppKit
 
 // MARK: - Assistant Display Mode
 
@@ -21,25 +22,153 @@ private struct PromptTemplate: Identifiable {
     let text: String
 }
 
+// MARK: - MacAudioEngineHolder
+
+/// Holds AVAudioEngine + SFSpeechRecognizer in an @unchecked Sendable container
+/// so heavy audio operations (inputNode, prepare, start) can run off the main
+/// actor without Swift 6 Sendable conformance issues.
+private final class MacAudioEngineHolder: @unchecked Sendable {
+    let speechRecognizer: SFSpeechRecognizer? = SFSpeechRecognizer()
+    private var audioEngine: AVAudioEngine?
+    private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
+    private var recognitionTask: SFSpeechRecognitionTask?
+    private var hasInstalledTap = false
+    private let lock = NSLock()
+
+    /// Prepares and starts the audio engine entirely off the main thread.
+    /// AVAudioEngine.inputNode, prepare(), and start() can collectively block
+    /// for several seconds while hardware initializes — running them off-main
+    /// prevents a visible UI freeze.
+    func setupAndStartEngine() async throws {
+        var engine: AVAudioEngine?
+        var request: SFSpeechAudioBufferRecognitionRequest?
+        var didInstallTap = false
+
+        do {
+            let newEngine = AVAudioEngine()
+            let newRequest = SFSpeechAudioBufferRecognitionRequest()
+            newRequest.shouldReportPartialResults = true
+            engine = newEngine
+            request = newRequest
+
+            let inputNode = newEngine.inputNode
+            let format = inputNode.outputFormat(forBus: 0)
+
+            guard format.channelCount > 0, format.sampleRate > 0 else {
+                throw NSError(
+                    domain: "VoiceInput",
+                    code: -1,
+                    userInfo: [NSLocalizedDescriptionKey: "Invalid audio input format"]
+                )
+            }
+
+            inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
+                newRequest.append(buffer)
+            }
+            didInstallTap = true
+
+            newEngine.prepare()
+            try newEngine.start()
+
+            withLock {
+                audioEngine = newEngine
+                recognitionRequest = newRequest
+                hasInstalledTap = true
+            }
+        } catch {
+            if didInstallTap {
+                engine?.inputNode.removeTap(onBus: 0)
+            }
+            if let engine, engine.isRunning {
+                engine.stop()
+            }
+            request?.endAudio()
+            withLock {
+                audioEngine = nil
+                recognitionRequest = nil
+                recognitionTask = nil
+                hasInstalledTap = false
+            }
+            throw error
+        }
+    }
+
+    func cleanup() {
+        withLock {
+            recognitionTask?.cancel()
+            recognitionTask = nil
+            stopCaptureLocked()
+            audioEngine = nil
+            recognitionRequest = nil
+        }
+    }
+
+    func stopCapture() {
+        withLock {
+            stopCaptureLocked()
+            audioEngine = nil
+            recognitionRequest = nil
+        }
+    }
+
+    func currentRecognitionRequest() -> SFSpeechAudioBufferRecognitionRequest? {
+        withLock { recognitionRequest }
+    }
+
+    func currentRecognitionTask() -> SFSpeechRecognitionTask? {
+        withLock { recognitionTask }
+    }
+
+    func setRecognitionTask(_ task: SFSpeechRecognitionTask?) {
+        withLock {
+            recognitionTask = task
+        }
+    }
+
+    func clearRecognitionTask() {
+        withLock {
+            recognitionTask = nil
+        }
+    }
+
+    private func stopCaptureLocked() {
+        recognitionRequest?.endAudio()
+        guard let engine = audioEngine else { return }
+        if engine.isRunning {
+            engine.stop()
+        }
+        if hasInstalledTap {
+            engine.inputNode.removeTap(onBus: 0)
+            hasInstalledTap = false
+        }
+    }
+
+    private func withLock<T>(_ body: () throws -> T) rethrows -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return try body()
+    }
+}
+
 // MARK: - MacVoiceController
 
 /// Speech-to-text controller for macOS. Manages AVAudioEngine + SFSpeechRecognizer lifecycle.
-/// Recognition callbacks hop to the main actor to mutate state safely.
+/// Delegates heavy audio work to MacAudioEngineHolder which runs off the main actor.
 @MainActor
 @Observable
 private final class MacVoiceController {
     enum RecordingState: Equatable { case idle, recording, transcribing }
     var recordingState: RecordingState = .idle
 
-    // Audio objects are owned by the main actor; callbacks hop back to update them.
-    private var audioEngine: AVAudioEngine?
-    private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
-    private var recognitionTask: SFSpeechRecognitionTask?
+    private let holder = MacAudioEngineHolder()
     private var latestTranscript = ""
-    private let speechRecognizer: SFSpeechRecognizer? = SFSpeechRecognizer()
+    private var didFinishTranscription = false
 
     /// Request speech + mic permissions, then begin recording.
     func startRecording(onFinished: @escaping @MainActor @Sendable (String) -> Void) {
+        guard recordingState == .idle else { return }
+        latestTranscript = ""
+        didFinishTranscription = false
         Task {
             // Request speech authorization
             let authStatus = await withCheckedContinuation { (cont: CheckedContinuation<SFSpeechRecognizerAuthorizationStatus, Never>) in
@@ -53,52 +182,46 @@ private final class MacVoiceController {
             let micGranted = await AVCaptureDevice.requestAccess(for: .audio)
             guard micGranted else { return }
 
-            beginAudioSession(onFinished: onFinished)
+            await beginAudioSession(onFinished: onFinished)
         }
     }
 
     /// Stop recording; transcription finalises asynchronously. 3s timeout fallback.
     func stopRecording(onFinished: @escaping @MainActor @Sendable (String) -> Void) {
+        guard recordingState == .recording else { return }
         recordingState = .transcribing
-        audioEngine?.stop()
-        audioEngine?.inputNode.removeTap(onBus: 0)
-        recognitionRequest?.endAudio()
-        audioEngine = nil
-        recognitionRequest = nil
+        holder.stopCapture()
 
         let captured = latestTranscript
-        let capturedTask = recognitionTask
+        let capturedTask = holder.currentRecognitionTask()
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
             guard let self, self.recordingState == .transcribing else { return }
             capturedTask?.cancel()
-            self.recognitionTask = nil
+            self.holder.clearRecognitionTask()
             self.latestTranscript = ""
             self.recordingState = .idle
-            if !captured.isEmpty { onFinished(captured) }
+            if !captured.isEmpty { self.finishTranscription(captured, onFinished: onFinished) }
         }
     }
 
-    private func beginAudioSession(onFinished: @escaping @MainActor @Sendable (String) -> Void) {
-        guard let recognizer = speechRecognizer, recognizer.isAvailable else { return }
-
-        let engine = AVAudioEngine()
-        let request = SFSpeechAudioBufferRecognitionRequest()
-        request.shouldReportPartialResults = true
-
-        let inputNode = engine.inputNode
-        let format = inputNode.outputFormat(forBus: 0)
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
-            Task { @MainActor [weak self] in
-                self?.recognitionRequest?.append(buffer)
-            }
-        }
+    private func beginAudioSession(onFinished: @escaping @MainActor @Sendable (String) -> Void) async {
+        guard holder.speechRecognizer?.isAvailable == true else { return }
 
         do {
-            engine.prepare()
-            try engine.start()
-        } catch { return }
+            // All engine setup runs off-main via the holder to prevent UI freeze.
+            try await holder.setupAndStartEngine()
+        } catch {
+            holder.cleanup()
+            return
+        }
 
-        recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
+        guard let request = holder.currentRecognitionRequest(),
+              let recognizer = holder.speechRecognizer else {
+            holder.cleanup()
+            return
+        }
+
+        let recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
             let text = result?.bestTranscription.formattedString ?? ""
             let isFinal = result?.isFinal == true || error != nil
             Task { @MainActor [weak self] in
@@ -107,16 +230,25 @@ private final class MacVoiceController {
                 if isFinal {
                     let finalText = self.latestTranscript
                     self.latestTranscript = ""
-                    self.recognitionTask = nil
+                    self.holder.clearRecognitionTask()
                     self.recordingState = .idle
-                    if !finalText.isEmpty { onFinished(finalText) }
+                    if !finalText.isEmpty { self.finishTranscription(finalText, onFinished: onFinished) }
                 }
             }
         }
+        holder.setRecognitionTask(recognitionTask)
 
-        audioEngine = engine
-        recognitionRequest = request
         recordingState = .recording
+    }
+
+    private func finishTranscription(
+        _ text: String,
+        onFinished: @escaping @MainActor @Sendable (String) -> Void
+    ) {
+        guard !didFinishTranscription else { return }
+        guard !text.isEmpty else { return }
+        didFinishTranscription = true
+        onFinished(text)
     }
 }
 
@@ -175,8 +307,27 @@ struct MacAssistantPanel: View {
     @State private var renameText = ""
     // Share conversation panel — creates a public shareable link
     @State private var showsSharePanel = false
+    @State private var showEmailSettingsFallbackAlert = false
+
+    // Panel content mode — drives which content the panel shows
+    // Groups live here (inside the panel), NOT in the sidebar
+    enum PanelContent: Equatable {
+        case chat
+        case groupList
+        case groupChat(String)  // groupId
+    }
+    @State private var panelContent: PanelContent = .chat
 
     private var chatService: MacAIChatService { services.aiChatService }
+
+    /// Whether EventKit calendar access has been granted.
+    private var calendarConnected: Bool {
+        services.calendarService.canReadEvents()
+    }
+    /// Whether email is connected and authenticated.
+    private var emailConnected: Bool {
+        services.emailService.hasConnection
+    }
 
     private var filteredConversations: [MacChatConversation] {
         chatService.savedConversations.filter { convo in
@@ -261,14 +412,32 @@ struct MacAssistantPanel: View {
             panelHeader
             Divider().opacity(0.3)
 
-            if chatService.messages.isEmpty {
-                emptyStateView
-            } else {
-                conversationView
-            }
+            // Content area switches between chat, group list, and group chat
+            switch panelContent {
+            case .chat:
+                if chatService.messages.isEmpty {
+                    emptyStateView
+                } else {
+                    conversationView
+                }
+                Divider().opacity(0.3)
+                inputSection
 
-            Divider().opacity(0.3)
-            inputSection
+            case .groupList:
+                ScrollView {
+                    MacGroupListSection(
+                        onSelect: { groupId in
+                            panelContent = .groupChat(groupId)
+                        },
+                        activeGroupId: nil
+                    )
+                    .padding(12)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            case .groupChat(let groupId):
+                MacGroupChatView(groupId: groupId)
+            }
         }
         .background(panelBackground)
         .clipShape(RoundedRectangle(cornerRadius: displayMode == .floating ? 14 : 0, style: .continuous))
@@ -327,7 +496,7 @@ struct MacAssistantPanel: View {
             do {
                 try await services.syncSharedFolders(in: modelContext)
             } catch {
-                print("[MacAssistantPanel] Failed to sync shared folders: \(error)")
+                AppLogger.shared.log("[MacAssistantPanel] Failed to sync shared folders: \(error)")
             }
         }
         // Auto-save conversation when panel hides
@@ -420,41 +589,80 @@ struct MacAssistantPanel: View {
 
     private var panelHeader: some View {
         HStack(spacing: 8) {
-            // History button (left, matching iOS placement)
-            Button { showsHistory.toggle() } label: {
-                Image(systemName: "clock.arrow.trianglehead.counterclockwise.rotate.90")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.primary.opacity(0.7))
-                    .frame(width: 26, height: 26)
+            // Back button (shown when in group list or group chat)
+            // History button (shown in chat mode)
+            if panelContent == .chat {
+                Button { showsHistory.toggle() } label: {
+                    Image(systemName: "clock.arrow.trianglehead.counterclockwise.rotate.90")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.primary.opacity(0.7))
+                        .frame(width: 26, height: 26)
+                }
+                .buttonStyle(.plain)
+                .help("Conversation History")
+            } else {
+                Button {
+                    withAnimation(.snappy(duration: 0.2)) { panelContent = .chat }
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.primary.opacity(0.7))
+                        .frame(width: 26, height: 26)
+                }
+                .buttonStyle(.plain)
+                .help("Back to Chat")
             }
-            .buttonStyle(.plain)
-            .help("Conversation History")
 
             Spacer(minLength: 4)
 
-            // Title (center)
-            Text(chatService.chatTitle ?? "AI Assistant")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.primary.opacity(0.85))
-                .lineLimit(1)
-                .frame(maxWidth: 180)
+            // Title — changes based on panel content
+            Group {
+                switch panelContent {
+                case .chat:
+                    Text(chatService.chatTitle ?? "AI Assistant")
+                case .groupList:
+                    Text("Group Chats")
+                case .groupChat:
+                    Text(services.groupChatService.currentGroupDetails?.name ?? "Group")
+                }
+            }
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(.primary.opacity(0.85))
+            .lineLimit(1)
+            .frame(maxWidth: 180)
 
             Spacer(minLength: 4)
 
-            // New chat button
-            Button {
-                withAnimation(.snappy(duration: 0.2)) { chatService.clearHistory() }
-            } label: {
-                Image(systemName: "square.and.pencil")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.primary.opacity(0.7))
-                    .frame(width: 26, height: 26)
+            // Groups button — toggles the group list (only shown in chat mode)
+            if panelContent == .chat {
+                Button {
+                    withAnimation(.snappy(duration: 0.2)) { panelContent = .groupList }
+                } label: {
+                    Image(systemName: "person.2")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.primary.opacity(0.7))
+                        .frame(width: 26, height: 26)
+                }
+                .buttonStyle(.plain)
+                .help("Group Chats")
             }
-            .buttonStyle(.plain)
-            .help("New Conversation")
 
-            // Ellipsis menu — conversation actions (matching iOS menu items)
-            Menu {
+            // New chat button (chat mode only)
+            if panelContent == .chat {
+                Button {
+                    withAnimation(.snappy(duration: 0.2)) { chatService.clearHistory() }
+                } label: {
+                    Image(systemName: "square.and.pencil")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.primary.opacity(0.7))
+                        .frame(width: 26, height: 26)
+                }
+                .buttonStyle(.plain)
+                .help("New Conversation")
+            }
+
+            // Ellipsis menu — conversation actions (chat mode only)
+            if panelContent == .chat { Menu {
                 // Rename
                 Button {
                     renameText = chatService.chatTitle ?? ""
@@ -512,6 +720,7 @@ struct MacAssistantPanel: View {
             }
             .menuStyle(.borderlessButton)
             .frame(width: 26)
+            } // end if panelContent == .chat (ellipsis menu)
 
             // Toggle floating / side pane
             Button {
@@ -559,6 +768,48 @@ struct MacAssistantPanel: View {
 
     // MARK: - Empty State (matches iOS: sparkle icon, heading, suggestions, show more, prompt library)
 
+    /// Compact connect buttons shown when the active section's service pool is empty.
+    private var macConnectServicesPrompt: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Connect a service to get started")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(MacTheme.mutedText)
+            HStack(spacing: 8) {
+                if !calendarConnected && ["calendar", "home"].contains(currentSelection.category) {
+                    Button {
+                        Task { _ = await services.calendarService.requestAccess() }
+                    } label: {
+                        Label("Connect Calendar", systemImage: "calendar")
+                            .font(.system(size: 11, weight: .medium))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 5)
+                            .background(Color.blue.opacity(0.1), in: Capsule())
+                            .foregroundStyle(.blue)
+                    }
+                    .buttonStyle(.plain)
+                }
+                if !emailConnected && ["email", "home"].contains(currentSelection.category) {
+                    Button {
+                        openInternetAccountsSettings()
+                    } label: {
+                        Label("Connect Email", systemImage: "envelope")
+                            .font(.system(size: 11, weight: .medium))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 5)
+                            .background(Color.orange.opacity(0.1), in: Capsule())
+                            .foregroundStyle(.orange)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .alert("Configure Email in System Settings", isPresented: $showEmailSettingsFallbackAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Open System Settings > Internet Accounts to connect an email account, then return to Todus.")
+        }
+    }
+
     private var emptyStateView: some View {
         VStack(spacing: 0) {
             Spacer()
@@ -585,6 +836,13 @@ struct MacAssistantPanel: View {
                 // Suggestions — 3 default, up to 10 when expanded
                 VStack(alignment: .leading, spacing: 0) {
                     let pool = contextualSuggestionsPool
+                    // When pool is empty the current section's service isn't connected — show CTA
+                    if pool.isEmpty {
+                        macConnectServicesPrompt
+                            .padding(.horizontal, 12)
+                            .padding(.top, 2)
+                            .padding(.bottom, 8)
+                    }
                     let shown = suggestionsExpanded ? pool : Array(pool.prefix(3))
 
                     ForEach(shown, id: \.text) { suggestion in
@@ -664,13 +922,22 @@ struct MacAssistantPanel: View {
                             message: message,
                             allTasks: Array(allTasks),
                             canRetry: chatService.canRetry(assistantMessageID: message.id),
+                            calendarConnected: calendarConnected,
+                            emailConnected: emailConnected,
                             onRetry: {
                                 chatService.retryMessage(
                                     assistantMessageID: message.id,
                                     allTasks: Array(allTasks),
                                     modelContext: modelContext
                                 )
-                            }
+                            },
+                            onConnect: { service in
+                                if service == "calendar" {
+                                    Task { _ = await services.calendarService.requestAccess() }
+                                }
+                                // email: user needs to go to system settings — no in-app action on macOS
+                            },
+                            onOpenEmailSettings: openInternetAccountsSettings
                         )
                         .id(message.id)
                     }
@@ -786,15 +1053,26 @@ struct MacAssistantPanel: View {
                 .padding(.bottom, 2)
             }
 
-            // Text field
-            TextField("Ask, search or make anything…", text: $inputText, axis: .vertical)
-                .textFieldStyle(.plain)
-                .font(.system(size: 13))
-                .lineLimit(1...6)
-                .padding(.horizontal, 14)
-                .padding(.top, (pageContextAttached || !pendingAttachments.isEmpty) ? 4 : 10)
-                .padding(.bottom, 6)
-                .onSubmit { sendMessage() }
+            // Multiline text input: Return = newline, Cmd+Return = send.
+            // Using NSViewRepresentable (NSTextView) instead of SwiftUI's TextField because
+            // TextField.onSubmit fires on ALL Return presses with no way to distinguish
+            // Shift/Option+Return, preventing users from entering line breaks.
+            ZStack(alignment: .topLeading) {
+                MacChatTextInput(text: $inputText, onSend: sendMessage)
+                    .padding(.horizontal, 14)
+                    .padding(.top, (pageContextAttached || !pendingAttachments.isEmpty) ? 4 : 10)
+                    .padding(.bottom, 6)
+
+                // Placeholder shown when input is empty
+                if inputText.isEmpty {
+                    Text("Ask, search or make anything…")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.tertiary)
+                        .padding(.horizontal, 14)
+                        .padding(.top, (pageContextAttached || !pendingAttachments.isEmpty) ? 4 : 10)
+                        .allowsHitTesting(false)
+                }
+            }
 
             // Bottom toolbar: [+ attach] [config] | spacer | [mic] [send/stop]
             HStack(spacing: 4) {
@@ -842,7 +1120,7 @@ struct MacAssistantPanel: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(isEmpty)
-                    .help("Send (⏎)")
+                    .help("Send (⌘↵)")
                     .transition(.scale.combined(with: .opacity))
                 }
             }
@@ -1047,6 +1325,8 @@ struct MacAssistantPanel: View {
 
         switch currentSelection.category {
         case "email":
+            // Only show email suggestions when inbox is connected
+            guard emailConnected else { return [] }
             pinned = [
                 ("envelope.open",           "Summarize my recent emails"),
                 ("arrowshape.turn.up.left", "Draft a reply to my latest email"),
@@ -1061,6 +1341,8 @@ struct MacAssistantPanel: View {
                 ("magnifyingglass",            "Search for emails about a specific topic"),
             ]
         case "calendar":
+            // Only show calendar suggestions when EventKit access is granted
+            guard calendarConnected else { return [] }
             pinned = [
                 ("clock",                "What's on my calendar today?"),
                 ("calendar.badge.plus",  "Find free focus time this week"),
@@ -1104,18 +1386,20 @@ struct MacAssistantPanel: View {
             ]
         default: // home
             pinned = [
-                ("sun.max",                  "Give me a morning briefing"),
-                ("sparkle",                  "What should I focus on right now?"),
-                ("calendar.badge.checkmark", "Triage my tasks and calendar for today"),
-            ]
-            extended = [
+                ("sun.max",    "Give me a morning briefing"),
+                ("sparkle",    "What should I focus on right now?"),
+            ] + (calendarConnected
+                 ? [("calendar.badge.checkmark", "Triage my tasks and calendar for today")]
+                 : [("list.bullet", "Review my task list")])
+            var extBase: [(icon: String, text: String)] = [
                 ("moon.stars",                    "End-of-day review — what did I accomplish?"),
                 ("chart.line.uptrend.xyaxis",     "Weekly retrospective — what went well?"),
                 ("flag",                          "What are my top priorities this week?"),
                 ("rocket",                        "Help me kick off a new project"),
-                ("envelope.open",                 "Any important emails I should handle first?"),
                 ("brain.head.profile",            "Block focus time and clear my schedule"),
             ]
+            if emailConnected { extBase.append(("envelope.open", "Any important emails I should handle first?")) }
+            extended = extBase
         }
 
         // Shuffle extended pool deterministically with seed
@@ -1152,6 +1436,7 @@ struct MacAssistantPanel: View {
         case .email: return "envelope.fill"
         case .calendar: return "calendar"
         case .meetings: return "video.fill"
+        case .docs: return "doc.text.fill"
         }
     }
 
@@ -1184,6 +1469,15 @@ struct MacAssistantPanel: View {
         case "google/gemini-3.1-flash-lite-preview":  return "Gemini 3.1 Flash Lite"
         case "google/gemini-3-flash-preview":         return "Gemini 3 Flash"
         default: return model
+        }
+    }
+
+    private func openInternetAccountsSettings() {
+        guard let url = URL(
+            string: "x-apple.systempreferences:com.apple.Internet-Accounts-Settings.extension"
+        ), NSWorkspace.shared.open(url) else {
+            showEmailSettingsFallbackAlert = true
+            return
         }
     }
 }
@@ -1287,12 +1581,15 @@ private struct MacMessageBubble: View {
     let message: MacChatMessage
     let allTasks: [TaskRecord]
     let canRetry: Bool
+    var calendarConnected: Bool = true
+    var emailConnected: Bool = true
     var onRetry: () -> Void = {}
+    var onConnect: ((String) -> Void)?
+    var onOpenEmailSettings: () -> Void = {}
 
     @State private var showActions = false
     @State private var didCopy = false
     @State private var thumbsState: ThumbsState? = nil
-    @State private var showFullMarkdown = false
 
     private enum ThumbsState { case up, down }
 
@@ -1331,6 +1628,8 @@ private struct MacMessageBubble: View {
             .font(.system(size: 13, weight: .medium))
             .lineSpacing(2)
             .foregroundStyle(.primary)
+            // fixedSize ensures the bubble expands vertically for multi-line messages
+            .fixedSize(horizontal: false, vertical: true)
             .textSelection(.enabled)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
@@ -1363,52 +1662,72 @@ private struct MacMessageBubble: View {
             if !message.content.isEmpty {
                 assistantContent
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .onChange(of: message.isStreaming) { _, isStreaming in
-                        if !isStreaming {
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                                withAnimation(.easeIn(duration: 0.3)) { showFullMarkdown = true }
-                            }
-                        }
+            }
+
+            // Connect CTA — when AI mentions a disconnected service
+            if !message.isStreaming && !message.content.isEmpty {
+                let lc = message.content.lowercased()
+                let mentionsCalendarConnectionIssue =
+                    lc.contains("calendar not connected") ||
+                    lc.contains("not connected to calendar") ||
+                    lc.contains("calendar isn't connected") ||
+                    lc.contains("calendar is not connected")
+                let mentionsEmailConnectionIssue =
+                    lc.contains("email not connected") ||
+                    lc.contains("not connected to email") ||
+                    lc.contains("not connected to inbox") ||
+                    lc.contains("inbox not connected") ||
+                    lc.contains("email isn't connected") ||
+                    lc.contains("email is not connected")
+
+                if !calendarConnected && mentionsCalendarConnectionIssue {
+                    macConnectBanner(label: "Connect Calendar", icon: "calendar", color: .blue) {
+                        onConnect?("calendar")
                     }
-                    .onAppear {
-                        if !message.isStreaming { showFullMarkdown = true }
+                }
+                if !emailConnected && mentionsEmailConnectionIssue {
+                    macConnectBanner(label: "Connect Email", icon: "envelope", color: .orange) {
+                        onOpenEmailSettings()
                     }
+                }
             }
         }
         .animation(.snappy(duration: 0.3), value: message.searchState)
         .animation(.snappy(duration: 0.3), value: message.sources.count)
     }
 
+    @ViewBuilder
+    private func macConnectBanner(label: String, icon: String, color: Color, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Image(systemName: icon).font(.system(size: 11, weight: .medium))
+                Text(label).font(.system(size: 12, weight: .medium))
+                Image(systemName: "arrow.right").font(.system(size: 10, weight: .medium))
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(color.opacity(0.1), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .foregroundStyle(color)
+        }
+        .buttonStyle(.plain)
+        .padding(.top, 2)
+        .transition(.opacity.combined(with: .scale(scale: 0.95)))
+    }
+
     // MARK: Assistant Content — Markdown
+    // Always uses full markdown rendering so headings/bullets/code appear immediately
+    // during streaming. The typewriter effect comes from tokens being appended.
 
     @ViewBuilder
     private var assistantContent: some View {
-        Group {
-            if showFullMarkdown {
-                fullMarkdownText(message.content)
-                    .transition(.opacity)
-            } else {
-                inlineMarkdownText(message.content)
-                    .transition(.opacity)
+        fullMarkdownText(message.content)
+            .overlay(alignment: .bottomLeading) {
+                // Blinking cursor during streaming
+                if message.isStreaming { MacBlinkingCursor() }
             }
-        }
-        .animation(.easeIn(duration: 0.3), value: showFullMarkdown)
-        .font(.system(size: 13))
-        .lineSpacing(3)
-        .foregroundStyle(.primary.opacity(0.85))
-        .textSelection(.enabled)
-    }
-
-    @ViewBuilder
-    private func inlineMarkdownText(_ content: String) -> some View {
-        if let attributed = try? AttributedString(
-            markdown: content,
-            options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        ) {
-            Text(attributed)
-        } else {
-            Text(content)
-        }
+            .lineSpacing(3)
+            .foregroundStyle(.primary.opacity(0.85))
+            .textSelection(.enabled)
     }
 
     @ViewBuilder
@@ -1709,6 +2028,107 @@ private struct SuggestionRow: View {
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
         .animation(.easeOut(duration: 0.1), value: isHovered)
+    }
+}
+
+// MARK: - MacBlinkingCursor
+
+/// Animated blinking cursor shown at the end of the last AI text chunk during streaming.
+private struct MacBlinkingCursor: View {
+    @State private var visible = true
+
+    var body: some View {
+        Rectangle()
+            .frame(width: 2, height: 13)
+            .foregroundStyle(.primary.opacity(0.6))
+            .opacity(visible ? 1 : 0)
+            .onAppear {
+                withAnimation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true)) {
+                    visible = false
+                }
+            }
+            .offset(x: 2, y: 1)
+    }
+}
+
+// MARK: - MacChatTextInput
+// NSTextView-based multiline input: Return = newline, Cmd+Return = send.
+// Replaces SwiftUI's TextField which fires onSubmit on ALL Return presses,
+// making it impossible for users to enter line breaks.
+
+private struct MacChatTextInput: NSViewRepresentable {
+    @Binding var text: String
+    let onSend: () -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scrollView = NSScrollView()
+        scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = true
+        scrollView.drawsBackground = false
+        scrollView.borderType = .noBorder
+
+        let textView = MacChatNSTextView()
+        textView.onSend = onSend
+        textView.delegate = context.coordinator
+        textView.isRichText = false
+        textView.allowsUndo = true
+        textView.font = .systemFont(ofSize: 13)
+        textView.backgroundColor = .clear
+        textView.drawsBackground = false
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.autoresizingMask = [.width]
+        textView.textContainerInset = NSSize(width: 0, height: 0)
+        textView.textContainer?.widthTracksTextView = true
+        textView.textContainer?.lineFragmentPadding = 0
+
+        scrollView.documentView = textView
+        return scrollView
+    }
+
+    func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        guard let textView = scrollView.documentView as? MacChatNSTextView else { return }
+        textView.onSend = onSend
+        // Only sync when text changed externally (e.g., cleared after send)
+        if textView.string != text {
+            textView.string = text
+        }
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSScrollView, context: Context) -> CGSize? {
+        guard let textView = nsView.documentView as? NSTextView,
+              let width = proposal.width, width > 0 else { return nil }
+        textView.sizeToFit()
+        let contentHeight = textView.frame.height
+        // Grow from 1 line (≈18pt) up to max 120pt, then scroll
+        let height = min(max(contentHeight, 18), 120)
+        return CGSize(width: width, height: height)
+    }
+
+    final class Coordinator: NSObject, NSTextViewDelegate {
+        @Binding var text: String
+        init(text: Binding<String>) { _text = text }
+
+        func textDidChange(_ notification: Notification) {
+            guard let tv = notification.object as? NSTextView else { return }
+            text = tv.string
+        }
+    }
+}
+
+private final class MacChatNSTextView: NSTextView {
+    var onSend: (() -> Void)?
+
+    override func keyDown(with event: NSEvent) {
+        // Cmd+Return = send the message
+        if event.keyCode == 36 /* kVK_Return */ && event.modifierFlags.contains(.command) {
+            onSend?()
+            return
+        }
+        // Plain Return (and all other keys) = natural NSTextView behavior (newline)
+        super.keyDown(with: event)
     }
 }
 

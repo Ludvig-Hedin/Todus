@@ -22,6 +22,7 @@ import type { Outputs } from '@zero/server/trpc';
 import { Button } from '@/components/ui/button';
 import { useThread } from '@/hooks/use-threads';
 import { Badge } from '@/components/ui/badge';
+import { useSettings } from '@/hooks/use-settings';
 import { authProxy } from '@/lib/auth-proxy';
 import type { Route } from './+types/page';
 import { Link } from 'react-router';
@@ -30,6 +31,7 @@ import { useMemo } from 'react';
 
 type Task = Outputs['tasks']['list']['tasks'][number];
 type CalendarEvent = Outputs['calendar']['events']['events'][number];
+type AssistantBriefing = Outputs['assistant']['getBriefing'];
 
 // Auth guard
 export async function clientLoader({ request }: Route.ClientLoaderArgs) {
@@ -105,7 +107,18 @@ export default function HomePage() {
   const { data: session } = useSession();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
+  const { data: settings } = useSettings();
   const firstName = session?.user?.name?.split(' ')[0] ?? '';
+  const assistantPolicy = settings?.settings.assistantAutomationPolicy;
+  const showHomeBriefing =
+    assistantPolicy?.briefingEnabled !== false && assistantPolicy?.showHomeBriefing !== false;
+
+  const briefingQuery = useQuery(
+    trpc.assistant.getBriefing.queryOptions(undefined, {
+      enabled: showHomeBriefing,
+      staleTime: 60 * 1000,
+    }),
+  );
 
   // Tasks — fetch all, filter client-side for "today or pending"
   const { data: tasksData, isLoading: tasksLoading } = useQuery(
@@ -170,6 +183,23 @@ export default function HomePage() {
         </div>
 
         <div className="flex flex-col gap-4">
+          {showHomeBriefing && (
+            <Section className="space-y-4">
+              <SectionHeader icon={Inbox} title="Assistant Briefing" />
+              {briefingQuery.isLoading ? (
+                <div className="flex flex-col gap-2">
+                  {['briefing-skeleton-1', 'briefing-skeleton-2', 'briefing-skeleton-3'].map(
+                    (key) => (
+                      <div key={key} className="bg-muted/50 h-12 animate-pulse rounded-lg" />
+                    ),
+                  )}
+                </div>
+              ) : briefingQuery.data ? (
+                <AssistantBriefingBlock briefing={briefingQuery.data} />
+              ) : null}
+            </Section>
+          )}
+
           {/* ── Today's Events ────────────────────────────────────────────── */}
           <Section>
             <SectionHeader
@@ -414,4 +444,162 @@ function CalendarEventRow({ event }: { event: CalendarEvent }) {
   }
 
   return content;
+}
+
+function AssistantBriefingBlock({ briefing }: { briefing: AssistantBriefing }) {
+  const priorityCards = [
+    briefing.today.urgentReply
+      ? {
+          title: 'Urgent reply',
+          detail: briefing.today.urgentReply.title,
+          href: briefing.today.urgentReply.threadId
+            ? `/mail/inbox?threadId=${briefing.today.urgentReply.threadId}`
+            : null,
+        }
+      : null,
+    briefing.today.topTask
+      ? {
+          title: 'Top task',
+          detail: briefing.today.topTask.title,
+          href: '/mail/tasks',
+        }
+      : null,
+    briefing.today.nextEvent
+      ? {
+          title: 'Next event',
+          detail: briefing.today.nextEvent.title,
+          href: `/mail/meetings/${briefing.today.nextEvent.id}`,
+        }
+      : null,
+  ].filter(Boolean) as Array<{ title: string; detail: string; href: string | null }>;
+
+  const groupedQueues = [
+    { title: 'Needs You', items: briefing.needsYou, empty: 'No reply or decision blockers right now.' },
+    { title: 'Waiting On', items: briefing.waitingOn, empty: 'Nothing currently tracked as waiting on someone else.' },
+    { title: 'Prepared', items: briefing.prepared, empty: 'No prepared drafts or actions waiting for approval.' },
+  ];
+
+  return (
+    <div className="space-y-4">
+      {priorityCards.length > 0 && (
+        <div className="grid gap-2 sm:grid-cols-3">
+          {priorityCards.map((card) => {
+            const content = (
+              <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-3">
+                <p className="text-muted-foreground text-[10px] font-semibold uppercase tracking-[0.1em]">
+                  {card.title}
+                </p>
+                <p className="mt-1 text-[13px] font-medium tracking-[-0.01em] text-foreground">
+                  {card.detail}
+                </p>
+              </div>
+            );
+
+            return card.href ? (
+              <Link key={card.title} to={card.href} className="block">
+                {content}
+              </Link>
+            ) : (
+              <div key={card.title}>{content}</div>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="grid gap-3 lg:grid-cols-3">
+        {groupedQueues.map((section) => (
+          <div key={section.title} className="space-y-2">
+            <div className="flex items-center justify-between">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+                {section.title}
+              </p>
+              <Badge variant="outline" className="h-5 rounded-full px-1.5 text-[10px]">
+                {section.items.length}
+              </Badge>
+            </div>
+            {section.items.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-border/60 bg-muted/10 px-3 py-3 text-[12px] leading-5 text-muted-foreground">
+                {section.empty}
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {section.items.slice(0, 3).map((item) => {
+                  const href =
+                    'threadId' in item && item.threadId
+                      ? `/mail/inbox?threadId=${item.threadId}`
+                      : 'meetingId' in item && item.meetingId
+                        ? `/mail/meetings/${item.meetingId}`
+                        : null;
+                  const content = (
+                    <div className="rounded-lg border border-border/60 bg-muted/15 px-3 py-3">
+                      <p className="text-[13px] font-medium tracking-[-0.01em] text-foreground">
+                        {item.title}
+                      </p>
+                      <p className="text-muted-foreground mt-1 text-[12px] leading-5">
+                        {item.summary}
+                      </p>
+                    </div>
+                  );
+                  return href ? (
+                    <Link key={item.id} to={href} className="block">
+                      {content}
+                    </Link>
+                  ) : (
+                    <div key={item.id}>{content}</div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {(briefing.upcomingMeetings.length > 0 || briefing.changedSinceLastTime.length > 0) && (
+        <div className="grid gap-3 lg:grid-cols-2">
+          <div className="space-y-2">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+              Upcoming
+            </p>
+            <div className="space-y-2">
+              {briefing.upcomingMeetings.slice(0, 3).map((meeting) => (
+                <Link
+                  key={meeting.id}
+                  to={`/mail/meetings/${meeting.id}`}
+                  className="block rounded-lg border border-border/60 bg-muted/15 px-3 py-3"
+                >
+                  <p className="text-[13px] font-medium tracking-[-0.01em] text-foreground">
+                    {meeting.title}
+                  </p>
+                  <p className="text-muted-foreground mt-1 text-[12px] leading-5">
+                    {format(new Date(meeting.startsAt), 'PPp')}
+                  </p>
+                </Link>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+              Changed Since Last Time
+            </p>
+            <div className="space-y-2">
+              {briefing.changedSinceLastTime.slice(0, 4).map((item) => (
+                <div
+                  key={`${item.type}-${item.id}`}
+                  className="rounded-lg border border-border/60 bg-muted/15 px-3 py-3"
+                >
+                  <p className="text-[13px] font-medium tracking-[-0.01em] text-foreground">
+                    {item.title}
+                  </p>
+                  <p className="text-muted-foreground mt-1 text-[12px] leading-5">
+                    {item.summary}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }

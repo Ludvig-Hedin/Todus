@@ -24,11 +24,13 @@ import { sessionsRouter } from './routes/sessions';
 import { sharingRouter } from './routes/sharing';
 import { groupsRouter } from './routes/groups';
 import { mailAssistantRouter } from './routes/mail-assistant';
+import { assistantRouter } from './routes/assistant';
 import { docsRouter } from './routes/docs';
 import { aiRouter } from './routes/ai';
 import { router } from './trpc';
 
 export const appRouter = router({
+  assistant: assistantRouter,
   ai: aiRouter,
   avatar: avatarRouter,
   bimi: bimiRouter,
