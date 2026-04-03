@@ -1,5 +1,11 @@
 # Project Changelog
 
+## [2026-04-03] Fix — macOS Dock icon crop
+
+### macOS (`apps/macos`)
+- **TodusMac/Resources/Assets.xcassets/AppIcon.appiconset**: Regenerated the macOS app icon set from the iOS 1024 px master artwork so the Dock icon uses the same padding and no longer appears cropped.
+- **apps/ios/Todus/status_macos.md**: Added a build note documenting the icon asset correction.
+
 ## [2026-04-03] Fix — Cloudflare web build cleanup
 
 ### Web (`apps/mail`)
@@ -14,15 +20,23 @@
 - **iOS MeetingsService.swift**: Calendar sync and bot scheduling now reload meetings with the current search/status filters preserved, so the visible list stays consistent with the active search field.
 - **MacMeetingsView.swift**: Reordered grouped meeting sections to `Today → This Week → Upcoming → Earlier`, matching iOS and prioritizing the most time-sensitive meetings first.
 
-## [2026-04-02] Fix — Native app session expiration after inactivity
+## [2026-04-03] Enhancement — Production-grade session persistence
 
-Root cause: `/auth/mobile-token` minted JWTs via Better Auth's `jwt()` plugin which defaults to **15-minute expiration**. After 15 minutes, the JWT expired and all three backend resolution strategies failed (JWT verify, DB lookup, cookie rehydration). No working token refresh mechanism existed — `attemptSilentRefresh()` called `/api/auth/get-session` which can't resolve bearer tokens.
+Upgraded session durations to match production apps (Gmail, Slack, Twitter). Sessions now last 90 days with daily rolling extension — users stay signed in indefinitely as long as they use the app within any 90-day window.
 
 ### Server (`apps/server`)
-- **main.ts**: `/auth/mobile-token` now returns the raw session token (`session.session.token`) instead of minting a JWT. Raw tokens are stored in the session table with 30-day expiry and resolve through Better Auth's full pipeline (session extension via `updateAge`, token rotation via `set-auth-token` header).
+- **auth.ts**: Session `expiresIn` increased from 30 → 90 days. `updateAge` changed from 3 days → 1 day for more frequent session extension. `cookieCache.maxAge` aligned to 90 days. JWT expiration set to 90 days (was 15 minutes default).
+- **main.ts**: Updated `/auth/mobile-token` comments to document 90-day JWT configuration.
 
 ### Shared Auth (`packages/swift-auth`)
-- **AuthService.swift**: `attemptSilentRefresh()` now calls `/api/auth/me` (which resolves bearer tokens) instead of `/api/auth/get-session` (which only works with cookies).
+- **AuthService.swift**: `attemptSilentRefresh()` now calls `/api/auth/me` (which resolves bearer tokens) instead of `/api/auth/get-session` (which only works with cookies). Improved all user-facing error messages to be friendlier and less technical.
+
+### Native Apps (`apps/ios`, `apps/macos`)
+- **TodosAPIClient.swift** (both platforms): Improved session expired error message.
+
+## [2026-04-02] Fix — Native app session expiration after inactivity
+
+Root cause: Better Auth's `jwt()` plugin defaults to **15-minute expiration**. JWTs minted by `/auth/mobile-token` expired almost immediately, causing native app sign-outs.
 
 ### Additional fixes
 - **MacAppServices.swift**: Shared folder sync now propagates local fetch failures instead of silently falling back to an empty folder list.

@@ -60,6 +60,7 @@ Native macOS shell scaffolding is now in place under `apps/macos` as a standalon
 
 ## Build Notes
 
+- April 3, 2026: regenerated the macOS `AppIcon.appiconset` from the iOS 1024 px master so the Dock icon uses the same padding as iOS and the logo no longer reads as cropped.
 - March 30, 2026: removed the explicit `AppIcon.icns` plist/resource wiring so the macOS app now uses the asset catalog `AppIcon` target directly, matching the iOS artwork and avoiding the cropped launcher icon.
 - March 30, 2026: wired the shared AI profile settings into the macOS settings sheet and assistant prompt pipeline so `Context about you` and `Custom instructions` are now persisted through backend settings.
 - March 30, 2026: wired the mini calendar sidebar tap through to the calendar view's selected date so tapping a day now jumps the main calendar to that date instead of only opening the calendar section.
@@ -67,4 +68,4 @@ Native macOS shell scaffolding is now in place under `apps/macos` as a standalon
 
 ---
 
-## Last Updated: 2026-03-30
+## Last Updated: 2026-04-03
