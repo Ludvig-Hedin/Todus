@@ -9,6 +9,7 @@ This app currently provides:
 - a single main window
 - sidebar navigation shell
 - native services for auth, email, calendar, and AI wired through the shared Swift auth package
+- first-run onboarding for Gmail, calendar access, and launch-page selection
 - content panes for Home, Tasks, Email, and Calendar
 - a floating Assistant entry point
 - settings and account actions, including a profile menu entry that opens the settings panel
