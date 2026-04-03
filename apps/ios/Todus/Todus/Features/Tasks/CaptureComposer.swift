@@ -511,6 +511,10 @@ struct PasteHandlingTextInput: UIViewRepresentable {
             if textView.textColor == UIColor.placeholderText {
                 textView.text = ""
                 textView.textColor = UIColor.label
+                // Reset intrinsic size and scroll offset so the cursor starts at
+                // the top-left (0,0), matching where the placeholder text was rendered.
+                textView.invalidateIntrinsicContentSize()
+                textView.setContentOffset(.zero, animated: false)
             }
             onFocusChange?(true)
         }
@@ -647,7 +651,16 @@ final class PasteInterceptingTextView: UITextView {
     var maxContentHeight: CGFloat = 0
 
     override var intrinsicContentSize: CGSize {
-        // Measure the height required for the current content
+        // Keep the empty composer compact; the placeholder should behave like a
+        // single-line input instead of inheriting a tall measured height.
+        if textColor == UIColor.placeholderText || (text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true) {
+            let lineHeight = font?.lineHeight ?? 20
+            let verticalInsets = textContainerInset.top + textContainerInset.bottom
+            let height = ceil(lineHeight + verticalInsets)
+            return CGSize(width: UIView.noIntrinsicMetric, height: height)
+        }
+
+        // Measure the height required for the current content.
         let measured = sizeThatFits(
             CGSize(width: frame.width > 0 ? frame.width : UIScreen.main.bounds.width,
                    height: .greatestFiniteMagnitude)

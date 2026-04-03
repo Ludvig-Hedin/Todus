@@ -13,6 +13,7 @@
 | CalendarKit SPM | ✅ Done | richardtop/CalendarKit v1.1.7 |
 | Compiles | ✅ Done | Clean Xcode build now succeeds after fixing recursive SwiftUI types, calendar sendability, and the remaining voice/AI sendability issues |
 | Runs on device | ✅ Done | Installs and launches on physical iPhone |
+| Hang mitigation pass | ✅ Done | EventKit pruning removed from hot fetch paths, startup/tab work throttled, attachment thumbnails now decode lazily off the UI path, and signposts/hang watchdog added for Instruments |
 
 ## Auth Status
 
@@ -99,6 +100,7 @@
 | Feature | Status | Notes |
 |---------|--------|-------|
 | Chat UI | ✅ Ported | From MiniTaskApp |
+| Chat composer height | ✅ Fixed | Empty RichComposerInput now resolves to a compact single-line intrinsic height instead of stretching tall in conversation view |
 | Task tools | ✅ Ported | create, update, delete |
 | Email tools | ⬜ Not started | |
 | Calendar tools | ⬜ Not started | |
@@ -126,6 +128,7 @@
 
 ## Build Notes
 
+- April 3, 2026: shipped a consolidated iOS UX remediation pass. Native button hit targets were tightened across shared SwiftUI button styles and header controls without changing layout; Home gained explicit loading states, partial-setup guidance, stronger section actions, and a less dominant `More pages` section; Tasks search/sort now behaves consistently across all modes with clearer mode guidance and `By Date` naming; Email now exposes primary mailbox chips, clearer search-state feedback, a short message preview before AI summary/actions in thread detail, and a first-use folder-switch hint; Gmail/Reminders/tab-bar onboarding now shows progress with lighter, more skippable copy; the floating tab bar gets a one-time coachmark overlay aligned with the `More pages` wording; and Create now guides natural-language input more clearly.
 - March 30, 2026: fixed the remaining iOS compile blockers in `CardViews.swift`, `AIChatView.swift`, `VoiceChatViewModel.swift`, and `VoiceInputButton.swift`; verified `xcodebuild -project apps/ios/Todus/Todus.xcodeproj -scheme Todus -destination 'generic/platform=iOS Simulator' build` succeeds.
 - March 30, 2026: added the shared AI profile settings flow (`Context about you` + `Custom instructions`) to iOS, wired the form to backend `userSettings`, and injected the profile into every AI request path.
 - March 30, 2026: tightened AI chat failure handling on iOS and macOS so auth/session issues now surface as explicit messages instead of the generic "Connection lost briefly" banner; macOS build verified with `xcodebuild -project apps/macos/TodusMac.xcodeproj -scheme TodusMac build`.
@@ -142,4 +145,4 @@
 
 ---
 
-## Last Updated: 2026-03-30
+## Last Updated: 2026-04-03
