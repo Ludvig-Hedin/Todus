@@ -330,7 +330,7 @@ const Thread = memo(
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent side={index === 0 ? 'bottom' : 'top'} className="mb-1">
-                    {m['common.actions.Bin']()}
+                    {m['common.actions.bin']()}
                   </TooltipContent>
                 </Tooltip>
               ) : null}
@@ -646,7 +646,7 @@ const Draft = memo(({ message, index }: { message: { id: string }; index: number
               </Button>
             </TooltipTrigger>
             <TooltipContent side={index === 0 ? 'bottom' : 'top'} className="mb-1">
-              {m['common.actions.Bin']()}
+              {m['common.actions.bin']()}
             </TooltipContent>
           </Tooltip>
         </div>

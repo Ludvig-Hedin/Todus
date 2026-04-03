@@ -38,7 +38,7 @@
       "failedToModifyFavorites": "Wijzigen van favorieten mislukt",
       "movingToBin": "Verplaatsen naar prullenbak...",
       "movedToBin": "Verplaatst naar prullenbak",
-      "Bin": "Prullenbak",
+      "bin": "Prullenbak",
       "failedToMoveToBin": "Verplaatsen naar prullenbak mislukt",
       "markingAsRead": "Markeren als gelezen...",
       "markingAsUnread": "Markeren als ongelezen...",
@@ -165,13 +165,8 @@
       "attachments": "Bijlagen",
       "attachmentCount": [
         {
-          "declarations": [
-            "input count",
-            "local countPlural = count: plural"
-          ],
-          "selectors": [
-            "countPlural"
-          ],
+          "declarations": ["input count", "local countPlural = count: plural"],
+          "selectors": ["countPlural"],
           "match": {
             "countPlural=0": "bijlagen",
             "countPlural=one": "bijlage",
@@ -181,13 +176,8 @@
       ],
       "fileCount": [
         {
-          "declarations": [
-            "input count",
-            "local countPlural = count: plural"
-          ],
-          "selectors": [
-            "countPlural"
-          ],
+          "declarations": ["input count", "local countPlural = count: plural"],
+          "selectors": ["countPlural"],
           "match": {
             "countPlural=0": "bestanden",
             "countPlural=one": "bestand",
@@ -259,13 +249,8 @@
       "search": "Notities zoeken...",
       "noteCount": [
         {
-          "declarations": [
-            "input count",
-            "local countPlural = count: plural"
-          ],
-          "selectors": [
-            "countPlural"
-          ],
+          "declarations": ["input count", "local countPlural = count: plural"],
+          "selectors": ["countPlural"],
           "match": {
             "countPlural=0": "Notities toevoegen",
             "countPlural=one": "# notitie",
@@ -327,13 +312,8 @@
     "mail": {
       "replies": [
         {
-          "declarations": [
-            "input count",
-            "local countPlural = count: plural"
-          ],
-          "selectors": [
-            "countPlural"
-          ],
+          "declarations": ["input count", "local countPlural = count: plural"],
+          "selectors": ["countPlural"],
           "match": {
             "countPlural=0": "reacties",
             "countPlural=one": "# antwoord",
@@ -427,8 +407,8 @@
       "settings": "Instellingen",
       "voice": "Spraakassistent",
       "snoozed": "Uitgesteld",
-      "meetings": "Meetings",
-      "docs": "Docs"
+      "meetings": "Vergaderingen",
+      "docs": "Documenten"
     },
     "settings": {
       "general": "Algemeen",

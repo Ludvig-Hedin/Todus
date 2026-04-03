@@ -16,16 +16,25 @@ struct MacTasksView: View {
     @State private var selectedTask: TaskRecord? = nil
     @State private var visibleTasks: [TaskRecord] = []
     @State private var completedTasks: [TaskRecord] = []
+    var onCreateItem: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Toolbar: view mode + search + sort
-            toolbar
-                .padding(.bottom, MacTheme.spacing12)
+            VStack(alignment: .leading, spacing: MacTheme.spacing6) {
+                toolbar
+                toolbarHint
+            }
+            .padding(.bottom, MacTheme.spacing12)
 
             // Folder strip
             if !folders.isEmpty {
                 folderStrip
+                    .padding(.bottom, MacTheme.spacing12)
+            }
+
+            if viewMode != .list {
+                completedVisibilityNote
                     .padding(.bottom, MacTheme.spacing12)
             }
 
@@ -41,7 +50,7 @@ struct MacTasksView: View {
             do {
                 try await services.syncSharedFolders(in: modelContext)
             } catch {
-                print("[MacTasksView] Failed to sync shared folders: \(error)")
+                AppLogger.shared.log("[MacTasksView] Failed to sync shared folders: \(error)")
             }
         }
         .onChange(of: allTasks) { recomputeTasks() }
@@ -60,6 +69,23 @@ struct MacTasksView: View {
         HStack(spacing: MacTheme.spacing8) {
             // View mode picker
             viewModePicker
+
+            Button {
+                onCreateItem()
+            } label: {
+                Label("Add Task", systemImage: "plus")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(MacTheme.textPrimary)
+                    .padding(.horizontal, MacTheme.spacing12)
+                    .padding(.vertical, MacTheme.spacing6)
+                    .background(MacTheme.surfaceCard, in: RoundedRectangle(cornerRadius: MacTheme.buttonRadius, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: MacTheme.buttonRadius, style: .continuous)
+                            .stroke(MacTheme.cardBorder, lineWidth: 0.5)
+                    )
+            }
+            .buttonStyle(.plain)
+            .interactiveHitTarget(expansion: 6)
 
             Spacer()
 
@@ -83,6 +109,7 @@ struct MacTasksView: View {
                             .foregroundStyle(MacTheme.mutedText)
                     }
                     .buttonStyle(.plain)
+                    .interactiveHitTarget(expansion: 6)
                 }
             }
             .padding(.horizontal, MacTheme.spacing8)
@@ -103,17 +130,62 @@ struct MacTasksView: View {
                     }
                 }
             } label: {
-                Image(systemName: "arrow.up.arrow.down")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(MacTheme.mutedText)
-                    .frame(width: 28, height: 28)
-                    .background(MacTheme.surfaceCard, in: Circle())
-                    .overlay(Circle().stroke(MacTheme.cardBorder, lineWidth: 0.5))
+                HStack(spacing: MacTheme.spacing6) {
+                    Text(sortOrder.title)
+                        .font(.system(size: 11, weight: .semibold))
+                    Image(systemName: "arrow.up.arrow.down")
+                        .font(.system(size: 12, weight: .medium))
+                }
+                .foregroundStyle(MacTheme.mutedText)
+                .padding(.horizontal, MacTheme.spacing12)
+                .padding(.vertical, MacTheme.spacing6)
+                .background(
+                    MacTheme.surfaceCard,
+                    in: RoundedRectangle(cornerRadius: MacTheme.buttonRadius, style: .continuous)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: MacTheme.buttonRadius, style: .continuous)
+                        .stroke(MacTheme.cardBorder, lineWidth: 0.5)
+                )
             }
             .menuStyle(.borderlessButton)
+            .interactiveHitTarget(expansion: 6)
             .tint(Color.primary.opacity(0.7))
-            .frame(width: 28)
         }
+    }
+
+    private var toolbarHint: some View {
+        Text(toolbarHintText)
+            .font(MacTheme.cardSubtitleFont())
+            .foregroundStyle(MacTheme.textSecondary)
+    }
+
+    private var toolbarHintText: String {
+        switch viewMode {
+        case .list:
+            return "List is the fastest way to triage active and completed work."
+        case .board:
+            return "Board helps you move active tasks across stages."
+        case .table:
+            return "Table is best when you need to compare status, priority, and due dates."
+        }
+    }
+
+    private var completedVisibilityNote: some View {
+        HStack(spacing: MacTheme.spacing6) {
+            Image(systemName: "info.circle")
+                .font(.system(size: 11, weight: .medium))
+            Text("Completed tasks stay visible in List.")
+                .font(MacTheme.cardSubtitleFont())
+        }
+        .foregroundStyle(MacTheme.mutedText)
+        .padding(.horizontal, MacTheme.spacing12)
+        .padding(.vertical, MacTheme.spacing8)
+        .background(MacTheme.emptyStateSurface, in: RoundedRectangle(cornerRadius: MacTheme.buttonRadius, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: MacTheme.buttonRadius, style: .continuous)
+                .stroke(MacTheme.cardBorder, lineWidth: 0.5)
+        )
     }
 
     private var viewModePicker: some View {
@@ -124,18 +196,24 @@ struct MacTasksView: View {
                         viewMode = mode
                     }
                 } label: {
-                    Image(systemName: mode.systemImage)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(viewMode == mode ? MacTheme.textPrimary : MacTheme.mutedText)
-                        .frame(width: 30, height: 24)
-                        .background(
-                            viewMode == mode
-                                ? MacTheme.surfaceHover
-                                : Color.clear,
-                            in: Capsule(style: .continuous)
-                        )
+                    HStack(spacing: 6) {
+                        Image(systemName: mode.systemImage)
+                            .font(.system(size: 12, weight: .medium))
+                        Text(mode.shortTitle)
+                            .font(.system(size: 11, weight: .semibold))
+                    }
+                    .foregroundStyle(viewMode == mode ? MacTheme.textPrimary : MacTheme.mutedText)
+                    .frame(minWidth: 68)
+                    .frame(height: 28)
+                    .background(
+                        viewMode == mode
+                            ? MacTheme.surfaceHover
+                            : Color.clear,
+                        in: Capsule(style: .continuous)
+                    )
                 }
                 .buttonStyle(.plain)
+                .interactiveHitTarget(expansion: 6)
             }
         }
         .padding(2)
@@ -181,6 +259,7 @@ struct MacTasksView: View {
                 )
         }
         .buttonStyle(.plain)
+        .interactiveHitTarget(expansion: 6)
     }
 
     // MARK: - Task Content
@@ -402,9 +481,21 @@ struct MacTasksView: View {
                 .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(MacTheme.textSecondary)
 
-            Text(searchText.isEmpty ? "Tasks you create will appear here." : "Try a different search term.")
+            Text(searchText.isEmpty ? "Use Add Task to capture something new right from this page." : "Try a different search term.")
                 .font(MacTheme.cardSubtitleFont())
                 .foregroundStyle(MacTheme.mutedText)
+
+            Button(searchText.isEmpty ? "Add Task" : "Clear search") {
+                if searchText.isEmpty {
+                    onCreateItem()
+                } else {
+                    searchText = ""
+                }
+            }
+            .buttonStyle(.plain)
+            .interactiveHitTarget(expansion: 6)
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(MacTheme.accent)
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -440,6 +531,7 @@ struct MacTasksView: View {
             return tasks.sorted {
                 switch ($0.dueDate, $1.dueDate) {
                 case let (a?, b?): return a < b
+                case (nil, nil): return $0.createdAt > $1.createdAt
                 case (nil, _): return false
                 case (_, nil): return true
                 }
@@ -497,16 +589,20 @@ struct MacTaskRow: View {
                                 color: dueDateColor(dueDate)
                             )
                         }
-                        if let folder = task.folder {
-                            metaTag(text: folder.name, icon: "folder", color: MacTheme.mutedText)
-                        }
                         if task.priority != .none {
                             metaTag(text: task.priority.title, icon: "flag.fill", color: priorityColor(task.priority))
+                        }
+                        if let folder = task.folder {
+                            metaTag(text: folder.name, icon: "folder", color: MacTheme.mutedText.opacity(0.9))
                         }
                     }
                 }
 
                 Spacer(minLength: 0)
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(MacTheme.mutedText.opacity(isHovered ? 0.9 : 0.45))
             }
             .padding(.horizontal, MacTheme.spacing12)
             .padding(.vertical, MacTheme.spacing8)
@@ -554,6 +650,7 @@ struct MacTaskRow: View {
 struct MacTaskDetailSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    @Query(sort: \FolderRecord.name) private var folders: [FolderRecord]
     let task: TaskRecord
 
     @State private var editedTitle: String = ""
@@ -562,6 +659,7 @@ struct MacTaskDetailSheet: View {
     @State private var editedPriority: AppTaskPriority = .none
     @State private var editedDueDate: Date? = nil
     @State private var hasDueDate = false
+    @State private var selectedFolderID: UUID? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -571,7 +669,7 @@ struct MacTaskDetailSheet: View {
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(MacTheme.textPrimary)
                 Spacer()
-                Button("Done") {
+                Button("Save") {
                     saveChanges()
                     dismiss()
                 }
@@ -665,16 +763,22 @@ struct MacTaskDetailSheet: View {
                         }
                     }
 
-                    // Metadata
-                    if let folder = task.folder {
-                        HStack(spacing: MacTheme.spacing6) {
-                            Image(systemName: "folder")
-                                .font(.system(size: 11))
-                                .foregroundStyle(MacTheme.mutedText)
-                            Text(folder.name)
-                                .font(MacTheme.cardSubtitleFont())
-                                .foregroundStyle(MacTheme.textSecondary)
+                    VStack(alignment: .leading, spacing: MacTheme.spacing4) {
+                        Text("FOLDER")
+                            .font(MacTheme.sectionHeaderFont())
+                            .foregroundStyle(MacTheme.mutedText)
+                            .tracking(0.8)
+                        Picker("Folder", selection: Binding(
+                            get: { selectedFolderID?.uuidString ?? "" },
+                            set: { selectedFolderID = UUID(uuidString: $0) }
+                        )) {
+                            Text("Inbox").tag("")
+                            ForEach(folders) { folder in
+                                Text(folder.name).tag(folder.id.uuidString)
+                            }
                         }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
                     }
 
                     HStack(spacing: MacTheme.spacing6) {
@@ -696,6 +800,7 @@ struct MacTaskDetailSheet: View {
             editedPriority = task.priority
             editedDueDate = task.dueDate
             hasDueDate = task.dueDate != nil
+            selectedFolderID = task.folderID
         }
     }
 
@@ -705,6 +810,8 @@ struct MacTaskDetailSheet: View {
         task.status = editedStatus
         task.priority = editedPriority
         task.dueDate = hasDueDate ? editedDueDate : nil
+        task.folderID = selectedFolderID
+        task.folder = folders.first(where: { $0.id == selectedFolderID })
         task.updatedAt = .now
         try? modelContext.save()
     }

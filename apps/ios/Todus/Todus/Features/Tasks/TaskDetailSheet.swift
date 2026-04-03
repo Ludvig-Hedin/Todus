@@ -20,6 +20,9 @@ struct TaskDetailSheet: View {
     @State private var dueDate: Date
     @State private var selectedFolderID: UUID?
     @State private var newFolderName = ""
+    @State private var isCreatingFolder = false
+    @State private var folderCreationErrorMessage = ""
+    @State private var showFolderCreationErrorAlert = false
     @State private var attachmentNames: [String]
     @State private var isShowingAttachmentOptions = false
     @State private var isShowingFilePicker = false
@@ -42,11 +45,14 @@ struct TaskDetailSheet: View {
     var body: some View {
         NavigationStack {
             List {
-                basicsSection
+                taskSection
+                progressSection
                 scheduleSection
                 organizationSection
                 attachmentsSection
             }
+            .listStyle(.insetGrouped)
+            .listRowSpacing(10)
             .scrollContentBackground(.hidden)
             .background(AppTheme.backgroundTop)
             .navigationTitle("Edit Task")
@@ -62,7 +68,7 @@ struct TaskDetailSheet: View {
                     Button("Save") {
                         saveTask()
                     }
-                    .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(trimmedTitle.isEmpty)
                 }
             }
         }
@@ -92,18 +98,15 @@ struct TaskDetailSheet: View {
             allowsMultipleSelection: true
         ) { result in
             guard case .success(let urls) = result else { return }
-            var savedNames: [String] = []
-            for url in urls {
-                guard url.startAccessingSecurityScopedResource() else { continue }
-                defer { url.stopAccessingSecurityScopedResource() }
-                if let data = try? Data(contentsOf: url) {
-                    let ext = url.pathExtension.isEmpty ? "dat" : url.pathExtension
-                    if let filename = AttachmentService.shared.saveData(data, fileExtension: ext) {
+            Task {
+                var savedNames: [String] = []
+                for url in urls {
+                    if let filename = await AttachmentService.shared.importFile(at: url) {
                         savedNames.append(filename)
                     }
                 }
+                appendAttachments(savedNames)
             }
-            appendAttachments(savedNames)
         }
         .fullScreenCover(isPresented: $isShowingCamera) {
             TaskDetailCameraPicker { image in
@@ -128,44 +131,57 @@ struct TaskDetailSheet: View {
             }
             selectedPhotoItem = nil
         }
+        .alert("Unable to Create Folder", isPresented: $showFolderCreationErrorAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(folderCreationErrorMessage)
+        }
     }
 
-    private var basicsSection: some View {
-        Section("Basics") {
+    private var taskSection: some View {
+        Section("Task") {
             TextField("Title", text: $title)
-
             TextField("Description", text: $taskDescription, axis: .vertical)
                 .lineLimit(3...8)
+        }
+        .listRowBackground(AppTheme.sheetCardFill)
+    }
 
+    private var progressSection: some View {
+        Section("Progress") {
             Picker("Status", selection: $status) {
                 ForEach(TaskStatus.allCases) { value in
                     Text(value.title).tag(value)
                 }
             }
+            .pickerStyle(.segmented)
 
             Picker("Priority", selection: $priority) {
                 ForEach(AppTaskPriority.allCases) { value in
-                    Text(value.title).tag(value)
+                    Label(value.title, systemImage: prioritySystemImage(value))
+                        .tag(value)
                 }
             }
+            .pickerStyle(.menu)
         }
+        .listRowBackground(AppTheme.sheetCardFill)
     }
 
     private var scheduleSection: some View {
-        Section("Deadline") {
-            Toggle("Has deadline", isOn: $hasDueDate)
+        Section("Schedule") {
+            Toggle("Due date", isOn: $hasDueDate)
                 .tint(Color.blue)
 
             if hasDueDate {
                 DatePicker("Due", selection: $dueDate)
             }
         }
+        .listRowBackground(AppTheme.sheetCardFill)
     }
 
     private var organizationSection: some View {
         Section {
-            // Pick an existing folder
-            Picker("Move to folder", selection: Binding(
+            Picker("Folder", selection: Binding(
                 get: { selectedFolderID?.uuidString ?? "" },
                 set: { newValue in
                     selectedFolderID = UUID(uuidString: newValue)
@@ -176,54 +192,83 @@ struct TaskDetailSheet: View {
                     Text(folder.name).tag(folder.id.uuidString as String)
                 }
             }
+            .onChange(of: selectedFolderID) { _, _ in
+                isCreatingFolder = false
+                newFolderName = ""
+            }
 
-            // Create a new folder inline — type a name then tap the + button
-            HStack(spacing: 8) {
-                Image(systemName: "folder.badge.plus")
-                    .font(.system(size: 14))
-                    .foregroundStyle(AppTheme.mutedText)
+            if isCreatingFolder {
+                VStack(alignment: .leading, spacing: 12) {
+                    TextField("New folder name", text: $newFolderName)
+                        .autocorrectionDisabled()
 
-                TextField("New folder name…", text: $newFolderName)
-                    .autocorrectionDisabled()
-
-                if !newFolderName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Button {
-                        let trimmedName = newFolderName.trimmingCharacters(in: .whitespacesAndNewlines)
-                        guard let folder = services.captureService.createFolder(named: trimmedName, in: modelContext) else { return }
-                        selectedFolderID = folder.id
-                        newFolderName = ""
-                    } label: {
-                        Image(systemName: "plus.circle.fill")
-                            .font(.system(size: 20))
-                            .foregroundStyle(AppTheme.accent)
+                    if !folderCreationErrorMessage.isEmpty {
+                        Text(folderCreationErrorMessage)
+                            .font(.system(size: 12))
+                            .foregroundStyle(.red)
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Create folder")
+
+                    HStack {
+                        Button("Cancel") {
+                            isCreatingFolder = false
+                            newFolderName = ""
+                            folderCreationErrorMessage = ""
+                        }
+                        .foregroundStyle(AppTheme.mutedText)
+
+                        Spacer()
+
+                        Button("Create Folder") {
+                            createFolder()
+                        }
+                        .disabled(trimmedNewFolderName.isEmpty)
+                    }
+                    .font(.system(size: 14, weight: .semibold))
+                }
+            } else {
+                Button {
+                    isCreatingFolder = true
+                    folderCreationErrorMessage = ""
+                } label: {
+                    Label("Create new folder", systemImage: "folder.badge.plus")
                 }
             }
         } header: {
-            Text("Folder")
+            Text("Organization")
         } footer: {
-            Text("Type a name above and tap \(Image(systemName: "plus.circle.fill")) to create a new folder.")
-                .font(.system(size: 12))
+            if isCreatingFolder {
+                Text("Create the folder here and the task will move into it immediately.")
+                    .font(.system(size: 12))
+            } else if selectedFolderID == nil {
+                Text("This task is currently in Inbox.")
+                    .font(.system(size: 12))
+            }
         }
+        .listRowBackground(AppTheme.sheetCardFill)
     }
 
     private var attachmentsSection: some View {
         Section("Attachments") {
+            Button {
+                isShowingAttachmentOptions = true
+            } label: {
+                Label(
+                    attachmentNames.isEmpty ? "Add attachment" : "Add another attachment",
+                    systemImage: "paperclip.badge.plus"
+                )
+            }
+
             if attachmentNames.isEmpty {
-                Text("No attachments yet")
+                Text("Photos and files you attach here stay with the task.")
                     .foregroundStyle(AppTheme.mutedText)
             } else {
                 ForEach(attachmentNames, id: \.self) { name in
                     HStack(spacing: 12) {
-                        // Show thumbnail if it's an image, otherwise show generic icon
-                        if let image = AttachmentService.shared.loadImage(for: name) {
-                            Image(uiImage: image)
-                                .resizable()
-                                .scaledToFill()
-                                .frame(width: 40, height: 40)
-                                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        if AttachmentService.shared.isImageFile(name) {
+                            AttachmentThumbnailView(filename: name, size: 40) {
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .fill(AppTheme.surfaceSecondary)
+                            }
                         } else {
                             Image(systemName: "paperclip")
                                 .font(.system(size: 14))
@@ -250,11 +295,43 @@ struct TaskDetailSheet: View {
                     }
                 }
             }
-
-            Button("Add attachment") {
-                isShowingAttachmentOptions = true
-            }
         }
+        .listRowBackground(AppTheme.sheetCardFill)
+    }
+
+    private var trimmedTitle: String {
+        title.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var trimmedNewFolderName: String {
+        newFolderName.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func prioritySystemImage(_ value: AppTaskPriority) -> String {
+        switch value {
+        case .none:
+            return "minus.circle"
+        case .low:
+            return "flag"
+        case .medium:
+            return "flag.fill"
+        case .high:
+            return "exclamationmark.circle.fill"
+        }
+    }
+
+    private func createFolder() {
+        guard !trimmedNewFolderName.isEmpty else { return }
+        guard let folder = services.captureService.createFolder(named: trimmedNewFolderName, in: modelContext) else {
+            folderCreationErrorMessage = "Could not create the folder. Please try a different name."
+            showFolderCreationErrorAlert = true
+            print("[TaskDetailSheet] Failed to create folder named \(trimmedNewFolderName)")
+            return
+        }
+        selectedFolderID = folder.id
+        newFolderName = ""
+        folderCreationErrorMessage = ""
+        isCreatingFolder = false
     }
 
     private func appendAttachments(_ names: [String]) {
@@ -265,8 +342,8 @@ struct TaskDetailSheet: View {
         let folder = folders.first(where: { $0.id == selectedFolderID })
         services.captureService.updateTaskDetails(
             task,
-            title: title,
-            taskDescription: taskDescription,
+            title: trimmedTitle,
+            taskDescription: taskDescription.trimmingCharacters(in: .whitespacesAndNewlines),
             status: status,
             priority: priority,
             dueDate: hasDueDate ? dueDate : nil,
@@ -318,4 +395,3 @@ private struct TaskDetailCameraPicker: UIViewControllerRepresentable {
         }
     }
 }
-

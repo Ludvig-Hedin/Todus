@@ -12,11 +12,11 @@ struct TaskRowView: View {
         Button {
             onOpenDetails()
         } label: {
-            HStack(alignment: .top, spacing: 10) {
+            HStack(alignment: .top, spacing: 8) {
                 // Checkbox — isolated tap target
                 Button(action: { toggleCheckbox() }) {
                     Image(systemName: task.completed ? "checkmark.circle.fill" : "circle")
-                        .font(.system(size: 18, weight: .medium))
+                        .font(.system(size: 17, weight: .medium))
                         .foregroundStyle(task.completed ? task.status.tintColor : AppTheme.subtleText)
                 }
                 .buttonStyle(.plain)
@@ -25,8 +25,8 @@ struct TaskRowView: View {
                 .contentShape(Rectangle())
 
                 // Content area
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 6) {
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 5) {
                         Text(task.title)
                             .font(.system(size: 14, weight: .medium))
                             .tracking(-0.2)
@@ -49,7 +49,7 @@ struct TaskRowView: View {
                         Text(task.taskDescription)
                             .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(AppTheme.mutedText)
-                            .lineLimit(2)
+                            .lineLimit(1)
                     }
 
                     // Metadata tags
@@ -58,22 +58,22 @@ struct TaskRowView: View {
                             dueDateTag(dueDate)
                         }
 
-                        if let folder = task.folder {
-                            tag(title: folder.name, systemImage: "folder")
-                        }
-
                         if task.priority != .none {
                             priorityTag(task.priority)
                         }
 
                         statusTag(status: task.status)
+
+                        if let folder = task.folder, task.dueDate == nil {
+                            tag(title: folder.name, systemImage: "folder")
+                        }
                     }
                 }
 
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 5)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -119,8 +119,8 @@ struct TaskRowView: View {
                 .tracking(-0.1)
         }
         .foregroundStyle(status.tintColor)
-        .padding(.horizontal, 7)
-        .padding(.vertical, 3)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
         .background(status.tintColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 5, style: .continuous)
@@ -136,8 +136,8 @@ struct TaskRowView: View {
             .font(.system(size: 10, weight: .semibold))
             .tracking(-0.1)
             .foregroundStyle(color)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 3)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
             .background(color.opacity(0.08), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 5, style: .continuous)
@@ -157,12 +157,12 @@ struct TaskRowView: View {
                 .tracking(-0.1)
         }
         .foregroundStyle(color)
-        .padding(.horizontal, 7)
-        .padding(.vertical, 3)
-        .background(color.opacity(0.08), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
+        .background(color.opacity(0.06), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 5, style: .continuous)
-                .stroke(color.opacity(0.10), lineWidth: 0.5)
+                .stroke(color.opacity(0.08), lineWidth: 0.5)
         )
     }
 
@@ -172,13 +172,13 @@ struct TaskRowView: View {
         Label(title, systemImage: systemImage)
             .font(.system(size: 10, weight: .semibold))
             .tracking(-0.1)
-            .foregroundStyle(AppTheme.mutedText)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 3)
-            .background(AppTheme.surfaceSecondary.opacity(0.6), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+            .foregroundStyle(AppTheme.mutedText.opacity(0.9))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(AppTheme.surfaceSecondary.opacity(0.45), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 5, style: .continuous)
-                    .stroke(AppTheme.cardBorder, lineWidth: 0.5)
+                    .stroke(AppTheme.cardBorder.opacity(0.75), lineWidth: 0.5)
             )
     }
 
