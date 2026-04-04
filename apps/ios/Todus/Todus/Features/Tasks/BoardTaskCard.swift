@@ -8,66 +8,69 @@ struct BoardTaskCard: View {
     let onOpenDetails: () -> Void
 
     var body: some View {
-        HStack(spacing: 0) {
-            // Thin left-edge color indicator — status at a glance without reading text
-            RoundedRectangle(cornerRadius: 1.5, style: .continuous)
-                .fill(task.status.tintColor.opacity(0.5))
-                .frame(width: 3)
-                .padding(.vertical, 6)
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(alignment: .top, spacing: 8) {
+                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                    .fill(task.status.tintColor.opacity(0.42))
+                    .frame(width: 4, height: 28)
 
-            VStack(alignment: .leading, spacing: 5) {
-                // Title row with optional priority flag
-                HStack(spacing: 4) {
-                    if task.priority != .none {
-                        Image(systemName: "flag.fill")
-                            .font(.system(size: 8, weight: .bold))
-                            .foregroundStyle(priorityColor)
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(alignment: .top, spacing: 5) {
+                        Text(task.title)
+                            .font(.system(size: 12, weight: .semibold))
+                            .tracking(-0.2)
+                            .lineSpacing(1)
+                            .foregroundStyle(.primary.opacity(task.completed ? 0.44 : 0.9))
+                            .strikethrough(task.completed, color: .primary.opacity(0.2))
+                            .lineLimit(3)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                        if task.priority != .none {
+                            Image(systemName: "flag.fill")
+                                .font(.system(size: 8, weight: .bold))
+                                .foregroundStyle(priorityColor.opacity(0.9))
+                                .padding(.top, 2)
+                        }
                     }
 
-                    Text(task.title)
-                        .font(.system(size: 12, weight: .medium))
-                        .tracking(-0.15)
-                        .lineSpacing(1.5)
-                        .foregroundStyle(.primary.opacity(task.completed ? 0.45 : 0.88))
-                        .strikethrough(task.completed, color: .primary.opacity(0.2))
-                        .lineLimit(3)
-                }
-
-                // Metadata row
-                if task.dueDate != nil || task.folder != nil {
-                    HStack(spacing: 5) {
-                        if let dueDate = task.dueDate {
-                            HStack(spacing: 3) {
-                                Image(systemName: "calendar")
-                                    .font(.system(size: 8, weight: .semibold))
-                                Text(TaskDateFormatter.dueFormatter.string(from: dueDate))
-                                    .font(.system(size: 9, weight: .medium))
-                            }
-                            .foregroundStyle(dueDateColor(dueDate))
-                        }
-
-                        if let folder = task.folder {
-                            HStack(spacing: 3) {
-                                Image(systemName: "folder")
-                                    .font(.system(size: 8, weight: .semibold))
-                                Text(folder.name)
-                                    .font(.system(size: 9, weight: .medium))
-                            }
+                    if !task.taskDescription.isEmpty && task.taskDescription != task.title {
+                        Text(task.taskDescription)
+                            .font(.system(size: 10, weight: .medium))
+                            .tracking(-0.1)
                             .foregroundStyle(AppTheme.mutedText)
-                        }
+                            .lineSpacing(1)
+                            .lineLimit(2)
                     }
-                    .tracking(-0.1)
                 }
             }
-            .padding(.leading, 8)
-            .padding(.trailing, 10)
-            .padding(.vertical, 8)
+
+            if task.dueDate != nil || task.folder != nil {
+                HStack(spacing: 6) {
+                    if let dueDate = task.dueDate {
+                        boardMetaPill(
+                            title: TaskDateFormatter.dueFormatter.string(from: dueDate),
+                            systemImage: "calendar",
+                            tint: dueDateColor(dueDate)
+                        )
+                    }
+
+                    if let folder = task.folder {
+                        boardMetaPill(
+                            title: folder.name,
+                            systemImage: "folder",
+                            tint: AppTheme.mutedText
+                        )
+                    }
+                }
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .padding(.horizontal, 11)
+        .padding(.vertical, 10)
+        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(AppTheme.cardBorder, lineWidth: 0.5)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(AppTheme.cardBorder.opacity(0.9), lineWidth: 1)
         )
         .contentShape(Rectangle())
         .onTapGesture {
@@ -131,5 +134,15 @@ struct BoardTaskCard: View {
             return Color(red: 0.85, green: 0.30, blue: 0.25)
         }
         return AppTheme.mutedText
+    }
+
+    private func boardMetaPill(title: String, systemImage: String, tint: Color) -> some View {
+        Label(title, systemImage: systemImage)
+            .font(.system(size: 9, weight: .semibold))
+            .tracking(-0.08)
+            .foregroundStyle(tint)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 4)
+            .background(tint.opacity(0.07), in: Capsule())
     }
 }

@@ -249,6 +249,11 @@ final class EmailService {
         }
     }
 
+    /// Throwing variant — surfaces the error so callers (e.g. Summarize button) can show details.
+    func loadAssistantThrowing(threadId: String) async throws -> AssistantThreadContext {
+        try await api.trpcQuery("assistant.getThreadContext", input: AssistantThreadInput(threadId: threadId))
+    }
+
     func loadAssistantNudges(folder: String = "inbox") async {
         do {
             let response: AssistantOpenLoopsResponse = try await api.trpcQuery(
@@ -381,6 +386,8 @@ final class EmailService {
         do {
             let input = SendEmailInput(
                 to: draft.to.map { SendRecipient(email: $0) },
+                cc: draft.cc.isEmpty ? nil : draft.cc.map { SendRecipient(email: $0) },
+                bcc: draft.bcc.isEmpty ? nil : draft.bcc.map { SendRecipient(email: $0) },
                 subject: draft.subject,
                 message: draft.body,
                 threadId: draft.replyToThreadId
@@ -512,6 +519,8 @@ private struct SendRecipient: Encodable {
 
 private struct SendEmailInput: Encodable {
     let to: [SendRecipient]
+    let cc: [SendRecipient]?
+    let bcc: [SendRecipient]?
     let subject: String
     let message: String
     let threadId: String?

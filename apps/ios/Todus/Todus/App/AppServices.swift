@@ -85,6 +85,8 @@ final class AppServices {
         static let contextAboutYou = "TaskApp.contextAboutYou"
         static let customInstructions = "TaskApp.customInstructions"
         static let assistantAutomationPolicy = "TaskApp.assistantAutomationPolicy"
+        static let tabBarTabs = "TaskApp.tabBarTabs"
+        static let hasConfiguredTabBarPrompt = "TaskApp.hasConfiguredTabBarPrompt"
     }
 
     let configuration: AppConfiguration
@@ -96,6 +98,8 @@ final class AppServices {
 
     let emailService: EmailService
     let calendarService: CalendarService
+    /// Multi-account connections service — manages connected email accounts and filter state
+    let connectionsService: ConnectionsService
     let networkMonitor: NetworkMonitor
     let notificationService: NotificationService
 
@@ -116,6 +120,9 @@ final class AppServices {
     /// Meetings service — fetches/syncs meetings from backend
     let meetingsService: MeetingsService
     private let defaults: UserDefaults
+    private var isLoadingSharedProfile = false
+    private var lastSharedProfileLoadAt: Date?
+    private let sharedProfileRefreshInterval: TimeInterval = 60
 
     var selectedViewMode: TaskViewMode
     var selectedFolderID: UUID?
@@ -136,6 +143,10 @@ final class AppServices {
     var showsComposeEmail = false
     var composeEmailSeedBody: String? = nil
     var showsAIChat = false
+
+    /// Set by detail views (e.g. EmailThreadView) to hide the custom floating tab bar
+    /// so their own bottom bar is visible. Reset to false on dismiss.
+    var hideTabBar = false
 
     // MARK: - Deep Navigation (from AI chat cards → specific items)
     /// Set by AI chat card taps to navigate to a specific email thread after dismissing the sheet.
@@ -172,6 +183,26 @@ final class AppServices {
     var hasConfiguredGmailPrompt: Bool {
         didSet { defaults.set(hasConfiguredGmailPrompt, forKey: Keys.hasConfiguredGmailPrompt) }
     }
+
+    /// Whether the user has completed the tab bar customization onboarding step.
+    var hasConfiguredTabBarPrompt: Bool {
+        didSet { defaults.set(hasConfiguredTabBarPrompt, forKey: Keys.hasConfiguredTabBarPrompt) }
+    }
+
+    /// Ordered list of tabs shown in the floating tab bar. Max 4, home is always first.
+    /// Persisted as a JSON-encoded array of raw string values.
+    var tabBarTabs: [AppTab] {
+        didSet {
+            let raw = tabBarTabs.map(\.rawValue)
+            if let data = try? JSONEncoder().encode(raw) {
+                defaults.set(data, forKey: Keys.tabBarTabs)
+            }
+        }
+    }
+
+    /// Present a non-tab-bar page as a full-screen sheet from MainTabView.
+    /// Set this from any child view (e.g. HomeView "View all" → .meetings).
+    var navigateToSheet: AppTab? = nil
 
     /// Reminders sync direction: "twoWay" (default), "toReminders", "fromReminders"
     var remindersSyncDirection: RemindersSyncDirection {
@@ -282,6 +313,7 @@ final class AppServices {
         self.apiClient = apiClient
         self.emailService = EmailService(api: apiClient)
         self.calendarService = CalendarService()
+        self.connectionsService = ConnectionsService(api: apiClient)
         self.networkMonitor = NetworkMonitor()
         self.notificationService = NotificationService()
 
@@ -345,37 +377,64 @@ final class AppServices {
         }
         self.taskRemindersEnabled = defaults.object(forKey: Keys.taskRemindersEnabled) as? Bool ?? true
         self.calendarRemindersEnabled = defaults.object(forKey: Keys.calendarRemindersEnabled) as? Bool ?? true
+
         // Load signatures — migrate from old single-text format if no v2 data exists
+        let loadedSignatures: [EmailSignature]
         if let data = defaults.data(forKey: Keys.emailSignatures),
            let saved = try? JSONDecoder().decode([EmailSignature].self, from: data) {
-            self.signatures = saved
+            loadedSignatures = saved
         } else {
             let oldText = defaults.string(forKey: Keys.signatureText) ?? ""
             let oldEnabled = defaults.bool(forKey: Keys.signatureEnabled)
             if oldEnabled && !oldText.isEmpty {
                 let migrated = [EmailSignature(name: "Default", body: oldText)]
-                self.signatures = migrated
+                loadedSignatures = migrated
                 // Persist migrated signatures so we don't re-run migration on next launch
                 if let data = try? JSONEncoder().encode(migrated) {
                     defaults.set(data, forKey: Keys.emailSignatures)
                 }
             } else {
-                self.signatures = []
+                loadedSignatures = []
             }
         }
+
         // Load selected signature ID — migrate from old signatureEnabled if needed
+        let loadedSelectedSignatureID: UUID?
         if let uuidStr = defaults.string(forKey: Keys.selectedSignatureID),
            let uuid = UUID(uuidString: uuidStr) {
-            self.selectedSignatureID = uuid
+            loadedSelectedSignatureID = uuid
         } else {
             let oldEnabled = defaults.bool(forKey: Keys.signatureEnabled)
-            let migratedID = (oldEnabled && !self.signatures.isEmpty) ? self.signatures.first?.id : nil
-            self.selectedSignatureID = migratedID
+            let migratedID = (oldEnabled && !loadedSignatures.isEmpty) ? loadedSignatures.first?.id : nil
+            loadedSelectedSignatureID = migratedID
             // Persist migrated selected ID so we don't re-run migration on next launch
             if let migratedID {
                 defaults.set(migratedID.uuidString, forKey: Keys.selectedSignatureID)
             }
         }
+
+        // Load tab bar tabs — decode from JSON [String] back to [AppTab]
+        // Default to the 4-tab layout (home, tasks, email, calendar) on first launch.
+        if let data = defaults.data(forKey: Keys.tabBarTabs),
+           let rawValues = try? JSONDecoder().decode([String].self, from: data) {
+            let decoded = rawValues.compactMap(AppTab.init(rawValue:))
+            // Always ensure home is first and present; clamp to max 4
+            var tabs = decoded.filter { $0 != .home }
+            tabs.insert(.home, at: 0)
+            if decoded.isEmpty || tabs.count < 2 {
+                self.tabBarTabs = AppTab.defaultNavTabs
+            } else {
+                // Burger is a fixed extra slot; max configurable tabs = 4
+                self.tabBarTabs = Array(tabs.prefix(4))
+            }
+        } else {
+            self.tabBarTabs = AppTab.defaultNavTabs
+        }
+        self.hasConfiguredTabBarPrompt = defaults.bool(forKey: Keys.hasConfiguredTabBarPrompt)
+
+        // Now assign to stored properties relying on self.
+        self.signatures = loadedSignatures
+        self.selectedSignatureID = loadedSelectedSignatureID
         self.remindersSyncState.isEnabled = self.remindersSyncEnabled
         self.remindersSyncState.direction = self.remindersSyncDirection
 
@@ -404,12 +463,23 @@ final class AppServices {
 
     func loadSharedAIProfile() async {
         guard authService.isAuthenticated else { return }
+        let now = Date()
+        if isLoadingSharedProfile {
+            return
+        }
+        if let lastSharedProfileLoadAt,
+           now.timeIntervalSince(lastSharedProfileLoadAt) < sharedProfileRefreshInterval {
+            return
+        }
 
+        isLoadingSharedProfile = true
+        defer { isLoadingSharedProfile = false }
         do {
             let response: MailAssistantSettingsResponse = try await apiClient.trpcQuery("settings.get")
             contextAboutYou = response.settings.contextAboutYou
             customInstructions = response.settings.customPrompt
             assistantAutomationPolicy = response.settings.assistantAutomationPolicy
+            lastSharedProfileLoadAt = now
         } catch {
             print("[AppServices] Failed to load shared AI profile: \(error)")
         }

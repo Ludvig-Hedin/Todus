@@ -150,8 +150,11 @@ struct EmailAttachment: Decodable, Identifiable {
 struct EmailDraft {
     var to: [String] = []
     var cc: [String] = []
+    var bcc: [String] = []
     var subject: String = ""
     var body: String = ""
     var replyToThreadId: String?
     var replyToMessageId: String?
+    /// Optional connection ID to send from a specific account (uses default if nil)
+    var fromConnectionId: String?
 }

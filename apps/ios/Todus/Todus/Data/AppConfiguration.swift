@@ -22,12 +22,28 @@ struct AppConfiguration: Sendable {
         set { UserDefaults.standard.set(newValue, forKey: "Todus.useLocalBackend") }
     }
 
+    // Static URL constants — constructed once, guaranteed valid by the literal strings.
+    // Using static lets avoids repeated URL(string:)! force unwraps throughout the codebase.
+    private static let localBackendURL = URL(string: "http://localhost:8787")!
+    private static let prodBackendURL = URL(string: "https://api.todus.app")!
+    private static let localAppURL = URL(string: "http://localhost:3000")!
+    private static let prodAppURL = URL(string: "https://app.todus.app")!
+
     /// Returns the effective backend URL, respecting the local dev override
     var effectiveBackendURL: URL {
         if AppConfiguration.useLocalBackend {
-            return URL(string: "http://localhost:8787")!
+            return Self.localBackendURL
         }
-        return backendURL ?? URL(string: "https://api.todus.app")!
+        return backendURL ?? Self.prodBackendURL
+    }
+
+    /// Returns the web app URL paired with the effective backend.
+    /// When using the local backend the web dev server runs on port 3000.
+    var effectiveAppURL: URL {
+        if AppConfiguration.useLocalBackend {
+            return Self.localAppURL
+        }
+        return Self.prodAppURL
     }
 
     static func load(bundle: Bundle = .main) -> AppConfiguration {

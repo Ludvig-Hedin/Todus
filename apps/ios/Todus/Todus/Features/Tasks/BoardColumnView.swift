@@ -3,8 +3,8 @@ import SwiftData
 
 struct BoardColumnView: View {
     @Environment(\.modelContext) private var modelContext
-    @Environment(AppServices.self) private var services
 
+    let captureService: TaskCaptureService
     let status: TaskStatus
     let tasks: [TaskRecord]
     let onOpenDetails: (TaskRecord) -> Void
@@ -15,26 +15,23 @@ struct BoardColumnView: View {
     @FocusState private var isNewTaskFocused: Bool
 
     var body: some View {
-        // Plain VStack — no inner ScrollView. The outer BoardView ScrollView([.horizontal, .vertical])
-        // + .fixedSize(vertical: true) on the HStack lets columns grow to their natural height,
-        // and the outer scroll view handles overflow in both directions.
         VStack(alignment: .leading, spacing: 0) {
             header
-                .padding(.horizontal, 10)
-                .padding(.top, 10)
-                .padding(.bottom, 8)
+                .padding(.horizontal, 12)
+                .padding(.top, 12)
+                .padding(.bottom, 10)
 
-            VStack(spacing: 7) {
+            VStack(spacing: 8) {
                 cards
 
                 if !isAddingTask {
                     addTaskButton
                 }
             }
-            .padding(.horizontal, 10)
-            .padding(.bottom, 10)
+            .padding(.horizontal, 12)
+            .padding(.bottom, 12)
         }
-        .frame(width: 260)
+        .frame(width: 272)
         .background(backgroundShape.fill(backgroundFill))
         .overlay(backgroundShape.stroke(backgroundStroke, lineWidth: 1))
         .clipShape(backgroundShape)
@@ -51,36 +48,56 @@ struct BoardColumnView: View {
     // MARK: - Header
 
     private var header: some View {
-        HStack(spacing: 6) {
-            Image(systemName: status.systemImage)
-                .font(.system(size: 9, weight: .bold))
-                .foregroundStyle(status.tintColor)
+        HStack(alignment: .top, spacing: 10) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(status.tintColor.opacity(0.08))
 
-            Text(status.title)
-                .font(.system(size: 12, weight: .semibold))
-                .tracking(-0.2)
-                .foregroundStyle(.primary.opacity(0.82))
+                Image(systemName: status.systemImage)
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(status.tintColor.opacity(0.92))
+            }
+            .frame(width: 30, height: 30)
 
-            Text("\(tasks.count)")
-                .font(.system(size: 10, weight: .medium, design: .rounded))
-                .foregroundStyle(status.tintColor.opacity(0.7))
-                .padding(.horizontal, 5)
-                .padding(.vertical, 2)
-                .background(status.tintColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text(status.title)
+                        .font(.system(size: 13, weight: .semibold))
+                        .tracking(-0.25)
+                        .foregroundStyle(.primary.opacity(0.9))
 
-            Spacer()
+                    Text("\(tasks.count)")
+                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.primary.opacity(0.6))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(AppTheme.surfacePrimary.opacity(0.9), in: Capsule())
+                        .overlay(
+                            Capsule()
+                                .stroke(AppTheme.cardBorder.opacity(0.8), lineWidth: 0.75)
+                        )
+                }
+
+                Text(columnSubtitle)
+                    .font(.system(size: 11, weight: .medium))
+                    .tracking(-0.15)
+                    .foregroundStyle(AppTheme.mutedText)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 0)
 
             Button {
                 beginAddingTask()
             } label: {
                 Image(systemName: "plus")
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(status.tintColor.opacity(0.6))
-                    .frame(width: 24, height: 24)
-                    .background(status.tintColor.opacity(0.06), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .foregroundStyle(.primary.opacity(0.72))
+                    .frame(width: 28, height: 28)
+                    .background(AppTheme.surfacePrimary.opacity(0.9), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .stroke(status.tintColor.opacity(0.10), lineWidth: 0.5)
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(AppTheme.cardBorder, lineWidth: 1)
                     )
             }
             .buttonStyle(.plain)
@@ -90,20 +107,47 @@ struct BoardColumnView: View {
     // MARK: - Cards
 
     private var cards: some View {
-        VStack(spacing: 7) {
+        VStack(spacing: 8) {
             if isAddingTask {
                 inlineAddField
                     .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
             }
 
-            ForEach(tasks) { task in
-                BoardTaskCard(task: task) {
-                    onOpenDetails(task)
+            if tasks.isEmpty {
+                emptyColumnState
+            } else {
+                ForEach(tasks) { task in
+                    BoardTaskCard(task: task) {
+                        onOpenDetails(task)
+                    }
+                    .draggable(task.id.uuidString)
                 }
-                .draggable(task.id.uuidString)
             }
         }
         .frame(maxWidth: .infinity, alignment: .top)
+    }
+
+    private var emptyColumnState: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Nothing here yet")
+                .font(.system(size: 12, weight: .semibold))
+                .tracking(-0.15)
+                .foregroundStyle(.primary.opacity(0.78))
+
+            Text("Add a task or drag one into this stage.")
+                .font(.system(size: 11, weight: .medium))
+                .tracking(-0.1)
+                .foregroundStyle(AppTheme.mutedText)
+                .lineSpacing(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 12)
+        .background(AppTheme.surfacePrimary.opacity(0.82), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(AppTheme.cardBorder.opacity(0.9), style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
+        )
     }
 
     // MARK: - Inline Add Field
@@ -111,7 +155,7 @@ struct BoardColumnView: View {
     private var inlineAddField: some View {
         HStack(spacing: 8) {
             Circle()
-                .fill(status.tintColor.opacity(0.3))
+                .fill(status.tintColor.opacity(0.34))
                 .frame(width: 6, height: 6)
 
             TextField("Task name…", text: $newTaskTitle)
@@ -139,12 +183,12 @@ struct BoardColumnView: View {
             }
             .buttonStyle(.plain)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .padding(.horizontal, 11)
+        .padding(.vertical, 9)
+        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(status.tintColor.opacity(0.20), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(AppTheme.cardBorder, lineWidth: 1)
         )
     }
 
@@ -152,20 +196,20 @@ struct BoardColumnView: View {
 
     private var addTaskButton: some View {
         Button { beginAddingTask() } label: {
-            HStack(spacing: 5) {
+            HStack(spacing: 6) {
                 Image(systemName: "plus")
                     .font(.system(size: 9, weight: .bold))
                 Text("Add task")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.system(size: 11, weight: .semibold))
                     .tracking(-0.1)
             }
-            .foregroundStyle(status.tintColor.opacity(0.50))
+            .foregroundStyle(.primary.opacity(0.62))
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 7)
-            .background(status.tintColor.opacity(0.03), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .padding(.vertical, 9)
+            .background(AppTheme.surfacePrimary.opacity(0.65), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .strokeBorder(status.tintColor.opacity(0.12), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(AppTheme.cardBorder, style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
             )
         }
         .buttonStyle(.plain)
@@ -174,15 +218,26 @@ struct BoardColumnView: View {
     // MARK: - Background
 
     private var backgroundShape: RoundedRectangle {
-        RoundedRectangle(cornerRadius: 14, style: .continuous)
+        RoundedRectangle(cornerRadius: 22, style: .continuous)
     }
 
     private var backgroundFill: Color {
-        isTargeted ? status.tintColor.opacity(0.08) : status.tintColor.opacity(0.025)
+        isTargeted ? status.tintColor.opacity(0.07) : AppTheme.surfaceSecondary.opacity(0.76)
     }
 
     private var backgroundStroke: Color {
-        isTargeted ? status.tintColor.opacity(0.22) : status.tintColor.opacity(0.08)
+        isTargeted ? status.tintColor.opacity(0.18) : AppTheme.cardBorder
+    }
+
+    private var columnSubtitle: String {
+        switch status {
+        case .todo:
+            return "Ready to pick up next"
+        case .doing:
+            return "Active focus right now"
+        case .done:
+            return "Finished and out of the way"
+        }
     }
 
     // MARK: - Actions
@@ -204,7 +259,7 @@ struct BoardColumnView: View {
         let title = newTaskTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty else { cancelAddingTask(); return }
         withAnimation(.snappy(duration: 0.22)) {
-            services.captureService.captureInStatus(title: title, status: status, folder: nil, in: modelContext)
+            captureService.captureInStatus(title: title, status: status, folder: nil, in: modelContext)
             newTaskTitle = ""
         }
         isNewTaskFocused = true
@@ -217,7 +272,7 @@ struct BoardColumnView: View {
             guard let taskID = UUID(uuidString: item),
                   let task = tasksInApp.first(where: { $0.id == taskID }) else { continue }
             withAnimation(.snappy(duration: 0.22)) {
-                services.captureService.setStatus(task, status: status, in: modelContext)
+                captureService.setStatus(task, status: status, in: modelContext)
             }
         }
         isTargeted = false

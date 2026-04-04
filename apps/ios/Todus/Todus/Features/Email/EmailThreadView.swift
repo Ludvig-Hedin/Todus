@@ -29,10 +29,13 @@ struct EmailThreadView: View {
     @State private var composeMode: ComposeMode = .reply
     @State private var isStarred = false
     @State private var assistantThread: AssistantThreadContext? = nil
+    /// Time of the last successful assistant context load (API does not return `generatedAt` per thread).
+    @State private var assistantContextLoadedAt: Date?
     @State private var isLoadingAssistant = true
     @State private var assistantDraftSeed: String? = nil
     @State private var showDeleteConfirmation = false
     @State private var assistantNotice: String?
+    @State private var isSummarizing = false
     /// Scroll offset drives the scroll-aware header title
     @State private var scrollOffset: CGFloat = 0
 
@@ -43,6 +46,15 @@ struct EmailThreadView: View {
         detail?.messages.first?.subject ?? ""
     }
     private var showTitleInHeader: Bool { scrollOffset > 90 }
+
+    /// Footer line under the summary card — uses load time because `AssistantThreadContext` has no server timestamp.
+    private var assistantAttributionLine: String {
+        guard assistantThread != nil else { return "Ai" }
+        if let loaded = assistantContextLoadedAt {
+            return "Ai · \(loaded.formatted(date: .abbreviated, time: .shortened))"
+        }
+        return "Ai"
+    }
 
     enum ComposeMode { case reply, replyAll, forward }
 
@@ -189,19 +201,19 @@ struct EmailThreadView: View {
         .animation(.easeInOut(duration: 0.2), value: showTitleInHeader)
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        // Scrim background — transparent when at top, fades in on scroll
+        // Pure gradient fade — no solid fill, content smoothly fades out under the bar
         .background(
             LinearGradient(
                 stops: [
-                    .init(color: AppTheme.backgroundTop, location: 0),
-                    .init(color: AppTheme.backgroundTop.opacity(0.85), location: 0.7),
+                    .init(color: AppTheme.backgroundTop.opacity(0.9), location: 0),
+                    .init(color: AppTheme.backgroundTop.opacity(0.6), location: 0.5),
                     .init(color: AppTheme.backgroundTop.opacity(0), location: 1),
                 ],
                 startPoint: .top,
                 endPoint: .bottom
             )
-            .opacity(showTitleInHeader ? 1 : 0.3)
-            .animation(.easeInOut(duration: 0.3), value: showTitleInHeader)
+            .padding(.bottom, -20) // Extend gradient below the bar for a smoother fade
+            .allowsHitTesting(false)
         )
         .confirmationDialog("Delete this thread?", isPresented: $showDeleteConfirmation, titleVisibility: .visible) {
             Button("Delete", role: .destructive) {
@@ -358,9 +370,37 @@ struct EmailThreadView: View {
                     }
                 }
             } else {
-                Text("No summary available.")
+                // No summary yet — show prompt and summarize button
+                Text("Not summarized yet")
                     .font(.system(size: 14))
                     .foregroundStyle(AppTheme.mutedText)
+
+                Button {
+                    Task { await handleSummarize() }
+                } label: {
+                    HStack(spacing: 5) {
+                        if isSummarizing {
+                            ProgressView()
+                                .controlSize(.mini)
+                                .tint(AppTheme.mutedText)
+                        } else {
+                            Image(systemName: "sparkles")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(aiGradient)
+                        }
+                        Text(isSummarizing ? "Summarizing…" : "Summarize")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.primary)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(AppTheme.rowStroke, lineWidth: 1)
+                    )
+                }
+                .buttonStyle(.plain)
+                .disabled(isSummarizing)
             }
 
             // AI attribution line
@@ -368,7 +408,7 @@ struct EmailThreadView: View {
                 Image(systemName: "sparkles")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(.tint)
-                Text("Ai · \(Date().formatted(date: .abbreviated, time: .shortened))")
+                Text(assistantAttributionLine)
                     .font(.system(size: 12))
                     .foregroundStyle(AppTheme.mutedText)
             }
@@ -467,24 +507,11 @@ struct EmailThreadView: View {
     }
 
     // MARK: - Bottom Bar
-    // Free-floating reply buttons with a scrim gradient behind them.
-    // No solid background — content fades out beneath the buttons.
+    // Free-floating reply buttons — no solid fill, only a smooth gradient
+    // that fades content out behind the buttons.
 
     private var bottomBar: some View {
         VStack(spacing: 0) {
-            // Scrim gradient that fades content out behind the reply buttons
-            LinearGradient(
-                stops: [
-                    .init(color: AppTheme.backgroundTop.opacity(0), location: 0),
-                    .init(color: AppTheme.backgroundTop.opacity(0.7), location: 0.3),
-                    .init(color: AppTheme.backgroundTop, location: 1),
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .frame(height: 30)
-            .allowsHitTesting(false)
-
             HStack(spacing: 8) {
                 ForEach([
                     ("arrowshape.turn.up.left", "Reply"),
@@ -510,8 +537,22 @@ struct EmailThreadView: View {
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 8)
-            .background(AppTheme.backgroundTop)
         }
+        // Single smooth gradient covering the full bottom bar area — no solid fill
+        .background(
+            LinearGradient(
+                stops: [
+                    .init(color: AppTheme.backgroundTop.opacity(0), location: 0),
+                    .init(color: AppTheme.backgroundTop.opacity(0.6), location: 0.35),
+                    .init(color: AppTheme.backgroundTop.opacity(0.9), location: 0.7),
+                    .init(color: AppTheme.backgroundTop, location: 1),
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .padding(.top, -30) // Extend gradient above the buttons for a smooth fade
+            .allowsHitTesting(false)
+        )
     }
 
     // MARK: - Action Handlers
@@ -527,15 +568,23 @@ struct EmailThreadView: View {
 
         async let markRead: Void = emailService.markAsRead(ids: [threadId])
         async let assistant = emailService.loadAssistant(threadId: threadId)
-        assistantThread = await assistant
+        applyAssistantContext(await assistant)
         isLoadingAssistant = false
         await markRead
     }
 
     private func refreshAssistant() async {
         isLoadingAssistant = true
-        assistantThread = await emailService.loadAssistant(threadId: threadId)
+        applyAssistantContext(await emailService.loadAssistant(threadId: threadId))
         isLoadingAssistant = false
+    }
+
+    /// Updates assistant state and stamps load time whenever a non-nil context is received.
+    private func applyAssistantContext(_ value: AssistantThreadContext?) {
+        assistantThread = value
+        if value != nil {
+            assistantContextLoadedAt = Date()
+        }
     }
 
     private func handleCreateTask(_ suggestion: MailAssistantSuggestedTask) async {
@@ -567,6 +616,17 @@ struct EmailThreadView: View {
         } else {
             assistantNotice = result.reason.isEmpty ? "Draft already exists or was skipped." : result.reason
         }
+    }
+
+    private func handleSummarize() async {
+        isSummarizing = true
+        do {
+            applyAssistantContext(try await emailService.loadAssistantThrowing(threadId: threadId))
+        } catch {
+            AppLogger.shared.log("[EmailThreadView] Summarize failed: \(error)")
+            assistantNotice = "Could not generate summary: \(error.localizedDescription)"
+        }
+        isSummarizing = false
     }
 
     private func openAssistant() {
@@ -614,12 +674,15 @@ private struct ThreadActionButton: View {
 /// Flat message row — no card boxing.
 /// Collapsed: avatar + sender + date + snippet preview.
 /// Expanded: sender details + toggleable From/To/Date card + HTML body + attachments.
+/// Performance: shows plain text immediately, defers WKWebView loading to avoid UI hang.
 private struct MessageRow: View {
     let message: EmailMessage
     let expandByDefault: Bool
 
     @State private var isExpanded: Bool
     @State private var showDetails = false
+    /// Defers WKWebView creation to avoid blocking the main thread on navigation
+    @State private var htmlReady = false
 
     init(message: EmailMessage, expandByDefault: Bool) {
         self.message = message
@@ -694,11 +757,29 @@ private struct MessageRow: View {
                         .transition(.opacity.combined(with: .move(edge: .top)))
                 }
 
-                // Email body
+                // Email body — show plain text immediately, defer HTML to avoid UI hang
                 if !message.body.isEmpty {
-                    ExpandingEmailHTMLView(html: message.body)
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 8)
+                    if htmlReady {
+                        ExpandingEmailHTMLView(html: message.body)
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, 8)
+                    } else if let plain = message.plainText, !plain.isEmpty {
+                        // Show plain text while WKWebView initializes in the background
+                        Text(plain)
+                            .font(.system(size: 15))
+                            .foregroundStyle(.primary)
+                            .lineSpacing(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, 12)
+                            .textSelection(.enabled)
+                            .transition(.opacity)
+                    } else {
+                        ProgressView()
+                            .controlSize(.small)
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, 12)
+                    }
                 } else if let plain = message.plainText, !plain.isEmpty {
                     Text(plain)
                         .font(.system(size: 15))
@@ -723,6 +804,14 @@ private struct MessageRow: View {
                         .padding(.horizontal, 16)
                         .padding(.bottom, 14)
                 }
+            }
+        }
+        .task(id: isExpanded) {
+            // Defer WKWebView creation slightly so the view appears instantly with plain text,
+            // then swaps in the full HTML rendering after a short delay
+            if isExpanded && !htmlReady && !message.body.isEmpty {
+                try? await Task.sleep(for: .milliseconds(150))
+                withAnimation(.easeIn(duration: 0.2)) { htmlReady = true }
             }
         }
     }
@@ -874,7 +963,7 @@ struct EmailHTMLView: UIViewRepresentable {
         <html>
         <head>
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src * data: blob:; style-src 'unsafe-inline'; font-src *;">
+        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src * data: blob:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; font-src *;">
         <style>
             * { box-sizing: border-box; }
             html, body { margin: 0; padding: 0; overflow-x: hidden; }
@@ -884,6 +973,16 @@ struct EmailHTMLView: UIViewRepresentable {
                 color: #e0e0e0; background: transparent;
                 word-wrap: break-word; overflow-wrap: break-word;
             }
+            /* Dark mode: strip all background colors, force readable text */
+            @media (prefers-color-scheme: dark) {
+                * { background-color: transparent !important; }
+                body, div, span, p, td, th, li, dd, dt, h1, h2, h3, h4, h5, h6,
+                label, strong, em, b, i, u, small, big, sub, sup, center, font {
+                    color: #e0e0e0 !important;
+                }
+                a { color: #5B9FFF !important; }
+                blockquote { color: #aaa !important; border-left-color: #555 !important; }
+            }
             @media (prefers-color-scheme: light) { body { color: #1a1a1a; } }
             a { color: #5B9FFF; }
             img { max-width: 100% !important; height: auto !important; }
@@ -892,7 +991,11 @@ struct EmailHTMLView: UIViewRepresentable {
             table { max-width: 100%; display: block; overflow-x: auto; }
         </style>
         </head>
-        <body>\(html)</body>
+        <body>\(html)
+        <script>
+        // Strip bgcolor HTML attributes that CSS can't override
+        document.querySelectorAll('[bgcolor]').forEach(function(el) { el.removeAttribute('bgcolor'); });
+        </script>
         </html>
         """
     }

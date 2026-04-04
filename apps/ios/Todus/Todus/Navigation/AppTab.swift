@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// The four primary navigation tabs in the unified Todus app.
-enum AppTab: String, CaseIterable, Identifiable, Hashable {
+/// All navigation destinations in Todus. Some live in the tab bar, others on the Home dashboard.
+enum AppTab: String, CaseIterable, Identifiable, Hashable, Codable {
     case home
     case tasks
     case email
@@ -20,6 +20,25 @@ enum AppTab: String, CaseIterable, Identifiable, Hashable {
         case .meetings: return "Meetings"
         }
     }
+
+    /// One-line description shown in tab bar customization UI.
+    var description: String {
+        switch self {
+        case .home:     return "Your daily overview"
+        case .tasks:    return "Capture and manage tasks"
+        case .email:    return "Gmail inbox and threads"
+        case .calendar: return "Events and schedule"
+        case .meetings: return "Recorded meetings & AI summaries"
+        }
+    }
+
+    /// Home tab is always present — it's the anchor for pages not in the tab bar.
+    var isRequired: Bool { self == .home }
+
+    /// Tabs shown in the tab bar by default (first launch).
+    /// Max 4 — the burger (More) button adds a fixed 5th visual slot so the pill isn't cramped.
+    /// Meetings is accessible via the More sheet and the Home "More" section by default.
+    static let defaultNavTabs: [AppTab] = [.home, .tasks, .email, .calendar]
 
     /// SF Symbol shown when this tab is selected.
     var activeIcon: String {

@@ -101,7 +101,7 @@ struct MeetingDetailView: View {
                         if isSchedulingBot {
                             ProgressView().controlSize(.small)
                         } else {
-                            Label("Send Bot", systemImage: "person.wave.2")
+                            Label("Record Meeting", systemImage: "mic")
                         }
                     }
                     .disabled(isSchedulingBot)
@@ -206,7 +206,7 @@ struct MeetingDetailView: View {
                                 .font(.subheadline.weight(.medium))
                         }
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(AppPrimaryButtonStyle())
                     .controlSize(.small)
                     .disabled(isGeneratingSummary)
                 }
@@ -249,14 +249,14 @@ struct MeetingDetailView: View {
     private func transcriptSection(_ segments: [MeetingTranscriptSegment]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Label("Transcript (\(segments.count))", systemImage: "text.quote")
+                Label("Transcript", systemImage: "text.quote")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.green)
 
                 Spacer()
 
                 if segments.count > 15 {
-                    Button(showFullTranscript ? "Less" : "All") {
+                    Button(showFullTranscript ? "Show less" : "Show all") {
                         withAnimation { showFullTranscript.toggle() }
                     }
                     .font(.caption)
@@ -367,7 +367,7 @@ struct MeetingDetailView: View {
         isSchedulingBot = true
         actionError = nil
         let success = await services.meetingsService.scheduleBot(meetingId: meetingId)
-        if !success { actionError = "Failed to schedule the recording bot. Please try again." }
+        if !success { actionError = "Failed to schedule recording. Please try again." }
         await loadMeeting()
         isSchedulingBot = false
     }
@@ -397,7 +397,7 @@ struct MeetingDetailView: View {
     private func statusLabel(_ status: String) -> String {
         switch status {
         case "scheduled": "Scheduled"
-        case "bot_joining": "Joining"
+        case "bot_joining": "Starting"
         case "recording": "Recording"
         case "processing": "Processing"
         case "ready": "Ready"

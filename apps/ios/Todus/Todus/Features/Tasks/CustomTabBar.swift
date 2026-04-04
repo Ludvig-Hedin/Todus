@@ -2,31 +2,34 @@ import SwiftUI
 
 /// Custom floating tab bar — two glass pills side by side.
 ///
-/// Layout (from Figma node 13-188):
-///   [  home | tasks | email | calendar  ]  [ AI | + ]
-///   ←──── nav tabs pill (fill) ──────────→  ←action→
+/// Layout:
+///   [ ☰ | home | tasks | email ]  [ ✦ | + ]
+///   ←── nav tabs pill (fill) ──→  ←action→
 ///
 /// Features:
-/// • Sliding background plate that animates between active tabs
-/// • Subtle scale press effect on tab buttons
+/// • Burger (☰) always first in nav pill — opens the More sheet (Meetings, Docs, …)
+/// • Nav tabs sourced from AppServices.tabBarTabs (max 4 configurable + burger = 5 slots)
+/// • Sliding indicator animates between active tabs
+/// • Subtle scale press effect on all buttons
 /// • Glass/translucent material (iOS 26 Liquid Glass, fallback ultraThinMaterial)
-/// • Drag gesture across tab bar to preview/swap tabs
+/// • Drag gesture across nav pill to swipe between tabs
 struct CustomTabBar: View {
     @Binding var selectedTab: AppTab
+    /// The ordered tabs to display — sourced from AppServices.tabBarTabs (max 4 + burger = 5).
+    var tabs: [AppTab]
     var hasUpcomingCalendarEvent: Bool = false
     var onAI: () -> Void
     var onCreate: () -> Void
-    /// Called when the user taps the overflow (ellipsis) button to open the More sheet.
+    /// Called when the user taps the burger button to open the More sheet.
     var onMore: (() -> Void)? = nil
 
     /// Namespace for the matched geometry sliding indicator
     @Namespace private var tabIndicator
 
-    // Icons: slightly smaller than Figma's 20px so the bigger button frame has breathing room.
-    private let iconFont: Font = .system(size: 17, weight: .semibold)
+    private let iconFont: Font = .system(size: 16, weight: .semibold)
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
             navTabsPill
             actionButtonsPill
         }
@@ -38,24 +41,38 @@ struct CustomTabBar: View {
 
     private var navTabsPill: some View {
         HStack(spacing: 0) {
-            ForEach(AppTab.allCases) { tab in
+            // Burger / More button — always first, opens the More sheet.
+            // Placed in the nav pill (not action pill) so it feels part of navigation.
+            Button { onMore?() } label: {
+                Image(systemName: "line.3.horizontal")
+                    .font(iconFont)
+                    .foregroundStyle(Color(UIColor.secondaryLabel))
+                    .frame(width: 44, height: 42)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(TabButtonStyle())
+
+            // Thin separator between burger and first tab
+            Rectangle()
+                .fill(Color(UIColor.separator).opacity(0.25))
+                .frame(width: 1, height: 22)
+
+            // User-configured nav tabs (max 4)
+            ForEach(tabs) { tab in
                 tabButton(tab)
             }
         }
-        .padding(4) // Figma: 4px padding around the tab buttons
-        // Drag gesture across the tab bar to swipe between tabs
+        .padding(3)
+        // Drag gesture swipes between nav tabs only (burger is not a tab)
         .gesture(
             DragGesture(minimumDistance: 20)
                 .onEnded { value in
-                    let tabs = AppTab.allCases
                     guard let currentIndex = tabs.firstIndex(of: selectedTab) else { return }
                     if value.translation.width < -30, currentIndex < tabs.count - 1 {
-                        // Swipe left → next tab
                         withAnimation(.snappy(duration: 0.25)) {
                             selectedTab = tabs[currentIndex + 1]
                         }
                     } else if value.translation.width > 30, currentIndex > 0 {
-                        // Swipe right → previous tab
                         withAnimation(.snappy(duration: 0.25)) {
                             selectedTab = tabs[currentIndex - 1]
                         }
@@ -77,11 +94,9 @@ struct CustomTabBar: View {
                     : tab.inactiveIcon(hasEvent: tab == .calendar && hasUpcomingCalendarEvent)
             )
             .font(iconFont)
-            // Figma: active #0081FF, inactive rgba(60,60,67,0.65) = UIColor.secondaryLabel
             .foregroundStyle(isSelected ? Color(red: 0, green: 0x81/255.0, blue: 1) : Color(UIColor.secondaryLabel))
-            // Bigger button frame (62×46) gives a more generous touch target.
-            .frame(width: 62, height: 46)
-            // Sliding indicator: matchedGeometryEffect moves this capsule between tabs
+            // Narrower frame — 50px fits 3 tabs + burger comfortably in the pill
+            .frame(width: 50, height: 42)
             .background {
                 if isSelected {
                     activeIndicatorColor
@@ -89,7 +104,6 @@ struct CustomTabBar: View {
                         .matchedGeometryEffect(id: "activeTab", in: tabIndicator)
                 }
             }
-            // Extra touch area — extends the tappable region 4pt beyond the visual frame
             .contentShape(Rectangle().inset(by: -4))
         }
         .buttonStyle(TabButtonStyle())
@@ -101,37 +115,27 @@ struct CustomTabBar: View {
 
     private var actionButtonsPill: some View {
         HStack(spacing: 0) {
-            // AI button — "sparkles" is the standard Apple AI icon
+            // AI button — gradient sparkles icon
             Button { onAI() } label: {
                 Image(systemName: "sparkles")
                     .font(iconFont)
                     .foregroundStyle(aiGradient)
-                    .frame(width: 54, height: 46)
+                    .frame(width: 50, height: 42)
                     .contentShape(Rectangle())
             }
             .buttonStyle(TabButtonStyle())
 
-            // Create button — "+" in primary text color
+            // Create button
             Button { onCreate() } label: {
                 Image(systemName: "plus")
                     .font(iconFont)
                     .foregroundStyle(.primary)
-                    .frame(width: 54, height: 46)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(TabButtonStyle())
-
-            // More button — overflow entry point (Docs, future items)
-            Button { onMore?() } label: {
-                Image(systemName: "ellipsis")
-                    .font(iconFont)
-                    .foregroundStyle(Color(UIColor.secondaryLabel))
-                    .frame(width: 44, height: 46)
+                    .frame(width: 50, height: 42)
                     .contentShape(Rectangle())
             }
             .buttonStyle(TabButtonStyle())
         }
-        .padding(4) // Figma: 4px padding around action buttons
+        .padding(3)
         .glassTabPill()
     }
 

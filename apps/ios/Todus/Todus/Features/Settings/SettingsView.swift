@@ -11,6 +11,8 @@ struct SettingsView: View {
     @State private var deleteConfirmText = ""
     @State private var isDeletingAccount = false
     @State private var showsDisconnectGmail = false
+    /// ID of the connection selected for disconnection — used by the confirmation dialog
+    @State private var disconnectingConnectionId: String?
     @State private var isConnectingCalendar = false
     @State private var isConnectingReminders = false
     @State private var activeSessions: [ActiveSessionRecord] = []
@@ -74,6 +76,10 @@ struct SettingsView: View {
         }
         .task {
             await services.emailService.checkConnection()
+        }
+        .task {
+            // Load connected email accounts for the dynamic connections list
+            await services.connectionsService.loadConnections()
         }
         .task {
             await loadActiveSessions()
@@ -268,28 +274,92 @@ struct SettingsView: View {
 
     private var connectedServicesSection: some View {
         Section {
-            // Gmail
-            HStack(spacing: 12) {
-                GmailIconView(size: 30)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Gmail")
-                        .font(.system(size: 15))
-                    Text(services.emailService.hasConnection ? "Connected" : "Not connected")
-                        .font(.system(size: 12))
-                        .foregroundStyle(services.emailService.hasConnection ? .green : .secondary)
-                }
-                Spacer()
-                if services.emailService.hasConnection {
-                    Button(role: .destructive) {
-                        showsDisconnectGmail = true
-                    } label: {
-                        Text("Disconnect")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(.red.opacity(0.8))
+            // Dynamic email connections from backend — replaces the old hardcoded Gmail row.
+            // Shows each connected account (Google, Microsoft, etc.) with provider icon,
+            // email address, and connection status.
+            if services.connectionsService.connections.isEmpty {
+                // Fallback: show legacy Gmail row when connections haven't loaded yet
+                HStack(spacing: 12) {
+                    GmailIconView(size: 30)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Gmail")
+                            .font(.system(size: 15))
+                        Text(services.emailService.hasConnection ? "Connected" : "Not connected")
+                            .font(.system(size: 12))
+                            .foregroundStyle(services.emailService.hasConnection ? .green : .secondary)
+                    }
+                    Spacer()
+                    if services.emailService.hasConnection {
+                        Button(role: .destructive) {
+                            showsDisconnectGmail = true
+                        } label: {
+                            Text("Disconnect")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(.red.opacity(0.8))
+                        }
                     }
                 }
+                .padding(.vertical, 2)
+            } else {
+                ForEach(services.connectionsService.connections) { connection in
+                    HStack(spacing: 12) {
+                        // Colored circle representing this connection
+                        Circle()
+                            .fill(Color(hex: connection.displayColor))
+                            .frame(width: 30, height: 30)
+                            .overlay {
+                                Text(connection.providerName.prefix(1))
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(.white)
+                            }
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(connection.providerName)
+                                .font(.system(size: 15))
+                            Text(connection.email)
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        Spacer()
+                        if services.connectionsService.isDisconnected(connection.id) {
+                            Text("Disconnected")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(.orange)
+                        } else {
+                            Text("Connected")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.green)
+                            Button(role: .destructive) {
+                                disconnectingConnectionId = connection.id
+                                showsDisconnectGmail = true
+                            } label: {
+                                Image(systemName: "xmark.circle")
+                                    .font(.system(size: 16))
+                                    .foregroundStyle(.red.opacity(0.6))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+
+                // Add Account button — allows connecting additional email accounts
+                Button {
+                    // Trigger the Gmail onboarding/connection flow
+                    services.hasConfiguredGmailPrompt = false
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.system(size: 22))
+                            .foregroundStyle(.blue)
+                        Text("Add Account")
+                            .font(.system(size: 15))
+                            .foregroundStyle(.blue)
+                    }
+                }
+                .padding(.vertical, 2)
             }
-            .padding(.vertical, 2)
 
             // Apple Calendar
             HStack(spacing: 12) {
@@ -689,14 +759,23 @@ struct SettingsView: View {
         dismiss()
     }
 
-    /// Disconnects Gmail by removing the email connection on the backend.
+    /// Disconnects an email connection on the backend.
+    /// Uses disconnectingConnectionId if set (from the dynamic connections list),
+    /// otherwise falls back to the legacy disconnectEmail() method.
     private func performDisconnectGmail() async {
+        let connectionId = disconnectingConnectionId
+        defer { disconnectingConnectionId = nil }
+
         do {
-            try await services.apiClient.disconnectEmail()
-            await services.emailService.checkConnection()
+            if let connectionId {
+                try await services.connectionsService.deleteConnection(connectionId: connectionId)
+            } else {
+                try await services.apiClient.disconnectEmail()
+            }
         } catch {
-            AppLogger.shared.log("Disconnect Gmail failed: \(error.localizedDescription)")
+            AppLogger.shared.log("Disconnect email failed: \(error.localizedDescription)")
         }
+        await services.emailService.checkConnection()
     }
 
 }

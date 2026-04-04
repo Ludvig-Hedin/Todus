@@ -55,8 +55,10 @@ struct CreateSheet: View {
                 typePill
             }
             .padding(.horizontal, 12)
-            // Keyboard-aware bottom padding: sit above keyboard or above tab bar
-            .padding(.bottom, keyboard.isVisible ? keyboard.height + 8 : 86)
+            // Sit above the keyboard when visible, or above the tab bar (86pt).
+            // max() avoids a conditional branch so SwiftUI doesn't create a
+            // redundant layout pass when the keyboard height flickers to 0.
+            .padding(.bottom, max(keyboard.height + 8, 86))
             .animation(.easeOut(duration: 0.25), value: keyboard.height)
             .transition(.move(edge: .bottom).combined(with: .opacity))
         }
@@ -85,17 +87,11 @@ struct CreateSheet: View {
         ) { result in
             guard case .success(let urls) = result else { return }
             for url in urls {
-                Task.detached(priority: .userInitiated) { [url] in
-                    guard url.startAccessingSecurityScopedResource() else { return }
-                    defer { url.stopAccessingSecurityScopedResource() }
-
-                    guard let data = try? Data(contentsOf: url) else { return }
-                    let ext = url.pathExtension.isEmpty ? "dat" : url.pathExtension
-                    guard let filename = AttachmentService.shared.saveData(data, fileExtension: ext) else {
+                Task {
+                    guard let filename = await AttachmentService.shared.importFile(at: url) else {
                         return
                     }
-
-                    await appendPendingAttachment(filename)
+                    pendingAttachments.append(filename)
                 }
             }
         }
@@ -170,13 +166,16 @@ struct CreateSheet: View {
                 .padding(.bottom, 2)
             }
 
-            // Text input — UITextView wrapper intercepts image paste
+            // Text input — matches AIChatView: maxHeight caps at 120px so the
+            // sheet stays compact and SwiftUI layout doesn't grow unboundedly.
             PasteHandlingTextInput(
                 text: $text,
                 placeholder: placeholderText,
                 isFocused: true,
+                maxHeight: 120,
                 onPasteImage: handlePastedImage
             )
+            .frame(maxHeight: 120)
             .padding(.top, pendingAttachments.isEmpty ? 10 : 6)
             .padding(.bottom, 4)
             .padding(.horizontal, 14)
@@ -238,6 +237,7 @@ struct CreateSheet: View {
                     )
                 }
                 .buttonStyle(.plain)
+                .opacity(metadataControlOpacity)
             }
 
             // Date selector
@@ -264,6 +264,7 @@ struct CreateSheet: View {
                     )
                 }
                 .buttonStyle(.plain)
+                .opacity(metadataControlOpacity)
             }
 
             Spacer()
@@ -423,12 +424,11 @@ struct CreateSheet: View {
     @ViewBuilder
     private func attachmentThumbnail(filename: String) -> some View {
         ZStack(alignment: .topTrailing) {
-            if let image = AttachmentService.shared.loadImage(for: filename) {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: 52, height: 52)
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            if AttachmentService.shared.isImageFile(filename) {
+                AttachmentThumbnailView(filename: filename, size: 52) {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(AppTheme.surfaceSecondary)
+                }
             } else {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .fill(AppTheme.surfaceSecondary)
@@ -496,11 +496,23 @@ struct CreateSheet: View {
 
     private var placeholderText: String {
         switch selectedType {
-        case .auto:  return "Write anything…"
+        case .auto:  return "Write a task, event, or email…"
         case .task:  return "New Task"
         case .event: return "New Event"
         case .email: return "New Email"
         }
+    }
+
+    private var metadataControlOpacity: Double {
+        isSimpleCaptureFocus ? 0.68 : 1
+    }
+
+    private var isSimpleCaptureFocus: Bool {
+        selectedType == .auto &&
+        text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        pendingAttachments.isEmpty &&
+        selectedFolder == nil &&
+        selectedDate == nil
     }
 
     private var showsFolderPicker: Bool {
@@ -668,10 +680,5 @@ struct CreateSheet: View {
         if let filename = AttachmentService.shared.saveImage(image) {
             pendingAttachments.append(filename)
         }
-    }
-
-    @MainActor
-    private func appendPendingAttachment(_ filename: String) {
-        pendingAttachments.append(filename)
     }
 }

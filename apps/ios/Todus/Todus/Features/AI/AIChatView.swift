@@ -70,6 +70,15 @@ struct AIChatView: View {
 
     private var chatService: AIChatService { services.aiChatService }
 
+    /// Whether EventKit calendar access has been granted to this app.
+    private var calendarConnected: Bool {
+        services.calendarService.canReadEvents()
+    }
+    /// Whether an email inbox is loaded (proxy for email being connected and accessible).
+    private var emailConnected: Bool {
+        chatService.aiCanReadEmail && !services.emailService.threads.isEmpty
+    }
+
     /// AI gradient — matches the tab bar sparkles icon exactly
     private var aiGradient: LinearGradient {
         LinearGradient(
@@ -196,11 +205,8 @@ struct AIChatView: View {
         ) { result in
             guard case .success(let urls) = result else { return }
             for url in urls {
-                guard url.startAccessingSecurityScopedResource() else { continue }
-                defer { url.stopAccessingSecurityScopedResource() }
-                if let data = try? Data(contentsOf: url) {
-                    let ext = url.pathExtension.isEmpty ? "dat" : url.pathExtension
-                    if let filename = AttachmentService.shared.saveData(data, fileExtension: ext) {
+                Task {
+                    if let filename = await AttachmentService.shared.importFile(at: url) {
                         pendingAttachments.append(filename)
                     }
                 }
@@ -431,6 +437,10 @@ struct AIChatView: View {
     // MARK: - Empty State
 
     private var emptyStateView: some View {
+        // Suggestions content fills the space above the keyboard-pinned input section.
+        // safeAreaInset keeps the input's bottom glued just above the keyboard (same
+        // as conversationView) — prevents the input from growing down into the keyboard
+        // when the user types multiple lines.
         VStack(spacing: 0) {
             Spacer()
 
@@ -448,6 +458,14 @@ struct AIChatView: View {
                 // Suggestions — 3 default, up to 10 when expanded
                 VStack(alignment: .leading, spacing: 0) {
                     let pool = contextualSuggestionsPool
+                    // If pool is empty, the current tab's service is not connected —
+                    // show connect buttons instead of suggestions.
+                    if pool.isEmpty {
+                        connectServicesPrompt
+                            .padding(.horizontal, 12)
+                            .padding(.top, 4)
+                            .padding(.bottom, 8)
+                    }
                     let shown = suggestionsExpanded ? pool : Array(pool.prefix(3))
 
                     ForEach(shown, id: \.text) { suggestion in
@@ -515,10 +533,27 @@ struct AIChatView: View {
             }
 
             Spacer()
-
+        }
+        // Pin the input section's bottom edge just above the keyboard — identical to
+        // conversationView. safeAreaInset updates as the keyboard shows/hides and as
+        // the input box grows, so multiline text never pushes the input below the keyboard.
+        .safeAreaInset(edge: .bottom) {
             inputSection
                 .padding(.horizontal, 8)
-                .padding(.bottom, 8)   // gap above keyboard on empty state
+                .padding(.top, 8)
+                .padding(.bottom, 12)
+                .background {
+                    VStack(spacing: 0) {
+                        LinearGradient(
+                            colors: [AppTheme.backgroundTop.opacity(0), AppTheme.backgroundTop.opacity(0.94)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                        .frame(height: 48)
+                        AppTheme.backgroundTop.opacity(0.97)
+                    }
+                    .ignoresSafeArea(edges: .bottom)
+                }
         }
     }
 
@@ -534,6 +569,8 @@ struct AIChatView: View {
 
         switch currentTab {
         case .email:
+            // Only show email suggestions when email is actually connected
+            guard emailConnected else { return [] }
             pinned = [
                 ("envelope.open",              "Summarize my recent emails"),
                 ("arrowshape.turn.up.left",    "Draft a reply to my latest email"),
@@ -549,6 +586,8 @@ struct AIChatView: View {
                 ("magnifyingglass",            "Search for emails about a specific topic"),
             ]
         case .calendar:
+            // Only show calendar suggestions when calendar permission is granted
+            guard calendarConnected else { return [] }
             pinned = [
                 ("clock",                      "What's on my calendar today?"),
                 ("calendar.badge.plus",        "Find free focus time this week"),
@@ -608,25 +647,64 @@ struct AIChatView: View {
                 ("pencil",                     "Rename or update outdated tasks"),
             ]
         case .home:
+            // Always show the universal morning/focus prompts; add service-specific ones conditionally
             pinned = [
                 ("sun.max",                    "Give me a morning briefing"),
                 ("sparkle",                    "What should I focus on right now?"),
-                ("calendar.badge.checkmark",   "Triage my tasks and calendar for today"),
-            ]
-            extended = [
+            ] + (calendarConnected ? [("calendar.badge.checkmark", "Triage my tasks and calendar for today")] : [("list.bullet", "Review my task list")])
+            var extBase: [(icon: String, text: String)] = [
                 ("moon.stars",                 "End-of-day review — what did I accomplish?"),
                 ("chart.line.uptrend.xyaxis",  "Weekly retrospective — what went well?"),
                 ("flag",                       "What are my top priorities this week?"),
                 ("rocket",                     "Help me kick off a new project"),
-                ("envelope.open",              "Any important emails I should handle first?"),
                 ("brain.head.profile",         "Block focus time and clear my schedule"),
                 ("person.2",                   "Help me coordinate with my team today"),
             ]
+            if emailConnected { extBase.append(("envelope.open", "Any important emails I should handle first?")) }
+            extended = extBase
         }
 
         // Shuffle the extended pool with the current seed so Refresh shows new ones
         let shuffled = extended.shuffled(seed: suggestionSeed)
         return pinned + Array(shuffled.prefix(7)) // total cap of 10
+    }
+
+    /// Compact connect-service buttons shown when the active tab's service pool is empty.
+    private var connectServicesPrompt: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Connect a service to get started")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(AppTheme.mutedText)
+            HStack(spacing: 8) {
+                if !calendarConnected && (currentTab == .calendar || currentTab == .home) {
+                    Button {
+                        Task { _ = await services.calendarService.requestAccess() }
+                    } label: {
+                        Label("Connect Calendar", systemImage: "calendar")
+                            .font(.system(size: 12, weight: .medium))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(Color.blue.opacity(0.1), in: Capsule())
+                            .foregroundStyle(.blue)
+                    }
+                    .buttonStyle(.plain)
+                }
+                if !emailConnected && (currentTab == .email || currentTab == .home) {
+                    Button {
+                        services.navigateTo = .email
+                        dismiss()
+                    } label: {
+                        Label("Connect Email", systemImage: "envelope")
+                            .font(.system(size: 12, weight: .medium))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(Color.orange.opacity(0.1), in: Capsule())
+                            .foregroundStyle(.orange)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
     }
 
     private func suggestionRow(icon: String, text: String) -> some View {
@@ -661,6 +739,8 @@ struct AIChatView: View {
                             message: message,
                             allTasks: Array(allTasks),
                             canRetry: chatService.canRetry(assistantMessageID: message.id),
+                            calendarConnected: calendarConnected,
+                            emailConnected: emailConnected,
                             onRetry: {
                                 chatService.retry(
                                     assistantMessageID: message.id,
@@ -670,6 +750,14 @@ struct AIChatView: View {
                             },
                             onNavigate: { action, params in
                                 handleCardNavigation(action, params: params)
+                            },
+                            onConnect: { service in
+                                if service == "calendar" {
+                                    Task { _ = await services.calendarService.requestAccess() }
+                                } else if service == "email" {
+                                    services.navigateTo = .email
+                                    dismiss()
+                                }
                             }
                         )
                             .id(message.id)
@@ -817,7 +905,9 @@ struct AIChatView: View {
             )
         }
 
-        let peopleMentions = Dictionary(grouping: services.emailService.threads.map(\.from), by: \.email)
+        // Cap at 50 threads before dictionary grouping to prevent O(n) main-thread hang
+        // when the user taps the input field and this computed property re-evaluates.
+        let peopleMentions = Dictionary(grouping: services.emailService.threads.prefix(50).map(\.from), by: \.email)
             .compactMap { _, senders in senders.first }
             .prefix(12)
             .map { sender in
@@ -842,6 +932,10 @@ struct AIChatView: View {
         // Whether any "above-text" accessories are visible (pill or attachments)
         let hasAccessories = pageContextAttached || !pendingAttachments.isEmpty
 
+        // Two-row layout: full-width text on top, button row on the bottom.
+        // This avoids squeezing the text field between buttons, and prevents
+        // the GeometryReader layout cycle that caused the 9s freeze (toggling
+        // inputAtMaxHeight no longer changes the text field's available width).
         return VStack(spacing: 0) {
             // ── Above-text row: page context pill + attachment thumbnails ──────
             if hasAccessories {
@@ -877,64 +971,64 @@ struct AIChatView: View {
                     }
                     .padding(.horizontal, 12)
                 }
-                .padding(.top, 10)
-                .padding(.bottom, 2)
+                .padding(.top, 6)
+                .padding(.bottom, 0)
             }
 
-            // ── Main input row: [config] [text field] [expand] [voice] [mic] [send] ──
-            // Unified layout — config button always left, action buttons always right.
-            // The text field grows naturally between them (up to maxHeight: 120).
-            HStack(alignment: .bottom, spacing: 6) {
-                // Config button — always on the left of the text input
+            // ── Full-width text input ──────────────────────────────────────────
+            RichComposerInput(
+                text: $inputText,
+                mentions: $inputMentions,
+                placeholder: "Ask, search or make anything…",
+                surface: .aiChat,
+                mentionOptions: mentionOptions,
+                isFocused: isInputFocused,
+                maxHeight: 120,
+                onCommand: { _ in },
+                onFocusChange: { focused in isInputFocused = focused }
+            )
+            .frame(maxHeight: 120)
+            // Track height to show/hide expand button — safe here because the
+            // buttons row is separate, so toggling inputAtMaxHeight cannot alter
+            // the text field width and cause a layout feedback loop.
+            .background(
+                GeometryReader { geo in
+                    Color.clear
+                        .onChange(of: geo.size.height) { _, h in
+                            let atMax = h >= 118
+                            if atMax != inputAtMaxHeight { inputAtMaxHeight = atMax }
+                        }
+                }
+            )
+            .padding(.horizontal, 12)
+            .padding(.top, hasAccessories ? 2 : 8)
+            .padding(.bottom, 2)
+
+            // ── Button row: [config]  spacer  [expand] [voice] [mic] [send] ──
+            HStack(spacing: 8) {
+                // Config button — opens model / settings sheet
                 Button { showsConfig = true } label: {
                     Image(systemName: "slider.horizontal.3")
                         .font(.system(size: 15, weight: .medium))
                         .foregroundStyle(AppTheme.mutedText)
                 }
                 .buttonStyle(.plain)
-                .frame(width: 34, height: 34)
+                .frame(width: 30, height: 30)
                 .contentShape(Rectangle())
-                .minTouchTarget()
 
-                // Growing text input — sits between config and action buttons
-                RichComposerInput(
-                    text: $inputText,
-                    mentions: $inputMentions,
-                    placeholder: "Ask, search or make anything…",
-                    surface: .aiChat,
-                    mentionOptions: mentionOptions,
-                    isFocused: isInputFocused,
-                    maxHeight: 120,
-                    onCommand: { _ in },
-                    onFocusChange: { focused in isInputFocused = focused }
-                )
-                .frame(maxHeight: 120)
-                // Measure the content height to decide whether to show the expand button.
-                // Background reads before padding so we get the raw content height (not padded).
-                .background(
-                    GeometryReader { geo in
-                        Color.clear
-                            .onAppear { inputAtMaxHeight = geo.size.height >= 118 }
-                            .onChange(of: geo.size.height) { _, h in
-                                inputAtMaxHeight = h >= 118
-                            }
-                    }
-                )
-                .padding(.vertical, hasAccessories ? 6 : 10)
+                Spacer()
 
-                // Full-screen expand toggle — only visible when text has filled the input box.
-                // This signals the user that more space is available and avoids a confusing
-                // always-visible button when the input is just one line.
+                // Full-screen expand — only when text has reached max input height
                 if inputAtMaxHeight {
                     Button { showsFullScreenInput.toggle() } label: {
                         Image(systemName: showsFullScreenInput
                               ? "arrow.down.right.and.arrow.up.left"
                               : "arrow.up.left.and.arrow.down.right")
-                            .font(.system(size: 12, weight: .medium))
+                            .font(.system(size: 13, weight: .medium))
                             .foregroundStyle(AppTheme.mutedText)
                     }
                     .buttonStyle(.plain)
-                    .frame(width: 28, height: 28)
+                    .frame(width: 30, height: 30)
                     .contentShape(Rectangle())
                     .transition(.scale.combined(with: .opacity))
                 }
@@ -948,8 +1042,8 @@ struct AIChatView: View {
                 .buttonStyle(.plain)
                 .frame(width: 30, height: 30)
                 .contentShape(Rectangle())
-                .minTouchTarget()
 
+                // Transcribe mic button
                 ChatVoiceInputButton(onTranscription: { transcribed in
                     let current = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
                     inputText = current.isEmpty ? transcribed : current + " " + transcribed
@@ -965,7 +1059,6 @@ struct AIChatView: View {
                     }
                     .buttonStyle(AppPrimaryButtonStyle())
                     .clipShape(Circle())
-                    .minTouchTarget()
                     .transition(.scale.combined(with: .opacity))
                 } else if !isEmpty {
                     Button(action: sendMessage) {
@@ -976,18 +1069,18 @@ struct AIChatView: View {
                     }
                     .buttonStyle(AppPrimaryButtonStyle())
                     .clipShape(Circle())
-                    .minTouchTarget()
                     .transition(.scale.combined(with: .opacity))
                 }
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
+            .padding(.horizontal, 10)
+            .padding(.bottom, 6)
         }
         .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(AppTheme.strongBorder, lineWidth: 1))
         .animation(.snappy(duration: 0.18), value: chatService.isStreaming)
         .animation(.easeOut(duration: 0.12), value: isEmpty)
         .animation(.snappy(duration: 0.15), value: pendingAttachments.count)
+        .animation(.snappy(duration: 0.15), value: inputAtMaxHeight)
         // Tapping anywhere on the input box (padding areas) focuses the text field
         .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         .onTapGesture { isInputFocused = true }
@@ -998,7 +1091,7 @@ struct AIChatView: View {
     /// - When standalone: shows as a square thumbnail with X overlay
     @ViewBuilder
     private func attachmentThumbnail(filename: String) -> some View {
-        let isImage = AttachmentService.shared.loadImage(for: filename) != nil
+        let isImage = AttachmentService.shared.isImageFile(filename)
         let displayName = filename.components(separatedBy: "_").dropFirst().joined(separator: "_")
             .replacingOccurrences(of: ".\(filename.components(separatedBy: ".").last ?? "")", with: "")
         let ext = filename.components(separatedBy: ".").last?.uppercased() ?? "FILE"
@@ -1007,12 +1100,11 @@ struct AIChatView: View {
         if pageContextAttached {
             // Pill style — matches the page context pill look
             HStack(spacing: 6) {
-                if isImage, let image = AttachmentService.shared.loadImage(for: filename) {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: 22, height: 22)
-                        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                if isImage {
+                    AttachmentThumbnailView(filename: filename, size: 22) {
+                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                            .fill(AppTheme.surfaceSecondary)
+                    }
                 } else {
                     Image(systemName: "doc")
                         .font(.system(size: 11, weight: .semibold))
@@ -1036,12 +1128,11 @@ struct AIChatView: View {
         } else {
             // Square thumbnail style — standalone without context pill
             ZStack(alignment: .topTrailing) {
-                if isImage, let image = AttachmentService.shared.loadImage(for: filename) {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: 56, height: 56)
-                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                if isImage {
+                    AttachmentThumbnailView(filename: filename, size: 56) {
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(AppTheme.surfaceSecondary)
+                    }
                 } else {
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
                         .fill(AppTheme.surfaceSecondary)
@@ -1339,16 +1430,19 @@ private struct MessageBubble: View {
     let message: AIChatMessage
     let allTasks: [TaskRecord]
     let canRetry: Bool
+    /// Whether calendar permission is granted — used to show connect CTA.
+    var calendarConnected: Bool = true
+    /// Whether email is loaded — used to show connect CTA.
+    var emailConnected: Bool = true
     var onRetry: () -> Void = {}
     /// Callback for generative UI card actions (e.g. navigate to thread/task/event).
     var onNavigate: ((String, [String: String]) -> Void)?
+    /// Callback when user taps a connect-service button in the message — "calendar" or "email".
+    var onConnect: ((String) -> Void)?
 
     @State private var showActions = false
     @State private var didCopy = false
     @State private var thumbsState: ThumbsState? = nil
-    /// Switches to full markdown (.full syntax) after streaming ends, with a crossfade.
-    /// This avoids the expensive `.full` parse on every streaming token.
-    @State private var showFullMarkdown = false
 
     private enum ThumbsState { case up, down }
 
@@ -1396,11 +1490,16 @@ private struct MessageBubble: View {
             .tracking(-0.1)
             .lineSpacing(3)
             .foregroundStyle(.primary)
+            // fixedSize ensures the bubble expands vertically for multi-line messages
+            .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 16)
-            .padding(.vertical, 12)
+            .padding(.vertical, 10)
+            // cornerRadius 20 ≈ half the single-line bubble height (~40pt), so
+            // one-line messages appear pill/capsule-shaped. Multi-line messages
+            // keep nicely rounded corners without looking boxy.
             .background(
                 AppTheme.surfacePrimary,
-                in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+                in: RoundedRectangle(cornerRadius: 20, style: .continuous)
             )
             // Intentionally no stroke overlay — cleaner look per design feedback
     }
@@ -1437,23 +1536,46 @@ private struct MessageBubble: View {
             } else {
                 assistantContent
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.bottom, showFullMarkdown ? 8 : 0)
-                    // When streaming ends, wait 150ms then crossfade to full markdown
-                    .onChange(of: message.isStreaming) { _, isStreaming in
-                        if !isStreaming {
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                                withAnimation(.easeIn(duration: 0.3)) { showFullMarkdown = true }
-                            }
-                        }
-                    }
-                    // Pre-loaded (history) messages show full markdown immediately
-                    .onAppear {
-                        if !message.isStreaming { showFullMarkdown = true }
-                    }
+                    .padding(.bottom, 8)
+            }
+
+            // Connect CTA — shown when AI mentions a service that isn't connected.
+            // Detection: service not connected AND response text mentions the service name.
+            if !message.isStreaming && !message.content.isEmpty {
+                let lc = message.content.lowercased()
+                if !calendarConnected && (lc.contains("calendar") || lc.contains("not connected")) {
+                    connectBanner(service: "calendar", icon: "calendar", color: .blue)
+                }
+                if !emailConnected && (lc.contains("email") || lc.contains("inbox") || lc.contains("not connected")) {
+                    connectBanner(service: "email", icon: "envelope", color: .orange)
+                }
             }
         }
         .animation(.snappy(duration: 0.3), value: message.searchState)
         .animation(.snappy(duration: 0.3), value: message.sources.count)
+    }
+
+    @ViewBuilder
+    private func connectBanner(service: String, icon: String, color: Color) -> some View {
+        Button {
+            onConnect?(service)
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .medium))
+                Text("Connect \(service.capitalized)")
+                    .font(.system(size: 13, weight: .medium))
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 11, weight: .medium))
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(color.opacity(0.1), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .foregroundStyle(color)
+        }
+        .buttonStyle(.plain)
+        .padding(.top, 2)
+        .transition(.opacity.combined(with: .scale(scale: 0.95)))
     }
 
     /// Mixed-content renderer: text runs with live markdown + [task:UUID] cards + generative UI specs.
@@ -1483,29 +1605,16 @@ private struct MessageBubble: View {
     private func contentPartView(_ part: ContentPart, isLastPart: Bool) -> some View {
         switch part {
         case .text(let txt):
-            // Streaming phase: fast inline-only markdown (bold, italic, inline code, preserves newlines).
-            // Completion phase: crossfade to full markdown (headings, list bullets, code blocks).
-            // NOTE: font/tracking are NOT applied to the full-markdown branch so heading
-            // sizes from AttributedString markdown parsing are respected.
-            if showFullMarkdown {
-                fullMarkdownText(txt)
-                    .transition(.opacity)
-                    .animation(.easeIn(duration: 0.3), value: showFullMarkdown)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            } else {
-                inlineMarkdownText(txt)
-                    .overlay(alignment: .bottomLeading) {
-                        // Blinking cursor only after the very last text chunk
-                        if isLastPart && message.isStreaming { BlinkingCursor() }
-                    }
-                    .transition(.opacity)
-                    .animation(.easeIn(duration: 0.3), value: showFullMarkdown)
-                    .font(.system(size: 16, weight: .regular))
-                    .tracking(-0.1)
-                    .lineSpacing(3)
-                    .foregroundStyle(.primary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
+            // Always use full markdown rendering so headings, bullets, and code blocks
+            // appear immediately during streaming. The typewriter animation comes from
+            // tokens being appended, not from a phase switch.
+            // heading sizes from AttributedString are preserved — no .font() override applied.
+            fullMarkdownText(txt)
+                .overlay(alignment: .bottomLeading) {
+                    // Blinking cursor at the end of the last text chunk while streaming
+                    if isLastPart && message.isStreaming { BlinkingCursor() }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
 
         case .taskRef(let uuid):
             if let task = allTasks.first(where: { $0.id == uuid }) {
@@ -1515,34 +1624,10 @@ private struct MessageBubble: View {
         }
     }
 
-    /// Inline-only markdown — fast, used during streaming.
-    /// Handles bold, italic, inline code and preserves `\n` whitespace.
-    @ViewBuilder
-    private func inlineMarkdownText(_ content: String) -> some View {
-        let attributed = Self.styledInlineMarkdown(content, sources: message.sources, styleCitations: styleCitations)
-        if let attributed {
-            Text(attributed)
-        } else {
-            Text(content)
-        }
-    }
-
-    /// Helper that builds an inline-parsed AttributedString with citation styling applied.
-    /// Extracted from @ViewBuilder to avoid Void-in-ViewBuilder compiler errors.
-    private static func styledInlineMarkdown(
-        _ content: String,
-        sources: [WebSource],
-        styleCitations: (inout AttributedString) -> Void
-    ) -> AttributedString? {
-        guard var attributed = try? AttributedString(
-            markdown: content,
-            options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        ) else { return nil }
-        if !sources.isEmpty { styleCitations(&attributed) }
-        return attributed
-    }
 
     /// Helper that builds a full-parsed AttributedString with citation styling applied.
+    /// Adds explicit paragraph spacing (6pt) so AI responses don't render as a single
+    /// blob — SwiftUI's Text has no default gap between CommonMark paragraphs.
     private static func styledFullMarkdown(
         _ content: String,
         sources: [WebSource],
@@ -1552,14 +1637,29 @@ private struct MessageBubble: View {
             markdown: content,
             options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .full)
         ) else { return nil }
+
+        // Add paragraph spacing so paragraph breaks are visually distinct.
+        // Without this, SwiftUI's Text renders paragraphs back-to-back with
+        // only a line break and no gap — making multi-paragraph AI responses
+        // look like a single block of text.
+        let nsAttr = NSMutableAttributedString(attributed)
+        let fullRange = NSRange(location: 0, length: nsAttr.length)
+        nsAttr.enumerateAttribute(.paragraphStyle, in: fullRange) { value, range, _ in
+            let existing = (value as? NSParagraphStyle) ?? .default
+            let mutable = existing.mutableCopy() as! NSMutableParagraphStyle
+            mutable.paragraphSpacing = 6
+            nsAttr.addAttribute(.paragraphStyle, value: mutable, range: range)
+        }
+        attributed = AttributedString(nsAttr)
+
         if !sources.isEmpty { styleCitations(&attributed) }
         return attributed
     }
 
-    /// Full markdown — runs once when streaming ends.
-    /// Adds headings, list bullets, code blocks on top of inline syntax.
-    /// Preprocesses single `\n` → `\n\n` because CommonMark collapses single newlines
-    /// to a space, causing all paragraphs/bullets to run together in one blob.
+    /// Full markdown — used for all AI response rendering (both during and after streaming).
+    /// Renders headings, list bullets, code blocks immediately so users see formatting as
+    /// tokens arrive (typewriter effect). Single `\n` is normalized to `\n\n` because
+    /// CommonMark collapses single newlines to a space, running paragraphs together.
     /// Does NOT apply an explicit `.font()` override so heading sizes from AttributedString
     /// markdown parsing (h1/h2/h3) are preserved with correct sizes and weights.
     @ViewBuilder
@@ -2100,30 +2200,103 @@ private struct MiniTaskCard: View {
 
 /// Manages SFSpeechRecognizer and AVAudioEngine as a long-lived object so they
 /// aren't recreated on every SwiftUI render (which blocks the main thread).
-/// Audio session setup runs on a background thread to avoid UI freezes.
+/// All heavy audio operations (inputNode, prepare, start) run off the main
+/// thread to prevent UI freezes during hardware initialization.
 private final class VoiceRecorder: ObservableObject, @unchecked Sendable {
     let speechRecognizer = SFSpeechRecognizer()
-    let audioEngine = AVAudioEngine()
+    private var audioEngine: AVAudioEngine?
     var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     var recognitionTask: SFSpeechRecognitionTask?
+    private var hasInstalledTap = false
 
-    /// Configures the audio session off the main thread to avoid blocking UI.
-    func configureAudioSession() async throws {
-        try await Task.detached(priority: .userInitiated) {
-            let session = AVAudioSession.sharedInstance()
+    /// Configures the audio session and starts the engine entirely off the main
+    /// thread. AVAudioSession.setActive, audioEngine.inputNode, prepare(), and
+    /// start() can collectively block for several seconds while hardware
+    /// initializes — running them off-main prevents a visible UI freeze.
+    func setupAndStartEngine() async throws {
+        let session = AVAudioSession.sharedInstance()
+        var engine: AVAudioEngine?
+        var request: SFSpeechAudioBufferRecognitionRequest?
+        var didInstallTap = false
+
+        do {
             try session.setCategory(.record, mode: .measurement, options: .duckOthers)
             try session.setActive(true, options: .notifyOthersOnDeactivation)
-        }.value
+
+            // Small delay for the audio session to fully propagate —
+            // inputNode.outputFormat can return invalid format if queried immediately.
+            try await Task.sleep(for: .milliseconds(50))
+
+            let newEngine = AVAudioEngine()
+            let newRequest = SFSpeechAudioBufferRecognitionRequest()
+            newRequest.shouldReportPartialResults = true
+            engine = newEngine
+            request = newRequest
+
+            let inputNode = newEngine.inputNode
+            let format = inputNode.outputFormat(forBus: 0)
+
+            guard format.channelCount > 0, format.sampleRate > 0 else {
+                throw NSError(
+                    domain: "VoiceInput",
+                    code: -1,
+                    userInfo: [NSLocalizedDescriptionKey: "Invalid audio input format"]
+                )
+            }
+
+            if hasInstalledTap, let oldEngine = audioEngine {
+                oldEngine.inputNode.removeTap(onBus: 0)
+                hasInstalledTap = false
+            }
+
+            inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
+                newRequest.append(buffer)
+            }
+            didInstallTap = true
+
+            newEngine.prepare()
+            try newEngine.start()
+
+            // Stop any previous engine before storing the new one
+            if let old = audioEngine, old.isRunning { old.stop() }
+            audioEngine = newEngine
+            recognitionRequest = newRequest
+            hasInstalledTap = true
+        } catch {
+            if didInstallTap {
+                engine?.inputNode.removeTap(onBus: 0)
+            }
+            if let engine, engine.isRunning {
+                engine.stop()
+            }
+            request?.endAudio()
+            audioEngine = nil
+            recognitionRequest = nil
+            hasInstalledTap = false
+            try? session.setActive(false, options: [])
+            throw error
+        }
     }
 
     func cleanup() {
         recognitionTask?.cancel()
         recognitionTask = nil
+        recognitionRequest?.endAudio()
         recognitionRequest = nil
-        if audioEngine.isRunning {
-            audioEngine.stop()
-            audioEngine.inputNode.removeTap(onBus: 0)
+        stopCapture()
+        try? AVAudioSession.sharedInstance().setActive(false, options: [])
+    }
+
+    func stopCapture() {
+        guard let engine = audioEngine else { return }
+        if engine.isRunning {
+            engine.stop()
         }
+        if hasInstalledTap {
+            engine.inputNode.removeTap(onBus: 0)
+            hasInstalledTap = false
+        }
+        audioEngine = nil
     }
 }
 
@@ -2133,6 +2306,7 @@ private struct ChatVoiceInputButton: View {
     @State private var isRecording = false
     @State private var isTranscribing = false
     @State private var partialText: String = ""
+    @State private var didDeliverTranscription = false
 
     // Speech / audio — StateObject so they persist across renders and
     // aren't re-initialized (which blocks main thread on first access)
@@ -2177,55 +2351,39 @@ private struct ChatVoiceInputButton: View {
 
     private func startRecording() {
         Task { @MainActor in
+            guard !isRecording, !isTranscribing else { return }
             guard await requestPermissions() else { return }
             do {
-                // Audio session configured off main thread to prevent UI freeze
-                try await recorder.configureAudioSession()
+                // Audio session + engine setup runs entirely off-main to prevent UI freeze.
+                // AVAudioSession.setActive, audioEngine.inputNode, prepare(), and start()
+                // can collectively block for several seconds during hardware initialization.
+                try await recorder.setupAndStartEngine()
 
-                // Small delay to let the audio session fully propagate —
-                // inputNode.outputFormat can crash with EXC_BAD_ACCESS if queried
-                // before the session is fully active.
-                try await Task.sleep(for: .milliseconds(50))
+                isRecording = true
+                didDeliverTranscription = false
+                partialText = ""
 
-                let request = SFSpeechAudioBufferRecognitionRequest()
-                request.shouldReportPartialResults = true
-                recorder.recognitionRequest = request
-
-                let inputNode = recorder.audioEngine.inputNode
-                let recordingFormat = inputNode.outputFormat(forBus: 0)
-
-                // Guard against invalid formats (0 channels / 0 sample rate) which cause crashes
-                guard recordingFormat.channelCount > 0, recordingFormat.sampleRate > 0 else {
-                    #if DEBUG
-                    print("Invalid input format: \(recordingFormat)")
-                    #endif
+                guard let request = recorder.recognitionRequest else {
                     cleanup()
                     return
                 }
 
-                inputNode.removeTap(onBus: 0)
-                inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { buffer, _ in
-                    request.append(buffer)
-                }
-
-                recorder.audioEngine.prepare()
-                try recorder.audioEngine.start()
-
-                isRecording = true
-                partialText = ""
-
                 recorder.recognitionTask = recorder.speechRecognizer?.recognitionTask(with: request) { result, error in
-                    // Recognition callback fires on an arbitrary queue — dispatch to main
+                    // Extract data on the callback's thread before dispatching —
+                    // avoids capturing framework objects across actor boundaries.
+                    let text = result?.bestTranscription.formattedString ?? ""
+                    let isFinal = result?.isFinal == true || error != nil
+                    #if DEBUG
+                    let errorDesc = error?.localizedDescription
+                    #endif
                     DispatchQueue.main.async {
-                        if let result = result {
-                            partialText = result.bestTranscription.formattedString
+                        if !text.isEmpty {
+                            partialText = text
                         }
-                        if let error = error {
-                            stopRecordingInternal(finalize: true)
+                        if isFinal {
                             #if DEBUG
-                            print("Speech recognition error: \(error.localizedDescription)")
+                            if let errorDesc { print("Speech recognition error: \(errorDesc)") }
                             #endif
-                        } else if result?.isFinal == true {
                             stopRecordingInternal(finalize: true)
                         }
                     }
@@ -2246,8 +2404,7 @@ private struct ChatVoiceInputButton: View {
     @MainActor
     private func stopRecordingInternal(finalize: Bool) {
         guard isRecording || isTranscribing else { return }
-        recorder.audioEngine.inputNode.removeTap(onBus: 0)
-        recorder.audioEngine.stop()
+        recorder.stopCapture()
         recorder.recognitionRequest?.endAudio()
         isRecording = false
         if finalize { isTranscribing = true }
@@ -2255,7 +2412,8 @@ private struct ChatVoiceInputButton: View {
         // Defer delivery slightly to allow final result to surface
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             let finalText = partialText.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !finalText.isEmpty {
+            if !finalText.isEmpty, !didDeliverTranscription {
+                didDeliverTranscription = true
                 onTranscription(finalText)
             }
             cleanup()

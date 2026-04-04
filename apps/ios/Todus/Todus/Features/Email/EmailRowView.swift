@@ -18,12 +18,7 @@ struct EmailRowView: View {
     }
 
     var body: some View {
-        HStack(spacing: 12) {
-            // Unread accent bar — uses theme accent for visual consistency
-            RoundedRectangle(cornerRadius: 2)
-                .fill(thread.unread ? AppTheme.accentBlue : Color.clear)
-                .frame(width: 3, height: 40)
-
+        HStack(spacing: 10) {
             // Avatar
             SenderAvatarView(email: thread.from.email, name: thread.from.name)
 
@@ -42,10 +37,21 @@ struct EmailRowView: View {
                         .foregroundStyle(AppTheme.mutedText)
                 }
 
-                Text(thread.subject)
-                    .font(.system(size: 14, weight: thread.unread ? .semibold : .regular))
-                    .foregroundStyle(thread.unread ? .primary : AppTheme.subtleText)
-                    .lineLimit(1)
+                // Subject + unread indicator on the right
+                HStack(spacing: 6) {
+                    Text(thread.subject)
+                        .font(.system(size: 14, weight: thread.unread ? .semibold : .regular))
+                        .foregroundStyle(thread.unread ? .primary : AppTheme.subtleText)
+                        .lineLimit(1)
+
+                    Spacer(minLength: 0)
+
+                    if thread.unread {
+                        Circle()
+                            .fill(AppTheme.accentBlue)
+                            .frame(width: 7, height: 7)
+                    }
+                }
 
                 Text(thread.snippet)
                     .font(.system(size: 13))
@@ -54,7 +60,7 @@ struct EmailRowView: View {
             }
         }
         .padding(.vertical, 11)
-        .padding(.trailing, 16)
+        .padding(.horizontal, 16)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(thread.unread ? "Unread, " : "")From \(thread.from.name), \(thread.subject), \(timeString)")

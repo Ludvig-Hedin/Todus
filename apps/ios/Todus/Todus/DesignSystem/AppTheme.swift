@@ -18,6 +18,9 @@ enum AppTheme {
     static let surfaceSecondary = Color(UIColor { trait in
         trait.userInterfaceStyle == .dark ? UIColor(white: 0.14, alpha: 1) : UIColor(white: 0.96, alpha: 1)
     })
+    static let sheetCardFill = Color(UIColor { trait in
+        trait.userInterfaceStyle == .dark ? UIColor(white: 0.13, alpha: 1) : UIColor(white: 0.92, alpha: 1)
+    })
     // Restrained completely minimal accent
     static let accent = Color.primary
     static let secondaryAccent = Color.secondary
@@ -48,10 +51,23 @@ enum AppTheme {
 
 /// Shared tab-page header — single row: avatar + page title (left) + action pill (right).
 /// Positioned consistently at the top of every tab with uniform padding.
-struct AppTopHeader: View {
+struct AppTopHeader<CustomTitle: View>: View {
     @Environment(AppServices.self) private var services
 
     let title: String
+    let customTitleContent: CustomTitle?
+
+    /// Standard init with a text title
+    init(title: String) where CustomTitle == Never {
+        self.title = title
+        self.customTitleContent = nil
+    }
+
+    /// Init with custom content replacing the title (e.g. CalendarViewModePicker)
+    init(title: String, @ViewBuilder customTitle: () -> CustomTitle) {
+        self.title = title
+        self.customTitleContent = customTitle()
+    }
 
     @State private var showNotifications = false
     @State private var showsGlobalSearch = false
@@ -60,10 +76,14 @@ struct AppTopHeader: View {
         HStack(alignment: .center, spacing: 10) {
             avatarButton
 
-            Text(title)
-                .font(.system(size: 18, weight: .bold))
-                .tracking(-0.3)
-                .foregroundStyle(.primary)
+            if let customTitleContent {
+                customTitleContent
+            } else {
+                Text(title)
+                    .font(.system(size: 18, weight: .bold))
+                    .tracking(-0.3)
+                    .foregroundStyle(.primary)
+            }
 
             Spacer()
 
@@ -91,7 +111,8 @@ struct AppTopHeader: View {
         } label: {
             avatarContent
         }
-        .buttonStyle(.plain)
+            .buttonStyle(.plain)
+        .interactiveHitTarget(expansion: 4)
         .accessibilityLabel("Open settings")
     }
 
@@ -148,6 +169,7 @@ struct AppTopHeader: View {
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(.primary)
                     .frame(width: 40, height: 36)
+                    .interactiveHitTarget(expansion: 4)
             }
             .buttonStyle(.plain)
 
@@ -161,6 +183,7 @@ struct AppTopHeader: View {
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(.primary)
                     .frame(width: 40, height: 36)
+                    .interactiveHitTarget(expansion: 4)
             }
             .buttonStyle(.plain)
 
@@ -186,6 +209,7 @@ struct AppTopHeader: View {
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(.primary)
                     .frame(width: 40, height: 36)
+                    .interactiveHitTarget(expansion: 4)
             }
             .menuStyle(.borderlessButton)
             .buttonStyle(.plain)
@@ -212,14 +236,18 @@ private extension View {
 // MARK: - Touch Target Helpers
 
 extension View {
-    /// Ensures a minimum 44×44 pt interactive touch area (Apple HIG requirement) without
-    /// changing the visual appearance of the view. The visible content stays the same size;
-    /// only the hit-testing region is expanded. Safe to use on buttons separated from
-    /// neighbours by a Spacer or flexible area — do NOT use in dense equal-width button rows.
+    /// Ensures a minimum visible 44x44 frame and then expands the hit target beyond that frame.
+    /// Safe for isolated icon buttons and pill controls; use `interactiveHitTarget` directly in dense rows.
     func minTouchTarget() -> some View {
         self
             .frame(minWidth: 44, minHeight: 44)
-            .contentShape(Rectangle())
+            .interactiveHitTarget(expansion: 8)
+    }
+
+    /// Expands the interactive region without affecting layout. Use a smaller expansion for
+    /// grouped controls and a larger one for isolated icons.
+    func interactiveHitTarget(expansion: CGFloat = 6) -> some View {
+        contentShape(Rectangle().inset(by: -expansion))
     }
 }
 
@@ -246,6 +274,7 @@ struct AppPrimaryButtonStyle: ButtonStyle {
             if #available(iOS 26.0, *) {
                 // iOS 26: Liquid Glass with a blue tint overlay — pill shape
                 configuration.label
+                    .interactiveHitTarget(expansion: 6)
                     .foregroundStyle(Color.white.opacity(configuration.isPressed ? 0.85 : 1))
                     .glassEffect(
                         .regular.tint(Color.blue.opacity(configuration.isPressed ? 0.72 : 0.88)),
@@ -254,10 +283,11 @@ struct AppPrimaryButtonStyle: ButtonStyle {
             } else {
                 // Older iOS: flat blue pill
                 configuration.label
+                    .interactiveHitTarget(expansion: 6)
                     .foregroundStyle(Color.white.opacity(configuration.isPressed ? 0.9 : 1))
                     .background(
                         Capsule()
-                            .fill(Color.blue.opacity(configuration.isPressed ? 0.82 : 0.96))
+                        .fill(Color.blue.opacity(configuration.isPressed ? 0.82 : 0.96))
                     )
             }
         }
@@ -272,10 +302,12 @@ struct AppSecondaryButtonStyle: ButtonStyle {
         Group {
             if #available(iOS 26.0, *) {
                 configuration.label
+                    .interactiveHitTarget(expansion: 6)
                     .foregroundStyle(Color.primary.opacity(configuration.isPressed ? 0.7 : 0.9))
                     .glassEffect(.regular, in: Capsule())
             } else {
                 configuration.label
+                    .interactiveHitTarget(expansion: 6)
                     .foregroundStyle(Color.primary.opacity(configuration.isPressed ? 0.7 : 0.9))
                     .background(.ultraThinMaterial, in: Capsule())
                     .overlay(
@@ -295,6 +327,7 @@ struct AppIconButtonModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .frame(width: size, height: size)
+            .contentShape(Circle().inset(by: -6))
             .background(AppTheme.surfacePrimary, in: Circle())
             .overlay(Circle().stroke(AppTheme.cardBorder, lineWidth: 1))
     }
@@ -323,9 +356,11 @@ struct LiquidGlassButtonStyle: ButtonStyle {
         Group {
             if #available(iOS 26.0, *) {
                 configuration.label
+                    .interactiveHitTarget(expansion: 6)
                     .glassEffect(.regular, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             } else {
                 configuration.label
+                    .interactiveHitTarget(expansion: 6)
                     .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
                     .overlay(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous).stroke(AppTheme.cardBorder, lineWidth: 1))
             }
@@ -346,5 +381,44 @@ extension View {
 
     func dismissKeyboard() {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+}
+
+struct AttachmentThumbnailView<Placeholder: View>: View {
+    let filename: String
+    let size: CGFloat
+    @ViewBuilder let placeholder: () -> Placeholder
+
+    @State private var image: UIImage?
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                placeholder()
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(RoundedRectangle(cornerRadius: max(8, size * 0.18), style: .continuous))
+        .task(id: [filename, String(format: "%.2f", size)].joined(separator: "-")) {
+            let thumbnailName = filename
+            let thumbnailSize = size
+            image = nil
+            guard !Task.isCancelled else { return }
+            let thumbnail = await Task(priority: .utility) {
+                AttachmentService.shared.loadThumbnail(
+                    for: thumbnailName,
+                    maxPixelSize: thumbnailSize * 3
+                )
+            }.value
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                guard !Task.isCancelled else { return }
+                image = thumbnail
+            }
+        }
     }
 }

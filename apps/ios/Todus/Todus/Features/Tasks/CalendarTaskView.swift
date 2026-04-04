@@ -1,6 +1,15 @@
 import SwiftUI
 import SwiftData
 
+fileprivate struct CalendarDateBucket: Identifiable {
+    let id: String
+    let label: String
+    let subtitle: String
+    let icon: String
+    let tint: Color
+    let tasks: [TaskRecord]
+}
+
 /// Shows tasks grouped by due-date buckets (Today, Tomorrow, This Week, Later, No Date).
 /// Used when the user selects the Calendar view mode.
 struct CalendarTaskView: View {
@@ -12,26 +21,20 @@ struct CalendarTaskView: View {
     @State private var taskPendingMove: TaskRecord?
 
     var searchText: String = ""
+    var sortOrder: TaskSortOrder = .dueDate
 
     // MARK: - Bucketing
 
-    private struct DateBucket: Identifiable {
-        let id: String
-        let label: String
-        let icon: String
-        let tint: Color
-        let tasks: [TaskRecord]
-    }
-
     // Cached buckets — recomputed only when inputs change, not on every body evaluation.
-    @State private var buckets: [DateBucket] = []
+    @State private var buckets: [CalendarDateBucket] = []
 
     private func recomputeBuckets() {
         let cal = Calendar.current
         let now = Date()
         let todayStart = cal.startOfDay(for: now)
-        let tomorrowStart = cal.date(byAdding: .day, value: 1, to: todayStart)!
-        let weekEnd = cal.date(byAdding: .day, value: 7, to: todayStart)!
+        guard let tomorrowStart = cal.date(byAdding: .day, value: 1, to: todayStart),
+              let weekEnd = cal.date(byAdding: .day, value: 7, to: todayStart) else { return }
+
 
         var today: [TaskRecord] = []
         var tomorrow: [TaskRecord] = []
@@ -62,27 +65,27 @@ struct CalendarTaskView: View {
             }
         }
 
-        var result: [DateBucket] = []
+        var result: [CalendarDateBucket] = []
         // Bucket colors: warm red-orange for urgent → cool blue for distant → neutral for unscheduled
         if !today.isEmpty {
-            result.append(DateBucket(id: "today", label: "Today", icon: "sun.max.fill",
-                                     tint: Color(red: 0.88, green: 0.50, blue: 0.20), tasks: today))
+            result.append(CalendarDateBucket(id: "today", label: "Today", subtitle: "Needs attention first", icon: "sun.max.fill",
+                                     tint: Color(red: 0.88, green: 0.50, blue: 0.20), tasks: sortTasks(today)))
         }
         if !tomorrow.isEmpty {
-            result.append(DateBucket(id: "tomorrow", label: "Tomorrow", icon: "sunrise.fill",
-                                     tint: Color(red: 0.75, green: 0.62, blue: 0.30), tasks: tomorrow))
+            result.append(CalendarDateBucket(id: "tomorrow", label: "Tomorrow", subtitle: "Coming up next", icon: "sunrise.fill",
+                                     tint: Color(red: 0.75, green: 0.62, blue: 0.30), tasks: sortTasks(tomorrow)))
         }
         if !thisWeek.isEmpty {
-            result.append(DateBucket(id: "week", label: "This Week", icon: "calendar",
-                                     tint: Color(red: 0.40, green: 0.56, blue: 0.85), tasks: thisWeek))
+            result.append(CalendarDateBucket(id: "week", label: "This Week", subtitle: "Plan the week ahead", icon: "calendar",
+                                     tint: Color(red: 0.40, green: 0.56, blue: 0.85), tasks: sortTasks(thisWeek)))
         }
         if !later.isEmpty {
-            result.append(DateBucket(id: "later", label: "Later", icon: "calendar.badge.clock",
-                                     tint: Color(red: 0.55, green: 0.55, blue: 0.60), tasks: later))
+            result.append(CalendarDateBucket(id: "later", label: "Later", subtitle: "Longer-term work", icon: "calendar.badge.clock",
+                                     tint: Color(red: 0.55, green: 0.55, blue: 0.60), tasks: sortTasks(later)))
         }
         if !noDate.isEmpty {
-            result.append(DateBucket(id: "nodate", label: "No Date", icon: "calendar.badge.minus",
-                                     tint: Color(red: 0.50, green: 0.50, blue: 0.52), tasks: noDate))
+            result.append(CalendarDateBucket(id: "nodate", label: "No Date", subtitle: "Needs a planned time", icon: "calendar.badge.minus",
+                                     tint: Color(red: 0.50, green: 0.50, blue: 0.52), tasks: sortTasks(noDate)))
         }
         buckets = result
     }
@@ -94,26 +97,27 @@ struct CalendarTaskView: View {
             if buckets.isEmpty {
                 emptyState
             } else {
-                List {
-                    ForEach(buckets) { bucket in
-                        Section {
-                            ForEach(bucket.tasks) { task in
-                                TaskRowView(task: task) {
-                                    taskPendingMove = task
-                                } onOpenDetails: {
-                                    selectedTask = task
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        ForEach(buckets) { bucket in
+                            VStack(alignment: .leading, spacing: 10) {
+                                bucketHeader(bucket)
+
+                                VStack(spacing: 8) {
+                                    ForEach(bucket.tasks) { task in
+                                        CalendarTaskCard(task: task, bucket: bucket) {
+                                            taskPendingMove = task
+                                        } onOpenDetails: {
+                                            selectedTask = task
+                                        }
+                                    }
                                 }
-                                .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
-                                .listRowBackground(Color.clear)
-                                .listRowSeparator(.hidden)
+                                .padding(.leading, 14)
                             }
-                        } header: {
-                            bucketHeader(bucket)
                         }
                     }
+                    .padding(.vertical, 10)
                 }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
                 .scrollDismissesKeyboard(.interactively)
                 .sheet(item: $taskPendingMove) { task in
                     MoveToFolderSheet(task: task)
@@ -130,34 +134,32 @@ struct CalendarTaskView: View {
         .onAppear { recomputeBuckets() }
         .onChange(of: allTasks) { recomputeBuckets() }
         .onChange(of: searchText) { recomputeBuckets() }
+        .onChange(of: sortOrder) { recomputeBuckets() }
         .onChange(of: services.selectedFolderID) { recomputeBuckets() }
     }
 
     // MARK: - Bucket Header
 
-    private func bucketHeader(_ bucket: DateBucket) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: bucket.icon)
-                .font(.system(size: 10, weight: .bold))
-                .foregroundStyle(bucket.tint)
-
+    private func bucketHeader(_ bucket: CalendarDateBucket) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
             Text(bucket.label)
-                .font(.system(size: 12, weight: .semibold))
-                .tracking(-0.1)
-                .textCase(nil)
-                .foregroundStyle(.primary.opacity(0.75))
+                .font(.system(size: 17, weight: .semibold))
+                .tracking(-0.25)
+                .foregroundStyle(.primary)
 
-            Text("\(bucket.tasks.count)")
-                .font(.system(size: 10, weight: .medium, design: .rounded))
-                .foregroundStyle(bucket.tint.opacity(0.7))
-                .padding(.horizontal, 5)
-                .padding(.vertical, 1)
-                .background(bucket.tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+            Text(bucket.subtitle)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(AppTheme.mutedText)
 
             Spacer()
+
+            Text("\(bucket.tasks.count)")
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .foregroundStyle(bucket.tint)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(bucket.tint.opacity(0.10), in: Capsule())
         }
-        .padding(.top, 16)
-        .padding(.bottom, 4)
     }
 
     // MARK: - Helpers
@@ -168,10 +170,30 @@ struct CalendarTaskView: View {
                task.taskDescription.localizedCaseInsensitiveContains(searchText)
     }
 
+    private func sortTasks(_ tasks: [TaskRecord]) -> [TaskRecord] {
+        switch sortOrder {
+        case .newest:
+            return tasks.sorted { $0.createdAt > $1.createdAt }
+        case .oldest:
+            return tasks.sorted { $0.createdAt < $1.createdAt }
+        case .alphabetical:
+            return tasks.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+        case .dueDate:
+            return tasks.sorted {
+                switch ($0.dueDate, $1.dueDate) {
+                case let (a?, b?): return a < b
+                case (nil, nil): return $0.createdAt > $1.createdAt
+                case (_, nil): return true
+                case (nil, _): return false
+                }
+            }
+        }
+    }
+
     private var emptyState: some View {
         VStack(spacing: 12) {
             Spacer()
-            Image(systemName: searchText.isEmpty ? "calendar.badge.checkmark" : "magnifyingglass")
+            Image(systemName: searchText.isEmpty ? "calendar.badge.clock" : "magnifyingglass")
                 .font(.system(size: 32, weight: .medium))
                 .foregroundStyle(AppTheme.mutedText)
                 .appIconButton(size: 48)
@@ -180,7 +202,7 @@ struct CalendarTaskView: View {
                 .tracking(-0.4)
             Text(
                 searchText.isEmpty
-                    ? "Tasks with a due date will appear here, grouped by when they're due."
+                    ? "Tasks with dates will appear in order: today, tomorrow, this week, then later."
                     : "Try a different search term."
             )
             .font(.system(size: 14, weight: .medium))
@@ -192,5 +214,124 @@ struct CalendarTaskView: View {
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+private struct CalendarTaskCard: View {
+    let task: TaskRecord
+    let bucket: CalendarDateBucket
+    let onMoveRequested: () -> Void
+    let onOpenDetails: () -> Void
+
+    var body: some View {
+        Button {
+            onOpenDetails()
+        } label: {
+            HStack(alignment: .center, spacing: 12) {
+                VStack(spacing: 4) {
+                    Circle()
+                        .fill(bucket.tint)
+                        .frame(width: 8, height: 8)
+
+                    Rectangle()
+                        .fill(bucket.tint.opacity(0.18))
+                        .frame(width: 2)
+                }
+                .frame(width: 12)
+
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(task.title)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(.primary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                        if let dueDate = task.dueDate {
+                            Text(TaskDateFormatter.dueFormatter.string(from: dueDate))
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(bucket.tint)
+                        }
+                    }
+
+                    HStack(spacing: 6) {
+                        if !task.taskDescription.isEmpty && task.taskDescription != task.title {
+                            Text(task.taskDescription)
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(AppTheme.mutedText)
+                                .lineLimit(1)
+                        }
+
+                        Spacer(minLength: 0)
+                    }
+
+                    HStack(spacing: 6) {
+                        CalendarMetaPill(
+                            text: task.status.title,
+                            systemImage: task.status.systemImage,
+                            tint: task.status.tintColor
+                        )
+
+                        if task.priority != .none {
+                            CalendarMetaPill(
+                                text: task.priority.title,
+                                systemImage: "flag.fill",
+                                tint: priorityColor(task.priority)
+                            )
+                        }
+
+                        if let folder = task.folder {
+                            CalendarMetaPill(
+                                text: folder.name,
+                                systemImage: "folder",
+                                tint: AppTheme.mutedText
+                            )
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(AppTheme.cardBorder, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            Button {
+                onMoveRequested()
+            } label: {
+                Label("Move", systemImage: "folder")
+            }
+        }
+    }
+
+    private func priorityColor(_ priority: AppTaskPriority) -> Color {
+        switch priority {
+        case .high:   return Color(red: 0.85, green: 0.30, blue: 0.25)
+        case .medium: return Color(red: 0.88, green: 0.65, blue: 0.20)
+        case .low:    return Color(red: 0.50, green: 0.60, blue: 0.70)
+        default:      return AppTheme.mutedText
+        }
+    }
+}
+
+private struct CalendarMetaPill: View {
+    let text: String
+    let systemImage: String
+    let tint: Color
+
+    var body: some View {
+        Label(text, systemImage: systemImage)
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(tint.opacity(0.9))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(AppTheme.surfaceSecondary.opacity(0.7), in: Capsule())
+            .overlay(
+                Capsule()
+                    .stroke(AppTheme.cardBorder, lineWidth: 0.75)
+            )
     }
 }

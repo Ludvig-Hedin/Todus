@@ -141,6 +141,19 @@ final class GroupChatService {
     /// When DO rooms are available, connect via URLSessionWebSocketTask here,
     /// receive broadcast messages, and append them to `currentMessages` directly.
     /// Call stopPolling() before disconnecting.
+    ///
+    /// Polling uses adaptive intervals: 5s when the view is active, 30s when backgrounded.
+    /// Call setActive(false) when the GroupChatView disappears to reduce battery drain.
+    private var isViewActive: Bool = true
+
+    func setActive(_ active: Bool) {
+        isViewActive = active
+    }
+
+    private var pollingInterval: Duration {
+        isViewActive ? .seconds(5) : .seconds(30)
+    }
+
     func startPolling(groupId: String) {
         stopPolling()
         isPolling = true
@@ -152,7 +165,7 @@ final class GroupChatService {
                 } catch {
                     // Non-fatal: keep polling even if one request fails
                 }
-                try? await Task.sleep(for: .seconds(5))
+                try? await Task.sleep(for: self.pollingInterval)
             }
             await MainActor.run { self.isPolling = false }
         }

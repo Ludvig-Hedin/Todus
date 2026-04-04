@@ -10,6 +10,11 @@ struct CalendarEvent: Identifiable, Sendable {
     let endDate: Date
     let isAllDay: Bool
     let calendarColor: UInt
+    /// RGB components (0.0–1.0) for SwiftUI Color construction
+    let calendarColorRed: Double
+    let calendarColorGreen: Double
+    let calendarColorBlue: Double
+    let calendarName: String
     let folderID: UUID?
 }
 
@@ -19,6 +24,14 @@ struct CalendarEvent: Identifiable, Sendable {
 actor CalendarService {
     private lazy var eventStore = EKEventStore()
     private let folderMapKey = "com.todus.calendar.eventFolderMap"
+    private var lastFolderPruneAt: Date?
+    private let folderPruneInterval: TimeInterval = 6 * 60 * 60
+    private let folderPrunePastWindow: TimeInterval = 60 * 60 * 24 * 365
+    private let folderPruneFutureWindow: TimeInterval = 60 * 60 * 24 * 365
+    private var cachedTodayDate: Date?
+    private var cachedTodayEvents: [CalendarEvent] = []
+    private var cachedTodayFetchedAt: Date?
+    private let todayCacheInterval: TimeInterval = 30
 
     /// Request full access to calendar events. Returns true if authorized.
     func requestAccess() async -> Bool {
@@ -60,18 +73,37 @@ actor CalendarService {
 
     /// Fetch events for a given date range, returned as sendable CalendarEvent structs.
     func events(from startDate: Date, to endDate: Date) -> [CalendarEvent] {
-        pruneStaleFolderMapEntries()
+        let trace = PerformanceTrace.beginInterval(
+            PerformanceTrace.calendarEventsFetch,
+            message: "CalendarService.events begin"
+        )
+        defer {
+            PerformanceTrace.endInterval(
+                PerformanceTrace.calendarEventsFetch,
+                trace,
+                message: "CalendarService.events end"
+            )
+        }
+        scheduleFolderMapPruneIfNeeded()
         let predicate = eventStore.predicateForEvents(withStart: startDate, end: endDate, calendars: nil)
         return eventStore.events(matching: predicate).map { $0.toCalendarEvent(folderID: folderID(for: $0.eventIdentifier)) }
     }
 
     /// Fetch today's events (from midnight to midnight).
     func todaysEvents() -> [CalendarEvent] {
-        pruneStaleFolderMapEntries()
         let calendar = Calendar.current
         let startOfDay = calendar.startOfDay(for: Date())
+        if cachedTodayDate == startOfDay,
+           let cachedTodayFetchedAt,
+           Date().timeIntervalSince(cachedTodayFetchedAt) < todayCacheInterval {
+            return cachedTodayEvents
+        }
         let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay) ?? startOfDay
-        return events(from: startOfDay, to: endOfDay)
+        let events = events(from: startOfDay, to: endOfDay)
+        cachedTodayDate = startOfDay
+        cachedTodayFetchedAt = Date()
+        cachedTodayEvents = events
+        return events
     }
 
     /// Create a new event with the given title and optional dates.
@@ -82,9 +114,15 @@ actor CalendarService {
         event.endDate = endDate ?? startDate.addingTimeInterval(3600)
         event.calendar = eventStore.defaultCalendarForNewEvents
         try eventStore.save(event, span: .thisEvent)
+        invalidateTodayCache()
         if let folderID, let identifier = event.eventIdentifier {
             setFolderID(folderID, for: identifier)
         }
+    }
+
+    /// Fetch the underlying EKEvent by identifier — used by SwiftUI views to present EKEventViewController.
+    func ekEvent(for identifier: String) -> EKEvent? {
+        eventStore.event(withIdentifier: identifier)
     }
 
     func setFolderID(_ folderID: UUID?, for eventIdentifier: String?) {
@@ -96,6 +134,7 @@ actor CalendarService {
             map.removeValue(forKey: eventIdentifier)
         }
         folderMap = map
+        invalidateTodayCache()
     }
 
     private func folderID(for eventIdentifier: String?) -> UUID? {
@@ -113,15 +152,38 @@ actor CalendarService {
         }
     }
 
-    private func pruneStaleFolderMapEntries() {
+    private func scheduleFolderMapPruneIfNeeded() {
+        let now = Date()
+        if let lastPrune = lastFolderPruneAt, now.timeIntervalSince(lastPrune) <= folderPruneInterval {
+            return
+        }
+        lastFolderPruneAt = now
+        pruneStaleFolderMapEntries(referenceDate: now)
+    }
+
+    private func pruneStaleFolderMapEntries(referenceDate: Date) {
         guard canReadEvents() else { return }
+        let trace = PerformanceTrace.beginInterval(
+            PerformanceTrace.calendarFolderPrune,
+            message: "CalendarService.pruneFolderMap begin"
+        )
+        defer {
+            PerformanceTrace.endInterval(
+                PerformanceTrace.calendarFolderPrune,
+                trace,
+                message: "CalendarService.pruneFolderMap end"
+            )
+        }
+
+        let startDate = referenceDate.addingTimeInterval(-folderPrunePastWindow)
+        let endDate = referenceDate.addingTimeInterval(folderPruneFutureWindow)
 
         let existingIdentifiers = Set(
             eventStore
                 .events(
                     matching: eventStore.predicateForEvents(
-                        withStart: .distantPast,
-                        end: .distantFuture,
+                        withStart: startDate,
+                        end: endDate,
                         calendars: nil
                     )
                 )
@@ -136,30 +198,41 @@ actor CalendarService {
             folderMap = prunedMap
         }
     }
+
+    private func invalidateTodayCache() {
+        cachedTodayDate = nil
+        cachedTodayFetchedAt = nil
+        cachedTodayEvents = []
+    }
 }
 
 private extension EKEvent {
     func toCalendarEvent(folderID: UUID?) -> CalendarEvent {
-        CalendarEvent(
+        // Extract RGB components from the calendar color for both packed UInt and individual doubles
+        let (r, g, b): (Double, Double, Double) = {
+            guard let cgColor = calendar?.cgColor,
+                  let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+                  let converted = cgColor.converted(to: colorSpace, intent: .defaultIntent, options: nil),
+                  let comps = converted.components, comps.count >= 3 else {
+                // Default blue (0x5B8DEF)
+                return (0.357, 0.553, 0.937)
+            }
+            return (comps[0], comps[1], comps[2])
+        }()
+
+        return CalendarEvent(
             id: eventIdentifier ?? UUID().uuidString,
             title: title ?? "Untitled",
             startDate: startDate,
             endDate: endDate,
             isAllDay: isAllDay,
-            // Extract a stable packed-RGB UInt from the calendar color.
-            // hashValue is unstable across launches; use the actual RGB components instead.
-            calendarColor: {
-                guard let cgColor = calendar?.cgColor,
-                      let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
-                      let converted = cgColor.converted(to: colorSpace, intent: .defaultIntent, options: nil),
-                      let comps = converted.components, comps.count >= 3 else {
-                    return 0x5B8DEF // default blue
-                }
-                let r = UInt(max(0, min(255, Int(comps[0] * 255))))
-                let g = UInt(max(0, min(255, Int(comps[1] * 255))))
-                let b = UInt(max(0, min(255, Int(comps[2] * 255))))
-                return (r << 16) | (g << 8) | b
-            }(),
+            calendarColor: (UInt(max(0, min(255, Int(r * 255)))) << 16)
+                         | (UInt(max(0, min(255, Int(g * 255)))) << 8)
+                         | UInt(max(0, min(255, Int(b * 255)))),
+            calendarColorRed: r,
+            calendarColorGreen: g,
+            calendarColorBlue: b,
+            calendarName: calendar?.title ?? "Calendar",
             folderID: folderID
         )
     }

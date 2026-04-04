@@ -17,27 +17,27 @@ struct ChatUISpec: Codable, Sendable {
 /// `children` contains IDs of child elements (referencing siblings in the flat map).
 struct UIElement: Codable, Sendable {
     let type: String
-    let props: [String: JSONValue]
+    let props: [String: ChatJSONValue]
     let children: [String]?
 
-    init(type: String, props: [String: JSONValue], children: [String]? = nil) {
+    init(type: String, props: [String: ChatJSONValue], children: [String]? = nil) {
         self.type = type
         self.props = props
         self.children = children
     }
 }
 
-// MARK: - JSONValue
+// MARK: - ChatJSONValue
 // Flexible enum for representing any JSON value in props.
 // Handles string, number, bool, null, array, and object.
 
-enum JSONValue: Codable, Sendable {
+enum ChatJSONValue: Codable, Sendable {
     case string(String)
     case number(Double)
     case bool(Bool)
     case null
-    case array([JSONValue])
-    case object([String: JSONValue])
+    case array([ChatJSONValue])
+    case object([String: ChatJSONValue])
 
     // Convenience accessors
     var stringValue: String? {
@@ -60,12 +60,12 @@ enum JSONValue: Codable, Sendable {
         return nil
     }
 
-    var arrayValue: [JSONValue]? {
+    var arrayValue: [ChatJSONValue]? {
         if case .array(let v) = self { return v }
         return nil
     }
 
-    var objectValue: [String: JSONValue]? {
+    var objectValue: [String: ChatJSONValue]? {
         if case .object(let v) = self { return v }
         return nil
     }
@@ -88,14 +88,14 @@ enum JSONValue: Codable, Sendable {
             self = .number(value)
         } else if let value = try? container.decode(String.self) {
             self = .string(value)
-        } else if let value = try? container.decode([JSONValue].self) {
+        } else if let value = try? container.decode([ChatJSONValue].self) {
             self = .array(value)
-        } else if let value = try? container.decode([String: JSONValue].self) {
+        } else if let value = try? container.decode([String: ChatJSONValue].self) {
             self = .object(value)
         } else {
             throw DecodingError.dataCorruptedError(
                 in: container,
-                debugDescription: "JSONValue could not decode value"
+                debugDescription: "ChatJSONValue could not decode value"
             )
         }
     }
@@ -114,7 +114,7 @@ enum JSONValue: Codable, Sendable {
 }
 
 // MARK: - Strongly-Typed Card Props
-// Optional convenience structs that can be initialized from JSONValue props.
+// Optional convenience structs that can be initialized from ChatJSONValue props.
 // These are used by the SwiftUI card views for type-safe access.
 
 struct EmailCardProps {
@@ -127,7 +127,7 @@ struct EmailCardProps {
     let isUnread: Bool
     let labels: [(name: String, color: String?)]
 
-    init?(from props: [String: JSONValue]) {
+    init?(from props: [String: ChatJSONValue]) {
         guard let threadId = props["threadId"]?.stringValue,
               let sender = props["sender"]?.stringValue,
               let senderEmail = props["senderEmail"]?.stringValue,
@@ -161,7 +161,7 @@ struct TaskCardProps {
     let folderName: String?
     let emailThreadId: String?
 
-    init?(from props: [String: JSONValue]) {
+    init?(from props: [String: ChatJSONValue]) {
         guard let taskId = props["taskId"]?.stringValue,
               let title = props["title"]?.stringValue,
               let status = props["status"]?.stringValue,
@@ -188,7 +188,7 @@ struct CalendarEventCardProps {
     let isAllDay: Bool
     let attendees: [(name: String?, email: String)]
 
-    init?(from props: [String: JSONValue]) {
+    init?(from props: [String: ChatJSONValue]) {
         guard let eventId = props["eventId"]?.stringValue,
               let title = props["title"]?.stringValue,
               let start = props["start"]?.stringValue,
@@ -216,7 +216,7 @@ struct NoteCardProps {
     let isPinned: Bool
     let threadId: String?
 
-    init?(from props: [String: JSONValue]) {
+    init?(from props: [String: ChatJSONValue]) {
         guard let noteId = props["noteId"]?.stringValue,
               let content = props["content"]?.stringValue else {
             return nil
@@ -236,7 +236,7 @@ struct DraftCardProps {
     let updatedAt: String?
     let to: [(name: String?, email: String)]
 
-    init?(from props: [String: JSONValue]) {
+    init?(from props: [String: ChatJSONValue]) {
         guard let draftId = props["draftId"]?.stringValue,
               let subject = props["subject"]?.stringValue,
               let snippet = props["snippet"]?.stringValue else {
@@ -260,7 +260,7 @@ struct LabelCardProps {
     let color: String?
     let count: Int?
 
-    init?(from props: [String: JSONValue]) {
+    init?(from props: [String: ChatJSONValue]) {
         guard let labelId = props["labelId"]?.stringValue,
               let name = props["name"]?.stringValue else {
             return nil
@@ -277,7 +277,7 @@ struct ContactCardProps {
     let email: String
     let avatarUrl: String?
 
-    init?(from props: [String: JSONValue]) {
+    init?(from props: [String: ChatJSONValue]) {
         guard let name = props["name"]?.stringValue,
               let email = props["email"]?.stringValue else {
             return nil
@@ -293,7 +293,7 @@ struct SearchResultCardProps {
     let resultCount: Int
     let summary: String?
 
-    init?(from props: [String: JSONValue]) {
+    init?(from props: [String: ChatJSONValue]) {
         guard let query = props["query"]?.stringValue,
               let resultCount = props["resultCount"]?.intValue else {
             return nil

@@ -13,6 +13,7 @@ struct AuthView: View {
     @State private var code = ""
     @FocusState private var isEmailFocused: Bool
     @FocusState private var isCodeFocused: Bool
+    private let otpHelpMessage = "You can keep using tasks without email and connect it later in Settings."
 
     /// Blue accent used for primary action buttons (matches todo app)
     private let accentBlue = Color(red: 0.25, green: 0.48, blue: 1.0)
@@ -42,11 +43,15 @@ struct AuthView: View {
                     Text("Welcome to Todus")
                         .font(.system(size: 24, weight: .semibold))
 
-                    Text("Your AI agent for emails")
+                    Text("Email, tasks, and calendar in one workspace.")
                         .font(.system(size: 17, weight: .regular))
                         .foregroundStyle(.primary.opacity(0.5))
 
-                    Text(otpPendingEmail == nil ? "Sign in to get started" : "Enter the code sent to your email")
+                    Text(
+                        otpPendingEmail == nil
+                            ? "Sign in to sync your workspace, or keep going with tasks only."
+                            : "Enter the 6-digit code we sent to finish signing in."
+                    )
                         .font(.system(size: 14, weight: .regular))
                         .foregroundStyle(.primary.opacity(0.4))
                 }
@@ -202,7 +207,7 @@ struct AuthView: View {
             Button {
                 openEmailApp()
             } label: {
-                Text("Open Email App")
+                Text("Open your email app")
                     .font(.system(size: 16, weight: .semibold))
                     .frame(maxWidth: .infinity)
                     .frame(height: 48)
@@ -211,12 +216,18 @@ struct AuthView: View {
             }
             .buttonStyle(.plain)
 
+            Text(otpHelpMessage)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 8)
+
             // Back button — returns to main login screen
             Button {
                 code = ""
                 authService.returnToLogin()
             } label: {
-                Text("Back")
+                Text("Use another email")
                     .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(.secondary)
             }
@@ -298,12 +309,12 @@ struct AuthView: View {
         Button {
             authService.continueAsGuest()
         } label: {
-            Text("Continue without account")
+            Text("Skip, use tasks only for now")
                 .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(.secondary)
         }
         .buttonStyle(.plain)
-        .padding(.top, 20)
+        .padding(.top, 16)
     }
 
     /// Terms / Privacy links — pinned at the very bottom of the screen

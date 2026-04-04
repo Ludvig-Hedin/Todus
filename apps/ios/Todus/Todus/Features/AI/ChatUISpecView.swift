@@ -89,8 +89,8 @@ struct ChatUISpecView: View {
 // MARK: - Layout Components
 
 struct StackView<Content: View>: View {
-    let props: [String: JSONValue]
-    @ViewBuilder let content: Content
+    let props: [String: ChatJSONValue]
+    @ViewBuilder var content: () -> Content
 
     private var isVertical: Bool {
         props["direction"]?.stringValue != "horizontal"
@@ -107,9 +107,9 @@ struct StackView<Content: View>: View {
 
     var body: some View {
         if isVertical {
-            VStack(alignment: alignment, spacing: spacing) { content }
+            VStack(alignment: alignment, spacing: spacing) { content() }
         } else {
-            HStack(alignment: vAlignment, spacing: spacing) { content }
+            HStack(alignment: vAlignment, spacing: spacing) { content() }
         }
     }
 
@@ -131,8 +131,8 @@ struct StackView<Content: View>: View {
 }
 
 struct CardContainerView<Content: View>: View {
-    let props: [String: JSONValue]
-    @ViewBuilder let content: Content
+    let props: [String: ChatJSONValue]
+    @ViewBuilder var content: () -> Content
 
     private var padding: CGFloat {
         switch props["padding"]?.stringValue {
@@ -155,7 +155,7 @@ struct CardContainerView<Content: View>: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            content
+            content()
         }
         .padding(padding)
         .background(Color(.systemBackground).opacity(0.5))
@@ -168,7 +168,7 @@ struct CardContainerView<Content: View>: View {
 }
 
 struct TextElementView: View {
-    let props: [String: JSONValue]
+    let props: [String: ChatJSONValue]
 
     var body: some View {
         Text(props["content"]?.stringValue ?? "")
@@ -195,7 +195,7 @@ struct TextElementView: View {
 }
 
 struct ButtonElementView: View {
-    let props: [String: JSONValue]
+    let props: [String: ChatJSONValue]
     var onAction: ((String, [String: String]) -> Void)?
 
     var body: some View {
@@ -226,7 +226,7 @@ struct ButtonElementView: View {
 }
 
 struct BadgeElementView: View {
-    let props: [String: JSONValue]
+    let props: [String: ChatJSONValue]
 
     private var color: Color {
         switch props["variant"]?.stringValue {

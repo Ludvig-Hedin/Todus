@@ -791,11 +791,11 @@ final class AIChatService {
         // ── Calendar — gated by aiCanReadCalendar ─────────────────────────────
         let calendarContext: String
         if !aiCanReadCalendar {
-            calendarContext = "## Calendar\nCalendar access is disabled by the user."
+            calendarContext = "## Calendar\nCalendar access is disabled in the app's AI settings. Inform the user that they need to re-enable calendar access in Todus AI preferences before you can use calendar features."
         } else if let snap = calendarSnapshot {
             calendarContext = snap
         } else {
-            calendarContext = "## Calendar\nCalendar access not granted or not yet loaded."
+            calendarContext = "## Calendar\nCalendar data is unavailable right now. Inform the user that they may need to grant Calendar permission in iOS Settings or wait for events to finish loading."
         }
 
         let calendarWriteNote = aiCanWriteCalendar
@@ -805,7 +805,8 @@ final class AIChatService {
         // ── Email — gated by aiCanReadEmail ──────────────────────────────────
         let emailContext: String
         if !aiCanReadEmail {
-            emailContext = "## Email\nEmail access is disabled by the user."
+            // Email not connected — tell AI to inform the user to connect
+            emailContext = "## Email\nEmail is not connected. Inform the user that their email inbox is not connected and they need to enable email access in settings."
         } else if let email = emailService, !email.threads.isEmpty {
             let recent = email.threads.prefix(10).map { t in
                 "- [\(t.id)] \(t.unread ? "UNREAD" : "read") from \(t.from.name.isEmpty ? t.from.email : t.from.name): \"\(t.subject)\""
@@ -817,7 +818,7 @@ final class AIChatService {
             \(sendNote)
             """
         } else {
-            emailContext = "## Email\nNo email threads loaded or email not connected."
+            emailContext = "## Email\nEmail is not connected. Inform the user that their email inbox is not connected and they need to connect an email account in settings."
         }
 
         // ── System prompt ──────────────────────────────────────────────────────

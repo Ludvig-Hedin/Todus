@@ -8,78 +8,25 @@ struct MeetingsListView: View {
     @State private var searchDebounceTask: Task<Void, Never>? = nil
 
     var body: some View {
-        Group {
-            if services.meetingsService.isLoading && services.meetingsService.meetings.isEmpty {
-                ProgressView()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if let error = services.meetingsService.loadError, services.meetingsService.meetings.isEmpty {
-                VStack(spacing: 12) {
-                    Image(systemName: "exclamationmark.triangle")
-                        .font(.system(size: 36))
-                        .foregroundStyle(.secondary)
-                    Text("Could not load meetings")
-                        .font(.headline)
-                    Text(error)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 32)
-                    Button("Retry") {
-                        Task {
-                            await services.meetingsService.loadMeetings(
-                                search: searchText.isEmpty ? nil : searchText
-                            )
-                        }
-                    }
-                    .buttonStyle(.borderedProminent)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if services.meetingsService.meetings.isEmpty {
-                emptyState
-            } else {
-                List {
-                    ForEach(groupedSections) { section in
-                        Section(section.title) {
-                            ForEach(section.meetings) { meeting in
-                                NavigationLink(value: meeting.id) {
-                                    MeetingRowView(meeting: meeting)
-                                }
-                            }
-                        }
-                    }
-                }
-                .listStyle(.insetGrouped)
-                .searchable(text: $searchText, prompt: "Search meetings")
-                .onChange(of: searchText) { _, newValue in
-                    searchDebounceTask?.cancel()
-                    searchDebounceTask = Task {
-                        try? await Task.sleep(nanoseconds: 300_000_000)
-                        guard !Task.isCancelled else { return }
-                        await services.meetingsService.loadMeetings(
-                            search: newValue.isEmpty ? nil : newValue
-                        )
-                    }
-                }
+        // Use same layout pattern as HomeView / EmailInboxView:
+        // AppTopHeader pinned at top, list content below. Hides system nav bar
+        // so title appears in the same position as every other tab.
+        ZStack {
+            AppTheme.backgroundTop.ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                // Pinned header — matches the same AppTopHeader pattern used on
+                // Home, Email, and Tasks so the title sits at the same vertical position.
+                AppTopHeader(title: "Meetings")
+                    .padding(.horizontal, 16)
+                    .padding(.top, 4)
+
+                listContent
             }
         }
-        .navigationTitle("Meetings")
+        .toolbar(.hidden, for: .navigationBar)
         .navigationDestination(for: String.self) { meetingId in
             MeetingDetailView(meetingId: meetingId)
-        }
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    Task { await services.meetingsService.syncFromCalendar() }
-                } label: {
-                    if services.meetingsService.isSyncing {
-                        ProgressView()
-                            .controlSize(.small)
-                    } else {
-                        Image(systemName: "arrow.clockwise")
-                    }
-                }
-                .disabled(services.meetingsService.isSyncing)
-            }
         }
         .task {
             await services.meetingsService.loadMeetings()
@@ -87,6 +34,66 @@ struct MeetingsListView: View {
         .onDisappear {
             searchDebounceTask?.cancel()
             searchDebounceTask = nil
+        }
+    }
+
+    @ViewBuilder
+    private var listContent: some View {
+        if services.meetingsService.isLoading && services.meetingsService.meetings.isEmpty {
+            ProgressView()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if let error = services.meetingsService.loadError, services.meetingsService.meetings.isEmpty {
+            VStack(spacing: 12) {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.system(size: 36))
+                    .foregroundStyle(.secondary)
+                Text("Could not load meetings")
+                    .font(.headline)
+                Text(error)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 32)
+                Button("Retry") {
+                    Task {
+                        await services.meetingsService.loadMeetings(
+                            search: searchText.isEmpty ? nil : searchText
+                        )
+                    }
+                }
+                .buttonStyle(AppPrimaryButtonStyle())
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if services.meetingsService.meetings.isEmpty {
+            emptyState
+        } else {
+            List {
+                ForEach(groupedSections) { section in
+                    Section(section.title) {
+                        ForEach(section.meetings) { meeting in
+                            NavigationLink(value: meeting.id) {
+                                MeetingRowView(meeting: meeting)
+                            }
+                        }
+                    }
+                }
+            }
+            .listStyle(.insetGrouped)
+            // Pull-to-refresh syncs from Google Calendar — replaces the old toolbar button
+            .refreshable {
+                await services.meetingsService.syncFromCalendar()
+            }
+            .searchable(text: $searchText, prompt: "Search meetings")
+            .onChange(of: searchText) { _, newValue in
+                searchDebounceTask?.cancel()
+                searchDebounceTask = Task {
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    guard !Task.isCancelled else { return }
+                    await services.meetingsService.loadMeetings(
+                        search: newValue.isEmpty ? nil : newValue
+                    )
+                }
+            }
         }
     }
 
@@ -99,7 +106,7 @@ struct MeetingsListView: View {
             Text("No meetings")
                 .font(.headline)
 
-            Text("Sync your Google Calendar to import meetings with Google Meet links.")
+            Text("Sync your Google Calendar to import meetings. They'll be recorded automatically.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -110,7 +117,7 @@ struct MeetingsListView: View {
             } label: {
                 Label("Sync Calendar", systemImage: "arrow.clockwise")
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(AppPrimaryButtonStyle())
             .disabled(services.meetingsService.isSyncing)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -211,7 +218,7 @@ struct MeetingRowView: View {
     private var statusLabel: String {
         switch meeting.status {
         case "scheduled": "Scheduled"
-        case "bot_joining": "Joining"
+        case "bot_joining": "Starting"
         case "recording": "Recording"
         case "processing": "Processing"
         case "ready": "Ready"

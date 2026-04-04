@@ -60,6 +60,10 @@ Native macOS shell scaffolding is now in place under `apps/macos` as a standalon
 
 ## Build Notes
 
+- April 3, 2026: tightened macOS button hit targets and pointer affordances on the shared header, sidebar, task, and calendar controls without changing the drawn UI.
+- April 3, 2026: shipped a focused Home/Tasks/Email UX remediation pass on macOS. Home now distinguishes loading from empty states and shows partial-setup guidance plus actionable empty cards; Tasks now exposes the active sort label, explains view purpose more clearly, and calls out when completed tasks stay in List; Email now shows mailbox context inside the pane, clarifies search status, de-emphasizes assistant nudges, and places a short message preview ahead of the AI card in thread detail.
+- April 3, 2026: applied a small macOS UX clarity pass without changing the shell structure: the bell surface is now framed as a `Daily Brief`, auth/restoring copy better explains the synced workspace state, search copy better communicates jump/navigation behavior, and create/search are slightly more visually prominent than secondary toolbar actions.
+- April 3, 2026: added macOS first-run onboarding after auth for Gmail, calendar access, and launch-page selection. Each step is skippable, persists in `MacAppServices`, and the app now lands users in the main shell with a clearer startup destination.
 - April 3, 2026: regenerated the macOS `AppIcon.appiconset` from the iOS 1024 px master so the Dock icon uses the same padding as iOS and the logo no longer reads as cropped.
 - March 30, 2026: removed the explicit `AppIcon.icns` plist/resource wiring so the macOS app now uses the asset catalog `AppIcon` target directly, matching the iOS artwork and avoiding the cropped launcher icon.
 - March 30, 2026: wired the shared AI profile settings into the macOS settings sheet and assistant prompt pipeline so `Context about you` and `Custom instructions` are now persisted through backend settings.

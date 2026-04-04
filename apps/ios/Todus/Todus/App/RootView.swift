@@ -24,9 +24,45 @@ struct RootView: View {
             } else if !services.hasConfiguredRemindersPrompt {
                 RemindersOnboardingView()
                     .transition(hasAppeared ? .opacity.combined(with: .move(edge: .trailing)) : .opacity)
+            } else if !services.hasConfiguredTabBarPrompt {
+                // Tab bar customization — shown once so users understand what's in/out of the bar
+                TabBarOnboardingView()
+                    .transition(hasAppeared ? .opacity.combined(with: .move(edge: .trailing)) : .opacity)
             } else {
                 MainTabView()
                     .transition(hasAppeared ? .opacity : .identity)
+            }
+        }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if let onboardingStep = onboardingStep {
+                let onboardingTotal = 3
+                let progressText = String(
+                    localized: "\(onboardingStep) of \(onboardingTotal)",
+                    comment: "Compact onboarding progress label showing current step and total steps"
+                )
+                let progressAccessibilityLabel = String(
+                    localized: "Onboarding step \(onboardingStep) of \(onboardingTotal)",
+                    comment: "Accessibility label for onboarding progress"
+                )
+                HStack {
+                    Spacer()
+                    Text(progressText)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(.ultraThinMaterial, in: Capsule())
+                        .overlay(
+                            Capsule()
+                                .stroke(AppTheme.cardBorder.opacity(0.8), lineWidth: 1)
+                                .accessibilityLabel(progressAccessibilityLabel)
+                        )
+                        .accessibilityLabel(progressAccessibilityLabel)
+                    Spacer()
+                }
+                .padding(.top, 8)
+                .padding(.bottom, 6)
+                .allowsHitTesting(false)
             }
         }
         // Single animation modifier prevents competing animation controllers from
@@ -34,6 +70,7 @@ struct RootView: View {
         .animation(hasAppeared ? .snappy(duration: 0.3) : nil, value: services.authService.showsOnboarding)
         .animation(hasAppeared ? .snappy(duration: 0.3) : nil, value: services.hasConfiguredRemindersPrompt)
         .animation(hasAppeared ? .snappy(duration: 0.3) : nil, value: services.hasConfiguredGmailPrompt)
+        .animation(hasAppeared ? .snappy(duration: 0.3) : nil, value: services.hasConfiguredTabBarPrompt)
         .animation(hasAppeared ? .snappy(duration: 0.3) : nil, value: services.authService.isAuthenticated)
         .onAppear {
             // Enable transitions only after the first frame renders.
@@ -73,5 +110,13 @@ struct RootView: View {
         // Delay legacy upgrade work until after the initial shell is usable.
         try? await Task.sleep(for: .milliseconds(150))
         await services.completeAuthUpgradeIfNeeded(in: modelContext)
+    }
+
+    private var onboardingStep: Int? {
+        guard !services.authService.showsOnboarding else { return nil }
+        if !services.hasConfiguredGmailPrompt { return 1 }
+        if !services.hasConfiguredRemindersPrompt { return 2 }
+        if !services.hasConfiguredTabBarPrompt { return 3 }
+        return nil
     }
 }

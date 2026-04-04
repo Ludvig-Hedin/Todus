@@ -7,7 +7,6 @@ struct TasksTabView: View {
     @Environment(AppServices.self) private var services
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \FolderRecord.createdAt) private var folders: [FolderRecord]
-    @Query(sort: \TaskRecord.createdAt, order: .reverse) private var allTasks: [TaskRecord]
 
     @State private var searchText = ""
     @State private var taskSortOrder: TaskSortOrder = .newest
@@ -20,10 +19,34 @@ struct TasksTabView: View {
                 .ignoresSafeArea()
                 .onTapGesture { self.dismissKeyboard() }
 
-            VStack(spacing: 12) {
-                AppTopHeader(title: "Tasks")
-                    .padding(.horizontal, 16)
-                    .padding(.top, 4)
+            VStack(spacing: 10) {
+                HStack(alignment: .center, spacing: 12) {
+                    AppTopHeader(title: "Tasks")
+
+                    if services.captureService.isSyncingSharedFolders {
+                        InlineRefreshBadge(label: "Syncing")
+                    }
+
+                    Spacer(minLength: 0)
+
+                    Button {
+                        services.requestCreateSheet = .task
+                    } label: {
+                        Label("Add Task", systemImage: "plus")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.primary)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 9)
+                            .background(AppTheme.surfacePrimary, in: Capsule())
+                            .overlay(
+                                Capsule()
+                                    .stroke(AppTheme.cardBorder, lineWidth: 1)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 4)
 
                 header
                     .padding(.horizontal, 16)
@@ -39,14 +62,29 @@ struct TasksTabView: View {
                 Group {
                     switch services.selectedViewMode {
                     case .list:
-                        InboxView(searchText: searchText, sortOrder: taskSortOrder)
+                        InboxView(
+                            captureService: services.captureService,
+                            selectedFolderID: services.selectedFolderID,
+                            searchText: searchText,
+                            sortOrder: taskSortOrder
+                        )
                             .padding(.horizontal, 16)
                     case .board:
-                        BoardView()
+                        BoardView(
+                            captureService: services.captureService,
+                            selectedFolderID: services.selectedFolderID,
+                            searchText: searchText,
+                            sortOrder: taskSortOrder
+                        )
                     case .table:
-                        TaskTableView()
+                        TaskTableView(
+                            captureService: services.captureService,
+                            selectedFolderID: services.selectedFolderID,
+                            searchText: searchText,
+                            sortOrder: taskSortOrder
+                        )
                     case .calendar:
-                        CalendarTaskView(searchText: searchText)
+                        CalendarTaskView(searchText: searchText, sortOrder: taskSortOrder)
                             .padding(.horizontal, 16)
                     }
                 }
@@ -69,7 +107,10 @@ struct TasksTabView: View {
     private func consumePendingTaskNavigation() {
         guard let taskId = services.pendingTaskId else { return }
         services.pendingTaskId = nil
-        if let task = allTasks.first(where: { $0.id == taskId }) {
+        let descriptor = FetchDescriptor<TaskRecord>(
+            predicate: #Predicate { task in task.id == taskId }
+        )
+        if let task = try? modelContext.fetch(descriptor).first {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                 pendingTaskRecord = task
             }
@@ -79,10 +120,9 @@ struct TasksTabView: View {
     // MARK: - Header
 
     private var header: some View {
-        HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: 0) {
             viewModePicker
         }
-        .padding(.vertical, 4)
     }
 
     private var viewModePicker: some View {
@@ -93,19 +133,25 @@ struct TasksTabView: View {
                         services.selectedViewMode = mode
                     }
                 } label: {
-                    Image(systemName: mode.systemImage)
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(
-                            services.selectedViewMode == mode ? .primary : AppTheme.mutedText
-                        )
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 30)
-                        .background(
-                            services.selectedViewMode == mode
-                                ? AppTheme.surfaceSecondary
-                                : Color.clear,
-                            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        )
+                    HStack(spacing: 8) {
+                        Image(systemName: mode.systemImage)
+                            .font(.system(size: 14, weight: .semibold))
+
+                        Text(mode.shortTitle)
+                            .font(.system(size: 11, weight: .semibold))
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .foregroundStyle(
+                        services.selectedViewMode == mode ? .primary : AppTheme.mutedText
+                    )
+                    .frame(maxWidth: .infinity)
+                    .background(
+                        services.selectedViewMode == mode
+                            ? AppTheme.surfaceSecondary
+                            : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    )
                 }
                 .buttonStyle(.plain)
             }
@@ -123,11 +169,11 @@ struct TasksTabView: View {
     private var searchSortBar: some View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 14, weight: .semibold))
+                .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(AppTheme.mutedText)
 
             TextField("Search tasks…", text: $searchText)
-                .font(.system(size: 14, weight: .medium))
+                .font(.system(size: 13, weight: .medium))
                 .autocorrectionDisabled()
 
             if !searchText.isEmpty {
@@ -135,14 +181,14 @@ struct TasksTabView: View {
                     searchText = ""
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 14))
+                        .font(.system(size: 13))
                         .foregroundStyle(AppTheme.mutedText)
                 }
                 .buttonStyle(.plain)
                 .minTouchTarget()
             }
 
-            Divider().frame(height: 16)
+            Divider().frame(height: 14)
 
             Menu {
                 ForEach(TaskSortOrder.allCases) { order in
@@ -153,14 +199,21 @@ struct TasksTabView: View {
                     }
                 }
             } label: {
-                Image(systemName: "arrow.up.arrow.down")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(AppTheme.mutedText)
-                    .minTouchTarget()
+                HStack(spacing: 6) {
+                    Text(taskSortOrder.title)
+                        .font(.system(size: 11, weight: .semibold))
+                    Image(systemName: "arrow.up.arrow.down")
+                        .font(.system(size: 11, weight: .semibold))
+                }
+                .foregroundStyle(AppTheme.mutedText)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(AppTheme.surfaceSecondary, in: Capsule())
+                .minTouchTarget()
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
         // Use surfacePrimary (white in light / 0.11 in dark) so the bar is clearly
         // visible against the backgroundTop (0.94 in light / 0.05 in dark).
         .background(AppTheme.surfacePrimary, in: Capsule())

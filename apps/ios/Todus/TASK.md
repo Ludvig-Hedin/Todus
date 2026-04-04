@@ -58,6 +58,8 @@
 - [ ] **IOS-054** — Wire "Auto" mode in CreateSheet (AI decides type)
 
 #### iOS — Polish
+- [x] **IOS-077** — Mitigate startup/runtime hangs with EventKit pruning fix, startup throttling, task recompute tracing, and async attachment thumbnail loading
+- [x] **IOS-079** — Simplify the task edit sheet with explicit field labels, clearer progress controls, and a lower-friction folder + attachment flow
 - [ ] **IOS-060** — Dark mode audit across all new views
 - [ ] **IOS-061** — HomeView loading skeletons
 - [ ] **IOS-062** — HomeView pull-to-refresh
@@ -148,8 +150,10 @@
 
 - CalendarViewController uses `CalendarKit` which imports as a module — need SPM dependency before it compiles
 - RootView has a `dismissKeyboard()` function — duplicated in TasksTabView, should be a shared utility
+- Native buttons now use expanded hit shapes without visual layout changes, and the web app applies pointer cursors to semantic interactive elements.
 - AppConfiguration.swift now loads from `TodosConfig.plist` first, falls back to `TaskAppConfig.plist` ✅ Fixed
 - Shared AI profile settings now sync through backend `userSettings` and feed web/iOS/macOS prompts with `Context about you` and `Custom instructions`.
+- macOS first-run onboarding now mirrors the iOS setup flow with skippable Gmail, calendar, and launch-page prompts persisted in `MacAppServices`.
 - The existing AuthSessionStore stores tokens in UserDefaults — new AuthService uses Keychain instead
 - EmailService response DTOs (RawThread, GetThreadResponse) may need adjustment once tested against real backend responses ✅ Fixed — listThreads only returns IDs, now enriching via mail.get per thread (same as web app)
 - Saved AI chat history previously dropped mention IDs and broke follow-up turns after reopening a conversation ✅ Fixed — persisted mention refs in saved messages with backward-compatible decoding
@@ -161,4 +165,4 @@
 
 ---
 
-## Last Updated: 2026-03-30
+## Last Updated: 2026-04-03

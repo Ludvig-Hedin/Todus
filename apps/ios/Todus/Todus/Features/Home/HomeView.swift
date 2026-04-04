@@ -169,6 +169,18 @@ struct HomeView: View {
         }
     }
 
+    private var isAssistantBriefingRefreshing: Bool {
+        isLoadingAssistantBriefing && services.emailService.assistantBriefing != nil
+    }
+
+    private var isEventsRefreshing: Bool {
+        isLoadingEvents && !todaysEvents.isEmpty
+    }
+
+    private var isEmailRefreshing: Bool {
+        services.emailService.isLoadingThreads && !services.emailService.threads.isEmpty
+    }
+
     // MARK: - Events Section
 
     private var eventsSection: some View {
@@ -179,11 +191,12 @@ struct HomeView: View {
                 icon: "calendar",
                 count: todaysEvents.count,
                 actionTitle: "Open",
+                isUpdating: isEventsRefreshing,
                 onOpen: { services.navigateTo = .calendar },
                 onAdd: { services.requestCreateSheet = .event }
             )
 
-            if isLoadingEvents {
+            if isLoadingEvents && todaysEvents.isEmpty {
                 loadingState(message: "Loading today's events")
             } else if todaysEvents.isEmpty {
                 emptyState(message: "No events today", onTap: { services.navigateTo = .calendar })
@@ -272,6 +285,9 @@ struct HomeView: View {
                     .foregroundStyle(AppTheme.mutedText)
                 Text("Assistant Briefing")
                     .font(.system(size: 15, weight: .semibold))
+                if isAssistantBriefingRefreshing {
+                    InlineRefreshBadge()
+                }
             }
 
             if isLoadingAssistantBriefing && services.emailService.assistantBriefing == nil {
@@ -437,6 +453,7 @@ struct HomeView: View {
                 icon: "checklist",
                 count: tasksDueToday.count,
                 actionTitle: "View all",
+                isUpdating: false,
                 onOpen: { services.navigateTo = .tasks },
                 onAdd: { services.requestCreateSheet = .task }
             )
@@ -467,6 +484,7 @@ struct HomeView: View {
                 icon: "envelope.fill",
                 count: services.emailService.threads.prefix(3).count,
                 actionTitle: "Open",
+                isUpdating: isEmailRefreshing,
                 onOpen: { services.navigateTo = .email },
                 // "+" opens compose sheet if connected, otherwise navigates to email tab to connect
                 onAdd: {
@@ -728,6 +746,7 @@ struct HomeView: View {
         icon: String,
         count: Int,
         actionTitle: String,
+        isUpdating: Bool = false,
         onOpen: @escaping () -> Void,
         onAdd: @escaping () -> Void
     ) -> some View {
@@ -744,6 +763,9 @@ struct HomeView: View {
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
                     .background(AppTheme.surfaceSecondary, in: Capsule())
+            }
+            if isUpdating {
+                InlineRefreshBadge()
             }
             Spacer()
 

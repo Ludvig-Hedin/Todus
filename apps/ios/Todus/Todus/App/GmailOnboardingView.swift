@@ -4,6 +4,7 @@ import SwiftData
 struct GmailOnboardingView: View {
     @Environment(AppServices.self) private var services
     @State private var isConnecting = false
+    @State private var errorMessage: String?
 
     var body: some View {
         ZStack {
@@ -26,17 +27,30 @@ struct GmailOnboardingView: View {
 
                 Spacer().frame(height: 12)
 
-                Text("Grant access to see your inbox, reply to emails, and let AI help manage your messages.\nYou can revoke access anytime in Settings.")
+                Text("Connect Gmail to read and draft email here. If you skip, Todus still works for tasks and you can connect Gmail later in Settings.")
                     .font(.system(size: 15, weight: .regular))
                     .foregroundStyle(AppTheme.mutedText)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 32)
 
-                Spacer().frame(height: 40)
+                Spacer().frame(height: 28)
 
                 VStack(spacing: 12) {
+                    if let errorMessage {
+                        onboardingMessage(
+                            text: errorMessage,
+                            tint: AppTheme.danger
+                        )
+                    } else {
+                        onboardingMessage(
+                            text: "This takes about a minute. You can always change it later in Settings.",
+                            tint: AppTheme.mutedText
+                        )
+                    }
+
                     Button {
                         isConnecting = true
+                        errorMessage = nil
                         Task {
                             await services.authService.signInWithGoogle()
                             if services.authService.isAuthenticated {
@@ -46,6 +60,9 @@ struct GmailOnboardingView: View {
                                     await services.emailService.loadThreads(refresh: true)
                                 }
                                 services.hasConfiguredGmailPrompt = true
+                            } else {
+                                errorMessage = services.authService.lastErrorMessage
+                                    ?? "Connection did not finish. You can try again or set this up later in Settings."
                             }
                             isConnecting = false
                         }
@@ -65,12 +82,11 @@ struct GmailOnboardingView: View {
                     }
                     .buttonStyle(AppPrimaryButtonStyle())
                     .disabled(isConnecting)
-                    .accessibilityHint("Connect your Gmail account")
 
                     Button {
                         services.hasConfiguredGmailPrompt = true
                     } label: {
-                        Text("Skip for now")
+                        Text("Skip, use tasks only for now")
                             .font(.system(size: 15, weight: .medium))
                             .foregroundStyle(AppTheme.mutedText)
                             .frame(maxWidth: .infinity)
@@ -86,5 +102,19 @@ struct GmailOnboardingView: View {
             .padding(.vertical, 32)
         }
     }
-}
 
+    private func onboardingMessage(text: String, tint: Color) -> some View {
+        Text(text)
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(tint)
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity)
+            .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(tint.opacity(0.12), lineWidth: 1)
+            )
+    }
+}

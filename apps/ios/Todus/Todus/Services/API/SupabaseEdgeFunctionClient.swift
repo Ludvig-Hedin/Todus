@@ -53,7 +53,11 @@ struct SupabaseEdgeFunctionClient: Sendable {
         }
 
         if Response.self == EmptyResponse.self, data.isEmpty {
-            return EmptyResponse() as! Response
+            // Safe conditional cast — throws if caller expects a type other than EmptyResponse
+            guard let empty = EmptyResponse() as? Response else {
+                throw BackendClientError.invalidResponse
+            }
+            return empty
         }
 
         return try JSONDecoder.taskAppDecoder.decode(Response.self, from: data)

@@ -3,9 +3,10 @@ import SwiftData
 
 struct InboxView: View {
     @Environment(\.modelContext) private var modelContext
-    @Environment(AppServices.self) private var services
     @Query(sort: \TaskRecord.createdAt, order: .reverse) private var allTasks: [TaskRecord]
 
+    let captureService: TaskCaptureService
+    let selectedFolderID: UUID?
     @State private var taskPendingMove: TaskRecord?
     @State private var selectedTask: TaskRecord?
     @State private var showsClearCompletedConfirmation = false
@@ -58,15 +59,15 @@ struct InboxView: View {
                                 .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                                 // Tap to restore a completed task back to .todo
                                 .contentShape(Rectangle())
-                                .onTapGesture {
-                                    withAnimation(.snappy(duration: 0.22)) {
-                                        services.captureService.toggleCompletion(task, in: modelContext)
+                                    .onTapGesture {
+                                        withAnimation(.snappy(duration: 0.22)) {
+                                            captureService.toggleCompletion(task, in: modelContext)
+                                        }
                                     }
-                                }
                                 .swipeActions(edge: .leading, allowsFullSwipe: true) {
                                     Button {
                                         withAnimation(.snappy(duration: 0.22)) {
-                                            services.captureService.toggleCompletion(task, in: modelContext)
+                                            captureService.toggleCompletion(task, in: modelContext)
                                         }
                                     } label: {
                                         Label("Restore", systemImage: "arrow.uturn.backward")
@@ -75,7 +76,7 @@ struct InboxView: View {
                                 }
                                 .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                                     Button(role: .destructive) {
-                                        services.captureService.delete(task, in: modelContext)
+                                        captureService.delete(task, in: modelContext)
                                     } label: {
                                         Label("Delete", systemImage: "trash")
                                     }
@@ -128,7 +129,7 @@ struct InboxView: View {
         .alert("Clear completed tasks?", isPresented: $showsClearCompletedConfirmation) {
             Button("Cancel", role: .cancel) {}
             Button("Clear", role: .destructive) {
-                services.captureService.clearCompletedTasks(filteredBy: services.selectedFolderID, in: modelContext)
+                captureService.clearCompletedTasks(filteredBy: selectedFolderID, in: modelContext)
             }
         } message: {
             Text("This permanently removes all completed tasks in the current view.")
@@ -140,21 +141,32 @@ struct InboxView: View {
         .onChange(of: allTasks) { recomputeTasks() }
         .onChange(of: searchText) { recomputeTasks() }
         .onChange(of: sortOrder) { recomputeTasks() }
-        .onChange(of: services.selectedFolderID) { recomputeTasks() }
+        .onChange(of: selectedFolderID) { recomputeTasks() }
     }
 
     // MARK: - Helpers
 
     /// Recomputes the filtered and sorted task arrays and writes them to @State.
     private func recomputeTasks() {
+        let trace = PerformanceTrace.beginInterval(
+            PerformanceTrace.taskListRecompute,
+            message: "InboxView.recomputeTasks begin"
+        )
+        defer {
+            PerformanceTrace.endInterval(
+                PerformanceTrace.taskListRecompute,
+                trace,
+                message: "InboxView.recomputeTasks end visible=\(visibleTasks.count) completed=\(completedTasks.count)"
+            )
+        }
         visibleTasks = sorted(allTasks.filter { task in
             task.status != .done &&
-            (services.selectedFolderID == nil || task.folderID == services.selectedFolderID) &&
+            (selectedFolderID == nil || task.folderID == selectedFolderID) &&
             matchesSearch(task)
         })
         completedTasks = allTasks.filter { task in
             task.status == .done &&
-            (services.selectedFolderID == nil || task.folderID == services.selectedFolderID) &&
+            (selectedFolderID == nil || task.folderID == selectedFolderID) &&
             matchesSearch(task)
         }
     }
@@ -199,8 +211,8 @@ struct InboxView: View {
 
             Text(
                 searchText.isEmpty
-                    ? "Open the keyboard and drop your next thought straight in. Folders and board stay out of the way until you need them."
-                    : "Try a different search term or clear the filter."
+                    ? "Tap Add Task to capture something new. Folders and other views can wait until you need them."
+                    : "Try a different search term or clear the filter to get back to your full list."
             )
             .font(.system(size: 14, weight: .medium))
             .tracking(-0.2)

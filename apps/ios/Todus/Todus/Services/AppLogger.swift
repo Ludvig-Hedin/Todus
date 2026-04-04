@@ -1,5 +1,6 @@
 import Foundation
 import OSLog
+import QuartzCore
 
 /// Persistent file-based logger. Appends to Documents/app.log across launches.
 ///
@@ -74,8 +75,15 @@ enum PerformanceTrace {
     static let tabSwitch: StaticString = "TabSwitch"
     static let saveContext: StaticString = "SaveContext"
     static let loadThreads: StaticString = "LoadThreads"
+    static let checkEmailConnection: StaticString = "CheckEmailConnection"
     static let remindersSync: StaticString = "RemindersSync"
     static let remindersImport: StaticString = "RemindersImport"
+    static let loadTodayEvents: StaticString = "LoadTodayEvents"
+    static let calendarEventsFetch: StaticString = "CalendarEventsFetch"
+    static let calendarFolderPrune: StaticString = "CalendarFolderPrune"
+    static let sharedFolderSync: StaticString = "SharedFolderSync"
+    static let taskListRecompute: StaticString = "TaskListRecompute"
+    static let attachmentDecode: StaticString = "AttachmentDecode"
 
     typealias IntervalState = OSSignpostIntervalState
 
@@ -101,3 +109,42 @@ enum PerformanceTrace {
         logger.debug("\(message, privacy: .public)")
     }
 }
+
+#if DEBUG
+final class MainThreadHangWatchdog: @unchecked Sendable {
+    static let shared = MainThreadHangWatchdog()
+
+    private let threshold: TimeInterval = 0.2
+    private let queue = DispatchQueue(label: "com.todus.hang-watchdog", qos: .utility)
+    private var timer: DispatchSourceTimer?
+    private var isStarted = false
+
+    private init() {}
+
+    func start() {
+        queue.async { [weak self] in
+            guard let self, !self.isStarted else { return }
+            self.isStarted = true
+
+            let timer = DispatchSource.makeTimerSource(queue: self.queue)
+            timer.schedule(deadline: .now() + 1, repeating: .milliseconds(250))
+            timer.setEventHandler { [weak self] in
+                self?.sampleMainThread()
+            }
+            self.timer = timer
+            timer.resume()
+        }
+    }
+
+    private func sampleMainThread() {
+        let startedAt = CACurrentMediaTime()
+        DispatchQueue.main.async {
+            let stall = CACurrentMediaTime() - startedAt
+            guard stall > self.threshold else { return }
+            AppLogger.shared.log(
+                "[HangWatchdog] Main thread stall detected: \(String(format: "%.3f", stall))s"
+            )
+        }
+    }
+}
+#endif

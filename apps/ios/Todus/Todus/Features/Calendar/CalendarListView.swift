@@ -1,0 +1,160 @@
+import SwiftUI
+
+/// Chronological list view — shows only days that have events.
+/// Grouped by day with sticky headers showing date + week number.
+/// Matches Apple Calendar iPhone list view style.
+struct CalendarListView: View {
+    let events: [CalendarEvent]
+    var onEventTap: ((CalendarEvent) -> Void)? = nil
+    var onLoadMore: (() async -> Void)? = nil
+    @State private var isLoadingMore = false
+
+    var body: some View {
+        let groupedDays = groupedEventDays
+
+        if groupedDays.isEmpty {
+            emptyState
+        } else {
+            ScrollView(.vertical, showsIndicators: true) {
+                LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
+                    ForEach(groupedDays) { dayGroup in
+                        Section {
+                            ForEach(dayGroup.events) { event in
+                                eventRow(event)
+                            }
+                        } header: {
+                            dayHeader(dayGroup.date)
+                        }
+                    }
+
+                    // Load more trigger
+                    if onLoadMore != nil {
+                        Color.clear
+                            .frame(height: 1)
+                            .task {
+                                guard !isLoadingMore else { return }
+                                isLoadingMore = true
+                                defer { isLoadingMore = false }
+                                await onLoadMore?()
+                            }
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Day Header
+
+    /// Sticky day header — "Friday – 3 Apr" + "W14" (week number)
+    private func dayHeader(_ date: Date) -> some View {
+        let cal = Calendar.current
+        let isToday = cal.isDateInToday(date)
+        let weekNumber = cal.component(.weekOfYear, from: date)
+
+        return HStack {
+            Text(date.formatted(.dateTime.weekday(.wide)))
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(isToday ? Color(red: 0.92, green: 0.23, blue: 0.21) : .primary)
+            Text("– \(date.formatted(.dateTime.day().month(.abbreviated)))")
+                .font(.system(size: 14, weight: .regular))
+                .foregroundStyle(isToday ? Color(red: 0.92, green: 0.23, blue: 0.21) : .primary)
+
+            Spacer()
+
+            Text("W\(weekNumber)")
+                .font(.system(size: 12, weight: .regular))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(AppTheme.backgroundTop)
+    }
+
+    // MARK: - Event Row
+
+    @ViewBuilder
+    private func eventRow(_ event: CalendarEvent) -> some View {
+        let eventColor = Color(
+            red: event.calendarColorRed,
+            green: event.calendarColorGreen,
+            blue: event.calendarColorBlue
+        )
+
+        Button {
+            onEventTap?(event)
+        } label: {
+            HStack(spacing: 10) {
+                // Calendar color indicator
+                Circle()
+                    .fill(eventColor)
+                    .frame(width: 8, height: 8)
+
+                // Event title
+                Text(event.title)
+                    .font(.system(size: 15, weight: .regular))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+
+                Spacer()
+
+                // Time info
+                Text(timeLabel(for: event))
+                    .font(.system(size: 13, weight: .regular))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+        }
+        .buttonStyle(.plain)
+
+        Divider()
+            .padding(.leading, 34)
+    }
+
+    // MARK: - Empty State
+
+    private var emptyState: some View {
+        VStack(spacing: 12) {
+            Spacer()
+            Image(systemName: "calendar")
+                .font(.system(size: 40, weight: .light))
+                .foregroundStyle(.secondary.opacity(0.5))
+            Text("No upcoming events")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    // MARK: - Helpers
+
+    private func timeLabel(for event: CalendarEvent) -> String {
+        if event.isAllDay {
+            return String(
+                localized: "calendar.all-day",
+                defaultValue: "all-day",
+                comment: "Label for all-day calendar events"
+            )
+        }
+        let start = event.startDate.formatted(date: .omitted, time: .shortened)
+        let end = event.endDate.formatted(date: .omitted, time: .shortened)
+        return "\(start) – \(end)"
+    }
+
+    /// Groups events by day, sorted chronologically, skipping empty days.
+    private var groupedEventDays: [EventDayGroup] {
+        let cal = Calendar.current
+        let grouped = Dictionary(grouping: events) { cal.startOfDay(for: $0.startDate) }
+        return grouped
+            .map { EventDayGroup(date: $0.key, events: $0.value.sorted { $0.startDate < $1.startDate }) }
+            .sorted { $0.date < $1.date }
+    }
+}
+
+/// A group of events for a single day.
+struct EventDayGroup: Identifiable {
+    let date: Date
+    let events: [CalendarEvent]
+    var id: Date { date }
+}

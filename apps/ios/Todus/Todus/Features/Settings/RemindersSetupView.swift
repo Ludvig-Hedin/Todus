@@ -10,6 +10,7 @@ struct RemindersOnboardingView: View {
     @Environment(AppServices.self) private var services
     @Environment(\.modelContext) private var modelContext
     @State private var isConnecting = false
+    @State private var deniedMessage: String?
 
     var body: some View {
         ZStack {
@@ -32,15 +33,24 @@ struct RemindersOnboardingView: View {
 
                 Spacer().frame(height: 12)
 
-                Text("Keep your tasks in sync with Apple Reminders.\nExisting reminders will be imported automatically.")
+                Text("Connect Apple Reminders to keep your tasks aligned. If you skip, Todus still works normally and you can turn sync on later in Settings.")
                     .font(.system(size: 15, weight: .regular))
                     .foregroundStyle(AppTheme.mutedText)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 32)
 
-                Spacer().frame(height: 40)
+                Spacer().frame(height: 28)
 
                 VStack(spacing: 12) {
+                    if let deniedMessage {
+                        onboardingMessage(text: deniedMessage, tint: AppTheme.danger)
+                    } else {
+                        onboardingMessage(
+                            text: "We only ask once here. You can revisit this anytime in Settings.",
+                            tint: AppTheme.mutedText
+                        )
+                    }
+
                     // Connect button — requests permission, enables sync, imports reminders
                     Button {
                         Task { await connect() }
@@ -62,7 +72,7 @@ struct RemindersOnboardingView: View {
                     .disabled(isConnecting)
 
                     // Skip — marks prompt as seen without enabling sync
-                    Button("Skip for now") {
+                    Button("Skip, set this up later in Settings") {
                         services.hasConfiguredRemindersPrompt = true
                     }
                     .font(.system(size: 15, weight: .medium))
@@ -80,6 +90,7 @@ struct RemindersOnboardingView: View {
 
     private func connect() async {
         isConnecting = true
+        deniedMessage = nil
         // Enable the flag first so requestRemindersPermissionIfNeeded proceeds
         services.remindersSyncEnabled = true
         let granted = await services.requestRemindersPermissionIfNeeded()
@@ -88,13 +99,28 @@ struct RemindersOnboardingView: View {
             await services.importFromReminders(in: modelContext)
             // Sync new app tasks back out to Reminders
             services.syncExistingTasksToReminders(in: modelContext)
+            services.hasConfiguredRemindersPrompt = true
         } else {
             // Permission denied — roll back the enabled flag
             services.remindersSyncEnabled = false
+            deniedMessage = "Permission was not granted. You can keep going and enable Reminders later in Settings."
         }
         isConnecting = false
-        // Dismiss the onboarding step regardless of permission outcome
-        services.hasConfiguredRemindersPrompt = true
+    }
+
+    private func onboardingMessage(text: String, tint: Color) -> some View {
+        Text(text)
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(tint)
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity)
+            .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(tint.opacity(0.12), lineWidth: 1)
+            )
     }
 }
 

@@ -6,6 +6,8 @@ import Foundation
 final class TodosAPIClient {
     private let baseURL: URL
     private let authService: AuthService
+    /// Default timeout for API requests — prevents indefinite hangs on bad connectivity.
+    private let requestTimeout: TimeInterval = 30
 
     init(baseURL: URL, authService: AuthService) {
         self.baseURL = baseURL
@@ -33,7 +35,7 @@ final class TodosAPIClient {
         body: Encodable? = nil
     ) async throws -> T {
         let url = baseURL.appending(path: path)
-        var request = URLRequest(url: url)
+        var request = URLRequest(url: url, timeoutInterval: requestTimeout)
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
@@ -81,7 +83,7 @@ final class TodosAPIClient {
         body: Encodable?
     ) async throws -> T {
         let url = baseURL.appending(path: path)
-        var request = URLRequest(url: url)
+        var request = URLRequest(url: url, timeoutInterval: requestTimeout)
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if let token = authService.bearerToken {
@@ -136,7 +138,7 @@ final class TodosAPIClient {
         // TRPC over HTTP: POST /api/trpc/{procedure}
         // Body: { "json": <input> } (superjson format)
         let url = baseURL.appending(path: "api/trpc/\(procedure)")
-        var request = URLRequest(url: url)
+        var request = URLRequest(url: url, timeoutInterval: requestTimeout)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
@@ -199,7 +201,7 @@ final class TodosAPIClient {
         input: Encodable?
     ) async throws -> T {
         let url = baseURL.appending(path: "api/trpc/\(procedure)")
-        var request = URLRequest(url: url)
+        var request = URLRequest(url: url, timeoutInterval: requestTimeout)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if let token = authService.bearerToken {
@@ -274,7 +276,7 @@ enum APIError: Error, LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .unauthorized: return "Session expired. Please sign in again."
+        case .unauthorized: return "Your session has expired. Please sign in again."
         case .invalidResponse: return "Invalid server response."
         case .httpError(let code, _): return "Server error (HTTP \(code))."
         case .decodingError(let error): return "Data error: \(error.localizedDescription)"

@@ -116,12 +116,14 @@ final class AvatarCache {
         }
 
         var candidates: [URL] = []
+        // Google's favicon service has the best coverage (same source Gmail uses),
+        // so we prioritize it. Then apple-touch-icon (higher-res), then other fallbacks.
         for host in hostCandidates {
             let rawURLs = [
-                "https://\(host)/favicon.ico",
+                "https://www.google.com/s2/favicons?domain=\(host)&sz=128",
                 "https://\(host)/apple-touch-icon.png",
-                "https://icons.duckduckgo.com/ip3/\(host).ico",
-                "https://www.google.com/s2/favicons?domain=\(host)&sz=128"
+                "https://\(host)/favicon.ico",
+                "https://icons.duckduckgo.com/ip3/\(host).ico"
             ]
             for raw in rawURLs {
                 if let url = URL(string: raw), !candidates.contains(url) {
@@ -223,6 +225,10 @@ struct SenderAvatarView: View {
                 AsyncImage(url: candidates[urlIndex]) { phase in
                     switch phase {
                     case .success(let image):
+                        // White background ensures transparent logos (e.g. Slack, GitHub)
+                        // are visible and the colored initials circle doesn't bleed through.
+                        Circle()
+                            .fill(Color.white)
                         image
                             .resizable()
                             .scaledToFill()

@@ -50,6 +50,9 @@ struct TodosApp: App {
     /// The splash screen is visible while this runs, eliminating the black screen.
     @MainActor
     private func initializeApp() async {
+#if DEBUG
+        MainThreadHangWatchdog.shared.start()
+#endif
         let trace = PerformanceTrace.beginInterval(
             PerformanceTrace.initializeApp,
             message: "TodosApp.initializeApp begin"

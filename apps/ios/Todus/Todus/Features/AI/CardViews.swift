@@ -3,7 +3,7 @@ import SwiftUI
 // MARK: - Email Card
 
 struct EmailCardView: View {
-    let props: [String: JSONValue]
+    let props: [String: ChatJSONValue]
     var onAction: ((String, [String: String]) -> Void)?
 
     private var parsed: EmailCardProps? { EmailCardProps(from: props) }
@@ -68,7 +68,7 @@ struct EmailCardView: View {
 // MARK: - Task Card
 
 struct TaskCardView: View {
-    let props: [String: JSONValue]
+    let props: [String: ChatJSONValue]
     var onAction: ((String, [String: String]) -> Void)?
 
     private var parsed: TaskCardProps? { TaskCardProps(from: props) }
@@ -163,7 +163,7 @@ struct TaskCardView: View {
 // MARK: - Calendar Event Card
 
 struct CalendarEventCardView: View {
-    let props: [String: JSONValue]
+    let props: [String: ChatJSONValue]
     var onAction: ((String, [String: String]) -> Void)?
 
     private var parsed: CalendarEventCardProps? { CalendarEventCardProps(from: props) }
@@ -229,7 +229,7 @@ struct CalendarEventCardView: View {
 // MARK: - Note Card
 
 struct NoteCardView: View {
-    let props: [String: JSONValue]
+    let props: [String: ChatJSONValue]
 
     private var parsed: NoteCardProps? { NoteCardProps(from: props) }
 
@@ -266,7 +266,7 @@ struct NoteCardView: View {
 // MARK: - Draft Card
 
 struct DraftCardView: View {
-    let props: [String: JSONValue]
+    let props: [String: ChatJSONValue]
     var onAction: ((String, [String: String]) -> Void)?
 
     private var parsed: DraftCardProps? { DraftCardProps(from: props) }
@@ -318,7 +318,7 @@ struct DraftCardView: View {
 // MARK: - Label Card
 
 struct LabelCardView: View {
-    let props: [String: JSONValue]
+    let props: [String: ChatJSONValue]
 
     private var parsed: LabelCardProps? { LabelCardProps(from: props) }
 
@@ -350,7 +350,7 @@ struct LabelCardView: View {
 // MARK: - Contact Card
 
 struct ContactCardView: View {
-    let props: [String: JSONValue]
+    let props: [String: ChatJSONValue]
 
     private var parsed: ContactCardProps? { ContactCardProps(from: props) }
 
@@ -382,7 +382,7 @@ struct ContactCardView: View {
 // MARK: - Search Result Card
 
 struct SearchResultCardView: View {
-    let props: [String: JSONValue]
+    let props: [String: ChatJSONValue]
 
     private var parsed: SearchResultCardProps? { SearchResultCardProps(from: props) }
 
@@ -473,3 +473,4 @@ extension Color {
         self.init(red: r, green: g, blue: b)
     }
 }
+

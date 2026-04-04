@@ -4,10 +4,14 @@ import SwiftData
 /// Issue #10: Rebuild table view with proper column alignment.
 /// Columns use fixed widths so the header and data rows match visually.
 struct TaskTableView: View {
-    @Environment(AppServices.self) private var services
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \TaskRecord.createdAt, order: .reverse) private var allTasks: [TaskRecord]
+    let captureService: TaskCaptureService
+    let selectedFolderID: UUID?
+    let searchText: String
+    let sortOrder: TaskSortOrder
     @State private var selectedTask: TaskRecord?
+    @State private var pendingDeleteTask: TaskRecord?
 
     private let statusColumnWidth: CGFloat = 72
     private let dueColumnWidth: CGFloat = 80
@@ -16,111 +20,123 @@ struct TaskTableView: View {
     @State private var visibleTasks: [TaskRecord] = []
 
     private func recomputeVisibleTasks() {
-        visibleTasks = allTasks.filter { task in
-            services.selectedFolderID == nil || task.folderID == services.selectedFolderID
+        let trace = PerformanceTrace.beginInterval(
+            PerformanceTrace.taskListRecompute,
+            message: "TaskTableView.recomputeVisibleTasks begin"
+        )
+        defer {
+            PerformanceTrace.endInterval(
+                PerformanceTrace.taskListRecompute,
+                trace,
+                message: "TaskTableView.recomputeVisibleTasks end count=\(visibleTasks.count)"
+            )
         }
+        visibleTasks = allTasks.filter { task in
+            !task.completed &&
+            (selectedFolderID == nil || task.folderID == selectedFolderID) &&
+            matchesSearch(task)
+        }
+        visibleTasks = sortTasks(visibleTasks)
     }
 
     var body: some View {
-        List {
-            headerRow
+        Group {
+            if visibleTasks.isEmpty {
+                emptyState
+            } else {
+                List {
+                    headerRow
 
-            ForEach(visibleTasks) { task in
-                Button {
-                    selectedTask = task
-                } label: {
-                    HStack(spacing: 0) {
-                        // Title column — fills remaining width
-                        HStack(spacing: 8) {
-                            // Completion checkbox
-                            Image(systemName: task.completed ? "checkmark.circle.fill" : "circle")
-                                .font(.system(size: 14, weight: .medium))
-                                .foregroundStyle(task.completed ? task.status.tintColor : AppTheme.mutedText.opacity(0.6))
+                    ForEach(visibleTasks) { task in
+                        Button {
+                            selectedTask = task
+                        } label: {
+                            HStack(spacing: 0) {
+                                // Title column — fills remaining width
+                                HStack(spacing: 8) {
+                                    Image(systemName: "circle")
+                                        .font(.system(size: 14, weight: .medium))
+                                        .foregroundStyle(AppTheme.mutedText.opacity(0.6))
 
-                            VStack(alignment: .leading, spacing: 1) {
-                                HStack(spacing: 4) {
-                                    // Priority indicator
-                                    if task.priority != .none {
-                                        Circle()
-                                            .fill(priorityColor(task.priority))
-                                            .frame(width: 5, height: 5)
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        HStack(spacing: 4) {
+                                            if task.priority != .none {
+                                                Circle()
+                                                    .fill(priorityColor(task.priority))
+                                                    .frame(width: 5, height: 5)
+                                            }
+
+                                            Text(task.title)
+                                                .font(.system(size: 13, weight: .medium))
+                                                .tracking(-0.15)
+                                                .foregroundStyle(.primary.opacity(0.88))
+                                                .lineLimit(1)
+                                        }
+
+                                        if !task.taskDescription.isEmpty && task.taskDescription != task.title {
+                                            Text(task.taskDescription)
+                                                .font(.system(size: 11, weight: .medium))
+                                                .foregroundStyle(AppTheme.mutedText)
+                                                .lineLimit(1)
+                                        }
                                     }
-
-                                    Text(task.title)
-                                        .font(.system(size: 13, weight: .medium))
-                                        .tracking(-0.15)
-                                        .foregroundStyle(.primary.opacity(task.completed ? 0.45 : 0.88))
-                                        .strikethrough(task.completed, color: .primary.opacity(0.2))
-                                        .lineLimit(1)
                                 }
+                                .frame(maxWidth: .infinity, alignment: .leading)
 
-                                // Description subtitle
-                                if !task.taskDescription.isEmpty && task.taskDescription != task.title {
-                                    Text(task.taskDescription)
-                                        .font(.system(size: 11, weight: .medium))
-                                        .foregroundStyle(AppTheme.mutedText)
-                                        .lineLimit(1)
-                                }
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                                statusPill(task.status)
+                                    .frame(width: statusColumnWidth, alignment: .trailing)
 
-                        // Status column — colored pill
-                        statusPill(task.status)
-                            .frame(width: statusColumnWidth, alignment: .trailing)
-
-                        // Due column — color-coded date
-                        Group {
-                            if let dueDate = task.dueDate {
-                                Text(TaskDateFormatter.dueFormatter.string(from: dueDate))
-                                    .foregroundStyle(dueDateColor(dueDate))
-                            } else {
-                                Text("—")
-                                    .foregroundStyle(AppTheme.mutedText.opacity(0.4))
-                            }
-                        }
-                        .font(.system(size: 11, weight: .medium))
-                        .frame(width: dueColumnWidth, alignment: .trailing)
-                    }
-                    .padding(.vertical, 4)
-                }
-                .buttonStyle(.plain)
-                .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
-                // Context menu for quick actions in table view
-                .contextMenu {
-                    Button {
-                        withAnimation(.snappy(duration: 0.22)) {
-                            services.captureService.toggleCompletion(task, in: modelContext)
-                        }
-                    } label: {
-                        Label(task.completed ? "Restore" : "Mark as Done", systemImage: task.completed ? "arrow.uturn.backward" : "checkmark.circle")
-                    }
-
-                    // Quick status change submenu
-                    Menu {
-                        ForEach(TaskStatus.allCases) { targetStatus in
-                            if targetStatus != task.status {
-                                Button {
-                                    withAnimation(.snappy(duration: 0.22)) {
-                                        services.captureService.setStatus(task, status: targetStatus, in: modelContext)
+                                Group {
+                                    if let dueDate = task.dueDate {
+                                        Text(TaskDateFormatter.dueFormatter.string(from: dueDate))
+                                            .foregroundStyle(dueDateColor(dueDate))
+                                    } else {
+                                        Text("—")
+                                            .foregroundStyle(AppTheme.mutedText.opacity(0.4))
                                     }
-                                } label: {
-                                    Label(targetStatus.title, systemImage: targetStatus.systemImage)
                                 }
+                                .font(.system(size: 11, weight: .medium))
+                                .frame(width: dueColumnWidth, alignment: .trailing)
+                            }
+                            .padding(.vertical, 4)
+                        }
+                        .buttonStyle(.plain)
+                        .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                        .contextMenu {
+                            Button {
+                                withAnimation(.snappy(duration: 0.22)) {
+                                    captureService.toggleCompletion(task, in: modelContext)
+                                }
+                            } label: {
+                                Label("Mark as Done", systemImage: "checkmark.circle")
+                            }
+
+                            Menu {
+                                ForEach(TaskStatus.allCases) { targetStatus in
+                                    if targetStatus != task.status {
+                                        Button {
+                                            withAnimation(.snappy(duration: 0.22)) {
+                                                captureService.setStatus(task, status: targetStatus, in: modelContext)
+                                            }
+                                        } label: {
+                                            Label(targetStatus.title, systemImage: targetStatus.systemImage)
+                                        }
+                                    }
+                                }
+                            } label: {
+                                Label("Move to…", systemImage: "arrow.right.circle")
+                            }
+
+                            Divider()
+
+                            Button(role: .destructive) {
+                                pendingDeleteTask = task
+                            } label: {
+                                Label("Delete", systemImage: "trash")
                             }
                         }
-                    } label: {
-                        Label("Move to…", systemImage: "arrow.right.circle")
-                    }
-
-                    Divider()
-
-                    Button(role: .destructive) {
-                        services.captureService.delete(task, in: modelContext)
-                    } label: {
-                        Label("Delete", systemImage: "trash")
                     }
                 }
             }
@@ -137,9 +153,29 @@ struct TaskTableView: View {
                 .presentationDragIndicator(.visible)
                 .presentationBackground(AppTheme.backgroundTop)
         }
+        .alert(
+            "Delete task?",
+            isPresented: Binding(
+                get: { pendingDeleteTask != nil },
+                set: { if !$0 { pendingDeleteTask = nil } }
+            ),
+            presenting: pendingDeleteTask
+        ) { task in
+            Button("Delete", role: .destructive) {
+                captureService.delete(task, in: modelContext)
+                pendingDeleteTask = nil
+            }
+            Button("Cancel", role: .cancel) {
+                pendingDeleteTask = nil
+            }
+        } message: { task in
+            Text("Delete “\(task.title)”? This action can’t be undone.")
+        }
         .onAppear { recomputeVisibleTasks() }
         .onChange(of: allTasks) { recomputeVisibleTasks() }
-        .onChange(of: services.selectedFolderID) { recomputeVisibleTasks() }
+        .onChange(of: selectedFolderID) { recomputeVisibleTasks() }
+        .onChange(of: searchText) { recomputeVisibleTasks() }
+        .onChange(of: sortOrder) { recomputeVisibleTasks() }
     }
 
     // MARK: - Header Row
@@ -209,5 +245,50 @@ struct TaskTableView: View {
             return Color(red: 0.85, green: 0.30, blue: 0.25)
         }
         return AppTheme.mutedText
+    }
+
+    private func matchesSearch(_ task: TaskRecord) -> Bool {
+        guard !searchText.isEmpty else { return true }
+        return task.title.localizedCaseInsensitiveContains(searchText)
+            || task.taskDescription.localizedCaseInsensitiveContains(searchText)
+    }
+
+    private func sortTasks(_ tasks: [TaskRecord]) -> [TaskRecord] {
+        switch sortOrder {
+        case .newest:
+            return tasks.sorted { $0.createdAt > $1.createdAt }
+        case .oldest:
+            return tasks.sorted { $0.createdAt < $1.createdAt }
+        case .alphabetical:
+            return tasks.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+        case .dueDate:
+            return tasks.sorted {
+                switch ($0.dueDate, $1.dueDate) {
+                case let (a?, b?): return a < b
+                case (nil, nil): return $0.createdAt > $1.createdAt
+                case (_, nil): return true
+                case (nil, _): return false
+                }
+            }
+        }
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 12) {
+            Spacer()
+            Image(systemName: searchText.isEmpty ? "tablecells" : "magnifyingglass")
+                .font(.system(size: 28, weight: .medium))
+                .foregroundStyle(AppTheme.mutedText)
+                .appIconButton(size: 44)
+            Text(searchText.isEmpty ? "No visible tasks." : "No matching tasks.")
+                .font(.system(size: 18, weight: .semibold))
+            Text(searchText.isEmpty ? "Table view focuses on active work. Completed tasks stay in List." : "Try a different search term.")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(AppTheme.mutedText)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 24)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

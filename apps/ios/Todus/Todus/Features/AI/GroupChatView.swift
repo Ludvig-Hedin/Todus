@@ -226,6 +226,7 @@ struct GroupChatView: View {
 
     @Environment(AppServices.self) private var services
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var messageText: String = ""
     @State private var isSending = false
@@ -264,6 +265,10 @@ struct GroupChatView: View {
         }
         .onDisappear {
             groupService.stopPolling()
+        }
+        // Reduce polling frequency when the app goes to the background to save battery
+        .onChange(of: scenePhase) { _, newPhase in
+            groupService.setActive(newPhase == .active)
         }
         .confirmationDialog("Leave this group?", isPresented: $showLeaveConfirm, titleVisibility: .visible) {
             Button("Leave", role: .destructive) { Task { await leaveGroup() } }

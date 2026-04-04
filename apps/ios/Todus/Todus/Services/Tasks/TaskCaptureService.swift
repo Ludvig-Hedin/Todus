@@ -1,7 +1,9 @@
 import Foundation
+import Observation
 import SwiftData
 
 @MainActor
+@Observable
 final class TaskCaptureService {
     private let parser: TaskParsingService
     private let syncService: SyncService
@@ -15,6 +17,9 @@ final class TaskCaptureService {
     var notificationService: NotificationService?
     /// Whether task reminders are enabled — read from AppServices at schedule time.
     var taskRemindersEnabled: Bool = true
+    private var lastSharedFolderSyncAt: Date?
+    private(set) var isSyncingSharedFolders = false
+    private let sharedFolderSyncInterval: TimeInterval = 60
 
     init(
         parser: TaskParsingService,
@@ -279,6 +284,15 @@ final class TaskCaptureService {
     }
 
     func syncSharedFolders(in context: ModelContext) async {
+        let now = Date()
+        if isSyncingSharedFolders {
+            return
+        }
+        if let lastSharedFolderSyncAt,
+           now.timeIntervalSince(lastSharedFolderSyncAt) < sharedFolderSyncInterval {
+            return
+        }
+
         struct FolderListResponse: Decodable {
             let folders: [RemoteFolder]
         }
@@ -287,6 +301,20 @@ final class TaskCaptureService {
             let id: String
             let name: String
             let createdAt: Date
+        }
+
+        let trace = PerformanceTrace.beginInterval(
+            PerformanceTrace.sharedFolderSync,
+            message: "TaskCaptureService.syncSharedFolders begin"
+        )
+        isSyncingSharedFolders = true
+        defer {
+            isSyncingSharedFolders = false
+            PerformanceTrace.endInterval(
+                PerformanceTrace.sharedFolderSync,
+                trace,
+                message: "TaskCaptureService.syncSharedFolders end"
+            )
         }
 
         do {
@@ -307,7 +335,12 @@ final class TaskCaptureService {
                 }
             }
 
-            try? context.save()
+            do {
+                try context.save()
+                lastSharedFolderSyncAt = now
+            } catch {
+                print("[TaskCaptureService] Failed to save shared folders: \(error)")
+            }
         } catch {
             // Folder sync is best-effort; local folders remain usable offline.
         }
