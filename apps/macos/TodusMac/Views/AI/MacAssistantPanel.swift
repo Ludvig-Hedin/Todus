@@ -193,11 +193,10 @@ private final class MacVoiceController {
         holder.stopCapture()
 
         let captured = latestTranscript
-        let capturedTask = holder.currentRecognitionTask()
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
             guard let self, self.recordingState == .transcribing else { return }
-            capturedTask?.cancel()
-            self.holder.clearRecognitionTask()
+            // Full cleanup — stops engine & releases mic to avoid stale audio state
+            self.holder.cleanup()
             self.latestTranscript = ""
             self.recordingState = .idle
             if !captured.isEmpty { self.finishTranscription(captured, onFinished: onFinished) }
@@ -230,7 +229,10 @@ private final class MacVoiceController {
                 if isFinal {
                     let finalText = self.latestTranscript
                     self.latestTranscript = ""
-                    self.holder.clearRecognitionTask()
+                    // Full cleanup — stops the audio engine and releases the mic.
+                    // Without this, a dangling engine causes audio session conflicts
+                    // on the next recording attempt, which can freeze the app.
+                    self.holder.cleanup()
                     self.recordingState = .idle
                     if !finalText.isEmpty { self.finishTranscription(finalText, onFinished: onFinished) }
                 }

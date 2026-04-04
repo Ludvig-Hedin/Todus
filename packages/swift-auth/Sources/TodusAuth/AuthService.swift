@@ -101,6 +101,7 @@ public final class AuthService: NSObject {
 
     private enum Keys {
         static let bearerToken = "com.todus.auth.bearerToken"
+        static let refreshToken = "com.todus.auth.refreshToken"
         static let currentSessionId = "com.todus.auth.currentSessionId"
         static let userEmail = "com.todus.auth.userEmail"
         static let userName = "com.todus.auth.userName"
@@ -120,9 +121,17 @@ public final class AuthService: NSObject {
     private var lastHandledCallbackToken: String?
     private var lastHandledCallbackAt: Date?
 
-    /// The current Bearer token, cached in memory to avoid repeated synchronous Keychain reads.
+    /// Short-lived JWT (15min) used as "access token" for all API calls.
+    /// Verified stateless via JWKS — no DB lookup needed.
     public private(set) var bearerToken: String? {
         didSet { persistStringToKeychain(key: Keys.bearerToken, value: bearerToken) }
+    }
+
+    /// Long-lived raw session token (90-day sliding window) used as "refresh token".
+    /// Stored in Keychain, used only to obtain fresh JWTs via /auth/refresh-native-token.
+    /// The 90-day window extends daily on use via Better Auth's updateAge mechanism.
+    public private(set) var refreshToken: String? {
+        didSet { persistStringToKeychain(key: Keys.refreshToken, value: refreshToken) }
     }
 
     public private(set) var currentSessionId: String? {
@@ -132,6 +141,11 @@ public final class AuthService: NSObject {
     public var hasPersistedBearerToken: Bool {
         bearerToken != nil
     }
+
+    /// Coalescing gate for concurrent token refreshes. When multiple API calls receive 401
+    /// simultaneously, they all call refreshAccessToken(). This ensures only one network
+    /// request fires; subsequent callers await the in-flight result.
+    private var activeRefreshTask: Task<Bool, Never>?
 
     public var bearerTokenPreview: String {
         guard let token = bearerToken, !token.isEmpty else { return "None" }
@@ -152,6 +166,7 @@ public final class AuthService: NSObject {
         self.userImage = nil
         self.currentSessionId = KeychainHelper.read(key: Keys.currentSessionId)
         self.bearerToken = KeychainHelper.read(key: Keys.bearerToken)
+        self.refreshToken = KeychainHelper.read(key: Keys.refreshToken)
         super.init()
 
         if !UserDefaults.standard.bool(forKey: Keys.hasLaunchedBefore) {
@@ -256,7 +271,7 @@ public final class AuthService: NSObject {
                 authLog.info("Apple sign-in: token extracted from redirect response")
             } else {
                 authLog.error("Apple sign-in: failed to extract token. Status=\(http.statusCode)")
-                lastErrorMessage = "Apple Sign In: no token in response (HTTP \(http.statusCode)). Check debug logs."
+                lastErrorMessage = "Apple Sign In failed. Please try again."
                 authState = .guest
             }
 
@@ -266,7 +281,7 @@ public final class AuthService: NSObject {
                (error as NSError).code == ASAuthorizationError.canceled.rawValue {
                 // User cancelled — no error message needed
             } else {
-                lastErrorMessage = "Apple Sign In was cancelled or failed."
+                lastErrorMessage = "Apple Sign In was cancelled."
             }
             authState = .guest
         }
@@ -338,7 +353,7 @@ public final class AuthService: NSObject {
             guard let oauthURL = googleAuthURL else {
                 let bodyStr = String(data: data, encoding: .utf8) ?? "(empty)"
                 authLog.error("Google sign-in: no redirect URL. status=\(http.statusCode), body=\(bodyStr)")
-                lastErrorMessage = "Google Sign In failed (HTTP \(http.statusCode))."
+                lastErrorMessage = "Google Sign In failed. Please try again."
                 authState = .guest
                 isLoading = false
                 return
@@ -389,7 +404,7 @@ public final class AuthService: NSObject {
                 authLog.info("Google sign-in cancelled by user")
             } else {
                 authLog.error("Google sign-in error: domain=\(nsError.domain) code=\(nsError.code) desc=\(error.localizedDescription)")
-                lastErrorMessage = "Google Sign In failed: \(error.localizedDescription)"
+                lastErrorMessage = "Google Sign In failed. Please try again."
             }
             if !isAuthenticated {
                 authState = .guest
@@ -400,6 +415,96 @@ public final class AuthService: NSObject {
         if !isCompletingAuthentication {
             isLoading = false
         }
+    }
+
+    // MARK: - Link Additional Account (Multi-Account)
+
+    /// Links a new social account (Google) to the current authenticated user.
+    /// Uses the same ASWebAuthenticationSession flow as sign-in but hits the
+    /// Better-Auth link-social endpoint, which creates a new connection without
+    /// creating a new user session.
+    ///
+    /// Flow:
+    /// 1. POST /auth/native-link-social with current Bearer token (the backend
+    ///    bridges the existing session and links instead of creating a new user)
+    /// 2. Open the returned Google OAuth URL in ASWebAuthenticationSession
+    /// 3. After consent, backend creates a new connection record and redirects
+    ///    back to todus://link-callback
+    public func linkSocialAccount(provider: String = "google") async throws {
+        guard isAuthenticated else {
+            throw AuthError.notAuthenticated
+        }
+
+        isLoading = true
+        defer { isLoading = false }
+
+        // Step 1: Get the OAuth URL from the native link bridge, passing our
+        // Bearer token so the backend knows which user to link the new account to.
+        let linkURL = backendURL.appending(path: "auth/native-link-social")
+        var request = URLRequest(url: linkURL)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("https://todus.app", forHTTPHeaderField: "Origin")
+
+        // Include Bearer token so backend links to existing user
+        if let token = bearerToken {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+
+        var callbackComponents = URLComponents(
+            url: backendURL.appendingPathComponent("api/auth/callback").appendingPathComponent(provider),
+            resolvingAgainstBaseURL: false
+        )
+        callbackComponents?.queryItems = [
+            URLQueryItem(name: "callbackURL", value: "todus://link-callback")
+        ]
+        guard let callbackURL = callbackComponents?.url else {
+            throw AuthError.networkError
+        }
+
+        let payload: [String: String] = [
+            "provider": provider,
+            "callbackURL": callbackURL.absoluteString
+        ]
+        request.httpBody = try JSONEncoder().encode(payload)
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<400).contains(http.statusCode) else {
+            throw AuthError.networkError
+        }
+
+        struct OAuthRedirect: Decodable { let url: String }
+        let redirect = try JSONDecoder().decode(OAuthRedirect.self, from: data)
+        guard let oauthURL = URL(string: redirect.url) else {
+            throw AuthError.networkError
+        }
+
+        // Step 2: Open the OAuth URL in ASWebAuthenticationSession
+        let _ = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<URL, Error>) in
+            let completionHandler: @Sendable (URL?, (any Error)?) -> Void = { url, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else if let url {
+                    continuation.resume(returning: url)
+                } else {
+                    continuation.resume(throwing: AuthError.cancelled)
+                }
+            }
+
+            let webSession = ASWebAuthenticationSession(
+                url: oauthURL,
+                callbackURLScheme: "todus",
+                completionHandler: completionHandler
+            )
+            webSession.prefersEphemeralWebBrowserSession = false
+            webSession.presentationContextProvider = self
+            self.webAuthSession = webSession
+            webSession.start()
+        }
+
+        webAuthSession = nil
+        debugAuthLog("Link account callback received — new connection should be available")
+        // The caller should refresh the connections list after this completes
     }
 
     // MARK: - Email OTP
@@ -447,7 +552,7 @@ public final class AuthService: NSObject {
                 case 429:
                     lastErrorMessage = "Too many attempts. Try again later."
                 default:
-                    lastErrorMessage = errorMsg ?? "Failed to send code (HTTP \(http.statusCode))."
+                    lastErrorMessage = errorMsg ?? "Failed to send code. Please try again."
                 }
                 authLog.error("Email OTP send failed: status=\(http.statusCode), error=\(errorMsg ?? "unknown"), body=\(bodyStr)")
             }
@@ -499,7 +604,7 @@ public final class AuthService: NSObject {
                     authLog.info("Email OTP: authenticated successfully")
                 } else {
                     // Token not in response — try fetching session
-                    lastErrorMessage = "Verification succeeded but session failed. Try signing in again."
+                    lastErrorMessage = "Verification succeeded but something went wrong. Please try again."
                     authState = .guest
                 }
             } else {
@@ -508,7 +613,7 @@ public final class AuthService: NSObject {
                 case 400, 401:
                     lastErrorMessage = "Invalid or expired code. Request a new one."
                 default:
-                    lastErrorMessage = errorMsg ?? "Verification failed. Try again."
+                    lastErrorMessage = errorMsg ?? "Verification failed. Please try again."
                 }
             }
         } catch {
@@ -546,8 +651,11 @@ public final class AuthService: NSObject {
             }
             let email = components.queryItems?.first(where: { $0.name == "email" })?.value
             let sessionId = components.queryItems?.first(where: { $0.name == "sessionId" })?.value
-            authLog.info("Auth callback: token received \(self.tokenPreview(token))")
-            completeAuthentication(token: token, email: email, sessionId: sessionId)
+            // Extract refresh token (raw session token) for the access+refresh pattern.
+            // Older backend versions may not include this — handled gracefully in completeAuthentication.
+            let callbackRefreshToken = components.queryItems?.first(where: { $0.name == "refreshToken" })?.value
+            authLog.info("Auth callback: token received \(self.tokenPreview(token)), refreshToken=\(callbackRefreshToken != nil ? "present" : "absent")")
+            completeAuthentication(token: token, email: email, sessionId: sessionId, refreshToken: callbackRefreshToken)
         } else {
             authLog.error("Auth callback: no token in URL — \(url.absoluteString)")
             lastErrorMessage = "Sign in failed. No token received."
@@ -566,6 +674,28 @@ public final class AuthService: NSObject {
 
     @discardableResult
     public func restorePersistedSession() async -> SessionRestoreResult {
+        guard bearerToken != nil else {
+            return .missingToken
+        }
+
+        // Proactively refresh the JWT if it's expired or about to expire.
+        // This avoids a wasted round-trip to /auth/me that would fail with 401.
+        if isJWTExpiredOrExpiring(bearerToken) {
+            if await refreshAccessToken() {
+                debugAuthLog("restorePersistedSession: JWT refreshed successfully")
+            } else if refreshToken == nil {
+                // No refresh token (legacy install) — fall through to direct validation
+                debugAuthLog("restorePersistedSession: no refresh token, trying direct validation")
+            } else {
+                // Refresh token is present but refresh failed — session is truly expired
+                authLog.warning("restorePersistedSession: refresh failed, session expired")
+                signOut()
+                isSessionExpired = true
+                lastErrorMessage = "You've been signed out for security. Please sign in again."
+                return .invalid
+            }
+        }
+
         guard let token = bearerToken else {
             return .missingToken
         }
@@ -582,10 +712,30 @@ public final class AuthService: NSObject {
             isSessionExpired = false
             return .restored
         case .invalidSession:
+            // JWT valid but rejected — try refreshing once more before giving up
+            if await refreshAccessToken() {
+                debugAuthLog("restorePersistedSession: retrying after refresh")
+                if let freshToken = bearerToken {
+                    switch await validateUserProfile(
+                        token: freshToken,
+                        fallbackEmail: userEmail,
+                        attempts: 1
+                    ) {
+                    case .verified(let profile):
+                        applyVerifiedProfile(profile, fallbackEmail: userEmail)
+                        hasSeenOnboarding = true
+                        authState = .authenticated
+                        isSessionExpired = false
+                        return .restored
+                    default:
+                        break
+                    }
+                }
+            }
             authLog.warning("restorePersistedSession: token no longer valid")
             signOut()
             isSessionExpired = true
-            lastErrorMessage = "Your saved session expired. Please sign in again."
+            lastErrorMessage = "You've been signed out for security. Please sign in again."
             return .invalid
         case .transientFailure(let reason):
             debugAuthLog("restorePersistedSession: deferred due to \(reason)")
@@ -594,22 +744,26 @@ public final class AuthService: NSObject {
         }
     }
 
-    /// Attempt a silent session refresh by calling /auth/me with the current token.
-    /// Returns true if the session is still valid, false if it's expired.
-    /// Uses /auth/me instead of /auth/get-session because the latter doesn't resolve
-    /// bearer tokens — it only works with cookie-based sessions.
+    /// Attempt a silent session refresh. First tries the access+refresh pattern
+    /// (exchange refresh token for a new JWT). Falls back to direct /auth/me validation
+    /// for legacy installs that don't have a refresh token.
     public func attemptSilentRefresh() async -> Bool {
+        // Try the access+refresh pattern first
+        if await refreshAccessToken() {
+            isSessionExpired = false
+            return true
+        }
+
+        // Fallback for legacy installs: try /auth/me with the current token
         guard let token = bearerToken else { return false }
         let url = backendURL.appendingPathComponent("api/auth/me")
         var request = URLRequest(url: url)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        // Origin required by Better Auth CSRF middleware on all requests
         request.setValue("https://todus.app", forHTTPHeaderField: "Origin")
 
         do {
             let (_, response) = try await URLSession.shared.data(for: request)
             if let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) {
-                // Capture rotated token if the server issued a new one
                 captureRotatedToken(from: http)
                 isSessionExpired = false
                 return true
@@ -618,6 +772,97 @@ public final class AuthService: NSObject {
             // Network error — don't mark as expired, might just be offline
         }
         return false
+    }
+
+    // MARK: - Access + Refresh Token Pattern
+
+    /// Decode the JWT's `exp` claim to check if it's expired or about to expire.
+    /// Does NOT verify the signature — that's the server's job. This is just a
+    /// client-side optimization to avoid wasted 401 round-trips.
+    private func isJWTExpiredOrExpiring(_ token: String?) -> Bool {
+        guard let token, !token.isEmpty else { return true }
+        let parts = token.split(separator: ".")
+        guard parts.count == 3 else {
+            // Not a JWT (might be a raw session token from legacy flow) — treat as expired
+            // so the refresh mechanism kicks in
+            return true
+        }
+
+        // Decode the base64url-encoded payload (middle segment)
+        var base64 = String(parts[1])
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        while base64.count % 4 != 0 { base64.append("=") }
+
+        guard let data = Data(base64Encoded: base64),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let exp = json["exp"] as? TimeInterval else {
+            return true
+        }
+
+        let expirationDate = Date(timeIntervalSince1970: exp)
+        // Refresh if expiring within 2 minutes — gives buffer for network latency
+        return expirationDate.timeIntervalSinceNow < 120
+    }
+
+    /// Exchange the refresh token (raw session token) for a fresh short-lived JWT.
+    /// Calls /auth/refresh-native-token which validates the session and mints a new JWT.
+    /// The session's 90-day sliding window is extended on each successful refresh.
+    /// Returns true if a new JWT was obtained, false otherwise.
+    @discardableResult
+    public func refreshAccessToken() async -> Bool {
+        // Coalesce concurrent refresh attempts — only one network request fires at a time.
+        // Subsequent callers await the in-flight result instead of firing duplicate requests.
+        if let existing = activeRefreshTask {
+            return await existing.value
+        }
+
+        let task = Task<Bool, Never> { [weak self] in
+            guard let self else { return false }
+
+            guard let rt = self.refreshToken, !rt.isEmpty else {
+                debugAuthLog("refreshAccessToken: no refresh token available")
+                return false
+            }
+
+            let url = self.backendURL.appendingPathComponent("api/auth/refresh-native-token")
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue("https://todus.app", forHTTPHeaderField: "Origin")
+
+            let body: [String: String] = ["refreshToken": rt]
+            request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+
+            do {
+                let (data, response) = try await URLSession.shared.data(for: request)
+                guard let http = response as? HTTPURLResponse else { return false }
+
+                if (200..<300).contains(http.statusCode),
+                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let newToken = json["token"] as? String, !newToken.isEmpty {
+                    debugAuthLog("refreshAccessToken: new JWT obtained")
+                    self.bearerToken = newToken
+                    self.isSessionExpired = false
+                    return true
+                }
+
+                if http.statusCode == 401 {
+                    authLog.warning("refreshAccessToken: refresh token rejected (401)")
+                    return false
+                }
+
+                authLog.warning("refreshAccessToken: unexpected response \(http.statusCode)")
+                return false
+            } catch {
+                authLog.warning("refreshAccessToken: network error — \(error.localizedDescription)")
+                return false
+            }
+        }
+        activeRefreshTask = task
+        let result = await task.value
+        activeRefreshTask = nil
+        return result
     }
 
     /// Check an HTTP response for a rotated Bearer token from Better Auth's bearer plugin.
@@ -644,6 +889,7 @@ public final class AuthService: NSObject {
 
     private func clearPersistedAuthState() {
         bearerToken = nil
+        refreshToken = nil
         currentSessionId = nil
         // Clear stored properties — didSet handles Keychain deletion
         userEmail = nil
@@ -677,7 +923,7 @@ public final class AuthService: NSObject {
             authLog.warning("fetchUserProfile: token rejected, signing out")
             signOut()
             isSessionExpired = true
-            lastErrorMessage = "Your sign-in session could not be verified. Please sign in again."
+            lastErrorMessage = "Your session has expired. Please sign in again."
         case .transientFailure(let reason):
             authLog.warning("fetchUserProfile deferred: \(reason)")
         }
@@ -689,8 +935,26 @@ public final class AuthService: NSObject {
 
     // MARK: - Private Helpers
 
-    private func completeAuthentication(token: String, email: String?, sessionId: String? = nil) {
-        bearerToken = token
+    private func completeAuthentication(token: String, email: String?, sessionId: String? = nil, refreshToken newRefreshToken: String? = nil) {
+        // Determine if the token is a JWT (contains dots) or a raw session token.
+        // Google Sign-In (via /auth/mobile-token): token=JWT, refreshToken=sessionToken
+        // Apple Sign-In / Email OTP: token=sessionToken (from set-auth-token header or body)
+        let tokenIsJWT = token.split(separator: ".").count == 3
+
+        if let rt = newRefreshToken, !rt.isEmpty {
+            // Google flow: explicit refresh token provided alongside the JWT
+            bearerToken = token
+            refreshToken = rt
+        } else if !tokenIsJWT {
+            // Apple/Email OTP flow: token is a raw session token — use it as refresh token.
+            // A JWT will be obtained via refreshAccessToken() below.
+            refreshToken = token
+            bearerToken = token  // Temporary — will be replaced with JWT
+        } else {
+            // JWT without refresh token (legacy or unexpected) — store as-is
+            bearerToken = token
+        }
+
         currentSessionId = sessionId?.isEmpty == false ? sessionId : nil
         if let email {
             self.userEmail = email
@@ -704,8 +968,24 @@ public final class AuthService: NSObject {
                 self.isLoading = false
             }
 
+            // For Apple/Email OTP flows where we have a session token but no JWT,
+            // exchange it for a proper JWT before validating the profile.
+            if !tokenIsJWT, self.refreshToken != nil {
+                if await self.refreshAccessToken() {
+                    debugAuthLog("completeAuthentication: exchanged session token for JWT")
+                } else {
+                    debugAuthLog("completeAuthentication: JWT exchange failed, proceeding with session token")
+                }
+            }
+
+            guard let currentToken = self.bearerToken else {
+                self.signOut()
+                self.lastErrorMessage = "Something went wrong during sign in. Please try again."
+                return
+            }
+
             switch await validateUserProfile(
-                token: token,
+                token: currentToken,
                 fallbackEmail: email,
                 attempts: Self.freshLoginValidationAttempts
             ) {
@@ -718,11 +998,11 @@ public final class AuthService: NSObject {
             case .invalidSession:
                 authLog.error("completeAuthentication: token rejected after callback")
                 self.signOut()
-                self.lastErrorMessage = "Sign in completed, but Todus could not verify your session. Please try again."
+                self.lastErrorMessage = "Something went wrong during sign in. Please try again."
             case .transientFailure(let reason):
                 authLog.error("completeAuthentication: verification failed due to \(reason)")
                 self.signOut()
-                self.lastErrorMessage = "Sign in completed, but Todus could not reach the server to verify your session."
+                self.lastErrorMessage = "Unable to connect to server. Check your internet and try again."
             }
         }
     }
@@ -949,6 +1229,8 @@ public final class AuthService: NSObject {
     public enum AuthError: Error {
         case cancelled
         case invalidResponse
+        case notAuthenticated
+        case networkError
     }
 }
 

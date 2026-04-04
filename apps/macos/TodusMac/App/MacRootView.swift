@@ -86,6 +86,7 @@ enum MacPrimarySelection: Hashable {
 
 struct MacRootView: View {
     @Environment(MacAppServices.self) private var services
+    @Environment(\.openWindow) private var openWindow
 
     // Live task count for sidebar badge
     @Query(filter: #Predicate<TaskRecord> { !$0.completed }) private var incompleteTasks: [TaskRecord]
@@ -98,18 +99,18 @@ struct MacRootView: View {
     // Side pane resize — user can drag the divider to adjust width
     @State private var sidePaneWidth: CGFloat = 380
     @State private var sidePaneDragStartWidth: CGFloat?
-    @State private var isSettingsPresented = false
+
     @State private var isComposePresented = false
     @State private var isCreatePresented = false
     @State private var isSearchPresented = false
+    @State private var isNotificationsPresented = false
     @State private var selectedEmailThread: IdentifiableString? = nil
     @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
     @State private var calendarViewMode: String = "Week"
     @State private var calendarSelectedDate: Date = Date()
     @State private var composeEmailSeedBody: String = ""
     @State private var hasBootstrappedAuthState = false
-    /// Currently selected group chat ID — nil when viewing regular content
-    @State private var selectedGroupId: String? = nil
+    @State private var hasAppliedStartupSelection = false
 
     // Accent color — drives .tint() on root so SwiftUI controls update immediately
     @AppStorage("mac_accent_color") private var accentColorKey = "blue"
@@ -123,6 +124,15 @@ struct MacRootView: View {
                 // Not authenticated → show sign-in screen
                 MacAuthView()
                     .transition(.opacity)
+            } else if !services.hasConfiguredGmailPrompt {
+                MacGmailOnboardingView()
+                    .transition(.opacity.combined(with: .move(edge: .trailing)))
+            } else if !services.hasConfiguredCalendarPrompt {
+                MacCalendarOnboardingView()
+                    .transition(.opacity.combined(with: .move(edge: .trailing)))
+            } else if !services.hasConfiguredStartupViewPrompt {
+                MacStartupOnboardingView()
+                    .transition(.opacity.combined(with: .move(edge: .trailing)))
             } else {
                 // Authenticated or guest → show main app shell
                 mainAppView
@@ -132,6 +142,30 @@ struct MacRootView: View {
         .tint(MacTheme.accentColor(for: accentColorKey))
         .animation(.snappy(duration: 0.3), value: services.authService.showsOnboarding)
         .animation(.snappy(duration: 0.3), value: services.authService.isAuthenticated)
+        .animation(.snappy(duration: 0.3), value: services.hasConfiguredGmailPrompt)
+        .animation(.snappy(duration: 0.3), value: services.hasConfiguredCalendarPrompt)
+        .animation(.snappy(duration: 0.3), value: services.hasConfiguredStartupViewPrompt)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if let onboardingStep = onboardingStep {
+                HStack {
+                    Spacer()
+                    Text("\(onboardingStep) of 3")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(.thinMaterial, in: Capsule())
+                        .overlay(
+                            Capsule()
+                                .stroke(MacTheme.cardBorder.opacity(0.8), lineWidth: 1)
+                        )
+                    Spacer()
+                }
+                .padding(.top, 8)
+                .padding(.bottom, 6)
+                .allowsHitTesting(false)
+            }
+        }
         .onChange(of: services.showsAssistantPanel) { _, isPresented in
             isAssistantPresented = isPresented
         }
@@ -183,7 +217,7 @@ struct MacRootView: View {
                 ProgressView()
                     .controlSize(.small)
 
-                Text("Verifying session…")
+                Text("Checking your session…")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(.secondary)
             }
@@ -244,32 +278,28 @@ struct MacRootView: View {
             }
         }
         .animation(.snappy(duration: 0.25), value: isAssistantPresented && assistantDisplayMode == .floating)
-        // Settings overlay — full-screen dimmed backdrop; tap outside to dismiss
-        .overlay {
-            if isSettingsPresented {
-                ZStack {
-                    Color.black.opacity(0.35)
-                        .ignoresSafeArea()
-                        .onTapGesture {
-                            withAnimation(.snappy(duration: 0.2)) {
-                                isSettingsPresented = false
-                            }
-                        }
-
-                    MacSettingsView(isPresented: $isSettingsPresented)
-                        .frame(width: 560)
-                        .frame(maxHeight: 680)
-                        .clipShape(RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous))
-                        .shadow(color: .black.opacity(0.28), radius: 32, y: 12)
-                        // Prevent taps on the panel itself from propagating to the backdrop
-                        .onTapGesture {}
+        // Offline banner — shown when the device has no network connectivity
+        .overlay(alignment: .top) {
+            if !services.networkMonitor.isConnected {
+                HStack(spacing: 6) {
+                    Image(systemName: "wifi.slash")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text("No internet connection")
+                        .font(.system(size: 12, weight: .medium))
                 }
-                .transition(.opacity)
+                .foregroundStyle(.white)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 7)
+                .background(.red.gradient, in: Capsule())
+                .shadow(color: .black.opacity(0.15), radius: 4, y: 2)
+                .padding(.top, 8)
+                .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
-        .animation(.snappy(duration: 0.2), value: isSettingsPresented)
-        .onChange(of: selection) { _, _ in
-            selectedGroupId = nil
+        .animation(.snappy(duration: 0.3), value: services.networkMonitor.isConnected)
+        .onChange(of: selection) { _, _ in }
+        .onAppear {
+            applyStartupSelectionIfNeeded()
         }
     }
 
@@ -281,15 +311,13 @@ struct MacRootView: View {
                 selection: $selection,
                 isEmailExpanded: $isEmailExpanded,
                 isCalendarExpanded: $isCalendarExpanded,
-                selectedGroupId: $selectedGroupId,
-                onOpenSettings: { isSettingsPresented = true },
+                onOpenSettings: { openWindow(id: "settings") },
                 onCompose: { isComposePresented = true },
                 taskCount: incompleteTasks.count,
                 onCreateItem: { isCreatePresented = true },
                 onCalendarDayTap: { date in
                     calendarSelectedDate = date
                     selection = .calendar(.all)
-                    selectedGroupId = nil  // deselect group when switching to calendar
                 }
             )
             .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 260)
@@ -299,14 +327,12 @@ struct MacRootView: View {
                 MacTheme.contentBackground
                     .ignoresSafeArea()
 
-                // Group chat view takes over the detail pane when a group is selected
-                if let groupId = selectedGroupId {
-                    MacGroupChatView(groupId: groupId)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .id(groupId)
                 // Calendar manages its own scroll and needs edge-to-edge layout;
                 // other views use a standard padded ScrollView wrapper.
-                } else if selection.category == "calendar" {
+                if selection.category == "calendar" || selection.category == "docs" || selection.category == "email" {
+                    // These views manage their own layout/scroll and need edge-to-edge frames.
+                    // WKWebView (docs) must not be wrapped in a ScrollView — it has no intrinsic height
+                    // and would render as 0-height (black) inside one.
                     contentView(for: selection)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                         .id(selection)
@@ -349,11 +375,23 @@ struct MacRootView: View {
                 }
 
                 ToolbarItemGroup(placement: .primaryAction) {
-                    // Notifications bell removed — placeholder "No new notifications" popover
-                    // offered no value. Will be re-added when notification backend is implemented.
+                    // Notifications — AI-powered digest of tasks due, events, and important emails
+                    Button {
+                        isNotificationsPresented = true
+                    } label: {
+                        Image(systemName: "bell")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.secondary.opacity(0.9))
+                    }
+                    .help("Daily Brief")
+                    .accessibilityLabel("Notifications")
+                    .accessibilityHint("Opens your daily brief with tasks, events, and emails")
+                    .popover(isPresented: $isNotificationsPresented, arrowEdge: .bottom) {
+                        MacNotificationCenterView()
+                    }
 
                     Menu {
-                        Button("Preferences…  ⌘,") { isSettingsPresented = true }
+                        Button("Preferences…  ⌘,") { openWindow(id: "settings") }
                         Divider()
                         Button("New Email  ⌘⇧E") { isComposePresented = true }
                         Button("Refresh  ⌘R") {
@@ -378,17 +416,32 @@ struct MacRootView: View {
                         }
                     } label: {
                         Image(systemName: "ellipsis")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.secondary.opacity(0.9))
                     }
-                    .tint(Color.primary.opacity(0.7))
+                    .tint(Color.primary.opacity(0.55))
                     .help("More Options")
+                    .accessibilityLabel("More options menu")
 
                     // Create / compose
                     Button {
                         isCreatePresented = true
                     } label: {
                         Image(systemName: "square.and.pencil")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.primary)
+                            .frame(width: 28, height: 28)
+                            .background(
+                                MacTheme.surfaceCard.opacity(0.95),
+                                in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .stroke(MacTheme.cardBorder.opacity(0.9), lineWidth: 0.6)
+                            )
                     }
                     .help("New Item (⌘N)")
+                    .accessibilityLabel("Create new item")
                     .keyboardShortcut("n", modifiers: .command)
 
                     // Search — ⌘K (command palette convention)
@@ -396,9 +449,21 @@ struct MacRootView: View {
                         isSearchPresented = true
                     } label: {
                         Image(systemName: "magnifyingglass")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.primary)
+                            .frame(width: 28, height: 28)
+                            .background(
+                                MacTheme.surfaceCard.opacity(0.95),
+                                in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .stroke(MacTheme.cardBorder.opacity(0.9), lineWidth: 0.6)
+                            )
                     }
                     .keyboardShortcut("k", modifiers: .command)
                     .help("Search (⌘K)")
+                    .accessibilityLabel("Search")
                 }
             }
         }
@@ -408,7 +473,7 @@ struct MacRootView: View {
         .background {
             Group {
                 // ⌘,  — Settings (standard macOS convention)
-                Button("") { isSettingsPresented = true }
+                Button("") { openWindow(id: "settings") }
                     .keyboardShortcut(",", modifiers: .command)
 
                 // ⌘B — Toggle sidebar
@@ -501,6 +566,36 @@ struct MacRootView: View {
             MacEmailThreadView(threadId: thread.value)
                 .frame(minWidth: 560, minHeight: 400)
         }
+        .onAppear {
+            applyStartupSelectionIfNeeded()
+        }
+    }
+
+    private var onboardingStep: Int? {
+        guard !services.authService.showsOnboarding else { return nil }
+        if !services.hasConfiguredGmailPrompt { return 1 }
+        if !services.hasConfiguredCalendarPrompt { return 2 }
+        if !services.hasConfiguredStartupViewPrompt { return 3 }
+        return nil
+    }
+
+    private var startupSelection: MacPrimarySelection {
+        switch services.startupView {
+        case "inbox":
+            return .email(.inbox)
+        case "tasks":
+            return .tasks
+        case "meetings":
+            return .meetings
+        default:
+            return .home
+        }
+    }
+
+    private func applyStartupSelectionIfNeeded() {
+        guard !hasAppliedStartupSelection else { return }
+        selection = startupSelection
+        hasAppliedStartupSelection = true
     }
 
     // MARK: - Context Toolbar
@@ -538,7 +633,7 @@ struct MacRootView: View {
         case .home:
             MacHomeView(onNavigate: { selection = $0 })
         case .tasks:
-            MacTasksView()
+            MacTasksView(onCreateItem: { isCreatePresented = true })
         case .email(let section):
             MacEmailInboxView(folder: section.rawValue)
         case .calendar:

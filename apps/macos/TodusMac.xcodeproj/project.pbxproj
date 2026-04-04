@@ -3,775 +3,653 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 77;
+	objectVersion = 50;
 	objects = {
 
 /* Begin PBXBuildFile section */
-		045E3AE98A7C4DD9B21F5D30 /* AppLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A9C4C77A8F84C5092EAB1C7 /* AppLogger.swift */; };
-		0C13133C6201ACA4FE36F69A /* ShareConversationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 242450F6FF63BC819CBEAA9A /* ShareConversationService.swift */; };
-		0F5B670890164922821F1D85 /* SyncState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 456C42750E641F95F8340F79 /* SyncState.swift */; };
-		114A126295562124E1BCCFEE /* MacNotificationCenterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99FBA8C2A1979EE21A835D0C /* MacNotificationCenterView.swift */; };
-		16E2E04A85DA754EE034D0D1 /* MacContentHeaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BC2CFEF093D8584286BE20B /* MacContentHeaderView.swift */; };
-		19F6CCD4CA1B0486DC9FC6F3 /* TodosConfig.plist in Resources */ = {isa = PBXBuildFile; fileRef = D781F56D4BD27C55F3E8F7F8 /* TodosConfig.plist */; };
-		1A4A6BEF2511133A5550E42C /* SyncModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A87121AD344331AAA348FB3 /* SyncModels.swift */; };
-		1EE17250C40060265DE72BB0 /* AppIcon.icns in Resources */ = {isa = PBXBuildFile; fileRef = 9174DF615C066916378ACE05 /* AppIcon.icns */; };
-		21AB7C6A8D655F461E48E375 /* MacEmailInboxView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF20EABA4B082AA168D3DDF7 /* MacEmailInboxView.swift */; };
-		2D555E443F1CAE9F0BCF376C /* CreateItemType.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0978AB24BCBA5061D06B50 /* CreateItemType.swift */; };
-		2F99507599647B4DACBB4E59 /* MacSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D1039835BD7B82F4F126EC4 /* MacSettingsView.swift */; };
-		354FEAB67EEF8F3538C1115D /* TaskSortOrder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BD152C78EA2F5515F84D973 /* TaskSortOrder.swift */; };
-		37F6479AF457C04C69749DF0 /* AssistantButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = C27FE022BFDFDA4FCC15BCB4 /* AssistantButton.swift */; };
-		386E04C87DD0F4818121F3EE /* MacShareConversationPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27C91508CA011F9E782FC412 /* MacShareConversationPanel.swift */; };
-		3A35016EE897594FAC82E86E /* MacEmailThreadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B1DA8871127C8B42C32B686 /* MacEmailThreadView.swift */; };
-		3A74856E3BCE1CA3CF44FD04 /* AuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3169072826FA9D5EBF6594C /* AuthService.swift */; };
-		3B8D7A98DF2A4ACFEA4A675E /* CalendarTimeGridView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B26A21E1F1C02C4ACD3E4C30 /* CalendarTimeGridView.swift */; };
-		3DABF8528A2D1EC0BE66AAD8 /* TaskStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 347B2B771EF16298AC5CBCF6 /* TaskStatus.swift */; };
-		413EB23387CF524ADEE6AA47 /* MacRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51FB7C44A440DFC527210FE5 /* MacRootView.swift */; };
-		430B1D78D4B567975A394A37 /* TaskViewMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A6E6D9EAB8380C6BE5719C3 /* TaskViewMode.swift */; };
-		4564647511EB57A78B398E63 /* TodosAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27FFF0A469A295576A24B8F9 /* TodosAPIClient.swift */; };
-		4BA429F138151D2591542720 /* MacMeetingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC576DC4D340857DE4F44A65 /* MacMeetingsView.swift */; };
-		4C73B49045690BB0BA55C141 /* MacDocsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6155C00DFE00B636BFF8D00 /* MacDocsView.swift */; };
-		53D7BE88F236E8F472FF4D68 /* MacAssistantPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E9CA2173967A8D824F414D7 /* MacAssistantPanel.swift */; };
-		553EE990264F3CEFD8E517BC /* AppTaskPriority.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC585F2265934558433E3E36 /* AppTaskPriority.swift */; };
-		57FBCDF125B965458E0BECF3 /* TodusMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 046484DCDC536576B1BBB40C /* TodusMacApp.swift */; };
-		5ADF61DDFE8A3E3F7B49F343 /* MacHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AA56C7900CF82A6B22C847C /* MacHomeView.swift */; };
-		5F09630B9742564B1D9301A7 /* MacGroupChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 620A8071ABFD71C08BFB844C /* MacGroupChatView.swift */; };
-		680812535C1CC7B2F7FDC9BB /* MacCalendarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0977C553BCC4593120370036 /* MacCalendarView.swift */; };
-		6F775FA79762FB29E75EBF88 /* EmailService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90565199B1A829021602D8C0 /* EmailService.swift */; };
-		7000180C6ACC0E9CEF9DBBE2 /* GroupChatService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B582ECD8716F2A249C77A507 /* GroupChatService.swift */; };
-		781AD1613378DF8ABEAE55FB /* MacTasksView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B974F05FBCA3D4523D8602C6 /* MacTasksView.swift */; };
-		78BD1210EB9A905EE0141C92 /* ParseState.swift in Sources */ = {isa = PBXBuildFile; fileRef = E600FB3DFA1A854E9BB82907 /* ParseState.swift */; };
-		7D3EA9502036072E10A5D8D6 /* MailAssistantModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BDFA48500E383D1201957B7 /* MailAssistantModels.swift */; };
-		8DA443DB62DF856D9E4498DB /* MacSidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD746B8A12A661970B8AAAEB /* MacSidebarView.swift */; };
-		925EAACC9F2A49C38CE4FE49 /* MacCreateSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C43C6BCE6D9B0B2A4A9FB06 /* MacCreateSheet.swift */; };
-		928618689B0DCC6D49DD695A /* NoRedirectDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F0770529CFD6B1D54769766 /* NoRedirectDelegate.swift */; };
-		931603E9E487ACFB7CCC3F57 /* MacSearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 341C4B2E1051392DA2B1937B /* MacSearchView.swift */; };
-		94D3AC3D25D4BBA93211F42C /* AppleSignInDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CC3DE23485F3643714CDC86 /* AppleSignInDelegate.swift */; };
-		9640716F563A9C39A3F58012 /* MacMeetingDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7D981A56C9B33E626FE9700 /* MacMeetingDetailView.swift */; };
-		9B5398902CE927DBEE3681D2 /* MeetingsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAE8C28D15F8313E78D3E36E /* MeetingsService.swift */; };
-		A021A447733E1411FF2A61C7 /* CalendarService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1B78F2ECE3BBD9BBD4D0603 /* CalendarService.swift */; };
-		A1AA1459AFBEC54E5B9ED5C5 /* FolderRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B230C599CF29C2033F912E1 /* FolderRecord.swift */; };
-		ABD2AF0E183F49EB577D3249 /* MacOnboardingViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 673D4A873E62C0874909FABC /* MacOnboardingViews.swift */; };
-		AC4E7A7FC7E659AEF1C0A8CF /* NetworkMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CD4813CA22070B5E04AEB9E /* NetworkMonitor.swift */; };
-		AF4EBC7F8EF7769BC063A7F1 /* MacAIChatService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32EB09F409AF92D9A77ECC1F /* MacAIChatService.swift */; };
-		AF6D033EAB6384A3004D17B7 /* CalendarEventBlockView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE5DFCE18508A16E4285A3F8 /* CalendarEventBlockView.swift */; };
-		C0AC54923C3B9903F72784A4 /* TaskDateFormatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8ABE7D86ADEB39CEA890CD6 /* TaskDateFormatter.swift */; };
-		C3ABBC6BB009FE7995D12B02 /* EventKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 99A1500ECA0199177C906A2A /* EventKit.framework */; };
-		C7DF612D031A6CC198D17600 /* TaskRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54838BB181E398AEAE44D164 /* TaskRecord.swift */; };
-		D1ED251E912D63B61727D06F /* EmailModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6B833B391C01BEE4CB84524 /* EmailModels.swift */; };
-		D690F1E9E68EB72DB2A0FF10 /* MacAppServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = 326E7A3F239A043BA44D3B8F /* MacAppServices.swift */; };
-		D714906DC9EE1D9E1B6A4FB0 /* MacBrandIcons.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBA2486E15EFC7C6F22C7D19 /* MacBrandIcons.swift */; };
-		D76EFB86A42A4E0974640454 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AE1D36D7DEA8080434732636 /* Assets.xcassets */; };
-		D89DF48DA2B18922837710B9 /* MacEmailComposeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC7F6BC356E4ECE3D50717F5 /* MacEmailComposeView.swift */; };
-		E00A05101913579DC0E5D1C6 /* KeychainHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 458E1F394617FB142FC17275 /* KeychainHelper.swift */; };
-		E2D56D42AC089CCBC21CD21B /* MacAuthView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9DCCDC4628A7827493203AF /* MacAuthView.swift */; };
-		EE6A839A831D903BC3DBC25D /* MacTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52580E22D0F58138E0CE848E /* MacTheme.swift */; };
+		0E4CE5F5C0B05F62B2A64159CC0C8E25 /* AppleSignInDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F987800B668781BC01E1F4EA2C4BAE9 /* AppleSignInDelegate.swift */; };
+		10B3CD29276ED58E0661989B6FF5E0B1 /* ParseState.swift in Sources */ = {isa = PBXBuildFile; fileRef = E600FB3DFA1A854E9BB82907CD552FD9 /* ParseState.swift */; };
+		143786D291CE54C7DC770B41E05A8F3B /* GroupChatService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B582ECD8716F2A249C77A507D04E81B0 /* GroupChatService.swift */; };
+		16477CDE2B19E20E378FFA762CA6CE35 /* MacMeetingDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7D981A56C9B33E626FE970006B6DCD7 /* MacMeetingDetailView.swift */; };
+		180E4D028300F543474B697992D4B4EB /* MacRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51FB7C44A440DFC527210FE57E1CE202 /* MacRootView.swift */; };
+		190AAC96ED1F8CF5F5681E9DD229018E /* KeychainHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A63EB47653D3AF97BBDB61A7616DD3F /* KeychainHelper.swift */; };
+		1A06B2D7BD99681CE6CDA66E444FFFF0 /* MacAppServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = 326E7A3F239A043BA44D3B8F48BFD77D /* MacAppServices.swift */; };
+		20A42E927D716CCA0F67B2AA716987D4 /* MacCreateSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C43C6BCE6D9B0B2A4A9FB064D2600BE /* MacCreateSheet.swift */; };
+		211140EF2F773DE5C008190F8A48E6E5 /* EmailModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6B833B391C01BEE4CB84524440DA507 /* EmailModels.swift */; };
+		2891962330B992014CA04E5063492E8C /* SyncState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 456C42750E641F95F8340F7986394218 /* SyncState.swift */; };
+		29C190C5585CC36FFB079F9796DE7077 /* MailAssistantModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BDFA48500E383D1201957B773B97F81 /* MailAssistantModels.swift */; };
+		2A778C021A56BFBE76E540BC8996A7A7 /* MacTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52580E22D0F58138E0CE848EBE406289 /* MacTheme.swift */; };
+		2E472AE43F0792016A3281F4B4BE59D4 /* TaskSortOrder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BD152C78EA2F5515F84D9738A1A52B2 /* TaskSortOrder.swift */; };
+		32CF05AAD09E594B49FC3B22B9FDD427 /* CalendarEventBlockView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE5DFCE18508A16E4285A3F8AEDBE71F /* CalendarEventBlockView.swift */; };
+		36074BABB8BBA9EB1707EAECB3512F24 /* MacAssistantPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E9CA2173967A8D824F414D7FB86BBA1 /* MacAssistantPanel.swift */; };
+		3CAEC032FCCD6DC3BD6AE1A4BF5AF23F /* MacAIChatService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32EB09F409AF92D9A77ECC1FDA607855 /* MacAIChatService.swift */; };
+		3DAD3CA069D1AA61CCB26C9104EB4CE1 /* MacAuthView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9DCCDC4628A7827493203AF2071E54D /* MacAuthView.swift */; };
+		41982F5C23061A97F6635DC59B09A28B /* MacMeetingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC576DC4D340857DE4F44A651C6C0728 /* MacMeetingsView.swift */; };
+		445E79F29D0DD375347ABC88141124D7 /* ShareConversationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 242450F6FF63BC819CBEAA9AB44427CA /* ShareConversationService.swift */; };
+		45310EE7C7D808CDCD19005674DADF67 /* CalendarTimeGridView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B26A21E1F1C02C4ACD3E4C30D54011EA /* CalendarTimeGridView.swift */; };
+		46BF606A235D46ECDDE445A5583AE317 /* TodusMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 046484DCDC536576B1BBB40C953372EE /* TodusMacApp.swift */; };
+		479B73AF31381C7DA3CE7633476D126A /* TaskDateFormatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8ABE7D86ADEB39CEA890CD657CD87AE /* TaskDateFormatter.swift */; };
+		4F01B6CD818DE9338280907753597D7B /* TodosAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27FFF0A469A295576A24B8F9614EEFAC /* TodosAPIClient.swift */; };
+		552A80AD6BDCAA27F5CE1DA21170B7C3 /* CreateItemType.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0978AB24BCBA5061D06B508BA10720 /* CreateItemType.swift */; };
+		566897478643CE84F1D8F291770234D2 /* MacSidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD746B8A12A661970B8AAAEBA8746D57 /* MacSidebarView.swift */; };
+		5A6FD875EDF841AA0F4D698084688F83 /* MacGroupChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 620A8071ABFD71C08BFB844C72A4E05F /* MacGroupChatView.swift */; };
+		6BE057D57172005C25C50528318289D6 /* MacEmailComposeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC7F6BC356E4ECE3D50717F54BB0A4C7 /* MacEmailComposeView.swift */; };
+		6CB4EB70B0202124A92719AFA5A03D62 /* MacShareConversationPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27C91508CA011F9E782FC4122FF36470 /* MacShareConversationPanel.swift */; };
+		77D6D305C4D7E4C277E7981ABFAE33B5 /* TaskViewMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A6E6D9EAB8380C6BE5719C325AD9681 /* TaskViewMode.swift */; };
+		7ECDDD79B3DB4FD26C48BD3E08271BF0 /* MacContentHeaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BC2CFEF093D8584286BE20BBF997D10 /* MacContentHeaderView.swift */; };
+		7FED06BFC4A144EC5AD9E7FF382A596F /* TaskStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 347B2B771EF16298AC5CBCF6E492B477 /* TaskStatus.swift */; };
+		8C3B1EB7E370D7664BF0B01F129FCB75 /* MacNotificationCenterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99FBA8C2A1979EE21A835D0CA2521962 /* MacNotificationCenterView.swift */; };
+		8E9FD8D7AF4C139919AD1E01195DDCB6 /* TaskRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54838BB181E398AEAE44D1647C046E9B /* TaskRecord.swift */; };
+		9917FF1682CC3F21B50334B6DFF7C5A8 /* EmailService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90565199B1A829021602D8C033BCB13D /* EmailService.swift */; };
+		A296290441C9887260ABA423F8E3A00E /* AppTaskPriority.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC585F2265934558433E3E3612A1D814 /* AppTaskPriority.swift */; };
+		A37CA62B074F6A50FD85330E0E29AD7C /* NoRedirectDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F177B3675DA551BB1C5E9F51E218A490 /* NoRedirectDelegate.swift */; };
+		A57352B286D9A76364937A2E03D7BB27 /* AppLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 664A5E35FD54A0174263139C70AC2420 /* AppLogger.swift */; };
+		A872C296C7B5CC29E6DA6AD32D640A7E /* AppIcon.icns in Resources */ = {isa = PBXBuildFile; fileRef = 9174DF615C066916378ACE054334B81C /* AppIcon.icns */; };
+		B22100ADC8C31515049110F24FE3BB9F /* MacTasksView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B974F05FBCA3D4523D8602C6334B76A1 /* MacTasksView.swift */; };
+		B324E8110471D4D7B90BE8E30D2A6894 /* CalendarService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1B78F2ECE3BBD9BBD4D0603965FEB09 /* CalendarService.swift */; };
+		B4BB41C72DA1C29E6D6CC273DA0CBD51 /* MeetingsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAE8C28D15F8313E78D3E36E70299D16 /* MeetingsService.swift */; };
+		B6F7D1C8335EAB89FC020BA47ED0F777 /* ConnectionsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B2B69E67A87EE0014040A17C5402E35 /* ConnectionsService.swift */; };
+		B8EE5BD0D9E5A4A49FF75C6E34EFB129 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AE1D36D7DEA808043473263607529D8C /* Assets.xcassets */; };
+		C589AD643545B460656DFD61F0773B9C /* TodosConfig.plist in Resources */ = {isa = PBXBuildFile; fileRef = D781F56D4BD27C55F3E8F7F833E87588 /* TodosConfig.plist */; };
+		C5C9402DAC06B56F639AA05B8CFC8681 /* MacOnboardingViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 673D4A873E62C0874909FABCE15445B9 /* MacOnboardingViews.swift */; };
+		C8580353CDEC4D4203EFCA3BADDB5855 /* MacSearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 341C4B2E1051392DA2B1937B5DD1B850 /* MacSearchView.swift */; };
+		C8D712E1D5A9F1BE4B608C31BB5C8F59 /* AuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A60C60DEFB6A6743F2D2D4A275F3734 /* AuthService.swift */; };
+		CFB4338734620A54ED0146C849503307 /* SyncModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A87121AD344331AAA348FB345778EBB /* SyncModels.swift */; };
+		D0F5418F5BEABD6C7296573864C13B60 /* MacDocsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6155C00DFE00B636BFF8D0035DED2FD /* MacDocsView.swift */; };
+		D78D655CFF0D44011C83E5356B0D80FB /* FolderRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B230C599CF29C2033F912E1875F67FA /* FolderRecord.swift */; };
+		DA29920D65FE16638353A8525FC76714 /* EventKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 99A1500ECA0199177C906A2A69D09420 /* EventKit.framework */; };
+		DA9941D018CDDDECB8C163B5B73E5F68 /* MacEmailThreadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B1DA8871127C8B42C32B686E567A8DF /* MacEmailThreadView.swift */; };
+		DB1863707A0015DBD58C3B2125BC1C47 /* MacBrandIcons.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBA2486E15EFC7C6F22C7D193A8BE6EE /* MacBrandIcons.swift */; };
+		DC19F0D7E7D7164781B81974F6A7F9C4 /* MacCalendarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0977C553BCC4593120370036DE070A6E /* MacCalendarView.swift */; };
+		E7BDC73F88FDEBD8823C17333DFC1122 /* NetworkMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CD4813CA22070B5E04AEB9E4AEC4A6E /* NetworkMonitor.swift */; };
+		F138F805302591AA540128F716FB6126 /* MacHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AA56C7900CF82A6B22C847CF7729628 /* MacHomeView.swift */; };
+		F4B5A4B0C148735C06980546633E6D31 /* AssistantButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = C27FE022BFDFDA4FCC15BCB461950D31 /* AssistantButton.swift */; };
+		F4D002148E18424DC6538D5DE1282A61 /* MacSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D1039835BD7B82F4F126EC48209A90A /* MacSettingsView.swift */; };
+		F627925416BFA9200BE1BD91097B4405 /* ConnectionsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3BDAD1AD783F244B0C7F4413BC000E8 /* ConnectionsService.swift */; };
+		FF34A0135F2F9A843874F1D2517A7AB1 /* MacEmailInboxView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF20EABA4B082AA168D3DDF785C0EBF2 /* MacEmailInboxView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		046484DCDC536576B1BBB40C /* TodusMacApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodusMacApp.swift; sourceTree = "<group>"; };
-		0977C553BCC4593120370036 /* MacCalendarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacCalendarView.swift; sourceTree = "<group>"; };
-		0B4864E4D8074B1E115B4EB3 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
-		0F0978AB24BCBA5061D06B50 /* CreateItemType.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreateItemType.swift; sourceTree = "<group>"; };
-		242450F6FF63BC819CBEAA9A /* ShareConversationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareConversationService.swift; sourceTree = "<group>"; };
-		27C91508CA011F9E782FC412 /* MacShareConversationPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacShareConversationPanel.swift; sourceTree = "<group>"; };
-		27FFF0A469A295576A24B8F9 /* TodosAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodosAPIClient.swift; sourceTree = "<group>"; };
-		2BC2CFEF093D8584286BE20B /* MacContentHeaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacContentHeaderView.swift; sourceTree = "<group>"; };
-		2C43C6BCE6D9B0B2A4A9FB06 /* MacCreateSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacCreateSheet.swift; sourceTree = "<group>"; };
-		326E7A3F239A043BA44D3B8F /* MacAppServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacAppServices.swift; sourceTree = "<group>"; };
-		32EB09F409AF92D9A77ECC1F /* MacAIChatService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacAIChatService.swift; sourceTree = "<group>"; };
-		341C4B2E1051392DA2B1937B /* MacSearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacSearchView.swift; sourceTree = "<group>"; };
-		347B2B771EF16298AC5CBCF6 /* TaskStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskStatus.swift; sourceTree = "<group>"; };
-		3A6E6D9EAB8380C6BE5719C3 /* TaskViewMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskViewMode.swift; sourceTree = "<group>"; };
-		456C42750E641F95F8340F79 /* SyncState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncState.swift; sourceTree = "<group>"; };
-		458E1F394617FB142FC17275 /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
-		4A87121AD344331AAA348FB3 /* SyncModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncModels.swift; sourceTree = "<group>"; };
-		4BD152C78EA2F5515F84D973 /* TaskSortOrder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskSortOrder.swift; sourceTree = "<group>"; };
-		51FB7C44A440DFC527210FE5 /* MacRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacRootView.swift; sourceTree = "<group>"; };
-		52580E22D0F58138E0CE848E /* MacTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacTheme.swift; sourceTree = "<group>"; };
-		54838BB181E398AEAE44D164 /* TaskRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskRecord.swift; sourceTree = "<group>"; };
-		5AA56C7900CF82A6B22C847C /* MacHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacHomeView.swift; sourceTree = "<group>"; };
-		5CC3DE23485F3643714CDC86 /* AppleSignInDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleSignInDelegate.swift; sourceTree = "<group>"; };
-		620A8071ABFD71C08BFB844C /* MacGroupChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacGroupChatView.swift; sourceTree = "<group>"; };
-		673D4A873E62C0874909FABC /* MacOnboardingViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacOnboardingViews.swift; sourceTree = "<group>"; };
-		6CD4813CA22070B5E04AEB9E /* NetworkMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkMonitor.swift; sourceTree = "<group>"; };
-		7A9C4C77A8F84C5092EAB1C7 /* AppLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLogger.swift; sourceTree = "<group>"; };
-		7B230C599CF29C2033F912E1 /* FolderRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderRecord.swift; sourceTree = "<group>"; };
-		7E9CA2173967A8D824F414D7 /* MacAssistantPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacAssistantPanel.swift; sourceTree = "<group>"; };
-		7F0770529CFD6B1D54769766 /* NoRedirectDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoRedirectDelegate.swift; sourceTree = "<group>"; };
-		8D451E359ABBB69A4D11FDDE /* TodusMac.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TodusMac.entitlements; sourceTree = "<group>"; };
-		90565199B1A829021602D8C0 /* EmailService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailService.swift; sourceTree = "<group>"; };
-		9174DF615C066916378ACE05 /* AppIcon.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = AppIcon.icns; sourceTree = "<group>"; };
-		99A1500ECA0199177C906A2A /* EventKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; path = EventKit.framework; sourceTree = "<group>"; };
-		99FBA8C2A1979EE21A835D0C /* MacNotificationCenterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacNotificationCenterView.swift; sourceTree = "<group>"; };
-		9B1DA8871127C8B42C32B686 /* MacEmailThreadView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacEmailThreadView.swift; sourceTree = "<group>"; };
-		9BDFA48500E383D1201957B7 /* MailAssistantModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MailAssistantModels.swift; sourceTree = "<group>"; };
-		9D1039835BD7B82F4F126EC4 /* MacSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacSettingsView.swift; sourceTree = "<group>"; };
-		9F7214B43378FD9AE2A5CCEC /* TodusMac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TodusMac.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		A3169072826FA9D5EBF6594C /* AuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthService.swift; sourceTree = "<group>"; };
-		A8ABE7D86ADEB39CEA890CD6 /* TaskDateFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskDateFormatter.swift; sourceTree = "<group>"; };
-		A9DCCDC4628A7827493203AF /* MacAuthView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacAuthView.swift; sourceTree = "<group>"; };
-		AE1D36D7DEA8080434732636 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-		B26A21E1F1C02C4ACD3E4C30 /* CalendarTimeGridView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarTimeGridView.swift; sourceTree = "<group>"; };
-		B582ECD8716F2A249C77A507 /* GroupChatService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupChatService.swift; sourceTree = "<group>"; };
-		B6B833B391C01BEE4CB84524 /* EmailModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailModels.swift; sourceTree = "<group>"; };
-		B974F05FBCA3D4523D8602C6 /* MacTasksView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacTasksView.swift; sourceTree = "<group>"; };
-		BAE8C28D15F8313E78D3E36E /* MeetingsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingsService.swift; sourceTree = "<group>"; };
-		BC576DC4D340857DE4F44A65 /* MacMeetingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacMeetingsView.swift; sourceTree = "<group>"; };
-		BC585F2265934558433E3E36 /* AppTaskPriority.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppTaskPriority.swift; sourceTree = "<group>"; };
-		BF20EABA4B082AA168D3DDF7 /* MacEmailInboxView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacEmailInboxView.swift; sourceTree = "<group>"; };
-		C27FE022BFDFDA4FCC15BCB4 /* AssistantButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantButton.swift; sourceTree = "<group>"; };
-		CBA2486E15EFC7C6F22C7D19 /* MacBrandIcons.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacBrandIcons.swift; sourceTree = "<group>"; };
-		CE5DFCE18508A16E4285A3F8 /* CalendarEventBlockView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarEventBlockView.swift; sourceTree = "<group>"; };
-		D781F56D4BD27C55F3E8F7F8 /* TodosConfig.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = TodosConfig.plist; sourceTree = "<group>"; };
-		DD746B8A12A661970B8AAAEB /* MacSidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacSidebarView.swift; sourceTree = "<group>"; };
-		E1B78F2ECE3BBD9BBD4D0603 /* CalendarService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarService.swift; sourceTree = "<group>"; };
-		E600FB3DFA1A854E9BB82907 /* ParseState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParseState.swift; sourceTree = "<group>"; };
-		E6155C00DFE00B636BFF8D00 /* MacDocsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacDocsView.swift; sourceTree = "<group>"; };
-		E7D981A56C9B33E626FE9700 /* MacMeetingDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacMeetingDetailView.swift; sourceTree = "<group>"; };
-		EC7F6BC356E4ECE3D50717F5 /* MacEmailComposeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacEmailComposeView.swift; sourceTree = "<group>"; };
+		046484DCDC536576B1BBB40C953372EE /* TodusMacApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodusMacApp.swift; sourceTree = "<group>"; };
+		0977C553BCC4593120370036DE070A6E /* MacCalendarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacCalendarView.swift; sourceTree = "<group>"; };
+		0B4864E4D8074B1E115B4EB34F471846 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		0F0978AB24BCBA5061D06B508BA10720 /* CreateItemType.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreateItemType.swift; sourceTree = "<group>"; };
+		1A63EB47653D3AF97BBDB61A7616DD3F /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
+		242450F6FF63BC819CBEAA9AB44427CA /* ShareConversationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareConversationService.swift; sourceTree = "<group>"; };
+		27C91508CA011F9E782FC4122FF36470 /* MacShareConversationPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacShareConversationPanel.swift; sourceTree = "<group>"; };
+		27FFF0A469A295576A24B8F9614EEFAC /* TodosAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodosAPIClient.swift; sourceTree = "<group>"; };
+		2BC2CFEF093D8584286BE20BBF997D10 /* MacContentHeaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacContentHeaderView.swift; sourceTree = "<group>"; };
+		2C43C6BCE6D9B0B2A4A9FB064D2600BE /* MacCreateSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacCreateSheet.swift; sourceTree = "<group>"; };
+		326E7A3F239A043BA44D3B8F48BFD77D /* MacAppServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacAppServices.swift; sourceTree = "<group>"; };
+		32EB09F409AF92D9A77ECC1FDA607855 /* MacAIChatService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacAIChatService.swift; sourceTree = "<group>"; };
+		341C4B2E1051392DA2B1937B5DD1B850 /* MacSearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacSearchView.swift; sourceTree = "<group>"; };
+		347B2B771EF16298AC5CBCF6E492B477 /* TaskStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskStatus.swift; sourceTree = "<group>"; };
+		3A6E6D9EAB8380C6BE5719C325AD9681 /* TaskViewMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskViewMode.swift; sourceTree = "<group>"; };
+		3B2B69E67A87EE0014040A17C5402E35 /* ConnectionsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionsService.swift; sourceTree = "<group>"; };
+		456C42750E641F95F8340F7986394218 /* SyncState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncState.swift; sourceTree = "<group>"; };
+		4A87121AD344331AAA348FB345778EBB /* SyncModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncModels.swift; sourceTree = "<group>"; };
+		4BD152C78EA2F5515F84D9738A1A52B2 /* TaskSortOrder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskSortOrder.swift; sourceTree = "<group>"; };
+		51FB7C44A440DFC527210FE57E1CE202 /* MacRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacRootView.swift; sourceTree = "<group>"; };
+		52580E22D0F58138E0CE848EBE406289 /* MacTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacTheme.swift; sourceTree = "<group>"; };
+		54838BB181E398AEAE44D1647C046E9B /* TaskRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskRecord.swift; sourceTree = "<group>"; };
+		5AA56C7900CF82A6B22C847CF7729628 /* MacHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacHomeView.swift; sourceTree = "<group>"; };
+		620A8071ABFD71C08BFB844C72A4E05F /* MacGroupChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacGroupChatView.swift; sourceTree = "<group>"; };
+		664A5E35FD54A0174263139C70AC2420 /* AppLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLogger.swift; sourceTree = "<group>"; };
+		673D4A873E62C0874909FABCE15445B9 /* MacOnboardingViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacOnboardingViews.swift; sourceTree = "<group>"; };
+		6CD4813CA22070B5E04AEB9E4AEC4A6E /* NetworkMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkMonitor.swift; sourceTree = "<group>"; };
+		7B230C599CF29C2033F912E1875F67FA /* FolderRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderRecord.swift; sourceTree = "<group>"; };
+		7E9CA2173967A8D824F414D7FB86BBA1 /* MacAssistantPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacAssistantPanel.swift; sourceTree = "<group>"; };
+		8D451E359ABBB69A4D11FDDEA28C165D /* TodusMac.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TodusMac.entitlements; sourceTree = "<group>"; };
+		90565199B1A829021602D8C033BCB13D /* EmailService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailService.swift; sourceTree = "<group>"; };
+		9174DF615C066916378ACE054334B81C /* AppIcon.icns */ = {isa = PBXFileReference; path = AppIcon.icns; sourceTree = "<group>"; };
+		99A1500ECA0199177C906A2A69D09420 /* EventKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; path = EventKit.framework; sourceTree = "<group>"; };
+		99FBA8C2A1979EE21A835D0CA2521962 /* MacNotificationCenterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacNotificationCenterView.swift; sourceTree = "<group>"; };
+		9A60C60DEFB6A6743F2D2D4A275F3734 /* AuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthService.swift; sourceTree = "<group>"; };
+		9B1DA8871127C8B42C32B686E567A8DF /* MacEmailThreadView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacEmailThreadView.swift; sourceTree = "<group>"; };
+		9BDFA48500E383D1201957B773B97F81 /* MailAssistantModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MailAssistantModels.swift; sourceTree = "<group>"; };
+		9D1039835BD7B82F4F126EC48209A90A /* MacSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacSettingsView.swift; sourceTree = "<group>"; };
+		9F7214B43378FD9AE2A5CCEC9AAAD3B3 /* TodusMac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TodusMac.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		9F987800B668781BC01E1F4EA2C4BAE9 /* AppleSignInDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleSignInDelegate.swift; sourceTree = "<group>"; };
+		A8ABE7D86ADEB39CEA890CD657CD87AE /* TaskDateFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskDateFormatter.swift; sourceTree = "<group>"; };
+		A9DCCDC4628A7827493203AF2071E54D /* MacAuthView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacAuthView.swift; sourceTree = "<group>"; };
+		AE1D36D7DEA808043473263607529D8C /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		B26A21E1F1C02C4ACD3E4C30D54011EA /* CalendarTimeGridView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarTimeGridView.swift; sourceTree = "<group>"; };
+		B582ECD8716F2A249C77A507D04E81B0 /* GroupChatService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupChatService.swift; sourceTree = "<group>"; };
+		B6B833B391C01BEE4CB84524440DA507 /* EmailModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailModels.swift; sourceTree = "<group>"; };
+		B974F05FBCA3D4523D8602C6334B76A1 /* MacTasksView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacTasksView.swift; sourceTree = "<group>"; };
+		BAE8C28D15F8313E78D3E36E70299D16 /* MeetingsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingsService.swift; sourceTree = "<group>"; };
+		BC576DC4D340857DE4F44A651C6C0728 /* MacMeetingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacMeetingsView.swift; sourceTree = "<group>"; };
+		BC585F2265934558433E3E3612A1D814 /* AppTaskPriority.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppTaskPriority.swift; sourceTree = "<group>"; };
+		BF20EABA4B082AA168D3DDF785C0EBF2 /* MacEmailInboxView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacEmailInboxView.swift; sourceTree = "<group>"; };
+		C27FE022BFDFDA4FCC15BCB461950D31 /* AssistantButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantButton.swift; sourceTree = "<group>"; };
+		C3BDAD1AD783F244B0C7F4413BC000E8 /* ConnectionsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionsService.swift; sourceTree = "<group>"; };
+		CBA2486E15EFC7C6F22C7D193A8BE6EE /* MacBrandIcons.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacBrandIcons.swift; sourceTree = "<group>"; };
+		CE5DFCE18508A16E4285A3F8AEDBE71F /* CalendarEventBlockView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarEventBlockView.swift; sourceTree = "<group>"; };
+		D781F56D4BD27C55F3E8F7F833E87588 /* TodosConfig.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = TodosConfig.plist; sourceTree = "<group>"; };
+		DD746B8A12A661970B8AAAEBA8746D57 /* MacSidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacSidebarView.swift; sourceTree = "<group>"; };
+		E1B78F2ECE3BBD9BBD4D0603965FEB09 /* CalendarService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarService.swift; sourceTree = "<group>"; };
+		E600FB3DFA1A854E9BB82907CD552FD9 /* ParseState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParseState.swift; sourceTree = "<group>"; };
+		E6155C00DFE00B636BFF8D0035DED2FD /* MacDocsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacDocsView.swift; sourceTree = "<group>"; };
+		E7D981A56C9B33E626FE970006B6DCD7 /* MacMeetingDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacMeetingDetailView.swift; sourceTree = "<group>"; };
+		EC7F6BC356E4ECE3D50717F54BB0A4C7 /* MacEmailComposeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacEmailComposeView.swift; sourceTree = "<group>"; };
+		F177B3675DA551BB1C5E9F51E218A490 /* NoRedirectDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoRedirectDelegate.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
-		427E86593AFF5F19479C5FC8 /* Frameworks */ = {
+		427E86593AFF5F19479C5FC82FF295D1 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				C3ABBC6BB009FE7995D12B02 /* EventKit.framework in Frameworks */,
+				DA29920D65FE16638353A8525FC76714 /* EventKit.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		049CC7FF8B28C7D7CCA61994 /* Meetings */ = {
+		049CC7FF8B28C7D7CCA6199459DBAAA7 /* Meetings */ = {
 			isa = PBXGroup;
 			children = (
-				BAE8C28D15F8313E78D3E36E /* MeetingsService.swift */,
+				BAE8C28D15F8313E78D3E36E70299D16 /* MeetingsService.swift */,
 			);
 			path = Meetings;
 			sourceTree = "<group>";
 		};
-		0906583B2D1F95A4CCB8AC09 /* Tasks */ = {
+		0906583B2D1F95A4CCB8AC0969296A11 /* Tasks */ = {
 			isa = PBXGroup;
 			children = (
-				B974F05FBCA3D4523D8602C6 /* MacTasksView.swift */,
+				B974F05FBCA3D4523D8602C6334B76A1 /* MacTasksView.swift */,
 			);
 			path = Tasks;
 			sourceTree = "<group>";
 		};
-		0BC55A2C8DBF62F6BF965E0E /* App */ = {
+		0BC55A2C8DBF62F6BF965E0EA5419B48 /* App */ = {
 			isa = PBXGroup;
 			children = (
-				C27FE022BFDFDA4FCC15BCB4 /* AssistantButton.swift */,
-				326E7A3F239A043BA44D3B8F /* MacAppServices.swift */,
-				A9DCCDC4628A7827493203AF /* MacAuthView.swift */,
-				2BC2CFEF093D8584286BE20B /* MacContentHeaderView.swift */,
-				673D4A873E62C0874909FABC /* MacOnboardingViews.swift */,
-				51FB7C44A440DFC527210FE5 /* MacRootView.swift */,
-				DD746B8A12A661970B8AAAEB /* MacSidebarView.swift */,
-				046484DCDC536576B1BBB40C /* TodusMacApp.swift */,
+				C27FE022BFDFDA4FCC15BCB461950D31 /* AssistantButton.swift */,
+				3B2B69E67A87EE0014040A17C5402E35 /* ConnectionsService.swift */,
+				326E7A3F239A043BA44D3B8F48BFD77D /* MacAppServices.swift */,
+				A9DCCDC4628A7827493203AF2071E54D /* MacAuthView.swift */,
+				2BC2CFEF093D8584286BE20BBF997D10 /* MacContentHeaderView.swift */,
+				673D4A873E62C0874909FABCE15445B9 /* MacOnboardingViews.swift */,
+				51FB7C44A440DFC527210FE57E1CE202 /* MacRootView.swift */,
+				DD746B8A12A661970B8AAAEBA8746D57 /* MacSidebarView.swift */,
+				046484DCDC536576B1BBB40C953372EE /* TodusMacApp.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
 		};
-		1256D6A2E7291B8E8190DDF1 /* Docs */ = {
+		1256D6A2E7291B8E8190DDF1F1CFA2BE /* Docs */ = {
 			isa = PBXGroup;
 			children = (
-				E6155C00DFE00B636BFF8D00 /* MacDocsView.swift */,
+				E6155C00DFE00B636BFF8D0035DED2FD /* MacDocsView.swift */,
 			);
 			path = Docs;
 			sourceTree = "<group>";
 		};
-		188166A57143AE24E24D1FAB /* DesignSystem */ = {
+		188166A57143AE24E24D1FAB18A21C8E /* DesignSystem */ = {
 			isa = PBXGroup;
 			children = (
-				CBA2486E15EFC7C6F22C7D19 /* MacBrandIcons.swift */,
-				52580E22D0F58138E0CE848E /* MacTheme.swift */,
+				CBA2486E15EFC7C6F22C7D193A8BE6EE /* MacBrandIcons.swift */,
+				52580E22D0F58138E0CE848EBE406289 /* MacTheme.swift */,
 			);
 			path = DesignSystem;
 			sourceTree = "<group>";
 		};
-		1C0E6C020D405E30C888210F /* TodusAuth */ = {
+		267FFD0121EB8EE6B9EA1B91694987FF /* Resources */ = {
 			isa = PBXGroup;
 			children = (
-				5CC3DE23485F3643714CDC86 /* AppleSignInDelegate.swift */,
-				A3169072826FA9D5EBF6594C /* AuthService.swift */,
-				458E1F394617FB142FC17275 /* KeychainHelper.swift */,
-				7F0770529CFD6B1D54769766 /* NoRedirectDelegate.swift */,
-			);
-			name = TodusAuth;
-			path = "../../packages/swift-auth/Sources/TodusAuth";
-			sourceTree = "<group>";
-		};
-		267FFD0121EB8EE6B9EA1B91 /* Resources */ = {
-			isa = PBXGroup;
-			children = (
-				9174DF615C066916378ACE05 /* AppIcon.icns */,
-				AE1D36D7DEA8080434732636 /* Assets.xcassets */,
-				0B4864E4D8074B1E115B4EB3 /* Info.plist */,
-				D781F56D4BD27C55F3E8F7F8 /* TodosConfig.plist */,
-				8D451E359ABBB69A4D11FDDE /* TodusMac.entitlements */,
+				9174DF615C066916378ACE054334B81C /* AppIcon.icns */,
+				AE1D36D7DEA808043473263607529D8C /* Assets.xcassets */,
+				0B4864E4D8074B1E115B4EB34F471846 /* Info.plist */,
+				D781F56D4BD27C55F3E8F7F833E87588 /* TodosConfig.plist */,
+				8D451E359ABBB69A4D11FDDEA28C165D /* TodusMac.entitlements */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
 		};
-		27876A2C1A129D8877C75612 /* Calendar */ = {
+		27876A2C1A129D8877C75612F7E8D327 /* Calendar */ = {
 			isa = PBXGroup;
 			children = (
-				E1B78F2ECE3BBD9BBD4D0603 /* CalendarService.swift */,
+				E1B78F2ECE3BBD9BBD4D0603965FEB09 /* CalendarService.swift */,
 			);
 			path = Calendar;
 			sourceTree = "<group>";
 		};
-		2EBE2A9DFC2A96E6BA58848A /* AI */ = {
+		2EBE2A9DFC2A96E6BA58848AA4ECC07E /* AI */ = {
 			isa = PBXGroup;
 			children = (
-				7E9CA2173967A8D824F414D7 /* MacAssistantPanel.swift */,
-				620A8071ABFD71C08BFB844C /* MacGroupChatView.swift */,
-				27C91508CA011F9E782FC412 /* MacShareConversationPanel.swift */,
+				7E9CA2173967A8D824F414D7FB86BBA1 /* MacAssistantPanel.swift */,
+				620A8071ABFD71C08BFB844C72A4E05F /* MacGroupChatView.swift */,
+				27C91508CA011F9E782FC4122FF36470 /* MacShareConversationPanel.swift */,
 			);
 			path = AI;
 			sourceTree = "<group>";
 		};
-		30C40AB7AEB7407508612591 /* AI */ = {
+		30C40AB7AEB7407508612591C0823900 /* AI */ = {
 			isa = PBXGroup;
 			children = (
-				B582ECD8716F2A249C77A507 /* GroupChatService.swift */,
-				32EB09F409AF92D9A77ECC1F /* MacAIChatService.swift */,
-				242450F6FF63BC819CBEAA9A /* ShareConversationService.swift */,
+				B582ECD8716F2A249C77A507D04E81B0 /* GroupChatService.swift */,
+				32EB09F409AF92D9A77ECC1FDA607855 /* MacAIChatService.swift */,
+				242450F6FF63BC819CBEAA9AB44427CA /* ShareConversationService.swift */,
 			);
 			path = AI;
 			sourceTree = "<group>";
 		};
-		3EF1588B2CB28306C253E148 /* Products */ = {
+		3EF1588B2CB28306C253E148AE8B3EAA /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				9F7214B43378FD9AE2A5CCEC /* TodusMac.app */,
+				9F7214B43378FD9AE2A5CCEC9AAAD3B3 /* TodusMac.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
 		};
-		4241970905E29A02DAAC68BC /* Home */ = {
+		4241970905E29A02DAAC68BCD4BDC980 /* Home */ = {
 			isa = PBXGroup;
 			children = (
-				5AA56C7900CF82A6B22C847C /* MacHomeView.swift */,
+				5AA56C7900CF82A6B22C847CF7729628 /* MacHomeView.swift */,
 			);
 			path = Home;
 			sourceTree = "<group>";
 		};
-		4C9258EB553FDE89BDC2DE0E /* Create */ = {
+		4C9258EB553FDE89BDC2DE0E0640671C /* Create */ = {
 			isa = PBXGroup;
 			children = (
-				2C43C6BCE6D9B0B2A4A9FB06 /* MacCreateSheet.swift */,
+				2C43C6BCE6D9B0B2A4A9FB064D2600BE /* MacCreateSheet.swift */,
 			);
 			path = Create;
 			sourceTree = "<group>";
 		};
-		51646B02A008AB1787EC9240 /* API */ = {
+		51646B02A008AB1787EC92407C9C8B6B /* API */ = {
 			isa = PBXGroup;
 			children = (
-				27FFF0A469A295576A24B8F9 /* TodosAPIClient.swift */,
+				27FFF0A469A295576A24B8F9614EEFAC /* TodosAPIClient.swift */,
 			);
 			path = API;
 			sourceTree = "<group>";
 		};
-		603224CE8867D063EA823A5E /* Models */ = {
+		603224CE8867D063EA823A5E0B9905BE /* Models */ = {
 			isa = PBXGroup;
 			children = (
-				7B230C599CF29C2033F912E1 /* FolderRecord.swift */,
-				54838BB181E398AEAE44D164 /* TaskRecord.swift */,
+				7B230C599CF29C2033F912E1875F67FA /* FolderRecord.swift */,
+				54838BB181E398AEAE44D1647C046E9B /* TaskRecord.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
 		};
-		8210EDDF4FB85F157A2A7997 /* Email */ = {
+		8210EDDF4FB85F157A2A79977CCA9218 /* Email */ = {
 			isa = PBXGroup;
 			children = (
-				EC7F6BC356E4ECE3D50717F5 /* MacEmailComposeView.swift */,
-				BF20EABA4B082AA168D3DDF7 /* MacEmailInboxView.swift */,
-				9B1DA8871127C8B42C32B686 /* MacEmailThreadView.swift */,
+				EC7F6BC356E4ECE3D50717F54BB0A4C7 /* MacEmailComposeView.swift */,
+				BF20EABA4B082AA168D3DDF785C0EBF2 /* MacEmailInboxView.swift */,
+				9B1DA8871127C8B42C32B686E567A8DF /* MacEmailThreadView.swift */,
 			);
 			path = Email;
 			sourceTree = "<group>";
 		};
-		934068E9DD959380F2327182 /* Email */ = {
+		934068E9DD959380F23271826B9DDDB4 /* Email */ = {
 			isa = PBXGroup;
 			children = (
-				90565199B1A829021602D8C0 /* EmailService.swift */,
+				90565199B1A829021602D8C033BCB13D /* EmailService.swift */,
 			);
 			path = Email;
 			sourceTree = "<group>";
 		};
-		9355ECC0EA25534C1F8B6627 /* Views */ = {
+		9355ECC0EA25534C1F8B6627AA5547C7 /* Views */ = {
 			isa = PBXGroup;
 			children = (
-				2EBE2A9DFC2A96E6BA58848A /* AI */,
-				B4C380837A132F19BADEB312 /* Calendar */,
-				4C9258EB553FDE89BDC2DE0E /* Create */,
-				1256D6A2E7291B8E8190DDF1 /* Docs */,
-				8210EDDF4FB85F157A2A7997 /* Email */,
-				4241970905E29A02DAAC68BC /* Home */,
-				CF67C7AD4804FF8014F3DFCC /* Meetings */,
-				C6D1D5FE51A939297361608C /* Notifications */,
-				E3001FD12A29D71B67E2A525 /* Search */,
-				A7CBD3D0BB09E3AE6C5A5671 /* Settings */,
-				0906583B2D1F95A4CCB8AC09 /* Tasks */,
+				2EBE2A9DFC2A96E6BA58848AA4ECC07E /* AI */,
+				B4C380837A132F19BADEB312D52C821F /* Calendar */,
+				4C9258EB553FDE89BDC2DE0E0640671C /* Create */,
+				1256D6A2E7291B8E8190DDF1F1CFA2BE /* Docs */,
+				8210EDDF4FB85F157A2A79977CCA9218 /* Email */,
+				4241970905E29A02DAAC68BCD4BDC980 /* Home */,
+				CF67C7AD4804FF8014F3DFCC4544E4C4 /* Meetings */,
+				C6D1D5FE51A939297361608C1992C798 /* Notifications */,
+				E3001FD12A29D71B67E2A5258B10DB96 /* Search */,
+				A7CBD3D0BB09E3AE6C5A567184643A17 /* Settings */,
+				0906583B2D1F95A4CCB8AC0969296A11 /* Tasks */,
 			);
 			path = Views;
 			sourceTree = "<group>";
 		};
-		A7CBD3D0BB09E3AE6C5A5671 /* Settings */ = {
+		A7CBD3D0BB09E3AE6C5A567184643A17 /* Settings */ = {
 			isa = PBXGroup;
 			children = (
-				9D1039835BD7B82F4F126EC4 /* MacSettingsView.swift */,
+				9D1039835BD7B82F4F126EC48209A90A /* MacSettingsView.swift */,
 			);
 			path = Settings;
 			sourceTree = "<group>";
 		};
-		AB2B017FE8751101AD2895FA /* TodusMac */ = {
+		AB2B017FE8751101AD2895FA3FA94D64 /* TodusMac */ = {
 			isa = PBXGroup;
 			children = (
-				0BC55A2C8DBF62F6BF965E0E /* App */,
-				F7BA06A7B450230468A1A6A8 /* Data */,
-				188166A57143AE24E24D1FAB /* DesignSystem */,
-				D00866200A3F46A024957A60 /* Domain */,
-				267FFD0121EB8EE6B9EA1B91 /* Resources */,
-				C12516BFAEA2EBD4A1800BEB /* Services */,
-				9355ECC0EA25534C1F8B6627 /* Views */,
+				0BC55A2C8DBF62F6BF965E0EA5419B48 /* App */,
+				F7BA06A7B450230468A1A6A892F5B824 /* Data */,
+				188166A57143AE24E24D1FAB18A21C8E /* DesignSystem */,
+				D00866200A3F46A024957A60009E6103 /* Domain */,
+				267FFD0121EB8EE6B9EA1B91694987FF /* Resources */,
+				C12516BFAEA2EBD4A1800BEB62EAC173 /* Services */,
+				9355ECC0EA25534C1F8B6627AA5547C7 /* Views */,
 			);
 			path = TodusMac;
 			sourceTree = "<group>";
 		};
-		B4C380837A132F19BADEB312 /* Calendar */ = {
+		B4C380837A132F19BADEB312D52C821F /* Calendar */ = {
 			isa = PBXGroup;
 			children = (
-				CE5DFCE18508A16E4285A3F8 /* CalendarEventBlockView.swift */,
-				B26A21E1F1C02C4ACD3E4C30 /* CalendarTimeGridView.swift */,
-				0977C553BCC4593120370036 /* MacCalendarView.swift */,
+				CE5DFCE18508A16E4285A3F8AEDBE71F /* CalendarEventBlockView.swift */,
+				B26A21E1F1C02C4ACD3E4C30D54011EA /* CalendarTimeGridView.swift */,
+				0977C553BCC4593120370036DE070A6E /* MacCalendarView.swift */,
 			);
 			path = Calendar;
 			sourceTree = "<group>";
 		};
-		C12516BFAEA2EBD4A1800BEB /* Services */ = {
+		C12516BFAEA2EBD4A1800BEB62EAC173 /* Services */ = {
 			isa = PBXGroup;
 			children = (
-				30C40AB7AEB7407508612591 /* AI */,
-				51646B02A008AB1787EC9240 /* API */,
-				7A9C4C77A8F84C5092EAB1C7 /* AppLogger.swift */,
-				27876A2C1A129D8877C75612 /* Calendar */,
-				934068E9DD959380F2327182 /* Email */,
-				049CC7FF8B28C7D7CCA61994 /* Meetings */,
-				6CD4813CA22070B5E04AEB9E /* NetworkMonitor.swift */,
+				30C40AB7AEB7407508612591C0823900 /* AI */,
+				51646B02A008AB1787EC92407C9C8B6B /* API */,
+				27876A2C1A129D8877C75612F7E8D327 /* Calendar */,
+				934068E9DD959380F23271826B9DDDB4 /* Email */,
+				049CC7FF8B28C7D7CCA6199459DBAAA7 /* Meetings */,
+				664A5E35FD54A0174263139C70AC2420 /* AppLogger.swift */,
+				C3BDAD1AD783F244B0C7F4413BC000E8 /* ConnectionsService.swift */,
+				6CD4813CA22070B5E04AEB9E4AEC4A6E /* NetworkMonitor.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
 		};
-		C17A9A1D2C35479D0E52156A = {
+		C17A9A1D2C35479D0E52156AE30528DC = {
 			isa = PBXGroup;
 			children = (
-				FEE2C4E592FD48B28E7A3B67 /* TodusAuth */,
-				AB2B017FE8751101AD2895FA /* TodusMac */,
-				DF602AEF2BFFF5004462F4A8 /* Frameworks */,
-				3EF1588B2CB28306C253E148 /* Products */,
+				FEE2C4E592FD48B28E7A3B67C2F1024B /* TodusAuth */,
+				AB2B017FE8751101AD2895FA3FA94D64 /* TodusMac */,
+				DF602AEF2BFFF5004462F4A85D9EAB5A /* Frameworks */,
+				3EF1588B2CB28306C253E148AE8B3EAA /* Products */,
 			);
 			sourceTree = "<group>";
 		};
-		C6D1D5FE51A939297361608C /* Notifications */ = {
+		C6D1D5FE51A939297361608C1992C798 /* Notifications */ = {
 			isa = PBXGroup;
 			children = (
-				99FBA8C2A1979EE21A835D0C /* MacNotificationCenterView.swift */,
+				99FBA8C2A1979EE21A835D0CA2521962 /* MacNotificationCenterView.swift */,
 			);
 			path = Notifications;
 			sourceTree = "<group>";
 		};
-		CF67C7AD4804FF8014F3DFCC /* Meetings */ = {
+		CF67C7AD4804FF8014F3DFCC4544E4C4 /* Meetings */ = {
 			isa = PBXGroup;
 			children = (
-				E7D981A56C9B33E626FE9700 /* MacMeetingDetailView.swift */,
-				BC576DC4D340857DE4F44A65 /* MacMeetingsView.swift */,
+				E7D981A56C9B33E626FE970006B6DCD7 /* MacMeetingDetailView.swift */,
+				BC576DC4D340857DE4F44A651C6C0728 /* MacMeetingsView.swift */,
 			);
 			path = Meetings;
 			sourceTree = "<group>";
 		};
-		D00866200A3F46A024957A60 /* Domain */ = {
+		D00866200A3F46A024957A60009E6103 /* Domain */ = {
 			isa = PBXGroup;
 			children = (
-				BC585F2265934558433E3E36 /* AppTaskPriority.swift */,
-				0F0978AB24BCBA5061D06B50 /* CreateItemType.swift */,
-				B6B833B391C01BEE4CB84524 /* EmailModels.swift */,
-				9BDFA48500E383D1201957B7 /* MailAssistantModels.swift */,
-				E600FB3DFA1A854E9BB82907 /* ParseState.swift */,
-				4A87121AD344331AAA348FB3 /* SyncModels.swift */,
-				456C42750E641F95F8340F79 /* SyncState.swift */,
-				A8ABE7D86ADEB39CEA890CD6 /* TaskDateFormatter.swift */,
-				4BD152C78EA2F5515F84D973 /* TaskSortOrder.swift */,
-				347B2B771EF16298AC5CBCF6 /* TaskStatus.swift */,
-				3A6E6D9EAB8380C6BE5719C3 /* TaskViewMode.swift */,
+				BC585F2265934558433E3E3612A1D814 /* AppTaskPriority.swift */,
+				0F0978AB24BCBA5061D06B508BA10720 /* CreateItemType.swift */,
+				B6B833B391C01BEE4CB84524440DA507 /* EmailModels.swift */,
+				9BDFA48500E383D1201957B773B97F81 /* MailAssistantModels.swift */,
+				E600FB3DFA1A854E9BB82907CD552FD9 /* ParseState.swift */,
+				4A87121AD344331AAA348FB345778EBB /* SyncModels.swift */,
+				456C42750E641F95F8340F7986394218 /* SyncState.swift */,
+				A8ABE7D86ADEB39CEA890CD657CD87AE /* TaskDateFormatter.swift */,
+				4BD152C78EA2F5515F84D9738A1A52B2 /* TaskSortOrder.swift */,
+				347B2B771EF16298AC5CBCF6E492B477 /* TaskStatus.swift */,
+				3A6E6D9EAB8380C6BE5719C325AD9681 /* TaskViewMode.swift */,
 			);
 			path = Domain;
 			sourceTree = "<group>";
 		};
-		DF602AEF2BFFF5004462F4A8 /* Frameworks */ = {
+		DF602AEF2BFFF5004462F4A85D9EAB5A /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
-				99A1500ECA0199177C906A2A /* EventKit.framework */,
+				99A1500ECA0199177C906A2A69D09420 /* EventKit.framework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
 		};
-		E3001FD12A29D71B67E2A525 /* Search */ = {
+		E3001FD12A29D71B67E2A5258B10DB96 /* Search */ = {
 			isa = PBXGroup;
 			children = (
-				341C4B2E1051392DA2B1937B /* MacSearchView.swift */,
+				341C4B2E1051392DA2B1937B5DD1B850 /* MacSearchView.swift */,
 			);
 			path = Search;
 			sourceTree = "<group>";
 		};
-		F7BA06A7B450230468A1A6A8 /* Data */ = {
+		F7BA06A7B450230468A1A6A892F5B824 /* Data */ = {
 			isa = PBXGroup;
 			children = (
-				603224CE8867D063EA823A5E /* Models */,
+				603224CE8867D063EA823A5E0B9905BE /* Models */,
 			);
 			path = Data;
 			sourceTree = "<group>";
 		};
-		FEE2C4E592FD48B28E7A3B67 /* TodusAuth */ = {
+		FEE2C4E592FD48B28E7A3B67C2F1024B /* TodusAuth */ = {
 			isa = PBXGroup;
 			children = (
-				1C0E6C020D405E30C888210F /* TodusAuth */,
+				9F987800B668781BC01E1F4EA2C4BAE9 /* AppleSignInDelegate.swift */,
+				9A60C60DEFB6A6743F2D2D4A275F3734 /* AuthService.swift */,
+				1A63EB47653D3AF97BBDB61A7616DD3F /* KeychainHelper.swift */,
+				F177B3675DA551BB1C5E9F51E218A490 /* NoRedirectDelegate.swift */,
 			);
 			name = TodusAuth;
+			path = "../swift-auth/Sources/TodusAuth";
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		D9E95D26876E07FF218F214A /* TodusMac */ = {
+		D9E95D26876E07FF218F214AF6E6720C /* TodusMac */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 46F48AFF4C1A9C3E51566FEB /* Build configuration list for PBXNativeTarget "TodusMac" */;
+			buildConfigurationList = 46F48AFF4C1A9C3E51566FEBA97263F3 /* Build configuration list for PBXNativeTarget "TodusMac" */;
 			buildPhases = (
-				9EF0D2190E4E0A559073645C /* Sources */,
-				D62D6C1D813DB9BC5D37D408 /* Resources */,
-				427E86593AFF5F19479C5FC8 /* Frameworks */,
+				9EF0D2190E4E0A559073645C4F70AC8C /* Sources */,
+				D62D6C1D813DB9BC5D37D4084B9D9139 /* Resources */,
+				427E86593AFF5F19479C5FC82FF295D1 /* Frameworks */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 			);
 			name = TodusMac;
-			packageProductDependencies = (
-			);
 			productName = TodusMac;
-			productReference = 9F7214B43378FD9AE2A5CCEC /* TodusMac.app */;
+			productReference = 9F7214B43378FD9AE2A5CCEC9AAAD3B3 /* TodusMac.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
-		A35650E6FF5875B17B944EBF /* Project object */ = {
+		A35650E6FF5875B17B944EBF244C48A0 /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
-				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1600;
 				TargetAttributes = {
-					D9E95D26876E07FF218F214A = {
+					D9E95D26876E07FF218F214AF6E6720C = {
 						DevelopmentTeam = XDBG7P4V96;
 						ProvisioningStyle = Automatic;
 					};
 				};
 			};
-			buildConfigurationList = A40FB6148AA4E99775CA16C2 /* Build configuration list for PBXProject "TodusMac" */;
+			buildConfigurationList = A40FB6148AA4E99775CA16C2D67B0C28 /* Build configuration list for PBXProject "TodusMac" */;
+			compatibilityVersion = "Xcode 9.3";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
-				Base,
 				en,
 			);
-			mainGroup = C17A9A1D2C35479D0E52156A;
-			minimizedProjectReferenceProxies = 1;
-			preferredProjectObjectVersion = 77;
-			productRefGroup = 3EF1588B2CB28306C253E148 /* Products */;
+			mainGroup = C17A9A1D2C35479D0E52156AE30528DC;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				D9E95D26876E07FF218F214A /* TodusMac */,
+				D9E95D26876E07FF218F214AF6E6720C /* TodusMac */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		D62D6C1D813DB9BC5D37D408 /* Resources */ = {
+		D62D6C1D813DB9BC5D37D4084B9D9139 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				1EE17250C40060265DE72BB0 /* AppIcon.icns in Resources */,
-				D76EFB86A42A4E0974640454 /* Assets.xcassets in Resources */,
-				19F6CCD4CA1B0486DC9FC6F3 /* TodosConfig.plist in Resources */,
+				A872C296C7B5CC29E6DA6AD32D640A7E /* AppIcon.icns in Resources */,
+				B8EE5BD0D9E5A4A49FF75C6E34EFB129 /* Assets.xcassets in Resources */,
+				C589AD643545B460656DFD61F0773B9C /* TodosConfig.plist in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		9EF0D2190E4E0A559073645C /* Sources */ = {
+		9EF0D2190E4E0A559073645C4F70AC8C /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				045E3AE98A7C4DD9B21F5D30 /* AppLogger.swift in Sources */,
-				553EE990264F3CEFD8E517BC /* AppTaskPriority.swift in Sources */,
-				94D3AC3D25D4BBA93211F42C /* AppleSignInDelegate.swift in Sources */,
-				37F6479AF457C04C69749DF0 /* AssistantButton.swift in Sources */,
-				3A74856E3BCE1CA3CF44FD04 /* AuthService.swift in Sources */,
-				AF6D033EAB6384A3004D17B7 /* CalendarEventBlockView.swift in Sources */,
-				A021A447733E1411FF2A61C7 /* CalendarService.swift in Sources */,
-				3B8D7A98DF2A4ACFEA4A675E /* CalendarTimeGridView.swift in Sources */,
-				2D555E443F1CAE9F0BCF376C /* CreateItemType.swift in Sources */,
-				D1ED251E912D63B61727D06F /* EmailModels.swift in Sources */,
-				6F775FA79762FB29E75EBF88 /* EmailService.swift in Sources */,
-				A1AA1459AFBEC54E5B9ED5C5 /* FolderRecord.swift in Sources */,
-				7000180C6ACC0E9CEF9DBBE2 /* GroupChatService.swift in Sources */,
-				E00A05101913579DC0E5D1C6 /* KeychainHelper.swift in Sources */,
-				AF4EBC7F8EF7769BC063A7F1 /* MacAIChatService.swift in Sources */,
-				D690F1E9E68EB72DB2A0FF10 /* MacAppServices.swift in Sources */,
-				53D7BE88F236E8F472FF4D68 /* MacAssistantPanel.swift in Sources */,
-				E2D56D42AC089CCBC21CD21B /* MacAuthView.swift in Sources */,
-				D714906DC9EE1D9E1B6A4FB0 /* MacBrandIcons.swift in Sources */,
-				680812535C1CC7B2F7FDC9BB /* MacCalendarView.swift in Sources */,
-				16E2E04A85DA754EE034D0D1 /* MacContentHeaderView.swift in Sources */,
-				925EAACC9F2A49C38CE4FE49 /* MacCreateSheet.swift in Sources */,
-				4C73B49045690BB0BA55C141 /* MacDocsView.swift in Sources */,
-				D89DF48DA2B18922837710B9 /* MacEmailComposeView.swift in Sources */,
-				21AB7C6A8D655F461E48E375 /* MacEmailInboxView.swift in Sources */,
-				3A35016EE897594FAC82E86E /* MacEmailThreadView.swift in Sources */,
-				5F09630B9742564B1D9301A7 /* MacGroupChatView.swift in Sources */,
-				5ADF61DDFE8A3E3F7B49F343 /* MacHomeView.swift in Sources */,
-				9640716F563A9C39A3F58012 /* MacMeetingDetailView.swift in Sources */,
-				4BA429F138151D2591542720 /* MacMeetingsView.swift in Sources */,
-				114A126295562124E1BCCFEE /* MacNotificationCenterView.swift in Sources */,
-				ABD2AF0E183F49EB577D3249 /* MacOnboardingViews.swift in Sources */,
-				413EB23387CF524ADEE6AA47 /* MacRootView.swift in Sources */,
-				931603E9E487ACFB7CCC3F57 /* MacSearchView.swift in Sources */,
-				2F99507599647B4DACBB4E59 /* MacSettingsView.swift in Sources */,
-				386E04C87DD0F4818121F3EE /* MacShareConversationPanel.swift in Sources */,
-				8DA443DB62DF856D9E4498DB /* MacSidebarView.swift in Sources */,
-				781AD1613378DF8ABEAE55FB /* MacTasksView.swift in Sources */,
-				EE6A839A831D903BC3DBC25D /* MacTheme.swift in Sources */,
-				7D3EA9502036072E10A5D8D6 /* MailAssistantModels.swift in Sources */,
-				9B5398902CE927DBEE3681D2 /* MeetingsService.swift in Sources */,
-				AC4E7A7FC7E659AEF1C0A8CF /* NetworkMonitor.swift in Sources */,
-				928618689B0DCC6D49DD695A /* NoRedirectDelegate.swift in Sources */,
-				78BD1210EB9A905EE0141C92 /* ParseState.swift in Sources */,
-				0C13133C6201ACA4FE36F69A /* ShareConversationService.swift in Sources */,
-				1A4A6BEF2511133A5550E42C /* SyncModels.swift in Sources */,
-				0F5B670890164922821F1D85 /* SyncState.swift in Sources */,
-				C0AC54923C3B9903F72784A4 /* TaskDateFormatter.swift in Sources */,
-				C7DF612D031A6CC198D17600 /* TaskRecord.swift in Sources */,
-				354FEAB67EEF8F3538C1115D /* TaskSortOrder.swift in Sources */,
-				3DABF8528A2D1EC0BE66AAD8 /* TaskStatus.swift in Sources */,
-				430B1D78D4B567975A394A37 /* TaskViewMode.swift in Sources */,
-				4564647511EB57A78B398E63 /* TodosAPIClient.swift in Sources */,
-				57FBCDF125B965458E0BECF3 /* TodusMacApp.swift in Sources */,
+				A57352B286D9A76364937A2E03D7BB27 /* AppLogger.swift in Sources */,
+				A296290441C9887260ABA423F8E3A00E /* AppTaskPriority.swift in Sources */,
+				0E4CE5F5C0B05F62B2A64159CC0C8E25 /* AppleSignInDelegate.swift in Sources */,
+				F4B5A4B0C148735C06980546633E6D31 /* AssistantButton.swift in Sources */,
+				C8D712E1D5A9F1BE4B608C31BB5C8F59 /* AuthService.swift in Sources */,
+				32CF05AAD09E594B49FC3B22B9FDD427 /* CalendarEventBlockView.swift in Sources */,
+				B324E8110471D4D7B90BE8E30D2A6894 /* CalendarService.swift in Sources */,
+				45310EE7C7D808CDCD19005674DADF67 /* CalendarTimeGridView.swift in Sources */,
+				B6F7D1C8335EAB89FC020BA47ED0F777 /* ConnectionsService.swift in Sources */,
+				552A80AD6BDCAA27F5CE1DA21170B7C3 /* CreateItemType.swift in Sources */,
+				211140EF2F773DE5C008190F8A48E6E5 /* EmailModels.swift in Sources */,
+				9917FF1682CC3F21B50334B6DFF7C5A8 /* EmailService.swift in Sources */,
+				D78D655CFF0D44011C83E5356B0D80FB /* FolderRecord.swift in Sources */,
+				143786D291CE54C7DC770B41E05A8F3B /* GroupChatService.swift in Sources */,
+				190AAC96ED1F8CF5F5681E9DD229018E /* KeychainHelper.swift in Sources */,
+				3CAEC032FCCD6DC3BD6AE1A4BF5AF23F /* MacAIChatService.swift in Sources */,
+				1A06B2D7BD99681CE6CDA66E444FFFF0 /* MacAppServices.swift in Sources */,
+				36074BABB8BBA9EB1707EAECB3512F24 /* MacAssistantPanel.swift in Sources */,
+				3DAD3CA069D1AA61CCB26C9104EB4CE1 /* MacAuthView.swift in Sources */,
+				DB1863707A0015DBD58C3B2125BC1C47 /* MacBrandIcons.swift in Sources */,
+				DC19F0D7E7D7164781B81974F6A7F9C4 /* MacCalendarView.swift in Sources */,
+				7ECDDD79B3DB4FD26C48BD3E08271BF0 /* MacContentHeaderView.swift in Sources */,
+				20A42E927D716CCA0F67B2AA716987D4 /* MacCreateSheet.swift in Sources */,
+				D0F5418F5BEABD6C7296573864C13B60 /* MacDocsView.swift in Sources */,
+				6BE057D57172005C25C50528318289D6 /* MacEmailComposeView.swift in Sources */,
+				FF34A0135F2F9A843874F1D2517A7AB1 /* MacEmailInboxView.swift in Sources */,
+				DA9941D018CDDDECB8C163B5B73E5F68 /* MacEmailThreadView.swift in Sources */,
+				5A6FD875EDF841AA0F4D698084688F83 /* MacGroupChatView.swift in Sources */,
+				F138F805302591AA540128F716FB6126 /* MacHomeView.swift in Sources */,
+				16477CDE2B19E20E378FFA762CA6CE35 /* MacMeetingDetailView.swift in Sources */,
+				41982F5C23061A97F6635DC59B09A28B /* MacMeetingsView.swift in Sources */,
+				8C3B1EB7E370D7664BF0B01F129FCB75 /* MacNotificationCenterView.swift in Sources */,
+				C5C9402DAC06B56F639AA05B8CFC8681 /* MacOnboardingViews.swift in Sources */,
+				180E4D028300F543474B697992D4B4EB /* MacRootView.swift in Sources */,
+				C8580353CDEC4D4203EFCA3BADDB5855 /* MacSearchView.swift in Sources */,
+				F4D002148E18424DC6538D5DE1282A61 /* MacSettingsView.swift in Sources */,
+				6CB4EB70B0202124A92719AFA5A03D62 /* MacShareConversationPanel.swift in Sources */,
+				566897478643CE84F1D8F291770234D2 /* MacSidebarView.swift in Sources */,
+				B22100ADC8C31515049110F24FE3BB9F /* MacTasksView.swift in Sources */,
+				2A778C021A56BFBE76E540BC8996A7A7 /* MacTheme.swift in Sources */,
+				29C190C5585CC36FFB079F9796DE7077 /* MailAssistantModels.swift in Sources */,
+				B4BB41C72DA1C29E6D6CC273DA0CBD51 /* MeetingsService.swift in Sources */,
+				E7BDC73F88FDEBD8823C17333DFC1122 /* NetworkMonitor.swift in Sources */,
+				A37CA62B074F6A50FD85330E0E29AD7C /* NoRedirectDelegate.swift in Sources */,
+				10B3CD29276ED58E0661989B6FF5E0B1 /* ParseState.swift in Sources */,
+				445E79F29D0DD375347ABC88141124D7 /* ShareConversationService.swift in Sources */,
+				CFB4338734620A54ED0146C849503307 /* SyncModels.swift in Sources */,
+				2891962330B992014CA04E5063492E8C /* SyncState.swift in Sources */,
+				479B73AF31381C7DA3CE7633476D126A /* TaskDateFormatter.swift in Sources */,
+				8E9FD8D7AF4C139919AD1E01195DDCB6 /* TaskRecord.swift in Sources */,
+				2E472AE43F0792016A3281F4B4BE59D4 /* TaskSortOrder.swift in Sources */,
+				7FED06BFC4A144EC5AD9E7FF382A596F /* TaskStatus.swift in Sources */,
+				77D6D305C4D7E4C277E7981ABFAE33B5 /* TaskViewMode.swift in Sources */,
+				4F01B6CD818DE9338280907753597D7B /* TodosAPIClient.swift in Sources */,
+				46BF606A235D46ECDDE445A5583AE317 /* TodusMacApp.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
-		13C84BB2489BBEAC2433710A /* Debug */ = {
+		13C84BB2489BBEAC2433710A8F8AD737 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = TodusMac/Resources/TodusMac.entitlements;
-				COMBINE_HIDPI_IMAGES = YES;
 				ENABLE_PREVIEWS = YES;
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
 					"\".\"",
 				);
 				INFOPLIST_FILE = TodusMac/Resources/Info.plist;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/../Frameworks",
-				);
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.ludvighedin.todus.macos;
 				PRODUCT_NAME = Todus;
-				SDKROOT = macosx;
 			};
 			name = Debug;
 		};
-		2B9B21CB250C2523656FECCA /* Release */ = {
+		2B9B21CB250C2523656FECCA7D9FCE17 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ALWAYS_SEARCH_USER_PATHS = NO;
-				CLANG_ANALYZER_NONNULL = YES;
-				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
-				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
-				CLANG_CXX_LIBRARY = "libc++";
-				CLANG_ENABLE_MODULES = YES;
-				CLANG_ENABLE_OBJC_ARC = YES;
-				CLANG_ENABLE_OBJC_WEAK = YES;
-				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
-				CLANG_WARN_BOOL_CONVERSION = YES;
-				CLANG_WARN_COMMA = YES;
-				CLANG_WARN_CONSTANT_CONVERSION = YES;
-				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
-				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
-				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
-				CLANG_WARN_EMPTY_BODY = YES;
-				CLANG_WARN_ENUM_CONVERSION = YES;
-				CLANG_WARN_INFINITE_RECURSION = YES;
-				CLANG_WARN_INT_CONVERSION = YES;
-				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
-				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
-				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
-				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
-				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
-				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
-				CLANG_WARN_STRICT_PROTOTYPES = YES;
-				CLANG_WARN_SUSPICIOUS_MOVE = YES;
-				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
-				CLANG_WARN_UNREACHABLE_CODE = YES;
-				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
-				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = 1;
-				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = XDBG7P4V96;
-				ENABLE_NS_ASSERTIONS = NO;
-				ENABLE_STRICT_OBJC_MSGSEND = YES;
-				GCC_C_LANGUAGE_STANDARD = gnu11;
-				GCC_NO_COMMON_BLOCKS = YES;
-				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
-				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
-				GCC_WARN_UNDECLARED_SELECTOR = YES;
-				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
-				GCC_WARN_UNUSED_FUNCTION = YES;
-				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 1.0;
-				MTL_ENABLE_DEBUG_INFO = NO;
-				MTL_FAST_MATH = YES;
-				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
-				SWIFT_COMPILATION_MODE = wholemodule;
-				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_VERSION = 6.0;
 			};
 			name = Release;
 		};
-		676192966EB65BC490509BED /* Debug */ = {
+		676192966EB65BC490509BED1EFB39E8 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ALWAYS_SEARCH_USER_PATHS = NO;
-				CLANG_ANALYZER_NONNULL = YES;
-				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
-				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
-				CLANG_CXX_LIBRARY = "libc++";
-				CLANG_ENABLE_MODULES = YES;
-				CLANG_ENABLE_OBJC_ARC = YES;
-				CLANG_ENABLE_OBJC_WEAK = YES;
-				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
-				CLANG_WARN_BOOL_CONVERSION = YES;
-				CLANG_WARN_COMMA = YES;
-				CLANG_WARN_CONSTANT_CONVERSION = YES;
-				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
-				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
-				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
-				CLANG_WARN_EMPTY_BODY = YES;
-				CLANG_WARN_ENUM_CONVERSION = YES;
-				CLANG_WARN_INFINITE_RECURSION = YES;
-				CLANG_WARN_INT_CONVERSION = YES;
-				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
-				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
-				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
-				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
-				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
-				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
-				CLANG_WARN_STRICT_PROTOTYPES = YES;
-				CLANG_WARN_SUSPICIOUS_MOVE = YES;
-				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
-				CLANG_WARN_UNREACHABLE_CODE = YES;
-				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
-				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = 1;
-				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = XDBG7P4V96;
-				ENABLE_STRICT_OBJC_MSGSEND = YES;
-				ENABLE_TESTABILITY = YES;
-				GCC_C_LANGUAGE_STANDARD = gnu11;
-				GCC_DYNAMIC_NO_PIC = NO;
-				GCC_NO_COMMON_BLOCKS = YES;
-				GCC_OPTIMIZATION_LEVEL = 0;
-				GCC_PREPROCESSOR_DEFINITIONS = (
-					"$(inherited)",
-					"DEBUG=1",
-				);
-				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
-				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
-				GCC_WARN_UNDECLARED_SELECTOR = YES;
-				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
-				GCC_WARN_UNUSED_FUNCTION = YES;
-				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 1.0;
-				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
-				MTL_FAST_MATH = YES;
-				ONLY_ACTIVE_ARCH = YES;
-				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
-				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
-				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 6.0;
 			};
 			name = Debug;
 		};
-		923F78A8C06EF86D68EAAE3B /* Release */ = {
+		923F78A8C06EF86D68EAAE3B550103C2 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = TodusMac/Resources/TodusMac.entitlements;
-				COMBINE_HIDPI_IMAGES = YES;
 				ENABLE_PREVIEWS = YES;
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
 					"\".\"",
 				);
 				INFOPLIST_FILE = TodusMac/Resources/Info.plist;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/../Frameworks",
-				);
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.ludvighedin.todus.macos;
 				PRODUCT_NAME = Todus;
-				SDKROOT = macosx;
 			};
 			name = Release;
 		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		46F48AFF4C1A9C3E51566FEB /* Build configuration list for PBXNativeTarget "TodusMac" */ = {
+		46F48AFF4C1A9C3E51566FEBA97263F3 /* Build configuration list for PBXNativeTarget "TodusMac" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				13C84BB2489BBEAC2433710A /* Debug */,
-				923F78A8C06EF86D68EAAE3B /* Release */,
+				13C84BB2489BBEAC2433710A8F8AD737 /* Debug */,
+				923F78A8C06EF86D68EAAE3B550103C2 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
 		};
-		A40FB6148AA4E99775CA16C2 /* Build configuration list for PBXProject "TodusMac" */ = {
+		A40FB6148AA4E99775CA16C2D67B0C28 /* Build configuration list for PBXProject "TodusMac" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				676192966EB65BC490509BED /* Debug */,
-				2B9B21CB250C2523656FECCA /* Release */,
+				676192966EB65BC490509BED1EFB39E8 /* Debug */,
+				2B9B21CB250C2523656FECCA7D9FCE17 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
 		};
 /* End XCConfigurationList section */
 	};
-	rootObject = A35650E6FF5875B17B944EBF /* Project object */;
+	rootObject = A35650E6FF5875B17B944EBF244C48A0 /* Project object */;
 }

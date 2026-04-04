@@ -522,7 +522,7 @@ final class MacAIChatService {
         if let snap = calendarSnapshot {
             calendarContext = snap
         } else {
-            calendarContext = "## Calendar\nCalendar access not yet loaded."
+            calendarContext = "## Calendar\nCalendar is not connected. Inform the user that their calendar is not connected and they need to grant Calendar permission in macOS System Settings to use calendar features."
         }
 
         // Email
@@ -533,7 +533,7 @@ final class MacAIChatService {
             }.joined(separator: "\n")
             emailContext = "## Recent Emails (inbox)\n\(recent)\nYou CAN send emails via the send_email tool."
         } else {
-            emailContext = "## Email\nNo email threads loaded or email not connected."
+            emailContext = "## Email\nEmail is not connected. Inform the user that their email inbox is not connected and they need to connect an email account in settings."
         }
 
         let sharedAIProfilePrompt = Self.buildAIProfilePrompt(

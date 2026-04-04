@@ -8,8 +8,6 @@ struct MacSidebarView: View {
     @Binding var selection: MacPrimarySelection
     @Binding var isEmailExpanded: Bool
     @Binding var isCalendarExpanded: Bool
-    /// Currently active group chat ID — nil when no group is open
-    @Binding var selectedGroupId: String?
     let onOpenSettings: () -> Void
     let onCompose: () -> Void
 
@@ -86,6 +84,26 @@ struct MacSidebarView: View {
                                 action: { selection = .email(section) }
                             )
                         }
+
+                        // Connected accounts — shown when there are multiple connections.
+                        // Each row toggles that account's visibility in the email view.
+                        if services.connectionsService.hasMultipleConnections {
+                            Rectangle()
+                                .fill(Color.primary.opacity(0.08))
+                                .frame(height: 0.5)
+                                .padding(.leading, 36)
+                                .padding(.trailing, 4)
+                                .padding(.vertical, 3)
+
+                            ForEach(services.connectionsService.connections) { connection in
+                                SidebarConnectionRow(
+                                    connection: connection,
+                                    isEnabled: services.connectionsService.enabledConnectionIds.contains(connection.id),
+                                    isDisconnected: services.connectionsService.isDisconnected(connection.id),
+                                    action: { services.connectionsService.toggleConnection(connection.id) }
+                                )
+                            }
+                        }
                     }
                     // Use opacity-only so sub-items don't slide over sibling rows during animation
                     .transition(.opacity)
@@ -136,20 +154,18 @@ struct MacSidebarView: View {
                 }
             }
 
-            // Thin separator before Groups section
-            Rectangle()
-                .fill(Color.primary.opacity(0.07))
-                .frame(height: 0.5)
-                .padding(.horizontal, 4)
-                .padding(.vertical, 6)
-
-            // Group chats section
-            MacGroupListSection(selectedGroupId: $selectedGroupId)
-
             Spacer(minLength: 12)
 
             // Context-specific sidebar footer based on active view
             sidebarFooter(for: selection)
+
+            // Connected account indicators — small colored circles for multi-account switching.
+            // Shown only when there are 2+ connections. Tapping toggles visibility.
+            if services.connectionsService.hasMultipleConnections {
+                ConnectionAvatarsRow(connectionsService: services.connectionsService)
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, 4)
+            }
 
             // Separator above user area
             Rectangle()
@@ -196,6 +212,7 @@ struct MacSidebarView: View {
                 .menuStyle(.borderlessButton)
                 .tint(.primary.opacity(0.45))
                 .buttonStyle(.plain)
+                .interactiveHitTarget(expansion: 6)
                 .pointerStyle(.link)
 
                 Spacer(minLength: 0)
@@ -209,6 +226,7 @@ struct MacSidebarView: View {
                         .frame(width: 24, height: 24)
                 }
                 .buttonStyle(.plain)
+                .interactiveHitTarget(expansion: 6)
                 .focusEffectDisabled()
                 .pointerStyle(.link)
                 .help("Settings")
@@ -219,6 +237,10 @@ struct MacSidebarView: View {
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(.thinMaterial)
+        .task {
+            // Load connections on sidebar appear for multi-account support
+            await services.connectionsService.loadConnections()
+        }
     }
 
     // MARK: - Footer per view
@@ -250,6 +272,7 @@ struct MacSidebarView: View {
                 .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
+            .interactiveHitTarget(expansion: 6)
             .focusEffectDisabled()
             .pointerStyle(.link)
         }
@@ -362,6 +385,7 @@ private struct SidebarItemButton: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .interactiveHitTarget(expansion: 6)
             .focusEffectDisabled()
             .pointerStyle(.link)
 
@@ -396,6 +420,7 @@ private struct SidebarItemButton: View {
                             .contentShape(Circle())
                     }
                     .buttonStyle(.plain)
+                    .interactiveHitTarget(expansion: 6)
                     .focusEffectDisabled()
                     .pointerStyle(.link)
                     .opacity(isHovered ? 1 : 0)
@@ -461,6 +486,7 @@ private struct SidebarChildItemButton: View {
             .animation(.easeOut(duration: 0.1), value: isHovered)
         }
         .buttonStyle(.plain)
+        .interactiveHitTarget(expansion: 6)
         .focusEffectDisabled()
         .pointerStyle(.link)
         .onHover { isHovered = $0 }
@@ -546,6 +572,7 @@ private struct MiniCalendarView: View {
                         )
                         .frame(maxWidth: .infinity)
                         .contentShape(Rectangle())
+                        .pointerStyle(.link)
                         .onTapGesture {
                             selectedDay = day
                             // Build the tapped Date and notify parent
@@ -557,5 +584,142 @@ private struct MiniCalendarView: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Connection Account Row (Email Sub-item)
+
+/// A child row under the Email section showing a connected account.
+/// Tapping toggles the account's visibility in email views.
+private struct SidebarConnectionRow: View {
+    let connection: ConnectionAccount
+    let isEnabled: Bool
+    let isDisconnected: Bool
+    let action: () -> Void
+
+    @State private var isHovered = false
+
+    /// Parse the connection's hex color into a SwiftUI Color
+    private var dotColor: Color {
+        Color(hex: connection.displayColor) ?? .blue
+    }
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                // Colored dot indicating the account
+                Circle()
+                    .fill(dotColor)
+                    .frame(width: 8, height: 8)
+                    .overlay(
+                        // Strikethrough overlay when disconnected (needs re-auth)
+                        isDisconnected
+                            ? Circle().stroke(Color.red.opacity(0.6), lineWidth: 1)
+                            : nil
+                    )
+
+                // Account email, truncated to fit the sidebar
+                Text(connection.email)
+                    .font(.system(size: 12, weight: .regular))
+                    .foregroundStyle(.primary.opacity(isEnabled ? 0.6 : 0.3))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+
+                Spacer(minLength: 0)
+
+                // Checkmark when enabled
+                if isEnabled {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.leading, 36)
+            .padding(.trailing, 10)
+            .padding(.vertical, 5)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(isHovered ? Color.primary.opacity(0.04) : .clear)
+            )
+            .contentShape(Capsule(style: .continuous))
+            .opacity(isEnabled ? 1.0 : 0.35)
+            .animation(.easeOut(duration: 0.1), value: isHovered)
+            .animation(.easeOut(duration: 0.15), value: isEnabled)
+        }
+        .buttonStyle(.plain)
+        .focusEffectDisabled()
+        .pointerStyle(.link)
+        .onHover { isHovered = $0 }
+    }
+}
+
+// MARK: - Connection Avatars Row (Footer)
+
+/// A horizontal row of small colored avatar circles for each connection.
+/// Shown in the sidebar footer when there are multiple accounts.
+private struct ConnectionAvatarsRow: View {
+    let connectionsService: ConnectionsService
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(connectionsService.connections) { connection in
+                let isEnabled = connectionsService.enabledConnectionIds.contains(connection.id)
+                let dotColor = Color(hex: connection.displayColor) ?? .blue
+
+                Button {
+                    connectionsService.toggleConnection(connection.id)
+                } label: {
+                    // Small avatar circle with initial and colored ring
+                    ZStack {
+                        Circle()
+                            .fill(dotColor.opacity(0.15))
+                            .frame(width: 20, height: 20)
+
+                        // Initial letter
+                        Text(connectionInitial(connection))
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(dotColor)
+
+                        // Colored ring for enabled connections
+                        Circle()
+                            .stroke(dotColor, lineWidth: isEnabled ? 1.5 : 0)
+                            .frame(width: 20, height: 20)
+                    }
+                    .opacity(isEnabled ? 1.0 : 0.35)
+                    .animation(.easeOut(duration: 0.15), value: isEnabled)
+                }
+                .buttonStyle(.plain)
+                .focusEffectDisabled()
+                .pointerStyle(.link)
+                .help(connection.email)
+            }
+
+            Spacer(minLength: 0)
+        }
+    }
+
+    /// First letter of the connection's name or email for the avatar
+    private func connectionInitial(_ connection: ConnectionAccount) -> String {
+        if let name = connection.name, !name.isEmpty {
+            return String(name.prefix(1)).uppercased()
+        }
+        return String(connection.email.prefix(1)).uppercased()
+    }
+}
+
+// MARK: - Color Hex Initializer
+
+extension Color {
+    /// Creates a Color from a hex string (e.g. "#007AFF" or "007AFF").
+    /// Returns nil if the hex string is invalid.
+    init?(hex: String) {
+        var cleaned = hex.trimmingCharacters(in: .whitespacesAndNewlines)
+        if cleaned.hasPrefix("#") { cleaned.removeFirst() }
+        guard cleaned.count == 6,
+              let rgb = UInt64(cleaned, radix: 16) else { return nil }
+        let r = Double((rgb >> 16) & 0xFF) / 255.0
+        let g = Double((rgb >> 8) & 0xFF) / 255.0
+        let b = Double(rgb & 0xFF) / 255.0
+        self.init(red: r, green: g, blue: b)
     }
 }

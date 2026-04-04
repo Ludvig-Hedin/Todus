@@ -43,6 +43,7 @@ struct AssistantButton: View {
             .shadow(color: Color.black.opacity(0.18), radius: 12, x: 0, y: 4)
         }
         .buttonStyle(.plain)
+        .interactiveHitTarget(expansion: 6)
         .focusEffectDisabled()
         .pointerStyle(.link)
         .opacity(isHovered ? 1.0 : 0.92)

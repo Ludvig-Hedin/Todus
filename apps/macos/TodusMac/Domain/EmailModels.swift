@@ -90,7 +90,7 @@ struct EmailMessage: Decodable, Identifiable {
             self.date = parsed
         } else {
             if !receivedOn.isEmpty {
-                print("[EmailMessage] Failed to parse date string: \(receivedOn)")
+                AppLogger.shared.log("[EmailMessage] Failed to parse date string: \(receivedOn)")
             }
             self.date = .distantPast
         }

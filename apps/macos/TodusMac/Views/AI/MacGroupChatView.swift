@@ -223,10 +223,14 @@ private struct MacGroupMessageBubble: View {
 
 // MARK: - MacGroupListSection
 
-/// Sidebar section listing the user's group chats. Placed in MacSidebarView.
+/// Group list shown inside the AI assistant panel (not the sidebar).
+/// Uses a callback instead of a binding so it stays self-contained within the panel.
 struct MacGroupListSection: View {
     @Environment(MacAppServices.self) private var services
-    @Binding var selectedGroupId: String?
+    /// Called when the user taps a group row — passes the group ID to the panel
+    var onSelect: (String) -> Void
+    /// Currently active group ID for row highlighting
+    var activeGroupId: String? = nil
 
     @State private var showCreateSheet = false
     @State private var showJoinSheet = false
@@ -267,15 +271,16 @@ struct MacGroupListSection: View {
             .padding(.vertical, 4)
 
             if groupService.myGroups.isEmpty {
-                Text("No groups")
+                Text("No groups yet — create one or join with an invite link.")
                     .font(.system(size: 11))
                     .foregroundStyle(.tertiary)
-                    .padding(.leading, 10)
+                    .padding(.horizontal, 10)
                     .padding(.vertical, 3)
+                    .fixedSize(horizontal: false, vertical: true)
             } else {
                 ForEach(groupService.myGroups) { group in
                     Button {
-                        selectedGroupId = group.id
+                        onSelect(group.id)
                     } label: {
                         HStack(spacing: 7) {
                             ZStack {
@@ -295,7 +300,7 @@ struct MacGroupListSection: View {
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
                         .background(
-                            selectedGroupId == group.id
+                            activeGroupId == group.id
                                 ? Color.primary.opacity(0.08)
                                 : Color.clear,
                             in: RoundedRectangle(cornerRadius: 5, style: .continuous)

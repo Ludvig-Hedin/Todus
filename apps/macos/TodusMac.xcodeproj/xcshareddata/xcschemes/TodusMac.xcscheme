@@ -14,7 +14,7 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "D9E95D26876E07FF218F214A"
+               BlueprintIdentifier = "D9E95D26876E07FF218F214AF6E6720C"
                BuildableName = "Todus.app"
                BlueprintName = "TodusMac"
                ReferencedContainer = "container:TodusMac.xcodeproj">
@@ -30,7 +30,7 @@
       <MacroExpansion>
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "D9E95D26876E07FF218F214A"
+            BlueprintIdentifier = "D9E95D26876E07FF218F214AF6E6720C"
             BuildableName = "Todus.app"
             BlueprintName = "TodusMac"
             ReferencedContainer = "container:TodusMac.xcodeproj">
@@ -53,7 +53,7 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "D9E95D26876E07FF218F214A"
+            BlueprintIdentifier = "D9E95D26876E07FF218F214AF6E6720C"
             BuildableName = "Todus.app"
             BlueprintName = "TodusMac"
             ReferencedContainer = "container:TodusMac.xcodeproj">
@@ -70,7 +70,7 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "D9E95D26876E07FF218F214A"
+            BlueprintIdentifier = "D9E95D26876E07FF218F214AF6E6720C"
             BuildableName = "Todus.app"
             BlueprintName = "TodusMac"
             ReferencedContainer = "container:TodusMac.xcodeproj">

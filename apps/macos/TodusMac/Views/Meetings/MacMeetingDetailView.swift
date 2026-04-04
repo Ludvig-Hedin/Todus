@@ -129,10 +129,10 @@ struct MacMeetingDetailView: View {
                             if isSchedulingBot {
                                 ProgressView().controlSize(.mini)
                             } else {
-                                Image(systemName: "person.wave.2")
+                                Image(systemName: "mic")
                                     .font(.system(size: 11))
                             }
-                            Text("Send Note Taker")
+                            Text("Record Meeting")
                                 .font(.system(size: 11, weight: .medium))
                         }
                         .padding(.horizontal, 10)
@@ -285,7 +285,7 @@ struct MacMeetingDetailView: View {
     private func transcriptSection(_ segments: [MeetingTranscriptSegment]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Label("Transcript (\(segments.count) segments)", systemImage: "text.quote")
+                Label("Transcript", systemImage: "text.quote")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.green)
 
@@ -297,7 +297,7 @@ struct MacMeetingDetailView: View {
                     }
                     .font(.system(size: 11))
                     .buttonStyle(.plain)
-                    .foregroundStyle(.accentColor)
+                    .foregroundStyle(Color.accentColor)
                 }
             }
 
@@ -339,51 +339,24 @@ struct MacMeetingDetailView: View {
             if !qaMessages.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(qaMessages) { msg in
-                        HStack {
-                            if msg.role == "user" { Spacer() }
-
-                            Text(msg.content)
-                                .font(.system(size: 12))
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .background(
-                                    msg.role == "user"
-                                        ? Color.accentColor.opacity(0.15)
-                                        : Color.primary.opacity(0.05),
-                                    in: RoundedRectangle(cornerRadius: 8)
-                                )
-                                .frame(maxWidth: 400, alignment: msg.role == "user" ? .trailing : .leading)
-                                .textSelection(.enabled)
-
-                            if msg.role == "assistant" { Spacer() }
-                        }
+                        qaMessageRow(msg)
                     }
 
-                    if isAskingQuestion {
-                        HStack {
-                            ProgressView().controlSize(.mini)
-                            Spacer()
-                        }
-                    }
+                    qaLoadingRow
                 }
                 .padding(8)
                 .background(Color.primary.opacity(0.02), in: RoundedRectangle(cornerRadius: 8))
             }
 
             HStack(spacing: 6) {
-                TextField("What were the key decisions?", text: $qaInput)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 12))
-                    .padding(8)
-                    .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
-                    .onSubmit { Task { await askQuestion() } }
+                qaInputField
 
                 Button {
                     Task { await askQuestion() }
                 } label: {
                     Image(systemName: "arrow.up.circle.fill")
                         .font(.system(size: 20))
-                        .foregroundStyle(.accentColor)
+                        .foregroundStyle(Color.accentColor)
                 }
                 .buttonStyle(.plain)
                 .disabled(qaInput.trimmingCharacters(in: .whitespaces).isEmpty || isAskingQuestion)
@@ -392,6 +365,47 @@ struct MacMeetingDetailView: View {
         .padding(14)
         .background(Color.purple.opacity(0.03), in: RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.purple.opacity(0.1)))
+    }
+
+    private var qaInputField: some View {
+        TextField("What were the key decisions?", text: $qaInput)
+            .textFieldStyle(.plain)
+            .font(.system(size: 12))
+            .padding(8)
+            .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
+            .onSubmit { Task { await askQuestion() } }
+    }
+
+    private var qaLoadingRow: some View {
+        Group {
+            if isAskingQuestion {
+                HStack {
+                    ProgressView().controlSize(.mini)
+                    Spacer()
+                }
+            }
+        }
+    }
+
+    private func qaMessageRow(_ msg: QAChatMessage) -> some View {
+        HStack {
+            if msg.role == "user" { Spacer() }
+
+            Text(msg.content)
+                .font(.system(size: 12))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(
+                    msg.role == "user"
+                        ? Color.accentColor.opacity(0.15)
+                        : Color.primary.opacity(0.05),
+                    in: RoundedRectangle(cornerRadius: 8)
+                )
+                .frame(maxWidth: 400, alignment: msg.role == "user" ? .trailing : .leading)
+                .textSelection(.enabled)
+
+            if msg.role == "assistant" { Spacer() }
+        }
     }
 
     // MARK: - Actions
@@ -417,7 +431,7 @@ struct MacMeetingDetailView: View {
         isSchedulingBot = true
         actionError = nil
         let success = await services.meetingsService.scheduleBot(meetingId: meetingId)
-        if !success { actionError = "Failed to schedule the recording bot. Please try again." }
+        if !success { actionError = "Failed to schedule recording. Please try again." }
         await loadMeeting()
         isSchedulingBot = false
     }
@@ -449,7 +463,7 @@ struct MacMeetingDetailView: View {
     private func statusLabel(_ status: String) -> String {
         switch status {
         case "scheduled": "Scheduled"
-        case "bot_joining": "Joining"
+        case "bot_joining": "Starting"
         case "recording": "Recording"
         case "processing": "Processing"
         case "ready": "Ready"

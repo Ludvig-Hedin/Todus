@@ -12,6 +12,10 @@ final class MacAppServices {
         static let contextAboutYou = "MacApp.contextAboutYou"
         static let customInstructions = "MacApp.customInstructions"
         static let assistantAutomationPolicy = "MacApp.assistantAutomationPolicy"
+        static let startupView = "MacApp.startupView"
+        static let hasConfiguredGmailPrompt = "MacApp.hasConfiguredGmailPrompt"
+        static let hasConfiguredCalendarPrompt = "MacApp.hasConfiguredCalendarPrompt"
+        static let hasConfiguredStartupViewPrompt = "MacApp.hasConfiguredStartupViewPrompt"
     }
 
     let authService: AuthService
@@ -23,8 +27,10 @@ final class MacAppServices {
     let shareConversationService: ShareConversationService
     let groupChatService: GroupChatService
     let meetingsService: MeetingsService
+    let connectionsService: ConnectionsService
     private let defaults = UserDefaults.standard
     var showsAssistantPanel = false
+    var isSyncingSharedFolders = false
 
     var contextAboutYou: String {
         didSet {
@@ -48,6 +54,30 @@ final class MacAppServices {
         }
     }
 
+    var startupView: String {
+        didSet {
+            defaults.set(startupView, forKey: Keys.startupView)
+        }
+    }
+
+    var hasConfiguredGmailPrompt: Bool {
+        didSet {
+            defaults.set(hasConfiguredGmailPrompt, forKey: Keys.hasConfiguredGmailPrompt)
+        }
+    }
+
+    var hasConfiguredCalendarPrompt: Bool {
+        didSet {
+            defaults.set(hasConfiguredCalendarPrompt, forKey: Keys.hasConfiguredCalendarPrompt)
+        }
+    }
+
+    var hasConfiguredStartupViewPrompt: Bool {
+        didSet {
+            defaults.set(hasConfiguredStartupViewPrompt, forKey: Keys.hasConfiguredStartupViewPrompt)
+        }
+    }
+
     init() {
         let backendURL = Self.loadBackendURL()
         let auth = AuthService(backendURL: backendURL)
@@ -62,6 +92,10 @@ final class MacAppServices {
         self.networkMonitor = NetworkMonitor()
         self.contextAboutYou = defaults.string(forKey: Keys.contextAboutYou) ?? ""
         self.customInstructions = defaults.string(forKey: Keys.customInstructions) ?? ""
+        self.startupView = defaults.string(forKey: Keys.startupView) ?? "home"
+        self.hasConfiguredGmailPrompt = defaults.bool(forKey: Keys.hasConfiguredGmailPrompt)
+        self.hasConfiguredCalendarPrompt = defaults.bool(forKey: Keys.hasConfiguredCalendarPrompt)
+        self.hasConfiguredStartupViewPrompt = defaults.bool(forKey: Keys.hasConfiguredStartupViewPrompt)
         if let data = defaults.data(forKey: Keys.assistantAutomationPolicy),
            let savedPolicy = try? JSONDecoder().decode(AssistantAutomationPolicy.self, from: data) {
             self.assistantAutomationPolicy = savedPolicy
@@ -78,6 +112,7 @@ final class MacAppServices {
         self.shareConversationService = ShareConversationService(apiClient: api)
         self.groupChatService = GroupChatService(apiClient: api)
         self.meetingsService = MeetingsService(apiClient: api)
+        self.connectionsService = ConnectionsService(api: api)
         self.aiChatService.contextAboutYou = contextAboutYou
         self.aiChatService.customInstructions = customInstructions
     }
@@ -91,7 +126,7 @@ final class MacAppServices {
             customInstructions = response.settings.customPrompt
             assistantAutomationPolicy = response.settings.assistantAutomationPolicy
         } catch {
-            print("[MacAppServices] Failed to load shared AI profile: \(error)")
+            AppLogger.shared.log("[MacAppServices] Failed to load shared AI profile: \(error)")
         }
     }
 
@@ -108,7 +143,7 @@ final class MacAppServices {
                 )
             )
         } catch {
-            print("[MacAppServices] Failed to save shared AI profile: \(error)")
+            AppLogger.shared.log("[MacAppServices] Failed to save shared AI profile: \(error)")
         }
     }
 
@@ -124,6 +159,9 @@ final class MacAppServices {
             let name: String
             let createdAt: Date
         }
+
+        isSyncingSharedFolders = true
+        defer { isSyncingSharedFolders = false }
 
         let response: FolderListResponse = try await apiClient.trpcQuery("folders.list")
         let remoteFolders = response.folders
@@ -164,6 +202,17 @@ final class MacAppServices {
         }
         // Fallback to production backend
         return URL(string: "https://api.todus.app")!
+    }
+
+    /// Derives the web app URL from the backend URL.
+    /// When the backend is local (localhost), the web dev server runs on port 3000.
+    /// In production the web app lives at app.todus.app.
+    static func loadAppURL() -> URL {
+        let backend = loadBackendURL()
+        if backend.host?.contains("localhost") == true || backend.host?.contains("127.0.0.1") == true {
+            return URL(string: "http://localhost:3000")!
+        }
+        return URL(string: "https://app.todus.app")!
     }
 }
 

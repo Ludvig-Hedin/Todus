@@ -55,6 +55,9 @@ private struct HeaderIconButton: View {
                 )
         }
         .buttonStyle(.plain)
+        .interactiveHitTarget(expansion: 6)
+        .focusEffectDisabled()
+        .pointerStyle(.link)
     }
 }
 
@@ -76,5 +79,8 @@ private struct HeaderMenuButton: View {
         }
         .menuStyle(.borderlessButton)
         .buttonStyle(.plain)
+        .interactiveHitTarget(expansion: 6)
+        .focusEffectDisabled()
+        .pointerStyle(.link)
     }
 }

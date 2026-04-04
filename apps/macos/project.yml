@@ -23,6 +23,10 @@ targets:
       - path: TodusMac
         excludes:
           - "**/*.md"
+          - "MacDocsView.swift"
+          - "MacMeetingsView.swift"
+          - "MacMeetingDetailView.swift"
+          - "MeetingsService.swift"
       - path: ../../packages/swift-auth/Sources/TodusAuth
         group: TodusAuth
     resources:

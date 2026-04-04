@@ -70,6 +70,10 @@ struct MacTasksView: View {
             // View mode picker
             viewModePicker
 
+            if services.isSyncingSharedFolders {
+                MacInlineRefreshBadge(label: "Syncing")
+            }
+
             Button {
                 onCreateItem()
             } label: {

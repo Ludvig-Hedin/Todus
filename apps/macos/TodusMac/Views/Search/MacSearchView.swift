@@ -28,7 +28,7 @@ struct MacSearchView: View {
                     .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(MacTheme.mutedText)
 
-                TextField("Search tasks, emails, events...", text: $searchText)
+                TextField("Search or jump to tasks, emails, and events", text: $searchText)
                     .font(.system(size: 14))
                     .textFieldStyle(.plain)
                     .focused($isFocused)

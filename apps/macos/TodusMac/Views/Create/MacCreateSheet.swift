@@ -100,7 +100,7 @@ struct MacCreateSheet: View {
             do {
                 try await services.syncSharedFolders(in: modelContext)
             } catch {
-                print("[MacCreateSheet] Failed to sync shared folders: \(error)")
+                AppLogger.shared.log("[MacCreateSheet] Failed to sync shared folders: \(error)")
             }
         }
     }

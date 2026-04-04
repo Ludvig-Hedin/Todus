@@ -4,12 +4,21 @@ import SwiftData
 @main
 struct TodusMacApp: App {
     @State private var services = MacAppServices()
+    private let sharedModelContainer: ModelContainer = {
+        let schema = Schema([TaskRecord.self, FolderRecord.self])
+        do {
+            return try ModelContainer(for: schema)
+        } catch {
+            fatalError("Failed to create shared ModelContainer: \(error)")
+        }
+    }()
 
     var body: some Scene {
         WindowGroup {
             MacRootView()
                 .environment(services)
                 .environment(services.authService)
+                .modelContainer(sharedModelContainer)
                 .frame(minWidth: 1100, minHeight: 720)
                 // Handle todus://auth-callback?token=... deep links from Google OAuth
                 .onOpenURL { url in
@@ -24,8 +33,20 @@ struct TodusMacApp: App {
         .windowResizability(.contentSize)
         // Standard unified toolbar — proper button sizing
         .windowToolbarStyle(.unified)
-        // SwiftData container for local task/folder persistence
-        .modelContainer(for: [TaskRecord.self, FolderRecord.self])
+
+        // Dedicated Settings window — opened via openWindow(id: "settings")
+        // Stays open independently so the user can adjust prefs while using the app.
+        Window("Settings", id: "settings") {
+            MacSettingsView()
+                .environment(services)
+                .environment(services.authService)
+                .modelContainer(sharedModelContainer)
+                .frame(minWidth: 760, idealWidth: 760, maxWidth: 900)
+                .frame(minHeight: 480, idealHeight: 640, maxHeight: .infinity)
+                .onAppear { setWindowBackgroundColor() }
+        }
+        .defaultSize(width: 760, height: 640)
+        .windowResizability(.contentSize)
     }
 
     /// Makes the window title bar / toolbar chrome match the content background.

@@ -186,6 +186,7 @@ enum MacTheme {
     static func hourLabel(_ hour: Int) -> String {
         String(format: "%02d:00", hour)
     }
+
 }
 
 // MARK: - Color convenience for light/dark mode
@@ -202,5 +203,43 @@ extension Color {
                     : NSColor(light)
             }
         ))
+    }
+}
+
+private struct InteractiveHitTargetModifier: ViewModifier {
+    let expansion: CGFloat
+
+    func body(content: Content) -> some View {
+        content.contentShape(Rectangle().inset(by: -expansion))
+    }
+}
+
+extension View {
+    func interactiveHitTarget(expansion: CGFloat = 6) -> some View {
+        modifier(InteractiveHitTargetModifier(expansion: expansion))
+    }
+}
+
+struct MacInlineRefreshBadge: View {
+    var label: String = "Updating"
+
+    var body: some View {
+        HStack(spacing: MacTheme.spacing6) {
+            ProgressView()
+                .controlSize(.small)
+
+            Text(label)
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(MacTheme.textSecondary)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(MacTheme.badgeSurface, in: Capsule(style: .continuous))
+        .overlay(
+            Capsule(style: .continuous)
+                .stroke(MacTheme.cardBorder, lineWidth: 0.5)
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(label)
     }
 }

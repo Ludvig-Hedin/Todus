@@ -27,6 +27,18 @@ struct MacHomeView: View {
     @State private var isHoveringEmailIndex: Int? = nil
     @State private var isLoadingAssistantBriefing = false
 
+    private var isAssistantBriefingRefreshing: Bool {
+        isLoadingAssistantBriefing && services.emailService.assistantBriefing != nil
+    }
+
+    private var isEventsRefreshing: Bool {
+        isLoadingEvents && !todaysEvents.isEmpty
+    }
+
+    private var isEmailRefreshing: Bool {
+        services.emailService.isLoadingThreads && !services.emailService.threads.isEmpty
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Greeting header
@@ -152,7 +164,11 @@ struct MacHomeView: View {
 
     private var assistantBriefingSection: some View {
         VStack(alignment: .leading, spacing: MacTheme.spacing12) {
-            sectionHeader(title: "ASSISTANT BRIEFING", count: services.emailService.assistantBriefing?.topPriorities.count ?? 0)
+            sectionHeader(
+                title: "ASSISTANT BRIEFING",
+                count: services.emailService.assistantBriefing?.topPriorities.count ?? 0,
+                isUpdating: isAssistantBriefingRefreshing
+            )
 
             if isLoadingAssistantBriefing && services.emailService.assistantBriefing == nil {
                 loadingCard(message: "Preparing your briefing")
@@ -269,9 +285,9 @@ struct MacHomeView: View {
 
     private var eventsColumn: some View {
         VStack(alignment: .leading, spacing: MacTheme.spacing12) {
-            sectionHeader(title: "TODAY'S EVENTS", count: todaysEvents.count)
+            sectionHeader(title: "TODAY'S EVENTS", count: todaysEvents.count, isUpdating: isEventsRefreshing)
 
-            if isLoadingEvents {
+            if isLoadingEvents && todaysEvents.isEmpty {
                 loadingCard(message: "Loading today's events")
             } else if todaysEvents.isEmpty {
                 emptyActionCard(
@@ -432,7 +448,11 @@ struct MacHomeView: View {
 
     private var emailsSection: some View {
         VStack(alignment: .leading, spacing: MacTheme.spacing12) {
-            sectionHeader(title: "RECENT EMAILS", count: services.emailService.threads.prefix(5).count)
+            sectionHeader(
+                title: "RECENT EMAILS",
+                count: services.emailService.threads.prefix(5).count,
+                isUpdating: isEmailRefreshing
+            )
 
             if !services.emailService.hasConnection {
                 // Connect Gmail prompt — button inside the empty state card
@@ -613,7 +633,7 @@ struct MacHomeView: View {
     // MARK: - Shared Components
 
     /// Section header — all-caps label with count badge. Clean, editorial style.
-    private func sectionHeader(title: String, count: Int) -> some View {
+    private func sectionHeader(title: String, count: Int, isUpdating: Bool = false) -> some View {
         HStack(spacing: MacTheme.spacing6) {
             Text(title)
                 .font(MacTheme.sectionHeaderFont())
@@ -627,6 +647,10 @@ struct MacHomeView: View {
                     .padding(.horizontal, 5)
                     .padding(.vertical, 2)
                     .background(MacTheme.badgeSurface, in: RoundedRectangle(cornerRadius: MacTheme.pillRadius, style: .continuous))
+            }
+
+            if isUpdating {
+                MacInlineRefreshBadge()
             }
 
             Spacer()

@@ -15,6 +15,8 @@ enum TaskViewMode: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
+    var shortTitle: String { title }
+
     var systemImage: String {
         switch self {
         case .list: return "list.bullet"

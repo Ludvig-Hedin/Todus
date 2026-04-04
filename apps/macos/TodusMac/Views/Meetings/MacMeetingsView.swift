@@ -153,7 +153,7 @@ struct MacMeetingsView: View {
                     Text("No meetings")
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(.secondary)
-                    Text("Sync your calendar to import meetings.")
+                    Text("Sync your calendar to import meetings. They'll be recorded automatically when possible.")
                         .font(.system(size: 11))
                         .foregroundStyle(.tertiary)
                 }
@@ -336,7 +336,7 @@ struct MacMeetingRowView: View {
     private var statusLabel: String {
         switch meeting.status {
         case "scheduled": "Scheduled"
-        case "bot_joining": "Joining"
+        case "bot_joining": "Starting"
         case "recording": "Recording"
         case "processing": "Processing"
         case "ready": "Ready"

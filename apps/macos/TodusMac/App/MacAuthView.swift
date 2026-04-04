@@ -41,11 +41,15 @@ struct MacAuthView: View {
                 Text("Welcome to Todus")
                     .font(.system(size: 24, weight: .semibold))
 
-                Text("Your AI agent for emails")
+                Text("Email, tasks, and calendar in one workspace.")
                     .font(.system(size: 15, weight: .regular))
                     .foregroundStyle(.primary.opacity(0.5))
 
-                Text(otpPendingEmail == nil ? "Sign in to get started" : "Enter the code sent to your email")
+                Text(
+                    otpPendingEmail == nil
+                        ? "Sign in to sync your workspace, or keep going with tasks only."
+                        : "Enter the 6-digit code we sent to finish signing in."
+                )
                     .font(.system(size: 13, weight: .regular))
                     .foregroundStyle(.primary.opacity(0.4))
             }
@@ -205,7 +209,7 @@ struct MacAuthView: View {
                     NSWorkspace.shared.open(url)
                 }
             } label: {
-                Text("Open Email App")
+                Text("Open your email app")
                     .font(.system(size: 14, weight: .semibold))
                     .frame(maxWidth: .infinity)
                     .frame(height: 40)
@@ -219,12 +223,18 @@ struct MacAuthView: View {
             .focusEffectDisabled()
             .pointerStyle(.link)
 
+            Text("You can go back and skip sign-in to use tasks only. Email can be connected later in Settings.")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 8)
+
             // Back button — returns to main login screen
             Button {
                 code = ""
                 authService.returnToLogin()
             } label: {
-                Text("Back")
+                Text("Use another email")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(.secondary)
             }
@@ -314,7 +324,7 @@ struct MacAuthView: View {
             Button {
                 authService.continueAsGuest()
             } label: {
-                Text("Continue without account")
+                Text("Skip, use tasks only for now")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(.secondary)
             }

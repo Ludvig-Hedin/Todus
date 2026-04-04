@@ -108,6 +108,7 @@ struct MacCalendarView: View {
                         .background(MacTheme.accent, in: Capsule(style: .continuous))
                 }
                 .buttonStyle(.plain)
+                .interactiveHitTarget(expansion: 6)
                 .focusEffectDisabled()
                 .pointerStyle(.link)
             }
@@ -142,8 +143,12 @@ struct MacCalendarView: View {
                 .foregroundStyle(MacTheme.textPrimary)
 
             if isLoading {
-                ProgressView()
-                    .controlSize(.small)
+                if events.isEmpty {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    MacInlineRefreshBadge()
+                }
             }
 
             Spacer()
@@ -166,6 +171,7 @@ struct MacCalendarView: View {
                     .background(controlBg, in: Capsule(style: .continuous))
             }
             .buttonStyle(.plain)
+            .interactiveHitTarget(expansion: 6)
             .focusEffectDisabled()
             .pointerStyle(.link)
 
@@ -205,6 +211,7 @@ struct MacCalendarView: View {
                 .background(controlBg, in: Circle())
         }
         .buttonStyle(.plain)
+        .interactiveHitTarget(expansion: 6)
         .focusEffectDisabled()
         .pointerStyle(.link)
     }
