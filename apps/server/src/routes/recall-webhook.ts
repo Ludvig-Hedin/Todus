@@ -5,13 +5,27 @@
  * Ported from reference/AA-MCP-MVP/src/app/api/webhooks/recall/route.ts
  */
 
-import { Hono } from 'hono';
+import { meeting, meetingMedia, meetingTranscript, meetIntegration } from '../db/schema';
+import { getBotTranscript } from '../lib/recall';
+import { pruneExpiredMeetingRecordings } from '../lib/meeting-retention';
+import { eq, and, sql } from 'drizzle-orm';
 import type { HonoContext } from '../ctx';
 import { createDb } from '../db';
-import { meeting, meetingMedia, meetingTranscript } from '../db/schema';
-import { eq, and, sql } from 'drizzle-orm';
 import { env } from '../env';
-import { getBotTranscript } from '../lib/recall';
+import { Hono } from 'hono';
+
+const SUMMARY_GENERATING_SENTINEL = '__RECALL_SUMMARY_GENERATING__';
+
+// Format milliseconds to MM:SS or H:MM:SS
+function formatMs(ms: number): string {
+  const totalSeconds = Math.floor(ms / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0)
+    return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  return `${minutes}:${String(seconds).padStart(2, '0')}`;
+}
 
 export const recallWebhookRouter = new Hono<HonoContext>();
 
@@ -46,7 +60,9 @@ recallWebhookRouter.post('/', async (c) => {
       }
     } else {
       // In production, webhook secret must be configured to prevent spoofed events
-      console.warn('[RECALL_WEBHOOK] No RECALL_WEBHOOK_SECRET set — webhook signature verification is disabled. Set it in production.');
+      console.warn(
+        '[RECALL_WEBHOOK] No RECALL_WEBHOOK_SECRET set — webhook signature verification is disabled. Set it in production.',
+      );
     }
 
     const payload = JSON.parse(rawBody);
@@ -223,6 +239,147 @@ recallWebhookRouter.post('/', async (c) => {
               .update(meeting)
               .set({ status: 'ready' })
               .where(and(eq(meeting.id, meetingRow.id), sql`${meeting.status} != 'ready'`));
+
+            // Auto-generate AI summary if user has that preference enabled
+            const [integration] = await db
+              .select({
+                id: meetIntegration.id,
+                autoGenerateSummary: meetIntegration.autoGenerateSummary,
+                summaryLanguage: meetIntegration.summaryLanguage,
+                autoDeleteDays: meetIntegration.autoDeleteDays,
+                lastPrunedAt: meetIntegration.lastPrunedAt,
+              })
+              .from(meetIntegration)
+              .where(eq(meetIntegration.userId, meetingRow.userId))
+              .limit(1);
+
+            let claimedSummary = false;
+            try {
+              if (integration?.autoGenerateSummary) {
+                const [claimedSummaryRow] = await db
+                  .update(meeting)
+                  .set({ aiSummary: SUMMARY_GENERATING_SENTINEL })
+                  .where(and(eq(meeting.id, meetingRow.id), sql`${meeting.aiSummary} IS NULL`))
+                  .returning({ id: meeting.id });
+
+                claimedSummary = !!claimedSummaryRow;
+              }
+
+              if (integration?.autoGenerateSummary && claimedSummary) {
+                // Fetch all transcript segments for this meeting
+                const transcripts = await db
+                  .select()
+                  .from(meetingTranscript)
+                  .where(eq(meetingTranscript.meetingId, meetingRow.id))
+                  .orderBy(meetingTranscript.startTime);
+
+                if (transcripts.length > 0) {
+                  const transcriptText = transcripts
+                    .map((t) => `[${formatMs(t.startTime)}] ${t.speakerName}: ${t.text}`)
+                    .join('\n');
+
+                  const { generateText } = await import('ai');
+                  const { openai } = await import('@ai-sdk/openai');
+
+                  const langHint =
+                    integration.summaryLanguage !== 'en'
+                      ? ` Respond in ${integration.summaryLanguage}.`
+                      : '';
+
+                  const model = openai(env.OPENAI_MINI_MODEL || 'gpt-4o-mini');
+                  const result = await generateText({
+                    model,
+                    system: `You are a meeting analyst. Given a meeting transcript, produce:
+1. A concise summary (3-6 sentences) covering the key discussion points and decisions.
+2. A JSON array of action items, each with: { "description": string, "owner": string (speaker name or "Unassigned"), "dueDate": string | null }.
+
+Respond in this exact JSON format:
+{
+  "summary": "...",
+  "actionItems": [...]
+}${langHint}`,
+                    prompt: `Meeting: ${meetingRow.title}\nDate: ${meetingRow.startsAt}\n\nTranscript:\n${transcriptText.slice(0, 30000)}`,
+                  });
+
+                  let summary = '';
+                  let actionItems: unknown[] = [];
+                  try {
+                    const parsed = JSON.parse(result.text);
+                    summary = parsed.summary || '';
+                    actionItems = Array.isArray(parsed.actionItems)
+                      ? parsed.actionItems
+                          .filter(
+                            (item: unknown): item is Record<string, unknown> =>
+                              typeof item === 'object' && item !== null,
+                          )
+                          .map((item: Record<string, unknown>) => ({
+                            description:
+                              typeof item.description === 'string'
+                                ? item.description
+                                : typeof item.title === 'string'
+                                  ? item.title
+                                  : '',
+                            owner:
+                              typeof item.owner === 'string'
+                                ? item.owner
+                                : typeof item.assignee === 'string'
+                                  ? item.assignee
+                                  : 'Unassigned',
+                            dueDate: typeof item.dueDate === 'string' ? item.dueDate : null,
+                          }))
+                          .filter((item: { description: string }) => item.description.length > 0)
+                      : [];
+                  } catch {
+                    summary = result.text;
+                  }
+
+                  await db
+                    .update(meeting)
+                    .set({ aiSummary: summary, actionItems })
+                    .where(eq(meeting.id, meetingRow.id));
+
+                  console.log(
+                    '[RECALL_WEBHOOK] Auto-generated summary for meeting:',
+                    meetingRow.id,
+                  );
+                } else {
+                  await db
+                    .update(meeting)
+                    .set({ aiSummary: null })
+                    .where(
+                      and(
+                        eq(meeting.id, meetingRow.id),
+                        eq(meeting.aiSummary, SUMMARY_GENERATING_SENTINEL),
+                      ),
+                    );
+                }
+              }
+            } catch (summaryErr) {
+              if (claimedSummary) {
+                await db
+                  .update(meeting)
+                  .set({ aiSummary: null })
+                  .where(
+                    and(
+                      eq(meeting.id, meetingRow.id),
+                      eq(meeting.aiSummary, SUMMARY_GENERATING_SENTINEL),
+                    ),
+                  );
+              }
+              // Auto-summary is best-effort — don't fail the webhook
+              console.warn('[RECALL_WEBHOOK] Auto-summary failed:', summaryErr);
+            }
+
+            try {
+              await pruneExpiredMeetingRecordings(db, {
+                integrationId: integration?.id,
+                userId: meetingRow.userId,
+                autoDeleteDays: integration?.autoDeleteDays,
+                lastPrunedAt: integration?.lastPrunedAt,
+              });
+            } catch (pruneErr) {
+              console.warn('[RECALL_WEBHOOK] Retention prune failed:', pruneErr);
+            }
           }
           break;
         }

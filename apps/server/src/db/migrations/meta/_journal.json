@@ -320,8 +320,36 @@
     {
       "idx": 44,
       "version": "7",
+      "when": 1775050000000,
+      "tag": "0044_pale_luminals",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1775100000000,
+      "tag": "0045_meeting_retention_guardrails",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
       "when": 1775216100000,
       "tag": "0046_assistant_second_brain",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1775300000000,
+      "tag": "0047_connection_color",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1775310000000,
+      "tag": "0048_marketing_email_idempotency",
       "breakpoints": true
     }
   ]

@@ -806,7 +806,6 @@ const api = new Hono<HonoContext>()
     c.set('auth', undefined as any);
   })
   .route('/ai', aiRouter)
-  .route('/webhooks/recall', recallWebhookRouter)
   .route('/autumn', autumnApi)
   .route('/public', publicRouter)
   .get('/auth/me', async (c) => {
@@ -821,17 +820,15 @@ const api = new Hono<HonoContext>()
     return c.json({ user });
   })
   .get('/auth/mobile-token', async (c) => {
-    // Bridge endpoint: converts a cookie-based web session into a raw session token
-    // for the iOS/macOS apps. Called from the system browser after web login.
-    // The system browser has the session cookie, so we can read the session
-    // and return the raw session token for native bearer auth.
+    // Bridge endpoint: converts a cookie-based web session into a dual-token pair
+    // for native iOS/macOS apps:
+    //   1. Short-lived JWT (15min) — "access token" for stateless API auth
+    //   2. Raw session token (90-day sliding) — "refresh token" for getting new JWTs
     //
-    // IMPORTANT: Returns the raw session token (NOT a JWT) because:
-    // - JWTs minted by the jwt() plugin expire after 15 minutes by default
-    // - Raw session tokens are stored in the session table with 30-day expiry
-    // - The bearer plugin resolves raw tokens through Better Auth's full pipeline,
-    //   enabling session extension (updateAge) and token rotation (set-auth-token header)
-    // - Raw tokens can be revoked server-side by deleting the session row
+    // Native apps use the JWT for all API calls (verified via JWKS, no DB lookup).
+    // When the JWT expires, they call /auth/refresh-native-token with the session
+    // token to transparently get a fresh JWT. Users stay signed in indefinitely
+    // as long as they use the app within any 90-day window.
     //
     // IMPORTANT: We return an HTML page with a JavaScript redirect instead of
     // a 302 redirect. iOS's ASWebAuthenticationSession (used by expo-web-browser)
@@ -841,23 +838,28 @@ const api = new Hono<HonoContext>()
     const auth = c.var.auth;
     const session = await auth.api.getSession({ headers: c.req.raw.headers });
     if (!session?.session?.token) {
-      // No session — redirect back to web login
       return c.redirect(`${env.VITE_PUBLIC_APP_URL}/login?error=no_session`);
     }
+    const jwtToken = await auth.api.getToken({
+      headers: c.req.raw.headers,
+    });
 
-    // Use the raw session token instead of minting a JWT.
-    // Raw tokens persist in the session table for 30 days and are resolved by
-    // the bearer plugin + Strategy 2 (direct DB lookup) in the auth middleware.
-    const nativeToken = session.session.token;
+    if (!jwtToken?.token) {
+      return c.redirect(`${env.VITE_PUBLIC_APP_URL}/login?error=no_native_token`);
+    }
 
-    // Build the deep link URL for the native app
+    // Raw session token as refresh token — 90-day sliding window via updateAge.
+    // Stored in Keychain on native apps, used only to obtain fresh JWTs.
+    const refreshToken = session.session.token;
+
+    // Build the deep link URL with both tokens for the native app
     const redirectUrl = c.req.query('redirect') || 'todus://auth-callback';
     const separator = redirectUrl.includes('?') ? '&' : '?';
     const sessionIdParam = session.session.id
       ? `&sessionId=${encodeURIComponent(session.session.id)}`
       : '';
     const deepLink =
-      `${redirectUrl}${separator}token=${encodeURIComponent(nativeToken)}${sessionIdParam}`;
+      `${redirectUrl}${separator}token=${encodeURIComponent(jwtToken.token)}&refreshToken=${encodeURIComponent(refreshToken)}${sessionIdParam}`;
 
     // Return an HTML page that triggers the deep link via JavaScript.
     // This is more reliable than a 302 redirect for custom URL schemes on iOS.
@@ -870,6 +872,61 @@ const api = new Hono<HonoContext>()
 <script>window.location.href=${JSON.stringify(deepLink)};</script>
 </body>
 </html>`);
+  })
+  .post('/auth/refresh-native-token', async (c) => {
+    // Refresh endpoint for native apps: exchanges a raw session token (refresh token)
+    // for a fresh short-lived JWT (access token). This is the core of the access+refresh
+    // pattern — native apps call this when their JWT expires (every ~15min) to get a
+    // new one without requiring user interaction. The raw session token has a 90-day
+    // sliding window (extended daily via Better Auth's updateAge), so users stay
+    // signed in indefinitely as long as they use the app within any 90-day window.
+    //
+    // Security: The refresh token is validated through Better Auth's session resolution
+    // (cookie-signing + getSession), which checks the session table and extends expiresAt.
+    // If the session has been revoked (e.g., "sign out of all devices"), this returns 401.
+    const body = await c.req.json<{ refreshToken?: string }>().catch(() => ({}));
+    const refreshToken = body.refreshToken;
+
+    if (!refreshToken) {
+      return c.json({ error: 'Missing refresh token' }, 400);
+    }
+
+    try {
+      // Sign the raw session token as a cookie — same technique as Strategy 3 in the
+      // auth middleware. This goes through Better Auth's full session pipeline, which:
+      // 1. Validates the session exists and hasn't expired
+      // 2. Triggers updateAge to extend the session (sliding 90-day window)
+      // 3. Returns the session context needed by getToken() to mint a JWT
+      const auth = createAuth();
+      const cookiePrefix = env.NODE_ENV === 'development' ? 'better-auth-dev' : 'better-auth';
+      const signedToken = (
+        await serializeSignedCookie('', refreshToken, env.BETTER_AUTH_SECRET)
+      ).replace('=', '');
+
+      const cookieHeaders = new Headers({
+        cookie: `${cookiePrefix}.session_token=${signedToken}`,
+        origin: 'https://todus.app',
+      });
+
+      const session = await auth.api.getSession({ headers: cookieHeaders });
+      if (!session?.user) {
+        return c.json({ error: 'Session expired' }, 401);
+      }
+
+      // Mint a fresh short-lived JWT using the validated session context
+      const jwtToken = await auth.api.getToken({ headers: cookieHeaders });
+      if (!jwtToken?.token) {
+        return c.json({ error: 'Failed to generate token' }, 500);
+      }
+
+      return c.json({
+        token: jwtToken.token,
+        expiresIn: 900, // 15 minutes in seconds
+      });
+    } catch (err) {
+      console.error('[auth/refresh-native-token] Error:', err);
+      return c.json({ error: 'Token refresh failed' }, 500);
+    }
   })
   .post('/auth/native-link-social', async (c) => {
     const auth = c.var.auth;
@@ -1069,6 +1126,8 @@ const app = new Hono<HonoContext>()
     { replaceRequest: false },
   )
   .route('/api', api)
+  // Recall.ai webhooks must be outside /api — they have no session cookie/token
+  .route('/webhooks/recall', recallWebhookRouter)
   .use(
     '*',
     agentsMiddleware({

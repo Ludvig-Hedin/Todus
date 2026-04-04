@@ -19,6 +19,7 @@ import {
   countThreadsByLabels,
   deleteSpamThreads,
   get,
+  getLabelsForThreadIds,
   getThreadLabels,
   modifyThreadLabels,
   type DB,
@@ -42,7 +43,12 @@ import {
   type ISnoozeBatch,
   type ParsedMessage,
 } from '../../types';
-import type { IGetThreadResponse, IGetThreadsResponse, MailManager } from '../../lib/driver/types';
+import type {
+  IGetThreadResponse,
+  IGetThreadsResponse,
+  MailManager,
+  ThreadSummary,
+} from '../../lib/driver/types';
 import { connectionToDriver, getZeroSocketAgent, reSyncThread } from '../../lib/server-utils';
 import { generateWhatUserCaresAbout, type UserTopic } from '../../lib/analyze/interests';
 import { DurableObjectOAuthClientProvider } from 'agents/mcp/do-oauth-client-provider';
@@ -1220,10 +1226,7 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
       if (!folder && labelIds.length === 0 && !q && !pageToken) {
         console.log('[queryThreads] Case: all threads');
         const threads = await list(this.db);
-        return threads.map((thread: any) => ({
-          id: thread.id,
-          latest_received_on: thread.latestReceivedOn,
-        }));
+        return threads;
       }
 
       // Case 2: Folder only
@@ -1236,16 +1239,10 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
             pageToken,
             maxResults,
           });
-          return result.threads.map((thread: any) => ({
-            id: thread.id,
-            latest_received_on: thread.latestReceivedOn,
-          }));
+          return result.threads;
         } else {
           const threads = await findThreadsByFolder(this.db, folderLabel);
-          return threads.slice(0, maxResults).map((thread: any) => ({
-            id: thread.id,
-            latest_received_on: thread.latestReceivedOn,
-          }));
+          return threads.slice(0, maxResults);
         }
       }
 
@@ -1260,16 +1257,10 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
             pageToken,
             maxResults,
           });
-          return result.threads.map((thread: any) => ({
-            id: thread.id,
-            latest_received_on: thread.latestReceivedOn,
-          }));
+          return result.threads;
         } else {
           const threads = await findThreadsWithAnyLabels(this.db, [labelId]);
-          return threads.slice(0, maxResults).map((thread: any) => ({
-            id: thread.id,
-            latest_received_on: thread.latestReceivedOn,
-          }));
+          return threads.slice(0, maxResults);
         }
       }
 
@@ -1277,10 +1268,7 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
       if (q && !folder && labelIds.length === 0) {
         console.log('[queryThreads] Case: text search only', { q });
         const threads = await findThreadsWithTextSearch(this.db, q);
-        return threads.slice(0, maxResults).map((thread: any) => ({
-          id: thread.id,
-          latest_received_on: thread.latestReceivedOn,
-        }));
+        return threads.slice(0, maxResults);
       }
 
       // Case 5: Complex filtering (folder + labels + search + pagination)
@@ -1304,10 +1292,7 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
         requireAllLabels: true, // Require all labels to be present
       });
 
-      return result.threads.map((thread: any) => ({
-        id: thread.id,
-        latest_received_on: thread.latestReceivedOn,
-      }));
+      return result.threads;
     });
   }
 
@@ -1327,29 +1312,49 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
 
     const program = pipe(
       this.queryThreads(normalizedParams),
-      Effect.map((result) => {
-        if (result?.length) {
-          const threads = result.map((row) => ({
-            id: String(row.id),
-            historyId: null,
-          }));
+      Effect.flatMap((result) =>
+        Effect.promise(async () => {
+          if (!result?.length) {
+            return {
+              threads: [],
+              nextPageToken: '',
+            } satisfies IGetThreadsResponse;
+          }
 
-          // Use latest_received_on for pagination cursor
+          const threadIds = result.map((row) => String(row.id));
+          const labelMap = await getLabelsForThreadIds(this.db, threadIds);
+
+          const threads: ThreadSummary[] = result.map((row) => {
+            const labels = labelMap.get(String(row.id)) ?? [];
+            const labelIds = labels.map((label) => label.id);
+
+            return {
+              id: String(row.id),
+              historyId: null,
+              latestSender: row.latestSender ?? null,
+              latestSubject: row.latestSubject ?? null,
+              latestReceivedOn: row.latestReceivedOn ?? null,
+              hasUnread: labelIds.includes('UNREAD'),
+              isStarred: labelIds.includes('STARRED'),
+              isImportant: labelIds.includes('IMPORTANT'),
+              labelIds,
+              snippet: row.latestSubject ?? null,
+              hasDraft: false,
+              summaryUpdatedAt: row.latestReceivedOn ?? null,
+            };
+          });
+
           const nextPageToken =
             threads.length === maxResults && result.length > 0
-              ? String(result[result.length - 1].latest_received_on)
+              ? String(result[result.length - 1].latestReceivedOn)
               : null;
 
           return {
             threads,
             nextPageToken,
-          };
-        }
-        return {
-          threads: [],
-          nextPageToken: '',
-        };
-      }),
+          } satisfies IGetThreadsResponse;
+        }),
+      ),
       Effect.catchAll((error) =>
         Effect.sync(() => {
           console.error('Failed to get threads from database:', error);
@@ -1470,6 +1475,7 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
         totalReplies: messages.filter((e) => e.isDraft !== true).length,
         labels: labelsList,
         isLatestDraft,
+        threadDetailUpdatedAt: result.latestReceivedOn ?? null,
       } satisfies IGetThreadResponse;
     } catch (error) {
       console.error('Failed to get thread from database:', error);
@@ -1866,11 +1872,12 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
         const googleModelId = validateModelId('google', this.env.DEFAULT_MODEL || 'gemini-2.5-flash');
         const openAIModelId = validateModelId('openai', this.env.OPENAI_MODEL || 'gpt-4o');
         const anthropicModelId = validateModelId('anthropic', 'claude-3-5-sonnet-latest');
+        const openRouterApiKey = this.env.OPENROUTER_API_SECRET ?? this.env.OPENROUTER_API_KEY;
         const model =
-          this.env.OPENROUTER_API_KEY
+          openRouterApiKey
             ? openai(openRouterModelId, {
               baseURL: 'https://openrouter.ai/api/v1',
-              apiKey: this.env.OPENROUTER_API_KEY,
+              apiKey: openRouterApiKey,
             })
             : this.env.GOOGLE_GENERATIVE_AI_API_KEY
               ? google(googleModelId)

@@ -209,7 +209,7 @@ aiRouter.post('/chat', async (c) => {
   const parsed = chatRequestSchema.safeParse(body);
   if (!parsed.success) return c.json({ error: 'Invalid request' }, 400);
 
-  const apiKey = env.OPENROUTER_API_KEY;
+  const apiKey = env.OPENROUTER_API_SECRET ?? env.OPENROUTER_API_KEY;
   if (!apiKey) return c.json({ error: 'AI not configured' }, 503);
 
   const model = parsed.data.model || env.DEFAULT_MODEL || 'openai/gpt-4.1-mini';
@@ -286,7 +286,11 @@ aiRouter.post('/chat', async (c) => {
     console.warn('[AIProfile] Failed to inject AI profile into /ai/chat for user:', user.id, error);
   }
 
-  // Proxy the request to OpenRouter as SSE
+  // Respect the `stream` flag from the request — non-streaming mode is used by
+  // NotificationDigestService (and any other caller that needs a plain JSON response).
+  const shouldStream = parsed.data.stream !== false;
+
+  // Proxy the request to OpenRouter
   const upstreamResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -298,7 +302,7 @@ aiRouter.post('/chat', async (c) => {
     body: JSON.stringify({
       model,
       messages: enrichedMessages,
-      stream: true,
+      stream: shouldStream,
       // Include tool definitions for task mutations
       tools: [
         {
@@ -413,6 +417,37 @@ aiRouter.post('/chat', async (c) => {
   const mem0LastUserMsg = parsed.data.messages.filter((m) => m.role === 'user').pop();
   let assistantText = '';
   const userId = user.id;
+  const persistConversationMemory = async (assistantContent: string) => {
+    if (!mem0Key || !userId || !mem0LastUserMsg || assistantContent.length <= 10) return;
+
+    await addMemories(mem0Key, userId, [
+      { role: 'user', content: mem0LastUserMsg.content },
+      { role: 'assistant', content: assistantContent },
+    ]);
+    await invalidateMemoryCache(userId, env.prompts_storage);
+    await preloadMemories(userId, env.prompts_storage, mem0Key);
+  };
+
+  // ── Non-streaming path — preserve the same memory + source behaviour ─────
+  if (!shouldStream) {
+    const responseData = (await upstreamResponse.json()) as Record<string, any>;
+    const assistantContent =
+      typeof responseData?.choices?.[0]?.message?.content === 'string'
+        ? responseData.choices[0].message.content
+        : '';
+
+    if (assistantContent) {
+      const storePromise = persistConversationMemory(assistantContent).catch((error) => {
+        console.warn('[Mem0] Non-stream memory storage failed:', error);
+      });
+      c.executionCtx?.waitUntil?.(storePromise);
+    }
+
+    return c.json({
+      ...responseData,
+      searchSources,
+    });
+  }
 
   const responseStream = new ReadableStream({
     async start(controller) {
@@ -493,18 +528,9 @@ aiRouter.post('/chat', async (c) => {
 
         // 3. Mem0: store conversation memory after stream completes (fire-and-forget)
         if (mem0Key && userId && mem0LastUserMsg && assistantText.length > 10) {
-          const storePromise = (async () => {
-            try {
-              await addMemories(mem0Key, userId, [
-                { role: 'user', content: mem0LastUserMsg.content },
-                { role: 'assistant', content: assistantText },
-              ]);
-              await invalidateMemoryCache(userId, env.prompts_storage);
-              await preloadMemories(userId, env.prompts_storage, mem0Key);
-            } catch (error) {
-              console.warn('[Mem0] Post-stream memory storage failed:', error);
-            }
-          })();
+          const storePromise = persistConversationMemory(assistantText).catch((error) => {
+            console.warn('[Mem0] Post-stream memory storage failed:', error);
+          });
           c.executionCtx?.waitUntil?.(storePromise);
         }
 
@@ -618,9 +644,8 @@ aiRouter.get('/voice-ws', async (c) => {
   // Return the 101 Switching Protocols response with the client-side WebSocket
   return new Response(null, {
     status: 101,
-    // @ts-expect-error — CF Workers WebSocket API: webSocket property on Response
     webSocket: clientWs,
-  });
+  } as ResponseInit & { webSocket: WebSocket });
 });
 
 // Add CORS headers for /do/* routes

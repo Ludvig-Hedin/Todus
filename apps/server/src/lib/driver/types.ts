@@ -10,6 +10,7 @@ export interface IGetThreadResponse {
   totalReplies: number;
   labels: { id: string; name: string }[];
   isLatestDraft?: boolean;
+  threadDetailUpdatedAt?: string | null;
 }
 
 export const IGetThreadResponseSchema = z.object({
@@ -18,6 +19,49 @@ export const IGetThreadResponseSchema = z.object({
   hasUnread: z.boolean(),
   totalReplies: z.number(),
   labels: z.array(z.object({ id: z.string(), name: z.string() })),
+  isLatestDraft: z.boolean().optional(),
+  threadDetailUpdatedAt: z.string().nullable().optional(),
+});
+
+export interface ThreadSummary {
+  id: string;
+  historyId: string | null;
+  latestSender?: {
+    name?: string;
+    email: string;
+  } | null;
+  latestSubject?: string | null;
+  latestReceivedOn?: string | null;
+  hasUnread?: boolean;
+  isStarred?: boolean;
+  isImportant?: boolean;
+  labelIds?: string[];
+  snippet?: string | null;
+  hasDraft?: boolean;
+  summaryUpdatedAt?: string | null;
+  $raw?: unknown;
+}
+
+const threadSummarySchema = z.object({
+  id: z.string(),
+  historyId: z.string().nullable(),
+  latestSender: z
+    .object({
+      name: z.string().optional(),
+      email: z.string(),
+    })
+    .nullable()
+    .optional(),
+  latestSubject: z.string().nullable().optional(),
+  latestReceivedOn: z.string().nullable().optional(),
+  hasUnread: z.boolean().optional(),
+  isStarred: z.boolean().optional(),
+  isImportant: z.boolean().optional(),
+  labelIds: z.array(z.string()).optional(),
+  snippet: z.string().nullable().optional(),
+  hasDraft: z.boolean().optional(),
+  summaryUpdatedAt: z.string().nullable().optional(),
+  $raw: z.unknown().optional(),
 });
 
 export interface ParsedDraft {
@@ -120,17 +164,11 @@ export interface MailManager {
 }
 
 export interface IGetThreadsResponse {
-  threads: { id: string; historyId: string | null; $raw?: unknown }[];
+  threads: ThreadSummary[];
   nextPageToken: string | null;
 }
 
 export const IGetThreadsResponseSchema = z.object({
-  threads: z.array(
-    z.object({
-      id: z.string(),
-      historyId: z.string().nullable(),
-      $raw: z.unknown().optional(),
-    }),
-  ),
+  threads: z.array(threadSummarySchema),
   nextPageToken: z.string().nullable(),
 });

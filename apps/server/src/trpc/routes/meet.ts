@@ -1,17 +1,90 @@
 import { meeting, meetingMedia, meetingTranscript, meetIntegration } from '../../db/schema';
 import { privateProcedure, createRateLimiterMiddleware, router } from '../trpc';
-import { createRecallBot, cancelBot, getBotTranscript } from '../../lib/recall';
-import { eq, and, desc, gte, lte, inArray, sql } from 'drizzle-orm';
+import { eq, and, desc, gte, lte, inArray, sql, isNull } from 'drizzle-orm';
+import { createRecallBot, cancelBot } from '../../lib/recall';
+import { pruneExpiredMeetingRecordings } from '../../lib/meeting-retention';
 import { isProCustomer } from '../../lib/utils';
 import { Ratelimit } from '@upstash/ratelimit';
 import { TRPCError } from '@trpc/server';
-import { Autumn } from 'autumn-js';
 import { createDb } from '../../db';
+import { Autumn } from 'autumn-js';
 import { env } from '../../env';
 import { z } from 'zod';
 
 // Helper to get a direct Drizzle DB connection
 const getDb = () => createDb(env.HYPERDRIVE.connectionString);
+
+type Db = ReturnType<typeof createDb>['db'];
+type RecallBotResult = {
+  id: string;
+  meeting_url_id?: string | null;
+};
+
+async function claimMeetingForBotScheduling(db: Db, meetingId: string, userId: string) {
+  const [claimed] = await db
+    .update(meeting)
+    .set({
+      status: 'bot_joining',
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(meeting.id, meetingId),
+        eq(meeting.userId, userId),
+        eq(meeting.status, 'scheduled'),
+        isNull(meeting.recallBotId),
+      ),
+    )
+    .returning({ id: meeting.id });
+
+  return !!claimed;
+}
+
+async function releasePendingBotClaim(db: Db, meetingId: string, userId: string) {
+  await db
+    .update(meeting)
+    .set({
+      status: 'scheduled',
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(meeting.id, meetingId),
+        eq(meeting.userId, userId),
+        eq(meeting.status, 'bot_joining'),
+        isNull(meeting.recallBotId),
+      ),
+    );
+}
+
+async function persistScheduledBot(
+  db: Db,
+  meetingId: string,
+  userId: string,
+  botId: string,
+  meetingUrlId: string | null | undefined,
+  isScheduledForFuture: boolean,
+) {
+  const [updated] = await db
+    .update(meeting)
+    .set({
+      recallBotId: botId,
+      recallMeetingId: meetingUrlId ?? botId,
+      status: isScheduledForFuture ? 'scheduled' : 'bot_joining',
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(meeting.id, meetingId),
+        eq(meeting.userId, userId),
+        eq(meeting.status, 'bot_joining'),
+        isNull(meeting.recallBotId),
+      ),
+    )
+    .returning();
+
+  return updated;
+}
 
 type MeetResponse = {
   success: boolean;
@@ -94,12 +167,18 @@ export const meetRouter = router({
         isEnabled: z.boolean().optional(),
         autoJoin: z.boolean().optional(),
         joinEarlyMinutes: z.number().int().min(0).max(10).optional(),
+        autoGenerateSummary: z.boolean().optional(),
+        summaryLanguage: z.string().min(2).max(5).optional(),
+        excludeAllDay: z.boolean().optional(),
+        minimumDurationMinutes: z.number().int().min(0).max(120).optional(),
+        notifyOnRecordingStart: z.boolean().optional(),
+        notifyOnRecapReady: z.boolean().optional(),
+        autoDeleteDays: z.number().int().min(0).max(365).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
       const { db, conn } = getDb();
       try {
-        // Check if integration exists
         const [existing] = await db
           .select()
           .from(meetIntegration)
@@ -107,11 +186,11 @@ export const meetRouter = router({
           .limit(1);
 
         if (existing) {
+          // Build update object from all provided fields
           const updates: Record<string, unknown> = {};
-          if (input.botName !== undefined) updates.botName = input.botName;
-          if (input.isEnabled !== undefined) updates.isEnabled = input.isEnabled;
-          if (input.autoJoin !== undefined) updates.autoJoin = input.autoJoin;
-          if (input.joinEarlyMinutes !== undefined) updates.joinEarlyMinutes = input.joinEarlyMinutes;
+          for (const [key, value] of Object.entries(input)) {
+            if (value !== undefined) updates[key] = value;
+          }
 
           const [updated] = await db
             .update(meetIntegration)
@@ -126,10 +205,17 @@ export const meetRouter = router({
           .values({
             id: crypto.randomUUID(),
             userId: ctx.sessionUser.id,
-            botName: input.botName || 'Note Taker',
+            botName: input.botName || 'Notetaker',
             isEnabled: input.isEnabled ?? true,
             autoJoin: input.autoJoin ?? false,
             joinEarlyMinutes: input.joinEarlyMinutes ?? 1,
+            autoGenerateSummary: input.autoGenerateSummary ?? true,
+            summaryLanguage: input.summaryLanguage ?? 'en',
+            excludeAllDay: input.excludeAllDay ?? true,
+            minimumDurationMinutes: input.minimumDurationMinutes ?? 5,
+            notifyOnRecordingStart: input.notifyOnRecordingStart ?? true,
+            notifyOnRecapReady: input.notifyOnRecapReady ?? true,
+            autoDeleteDays: input.autoDeleteDays ?? 0,
           })
           .returning();
         return { integration: created };
@@ -145,7 +231,15 @@ export const meetRouter = router({
       z
         .object({
           status: z
-            .enum(['scheduled', 'bot_joining', 'recording', 'processing', 'ready', 'failed', 'cancelled'])
+            .enum([
+              'scheduled',
+              'bot_joining',
+              'recording',
+              'processing',
+              'ready',
+              'failed',
+              'cancelled',
+            ])
             .optional(),
           search: z.string().optional(),
           from: z.string().datetime().optional(),
@@ -159,6 +253,23 @@ export const meetRouter = router({
     .query(async ({ ctx, input }) => {
       const { db, conn } = getDb();
       try {
+        const [integration] = await db
+          .select({
+            id: meetIntegration.id,
+            autoDeleteDays: meetIntegration.autoDeleteDays,
+            lastPrunedAt: meetIntegration.lastPrunedAt,
+          })
+          .from(meetIntegration)
+          .where(eq(meetIntegration.userId, ctx.sessionUser.id))
+          .limit(1);
+
+        await pruneExpiredMeetingRecordings(db, {
+          integrationId: integration?.id,
+          userId: ctx.sessionUser.id,
+          autoDeleteDays: integration?.autoDeleteDays,
+          lastPrunedAt: integration?.lastPrunedAt,
+        });
+
         const conditions = [eq(meeting.userId, ctx.sessionUser.id)];
 
         if (input.status) conditions.push(eq(meeting.status, input.status));
@@ -190,6 +301,23 @@ export const meetRouter = router({
     .query(async ({ ctx, input }) => {
       const { db, conn } = getDb();
       try {
+        const [integration] = await db
+          .select({
+            id: meetIntegration.id,
+            autoDeleteDays: meetIntegration.autoDeleteDays,
+            lastPrunedAt: meetIntegration.lastPrunedAt,
+          })
+          .from(meetIntegration)
+          .where(eq(meetIntegration.userId, ctx.sessionUser.id))
+          .limit(1);
+
+        await pruneExpiredMeetingRecordings(db, {
+          integrationId: integration?.id,
+          userId: ctx.sessionUser.id,
+          autoDeleteDays: integration?.autoDeleteDays,
+          lastPrunedAt: integration?.lastPrunedAt,
+        });
+
         const [meetingRow] = await db
           .select()
           .from(meeting)
@@ -321,7 +449,10 @@ export const meetRouter = router({
         }
 
         if (meetingRow.recallBotId) {
-          throw new TRPCError({ code: 'BAD_REQUEST', message: 'Bot already scheduled for this meeting' });
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'Bot already scheduled for this meeting',
+          });
         }
 
         // Get bot name from integration settings
@@ -340,35 +471,55 @@ export const meetRouter = router({
         // If meeting starts in more than 2 minutes, schedule for the future
         const startAtISO = minutesUntilStart > 2 ? startsAt.toISOString() : undefined;
 
-        const result = await createRecallBot(
-          {
-            meetingUrl: meetingRow.meetUrl,
-            botName,
-            startAtISO,
-            metadata: { meeting_id: meetingRow.id, user_id: ctx.sessionUser.id },
-          },
-          env,
-        );
-
-        // Update meeting with bot info — if this fails, cancel the bot to avoid orphans
-        let updated;
-        try {
-          [updated] = await db
-            .update(meeting)
-            .set({
-              recallBotId: result.id,
-              recallMeetingId: result.meeting_url_id ?? result.id,
-              status: startAtISO ? 'scheduled' : 'bot_joining',
-            })
-            .where(eq(meeting.id, meetingRow.id))
-            .returning();
-        } catch (dbErr) {
-          // Cancel the bot to prevent it from joining without a DB record
-          try { await cancelBot(result.id, env); } catch (_) { /* best effort */ }
-          throw dbErr;
+        const claimed = await claimMeetingForBotScheduling(db, meetingRow.id, ctx.sessionUser.id);
+        if (!claimed) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'Bot already scheduled for this meeting',
+          });
         }
 
-        return { meeting: updated, botId: result.id };
+        let result: RecallBotResult;
+        try {
+          result = await createRecallBot(
+            {
+              meetingUrl: meetingRow.meetUrl,
+              botName,
+              startAtISO,
+              metadata: { meeting_id: meetingRow.id, user_id: ctx.sessionUser.id },
+            },
+            env,
+          );
+        } catch (createErr) {
+          await releasePendingBotClaim(db, meetingRow.id, ctx.sessionUser.id);
+          throw createErr;
+        }
+
+        try {
+          const updated = await persistScheduledBot(
+            db,
+            meetingRow.id,
+            ctx.sessionUser.id,
+            result.id,
+            result.meeting_url_id,
+            !!startAtISO,
+          );
+
+          if (!updated) {
+            throw new Error('Failed to persist scheduled bot');
+          }
+
+          return { meeting: updated, botId: result.id };
+        } catch (dbErr) {
+          // Cancel the bot to prevent it from joining without a DB record
+          try {
+            await cancelBot(result.id, env);
+          } catch {
+            /* best effort */
+          }
+          await releasePendingBotClaim(db, meetingRow.id, ctx.sessionUser.id);
+          throw dbErr;
+        }
       } finally {
         await conn.end();
       }
@@ -390,7 +541,10 @@ export const meetRouter = router({
         }
 
         if (!meetingRow.recallBotId) {
-          throw new TRPCError({ code: 'BAD_REQUEST', message: 'No bot scheduled for this meeting' });
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'No bot scheduled for this meeting',
+          });
         }
 
         // Cancel the bot via Recall API
@@ -442,7 +596,10 @@ export const meetRouter = router({
           .orderBy(meetingTranscript.startTime);
 
         if (transcripts.length === 0) {
-          throw new TRPCError({ code: 'BAD_REQUEST', message: 'No transcript available to summarize' });
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'No transcript available to summarize',
+          });
         }
 
         // Build transcript text for the AI
@@ -480,7 +637,7 @@ ${transcriptText.slice(0, 30000)}`; // Cap at ~30k chars to stay within context
 
         // Parse AI response
         let summary = '';
-        let actionItems: any[] = [];
+        let actionItems: unknown[] = [];
         try {
           const parsed = JSON.parse(result.text);
           summary = parsed.summary || '';
@@ -594,7 +751,10 @@ ${transcriptText.slice(0, 30000)}`; // Cap at ~30k chars to stay within context
       let accessToken = googleConn.accessToken;
       if (googleConn.expiresAt && new Date(googleConn.expiresAt) < new Date()) {
         if (!googleConn.refreshToken) {
-          throw new TRPCError({ code: 'BAD_REQUEST', message: 'Google token expired. Please reconnect.' });
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'Google token expired. Please reconnect.',
+          });
         }
         // Refresh the token
         const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
@@ -643,7 +803,10 @@ ${transcriptText.slice(0, 30000)}`; // Cap at ~30k chars to stay within context
       if (!calendarRes.ok) {
         const errText = await calendarRes.text();
         console.error('[MEET_SYNC] Calendar API error:', errText);
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to fetch calendar events' });
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Failed to fetch calendar events',
+        });
       }
 
       const calendarData = await calendarRes.json<{
@@ -670,7 +833,15 @@ ${transcriptText.slice(0, 30000)}`; // Cap at ~30k chars to stay within context
 
       // Get user's integration
       const [integration] = await db
-        .select()
+        .select({
+          id: meetIntegration.id,
+          botName: meetIntegration.botName,
+          autoJoin: meetIntegration.autoJoin,
+          excludeAllDay: meetIntegration.excludeAllDay,
+          minimumDurationMinutes: meetIntegration.minimumDurationMinutes,
+          autoDeleteDays: meetIntegration.autoDeleteDays,
+          lastPrunedAt: meetIntegration.lastPrunedAt,
+        })
         .from(meetIntegration)
         .where(eq(meetIntegration.userId, ctx.sessionUser.id))
         .limit(1);
@@ -692,7 +863,15 @@ ${transcriptText.slice(0, 30000)}`; // Cap at ~30k chars to stay within context
           : [];
       const existingByEventId = new Map(existingMeetings.map((m) => [m.googleEventId, m]));
 
+      // Determine auto-record preferences
+      const shouldAutoRecord = integration?.autoJoin ?? false;
+      const excludeAllDay = integration?.excludeAllDay ?? true;
+      const minDuration = integration?.minimumDurationMinutes ?? 5;
+      const botName = integration?.botName || 'Notetaker';
+
       let synced = 0;
+      const newMeetingIds: { id: string; meetUrl: string; startsAt: Date }[] = [];
+
       for (const event of meetEvents) {
         const meetUrl =
           event.hangoutLink ||
@@ -703,17 +882,25 @@ ${transcriptText.slice(0, 30000)}`; // Cap at ~30k chars to stay within context
 
         if (!meetUrl) continue;
 
-        // Validate start date before inserting — skip events with unparseable dates
+        // All-day events use event.start.date (no dateTime) — skip if setting enabled
+        const isAllDay = !event.start?.dateTime && !!event.start?.date;
+        if (isAllDay && excludeAllDay) continue;
+
         const startDateRaw = event.start?.dateTime || event.start?.date;
         if (!startDateRaw) continue;
         const startsAt = new Date(startDateRaw);
         if (isNaN(startsAt.getTime())) continue;
         const endsAt = event.end?.dateTime ? new Date(event.end.dateTime) : null;
 
+        // Skip meetings shorter than minimum duration
+        if (endsAt && minDuration > 0) {
+          const durationMinutes = (endsAt.getTime() - startsAt.getTime()) / (1000 * 60);
+          if (durationMinutes < minDuration) continue;
+        }
+
         const existing = existingByEventId.get(event.id);
 
         if (existing) {
-          // Update title/times if changed
           await db
             .update(meeting)
             .set({
@@ -723,10 +910,14 @@ ${transcriptText.slice(0, 30000)}`; // Cap at ~30k chars to stay within context
               participants: event.attendees || null,
             })
             .where(eq(meeting.id, existing.id));
+
+          if (shouldAutoRecord && !existing.recallBotId && existing.status === 'scheduled' && startsAt > now) {
+            newMeetingIds.push({ id: existing.id, meetUrl, startsAt });
+          }
         } else {
-          // Create new meeting
+          const newId = crypto.randomUUID();
           await db.insert(meeting).values({
-            id: crypto.randomUUID(),
+            id: newId,
             userId: ctx.sessionUser.id,
             integrationId: integration?.id || null,
             googleEventId: event.id,
@@ -742,10 +933,84 @@ ${transcriptText.slice(0, 30000)}`; // Cap at ~30k chars to stay within context
             updatedAt: new Date(),
           });
           synced++;
+
+          // Track new upcoming meetings for auto-record
+          if (shouldAutoRecord && startsAt > now) {
+            newMeetingIds.push({ id: newId, meetUrl, startsAt });
+          }
         }
       }
 
-      return { synced, total: meetEvents.length };
+      // Auto-schedule recording for new upcoming meetings
+      let autoRecorded = 0;
+      for (const m of newMeetingIds) {
+        try {
+          const claimed = await claimMeetingForBotScheduling(db, m.id, ctx.sessionUser.id);
+          if (!claimed) {
+            continue;
+          }
+
+          const minutesUntilStart = (m.startsAt.getTime() - now.getTime()) / (1000 * 60);
+          const startAtISO = minutesUntilStart > 2 ? m.startsAt.toISOString() : undefined;
+
+          let result: RecallBotResult;
+          try {
+            result = await createRecallBot(
+              {
+                meetingUrl: m.meetUrl,
+                botName,
+                startAtISO,
+                metadata: { meeting_id: m.id, user_id: ctx.sessionUser.id },
+              },
+              env,
+            );
+          } catch (createErr) {
+            await releasePendingBotClaim(db, m.id, ctx.sessionUser.id);
+            throw createErr;
+          }
+
+          try {
+            const updated = await persistScheduledBot(
+              db,
+              m.id,
+              ctx.sessionUser.id,
+              result.id,
+              result.meeting_url_id,
+              !!startAtISO,
+            );
+
+            if (!updated) {
+              throw new Error('Failed to persist scheduled bot');
+            }
+          } catch (dbErr) {
+            try {
+              await cancelBot(result.id, env);
+            } catch (cancelErr) {
+              console.warn('[MEET_SYNC] Failed to cancel bot after DB update error:', {
+                meetingId: m.id,
+                botId: result.id,
+                error: cancelErr,
+              });
+            }
+            await releasePendingBotClaim(db, m.id, ctx.sessionUser.id);
+            throw dbErr;
+          }
+
+          autoRecorded++;
+        } catch (botErr) {
+          // Auto-record is best-effort — don't fail the sync
+          console.warn('[MEET_SYNC] Failed to auto-schedule bot for meeting:', m.id, botErr);
+        }
+      }
+
+      await pruneExpiredMeetingRecordings(db, {
+        integrationId: integration?.id,
+        userId: ctx.sessionUser.id,
+        autoDeleteDays: integration?.autoDeleteDays,
+        lastPrunedAt: integration?.lastPrunedAt,
+      });
+
+      return { synced, total: meetEvents.length, autoRecorded };
     } finally {
       await conn.end();
     }
@@ -758,6 +1023,7 @@ function formatMs(ms: number): string {
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = totalSeconds % 60;
-  if (hours > 0) return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  if (hours > 0)
+    return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
   return `${minutes}:${String(seconds).padStart(2, '0')}`;
 }

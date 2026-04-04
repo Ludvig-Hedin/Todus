@@ -97,6 +97,7 @@ export const account = createTable(
     updatedAt: timestamp('updated_at').notNull(),
   },
   (t) => [
+    unique('account_provider_account_id_unique').on(t.providerId, t.accountId),
     index('account_user_id_idx').on(t.userId),
     index('account_provider_user_id_idx').on(t.providerId, t.userId),
     index('account_expires_at_idx').on(t.accessTokenExpiresAt),
@@ -159,6 +160,8 @@ export const connection = createTable(
     refreshToken: text('refresh_token'),
     scope: text('scope').notNull(),
     providerId: text('provider_id').$type<'google' | 'microsoft'>().notNull(),
+    /** Hex color for multi-account visual differentiation (e.g. "#007AFF") */
+    color: text('color'),
     expiresAt: timestamp('expires_at').notNull(),
     createdAt: timestamp('created_at').notNull(),
     updatedAt: timestamp('updated_at').notNull(),
@@ -234,6 +237,37 @@ export const userSettings = createTable(
   (t) => [index('user_settings_settings_idx').on(t.settings)],
 );
 
+export const marketingEmailDelivery = createTable(
+  'marketing_email_delivery',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id').references(() => user.id, { onDelete: 'cascade' }),
+    campaign: text('campaign').notNull(),
+    emailKey: text('email_key').notNull(),
+    subject: text('subject').notNull(),
+    recipientEmail: text('recipient_email').notNull(),
+    recipientEmailNormalized: text('recipient_email_normalized').notNull(),
+    sendOnDate: text('send_on_date').notNull(),
+    scheduledFor: timestamp('scheduled_for').notNull(),
+    resendId: text('resend_id'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    sentAt: timestamp('sent_at'),
+  },
+  (t) => [
+    unique('marketing_email_delivery_campaign_key_unique').on(
+      t.campaign,
+      t.recipientEmailNormalized,
+      t.emailKey,
+    ),
+    unique('marketing_email_delivery_daily_limit_unique').on(
+      t.recipientEmailNormalized,
+      t.sendOnDate,
+    ),
+    index('marketing_email_delivery_user_id_idx').on(t.userId),
+    index('marketing_email_delivery_send_on_date_idx').on(t.sendOnDate),
+  ],
+);
+
 // ─── Assistant State ─────────────────────────────────────────────────────────
 // Durable second-brain state used by briefings, prepared actions, people memory,
 // and cross-surface assistant context.
@@ -260,14 +294,19 @@ export const assistantOpenLoop = createTable(
     queue: text('queue')
       .$type<'needs_you' | 'waiting_on' | 'scheduling' | 'drafts_ready' | 'likely_dropped'>()
       .notNull(),
-    status: text('status').$type<'open' | 'snoozed' | 'done' | 'dismissed'>().notNull().default('open'),
+    status: text('status')
+      .$type<'open' | 'snoozed' | 'done' | 'dismissed'>()
+      .notNull()
+      .default('open'),
     title: text('title').notNull(),
     summary: text('summary').notNull(),
     confidencePct: integer('confidence_pct').notNull().default(50),
     reason: text('reason').notNull().default(''),
     suggestedActionLabel: text('suggested_action_label'),
     sourceThreadId: text('source_thread_id'),
-    sourceMeetingId: text('source_meeting_id').references(() => meeting.id, { onDelete: 'set null' }),
+    sourceMeetingId: text('source_meeting_id').references(() => meeting.id, {
+      onDelete: 'set null',
+    }),
     sourceTaskId: text('source_task_id').references(() => task.id, { onDelete: 'set null' }),
     sourceEventId: text('source_event_id'),
     personEmail: text('person_email'),
@@ -315,7 +354,9 @@ export const assistantPreparedAction = createTable(
     preview: text('preview'),
     payload: jsonb('payload').$type<unknown>().notNull().default({}),
     sourceThreadId: text('source_thread_id'),
-    sourceMeetingId: text('source_meeting_id').references(() => meeting.id, { onDelete: 'set null' }),
+    sourceMeetingId: text('source_meeting_id').references(() => meeting.id, {
+      onDelete: 'set null',
+    }),
     personEmail: text('person_email'),
     workstreamKey: text('workstream_key'),
     evidence: jsonb('evidence').$type<unknown>().notNull().default([]),
@@ -511,7 +552,9 @@ export const oauthAccessToken = createTable(
     refreshToken: text('refresh_token').unique(),
     accessTokenExpiresAt: timestamp('access_token_expires_at'),
     refreshTokenExpiresAt: timestamp('refresh_token_expires_at'),
-    clientId: text('client_id').references(() => oauthApplication.clientId, { onDelete: 'cascade' }),
+    clientId: text('client_id').references(() => oauthApplication.clientId, {
+      onDelete: 'cascade',
+    }),
     userId: text('user_id').references(() => user.id, { onDelete: 'cascade' }),
     scopes: text('scopes'),
     createdAt: timestamp('created_at'),
@@ -528,7 +571,9 @@ export const oauthConsent = createTable(
   'oauth_consent',
   {
     id: text('id').primaryKey(),
-    clientId: text('client_id').references(() => oauthApplication.clientId, { onDelete: 'cascade' }),
+    clientId: text('client_id').references(() => oauthApplication.clientId, {
+      onDelete: 'cascade',
+    }),
     userId: text('user_id').references(() => user.id, { onDelete: 'cascade' }),
     scopes: text('scopes'),
     createdAt: timestamp('created_at'),
@@ -588,7 +633,9 @@ export const meeting = createTable(
     botJoinedAt: timestamp('bot_joined_at'),
     botLeftAt: timestamp('bot_left_at'),
     status: text('status')
-      .$type<'scheduled' | 'bot_joining' | 'recording' | 'processing' | 'ready' | 'failed' | 'cancelled'>()
+      .$type<
+        'scheduled' | 'bot_joining' | 'recording' | 'processing' | 'ready' | 'failed' | 'cancelled'
+      >()
       .notNull()
       .default('scheduled'),
     errorMessage: text('error_message'),
@@ -619,9 +666,7 @@ export const meetingMedia = createTable(
     meetingId: text('meeting_id')
       .notNull()
       .references(() => meeting.id, { onDelete: 'cascade' }),
-    mediaType: text('media_type')
-      .$type<'audio_mixed' | 'video_mixed' | 'transcript'>()
-      .notNull(),
+    mediaType: text('media_type').$type<'audio_mixed' | 'video_mixed' | 'transcript'>().notNull(),
     recallMediaId: text('recall_media_id').unique(),
     url: text('url').notNull(),
     fileName: text('file_name'),
@@ -674,9 +719,7 @@ export const taskFolder = createTable(
     name: text('name').notNull(),
     createdAt: timestamp('created_at').notNull().defaultNow(),
   },
-  (t) => [
-    index('task_folder_user_id_idx').on(t.userId),
-  ],
+  (t) => [index('task_folder_user_id_idx').on(t.userId)],
 );
 
 export const task = createTable(
@@ -689,7 +732,10 @@ export const task = createTable(
     title: text('title').notNull(),
     description: text('description').default(''),
     status: text('status').$type<'todo' | 'doing' | 'done'>().notNull().default('todo'),
-    priority: text('priority').$type<'none' | 'low' | 'medium' | 'high'>().notNull().default('none'),
+    priority: text('priority')
+      .$type<'none' | 'low' | 'medium' | 'high'>()
+      .notNull()
+      .default('none'),
     dueDate: timestamp('due_date'),
     folderId: text('folder_id').references(() => taskFolder.id, { onDelete: 'set null' }),
     reminderIdentifier: text('reminder_identifier'),
@@ -773,8 +819,8 @@ export const sharedConversation = createTable(
     passwordHash: text('password_hash'),
     // Base64-encoded 16-byte random salt, stored alongside hash
     passwordSalt: text('password_salt'),
-    expiresAt: timestamp('expires_at'),    // null = never expires
-    revokedAt: timestamp('revoked_at'),    // null = active; set to disable the link
+    expiresAt: timestamp('expires_at'), // null = never expires
+    revokedAt: timestamp('revoked_at'), // null = active; set to disable the link
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at')
       .notNull()
@@ -799,12 +845,12 @@ export const group = createTable(
       .notNull()
       .references(() => user.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
-    slug: text('slug').notNull().unique(),                // display URL: /g/[slug]
+    slug: text('slug').notNull().unique(), // display URL: /g/[slug]
     inviteToken: text('invite_token').notNull().unique(), // opaque join token
     // 'mention' = AI responds only when @ai appears; 'always' = responds to every message
     aiMode: text('ai_mode').$type<'mention' | 'always'>().notNull().default('mention'),
     maxMembers: integer('max_members').notNull().default(20),
-    deletedAt: timestamp('deleted_at'),                   // soft-delete
+    deletedAt: timestamp('deleted_at'), // soft-delete
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at')
       .notNull()
@@ -844,8 +890,7 @@ export const groupMessage = createTable(
     groupId: text('group_id')
       .notNull()
       .references(() => group.id, { onDelete: 'cascade' }),
-    senderUserId: text('sender_user_id')
-      .references(() => user.id, { onDelete: 'set null' }), // null for AI / system messages
+    senderUserId: text('sender_user_id').references(() => user.id, { onDelete: 'set null' }), // null for AI / system messages
     senderType: text('sender_type').$type<'user' | 'ai' | 'system'>().notNull(),
     content: text('content').notNull(),
     createdAt: timestamp('created_at').notNull().defaultNow(),

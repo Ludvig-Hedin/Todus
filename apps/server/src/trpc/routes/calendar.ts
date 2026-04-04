@@ -9,7 +9,7 @@
  *   calendar.events — list events for a given time window
  *   calendar.calendars — list the user's calendar list (for multi-cal support)
  */
-import { activeConnectionProcedure, router } from '../trpc';
+import { activeConnectionProcedure, multiConnectionProcedure, router } from '../trpc';
 import { OAuth2Client } from 'google-auth-library';
 import { TRPCError } from '@trpc/server';
 import { env } from '../../env';
@@ -235,4 +235,115 @@ export const calendarRouter = router({
 
     return { calendars, scopeMissing: false };
   }),
+
+  /** Fetch calendar events from ALL connections in parallel — for unified calendar view */
+  eventsMulti: multiConnectionProcedure
+    .input(
+      z.object({
+        timeMin: z.string(),
+        timeMax: z.string(),
+        calendarId: z.string().optional().default('primary'),
+        maxResults: z.number().min(1).max(250).optional().default(100),
+        /** Filter to specific connection IDs (omit for all) */
+        connectionIds: z.array(z.string()).optional(),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const { connections } = ctx;
+
+      // Filter to requested connections, or use all
+      const targetConnections = input.connectionIds
+        ? connections.filter((c) => input.connectionIds!.includes(c.id))
+        : connections;
+
+      // Only Google connections support Calendar API
+      const googleConnections = targetConnections.filter(
+        (c) => c.providerId === 'google' && c.refreshToken,
+      );
+
+      const results = await Promise.allSettled(
+        googleConnections.map(async (conn) => {
+          const auth = buildAuthClient(conn.refreshToken!);
+
+          let data: GCalEventsResponse;
+          try {
+            data = await calendarFetch<GCalEventsResponse>(
+              auth,
+              `/calendars/${encodeURIComponent(input.calendarId)}/events`,
+              {
+                timeMin: input.timeMin,
+                timeMax: input.timeMax,
+                maxResults: String(input.maxResults),
+                singleEvents: 'true',
+                orderBy: 'startTime',
+              },
+            );
+          } catch (err) {
+            if (err instanceof CalendarScopeMissingError) {
+              return { connectionId: conn.id, connectionEmail: conn.email, connectionColor: conn.color, events: [], scopeMissing: true };
+            }
+            throw err;
+          }
+
+          const events = (data.items ?? [])
+            .filter((e) => e.status !== 'cancelled')
+            .flatMap((e) => {
+              const startTime = e.start.dateTime ?? e.start.date;
+              const endTime = e.end.dateTime ?? e.end.date;
+              if (!startTime || !endTime) return [];
+
+              return [{
+                id: e.id,
+                title: e.summary ?? '(No title)',
+                description: e.description ?? null,
+                location: e.location ?? null,
+                startTime,
+                endTime,
+                allDay: !e.start.dateTime,
+                color: e.colorId ? (GOOGLE_CALENDAR_COLORS[e.colorId] ?? '#5484ed') : '#5484ed',
+                htmlLink: e.htmlLink ?? null,
+                organizer: e.organizer?.displayName ?? e.organizer?.email ?? null,
+                isOrganizer: e.organizer?.self ?? false,
+              }];
+            });
+
+          return { connectionId: conn.id, connectionEmail: conn.email, connectionColor: conn.color, events, scopeMissing: false };
+        }),
+      );
+
+      // Merge results
+      const allEvents: Array<{
+        id: string; title: string; description: string | null; location: string | null;
+        startTime: string; endTime: string; allDay: boolean; color: string;
+        htmlLink: string | null; organizer: string | null; isOrganizer: boolean;
+        connectionId: string; connectionEmail: string; connectionColor: string | null;
+      }> = [];
+      const errors: Array<{ connectionId: string; connectionEmail: string; error: string }> = [];
+      let anyScopeMissing = false;
+
+      for (const result of results) {
+        if (result.status === 'fulfilled') {
+          const { connectionId, connectionEmail, connectionColor, events, scopeMissing } = result.value;
+          if (scopeMissing) anyScopeMissing = true;
+          for (const event of events) {
+            allEvents.push({ ...event, connectionId, connectionEmail, connectionColor });
+          }
+        } else {
+          const connIndex = results.indexOf(result);
+          const conn = googleConnections[connIndex];
+          if (conn) {
+            errors.push({
+              connectionId: conn.id,
+              connectionEmail: conn.email,
+              error: result.reason instanceof Error ? result.reason.message : 'Unknown error',
+            });
+          }
+        }
+      }
+
+      // Sort by start time
+      allEvents.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+
+      return { events: allEvents, errors, scopeMissing: anyScopeMissing };
+    }),
 });

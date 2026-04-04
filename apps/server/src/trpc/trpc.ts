@@ -110,6 +110,21 @@ export const activeConnectionProcedure = privateProcedure.use(async ({ ctx, next
   }
 });
 
+/** Resolves ALL connections for the user — used by multi-account endpoints */
+export const multiConnectionProcedure = privateProcedure.use(async ({ ctx, next }) => {
+  const db = await getZeroDB(ctx.sessionUser.id);
+  const connections = await db.findManyConnections();
+
+  if (!connections.length) {
+    throw new TRPCError({
+      code: 'NOT_FOUND',
+      message: 'No connections found',
+    });
+  }
+
+  return next({ ctx: { ...ctx, connections } });
+});
+
 const permissionErrors = ['precondition check', 'insufficient permission', 'invalid credentials'];
 
 export const activeDriverProcedure = activeConnectionProcedure.use(async ({ ctx, next }) => {

@@ -189,6 +189,7 @@
         },
       ],
       // Non-secret defaults for local `wrangler dev`. Real secrets: `wrangler secret put <NAME>` or `.dev.vars` (gitignored).
+      // Persist OpenRouter as `OPENROUTER_API_SECRET` in production/staging; code still falls back to `OPENROUTER_API_KEY` locally.
       "vars": {
         "NODE_ENV": "local",
         "COOKIE_DOMAIN": "localhost",
@@ -439,7 +440,7 @@
       "hyperdrive": [
         {
           "binding": "HYPERDRIVE",
-          "id": "57834ddb6716440496c8836f6d99bc9a",
+          "id": "e53252a4a8394ddab18f855b93601978",
           "localConnectionString": "postgresql://postgres:postgres@localhost:5432/todus",
         },
       ],

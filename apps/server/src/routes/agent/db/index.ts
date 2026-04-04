@@ -190,6 +190,38 @@ export async function getThreadLabels(db: DB, threadId: string): Promise<Label[]
   return results;
 }
 
+export async function getLabelsForThreadIds(
+  db: DB,
+  threadIds: string[],
+): Promise<Map<string, Label[]>> {
+  const map = new Map<string, Label[]>();
+
+  if (threadIds.length === 0) return map;
+
+  const results = await db
+    .select({
+      threadId: threadLabels.threadId,
+      id: labels.id,
+      name: labels.name,
+      color: labels.color,
+    })
+    .from(threadLabels)
+    .innerJoin(labels, eq(labels.id, threadLabels.labelId))
+    .where(inArray(threadLabels.threadId, threadIds));
+
+  for (const row of results) {
+    const current = map.get(row.threadId) ?? [];
+    current.push({
+      id: row.id,
+      name: row.name,
+      color: row.color,
+    });
+    map.set(row.threadId, current);
+  }
+
+  return map;
+}
+
 export async function getLabelThreads(db: DB, labelId: string): Promise<Thread[]> {
   const results = await db
     .select(threadSelect)

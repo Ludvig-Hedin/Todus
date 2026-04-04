@@ -12,10 +12,11 @@ import {
   IGetThreadResponseSchema,
   IGetThreadsResponseSchema,
   type IGetThreadsResponse,
+  type ThreadSummary,
 } from '../../lib/driver/types';
 import { updateWritingStyleMatrix } from '../../services/writing-style-service';
 import type { DeleteAllSpamResponse, IEmailSendBatch } from '../../types';
-import { activeDriverProcedure, router, privateProcedure } from '../trpc';
+import { activeDriverProcedure, multiConnectionProcedure, router, privateProcedure } from '../trpc';
 import { processEmailHtml } from '../../lib/email-processor';
 import { defaultPageSize, FOLDERS } from '../../lib/utils';
 import { toAttachmentFiles } from '../../lib/attachments';
@@ -139,6 +140,40 @@ export const mailRouter = router({
           pageToken: cursor,
           folder,
         });
+
+        threadsResponse.threads = await Promise.all(
+          threadsResponse.threads.map(async (thread): Promise<ThreadSummary> => {
+            if (thread.latestSender || thread.latestSubject || thread.latestReceivedOn) {
+              return thread;
+            }
+
+            try {
+              const { result } = await getThread(activeConnection.id, thread.id);
+              const labelIds = result.labels.map((label) => label.id);
+
+              return {
+                ...thread,
+                latestSender: result.latest?.sender ?? null,
+                latestSubject: result.latest?.subject ?? null,
+                latestReceivedOn: result.latest?.receivedOn ?? null,
+                hasUnread: result.hasUnread,
+                isStarred: labelIds.includes('STARRED'),
+                isImportant: labelIds.includes('IMPORTANT'),
+                labelIds,
+                snippet: result.latest?.body ?? result.latest?.subject ?? null,
+                hasDraft: result.isLatestDraft ?? false,
+                summaryUpdatedAt: result.threadDetailUpdatedAt ?? result.latest?.receivedOn ?? null,
+              };
+            } catch (error) {
+              console.warn('[listThreads] Failed to hydrate search result summary', {
+                threadId: thread.id,
+                error,
+              });
+
+              return thread;
+            }
+          }),
+        );
       } else {
         threadsResponse = await getThreadsFromDB(activeConnection.id, {
           folder,
@@ -216,6 +251,103 @@ export const mailRouter = router({
       console.debug('[listThreads] Returning threadsResponse:', threadsResponse);
       return threadsResponse;
     }),
+
+  /** Fetch threads from multiple connections in parallel — for unified inbox view */
+  listThreadsMulti: multiConnectionProcedure
+    .input(
+      z.object({
+        folder: z.string().optional().default('inbox'),
+        q: z.string().optional().default(''),
+        maxResults: z.number().optional().default(defaultPageSize),
+        /** Per-connection cursors for pagination */
+        cursors: z.record(z.string(), z.string()).optional().default({}),
+        labelIds: z.array(z.string()).optional().default([]),
+        /** Filter to specific connection IDs (omit for all) */
+        connectionIds: z.array(z.string()).optional(),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const { connections } = ctx;
+      const { folder, q, maxResults, cursors, labelIds, connectionIds } = input;
+
+      // Filter to requested connections, or use all
+      const targetConnections = connectionIds
+        ? connections.filter((c) => connectionIds.includes(c.id))
+        : connections;
+
+      // Only include connections that have valid tokens
+      const validConnections = targetConnections.filter(
+        (c) => c.accessToken && c.refreshToken,
+      );
+
+      // Per-connection limit: distribute maxResults evenly, minimum 5 per connection
+      const perConnectionLimit =
+        validConnections.length === 0
+          ? Math.max(5, maxResults)
+          : Math.max(5, Math.ceil(maxResults / validConnections.length));
+
+      const results = await Promise.allSettled(
+        validConnections.map(async (conn) => {
+          const cursor = cursors[conn.id] || '';
+          const threadsResponse = await getThreadsFromDB(conn.id, {
+            folder,
+            q,
+            maxResults: perConnectionLimit,
+            labelIds,
+            pageToken: cursor,
+          });
+
+          return {
+            connectionId: conn.id,
+            connectionEmail: conn.email,
+            connectionColor: conn.color,
+            threads: threadsResponse.threads,
+            nextPageToken: threadsResponse.nextPageToken,
+          };
+        }),
+      );
+
+      // Merge results, tracking errors per connection
+      const allThreads: Array<ThreadSummary & { connectionId: string; connectionEmail: string; connectionColor: string | null }> = [];
+      const nextCursors: Record<string, string> = {};
+      const errors: Array<{ connectionId: string; connectionEmail: string; error: string }> = [];
+
+      for (const result of results) {
+        if (result.status === 'fulfilled') {
+          const { connectionId, connectionEmail, connectionColor, threads, nextPageToken } = result.value;
+          for (const thread of threads) {
+            allThreads.push({ ...thread, connectionId, connectionEmail, connectionColor });
+          }
+          if (nextPageToken) {
+            nextCursors[connectionId] = nextPageToken;
+          }
+        } else {
+          // Extract connectionId from the error context
+          const connIndex = results.indexOf(result);
+          const conn = validConnections[connIndex];
+          if (conn) {
+            errors.push({
+              connectionId: conn.id,
+              connectionEmail: conn.email,
+              error: result.reason instanceof Error ? result.reason.message : 'Unknown error',
+            });
+          }
+        }
+      }
+
+      // Sort merged threads by date (newest first)
+      allThreads.sort((a, b) => {
+        const dateA = a.latestReceivedOn ? new Date(a.latestReceivedOn).getTime() : 0;
+        const dateB = b.latestReceivedOn ? new Date(b.latestReceivedOn).getTime() : 0;
+        return dateB - dateA;
+      });
+
+      // Cap to maxResults
+      const threads = allThreads.slice(0, maxResults);
+
+      return { threads, nextCursors, errors };
+    }),
+
   markAsRead: activeDriverProcedure
     .input(
       z.object({

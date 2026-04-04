@@ -106,6 +106,7 @@ export type ZeroEnv = {
   DD_SITE: string;
   DEFAULT_MODEL: string;
   OPENROUTER_API_KEY: string;
+  OPENROUTER_API_SECRET?: string;
   DUB_API_KEY?: string;
   APPLE_CLIENT_ID: string;
   APPLE_TEAM_ID: string;

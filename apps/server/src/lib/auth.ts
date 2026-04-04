@@ -13,6 +13,7 @@ import { getBrowserTimezone, isValidTimezone } from './timezones';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { getZeroDB, resetConnection } from './server-utils';
 import { getSocialProviders } from './auth-providers';
+import { marketingEmailDelivery } from '../db/schema';
 import { redis, resend, twilio } from './services';
 import { dubAnalytics } from '@dub/better-auth';
 import { defaultUserSettings } from './schemas';
@@ -22,76 +23,151 @@ import { type EProviders } from '../types';
 import { createDriver } from './driver';
 import type { ReactNode } from 'react';
 import { Autumn } from 'autumn-js';
+import { eq } from 'drizzle-orm';
 import { createDb } from '../db';
 import { env } from '../env';
 import { Dub } from 'dub';
 
-const scheduleCampaign = async (userInfo: { address: string; name: string }) => {
+const ONBOARDING_CAMPAIGN_KEY = 'onboarding_v1';
+
+const normalizeRecipientEmail = (email: string) => email.trim().toLowerCase();
+const maskEmail = (email: string) => {
+  const normalized = normalizeRecipientEmail(email);
+  const [localPart = '', domain = ''] = normalized.split('@');
+  const localPrefix = localPart ? `${localPart[0]}***` : '***';
+  return domain ? `${localPrefix}@${domain}` : localPrefix;
+};
+
+const campaignSendDay = (date: Date) => date.toISOString().slice(0, 10);
+
+const extractResendId = (result: unknown) => {
+  if (!result || typeof result !== 'object') return null;
+  const data = 'data' in result ? result.data : undefined;
+  if (!data || typeof data !== 'object') return null;
+  return 'id' in data && typeof data.id === 'string' ? data.id : null;
+};
+
+const scheduleCampaign = async (userInfo: { userId: string; address: string; name: string }) => {
   const name = userInfo.name || 'there';
   const resendService = resend();
+  const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
 
   const emails = [
     {
+      key: 'welcome',
       subject: 'Welcome to Todus',
       react: WelcomeEmail({ name }) as ReactNode,
-      scheduledAt: undefined,
+      delayDays: 0,
     },
     {
+      key: 'todus_pro',
       subject: 'Todus Pro is here',
       react: TodusProEmail({ name }) as ReactNode,
-      scheduledAt: 'in 1 day',
+      delayDays: 1,
     },
     {
+      key: 'auto_labeling',
       subject: 'Auto-labeling is here 🎉📥',
       react: AutoLabelingEmail({ name }) as ReactNode,
-      scheduledAt: 'in 2 days',
+      delayDays: 2,
     },
     {
+      key: 'ai_writing_assistant',
       subject: 'AI Writing Assistant is here 🤖💬',
       react: AIWritingAssistantEmail({ name }) as ReactNode,
-      scheduledAt: 'in 3 days',
+      delayDays: 3,
     },
     {
+      key: 'shortcuts',
       subject: 'Shortcuts are here 🔧🚀',
       react: ShortcutsEmail({ name }) as ReactNode,
-      scheduledAt: 'in 4 days',
+      delayDays: 4,
     },
     {
+      key: 'categories',
       subject: 'Categories are here 📂🔍',
       react: CategoriesEmail({ name }) as ReactNode,
-      scheduledAt: 'in 5 days',
+      delayDays: 5,
     },
     {
+      key: 'super_search',
       subject: 'Super Search is here 🔍🚀',
       react: SuperSearchEmail({ name }) as ReactNode,
-      scheduledAt: 'in 6 days',
+      delayDays: 6,
     },
   ];
 
-  await Promise.allSettled(
-    emails.map(async (email) => {
-      try {
-        await resendService.emails.send(
-          {
-            from: 'Todus <onboarding@todus.app>',
-            to: userInfo.address,
+  const normalizedEmail = normalizeRecipientEmail(userInfo.address);
+  const maskedEmail = maskEmail(userInfo.address);
+  const baseTime = Date.now();
+
+  try {
+    await Promise.allSettled(
+      emails.map(async (email) => {
+        const scheduledFor = new Date(baseTime + email.delayDays * 24 * 60 * 60 * 1000);
+        const sendOnDate = campaignSendDay(scheduledFor);
+
+        const [reservation] = await db
+          .insert(marketingEmailDelivery)
+          .values({
+            id: crypto.randomUUID(),
+            userId: userInfo.userId,
+            campaign: ONBOARDING_CAMPAIGN_KEY,
+            emailKey: email.key,
             subject: email.subject,
-            react: email.react,
-            ...(email.scheduledAt ? { scheduledAt: email.scheduledAt } : {}),
-          },
-          {
-            idempotencyKey: `onboarding:${userInfo.address}:${email.subject}:${email.scheduledAt ?? 'immediate'}`,
-          },
-        );
-      } catch (error) {
-        console.error('[CAMPAIGN] Failed to send onboarding email', {
-          to: userInfo.address,
-          subject: email.subject,
-          error,
-        });
-      }
-    }),
-  );
+            recipientEmail: userInfo.address,
+            recipientEmailNormalized: normalizedEmail,
+            sendOnDate,
+            scheduledFor,
+          })
+          .onConflictDoNothing()
+          .returning({ id: marketingEmailDelivery.id });
+
+        if (!reservation) {
+          console.log('[CAMPAIGN] Skipping duplicate marketing email enrollment', {
+            recipientEmail: maskedEmail,
+            subject: email.subject,
+            sendOnDate,
+          });
+          return;
+        }
+
+        try {
+          const result = await resendService.emails.send(
+            {
+              from: 'Todus <onboarding@todus.app>',
+              to: userInfo.address,
+              subject: email.subject,
+              react: email.react,
+              ...(email.delayDays > 0 ? { scheduledAt: scheduledFor } : {}),
+            },
+            {
+              idempotencyKey: `onboarding:${normalizedEmail}:${email.key}:${sendOnDate}`,
+            },
+          );
+
+          await db
+            .update(marketingEmailDelivery)
+            .set({
+              resendId: extractResendId(result),
+              sentAt: new Date(),
+            })
+            .where(eq(marketingEmailDelivery.id, reservation.id));
+        } catch (error) {
+          await db
+            .delete(marketingEmailDelivery)
+            .where(eq(marketingEmailDelivery.id, reservation.id));
+          console.error('[CAMPAIGN] Failed to send onboarding email', {
+            to: maskedEmail,
+            subject: email.subject,
+            error,
+          });
+        }
+      }),
+    );
+  } finally {
+    await conn.end();
+  }
 };
 
 const syncConnectionFromAccount = async (
@@ -171,7 +247,11 @@ const syncConnectionFromAccount = async (
     });
 
     if (env.NODE_ENV === 'production') {
-      await scheduleCampaign({ address: userInfo.address, name: userInfo.name || 'there' });
+      await scheduleCampaign({
+        userId: account.userId,
+        address: userInfo.address,
+        name: userInfo.name || 'there',
+      });
     }
   }
 
@@ -204,7 +284,15 @@ export const createAuth = () => {
       mcp({
         loginPage: env.VITE_PUBLIC_APP_URL + '/login',
       }),
-      jwt(),
+      jwt({
+        // Short-lived JWT as "access token" for native apps (15 minutes).
+        // Native apps also receive a long-lived raw session token as "refresh token".
+        // `expiresIn` keeps that session valid for up to 90 days, while `updateAge`
+        // controls how frequently the sliding session window is refreshed (currently 1 day).
+        // When the JWT expires, the native app calls /auth/refresh-native-token with the
+        // session token to get a fresh JWT.
+        jwt: { expirationTime: '15m' },
+      }),
       bearer(),
       phoneNumber({
         sendOTP: async ({ code, phoneNumber }) => {
@@ -224,8 +312,7 @@ export const createAuth = () => {
         otpLength: 6,
         expiresIn: 300, // 5 minutes
         sendVerificationOTP: async ({ email, otp, type }) => {
-          // Mask email PII in logs: show first char + domain only
-          const maskedEmail = email.replace(/^(.).*@/, '$1***@');
+          const maskedEmail = maskEmail(email);
           console.log(
             `[EMAIL_OTP] Sending OTP to ${maskedEmail}, type=${type}, code length=${otp.length}`,
           );
@@ -511,10 +598,14 @@ const createAuthConfig = () => {
     session: {
       cookieCache: {
         enabled: true,
-        maxAge: 60 * 60 * 24 * 30, // 30 days
+        maxAge: 60 * 60 * 24 * 90, // 90 days — matches session lifetime
       },
-      expiresIn: 60 * 60 * 24 * 30, // 30 days
-      updateAge: 60 * 60 * 24 * 3, // 1 day (every 1 day the session expiration is updated)
+      // 90-day rolling sessions: comparable to Gmail, Twitter, Facebook.
+      // Combined with updateAge (1 day), the session extends every day the
+      // user is active — so they stay logged in indefinitely as long as
+      // they open the app within any 90-day window.
+      expiresIn: 60 * 60 * 24 * 90, // 90 days
+      updateAge: 60 * 60 * 24 * 1, // 1 day — extend session daily on activity
     },
     socialProviders: getSocialProviders(env as unknown as Record<string, string>),
     account: {

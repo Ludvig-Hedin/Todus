@@ -4,6 +4,14 @@ import { Ratelimit } from '@upstash/ratelimit';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 
+/** Default color palette for multi-account visual differentiation */
+const CONNECTION_COLORS = ['#007AFF', '#34C759', '#FF9500', '#AF52DE', '#FF3B30', '#5AC8FA', '#A2845E', '#FF2D55'];
+const deriveConnectionColor = (connection: { id: string; color: string | null }) => {
+  if (connection.color) return connection.color;
+  const hash = Array.from(connection.id).reduce((total, char) => total + char.charCodeAt(0), 0);
+  return CONNECTION_COLORS[hash % CONNECTION_COLORS.length];
+};
+
 export const connectionsRouter = router({
   list: privateProcedure
     .use(
@@ -30,6 +38,7 @@ export const connectionsRouter = router({
             picture: connection.picture,
             createdAt: connection.createdAt,
             providerId: connection.providerId,
+            color: deriveConnectionColor(connection),
           };
         }),
         disconnectedIds,
@@ -51,10 +60,13 @@ export const connectionsRouter = router({
       const { connectionId } = input;
       const user = ctx.sessionUser;
       const db = await getZeroDB(user.id);
+      const currentUser = await db.findUser();
+      const shouldClearDefault = currentUser?.defaultConnectionId === connectionId;
       await db.deleteConnection(connectionId);
 
-      const activeConnection = await getActiveConnection();
-      if (activeConnection && connectionId === activeConnection.id) await db.updateUser({ defaultConnectionId: null });
+      if (shouldClearDefault) {
+        await db.updateUser({ defaultConnectionId: null });
+      }
     }),
   getDefault: publicProcedure.query(async ({ ctx }) => {
     if (!ctx.sessionUser) return null;
@@ -67,6 +79,22 @@ export const connectionsRouter = router({
       picture: connection.picture,
       createdAt: connection.createdAt,
       providerId: connection.providerId,
+      color: deriveConnectionColor(connection),
     };
   }),
+  /** Update a connection's display color */
+  updateColor: privateProcedure
+    .input(
+      z.object({
+        connectionId: z.string(),
+        color: z.string().regex(/^#(?:[0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      const { connectionId, color } = input;
+      const db = await getZeroDB(ctx.sessionUser.id);
+      const foundConnection = await db.findUserConnection(connectionId);
+      if (!foundConnection) throw new TRPCError({ code: 'NOT_FOUND' });
+      await db.updateConnection(connectionId, { color });
+    }),
 });
