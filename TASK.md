@@ -72,6 +72,7 @@ Last updated: 2026-04-04
 
 ## Build Fixes
 
+- `DONE` Fixed the macOS Xcode target graph for shared auth: `TodusMac.xcodeproj` now resolves `TodusAuth` from `packages/swift-auth`, excludes the dead `App/ConnectionsService.swift` placeholder, and builds cleanly again.
 - `DONE` Refreshed `pnpm-lock.yaml` so Cloudflare's frozen install no longer fails on the `apps/web` `uuid` / `@types/uuid` lockfile drift.
 - `DONE` Verified `pnpm --filter @zero/mail build` completes successfully after the lockfile refresh.
 - `DONE` Verified `pnpm --filter @zero/web build` completes successfully locally.

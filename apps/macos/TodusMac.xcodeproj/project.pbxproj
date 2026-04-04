@@ -48,7 +48,6 @@
 		B22100ADC8C31515049110F24FE3BB9F /* MacTasksView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B974F05FBCA3D4523D8602C6334B76A1 /* MacTasksView.swift */; };
 		B324E8110471D4D7B90BE8E30D2A6894 /* CalendarService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1B78F2ECE3BBD9BBD4D0603965FEB09 /* CalendarService.swift */; };
 		B4BB41C72DA1C29E6D6CC273DA0CBD51 /* MeetingsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAE8C28D15F8313E78D3E36E70299D16 /* MeetingsService.swift */; };
-		B6F7D1C8335EAB89FC020BA47ED0F777 /* ConnectionsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B2B69E67A87EE0014040A17C5402E35 /* ConnectionsService.swift */; };
 		B8EE5BD0D9E5A4A49FF75C6E34EFB129 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AE1D36D7DEA808043473263607529D8C /* Assets.xcassets */; };
 		C589AD643545B460656DFD61F0773B9C /* TodosConfig.plist in Resources */ = {isa = PBXBuildFile; fileRef = D781F56D4BD27C55F3E8F7F833E87588 /* TodosConfig.plist */; };
 		C5C9402DAC06B56F639AA05B8CFC8681 /* MacOnboardingViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 673D4A873E62C0874909FABCE15445B9 /* MacOnboardingViews.swift */; };
@@ -85,7 +84,6 @@
 		341C4B2E1051392DA2B1937B5DD1B850 /* MacSearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacSearchView.swift; sourceTree = "<group>"; };
 		347B2B771EF16298AC5CBCF6E492B477 /* TaskStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskStatus.swift; sourceTree = "<group>"; };
 		3A6E6D9EAB8380C6BE5719C325AD9681 /* TaskViewMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskViewMode.swift; sourceTree = "<group>"; };
-		3B2B69E67A87EE0014040A17C5402E35 /* ConnectionsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionsService.swift; sourceTree = "<group>"; };
 		456C42750E641F95F8340F7986394218 /* SyncState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncState.swift; sourceTree = "<group>"; };
 		4A87121AD344331AAA348FB345778EBB /* SyncModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncModels.swift; sourceTree = "<group>"; };
 		4BD152C78EA2F5515F84D9738A1A52B2 /* TaskSortOrder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskSortOrder.swift; sourceTree = "<group>"; };
@@ -167,7 +165,6 @@
 			isa = PBXGroup;
 			children = (
 				C27FE022BFDFDA4FCC15BCB461950D31 /* AssistantButton.swift */,
-				3B2B69E67A87EE0014040A17C5402E35 /* ConnectionsService.swift */,
 				326E7A3F239A043BA44D3B8F48BFD77D /* MacAppServices.swift */,
 				A9DCCDC4628A7827493203AF2071E54D /* MacAuthView.swift */,
 				2BC2CFEF093D8584286BE20BBF997D10 /* MacContentHeaderView.swift */,
@@ -438,7 +435,7 @@
 				F177B3675DA551BB1C5E9F51E218A490 /* NoRedirectDelegate.swift */,
 			);
 			name = TodusAuth;
-			path = "../swift-auth/Sources/TodusAuth";
+			path = "../../packages/swift-auth/Sources/TodusAuth";
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -517,7 +514,7 @@
 				32CF05AAD09E594B49FC3B22B9FDD427 /* CalendarEventBlockView.swift in Sources */,
 				B324E8110471D4D7B90BE8E30D2A6894 /* CalendarService.swift in Sources */,
 				45310EE7C7D808CDCD19005674DADF67 /* CalendarTimeGridView.swift in Sources */,
-				B6F7D1C8335EAB89FC020BA47ED0F777 /* ConnectionsService.swift in Sources */,
+				F627925416BFA9200BE1BD91097B4405 /* ConnectionsService.swift in Sources */,
 				552A80AD6BDCAA27F5CE1DA21170B7C3 /* CreateItemType.swift in Sources */,
 				211140EF2F773DE5C008190F8A48E6E5 /* EmailModels.swift in Sources */,
 				9917FF1682CC3F21B50334B6DFF7C5A8 /* EmailService.swift in Sources */,

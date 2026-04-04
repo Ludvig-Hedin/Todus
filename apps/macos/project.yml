@@ -23,6 +23,7 @@ targets:
       - path: TodusMac
         excludes:
           - "**/*.md"
+          - "App/ConnectionsService.swift"
           - "MacDocsView.swift"
           - "MacMeetingsView.swift"
           - "MacMeetingDetailView.swift"
