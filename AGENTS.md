@@ -10,7 +10,7 @@ Todus is a unified productivity app — email, calendar, tasks, and AI assistant
 
 | App | Path | Stack | Purpose |
 |-----|------|-------|---------|
-| **Web** | `apps/mail` | React Router v7 + Vite + Cloudflare Workers | Main web product at todus.app |
+| **Web** | `apps/web` | React Router v7 + Vite + Cloudflare Workers | Main web product at todus.app |
 | **Backend** | `apps/server` | Cloudflare Worker (Hono + tRPC + Durable Objects) | Auth, mail APIs, AI, task sync |
 | **iOS** | `apps/ios/Todus` | Native SwiftUI (Xcode, Swift 6) | iPhone app |
 | **macOS** | `apps/macos` | Native SwiftUI (Xcode, Swift 6) | Desktop shell scaffold with sidebar navigation |
@@ -190,7 +190,7 @@ Todus/
 
 ## Environment Variables
 
-- **Frontend (`apps/mail`):** Use `VITE_PUBLIC_` prefix
+- **Frontend (`apps/web`):** Use `VITE_PUBLIC_` prefix
 - **Backend (`apps/server`):** Defined in `wrangler.jsonc`; type-safe via `src/env.ts`
 - **Local dev:** `.env` at monorepo root (loaded via `dotenv-cli`)
 

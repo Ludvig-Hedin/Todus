@@ -1,14 +1,96 @@
 # Project Changelog
 
+## [2026-04-04] Feature — Unread dot repositioned + People view mode + avatar fixes
+
+### Unread indicator moved to right of subject (iOS, macOS, Web)
+- [UI] Moved blue unread dot from left of avatar to right of subject line across all platforms
+- Emails now stretch correctly without the left-side dot misaligning the avatar column
+- **Files:** `EmailRowView.swift`, `MacEmailInboxView.swift`, `mail-list.tsx`
+
+### People view mode (iOS, macOS)
+- [Feature] Added Threads/People toggle in inbox header (icon-based segmented control)
+- People mode groups emails by sender — shows avatar, name, email, thread count, unread badge
+- Tapping a person shows their threads (iOS: push navigation, macOS: detail panel)
+- **Files:** `EmailInboxView.swift`, `MacEmailInboxView.swift`
+
+### Avatar transparent background fix + fallback priority
+- [Fix] iOS/macOS: White background behind loaded avatar images prevents colored initials bleeding through transparent logos
+- [Fix] All platforms: Google favicon service prioritized in local fallback chain for better icon coverage
+- **Files:** `SenderAvatarView.swift`, `MacEmailInboxView.swift`, `bimi-avatar.tsx`
+
+## [2026-04-04] Fix — Inbox People view polish, thread AI timestamp, French grammar
+
+- [Enhancement] iOS `EmailInboxView`: Extracted `buildSenderGroups(from:)`; view mode control exposes VoiceOver labels + selected state; People/threads UI unchanged (already wired).
+- [Fix] iOS `EmailThreadView`: Summary attribution line uses `assistantContextLoadedAt` (set when assistant context loads) instead of `Date()` on every render.
+- [i18n] `fr.json`: Corrected broken elisions (`d'courriel` → `de courriel`, etc.) and send-failure / shortcuts strings.
+- **Files:** `EmailInboxView.swift`, `EmailThreadView.swift`, `apps/mail/messages/fr.json`
+
+## [2026-04-04] Fix — Compose recipients, AI draft sheet, French locale, photo picker
+
+- [Fix] iOS `EmailComposeView`: To field clears to `[]` when empty (matches CC/BCC); Photos picker resets selection after load, surfaces load/decode failures (alert + `AppLogger`), no silent `try?`.
+- [Enhancement] iOS `EmailAIDraftSheet`: Replace vs append explicit (`EmailAIDraftInsertMode`); cancel streaming on sheet dismiss; `URLRequest` timeout 30s; `Origin` from `AppConfiguration.effectiveAppURL` (not hardcoded).
+- [i18n] `apps/mail/messages/fr.json`: Standardized user-facing strings to **courriel** / **pourriel** terminology.
+- **Files:** `EmailComposeView.swift`, `EmailAIDraftSheet.swift`, `apps/mail/messages/fr.json`
+
+## [2026-04-04] Fix — Sender avatar transparent background bleed-through + fallback priority
+
+- [Fix] iOS/macOS: Added white background circle behind loaded avatar images so transparent logos (Slack, GitHub, etc.) no longer show the colored initials circle bleeding through behind them
+- [Fix] iOS/macOS/Web: Reordered local favicon fallback chain to prioritize Google's favicon service (`s2/favicons?sz=128`) — same source Gmail uses, highest coverage — before direct `/apple-touch-icon.png` and `/favicon.ico` fetches
+- **Files:** `apps/ios/Todus/Todus/Features/Email/SenderAvatarView.swift`, `apps/macos/TodusMac/Views/Email/MacEmailInboxView.swift`, `apps/mail/components/ui/bimi-avatar.tsx`
+
+## [2026-04-04] Fix — iOS AI chat: input height, user bubble roundness, AI paragraph spacing
+
+- **Input height reduced:** Tightened padding in `chatInputBox` — text field top/bottom padding reduced, button row bottom padding reduced, pill row padding reduced. Input is now more compact.
+- **User bubbles more round:** Increased corner radius from 16 → 20 and reduced vertical padding from 12 → 10. Single-line messages now appear capsule/pill-shaped (cornerRadius ≈ height/2).
+- **AI paragraph spacing:** Added 6pt `paragraphSpacing` via `NSParagraphStyle` to the markdown `AttributedString`. SwiftUI's `Text` has no default gap between CommonMark paragraphs, making AI responses appear as a single blob. This preserves heading-specific paragraph styles via `enumerateAttribute`.
+
+**Files:** `apps/ios/Todus/Todus/Features/AI/AIChatView.swift`
+
 ## ⚠️ Build Status
 
 - Overall: Targeted second-brain surfaces are green. The web assistant files were checked with targeted TypeScript verification, and both native apps build successfully after the latest assistant + target-graph fixes.
 - Blocking: None for the second-brain scope documented below.
 - Informational: Per-file verification details belong in CI logs instead of duplicated release notes.
 
+## [2026-04-04] iOS Email Thread View — Readability, Performance & Summary UX
+
+- [Fix] Dark mode email readability: universal `* { background-color: transparent !important }` CSS override strips all inline/HTML backgrounds in WKWebView; JS post-load strips `bgcolor` HTML attributes; forces all text to `#e0e0e0` in dark mode so emails are always readable (`EmailThreadView.swift`)
+- [Fix] Performance: email body shows plain text instantly on expand, defers WKWebView HTML rendering by 150ms to avoid 3-5 second UI hang (`EmailThreadView.swift`)
+- [Enhancement] Summary card: "Not summarized yet" with outlined "Summarize" button (gradient sparkles icon, muted stroke, no fill) triggers on-demand summarization; shows actual error message on failure (`EmailThreadView.swift`, `EmailService.swift`)
+- [Enhancement] Header background: pure gradient fade (no solid fill), starts at 0.9 opacity and fades to transparent — content smoothly fades under the bar (`EmailThreadView.swift`)
+- [Fix] Bottom reply bar: removed solid `backgroundTop` fill behind buttons, replaced with single smooth gradient that extends 30pt above the buttons — no more harsh cutoff (`EmailThreadView.swift`)
+- [Fix] Added `loadAssistantThrowing` to `EmailService` so Summarize button can surface real error messages instead of generic "Could not generate summary" (`EmailService.swift`)
+
+## [2026-04-04] iOS CreateSheet Input Polish
+
+- [Fix] Capped `PasteHandlingTextInput` at `maxHeight: 120` in `CreateSheet` — eliminates unbounded layout growth that caused lag and the sheet appearing too tall (`CreateSheet.swift`, `CaptureComposer.swift`)
+- [Fix] Removed helper copy ("Write naturally. Todus will sort it.") — sheet is now compact like the AI chat input (`CreateSheet.swift`)
+- [Fix] Fixed placeholder-below-cursor bug: `textViewDidBeginEditing` now calls `invalidateIntrinsicContentSize()` + `setContentOffset(.zero)` after clearing placeholder text (`CaptureComposer.swift`)
+- [Fix] Keyboard positioning uses `max(keyboard.height + 8, 86)` instead of conditional — removes redundant layout pass when keyboard height changes (`CreateSheet.swift`)
+
+## [2026-04-04] Localization and Native UX Follow-Up
+
+### iOS (`apps/ios/Todus`)
+
+- **Touch target documentation:** Clarified that `minTouchTarget()` enforces a visible minimum 44x44 frame and then expands the hit target further, so the comment now matches the actual modifier behavior.
+
+### macOS (`apps/macos`)
+
+- **Connection filter recovery:** When removed accounts invalidate the previously enabled set, the macOS connections service now re-enables the remaining current connections instead of leaving the app with an empty enabled set.
+
+### Web (`apps/mail`)
+
+- **Locale cleanup:** Updated targeted Arabic, Spanish, Hungarian, Korean, Czech, French, Catalan, Latvian, English, and Polish message keys for missing translations, terminology consistency, tone consistency, and review-friendly JSON formatting where requested.
+- **Translation key normalization:** Standardized `favorites` and `failedToSaveLabel` message keys across the locale catalog, aligned the Arabic bin label with existing trash copy, removed accidental Catalan newline padding, and added the missing Polish `many` plural form for note counts.
+
+### macOS (`apps/macos`)
+
+- **Project portability:** Replaced the hardcoded Swift-auth source path in the Xcode project with a relative reference, removed the duplicate `ConnectionsService.swift` compile entry, and set a concrete default build configuration.
+
 ## [2026-04-04] Web App Catch-Up Sync — Mirror `apps/mail` into `apps/web`
 
 ### Web (`apps/web`)
+
 - **Canonical source restored:** Synced the newer web-facing changes that had been applied in `apps/mail` over to `apps/web`, while intentionally leaving `apps/mail` unchanged.
 - **Route parity:** Brought `apps/web` up to date with the newer route/layout surface from `apps/mail`, including docs, meetings, sharing, and group-join/chat related pages.
 - **UI parity:** Mirrored the latest mail/home/tasks/search/settings/navigation/sidebar/thread-view updates so `apps/web` matches the newer app behavior and information architecture already present in `apps/mail`.
@@ -16,11 +98,13 @@
 - **Translations:** Synced the localized message catalogs that the newer web surfaces depend on.
 
 ### Verification
+
 - `pnpm --filter @zero/web build` [Passed]
 
 ## [2026-04-04] Multi-Account Support — Backend, Web, iOS, macOS
 
 ### Backend (`apps/server`)
+
 - **Schema:** Added `color` column to `connection` table (migration `0047_connection_color.sql`) for per-account visual differentiation.
 - **Middleware:** New `multiConnectionProcedure` in `trpc.ts` that resolves ALL user connections (not just default) for multi-account endpoints.
 - **`mail.listThreadsMulti`:** New endpoint that fetches threads from multiple connections in parallel, merges and sorts by date, returns threads tagged with `connectionId/connectionEmail/connectionColor`, handles partial failures gracefully.
@@ -29,6 +113,7 @@
 - **`connections.list/getDefault`:** Now includes `color` field in response (auto-assigned from palette if not set).
 
 ### Web (`apps/mail`)
+
 - **ConnectionFilterProvider:** New React context (`providers/connection-filter-provider.tsx`) managing which connections are visible, persisted to localStorage. Default: all enabled.
 - **nav-user.tsx:** Evolved account avatars from click-to-switch to click-to-toggle-visibility. Each account shows a colored ring (connection color) when enabled, reduced opacity when hidden. Right-click context menu for "Set as default". Star icon on default account.
 - **use-threads.ts:** Updated to call `listThreadsMulti` when multiple connections are enabled (unified view), falls back to original `listThreads` for single-connection efficiency.
@@ -36,12 +121,14 @@
 - **email-composer.tsx:** Enhanced "From:" picker to show all connected accounts with colored dots alongside aliases.
 
 ### Shared Auth (`packages/swift-auth`)
+
 - **AuthService:** Added `linkSocialAccount(provider:)` method for linking additional OAuth accounts to an existing authenticated user via ASWebAuthenticationSession.
 - **AuthError:** Added `notAuthenticated` and `networkError` cases.
 
 ## [2026-04-03] iOS — Multi-account connections service and inbox filtering
 
 ### iOS (`apps/ios/Todus`)
+
 - **ConnectionsService:** New `@Observable` service (`Services/API/ConnectionsService.swift`) that fetches connected email accounts from the `connections.list` tRPC route, manages enabled/disabled filter state per account in UserDefaults, and exposes toggle/enableAll/setDefault/deleteConnection APIs.
 - **AppServices:** Added `connectionsService` property so all views can access it via `@Environment(AppServices.self)`.
 - **Settings — dynamic connections list:** The Connected Services section now shows a dynamic list of connected accounts from the backend (with colored circles, provider names, email addresses, and connection status) instead of the hardcoded Gmail row. Includes an "Add Account" button. Falls back to the legacy Gmail row when connections haven't loaded yet.
@@ -50,6 +137,7 @@
 ## [2026-04-03] macOS — Multi-account connections service and sidebar integration
 
 ### macOS (`apps/macos`)
+
 - **ConnectionsService:** New `@Observable` service that fetches connected email accounts from the `connections.list` tRPC route, tracks enabled/disabled state per account in UserDefaults, and exposes toggle/enableAll/setDefault APIs.
 - **MacAppServices:** Added `connectionsService` property so all views can access it via `@Environment`.
 - **Sidebar accounts:** When multiple accounts are connected, the Email section shows per-account rows with colored dots and toggleable checkmarks. The sidebar footer shows a row of small colored avatar circles for quick multi-account switching.
@@ -57,6 +145,7 @@
 ## [2026-04-03] Performance — Summary-driven inbox and warmer caches
 
 ### Web (`apps/mail`)
+
 - **Summary-driven inbox rows:** Mail list rows now render from `mail.listThreads` summary data instead of issuing `mail.get` for every visible row, removing the inbox N+1 fetch pattern that made folder loads feel slow.
 - **Predictive thread warming:** The inbox now prefetches the selected thread, nearby threads, and hovered rows so opening a conversation is usually warm by the time the user clicks it.
 - **Persisted cache no longer self-invalidates:** Restored inbox cache is kept available on startup instead of being immediately invalidated after hydration, which improves perceived speed after reloads and app restarts.
@@ -65,15 +154,18 @@
 - **Task cache patching:** Web task create/update/delete flows now patch cached task queries directly on the tasks page, home page, calendar page, and search page instead of relying on broad refetches.
 
 ### Native (`apps/ios`, `apps/macos`)
+
 - **Cached refresh indicators across key surfaces:** iOS and macOS inbox, home, calendar, and tasks surfaces now show a compact `Updating` or `Syncing` badge when cached content is already visible and a background refresh is running.
 - **No cached-content flicker on Home:** Native Home events and recent-email sections now keep their warmed content on screen during refresh instead of swapping back to a blocking loading card.
 - **Shared-folder sync visibility:** Native task tabs now expose the background shared-folder sync state so task data can stay interactive while sync progress remains visible.
 
 ### Backend (`apps/server`)
+
 - **Thread summaries from the local thread store:** `mail.listThreads` now returns richer summary rows for DB-backed folder browsing, including sender, subject, timestamps, label-derived flags, and cache timestamps.
 - **Search summary hydration:** Provider-backed search results are hydrated with cached thread detail when summary fields are missing, so search results still render meaningful preview data without regressing the fast folder-browsing path.
 
 ### Verification
+
 - `pnpm exec tsc --noEmit -p apps/mail/tsconfig.json | rg "mail-list|use-optimistic-actions|client-providers|query-provider|use-threads|task-cache|mail/search/page|mail/tasks/page|mail/home/page|mail/calendar/page"` [No matches]
 - `pnpm exec tsc --noEmit -p apps/server/tsconfig.json | rg "lib/driver/types|routes/agent/index|routes/agent/db/index|trpc/routes/mail.ts"` [Still reports pre-existing errors in unrelated sections of `routes/agent/index.ts` and `routes/mail.ts`]
 
@@ -85,6 +177,7 @@
 ## [2026-04-03] AI — Second-brain briefing, open loops, and prepared work
 
 ### Backend (`apps/server`)
+
 - **Second-brain assistant domain:** Added a new `assistant` router that turns mail/meeting/task context into durable assistant state instead of one-off thread heuristics.
 - **Open-loop ledger:** Added persisted assistant open loops for needs-reply, waiting-on, deadline-risk, meeting follow-up, decision-needed, draft-ready, and research-needed states.
 - **Prepared actions:** Added persisted prepared actions for reply drafts, task creation, event creation, follow-ups, and research so the assistant can queue work for approval.
@@ -93,39 +186,46 @@
 - **Compatibility:** Kept existing `mailAssistant.*` APIs intact while allowing the new thread/inbox surfaces to read from the broader assistant state.
 
 ### Web (`apps/mail`)
+
 - **Home becomes a briefing surface:** Home now shows assistant priorities, Needs You, Waiting On, Prepared work, and recent changes before the generic dashboard sections.
 - **Inbox becomes queue-oriented:** Mail assistant nudges now come from grouped open-loop queues instead of looser thread-only nudges.
 - **Thread context upgraded:** The thread assistant card now uses `assistant.getThreadContext`, showing recommendation, waiting state, changed-since-last-open, related people context, linked work, and prepared actions.
 - **Assistant settings expanded:** Settings now expose briefing-engine controls, Home briefing visibility, waiting-on tracking, people memory, batch approvals, workday hours, and excluded sender/topic patterns in addition to the existing summary/draft/auto-send controls.
 
 ### iOS (`apps/ios/Todus`)
+
 - **Home briefing parity:** Home now conditionally loads and shows the assistant briefing sections when the briefing engine is enabled.
 - **Thread context parity:** Email thread assistant surfaces now use the richer second-brain context shape with recommendation, people context, changed-since-last-open, and prepared-draft awareness.
 - **Settings parity:** The AI settings page now exposes the second-brain operating model, including briefing controls, waiting-on tracking, people memory, batch approvals, workday timing, and noise filtering.
 
 ### macOS (`apps/macos`)
+
 - **Home briefing parity:** macOS Home now respects the same briefing-engine gating and shows the same prepared-work framing as web/iOS.
 - **Settings parity:** macOS settings now expose the new assistant operating model and workday/noise-filter controls.
 - **Target graph stabilization:** Added `AppLogger.swift` back into the macOS Xcode target and fixed follow-on compile issues in meetings/tasks/assistant-panel paths discovered during the second-brain verification build.
 
 ### Verification
-- `pnpm exec tsc -p apps/mail/tsconfig.json --noEmit` filtered to the changed assistant files produced no matches for [mail-display.tsx](/Users/ludvighedin/Programming/personal/mail/apps/mail/components/mail/mail-display.tsx), [mail.tsx](/Users/ludvighedin/Programming/personal/mail/apps/mail/components/mail/mail.tsx), [home/page.tsx](/Users/ludvighedin/Programming/personal/mail/apps/mail/app/(routes)/mail/home/page.tsx), and [settings/general/page.tsx](/Users/ludvighedin/Programming/personal/mail/apps/mail/app/(routes)/settings/general/page.tsx).
+
+- `pnpm exec tsc -p apps/mail/tsconfig.json --noEmit` filtered to the changed assistant files produced no matches for [mail-display.tsx](/Users/ludvighedin/Programming/personal/mail/apps/mail/components/mail/mail-display.tsx), [mail.tsx](/Users/ludvighedin/Programming/personal/mail/apps/mail/components/mail/mail.tsx), [home/page.tsx](</Users/ludvighedin/Programming/personal/mail/apps/mail/app/(routes)/mail/home/page.tsx>), and [settings/general/page.tsx](</Users/ludvighedin/Programming/personal/mail/apps/mail/app/(routes)/settings/general/page.tsx>).
 - `xcodebuild -project apps/ios/Todus/Todus.xcodeproj -scheme Todus -destination 'generic/platform=iOS Simulator' -sdk iphonesimulator build CODE_SIGNING_ALLOWED=NO` [Passed]
 - `xcodebuild -project apps/macos/TodusMac.xcodeproj -scheme TodusMac -destination 'platform=macOS' build CODE_SIGNING_ALLOWED=NO` [Passed]
 
 ## [2026-04-03] UX — Connection CTA, localization, and task flow fixes
 
 ### iOS (`apps/ios/Todus`)
+
 - **Attachment thumbnails:** Task attachment thumbnails now load off the main actor before updating the SwiftUI image state, preventing visible UI stalls while thumbnails are generated.
 - **Task folder creation failure feedback:** Task detail sheet now surfaces a visible error when inline folder creation fails instead of silently doing nothing.
 
 ### macOS (`apps/macos`)
+
 - **Assistant connection accuracy:** The assistant panel now treats email connectivity as `emailService.hasConnection` instead of inferring it from loaded threads, so connect prompts reflect the real auth state.
 - **Email connect recovery:** The assistant panel’s `Connect Email` actions now open Internet Accounts in System Settings and fall back to a helpful alert if the deep link cannot be opened.
 - **Service-specific CTA matching:** Assistant connection banners now only appear for explicit calendar/email disconnection phrases, avoiding false positives from generic “not connected” wording.
 - **Tasks empty state action:** The macOS tasks empty state now always invokes a required create callback instead of silently no-oping.
 
 ### Web (`apps/mail`, `apps/web`)
+
 - **Assistant email CTA matching:** The web AI compose chat now uses stricter email-connection phrase detection before showing the connect-email CTA.
 - **Sidebar dialog accessibility:** The compose dialog now exposes descriptive screen-reader-only title and description text instead of empty Radix dialog labels.
 - **Meetings auth redirect:** The meetings loader now constructs the login redirect with `URL` normalization so `VITE_PUBLIC_APP_URL` cannot produce double slashes.
@@ -134,6 +234,7 @@
 ## [2026-04-03] UX — Native onboarding and task clarity pass on iOS + macOS
 
 ### iOS (`apps/ios/Todus`)
+
 - **Onboarding copy refresh:** Auth, Gmail, Reminders, and tab-bar onboarding now share one product promise, explain the benefit of each step more directly, and use lower-friction skip copy that tells users they can finish setup later in Settings.
 - **Onboarding feedback states:** Gmail and Reminders onboarding now surface inline helper/error messaging so failed connection or denied-permission states are understandable instead of silent.
 - **Tasks discoverability:** The Tasks page now exposes a local `Add Task` action in the header, removes the old standalone current-view chip, and uses labeled mode toggles instead of icon-only buttons.
@@ -141,6 +242,7 @@
 - **Board scrolling:** The board view now scrolls vertically and horizontally as separate axes instead of allowing free-form canvas panning.
 
 ### macOS (`apps/macos`)
+
 - **Onboarding copy refresh:** Auth, Gmail, Calendar, and startup onboarding now use the same workspace framing as iOS, clearer outcome-based skip copy, and inline guidance that reduces setup anxiety.
 - **Permission feedback:** Calendar onboarding now keeps the user on the step when access is denied and explains the Settings recovery path instead of silently advancing.
 - **Startup preference polish:** Startup-view onboarding now presents Home as the recommended default and keeps the skip path aligned with that recommendation.
@@ -148,24 +250,29 @@
 - **Task editing parity:** macOS task detail editing now supports changing the task folder, and list/board rows communicate clickability more clearly with lighter metadata and a trailing chevron.
 
 ### Verification Details
+
 - `xcodebuild -project apps/ios/Todus/Todus.xcodeproj -scheme Todus -configuration Debug -destination 'generic/platform=iOS' build` [Resolved]
 - `xcodebuild -project apps/macos/TodusMac.xcodeproj -scheme TodusMac -configuration Debug build` [Blocking] existing unrelated compile failure in [EmailModels.swift](/Users/ludvighedin/Programming/personal/mail/apps/macos/TodusMac/Domain/EmailModels.swift) referencing missing `AppLogger`.
 
 ## [2026-04-03] Native App Readiness — Phase 3 Polish & Performance
 
 ### Both Platforms (iOS + macOS)
+
 - **Fix: Request timeouts** — All `URLRequest` objects in `TodosAPIClient` now use a 30-second timeout (`timeoutInterval: 30`) to prevent indefinite hangs on bad connectivity.
 
 ### iOS (`apps/ios/Todus`)
+
 - **Fix: AppConfiguration URL force unwraps** — Moved hardcoded URL strings to `static let` constants (constructed once, guaranteed valid). Eliminates repeated `URL(string:)!` force unwraps.
 - **Fix: GroupChat adaptive polling** — Polling interval now adapts: 5s when the view is active, 30s when the app is backgrounded. Uses `scenePhase` to toggle `setActive()`. Reduces battery drain.
 
 ### macOS (`apps/macos/TodusMac`)
+
 - **Feature: Structured logging** — Created `AppLogger.swift` (mirrors iOS). Replaced all 32 `print("[...")` calls across 9 files with `AppLogger.shared.log(...)` for persistent file-based logging and diagnostic sharing.
 - **Feature: Email error state + retry** — Added dedicated `errorState` view to `MacEmailInboxView` with error message and "Try Again" button (matching the iOS pattern). Previously, failed loads showed the empty state.
 - **Feature: Accessibility labels** — Added `accessibilityLabel` and `accessibilityHint` to toolbar buttons (Notifications, More Options, Create, Search) for VoiceOver support.
 
 ### Files changed
+
 - `apps/ios/Todus/Todus/Data/AppConfiguration.swift`
 - `apps/ios/Todus/Todus/Services/API/TodosAPIClient.swift`
 - `apps/ios/Todus/Todus/Services/AI/GroupChatService.swift`
@@ -189,23 +296,28 @@
 ## [2026-04-03] Native App Readiness — Critical Bug Fixes & UX Hardening
 
 ### Both Platforms (iOS + macOS)
+
 - **Fix: Silent email mutation failures** — `markAsRead()`, `markAsUnread()`, `archiveThreads()`, `deleteThreads()`, and `toggleStar()` previously had empty `catch {}` blocks. User actions would silently fail with no feedback. All now set `errorMessage` (already rendered in views) and log the error.
 - **Fix: Brittle session-expired detection** — Replaced string matching `error.errorDescription?.contains("Session expired")` with type-safe `catch APIError.unauthorized`. The API client already throws this enum case for all 401s.
 - **Fix: Network vs server error messages** — `loadThreads()` now distinguishes `URLError` ("No internet connection") from server errors ("Failed to load emails. Please try again.") instead of showing a generic message.
 
 ### Shared Auth (`packages/swift-auth`)
+
 - **Fix: Token refresh race condition** — Added `activeRefreshTask` coalescing gate in `refreshAccessToken()`. When multiple API calls receive 401 simultaneously, only one refresh network request fires; subsequent callers await the in-flight result instead of triggering duplicate requests.
 
 ### iOS (`apps/ios/Todus`)
+
 - **Fix: Force cast crash in SupabaseEdgeFunctionClient** — Replaced `EmptyResponse() as! Response` with safe conditional cast (`as?`) + guard.
 - **Fix: Force unwrap crashes in date computations** — `CalendarTaskView.recomputeBuckets()` and `HomeView.recomputeTasksDueToday()` used `Calendar.date(byAdding:)!`. Replaced with `guard let` + early return.
 - **Fix: CalendarService force unwrap after nil check** — `scheduleFolderMapPruneIfNeeded()` used `lastFolderPruneAt!` after a nil check. Replaced with `if let` binding.
 
 ### macOS (`apps/macos/TodusMac`)
+
 - **Fix: Settings session revocation errors hidden** — Added `settingsError` state + `.alert()` modifier so users see "Could not revoke session" instead of silent failure.
 - **Feature: Offline network banner** — `MacRootView` now reads `networkMonitor.isConnected` and shows a red "No internet connection" capsule banner at the top of the app. Animated in/out with `.snappy`.
 
 ### Files changed
+
 - `apps/ios/Todus/Todus/Services/Email/EmailService.swift`
 - `apps/macos/TodusMac/Services/Email/EmailService.swift`
 - `packages/swift-auth/Sources/TodusAuth/AuthService.swift`
@@ -221,6 +333,7 @@
 ## [2026-04-03] AI Chat — Service Connection UX + iOS Input Hang Fix
 
 ### iOS (`apps/ios/Todus`)
+
 - **Fix: Input-tap hang** — Capped `mentionOptions` thread iteration at 50 entries before dictionary grouping, preventing O(n) main-thread freeze when tapping the AI chat input field.
 - **Service connection messaging** — Updated system prompt: AI now says "Calendar/Email is not connected" instead of "access disabled by user". AI is told to direct users to connect in settings.
 - **Suggestion filtering** — Calendar tab returns no suggestions (shows connect CTA instead) when EventKit permission is not granted. Email tab does the same when inbox is not loaded.
@@ -228,17 +341,20 @@
 - **Connect CTA in empty state** — When the active tab's suggestion pool is empty, a `connectServicesPrompt` shows compact capsule buttons to request calendar access or navigate to email.
 
 ### macOS (`apps/macos/TodusMac`)
+
 - **Service connection messaging** — Same system prompt update as iOS. AI says "not connected" for calendar/email when not available.
 - **Suggestion filtering** — Calendar and email sections return empty pools when respective services aren't connected; connect prompt shown instead.
 - **Connect CTA in messages** — `MacMessageBubble` shows connect banner when AI mentions a disconnected service.
 
 ### Web (`apps/mail`)
+
 - **Markdown rendering** — Fixed `markdownStyles` to give headings visual hierarchy (bold/semibold weight), proper paragraph/list sizing, `outside` list-item positioning, styled code blocks, and blockquote styling. Added `normalizeMarkdown()` to convert single `\n` to `\n\n` so CommonMark sees paragraph breaks.
 - **Suggestion filtering** — `ExampleQueries` hides all email suggestions when no email connection exists and shows a "Connect Email Account" link instead.
 - **Connect CTA in messages** — Inline `<a>` to `/settings/connections` shown below assistant messages that mention "email", "inbox", or "not connected" when no email account is linked.
 - **Chat entitlement gating** — `isChatEnabled` now blocks chat until billing has finished loading and the feature is confirmed enabled, so users do not get access before entitlement is known.
 
 ### Files changed
+
 - `apps/ios/Todus/Todus/Features/AI/AIChatView.swift`
 - `apps/ios/Todus/Todus/Services/AI/AIChatService.swift`
 - `apps/macos/TodusMac/Views/AI/MacAssistantPanel.swift`
@@ -250,6 +366,7 @@
 ## [2026-04-03] UX — iOS email thread view polish pass
 
 ### iOS (`apps/ios/Todus`)
+
 - **Tab bar hidden in thread view:** Added `hideTabBar` flag to AppServices so the custom floating tab bar hides when viewing an email thread. Reply buttons are now fully visible.
 - **Header redesign:** Removed solid background, replaced with transparent-to-scrim gradient. Action icons (mark unread, archive, delete) grouped in a single glass capsule. Back button and Ask AI button are standalone circles.
 - **Ask AI in header:** Added sparkles button with the same gradient as the tab bar AI icon. Opens the AI chat sheet with thread context attached.
@@ -260,6 +377,7 @@
 - **Action buttons unclipped:** Moved padding inside the ScrollView HStack so right-side pills are no longer clipped by parent padding.
 
 ### Files changed
+
 - `apps/ios/Todus/Todus/Features/Email/EmailThreadView.swift` — Full rewrite
 - `apps/ios/Todus/Todus/App/AppServices.swift` — Added `hideTabBar` property
 - `apps/ios/Todus/Todus/Navigation/MainTabView.swift` — Conditionally hide custom tab bar
@@ -267,12 +385,14 @@
 ## [2026-04-03] UX — Native home, tasks, and email usability pass on iOS + macOS
 
 ### iOS (`apps/ios/Todus`)
+
 - **Home:** The Home dashboard now distinguishes loading from empty states for events and email, surfaces a compact partial-setup card when Gmail or Calendar still needs connection, adds explicit section actions (`Open` / `View all`), and visually demotes `Other Spaces` so today-focused content reads first.
 - **Tasks:** Task search and sort now apply consistently across List, Board, Table, and `By Date`; the mode helper text explains what each layout is for; Board and Table explicitly hide completed work outside List; board columns now have clearer empty states; and due dates are more visually prominent inside board cards.
 - **Email:** The inbox now shows a persistent mailbox cue with quick-switch chips for primary folders, clarifies search state (`Filtering loaded...` vs `Searching...`), compresses assistant nudges, and keeps the thread list primary. Thread detail now shows a short message preview before AI summary/actions and consolidates the main thread actions into one top cluster.
 - **Verification:** `xcodebuild -project apps/ios/Todus/Todus.xcodeproj -scheme Todus -destination 'generic/platform=iOS Simulator' build` succeeds after the UX pass.
 
 ### macOS (`apps/macos`)
+
 - **Home:** Added distinct loading cards for events/tasks/email, a compact partial-setup banner when Gmail or Calendar is still disconnected, and actionable empty states with direct next-step buttons for Calendar, Tasks, and Inbox.
 - **Tasks:** The toolbar now shows the active sort label alongside the sort icon, explains the purpose of the current view mode more clearly, adds a visible note when completed tasks stay in List, and upgrades the empty state with an explicit create/clear-search action.
 - **Email:** The inbox now shows the current mailbox context inside the pane, de-emphasizes assistant nudges relative to the thread list, clarifies search status, improves the empty detail guidance, and moves the AI card below a short message preview in thread detail so reading comes first.
@@ -281,11 +401,13 @@
 ## [2026-04-03] Fix — Native email mailbox clarity and responsiveness pass
 
 ### iOS (`apps/ios/Todus`)
+
 - **Connection-state gating:** The inbox now distinguishes `checking connection` from `not connected`, so the Gmail connect surface no longer flashes before the initial connection check completes.
 - **Folder-specific empty states:** Empty mailboxes now use folder-aware copy such as `No drafts`, `Nothing sent yet`, and `Trash is empty`, each with a short explanation of what belongs there.
 - **Verification:** `xcodebuild -project apps/ios/Todus/Todus.xcodeproj -scheme Todus -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build` succeeds after the inbox-state changes.
 
 ### macOS (`apps/macos`)
+
 - **Instant folder switching:** The macOS email service now hydrates each mailbox from an in-memory per-folder cache before refreshing, so switching between Inbox, Drafts, Sent, and the secondary folders no longer waits on a cold reload.
 - **Connection-state gating:** The macOS email page now shows a loading state while checking Gmail connectivity instead of briefly rendering the connect prompt during startup.
 - **Sender avatars:** The inbox list and thread detail now use the same avatar-resolution pipeline as iOS, preferring contact/domain imagery before falling back to deterministic initials.
@@ -295,6 +417,7 @@
 ## [2026-04-03] Fix — iOS startup/runtime hang mitigation and tracing pass
 
 ### iOS (`apps/ios/Todus`)
+
 - **Calendar hot path:** `CalendarService` no longer prunes folder mappings on every event fetch. Pruning is now throttled, bounded to a one-year window, and instrumented with signposts. Added a short-lived today-events cache to avoid repeated EventKit work when returning to Home.
 - **Startup/task/email tracing:** Added new `OSSignpost` intervals for calendar fetches, folder-map pruning, shared-folder sync, email connection checks, task-list recomputes, and attachment decoding. Added a debug-only main-thread hang watchdog that logs stalls over 200 ms.
 - **Startup/runtime throttling:** `TaskCaptureService.syncSharedFolders`, `EmailService.checkConnection`, and shared AI profile loading are now coalesced/throttled to avoid repeated work when switching tabs or reopening surfaces. `MainTabView` no longer force-rebuilds active tabs with `.id(selectedTab)`.
@@ -318,6 +441,7 @@
 ## [2026-04-03] Feat — iOS tab bar: burger menu, tighter layout, Home More section + Docs
 
 ### iOS (`apps/ios/Todus`)
+
 - **CustomTabBar.swift**: Burger `line.3.horizontal` button now first in the nav pill (replaces ellipsis in action pill). Removed ellipsis from action pill — right pill is now just AI + create. Narrowed all button frames (62→50px nav, 54→50px action). Reduced pill padding and HStack spacing for a tighter look.
 - **AppTab.swift**: `defaultNavTabs` remains `[home, tasks, email, calendar]`; the burger sits outside the configured tabs and keeps the visible pill from feeling cramped.
 - **AppServices.swift**: `tabBarTabs` decode still clamps invalid values, but the configured tab set remains capped at 4.
@@ -336,7 +460,7 @@
 
 ## [2026-04-03] Fix — AI chat markdown formatting and line breaks (iOS + macOS)
 
-- **Instant markdown rendering (iOS + macOS):** AI responses now render headings (`#`), bullets (`-`), bold, and code blocks *during streaming* instead of showing raw markdown characters. Removed the two-phase `showFullMarkdown` toggle — `fullMarkdownText` (`.full` AttributedString syntax) is used from the first token. Typewriter animation is preserved; the blinking cursor overlay continues during streaming.
+- **Instant markdown rendering (iOS + macOS):** AI responses now render headings (`#`), bullets (`-`), bold, and code blocks _during streaming_ instead of showing raw markdown characters. Removed the two-phase `showFullMarkdown` toggle — `fullMarkdownText` (`.full` AttributedString syntax) is used from the first token. Typewriter animation is preserved; the blinking cursor overlay continues during streaming.
 - **macOS multiline input:** Replaced SwiftUI `TextField` + `onSubmit` with a custom `NSViewRepresentable` (`MacChatTextInput`) wrapping `NSTextView`. Return now inserts a line break; **Cmd+Return** sends the message. The send button tooltip updated to `⌘↵`.
 - **User bubble line breaks (iOS + macOS):** Added `.fixedSize(horizontal: false, vertical: true)` to `Text(message.content)` in user bubbles to guarantee vertical expansion for multi-line messages.
 - Added `MacBlinkingCursor` component on macOS to show a blinking cursor during AI streaming.
@@ -381,6 +505,7 @@
 ## [2026-04-03] Fix — AI chat persistence and input blocking
 
 ### Web (`apps/mail`)
+
 - **layout.tsx**: Moved `AISidebar` and `AIToggleButton` from `mail.tsx` into the shared mail layout so the chat persists on all pages (home, tasks, meetings, etc.).
 - **ai-sidebar.tsx**: Replaced `ResizablePanel`-based sidebar with a `fixed` right panel (`fixed top-2 right-1 bottom-1 z-40 w-[360px]`) so sidebar mode works everywhere without needing a `ResizablePanelGroup`. Added self-gating `if (!activeConnection?.id) return null` inside the component.
 - **ai-chat.tsx**: Fixed paywall overlay (`absolute inset-0`) covering the text input by adding `relative` to the scroll container, scoping the overlay to only the messages area. Fixed billing loading race condition: `isChatEnabled = !isBillingLoading && chatMessages.enabled` so users stay blocked until billing is loaded and entitlement is confirmed.
@@ -389,6 +514,7 @@
 ## [2026-04-03] Fix — meeting retention and scheduling guardrails
 
 ### Server (`apps/server`)
+
 - **Migration 0045** (`apps/server/src/db/migrations/0045_meeting_retention_guardrails.sql`): Adds `last_pruned_at`, enforces unique `recall_bot_id`, and includes the duplicate-check guard before the constraint lands.
 - **meeting-retention.ts**: Added staleness-aware pruning that writes `last_pruned_at`, returns a uniform `{ deleted }` shape, and stops scanning on every read.
 - **trpc/routes/meet.ts**: Hardened Recall bot scheduling with an atomic claim before the external API call so concurrent syncs do not double-schedule the same meeting.
@@ -396,6 +522,7 @@
 - **db/schema.ts**: Matches the migration by adding the `last_pruned_at` integration column and making `recall_bot_id` unique.
 
 ### iOS (`apps/ios/Todus`)
+
 - **AppServices.swift**: Tab bar restore now falls back to the default 4-tab layout when decoded persisted tabs are invalid or insufficient.
 - **EmailService.swift**: Cached inbox data now checks staleness and refreshes in the background instead of leaving the timestamp fields unused.
 - **TabBarCustomizationView.swift**: Fixed the delete handler to pass an `IndexSet` to `remove(atOffsets:)`.
@@ -403,6 +530,7 @@
 ## [2026-04-03] Feat — iOS tab bar customization + meetings UX overhaul
 
 ### iOS (`apps/ios/Todus`)
+
 - **MeetingsListView.swift**: Fixed title position via `AppTopHeader` pattern; pull-to-refresh replaces toolbar sync button.
 - **AppTab.swift**: Added `description`, `isRequired`, `defaultNavTabs`; conforms to `Codable`.
 - **AppServices.swift**: Added `tabBarTabs` (persisted, default 4 tabs), `hasConfiguredTabBarPrompt`, `navigateToSheet`.
@@ -417,12 +545,14 @@
 ## [2026-04-03] Fix — macOS Dock icon crop
 
 ### macOS (`apps/macos`)
+
 - **TodusMac/Resources/Assets.xcassets/AppIcon.appiconset**: Regenerated the macOS app icon set from the iOS 1024 px master artwork so the Dock icon uses the same padding and no longer appears cropped.
 - **apps/ios/Todus/status_macos.md**: Added a build note documenting the icon asset correction.
 
 ## [2026-04-03] Fix — Cloudflare web build cleanup
 
 ### Web (`apps/mail`)
+
 - **apps/mail/app/(routes)/mail/docs/[docId]/page.tsx**: Fixed the doc editor import to use the default `Editor` export from `@/components/create/editor`, resolving the Rollup/Vite missing export build error.
 - **apps/mail/components/mail/note-panel.tsx**: Replaced `window.confirm` with the existing shadcn dialog pattern for note deletion so the code passes the `no-alert` lint rule without suppressions.
 - **apps/mail/app/(auth)/todus/login/page.tsx** and **apps/mail/app/(auth)/todus/signup/page.tsx**: Removed dead `false && (...)` JSX branches and the now-unused auth form code so Oxlint no longer flags constant boolean conditions.
@@ -430,6 +560,7 @@
 ## [2026-04-03] Fix — Native meetings follow-up regressions
 
 ### Native meetings (`apps/ios`, `apps/macos`)
+
 - **MeetingDetailView.swift / MacMeetingDetailView.swift**: Detail refreshes after `generateSummary` and `scheduleBot` now preserve the current content instead of blanking the whole screen behind a full-screen loading spinner.
 - **iOS MeetingsService.swift**: Calendar sync and bot scheduling now reload meetings with the current search/status filters preserved, so the visible list stays consistent with the active search field.
 - **MacMeetingsView.swift**: Reordered grouped meeting sections to `Today → This Week → Upcoming → Earlier`, matching iOS and prioritizing the most time-sensitive meetings first.
@@ -440,24 +571,30 @@
 Implemented a proper access + refresh token pattern for native apps, matching production apps like Gmail, Slack, and Twitter. Users feel "always signed in" — security is enforced behind the scenes, not by annoying logouts.
 
 ### Architecture
+
 - **Access token (JWT)**: 15-minute expiry, used for all API calls. Stateless JWKS verification, no DB lookup.
 - **Refresh token (session token)**: 90-day sliding window, stored in Keychain. Used only to obtain fresh JWTs via `/auth/refresh-native-token`. Window extends daily on use via Better Auth's `updateAge`.
 - **User experience**: App opens → JWT expired → refresh token exchanges for new JWT → user never notices. Only re-login if inactive 90+ days.
 
 ### Server (`apps/server`)
+
 - **auth.ts**: JWT expiration set to 15 minutes (access token). Session `expiresIn` set to 90 days. `updateAge` set to 1 day for daily session extension. `cookieCache.maxAge` set to 90 days.
 - **main.ts**: `/auth/mobile-token` now returns both a JWT (access) and raw session token (refresh) in the deep link. New `POST /auth/refresh-native-token` endpoint exchanges a refresh token for a fresh JWT, going through Better Auth's full session pipeline (validates session, extends expiresAt, mints JWT).
 
 ### Shared Auth (`packages/swift-auth`)
+
 - **AuthService.swift**: Dual token storage (`bearerToken` for JWT, `refreshToken` for session token). Added `refreshAccessToken()` for transparent JWT refresh. Added `isJWTExpiredOrExpiring()` for proactive refresh. Updated `restorePersistedSession()` to refresh JWT on app launch. Updated `attemptSilentRefresh()` to use refresh pattern with legacy fallback. Updated `completeAuthentication()` to detect JWT vs session token and exchange accordingly for Apple/Email OTP flows. Updated `handleAuthCallback()` to extract refresh token from deep links. Improved all user-facing error messages.
 
 ### Native Apps (`apps/ios`, `apps/macos`)
+
 - **TodosAPIClient.swift** (both platforms): Improved session expired error message.
 
 ### Session Revocation
+
 Better Auth provides `/revoke-session`, `/revoke-sessions`, and `/revoke-other-sessions` endpoints. When a session is revoked, the refresh token becomes immediately invalid. The JWT remains valid for up to 15 minutes (standard JWT trade-off). No additional wiring needed.
 
 ### Future Improvements (documented, not implemented)
+
 - Device trust / "remember me" (trusted devices get longer refresh window)
 - Suspicious IP/device fingerprint detection for forced re-login
 - JWT ID (`jti`) blacklisting for instant revocation
@@ -468,6 +605,7 @@ Better Auth provides `/revoke-session`, `/revoke-sessions`, and `/revoke-other-s
 Root cause: Better Auth's `jwt()` plugin defaults to **15-minute expiration**. JWTs minted by `/auth/mobile-token` expired almost immediately, causing native app sign-outs.
 
 ### Additional fixes
+
 - **MacAppServices.swift**: Shared folder sync now propagates local fetch failures instead of silently falling back to an empty folder list.
 - **nav-main.tsx**: `NavItemExpandable` now receives `isUrlActive` explicitly, fixing a runtime reference error in expandable navigation items.
 - **schemas.ts**: `mergeUserSettings` now keeps `categories` typed as full `MailCategory[]` while still allowing nested partial updates elsewhere.
@@ -476,6 +614,7 @@ Root cause: Better Auth's `jwt()` plugin defaults to **15-minute expiration**. J
 ## [2026-04-01] Feat — iOS More sheet + Docs WebView (apps/ios)
 
 Added "More" overflow button (ellipsis) to the custom tab bar that opens a sheet containing a Docs WebView:
+
 - `Features/Docs/DocsWebView.swift` — WKWebView wrapper loading `https://app.todus.app/mail/docs`; injects Bearer token on initial load; mirrors device colour scheme via JS at document start.
 - `Features/Docs/MoreSheetView.swift` — sheet with NavigationStack + List; single "Docs" row with `NavigationLink` to `DocsWebView`; Done button in toolbar.
 - `Features/Tasks/CustomTabBar.swift` — added optional `onMore: (() -> Void)?` property; added ellipsis button (44×46pt, `secondaryLabel` colour) after the + button in the action pill.
@@ -484,6 +623,7 @@ Added "More" overflow button (ellipsis) to the custom tab bar that opens a sheet
 ## [2026-04-01] Feat — Doc editor page with auto-save (apps/mail/app/(routes)/mail/docs/[docId]/page.tsx)
 
 Replaced the stub at `/mail/docs/:docId` with a full editor page:
+
 - Two-column `ResizablePanelGroup` matching the docs list page layout; left panel hosts `DocTree` with the current doc highlighted via `selectedDocId`.
 - Title: plain `<input>` (`text-2xl font-semibold`, no border) — saves on blur or Enter via `trpc.docs.update`.
 - Editor: `<Editor>` (Tiptap/Novel); captures the live editor instance via `onEditorReady` so `getJSON()` / `getText()` provide JSONContent + plaintext for storage (since `onChange` emits HTML only).
@@ -494,22 +634,25 @@ Replaced the stub at `/mail/docs/:docId` with a full editor page:
 ## [2026-04-01] Feat — DocTree component + Docs list page (apps/mail/components/docs/doc-tree.tsx, apps/mail/app/(routes)/mail/docs/page.tsx)
 
 Added `DocTree` sidebar component and replaced the `DocsPage` stub with a real two-column layout:
+
 - `DocTree` — fetches workspaces via `trpc.docs.workspaces.list`, fetches root docs per workspace via `trpc.docs.list`, renders collapsible workspace sections with inline "new page" (+ icon) and "new workspace" buttons; loading skeletons; empty state.
 - `DocsPage` — `ResizablePanelGroup` layout: left panel (20% default, 15% min) hosts `DocTree`; right panel shows an empty-state with "Select a page to start reading" + "New page" button; auth-guarded via `clientLoader`.
 
 ## [2026-04-01] Feat — Add docWorkspace + doc DB schema tables (apps/server/src/db/schema.ts)
 
 Added two new Drizzle ORM tables for the Docs feature:
+
 - `mail0_doc_workspace` — user-owned workspace container with optional emoji, createdAt/updatedAt
 - `mail0_doc` — Notion-style page with self-referential parentId for nesting, Tiptap JSONContent storage, plaintext search mirror, cross-entity link columns, and three indexes
-Added `import type { AnyPgColumn }` to satisfy TypeScript's circular reference check on the self-referential FK.
-Migration NOT applied — run `pnpm db:generate && pnpm db:migrate` to apply.
+  Added `import type { AnyPgColumn }` to satisfy TypeScript's circular reference check on the self-referential FK.
+  Migration NOT applied — run `pnpm db:generate && pnpm db:migrate` to apply.
 
 ## [2026-04-01] Fix — Code quality and bug fixes across all platforms
 
 Batch of ~50 fixes across iOS, macOS, web, and server layers covering security, stability, and UX.
 
 ### Server (`apps/server`)
+
 - **env.ts**: Made `RECALL_WEBHOOK_SECRET` optional (`?`)
 - **recall.ts**: Wrapped `JSON.parse` in try-catch for cleaner parse error messages
 - **recall-webhook.ts**: Implemented full HMAC-SHA256 signature verification with production warning when secret is not set; made media and transcript inserts idempotent via `onConflictDoUpdate`/`onConflictDoNothing`; transcript event only sets status to `ready` when transcript fetch succeeds; handles null `recallSegmentId` segments separately to avoid dedup failures on retry; read body once to avoid double-consume
@@ -519,12 +662,15 @@ Batch of ~50 fixes across iOS, macOS, web, and server layers covering security, 
 - **mail-assistant.ts**: Added TODO comment for hardcoded UTC timezone
 
 ### Security
+
 - **Severity: critical** — Fixed a SQL injection vulnerability in `searchMeetingTranscriptTool` in `apps/server/src/routes/agent/tools.ts`. The vulnerable transcript search path now escapes LIKE wildcards before building the query, preventing potential arbitrary query modification and transcript data exfiltration from attacker-controlled search input. Affected released versions: all released builds containing the original meetings transcript tool before the 2026-04-01 fix. Immediate upgrade required: **yes**.
 
 ### Fixes
+
 - **tools.ts (agent)**: Fixed meeting tools type to avoid `undefined` in `ToolSet`
 
 ### iOS (`apps/ios`)
+
 - **GroupChatView.swift**: URL-encodes invite token; surfaces `joinGroup`/`leaveGroup` errors via alerts; only clears token on success
 - **ShareConversationSheet.swift**: Added `@MainActor` to `createLink()`; removed redundant `MainActor.run {}`
 - **SharedConversationView.swift**: `unlock()` only sets `wrongPassword = true` for auth failures (401/403/password errors)
@@ -536,6 +682,7 @@ Batch of ~50 fixes across iOS, macOS, web, and server layers covering security, 
 - **MeetingsService.swift**: Added `loadError` property; removed `private` from `GenerateSummaryResponse`
 
 ### macOS (`apps/macos`)
+
 - **MailAssistantModels.swift**: Added `Sendable` to `MailAssistantSettingsResponse`/`Settings`; stable stored `id` for `MailAssistantNudge`
 - **GroupChatService.swift**: Replaced all `apiClient!` force-unwraps with guard-let; `createGroup` matches by returned id; per-iteration `guard let self` in polling loop
 - **ShareConversationService.swift**: Replaced all `apiClient!` force-unwraps with guard-let
@@ -548,6 +695,7 @@ Batch of ~50 fixes across iOS, macOS, web, and server layers covering security, 
 - **MeetingsService.swift**: Added `loadError`; removed `private` from `GenerateSummaryResponse`
 
 ### Web (`apps/mail`)
+
 - **mail-display.tsx**: Refresh button handler wrapped in try-catch with `toast.error`
 - **chat/page.tsx**: Added `onError` handler to `saveConversation`; `handleDeleteConversation` moves `handleNewChat()` to `onSuccess`
 - **search/page.tsx**: Safe date parsing with `isValid()` for thread and task dates
@@ -563,6 +711,7 @@ Batch of ~50 fixes across iOS, macOS, web, and server layers covering security, 
 Full meetings feature across all platforms: calendar sync, Recall.ai bot recording, AI recaps, transcript Q&A, and second-brain integration.
 
 ### Backend (`apps/server`)
+
 - **DB schema** (`schema.ts`): Added 4 tables — `meetIntegration`, `meeting`, `meetingMedia`, `meetingTranscript` with indexes.
 - **Migration**: `0042_absurd_emma_frost.sql` generated.
 - **Recall.ai client** (`lib/recall.ts`): `createRecallBot`, `getBotStatus`, `cancelBot`, `getBotTranscript` with retry logic.
@@ -573,18 +722,21 @@ Full meetings feature across all platforms: calendar sync, Recall.ai bot recordi
 - **Types** (`types.ts`): Added `ListMeetings`, `GetMeetingSummary`, `SearchMeetingTranscript` to Tools enum.
 
 ### Web (`apps/mail`)
+
 - **Routes** (`routes.ts`): Added `/mail/meetings` and `/mail/meetings/:meetingId`.
 - **Navigation** (`config/navigation.ts`): Added "Meetings" with Video icon and `g + m` shortcut.
 - **List page** (`meetings/page.tsx`): Time-grouped list, status filters, search, calendar sync button, empty state.
 - **Detail page** (`meetings/[meetingId]/page.tsx`): Video player, AI recap, action items, transcript viewer, Q&A chat.
 
 ### macOS (`apps/macos`)
+
 - **Navigation**: Added `.meetings` case to `MacPrimarySelection`, sidebar button, ⌘5 shortcut.
 - **Service** (`Services/Meetings/MeetingsService.swift`): Full tRPC client for meetings CRUD + AI.
 - **Views**: `MacMeetingsView.swift` (split list+detail), `MacMeetingDetailView.swift` (video, recap, transcript, Q&A).
 - **Registration**: Added `meetingsService` to `MacAppServices`.
 
 ### iOS (`apps/ios`)
+
 - **Navigation**: Added `.meetings` to `AppTab`, tab content in `MainTabView`.
 - **Service** (`Services/Meetings/MeetingsService.swift`): Full tRPC client matching macOS.
 - **Views**: `MeetingsListView.swift` (grouped list with search), `MeetingDetailView.swift` (video, recap, transcript, Q&A).
@@ -593,9 +745,11 @@ Full meetings feature across all platforms: calendar sync, Recall.ai bot recordi
 ## [2026-04-01] Fix — Code review bug-fix batch
 
 ### CHANGELOG
+
 - Corrected "4 branches" → "5 branches" in iOS EmailInboxView entry.
 
 ### Backend (`apps/server`)
+
 - `calendar.ts`: Added `scopeMissing: false` to non-Google early returns in `events` and `calendars` procedures so the shape is consistent.
 - `settings.ts`: `save` mutation now validates existing settings through `userSettingsSchema.safeParse` before merging, eliminating the unsafe `as UserSettings` cast.
 - `groups.ts`: `generateToken()` now uses URL-safe base64 (replaces `+`→`-`, `/`→`_` instead of stripping) for reliable 16-char output. `create` and `join` wrapped in transactions. `regenerateInvite` now calls `requireActiveGroup`. `listMessages` uses compound `timestamp:id` cursor. `generateGroupAIResponse` opens its own DB connection so it can run safely in a background `waitUntil` after the request connection closes.
@@ -604,6 +758,7 @@ Full meetings feature across all platforms: calendar sync, Recall.ai bot recordi
 - `migrations/0041`: Removed 3 redundant B-tree indexes (`group_slug_idx`, `group_invite_token_idx`, `shared_conversation_slug_idx`) that duplicated existing UNIQUE constraints.
 
 ### Web (`apps/mail`)
+
 - `calendar/page.tsx`: Removed redundant ternary `e.allDay ? new Date(e.startTime) : new Date(e.startTime)`.
 - `mail-list.tsx`: Empty-inbox state now checks `!isConnectionLoading` to prevent flash before connection loads.
 - `settings/sharing/page.tsx`: Added `'use client'` directive; clipboard `writeText` now properly awaited with error toast fallback.
@@ -613,6 +768,7 @@ Full meetings feature across all platforms: calendar sync, Recall.ai bot recordi
 - `share/[slug]/page.tsx`: Added `onError` handler and inline error message for import mutation.
 
 ### iOS (`apps/ios`)
+
 - `AIChatView.swift`: Removed `.menuStyle(.borderlessButton)` — macOS-only API.
 - `AIChatService.swift`: `moveConversation` captures value before spawning async `Task` to avoid stale index.
 - `CalendarService.swift`: Replaced `hashValue` with stable packed-RGB extraction from CGColor components.
@@ -623,6 +779,7 @@ Full meetings feature across all platforms: calendar sync, Recall.ai bot recordi
 - `ShareConversationService.swift`: Replaced `apiClient!` force-unwraps with `client()` helper; added `ShareConversationServiceError`.
 
 ### macOS (`apps/macos`)
+
 - `MacAppServices.swift`: `syncSharedFolders` now guards on `authService.isAuthenticated`.
 - `MacAssistantPanel.swift`: Removed `.swipeActions` (no-op in `ScrollView+LazyVStack`); moved Delete into ellipsis Menu.
 - `CalendarService.swift`: Added `pruneFolderMap()` to remove stale event entries from UserDefaults.
@@ -630,24 +787,28 @@ Full meetings feature across all platforms: calendar sync, Recall.ai bot recordi
 ## [2026-03-31] Feature — Proactive Mail Assistant across web + iOS + macOS
 
 ### Backend — shared assistant layer + settings policy
+
 - Added `mailAssistant` tRPC router with per-thread recommendations (`getThread`), inbox nudges (`getInboxNudges`), manual apply actions (`createTaskFromSuggestion`, `createEventFromSuggestion`), draft generation (`generateDraft`), and assistant activity logging (`logActivity`, `getActivity`).
 - Added shared `assistantAutomationPolicy` settings schema with defaults for summaries, task/event suggestions, smart nudges, auto-drafts, and the opt-in auto-send experiment.
 - Settings now deep-merge the nested assistant policy so older settings payloads stay backward-compatible.
 - Draft generation reuses the existing compose pipeline and thread context; assistant activity is stored in KV for lightweight audit history without a schema migration.
 
 ### Web — proactive thread + inbox UX
+
 - Replaced the passive summary block with a visible `Mail Assistant` card in thread view: summary, action-item detection, risk/confidence badges, suggested tasks/events, reply draft action, research entry point, and copy/refresh controls.
 - Added inline per-message assistant actions for task creation, event creation, assistant handoff, and research.
 - Added inbox-level assistant nudges above the thread list so users see reply-needed / meeting-request / follow-up / draft-ready prompts before opening a thread.
 - Added mail assistant controls to General Settings with recommended defaults, nested policy toggles, quiet hours, and allowed auto-send scenarios.
 
 ### iOS
+
 - Added native assistant models plus email-service calls for thread recommendations, inbox nudges, task/event creation, and assistant draft generation.
 - Email thread now shows a top-level assistant card with summarize, extract-task, create-event, draft-reply, ask-assistant, and research actions.
 - Email inbox now surfaces compact assistant nudges above the thread list.
 - AI Assistant settings now include mail-assistant automation toggles and persist them through shared backend settings.
 
 ### macOS
+
 - Added native assistant models plus email-service calls for thread recommendations, inbox nudges, task/event creation, and assistant draft generation.
 - macOS thread sheets now show a visible assistant card and inline assistant controls.
 - macOS inbox now surfaces assistant nudges above the thread list.
@@ -660,18 +821,21 @@ Full meetings feature across all platforms: calendar sync, Recall.ai bot recordi
 ## [2026-03-31] Feature — Shared conversation permalinks + Group chats (web + iOS + macOS)
 
 ### Backend — DB + tRPC
+
 - **4 new Drizzle tables**: `shared_conversation`, `group`, `group_member`, `group_message` — all with proper FKs, cascade rules, and indexes. Migration `0041_lame_emma_frost.sql` generated and applied.
 - **`sharing` tRPC router** (6 procedures): `create`, `get`, `import`, `listMine`, `revoke`, `update`. Password hashing via Web Crypto PBKDF2 (100k iterations, SHA-256). Rate-limited public `get` (20 req/min via Upstash Redis).
 - **`groups` tRPC router** (11 procedures): `create`, `getByInvite`, `join`, `leave`, `listMine`, `sendMessage`, `listMessages`, `get`, `update`, `kickMember`, `regenerateInvite`, `delete`. AI responses generated in background via `waitUntil`. Message rate-limited (30/min per user).
 - Both routers registered in `apps/server/src/trpc/index.ts`.
 
 ### Web
+
 - New routes: `/share/:slug` (public shared conversation), `/g/:token` (group invite join), `/settings/sharing` (manage shared links).
 - `ShareConversationModal` component — title, visibility (public/protected), password, expiry.
 - `GroupChatView` — 5-second `refetchInterval` polling with `TODO(realtime)` comment.
 - Share button wired into `ai-sidebar.tsx`; group sidebar section added to `app-sidebar.tsx`.
 
 ### iOS
+
 - `ShareConversationService` + `GroupChatService` (polling, `TODO(realtime)` marker).
 - `ShareConversationSheet` — create share link from AI chat menu; success state with native `ShareLink`.
 - `SharedConversationView` — read-only with password gate; opened via `todus://share?slug=...` deep link.
@@ -681,6 +845,7 @@ Full meetings feature across all platforms: calendar sync, Recall.ai bot recordi
 - `AppServices` extended with `shareConversationService` and `groupChatService`.
 
 ### macOS
+
 - `MacShareConversationPanel` — popover from AI assistant ellipsis menu.
 - `MacGroupChatView` — HSplitView with member list + message area, polling.
 - `MacGroupListSection` — sidebar section with create/join actions.
@@ -695,6 +860,7 @@ Full meetings feature across all platforms: calendar sync, Recall.ai bot recordi
 ## [2026-03-31] Fix — C2: Web home page — distinguish "not connected" from empty state
 
 ### Web — `home/page.tsx`
+
 - **Calendar section**: Replaces static "Connect Google Calendar" CTA with real `trpc.calendar.events` query for today. Shows live events with colored left border, time, and optional location. `scopeMissing = true` → re-auth button. No events → "No events today".
 - **Email section**: Checks `threadsQuery.isError` to surface "Connect Gmail" CTA (backend returns `NOT_FOUND` when no connection) vs "Your inbox is empty" when connected with no threads.
 - Added `CalendarEventRow` component for compact event rendering (colored border, time label, location).
@@ -706,11 +872,13 @@ Full meetings feature across all platforms: calendar sync, Recall.ai bot recordi
 ## [2026-03-31] Feature — S1: Google Calendar integration (backend + web)
 
 ### Backend — `calendar.ts` + `trpc/index.ts` + `driver/google.ts`
+
 - New `calendarRouter` with `events` and `calendars` queries — calls Google Calendar API v3 using `OAuth2Client` (auto-refresh via stored `refreshToken`)
 - `calendar.readonly` scope added to Google driver's `getScope()` — included in all new auth flows
 - 403 "scope missing" handled gracefully: returns `{ events: [], scopeMissing: true }` so the frontend can prompt a re-auth rather than surfacing an error
 
 ### Web — `calendar/page.tsx`
+
 - Calendar page now fetches real Google Calendar events for the displayed month
 - Right panel shows events (colored left border, time, location) above tasks; unified empty state
 - Week overview shows blue dots on days with events
@@ -724,6 +892,7 @@ Full meetings feature across all platforms: calendar sync, Recall.ai bot recordi
 ## [2026-03-31] Feature — S3: iOS Settings navigation-based restructure
 
 ### iOS — `SettingsView.swift`
+
 - Active Sessions → `SessionsSettingsView` sub-page; main settings shows session-count badge NavigationLink
 - AI Assistant → `AIAssistantSettingsView` sub-page (two large TextEditors removed from main list); profile saved on `.onDisappear`
 - Appearance → `AppearanceSettingsView` sub-page (vertical row list replaces cramped three-column picker); main settings shows current theme name as subtitle
@@ -2977,3 +3146,11 @@ todus.app had zero Google-indexed pages. This overhaul adds all missing SEO infr
 [2026-04-03] [UI Polish] Refined the native iOS Tasks board into a more product-like kanban surface with quieter monochrome columns, tighter card typography, clearer empty/add states, a stronger board header treatment, and a more explicit board-mode icon. User-facing change. (apps/ios/Todus/Todus/Features/Tasks/BoardView.swift, apps/ios/Todus/Todus/Features/Tasks/BoardColumnView.swift, apps/ios/Todus/Todus/Features/Tasks/BoardTaskCard.swift, apps/ios/Todus/Todus/Domain/TaskViewMode.swift).
 
 [2026-04-04] [UX Fix] Corrected the cached-refresh loading-state work to target the real web app in `apps/web`, added subtle background update badges across inbox, home, tasks, and calendar, stopped invalidating restored inbox cache on startup, and switched the web home recent-mail panel to render from thread summaries instead of per-row thread fetches. User-facing and architectural change. (apps/web/components/ui/background-refresh-indicator.tsx, apps/web/components/mail/mail-list.tsx, apps/web/app/(routes)/mail/home/page.tsx, apps/web/app/(routes)/mail/tasks/page.tsx, apps/web/app/(routes)/mail/calendar/page.tsx, apps/web/providers/query-provider.tsx).
+
+# 2026-04-04
+
+## Fixed
+
+- Prevented duplicate onboarding and marketing emails by adding a database-backed marketing delivery ledger and per-day recipient guardrails in the server auth flow.
+- Added a uniqueness constraint and migration-time dedupe for auth accounts so the same provider account cannot create multiple `mail0_account` rows and retrigger onboarding.
+- Added a duplicate-audit script for normalized users, auth accounts, and connections to support database cleanup on a live environment.

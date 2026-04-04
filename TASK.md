@@ -38,6 +38,7 @@ Last updated: 2026-04-04
 - `DONE` Fixed the web root error boundary hook-order violation by moving Sentry/error-reporting side effects into a dedicated child component.
 - `DONE` Fixed categories settings state sync so the local list rehydrates from fresh server data and removed the stale hook dependency warning.
 - `DONE` Fixed the privacy settings "remove trusted sender" control so it no longer submits the form when removing an address.
+- `DONE` Fixed native account linking to use the dedicated `/auth/native-link-social` bridge and cleared stale saved defaults when deleting a connection.
 - `IN_PROGRESS` Apply targeted fixes for AI profile prompt safety, session freshness filtering, navigation i18n, and device logout UX.
 - `PENDING` Verify whether the web settings-general AI profile fields exist in this branch before adding localization keys for them.
 
@@ -451,3 +452,12 @@ All marked DONE — these are WebView-based, not truly native.
 - Corrected the loading-state work to the actual web app under `apps/web` after the earlier pass hit the wrong frontend surface.
 - Added subtle background-refresh indicators for inbox, home, tasks, and calendar so cached data stays visible while refresh status remains explicit.
 - Stopped invalidating restored web inbox cache on startup and switched the web home recent-email panel to use thread summary data directly instead of extra per-row thread fetches.
+
+# 2026-04-04
+
+## Investigate onboarding/marketing email spam
+
+- Root cause traced to non-atomic onboarding campaign enrollment in `apps/server/src/lib/auth.ts` plus missing uniqueness on `mail0_account(provider_id, account_id)`.
+- Implemented a durable marketing email ledger to guarantee no duplicate onboarding email enrollment per normalized recipient and no more than one marketing email per recipient per day.
+- Added migration `0048_marketing_email_idempotency.sql` to dedupe duplicate account rows before enforcing the new auth account uniqueness constraint.
+- Added `pnpm scripts audit-auth-duplicates` for follow-up inspection against a connected database because the local Postgres instance was not running during the investigation.
