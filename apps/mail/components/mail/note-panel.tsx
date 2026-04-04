@@ -55,7 +55,6 @@ import {
   useSortable,
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   Dialog,
   DialogContent,
@@ -64,6 +63,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useTRPC } from '@/providers/query-provider';
@@ -861,20 +861,18 @@ export function NotesPanel({ threadId, open, onOpenChange, showTrigger = true }:
             >
               <DialogContent showOverlay className="max-w-sm">
                 <DialogHeader>
-                  <DialogTitle>Delete note?</DialogTitle>
-                  <DialogDescription>
-                    This will permanently remove the note from the thread.
-                  </DialogDescription>
+                  <DialogTitle>{m['common.notes.deleteConfirm']()}</DialogTitle>
+                  <DialogDescription>{m['common.notes.deleteConfirmDescription']()}</DialogDescription>
                 </DialogHeader>
 
-                <DialogFooter className="gap-2">
-                  <Button variant="ghost" onClick={() => setNoteToDelete(null)}>
-                    Cancel
-                  </Button>
-                  <Button variant="destructive" onClick={() => void handleConfirmDeleteNote()}>
-                    Delete
-                  </Button>
-                </DialogFooter>
+                  <DialogFooter className="gap-2">
+                    <Button variant="ghost" onClick={() => setNoteToDelete(null)}>
+                      {m['common.actions.cancel']()}
+                    </Button>
+                    <Button variant="destructive" onClick={() => void handleConfirmDeleteNote()}>
+                      {m['common.notes.actions.delete']()}
+                    </Button>
+                  </DialogFooter>
               </DialogContent>
             </Dialog>
           </div>

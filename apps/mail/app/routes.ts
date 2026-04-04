@@ -64,6 +64,7 @@ export default [
         route('/security', '(routes)/settings/security/page.tsx'),
         route('/shortcuts', '(routes)/settings/shortcuts/page.tsx'),
         route('/sharing', '(routes)/settings/sharing/page.tsx'),
+        route('/meetings', '(routes)/settings/meetings/page.tsx'),
         route('/*', '(routes)/settings/[...settings]/page.tsx'),
       ]),
     ),

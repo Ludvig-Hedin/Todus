@@ -20,10 +20,12 @@ import { authClient, useSession } from '@/lib/auth-client';
 import { useTRPC } from '@/providers/query-provider';
 import type { Outputs } from '@zero/server/trpc';
 import { Button } from '@/components/ui/button';
+import { BackgroundRefreshIndicator } from '@/components/ui/background-refresh-indicator';
 import { useThread } from '@/hooks/use-threads';
 import { Badge } from '@/components/ui/badge';
 import { useSettings } from '@/hooks/use-settings';
 import { authProxy } from '@/lib/auth-proxy';
+import { upsertTaskInTaskCaches } from '@/lib/task-cache';
 import type { Route } from './+types/page';
 import { Link } from 'react-router';
 import { cn } from '@/lib/utils';
@@ -57,12 +59,14 @@ function SectionHeader({
   count,
   linkTo,
   onAdd,
+  isUpdating = false,
 }: {
   icon: React.ComponentType<{ className?: string }>;
   title: string;
   count?: number;
   linkTo?: string;
   onAdd?: () => void;
+  isUpdating?: boolean;
 }) {
   return (
     <div className="mb-3 flex items-center gap-2">
@@ -74,6 +78,7 @@ function SectionHeader({
         </span>
       )}
       <div className="ml-auto flex items-center gap-1">
+        {isUpdating && <BackgroundRefreshIndicator className="mr-1" />}
         {linkTo && (
           <Button
             asChild
@@ -121,9 +126,16 @@ export default function HomePage() {
   );
 
   // Tasks — fetch all, filter client-side for "today or pending"
-  const { data: tasksData, isLoading: tasksLoading } = useQuery(
-    trpc.tasks.list.queryOptions({ limit: 100 }),
+  const { data: tasksData, isLoading: tasksLoading, isFetching: isFetchingTasks } = useQuery(
+    trpc.tasks.list.queryOptions(
+      { limit: 100 },
+      {
+        staleTime: 1000 * 60 * 5,
+        refetchOnMount: false,
+      },
+    ),
   );
+  const isTasksRefreshing = !!tasksData && !tasksLoading && isFetchingTasks;
 
   const todayTasks = useMemo(() => {
     const tasks = tasksData?.tasks ?? [];
@@ -140,17 +152,26 @@ export default function HomePage() {
   // Quick task toggle from home page
   const updateTask = useMutation({
     ...trpc.tasks.update.mutationOptions(),
-    onSuccess: () => void queryClient.invalidateQueries(trpc.tasks.list.queryFilter()),
+    onSuccess: ({ task }) => {
+      upsertTaskInTaskCaches(queryClient, task);
+    },
   });
 
   // Today's calendar events
   const todayStart = startOfDay(new Date()).toISOString();
   const todayEnd = endOfDay(new Date()).toISOString();
-  const { data: eventsData, isLoading: eventsLoading } = useQuery(
-    trpc.calendar.events.queryOptions({ timeMin: todayStart, timeMax: todayEnd }),
+  const { data: eventsData, isLoading: eventsLoading, isFetching: isFetchingEvents } = useQuery(
+    trpc.calendar.events.queryOptions(
+      { timeMin: todayStart, timeMax: todayEnd },
+      {
+        staleTime: 1000 * 60 * 3,
+        refetchOnMount: false,
+      },
+    ),
   );
   const todayEvents = eventsData?.events ?? [];
   const calendarScopeMissing = eventsData?.scopeMissing ?? false;
+  const isEventsRefreshing = !!eventsData && !eventsLoading && isFetchingEvents;
 
   // Recent inbox threads — first page, 3 items
   const threadsQuery = useInfiniteQuery(
@@ -167,6 +188,8 @@ export default function HomePage() {
     () => (threadsQuery.data?.pages[0]?.threads ?? []).slice(0, 3).map((t) => t.id),
     [threadsQuery.data],
   );
+  const isThreadsRefreshing =
+    !!threadsQuery.data && !threadsQuery.isLoading && threadsQuery.isFetching;
 
   return (
     <div className="bg-background flex h-screen flex-col overflow-y-auto">
@@ -185,7 +208,11 @@ export default function HomePage() {
         <div className="flex flex-col gap-4">
           {showHomeBriefing && (
             <Section className="space-y-4">
-              <SectionHeader icon={Inbox} title="Assistant Briefing" />
+              <SectionHeader
+                icon={Inbox}
+                title="Assistant Briefing"
+                isUpdating={!!briefingQuery.data && !briefingQuery.isLoading && briefingQuery.isFetching}
+              />
               {briefingQuery.isLoading ? (
                 <div className="flex flex-col gap-2">
                   {['briefing-skeleton-1', 'briefing-skeleton-2', 'briefing-skeleton-3'].map(
@@ -201,13 +228,14 @@ export default function HomePage() {
           )}
 
           {/* ── Today's Events ────────────────────────────────────────────── */}
-          <Section>
-            <SectionHeader
-              icon={CalendarDays}
-              title="Today's Events"
-              count={todayEvents.length}
-              linkTo="/mail/calendar"
-            />
+            <Section>
+              <SectionHeader
+                icon={CalendarDays}
+                title="Today's Events"
+                count={todayEvents.length}
+                linkTo="/mail/calendar"
+                isUpdating={isEventsRefreshing}
+              />
             {eventsLoading ? (
               <div className="flex flex-col gap-2">
                 {['event-skeleton-1', 'event-skeleton-2'].map((key) => (
@@ -247,13 +275,14 @@ export default function HomePage() {
           </Section>
 
           {/* ── Due Tasks ──────────────────────────────────────────────────── */}
-          <Section>
-            <SectionHeader
-              icon={CheckSquare2}
-              title="Due Tasks"
-              count={todayTasks.length}
-              linkTo="/mail/tasks"
-            />
+            <Section>
+              <SectionHeader
+                icon={CheckSquare2}
+                title="Due Tasks"
+                count={todayTasks.length}
+                linkTo="/mail/tasks"
+                isUpdating={isTasksRefreshing}
+              />
             {tasksLoading ? (
               <div className="flex flex-col gap-2">
                 {['task-skeleton-1', 'task-skeleton-2', 'task-skeleton-3'].map((key) => (
@@ -291,7 +320,12 @@ export default function HomePage() {
 
           {/* ── Recent Emails ─────────────────────────────────────────────── */}
           <Section>
-            <SectionHeader icon={Mail} title="Recent Emails" linkTo="/mail/inbox" />
+            <SectionHeader
+              icon={Mail}
+              title="Recent Emails"
+              linkTo="/mail/inbox"
+              isUpdating={isThreadsRefreshing}
+            />
             {threadsQuery.isLoading ? (
               <div className="flex flex-col gap-2">
                 {['mail-skeleton-1', 'mail-skeleton-2', 'mail-skeleton-3'].map((key) => (

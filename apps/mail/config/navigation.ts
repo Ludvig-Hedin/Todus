@@ -1,7 +1,4 @@
 import {
-  Archive,
-  Bin,
-  ExclamationCircle,
   SettingsGear,
   Stars,
   Tabs,
@@ -10,10 +7,17 @@ import {
   Danger,
   Sheet,
   LockIcon,
-  Clock,
   Mail,
 } from '@/components/icons/icons';
-import { CalendarDays, CheckSquare2, FileText, Home, MessageSquareIcon, Search, Video } from 'lucide-react';
+import {
+  CalendarDays,
+  CheckSquare2,
+  FileText,
+  Home,
+  MessageSquareIcon,
+  Search,
+  Video,
+} from 'lucide-react';
 import type { ComponentType, SVGProps } from 'react';
 import { m } from '@/paraglide/messages';
 
@@ -93,6 +97,26 @@ export const navigationConfig: Record<string, NavConfig> = {
                 title: m['navigation.sidebar.sent'](),
                 url: '/mail/sent',
               },
+              {
+                id: 'archive',
+                title: m['navigation.sidebar.archive'](),
+                url: '/mail/archive',
+              },
+              {
+                id: 'snoozed',
+                title: m['navigation.sidebar.snoozed'](),
+                url: '/mail/snoozed',
+              },
+              {
+                id: 'spam',
+                title: m['navigation.sidebar.spam'](),
+                url: '/mail/spam',
+              },
+              {
+                id: 'bin',
+                title: m['navigation.sidebar.bin'](),
+                url: '/mail/bin',
+              },
             ],
           },
           {
@@ -135,38 +159,6 @@ export const navigationConfig: Record<string, NavConfig> = {
             url: '/mail/chat',
             icon: MessageSquareIcon,
             shortcut: 'g + /',
-          },
-        ],
-      },
-      {
-        id: 'archive',
-        title: '',
-        items: [
-          {
-            id: 'archive',
-            title: m['navigation.sidebar.archive'](),
-            url: '/mail/archive',
-            icon: Archive,
-            shortcut: 'g + a',
-          },
-          {
-            id: 'snoozed',
-            title: m['navigation.sidebar.snoozed'](),
-            url: '/mail/snoozed',
-            icon: Clock,
-            shortcut: 'g + z',
-          },
-          {
-            id: 'spam',
-            title: m['navigation.sidebar.spam'](),
-            url: '/mail/spam',
-            icon: ExclamationCircle,
-          },
-          {
-            id: 'trash',
-            title: m['navigation.sidebar.bin'](),
-            url: '/mail/bin',
-            icon: Bin,
           },
         ],
       },
@@ -226,6 +218,11 @@ export const navigationConfig: Record<string, NavConfig> = {
             url: '/settings/shortcuts',
             icon: Tabs,
             shortcut: '?',
+          },
+          {
+            title: m['navigation.settings.meetings'](),
+            url: '/settings/meetings',
+            icon: Video,
           },
           {
             title: m['navigation.settings.deleteAccount'](),

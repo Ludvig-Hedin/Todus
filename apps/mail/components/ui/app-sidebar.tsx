@@ -205,9 +205,6 @@ function ComposeButton() {
   };
   return (
     <Dialog open={!!dialogOpen} onOpenChange={handleOpenChange}>
-      <DialogTitle></DialogTitle>
-      <DialogDescription></DialogDescription>
-
       <DialogTrigger asChild>
         <button
           type="button"
@@ -227,6 +224,10 @@ function ComposeButton() {
       </DialogTrigger>
 
       <DialogContent className="bg-background h-screen w-screen max-w-none border-none p-0 shadow-none">
+        <DialogTitle className="sr-only">Compose email</DialogTitle>
+        <DialogDescription className="sr-only">
+          Compose a new email message with recipients, subject, body, and attachments.
+        </DialogDescription>
         <CreateEmail />
       </DialogContent>
     </Dialog>

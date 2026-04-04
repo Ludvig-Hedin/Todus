@@ -2,7 +2,6 @@ import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/comp
 import { ArrowsPointingIn, PanelLeftOpen, Phone } from '../icons/icons';
 import { useActiveConnection } from '@/hooks/use-connections';
 import type { MentionRef } from '@zero/shared';
-import { ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
 import { useSearchValue } from '@/hooks/use-search-value';
 import { useState, useEffect, useCallback } from 'react';
 import useSearchLabels from '@/hooks/use-labels-search';
@@ -544,52 +543,43 @@ function AISidebar({ className }: AISidebarProps) {
     setPendingMentions([]);
   }, [chatState]);
 
+  // Don't render if user has no active email connection (all hooks must be called above this)
+  if (!activeConnection?.id) return null;
+
   return (
     <>
       {open && (
         <>
-          {/* Desktop view - visible on md and larger screens */}
+          {/* Desktop sidebar — fixed right panel, works on all pages */}
           {isSidebar && !isFullScreen && (
-            <>
-              <ResizableHandle className="hidden md:flex w-px bg-transparent" />
-              <ResizablePanel
-                id="ai-sidebar"
-                order={3}
-                defaultSize={24}
-                minSize={24}
-                maxSize={24}
-                className="bg-panelLight dark:bg-panelDark mb-1 mr-1 hidden h-[calc(100dvh-8px)] shadow-sm md:block md:rounded-2xl md:shadow-sm"
-              >
-                <div className={cn('h-[calc(98vh)]', 'flex flex-col', '', className)}>
-                  <div className="flex h-full flex-col">
-                    <ChatHeader
-                      onClose={() => {
-                        setOpen(false);
-                        setIsFullScreen(false);
-                      }}
-                      onToggleFullScreen={() => setIsFullScreen(!isFullScreen)}
-                      onToggleViewMode={toggleViewMode}
-                      isFullScreen={isFullScreen}
-                      isPopup={isPopup}
-                      isPro={isPro ?? false}
-                      onNewChat={handleNewChat}
-                      activeGroupId={groupId}
-                      onBackFromGroup={() => setGroupId(null)}
-                      currentConversationId={currentConversationId}
-                      currentConversationTitle={currentConversationTitle}
-                    />
-                    <div className="relative flex-1 overflow-hidden">
-                      {/* Switch between group chat and regular AI chat based on groupId param */}
-                      {groupId ? (
-                        <GroupChatView groupId={groupId} />
-                      ) : (
-                        <AIChat {...chatState} onMentionsChange={setPendingMentions} />
-                      )}
-                    </div>
-                  </div>
+            <div className="bg-panelLight dark:bg-panelDark fixed top-2 right-1 bottom-1 z-40 hidden w-[360px] flex-col rounded-2xl shadow-sm md:flex">
+              <div className={cn('flex h-full flex-col', className)}>
+                <ChatHeader
+                  onClose={() => {
+                    setOpen(false);
+                    setIsFullScreen(false);
+                  }}
+                  onToggleFullScreen={() => setIsFullScreen(!isFullScreen)}
+                  onToggleViewMode={toggleViewMode}
+                  isFullScreen={isFullScreen}
+                  isPopup={isPopup}
+                  isPro={isPro ?? false}
+                  onNewChat={handleNewChat}
+                  activeGroupId={groupId}
+                  onBackFromGroup={() => setGroupId(null)}
+                  currentConversationId={currentConversationId}
+                  currentConversationTitle={currentConversationTitle}
+                />
+                <div className="relative flex-1 overflow-hidden">
+                  {/* Switch between group chat and regular AI chat based on groupId param */}
+                  {groupId ? (
+                    <GroupChatView groupId={groupId} />
+                  ) : (
+                    <AIChat {...chatState} onMentionsChange={setPendingMentions} />
+                  )}
                 </div>
-              </ResizablePanel>
-            </>
+              </div>
+            </div>
           )}
 
           {/* Popup view - visible on small screens or when popup mode is selected */}

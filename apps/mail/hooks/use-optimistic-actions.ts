@@ -1,6 +1,6 @@
 import { addOptimisticActionAtom, removeOptimisticActionAtom } from '@/store/optimistic-updates';
 import { optimisticActionsManager, type PendingAction } from '@/lib/optimistic-actions-manager';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient, type InfiniteData } from '@tanstack/react-query';
 
 import { backgroundQueueAtom } from '@/store/backgroundQueue';
 import type { ThreadDestination } from '@/lib/thread-actions';
@@ -13,6 +13,23 @@ import { useCallback } from 'react';
 import posthog from 'posthog-js';
 import { useAtom } from 'jotai';
 import { toast } from 'sonner';
+
+type ThreadSummary = {
+  id: string;
+  hasUnread?: boolean;
+  isStarred?: boolean;
+  isImportant?: boolean;
+  labelIds?: string[];
+};
+
+type ThreadDetail = {
+  hasUnread: boolean;
+  labels: { id: string; name: string }[];
+  latest?: {
+    unread: boolean;
+    tags: { id: string; name: string; type: string }[];
+  };
+};
 
 enum ActionType {
   MOVE = 'MOVE',
@@ -36,6 +53,11 @@ interface ActionParams {
   destination?: ThreadDestination;
   wakeAt?: string;
 }
+
+type ThreadListPage = {
+  threads: ThreadSummary[];
+  nextPageToken: string | null;
+};
 
 const actionEventNames: Record<ActionType, (params: ActionParams) => string> = {
   [ActionType.MOVE]: () => 'email_moved',
@@ -70,6 +92,155 @@ export function useOptimisticActions() {
   const { mutateAsync: modifyLabels } = useMutation(trpc.mail.modifyLabels.mutationOptions());
 
   const { mutateAsync: deleteDraft } = useMutation(trpc.drafts.delete.mutationOptions());
+
+  const updateThreadSummaries = useCallback(
+    (threadIds: string[], updater: (thread: ThreadSummary) => ThreadSummary) => {
+      queryClient.setQueriesData(
+        {
+          predicate: (query) => {
+            const [routeKey, queryMeta] = query.queryKey as [unknown, { type?: string }?];
+            return (
+              Array.isArray(routeKey) &&
+              routeKey[0] === 'mail' &&
+              routeKey[1] === 'listThreads' &&
+              queryMeta?.type === 'infinite'
+            );
+          },
+        },
+        (data: InfiniteData<ThreadListPage> | undefined) => {
+          if (!data) return data;
+
+          return {
+            ...data,
+            pages: data.pages.map((page) => ({
+              ...page,
+              threads: page.threads.map((thread) =>
+                threadIds.includes(thread.id) ? updater(thread) : thread,
+              ),
+            })),
+          };
+        },
+      );
+    },
+    [queryClient],
+  );
+
+  const updateThreadDetails = useCallback(
+    (threadIds: string[], updater: (thread: ThreadDetail) => ThreadDetail) => {
+      threadIds.forEach((threadId) => {
+        queryClient.setQueryData<ThreadDetail>(
+          trpc.mail.get.queryKey({ id: threadId }),
+          (current: ThreadDetail | undefined) => (current ? updater(current) : current),
+        );
+      });
+    },
+    [queryClient, trpc],
+  );
+
+  const applyReadPatch = useCallback(
+    (threadIds: string[], read: boolean) => {
+      updateThreadSummaries(threadIds, (thread) => ({
+        ...thread,
+        hasUnread: !read,
+      }));
+
+      updateThreadDetails(threadIds, (thread) => ({
+        ...thread,
+        hasUnread: !read,
+        labels: read
+          ? thread.labels.filter((label: { id: string; name: string }) => label.id !== 'UNREAD')
+          : thread.labels.some((label: { id: string; name: string }) => label.id === 'UNREAD')
+            ? thread.labels
+            : [...thread.labels, { id: 'UNREAD', name: 'UNREAD' }],
+        latest: thread.latest
+          ? {
+              ...thread.latest,
+              unread: !read,
+              tags: read
+                ? thread.latest.tags.filter(
+                    (tag: { id: string; name: string; type: string }) => tag.id !== 'UNREAD',
+                  )
+                : thread.latest.tags.some(
+                    (tag: { id: string; name: string; type: string }) => tag.id === 'UNREAD',
+                  )
+                  ? thread.latest.tags
+                  : [...thread.latest.tags, { id: 'UNREAD', name: 'UNREAD', type: 'system' }],
+            }
+          : thread.latest,
+      }));
+    },
+    [updateThreadDetails, updateThreadSummaries],
+  );
+
+  const applyTagTogglePatch = useCallback(
+    (threadIds: string[], tagId: 'STARRED' | 'IMPORTANT', enabled: boolean) => {
+      const summaryField = tagId === 'STARRED' ? 'isStarred' : 'isImportant';
+
+      updateThreadSummaries(threadIds, (thread) => ({
+        ...thread,
+        [summaryField]: enabled,
+      }));
+
+      updateThreadDetails(threadIds, (thread) => {
+        const nextLabels = enabled
+          ? thread.labels.some((label: { id: string; name: string }) => label.id === tagId)
+            ? thread.labels
+            : [...thread.labels, { id: tagId, name: tagId }]
+          : thread.labels.filter((label: { id: string; name: string }) => label.id !== tagId);
+
+        const nextTags = thread.latest
+          ? enabled
+            ? thread.latest.tags.some(
+                (tag: { id: string; name: string; type: string }) => tag.id === tagId,
+              )
+              ? thread.latest.tags
+              : [...thread.latest.tags, { id: tagId, name: tagId, type: 'system' }]
+            : thread.latest.tags.filter(
+                (tag: { id: string; name: string; type: string }) => tag.id !== tagId,
+              )
+          : undefined;
+
+        return {
+          ...thread,
+          labels: nextLabels,
+          latest: thread.latest
+            ? {
+                ...thread.latest,
+                tags: nextTags ?? thread.latest.tags,
+              }
+            : thread.latest,
+        };
+      });
+    },
+    [updateThreadDetails, updateThreadSummaries],
+  );
+
+  const applyLabelPatch = useCallback(
+    (threadIds: string[], labelId: string, add: boolean) => {
+      updateThreadSummaries(threadIds, (thread) => {
+        const labelIds = add
+          ? thread.labelIds?.includes(labelId)
+            ? thread.labelIds
+            : [...(thread.labelIds ?? []), labelId]
+          : (thread.labelIds ?? []).filter((currentLabelId: string) => currentLabelId !== labelId);
+
+        return {
+          ...thread,
+          labelIds,
+        };
+      });
+
+      updateThreadDetails(threadIds, (thread) => ({
+        ...thread,
+        labels: add
+          ? thread.labels.some((label: { id: string; name: string }) => label.id === labelId)
+            ? thread.labels
+            : [...thread.labels, { id: labelId, name: labelId }]
+          : thread.labels.filter((label: { id: string; name: string }) => label.id !== labelId),
+      }));
+    },
+    [updateThreadDetails, updateThreadSummaries],
+  );
 
   const generatePendingActionId = () =>
     `pending_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
@@ -200,6 +371,7 @@ export function useOptimisticActions() {
         optimisticId,
         execute: async () => {
           await markAsRead({ ids: threadIds });
+          applyReadPatch(threadIds, true);
 
           if (mail.bulkSelected.length > 0) {
             setMail((prev) => ({ ...prev, bulkSelected: [] }));
@@ -211,7 +383,7 @@ export function useOptimisticActions() {
         toastMessage: silent ? '' : 'Marked as read',
       });
     },
-    [queryClient, addOptimisticAction, removeOptimisticAction, markAsRead, setMail],
+    [addOptimisticAction, applyReadPatch, markAsRead, mail.bulkSelected.length, removeOptimisticAction, setMail],
   );
 
   function optimisticMarkAsUnread(threadIds: string[]) {
@@ -230,6 +402,7 @@ export function useOptimisticActions() {
       optimisticId,
       execute: async () => {
         await markAsUnread({ ids: threadIds });
+        applyReadPatch(threadIds, false);
 
         if (mail.bulkSelected.length > 0) {
           setMail({ ...mail, bulkSelected: [] });
@@ -259,6 +432,7 @@ export function useOptimisticActions() {
         optimisticId,
         execute: async () => {
           await toggleStar({ ids: threadIds });
+          applyTagTogglePatch(threadIds, 'STARRED', starred);
         },
         undo: () => {
           removeOptimisticAction(optimisticId);
@@ -268,7 +442,7 @@ export function useOptimisticActions() {
           : m['common.actions.removedFromFavorites'](),
       });
     },
-    [queryClient, addOptimisticAction, removeOptimisticAction, toggleStar, setMail],
+    [addOptimisticAction, applyTagTogglePatch, removeOptimisticAction, toggleStar],
   );
 
   function optimisticMoveThreadsTo(
@@ -397,6 +571,7 @@ export function useOptimisticActions() {
         optimisticId,
         execute: async () => {
           await toggleImportant({ ids: threadIds });
+          applyTagTogglePatch(threadIds, 'IMPORTANT', isImportant);
 
           if (mail.bulkSelected.length > 0) {
             setMail((prev) => ({ ...prev, bulkSelected: [] }));
@@ -408,7 +583,7 @@ export function useOptimisticActions() {
         toastMessage: isImportant ? 'Marked as important' : 'Unmarked as important',
       });
     },
-    [queryClient, addOptimisticAction, removeOptimisticAction, toggleImportant, setMail],
+    [addOptimisticAction, applyTagTogglePatch, removeOptimisticAction, setMail, toggleImportant],
   );
 
   function optimisticToggleLabel(threadIds: string[], labelId: string, add: boolean) {
@@ -432,9 +607,10 @@ export function useOptimisticActions() {
           addLabels: add ? [labelId] : [],
           removeLabels: add ? [] : [labelId],
         });
+        applyLabelPatch(threadIds, labelId, add);
 
         if (mail.bulkSelected.length > 0) {
-          setMail({ ...mail, bulkSelected: [] });
+          setMail((prev) => ({ ...prev, bulkSelected: [] }));
         }
       },
       undo: () => {

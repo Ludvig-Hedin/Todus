@@ -176,6 +176,35 @@ export function NavMain({ items }: NavMainProps) {
                         item.children.some((child) => isUrlActive(child.url)) ||
                         isUrlActive(item.url)
                       }
+                      // Inject labels/folders section inside the email dropdown
+                      extraContent={
+                        item.id === 'email' && !pathname.includes('/settings') && activeAccount ? (
+                          <div className="mt-1">
+                            <div className="bg-border mx-1 mb-2 h-px" />
+                            <div className="mb-1 flex items-center justify-between pl-1 pr-1">
+                              <span className="text-muted-foreground text-[10px] font-medium uppercase tracking-wide">
+                                {activeAccount.providerId === 'google' ? 'Labels' : 'Folders'}
+                              </span>
+                              {activeAccount.providerId === 'google' ? (
+                                <LabelDialog
+                                  trigger={
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-4 w-4 p-0 hover:bg-transparent"
+                                      aria-label="Add label"
+                                    >
+                                      <Plus className="text-muted-foreground h-3 w-3" aria-hidden="true" />
+                                    </Button>
+                                  }
+                                  onSubmit={onSubmit}
+                                />
+                              ) : null}
+                            </div>
+                            <SidebarLabels data={userLabels ?? []} />
+                          </div>
+                        ) : undefined
+                      }
                     />
                   ) : (
                     <NavItemRow
@@ -191,33 +220,6 @@ export function NavMain({ items }: NavMainProps) {
             </SidebarMenuItem>
           </Collapsible>
         ))}
-        {!pathname.includes('/settings') && state !== 'collapsed' && (
-          <Collapsible defaultOpen={true} className="group/collapsible flex-col">
-            <SidebarMenuItem className="mb-4" style={{ height: 'auto' }}>
-              <div className="mx-2 mb-4 flex items-center justify-between">
-                <span className="text-muted-foreground text-[11px] font-medium uppercase tracking-wide">
-                  {activeAccount?.providerId === 'google' ? 'Labels' : 'Folders'}
-                </span>
-                {activeAccount?.providerId === 'google' ? (
-                  <LabelDialog
-                    trigger={
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="mr-1 h-4 w-4 p-0 hover:bg-transparent"
-                      >
-                        <Plus className="text-muted-foreground h-3 w-3" />
-                      </Button>
-                    }
-                    onSubmit={onSubmit}
-                  />
-                ) : null}
-              </div>
-
-              {activeAccount ? <SidebarLabels data={userLabels ?? []} /> : null}
-            </SidebarMenuItem>
-          </Collapsible>
-        )}
       </SidebarMenu>
     </SidebarGroup>
   );
@@ -228,6 +230,7 @@ function NavItemExpandable(
     href: string;
     children: NavChildItem[];
     isUrlActive: (url: string) => boolean;
+    extraContent?: React.ReactNode;
   },
 ) {
   const { state, setOpenMobile } = useSidebar();
@@ -280,6 +283,7 @@ function NavItemExpandable(
             />
           ))}
         </div>
+        {item.extraContent}
       </CollapsibleContent>
     </Collapsible>
   );
@@ -323,7 +327,7 @@ function NavChildRow({
 function NavItemRow(item: NavItemProps & { href: string }) {
   const iconRef = useRef<IconRefType>(null);
   const { data: stats } = useStats();
-  const { clearAllFilters } = useCommandPalette();
+  const { clearAllFilters, openPalette } = useCommandPalette();
   const { state, setOpenMobile } = useSidebar();
 
   if (item.disabled) {
@@ -334,6 +338,28 @@ function NavItemRow(item: NavItemProps & { href: string }) {
       >
         {item.icon && <item.icon ref={iconRef} className="relative mr-2.5 h-3 w-3.5" />}
         <p className="relative bottom-px mt-0.5 truncate text-[13px]">{item.title}</p>
+      </SidebarMenuButton>
+    );
+  }
+
+  // Search item opens the command palette modal instead of navigating to a page
+  if (item.id === 'search') {
+    return (
+      <SidebarMenuButton
+        tooltip={state === 'collapsed' ? item.title : undefined}
+        className={cn(
+          'hover:bg-accent flex items-center transition-colors duration-100',
+          item.isActive && 'bg-accent text-accent-foreground',
+        )}
+        onClick={() => {
+          openPalette();
+          setOpenMobile(false);
+        }}
+      >
+        {item.icon && <item.icon ref={iconRef} className="mr-2 shrink-0" />}
+        <p className="relative bottom-px mt-0.5 min-w-0 flex-1 truncate text-[13px]">
+          {item.title}
+        </p>
       </SidebarMenuButton>
     );
   }

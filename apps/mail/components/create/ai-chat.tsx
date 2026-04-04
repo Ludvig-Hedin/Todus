@@ -1,16 +1,18 @@
+import { ChatSpecRenderer, extractUISpecFromMessage } from '../generative-ui';
 import { Avatar, AvatarFallback, AvatarImage } from '../ui/avatar';
-import { useAIFullScreen, useAISidebar } from '../ui/ai-sidebar';
 import { extractMentionRefsFromDoc } from '@/lib/editor-mentions';
+import { useAIFullScreen, useAISidebar } from '../ui/ai-sidebar';
 import { VoiceProvider } from '@/providers/voice-provider';
 import useComposeEditor from '@/hooks/use-compose-editor';
+import { useConnections } from '@/hooks/use-connections';
 import { useRef, useCallback, useEffect } from 'react';
 import type { useAgentChat } from 'agents/ai-react';
-import type { MentionRef } from '@zero/shared';
 import { Markdown } from '@react-email/components';
 import { useBilling } from '@/hooks/use-billing';
 import { TextShimmer } from '../ui/text-shimmer';
 import { useThread } from '@/hooks/use-threads';
 import { MailLabels } from '../mail/mail-list';
+import type { MentionRef } from '@zero/shared';
 import { cn, getEmailLogo } from '@/lib/utils';
 import type { Message as AiMessage } from 'ai';
 import { VoiceButton } from '../voice-button';
@@ -20,7 +22,6 @@ import { Tools } from '../../types/tools';
 import { Button } from '../ui/button';
 import { format } from 'date-fns-tz';
 import { useQueryState } from 'nuqs';
-import { ChatSpecRenderer, extractUISpecFromMessage } from '../generative-ui';
 import './prosemirror.css';
 
 const ThreadPreview = ({ threadId }: { threadId: string }) => {
@@ -74,7 +75,40 @@ const ThreadPreview = ({ threadId }: { threadId: string }) => {
   );
 };
 
-const ExampleQueries = ({ onQueryClick }: { onQueryClick: (query: string) => void }) => {
+const ExampleQueries = ({
+  onQueryClick,
+  hasEmailConnection,
+}: {
+  onQueryClick: (query: string) => void;
+  hasEmailConnection: boolean;
+}) => {
+  // All example queries are email-focused — hide them when no email account is connected
+  // and show a connect CTA instead.
+  if (!hasEmailConnection) {
+    return (
+      <div className="mt-6 flex flex-col items-center gap-3">
+        <p className="text-sm text-[#8C8C8C] dark:text-[#929292]">
+          Connect an email account to get started
+        </p>
+        <a
+          href="/settings/connections"
+          className="flex items-center gap-2 rounded-lg bg-blue-500/10 px-4 py-2 text-sm font-medium text-blue-500 transition-colors hover:bg-blue-500/20"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            className="h-4 w-4"
+            viewBox="0 0 20 20"
+            fill="currentColor"
+          >
+            <path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z" />
+            <path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z" />
+          </svg>
+          Connect Email Account
+        </a>
+      </div>
+    );
+  }
+
   const firstRowQueries = [
     'Find all work meetings today',
     'Label all emails from Github as OSS',
@@ -92,7 +126,7 @@ const ExampleQueries = ({ onQueryClick }: { onQueryClick: (query: string) => voi
             <button
               key={query}
               onClick={() => onQueryClick(query)}
-              className="shrink-0 rounded-md bg-[#f0f0f0] p-1 px-2 text-sm whitespace-nowrap text-[#555555] dark:bg-[#262626] dark:text-[#929292]"
+              className="shrink-0 whitespace-nowrap rounded-md bg-[#f0f0f0] p-1 px-2 text-sm text-[#555555] dark:bg-[#262626] dark:text-[#929292]"
             >
               {query}
             </button>
@@ -106,7 +140,7 @@ const ExampleQueries = ({ onQueryClick }: { onQueryClick: (query: string) => voi
             <button
               key={query}
               onClick={() => onQueryClick(query)}
-              className="shrink-0 rounded-md bg-[#f0f0f0] p-1 px-2 text-sm whitespace-nowrap text-[#555555] dark:bg-[#262626] dark:text-[#929292]"
+              className="shrink-0 whitespace-nowrap rounded-md bg-[#f0f0f0] p-1 px-2 text-sm text-[#555555] dark:bg-[#262626] dark:text-[#929292]"
             >
               {query}
             </button>
@@ -114,9 +148,9 @@ const ExampleQueries = ({ onQueryClick }: { onQueryClick: (query: string) => voi
         </div>
       </div>
       {/* Left mask */}
-      <div className="from-panelLight dark:from-panelDark pointer-events-none absolute top-0 bottom-0 left-0 w-12 bg-linear-to-r to-transparent"></div>
+      <div className="from-panelLight dark:from-panelDark bg-linear-to-r pointer-events-none absolute bottom-0 left-0 top-0 w-12 to-transparent"></div>
       {/* Right mask */}
-      <div className="from-panelLight dark:from-panelDark pointer-events-none absolute top-0 right-0 bottom-0 w-12 bg-linear-to-l to-transparent"></div>
+      <div className="from-panelLight dark:from-panelDark bg-linear-to-l pointer-events-none absolute bottom-0 right-0 top-0 w-12 to-transparent"></div>
     </div>
   );
 };
@@ -137,29 +171,68 @@ const ExampleQueries = ({ onQueryClick }: { onQueryClick: (query: string) => voi
 //   }>;
 // }
 
-// Shared markdown styles for chat messages — extracted to avoid duplication
+// Shared markdown styles for chat messages — extracted to avoid duplication.
+// Headings use weight/size differentiation so responses render with visual hierarchy
+// instead of a flat text dump. Lists use `outside` positioning for clean indentation.
 const markdownStyles = {
-  h1: { fontSize: '1rem' },
-  h2: { fontSize: '1rem' },
-  h3: { fontSize: '1rem' },
-  h4: { fontSize: '1rem' },
-  h5: { fontSize: '1rem' },
-  h6: { fontSize: '1rem' },
-  p: { fontSize: '1rem' },
+  h1: { fontSize: '0.9375rem', fontWeight: '700', marginBottom: '0.25rem', marginTop: '0.5rem' },
+  h2: { fontSize: '0.9375rem', fontWeight: '600', marginBottom: '0.2rem', marginTop: '0.4rem' },
+  h3: { fontSize: '0.875rem', fontWeight: '600', marginBottom: '0.15rem', marginTop: '0.35rem' },
+  h4: { fontSize: '0.875rem', fontWeight: '600' },
+  h5: { fontSize: '0.875rem', fontWeight: '600' },
+  h6: { fontSize: '0.875rem', fontWeight: '600' },
+  p: { fontSize: '0.875rem', marginBottom: '0.35rem' },
   li: {
-    fontSize: '1rem',
-    marginBottom: '0.25rem',
+    fontSize: '0.875rem',
+    marginBottom: '0.15rem',
     listStyleType: 'disc' as const,
-    listStylePosition: 'inside' as const,
+    listStylePosition: 'outside' as const,
+    marginLeft: '1.25rem',
   },
-  ul: { fontSize: '1rem' },
-  ol: { fontSize: '1rem' },
-  blockQuote: { fontSize: '1rem' },
-  codeBlock: { fontSize: '1rem' },
-  codeInline: { fontSize: '1rem' },
-  link: { fontSize: '1rem' },
-  image: { fontSize: '1rem' },
+  ul: { fontSize: '0.875rem', marginBottom: '0.35rem' },
+  ol: { fontSize: '0.875rem', marginBottom: '0.35rem' },
+  blockQuote: {
+    fontSize: '0.875rem',
+    borderLeft: '2px solid #888',
+    paddingLeft: '0.6rem',
+    opacity: '0.75',
+    marginBottom: '0.35rem',
+  },
+  codeBlock: {
+    fontSize: '0.8125rem',
+    fontFamily: 'monospace',
+    backgroundColor: 'rgba(128,128,128,0.12)',
+    padding: '0.5rem 0.625rem',
+    borderRadius: '0.375rem',
+    display: 'block',
+    marginBottom: '0.35rem',
+    overflowX: 'auto' as const,
+  },
+  codeInline: {
+    fontSize: '0.8125rem',
+    fontFamily: 'monospace',
+    backgroundColor: 'rgba(128,128,128,0.12)',
+    padding: '0.1rem 0.3rem',
+    borderRadius: '0.25rem',
+  },
+  link: { fontSize: '0.875rem', color: '#3b82f6', textDecoration: 'underline' },
+  image: { maxWidth: '100%', borderRadius: '0.5rem' },
 };
+
+// Normalize single newlines to double so Markdown sees paragraph breaks.
+// AI responses frequently use single \n which CommonMark collapses to a space,
+// making the entire response render as one unbroken paragraph.
+const normalizeMarkdown = (text: string) => {
+  const sentinel = '__DOUBLE_NEWLINE__';
+  return text.replace(/\n\n/g, sentinel).replace(/\n/g, '\n\n').replaceAll(sentinel, '\n\n');
+};
+
+const EMAIL_CONNECTION_PATTERNS = [
+  /\bno (email|mail) (account|connection) (connected|found)\b/i,
+  /\bplease connect (your )?(email|mail|account)\b/i,
+  /\bnot connected to (your )?(email|mail|inbox)\b/i,
+  /\b(email|mail|inbox) (isn't|is not|not) connected\b/i,
+];
 
 export interface AIChatProps {
   messages: AiMessage[];
@@ -235,12 +308,14 @@ export function AIChat({
 }): React.ReactElement {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
-  const { chatMessages } = useBilling();
+  const { chatMessages, isLoading: isBillingLoading } = useBilling();
+  const { data: connectionsData } = useConnections();
+  const hasEmailConnection = (connectionsData?.connections?.length ?? 0) > 0;
   const { isFullScreen } = useAIFullScreen();
   const [, setPricingDialog] = useQueryState('pricingDialog');
   const [aiSidebarOpen] = useQueryState('aiSidebar');
   const { toggleOpen } = useAISidebar();
-  const isChatEnabled = chatMessages.enabled;
+  const isChatEnabled = !isBillingLoading && chatMessages.enabled;
 
   const scrollToBottom = useCallback(() => {
     if (messagesEndRef.current) {
@@ -309,7 +384,8 @@ export function AIChat({
 
   return (
     <div className={cn('flex h-full flex-col', isFullScreen ? 'mx-auto max-w-xl' : '')}>
-      <div className="no-scrollbar flex-1 overflow-y-auto" ref={messagesContainerRef}>
+      {/* relative here scopes the paywall absolute overlay to just this area, not the input below */}
+      <div className="no-scrollbar relative flex-1 overflow-y-auto" ref={messagesContainerRef}>
         <div className="min-h-full px-2 py-4">
           {!isChatEnabled ? (
             <div className="absolute inset-0 z-10 flex flex-col items-center justify-center">
@@ -326,7 +402,7 @@ export function AIChat({
                 <img src="/black-icon.svg" alt="Todus Logo" className="dark:hidden" />
                 <img src="/white-icon.svg" alt="Todus Logo" className="hidden dark:block" />
               </div>
-              <p className="mt-2 mb-1 hidden text-center text-sm font-medium text-black md:block dark:text-white">
+              <p className="mb-1 mt-2 hidden text-center text-sm font-medium text-black md:block dark:text-white">
                 Ask anything about your emails
               </p>
               <p className="mb-3 text-center text-sm text-[#8C8C8C] dark:text-[#929292]">
@@ -334,7 +410,10 @@ export function AIChat({
               </p>
 
               {/* Example Thread */}
-              <ExampleQueries onQueryClick={handleQueryClick} />
+              <ExampleQueries
+                onQueryClick={handleQueryClick}
+                hasEmailConnection={hasEmailConnection}
+              />
             </div>
           ) : (
             messages.map((message, index) => {
@@ -363,8 +442,8 @@ export function AIChat({
                       className={cn(
                         'flex w-fit flex-col gap-2 rounded-lg text-sm',
                         message.role === 'user'
-                          ? 'overflow-wrap-anywhere text-offsetDark dark:text-subtleWhite ml-auto bg-[#f0f0f0] px-2 py-1 break-words dark:bg-[#252525]'
-                          : 'overflow-wrap-anywhere mr-auto p-2 break-words',
+                          ? 'overflow-wrap-anywhere text-offsetDark dark:text-subtleWhite ml-auto break-words bg-[#f0f0f0] px-2 py-1 dark:bg-[#252525]'
+                          : 'overflow-wrap-anywhere mr-auto break-words p-2',
                       )}
                     >
                       {textParts.map((part) => {
@@ -381,13 +460,13 @@ export function AIChat({
                               <div key={part.text} className="flex flex-col gap-2">
                                 {textBefore && (
                                   <Markdown markdownCustomStyles={markdownStyles}>
-                                    {textBefore}
+                                    {normalizeMarkdown(textBefore)}
                                   </Markdown>
                                 )}
                                 <ChatSpecRenderer spec={spec} className="my-1 w-full" />
                                 {textAfter && (
                                   <Markdown markdownCustomStyles={markdownStyles}>
-                                    {textAfter}
+                                    {normalizeMarkdown(textAfter)}
                                   </Markdown>
                                 )}
                               </div>
@@ -397,10 +476,35 @@ export function AIChat({
 
                         return (
                           <Markdown markdownCustomStyles={markdownStyles} key={part.text}>
-                            {part.text || ' '}
+                            {normalizeMarkdown(part.text || ' ')}
                           </Markdown>
                         );
                       })}
+
+                      {/* Connect CTA — shown when AI mentions email not being connected */}
+                      {message.role === 'assistant' &&
+                        !hasEmailConnection &&
+                        textParts.some((p) => {
+                          const text = p.text?.toLowerCase();
+                          if (!text) return false;
+
+                          const hasEmailToken = /\b(email|mail|inbox|gmail)\b/.test(text);
+                          const hasConnectionToken =
+                            /\b(not connected|connect|connection|connected|found)\b/.test(text);
+
+                          return (
+                            (hasEmailToken && hasConnectionToken) ||
+                            EMAIL_CONNECTION_PATTERNS.some((pattern) => pattern.test(text))
+                          );
+                        }) && (
+                          <a
+                            href="/settings/connections"
+                            className="mt-1 inline-flex items-center gap-1.5 self-start rounded-lg bg-blue-500/10 px-3 py-1.5 text-xs font-medium text-blue-500 transition-colors hover:bg-blue-500/20"
+                          >
+                            Connect Email Account
+                            <span aria-hidden="true">→</span>
+                          </a>
+                        )}
                     </div>
                   )}
                 </div>
@@ -442,7 +546,7 @@ export function AIChat({
                       'max-h-[100px] w-full',
                       '[&_.ProseMirror]:min-h-[40px] [&_.ProseMirror]:px-3 [&_.ProseMirror]:py-2 [&_.ProseMirror]:text-sm [&_.ProseMirror]:outline-none',
                       '[&_.ProseMirror_p.is-editor-empty:first-child]:relative [&_.ProseMirror_p.is-editor-empty:first-child]:before:pointer-events-none',
-                      '[&_.ProseMirror_p.is-editor-empty:first-child]:before:absolute [&_.ProseMirror_p.is-editor-empty:first-child]:before:top-0 [&_.ProseMirror_p.is-editor-empty:first-child]:before:left-0',
+                      '[&_.ProseMirror_p.is-editor-empty:first-child]:before:absolute [&_.ProseMirror_p.is-editor-empty:first-child]:before:left-0 [&_.ProseMirror_p.is-editor-empty:first-child]:before:top-0',
                       '[&_.ProseMirror_p.is-editor-empty:first-child]:before:text-[#8C8C8C] [&_.ProseMirror_p.is-editor-empty:first-child]:before:content-[attr(data-placeholder)] dark:[&_.ProseMirror_p.is-editor-empty:first-child]:before:text-[#929292]',
                       !isChatEnabled && 'cursor-pointer opacity-70',
                     )}

@@ -56,10 +56,14 @@
       "deletedAllSpam": "S'han eliminat {count} correus brossa",
       "errorDeletingSpam": "No s'han pogut eliminar els correus brossa",
       "confirmDeleteSpam": "Eliminar tot el correu brossa",
-      "confirmDeleteSpamDescription": "Esteu segur que voleu eliminar tots els correus brossa? Aquesta acció no es pot desfer.",
+      "confirmDeleteSpamDescription": "Estàs segur que vols eliminar tots els correus brossa? Aquesta acció no es pot desfer.",
       "confirmDelete": "Eliminar"
     },
-    "themes": { "dark": "Fosc", "light": "Clar", "system": "Sistema" },
+    "themes": {
+      "dark": "Fosc",
+      "light": "Clar",
+      "system": "Sistema"
+    },
     "commandPalette": {
       "title": "Paleta de Comandes",
       "description": "Navegació ràpida i accions per a Todus",
@@ -161,8 +165,13 @@
       "attachments": "Adjunts",
       "attachmentCount": [
         {
-          "declarations": ["input count", "local countPlural = count: plural"],
-          "selectors": ["countPlural"],
+          "declarations": [
+            "input count",
+            "local countPlural = count: plural"
+          ],
+          "selectors": [
+            "countPlural"
+          ],
           "match": {
             "countPlural=0": "adjunts",
             "countPlural=one": "adjunt",
@@ -172,8 +181,13 @@
       ],
       "fileCount": [
         {
-          "declarations": ["input count", "local countPlural = count: plural"],
-          "selectors": ["countPlural"],
+          "declarations": [
+            "input count",
+            "local countPlural = count: plural"
+          ],
+          "selectors": [
+            "countPlural"
+          ],
           "match": {
             "countPlural=0": "fitxers",
             "countPlural=one": "fitxer",
@@ -200,7 +214,7 @@
       "loadingMailContent": "Carregant el contingut del correu...",
       "unsubscribe": "Cancel·lar subscripció",
       "unsubscribed": "Subscripció cancel·lada",
-      "unsubscribeDescription": "Esteu segur que voleu cancel·lar la subscripció a aquesta llista de correu?",
+      "unsubscribeDescription": "Estàs segur que vols cancel·lar la subscripció a aquesta llista de correu?",
       "unsubscribeOpenSiteDescription": "Per deixar de rebre missatges d'aquesta llista de correu, aneu al seu lloc web per cancel·lar la subscripció.",
       "cancel": "Cancel·lar",
       "goToWebsite": "Anar al lloc web",
@@ -220,12 +234,12 @@
       "markAsRead": "Marcar com a llegit",
       "addLabel": "Afegeix una etiqueta",
       "muteThread": "Silenciar el fil",
-      "favourites": "Preferits",
       "disableImages": "Amaga les imatges",
       "enableImages": "Mostra les imatges",
       "star": "Destacar",
       "unstar": "Treure destacat",
-      "printThread": "Imprimir fil"
+      "printThread": "Imprimir fil",
+      "favorites": "Preferits"
     },
     "notes": {
       "title": "Notes",
@@ -245,8 +259,13 @@
       "search": "Cerca notes...",
       "noteCount": [
         {
-          "declarations": ["input count", "local countPlural = count: plural"],
-          "selectors": ["countPlural"],
+          "declarations": [
+            "input count",
+            "local countPlural = count: plural"
+          ],
+          "selectors": [
+            "countPlural"
+          ],
           "match": {
             "countPlural=0": "Afegeix notes",
             "countPlural=one": "# nota",
@@ -308,8 +327,13 @@
     "mail": {
       "replies": [
         {
-          "declarations": ["input count", "local countPlural = count: plural"],
-          "selectors": ["countPlural"],
+          "declarations": [
+            "input count",
+            "local countPlural = count: plural"
+          ],
+          "selectors": [
+            "countPlural"
+          ],
           "match": {
             "countPlural=0": "respostes",
             "countPlural=one": "# resposta",
@@ -369,7 +393,9 @@
       "failedToArchive": "No s'ha pogut arxivar",
       "openInNewTab": "Obre en una pestanya nova"
     },
-    "units": { "mb": "{amount} MB" },
+    "units": {
+      "mb": "{amount} MB"
+    },
     "labels": {
       "color": "Color",
       "labelName": "Nom de l'etiqueta",
@@ -384,8 +410,8 @@
       "deletingLabel": "Eliminant etiqueta...",
       "editLabel": "Editar etiqueta",
       "savingLabel": "Desant etiqueta...",
-      "failedToSavingLabel": "No s'ha pogut desar l'etiqueta",
-      "saveLabelSuccess": "Etiqueta desada correctament"
+      "saveLabelSuccess": "Etiqueta desada correctament",
+      "failedToSaveLabel": "No s'ha pogut desar l'etiqueta"
     }
   },
   "navigation": {
@@ -415,7 +441,8 @@
       "categories": "Vistes",
       "dangerZone": "Zona perillosa",
       "deleteAccount": "Elimina el compte",
-      "privacy": "Privacitat"
+      "privacy": "Privacitat",
+      "meetings": "Reunions"
     }
   },
   "pages": {
@@ -458,13 +485,13 @@
         "title": "Connexions Correu",
         "description": "Connecta els teus comptes de correu a Todus.",
         "disconnectTitle": "Desconnecta el compte de correu.",
-        "disconnectDescription": "Estàs segur que vols desconnectar aquest correu?\n\n\n\n\n\n\n\n",
+        "disconnectDescription": "Estàs segur que vols desconnectar aquest correu?",
         "cancel": "Cancel·lar",
         "remove": "Esborrar",
-        "disconnectSuccess": "Compte desconnectat correctament.\n\n\n\n\n\n\n\n",
-        "disconnectError": "No s'ha pogut desconnectar el compte.\n\n\n\n\n\n\n\n",
+        "disconnectSuccess": "Compte desconnectat correctament.",
+        "disconnectError": "No s'ha pogut desconnectar el compte.",
         "addEmail": "Afegeix una connexió",
-        "connectEmail": "Connecta el correu electrònic\n\n\n\n\n\n\n\n",
+        "connectEmail": "Connecta el correu electrònic",
         "connectEmailDescription": "Selecciona un proveïdor de correu per connectar",
         "moreComingSoon": "Pròximament més",
         "reconnect": "Reconnecta",
@@ -472,11 +499,11 @@
       },
       "security": {
         "title": "Seguretat",
-        "description": "Gestiona les teves preferències de seguretat i protecció del compte.\n\n\n\n\n",
+        "description": "Gestiona les teves preferències de seguretat i protecció del compte.",
         "twoFactorAuth": "Autenticació de dos factors",
         "twoFactorAuthDescription": "Afegeix una capa extra de seguretat al teu compte.",
         "loginNotifications": "Notificacions d'inici de sessió.",
-        "loginNotificationsDescription": "Rebre notificacions sobre nous intents d'inici de sessió\n\n\n\n",
+        "loginNotificationsDescription": "Rebre notificacions sobre nous intents d'inici de sessió",
         "deleteAccount": "Elimina el compte",
         "loadImagesDefault": "Carregar imatges per defecte",
         "loadImagesDefaultDescription": "Les imatges no es carreguen per defecte per motius de seguretat."
@@ -568,7 +595,7 @@
         "description": "Gestiona les teves etiquetes per organitzar millor els teus correus."
       },
       "dangerZone": {
-        "title": "Danger Zone",
+        "title": "Zona perillosa",
         "description": "Elimina permanentment el teu compte i totes les dades associades.",
         "warning": "Aquesta acció no es pot desfer.",
         "confirmation": "Si us plau, escriu DELETE per confirmar l'eliminació del compte",
@@ -630,8 +657,14 @@
           "label": "Baixa",
           "description": "Mida de fitxer més petita, pèrdua de qualitat notable"
         },
-        "medium": { "label": "Mitjana", "description": "Equilibri entre mida i qualitat" },
-        "original": { "label": "Original", "description": "Sense compressió, qualitat original" }
+        "medium": {
+          "label": "Mitjana",
+          "description": "Equilibri entre mida i qualitat"
+        },
+        "original": {
+          "label": "Original",
+          "description": "Sense compressió, qualitat original"
+        }
       }
     }
   },

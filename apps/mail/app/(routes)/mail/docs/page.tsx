@@ -1,11 +1,11 @@
 /**
- * Docs list page — two-column layout with the DocTree on the left
- * and an empty-state prompt on the right.
- * Navigating to a doc from the tree takes you to /mail/docs/:id.
+ * Docs landing page — two-column layout.
+ * Left: DocTree (workspace + page navigation).
+ * Right: Welcome/empty state with a prominent "New page" action.
  */
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
 import { DocTree } from '@/components/docs/doc-tree';
-import { FileText, Plus } from 'lucide-react';
+import { FileText, Plus, ArrowRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useNavigate } from 'react-router';
 import { useTRPC } from '@/providers/query-provider';
@@ -25,12 +25,11 @@ export default function DocsPage() {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
 
-  // Fetch workspaces so we can guard the "New page" button — a doc requires a workspace.
-  const { data: workspacesData } = useQuery(trpc.docs.workspaces.list.queryOptions());
+  const { data: workspacesData, isLoading, isError } = useQuery(
+    trpc.docs.workspaces.list.queryOptions(),
+  );
   const firstWorkspaceId = workspacesData?.workspaces?.[0]?.id;
 
-  // Quick-create a doc from the empty state's "New page" button.
-  // Must pass a workspaceId — enforced by checking firstWorkspaceId before rendering the button.
   const createDoc = useMutation({
     ...trpc.docs.create.mutationOptions(),
     onSuccess: (result) => {
@@ -41,41 +40,69 @@ export default function DocsPage() {
 
   return (
     <ResizablePanelGroup direction="horizontal" className="h-full">
-      {/* Left panel — DocTree navigation */}
-      <ResizablePanel defaultSize={20} minSize={15} className="border-r">
+      {/* Left — page tree */}
+      <ResizablePanel defaultSize={22} minSize={16} maxSize={35} className="border-r">
         <DocTree onSelectDoc={(id) => void navigate(`/mail/docs/${id}`)} />
       </ResizablePanel>
 
-      <ResizableHandle />
+      <ResizableHandle withHandle />
 
-      {/* Right panel — empty state when no doc is selected */}
-      <ResizablePanel className="flex items-center justify-center">
-        <div className="flex flex-col items-center gap-4 text-center">
-          <FileText className="text-muted-foreground h-12 w-12" />
-          <div className="space-y-1">
-            <p className="text-foreground font-medium">Select a page to start reading</p>
-            <p className="text-muted-foreground text-sm">
-              Pick a page from the sidebar, or create a new one.
+      {/* Right — welcome state */}
+      <ResizablePanel className="flex h-full flex-col">
+        <div className="flex h-full flex-col items-center justify-center gap-6 px-8">
+          {/* Icon */}
+          <div className="bg-accent/50 flex h-16 w-16 items-center justify-center rounded-2xl">
+            <FileText className="text-muted-foreground h-8 w-8" />
+          </div>
+
+          {/* Heading */}
+          <div className="space-y-2 text-center">
+            <h2 className="text-foreground text-xl font-semibold">
+              Your docs, all in one place
+            </h2>
+            <p className="text-muted-foreground max-w-xs text-sm leading-relaxed">
+              Write notes, capture ideas, draft documents — pick a page on the left or start a new
+              one.
             </p>
           </div>
-          {firstWorkspaceId ? (
-            // Workspace exists — allow quick-creating a new doc from here
+
+          {/* Primary action */}
+          {!isLoading && !isError && (
             <Button
-              variant="ghost"
-              size="sm"
-              className="gap-1.5"
-              onClick={() => createDoc.mutate({ workspaceId: firstWorkspaceId, title: 'Untitled' })}
-              disabled={createDoc.isPending}
+              onClick={() => {
+                if (firstWorkspaceId) {
+                  createDoc.mutate({ workspaceId: firstWorkspaceId, title: 'Untitled' });
+                }
+              }}
+              disabled={createDoc.isPending || !firstWorkspaceId}
+              className="gap-2"
             >
               <Plus className="h-4 w-4" />
               New page
             </Button>
-          ) : (
-            // No workspaces yet — guide the user to create one first via the left panel
-            <p className="text-muted-foreground text-sm">
-              Create a workspace first using the + button on the left.
-            </p>
           )}
+
+          {!isLoading && isError && (
+            <div className="flex flex-col items-center gap-3 text-center">
+              <p className="text-sm text-muted-foreground">
+                Couldn&apos;t load your workspaces. Retry and then create a new page.
+              </p>
+              <Button
+                variant="outline"
+                onClick={() =>
+                  void queryClient.invalidateQueries(trpc.docs.workspaces.list.queryFilter())
+                }
+              >
+                Retry
+              </Button>
+            </div>
+          )}
+
+          {/* Hint */}
+          <p className="text-muted-foreground/60 flex items-center gap-1.5 text-xs">
+            <ArrowRight className="h-3 w-3 -rotate-180" />
+            Or select a page from the sidebar
+          </p>
         </div>
       </ResizablePanel>
     </ResizablePanelGroup>

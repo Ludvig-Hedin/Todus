@@ -21,6 +21,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState, useMemo, useRef, useCallback } from 'react';
 import { Separator } from '@/components/ui/separator';
 import { useTRPC } from '@/providers/query-provider';
+import { BackgroundRefreshIndicator } from '@/components/ui/background-refresh-indicator';
 import { Calendar } from '@/components/ui/calendar';
 import type { Outputs } from '@zero/server/trpc';
 import { Button } from '@/components/ui/button';
@@ -31,6 +32,7 @@ import { authProxy } from '@/lib/auth-proxy';
 import type { Route } from './+types/page';
 import { Link } from 'react-router';
 import { cn } from '@/lib/utils';
+import { upsertTaskInTaskCaches } from '@/lib/task-cache';
 import { toast } from 'sonner';
 
 type Task = Outputs['tasks']['list']['tasks'][number];
@@ -61,8 +63,14 @@ export default function CalendarPage() {
   const quickAddRef = useRef<HTMLInputElement>(null);
 
   // ── Tasks ──────────────────────────────────────────────────────────────────
-  const { data: tasksData, isLoading: tasksLoading } = useQuery(
-    trpc.tasks.list.queryOptions({ limit: 500 }),
+  const { data: tasksData, isLoading: tasksLoading, isFetching: isFetchingTasks } = useQuery(
+    trpc.tasks.list.queryOptions(
+      { limit: 500 },
+      {
+        staleTime: 1000 * 60 * 5,
+        refetchOnMount: false,
+      },
+    ),
   );
   const tasks = useMemo(() => tasksData?.tasks ?? [], [tasksData]);
 
@@ -77,11 +85,17 @@ export default function CalendarPage() {
     (monthStart < visibleWeekStart ? monthStart : visibleWeekStart).toISOString();
   const eventsTimeMax = (monthEnd > visibleWeekEnd ? monthEnd : visibleWeekEnd).toISOString();
 
-  const { data: eventsData, isLoading: eventsLoading } = useQuery(
-    trpc.calendar.events.queryOptions({
-      timeMin: eventsTimeMin,
-      timeMax: eventsTimeMax,
-    }),
+  const { data: eventsData, isLoading: eventsLoading, isFetching: isFetchingEvents } = useQuery(
+    trpc.calendar.events.queryOptions(
+      {
+        timeMin: eventsTimeMin,
+        timeMax: eventsTimeMax,
+      },
+      {
+        staleTime: 1000 * 60 * 3,
+        refetchOnMount: false,
+      },
+    ),
   );
   const calendarEvents = useMemo<CalendarEvent[]>(() => eventsData?.events ?? [], [eventsData]);
   // scopeMissing = true means the token lacks calendar.readonly (needs re-auth)
@@ -90,13 +104,15 @@ export default function CalendarPage() {
   // ── Mutations ──────────────────────────────────────────────────────────────
   const updateTask = useMutation({
     ...trpc.tasks.update.mutationOptions(),
-    onSuccess: () => void queryClient.invalidateQueries(trpc.tasks.list.queryFilter()),
+    onSuccess: ({ task }) => {
+      upsertTaskInTaskCaches(queryClient, task);
+    },
   });
 
   const createTask = useMutation({
     ...trpc.tasks.create.mutationOptions(),
-    onSuccess: () => {
-      void queryClient.invalidateQueries(trpc.tasks.list.queryFilter());
+    onSuccess: ({ task }) => {
+      upsertTaskInTaskCaches(queryClient, task);
       setQuickAdd('');
       quickAddRef.current?.focus();
     },
@@ -182,6 +198,9 @@ export default function CalendarPage() {
 
   const hasContent = selectedDateEvents.length > 0 || selectedDateTasks.length > 0;
   const selectedDateLabel = isToday(selectedDate) ? 'Today' : format(selectedDate, 'EEEE, MMMM d');
+  const isBackgroundRefreshing =
+    (!!tasksData && !tasksLoading && isFetchingTasks) ||
+    (!!eventsData && !eventsLoading && isFetchingEvents);
 
   return (
     <div className="bg-background flex h-screen flex-col overflow-hidden">
@@ -189,6 +208,9 @@ export default function CalendarPage() {
       <div className="flex items-center justify-between border-b px-6 py-3.5">
         <div className="flex items-center gap-2.5">
           <h1 className="text-[15px] font-semibold">Calendar</h1>
+          {isBackgroundRefreshing ? (
+            <BackgroundRefreshIndicator label="Updating calendar" />
+          ) : null}
           {scopeMissing && (
             <span className="rounded-full bg-yellow-100 px-2 py-0.5 text-[11px] font-medium text-yellow-700 dark:bg-yellow-950/40 dark:text-yellow-400">
               Events need permission

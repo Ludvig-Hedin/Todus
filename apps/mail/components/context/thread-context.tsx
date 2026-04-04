@@ -502,7 +502,7 @@ export function ThreadContextMenu({
       toast.promise(promise, {
         loading: m['common.labels.savingLabel'](),
         success: m['common.labels.saveLabelSuccess'](),
-        error: m['common.labels.failedToSavingLabel'](),
+        error: m['common.labels.failedToSaveLabel'](),
       });
       
       await promise;

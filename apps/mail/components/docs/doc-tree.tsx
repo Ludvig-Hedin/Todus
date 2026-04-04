@@ -1,24 +1,26 @@
 /**
- * DocTree — sidebar tree showing workspaces and their nested pages.
- * Used in both the docs list page and the doc editor page.
- * Fetches workspaces + root-level docs per workspace via tRPC,
- * renders them as collapsible sections with inline "new page" and
- * "new workspace" actions.
+ * DocTree — Affine-inspired sidebar for workspaces and pages.
+ *
+ * UX principles:
+ * - Zero friction: auto-creates a "Personal" workspace on first load
+ * - "New page" is one click away from the sidebar header
+ * - Workspace sections are collapsible with an inline "+" on hover
+ * - No mandatory workspace setup step
  */
-import { ChevronRight, ChevronDown, FileText, FolderOpen, Plus } from 'lucide-react';
+import { ChevronRight, ChevronDown, FileText, Plus, PenLine } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTRPC } from '@/providers/query-provider';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Button } from '@/components/ui/button';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
 
-interface DocTreeProps {
+export interface DocTreeProps {
   selectedDocId?: string;
   onSelectDoc: (docId: string) => void;
 }
 
-/** Per-workspace section: fetches root docs and renders them as a collapsible list. */
+// ─── WorkspaceSection ──────────────────────────────────────────────────────────
+
 function WorkspaceSection({
   workspace,
   selectedDocId,
@@ -32,7 +34,6 @@ function WorkspaceSection({
   const trpc = useTRPC();
   const queryClient = useQueryClient();
 
-  // Fetch root-level docs (parentId undefined = no parent) for this workspace
   const { data, isLoading } = useQuery(
     trpc.docs.list.queryOptions({ workspaceId: workspace.id }),
   );
@@ -40,9 +41,9 @@ function WorkspaceSection({
   const createDoc = useMutation({
     ...trpc.docs.create.mutationOptions(),
     onSuccess: (result) => {
-      // Invalidate only this workspace's docs list so the new page appears in the tree
-      void queryClient.invalidateQueries(trpc.docs.list.queryFilter({ workspaceId: workspace.id }));
-      // Navigate immediately to the newly created doc
+      void queryClient.invalidateQueries(
+        trpc.docs.list.queryFilter({ workspaceId: workspace.id }),
+      );
       onSelectDoc(result.doc.id);
     },
   });
@@ -50,30 +51,27 @@ function WorkspaceSection({
   const docs = data?.docs ?? [];
 
   return (
-    <div className="mb-1">
-      {/* Workspace header row with expand/collapse + new page button */}
-      <div className="group flex items-center gap-0.5 rounded-md px-1 py-0.5 hover:bg-accent/50">
+    <div>
+      {/* Workspace header */}
+      <div className="group/ws flex items-center gap-0.5 rounded-md px-2 py-1.5 hover:bg-accent/50">
         <button
           onClick={() => setExpanded((v) => !v)}
           className="flex flex-1 items-center gap-1 text-left"
         >
           {expanded ? (
-            <ChevronDown className="text-muted-foreground h-3.5 w-3.5 shrink-0" />
+            <ChevronDown className="text-muted-foreground h-3 w-3 shrink-0" />
           ) : (
-            <ChevronRight className="text-muted-foreground h-3.5 w-3.5 shrink-0" />
+            <ChevronRight className="text-muted-foreground h-3 w-3 shrink-0" />
           )}
-          <FolderOpen className="text-muted-foreground h-3.5 w-3.5 shrink-0" />
-          <span className="text-foreground truncate text-sm font-medium">
+          <span className="text-muted-foreground truncate text-[11px] font-semibold uppercase tracking-wider">
             {workspace.emoji ? `${workspace.emoji} ` : ''}
             {workspace.name}
           </span>
         </button>
 
-        {/* "New page" button — only visible on hover to keep the tree clean */}
-        <Button
-          variant="ghost"
-          size="sm"
-          className="text-muted-foreground h-5 w-5 shrink-0 p-0 opacity-0 transition-opacity group-hover:opacity-100"
+        {/* New page in this workspace — appears on row hover */}
+        <button
+          className="text-muted-foreground ml-auto opacity-0 transition-opacity hover:text-foreground group-hover/ws:opacity-100"
           onClick={(e) => {
             e.stopPropagation();
             createDoc.mutate({ workspaceId: workspace.id, title: 'Untitled' });
@@ -82,41 +80,47 @@ function WorkspaceSection({
           title="New page"
         >
           <Plus className="h-3.5 w-3.5" />
-        </Button>
+        </button>
       </div>
 
-      {/* Docs list — only rendered when expanded */}
+      {/* Pages list */}
       {expanded && (
-        <div className="ml-3 mt-0.5 border-l pl-2">
+        <div className="mb-1 ml-2 space-y-0.5">
           {isLoading ? (
-            // Skeleton placeholders while docs are loading
-            <div className="space-y-1 py-1">
-              <Skeleton className="h-4 w-3/4 rounded" />
-              <Skeleton className="h-4 w-1/2 rounded" />
+            <div className="space-y-1 py-1 pl-4">
+              <Skeleton className="h-4 w-4/5 rounded" />
+              <Skeleton className="h-4 w-3/5 rounded" />
             </div>
           ) : docs.length === 0 ? (
-            <p className="text-muted-foreground px-1 py-1 text-xs">No pages yet</p>
+            // Empty workspace — show a subtle "new page" prompt
+            <button
+              className="text-muted-foreground hover:text-foreground flex w-full items-center gap-2 rounded-md py-1.5 pl-5 pr-2 text-[13px] transition-colors hover:bg-accent/40"
+              onClick={() =>
+                createDoc.mutate({ workspaceId: workspace.id, title: 'Untitled' })
+              }
+            >
+              <Plus className="h-3.5 w-3.5 shrink-0" />
+              New page
+            </button>
           ) : (
-            <div className="space-y-0.5 py-0.5">
-              {docs.map((d) => (
-                <button
-                  key={d.id}
-                  onClick={() => onSelectDoc(d.id)}
-                  className={cn(
-                    'flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-sm transition-colors',
-                    selectedDocId === d.id
-                      ? 'bg-accent text-accent-foreground font-medium'
-                      : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground',
-                  )}
-                >
-                  <FileText className="h-3.5 w-3.5 shrink-0" />
-                  <span className="truncate">
-                    {d.emoji ? `${d.emoji} ` : ''}
-                    {d.title || 'Untitled'}
-                  </span>
-                </button>
-              ))}
-            </div>
+            docs.map((d) => (
+              <button
+                key={d.id}
+                onClick={() => onSelectDoc(d.id)}
+                className={cn(
+                  'group/doc flex w-full items-center gap-2 rounded-md py-1.5 pl-5 pr-2 text-left text-[13px] transition-colors',
+                  selectedDocId === d.id
+                    ? 'bg-accent text-accent-foreground font-medium'
+                    : 'text-foreground/80 hover:bg-accent/40 hover:text-foreground',
+                )}
+              >
+                <FileText className="text-muted-foreground h-3.5 w-3.5 shrink-0" />
+                <span className="flex-1 truncate">
+                  {d.emoji ? `${d.emoji} ` : ''}
+                  {d.title || 'Untitled'}
+                </span>
+              </button>
+            ))
           )}
         </div>
       )}
@@ -124,63 +128,101 @@ function WorkspaceSection({
   );
 }
 
-/** DocTree — root component. Fetches workspaces and renders a WorkspaceSection per workspace. */
+// ─── DocTree root ──────────────────────────────────────────────────────────────
+
 export function DocTree({ selectedDocId, onSelectDoc }: DocTreeProps) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
+  const autoCreatedRef = useRef(false);
 
   const { data, isLoading } = useQuery(trpc.docs.workspaces.list.queryOptions());
 
   const createWorkspace = useMutation({
     ...trpc.docs.workspaces.create.mutationOptions(),
     onSuccess: () => {
-      // Re-fetch the workspace list so the new entry appears immediately
       void queryClient.invalidateQueries(trpc.docs.workspaces.list.queryFilter());
     },
   });
 
+  // Quick-create a doc in the first workspace
+  const quickCreateDoc = useMutation({
+    ...trpc.docs.create.mutationOptions(),
+    onSuccess: (result) => {
+      if (firstWorkspaceId) {
+        void queryClient.invalidateQueries(
+          trpc.docs.list.queryFilter({ workspaceId: firstWorkspaceId }),
+        );
+      }
+      onSelectDoc(result.doc.id);
+    },
+  });
+
+  // Auto-create "Personal" workspace on first load.
+  // Guarded by a ref so it only fires once even in React StrictMode.
+  useEffect(() => {
+    if (!isLoading && data?.workspaces.length === 0 && !autoCreatedRef.current) {
+      autoCreatedRef.current = true;
+      createWorkspace.mutate({ name: 'Personal' });
+    }
+  }, [isLoading, data, createWorkspace]);
+
   const workspaces = data?.workspaces ?? [];
+  const firstWorkspaceId = workspaces[0]?.id;
+  const isSettingUp = isLoading || (workspaces.length === 0 && createWorkspace.isPending);
 
   return (
-    <div className="flex h-full flex-col gap-1 p-2">
-      <div className="flex-1 overflow-y-auto">
-        {isLoading ? (
-          // Skeleton while workspaces are loading
-          <div className="space-y-2 p-1">
-            <Skeleton className="h-5 w-full rounded" />
-            <Skeleton className="ml-3 h-4 w-3/4 rounded" />
-            <Skeleton className="ml-3 h-4 w-1/2 rounded" />
-          </div>
-        ) : workspaces.length === 0 ? (
-          // Empty state — prompt the user to create a workspace
-          <div className="flex flex-col items-center gap-2 px-2 py-8 text-center">
-            <FolderOpen className="text-muted-foreground h-8 w-8" />
-            <p className="text-muted-foreground text-sm">No docs yet</p>
-            <p className="text-muted-foreground text-xs">Create a workspace to get started</p>
-          </div>
-        ) : (
-          workspaces.map((ws) => (
-            <WorkspaceSection
-              key={ws.id}
-              workspace={ws}
-              selectedDocId={selectedDocId}
-              onSelectDoc={onSelectDoc}
-            />
-          ))
+    <div className="flex h-full flex-col">
+      {/* Header with "New page" quick action */}
+      <div className="flex items-center justify-between border-b px-3 py-2.5">
+        <span className="text-foreground text-[13px] font-semibold">Docs</span>
+        {firstWorkspaceId && (
+          <button
+            className="text-muted-foreground hover:bg-accent hover:text-foreground rounded-md p-1.5 transition-colors"
+            onClick={() =>
+              quickCreateDoc.mutate({
+                workspaceId: firstWorkspaceId,
+                title: 'Untitled',
+              })
+            }
+            disabled={quickCreateDoc.isPending}
+            title="New page"
+          >
+            <PenLine className="h-3.5 w-3.5" />
+          </button>
         )}
       </div>
 
-      {/* "New workspace" button anchored at the bottom of the tree */}
-      <Button
-        variant="ghost"
-        size="sm"
-        className="text-muted-foreground mt-auto w-full justify-start gap-1.5 text-xs"
-        onClick={() => createWorkspace.mutate({ name: 'New Workspace' })}
-        disabled={createWorkspace.isPending}
-      >
-        <Plus className="h-3.5 w-3.5" />
-        New workspace
-      </Button>
+      {/* Workspace tree */}
+      <div className="flex-1 overflow-y-auto py-1.5 pr-1">
+        {isSettingUp ? (
+          <div className="space-y-2 px-3 py-2">
+            <Skeleton className="h-4 w-2/5 rounded" />
+            <Skeleton className="ml-3 h-4 w-3/4 rounded" />
+            <Skeleton className="ml-3 h-4 w-1/2 rounded" />
+          </div>
+        ) : (
+          <>
+            {workspaces.map((ws) => (
+              <WorkspaceSection
+                key={ws.id}
+                workspace={ws}
+                selectedDocId={selectedDocId}
+                onSelectDoc={onSelectDoc}
+              />
+            ))}
+
+            {/* Add workspace — tertiary, stays out of the way */}
+            <button
+              className="text-muted-foreground/50 hover:text-muted-foreground mt-1 flex w-full items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] transition-colors hover:bg-accent/30"
+              onClick={() => createWorkspace.mutate({ name: 'New Workspace' })}
+              disabled={createWorkspace.isPending}
+            >
+              <Plus className="h-3 w-3" />
+              Add workspace
+            </button>
+          </>
+        )}
+      </div>
     </div>
   );
 }

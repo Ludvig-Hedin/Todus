@@ -59,7 +59,11 @@
       "confirmDeleteSpamDescription": "Czy na pewno chcesz usunąć wszystkie wiadomości spam? Tej akcji nie można cofnąć.",
       "confirmDelete": "Usuń"
     },
-    "themes": { "dark": "Ciemny", "light": "Jasny", "system": "Systemowy" },
+    "themes": {
+      "dark": "Ciemny",
+      "light": "Jasny",
+      "system": "Systemowy"
+    },
     "commandPalette": {
       "title": "Paleta poleceń",
       "description": "Szybka nawigacja i akcje dla Todus",
@@ -161,8 +165,13 @@
       "attachments": "Załączniki",
       "attachmentCount": [
         {
-          "declarations": ["input count", "local countPlural = count: plural"],
-          "selectors": ["countPlural"],
+          "declarations": [
+            "input count",
+            "local countPlural = count: plural"
+          ],
+          "selectors": [
+            "countPlural"
+          ],
           "match": {
             "countPlural=0": "załączników",
             "countPlural=one": "załącznik",
@@ -174,8 +183,13 @@
       ],
       "fileCount": [
         {
-          "declarations": ["input count", "local countPlural = count: plural"],
-          "selectors": ["countPlural"],
+          "declarations": [
+            "input count",
+            "local countPlural = count: plural"
+          ],
+          "selectors": [
+            "countPlural"
+          ],
           "match": {
             "countPlural=0": "plików",
             "countPlural=one": "plik",
@@ -224,12 +238,12 @@
       "markAsRead": "Oznacz jako przeczytane",
       "addLabel": "Dodaj etykietę",
       "muteThread": "Wycisz wątek",
-      "favourites": "Ulubione",
       "disableImages": "Ukryj obrazy",
       "enableImages": "Pokaż obrazy",
       "star": "Oznacz gwiazdką",
       "unstar": "Usuń oznaczenie gwiazdką",
-      "printThread": "Drukuj wątek"
+      "printThread": "Drukuj wątek",
+      "favorites": "Ulubione"
     },
     "notes": {
       "title": "Notatki",
@@ -249,13 +263,19 @@
       "search": "Szukaj notatek...",
       "noteCount": [
         {
-          "declarations": ["input count", "local countPlural = count: plural"],
-          "selectors": ["countPlural"],
+          "declarations": [
+            "input count",
+            "local countPlural = count: plural"
+          ],
+          "selectors": [
+            "countPlural"
+          ],
           "match": {
             "countPlural=0": "Dodaj notatki",
             "countPlural=one": "# notatka",
             "countPlural=few": "# notatki",
-            "countPlural=other": "# notatek"
+            "countPlural=other": "# notatek",
+            "countPlural=many": "# notatek"
           }
         }
       ],
@@ -313,8 +333,13 @@
     "mail": {
       "replies": [
         {
-          "declarations": ["input count", "local countPlural = count: plural"],
-          "selectors": ["countPlural"],
+          "declarations": [
+            "input count",
+            "local countPlural = count: plural"
+          ],
+          "selectors": [
+            "countPlural"
+          ],
           "match": {
             "countPlural=0": "odpowiedzi",
             "countPlural=one": "# odpowiedź",
@@ -376,7 +401,9 @@
       "failedToArchive": "Nie udało się zarchiwizować",
       "openInNewTab": "Otwórz w nowej karcie"
     },
-    "units": { "mb": "{amount} MB" },
+    "units": {
+      "mb": "{amount} MB"
+    },
     "labels": {
       "color": "Kolor",
       "labelName": "Nazwa etykiety",
@@ -391,8 +418,8 @@
       "deletingLabel": "Usuwanie etykiety...",
       "editLabel": "Edytuj etykietę",
       "savingLabel": "Zapisywanie etykiety...",
-      "failedToSavingLabel": "Nie udało się zapisać etykiety",
-      "saveLabelSuccess": "Etykieta została pomyślnie zapisana"
+      "saveLabelSuccess": "Etykieta została pomyślnie zapisana",
+      "failedToSaveLabel": "Nie udało się zapisać etykiety"
     }
   },
   "navigation": {
@@ -422,7 +449,8 @@
       "categories": "Widoki",
       "dangerZone": "Strefa zagrożenia",
       "deleteAccount": "Usuń konto",
-      "privacy": "Prywatność"
+      "privacy": "Prywatność",
+      "meetings": "Spotkania"
     }
   },
   "pages": {
@@ -637,8 +665,14 @@
           "label": "Niska",
           "description": "Najmniejszy rozmiar pliku, zauważalna utrata jakości"
         },
-        "medium": { "label": "Średnia", "description": "Zrównoważony rozmiar i jakość" },
-        "original": { "label": "Oryginalna", "description": "Bez kompresji, oryginalna jakość" }
+        "medium": {
+          "label": "Średnia",
+          "description": "Zrównoważony rozmiar i jakość"
+        },
+        "original": {
+          "label": "Oryginalna",
+          "description": "Bez kompresji, oryginalna jakość"
+        }
       }
     }
   },

@@ -18,6 +18,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { authProxy } from '@/lib/auth-proxy';
+import { upsertTaskInTaskCaches } from '@/lib/task-cache';
 import type { Route } from './+types/page';
 import { format, isValid } from 'date-fns';
 import { cn } from '@/lib/utils';
@@ -65,8 +66,8 @@ export default function SearchPage() {
   // Create task mutation — used for inline quick-add from search
   const createTask = useMutation({
     ...trpc.tasks.create.mutationOptions(),
-    onSuccess: () => {
-      void queryClient.invalidateQueries(trpc.tasks.list.queryFilter());
+    onSuccess: ({ task }) => {
+      upsertTaskInTaskCaches(queryClient, task);
       setQuickTaskTitle('');
       quickTaskRef.current?.focus();
     },
@@ -90,7 +91,11 @@ export default function SearchPage() {
   const { data: tasksData, isLoading: tasksLoading } = useQuery(
     trpc.tasks.list.queryOptions(
       { search: debouncedQuery || undefined, limit: 20 },
-      { enabled: debouncedQuery.length > 0 && tab !== 'emails' },
+      {
+        enabled: debouncedQuery.length > 0 && tab !== 'emails',
+        staleTime: 1000 * 60 * 2,
+        refetchOnMount: false,
+      },
     ),
   );
   const tasks = tasksData?.tasks ?? [];
@@ -244,7 +249,12 @@ export default function SearchPage() {
 // ─── EmailResult ────────────────────────────────────────────────────────────
 
 interface EmailResultProps {
-  thread: { id: string; subject?: string; snippet?: string; latestMessageSentAt?: string };
+  thread: {
+    id: string;
+    latestSubject?: string | null;
+    snippet?: string | null;
+    latestReceivedOn?: string | null;
+  };
 }
 
 function EmailResult({ thread }: EmailResultProps) {
@@ -255,13 +265,13 @@ function EmailResult({ thread }: EmailResultProps) {
     >
       <Mail className="text-muted-foreground mt-0.5 h-4 w-4 shrink-0" />
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium">{thread.subject || '(no subject)'}</p>
+        <p className="truncate text-sm font-medium">{thread.latestSubject || '(no subject)'}</p>
         {thread.snippet && (
           <p className="text-muted-foreground mt-0.5 line-clamp-1 text-xs">{thread.snippet}</p>
         )}
       </div>
-      {thread.latestMessageSentAt && (() => {
-        const d = new Date(thread.latestMessageSentAt);
+      {thread.latestReceivedOn && (() => {
+        const d = new Date(thread.latestReceivedOn);
         return isValid(d) ? (
           <span className="text-muted-foreground shrink-0 text-[11px]">{format(d, 'MMM d')}</span>
         ) : null;

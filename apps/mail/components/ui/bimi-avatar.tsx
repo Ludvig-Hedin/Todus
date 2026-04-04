@@ -70,13 +70,17 @@ function buildFaviconFallbackUrls(email: string) {
     return [];
   }
 
+  // Google's favicon service has the best coverage (same source Gmail uses),
+  // so we prioritize it before direct favicon/apple-touch-icon fetches.
   const urls: string[] = [];
   for (const candidate of buildDomainCandidates(domain)) {
-    urls.push(`https://${candidate}/favicon.ico`);
+    urls.push(`https://www.google.com/s2/favicons?domain=${candidate}&sz=128`);
     urls.push(`https://${candidate}/apple-touch-icon.png`);
+    urls.push(`https://${candidate}/favicon.ico`);
     if (!candidate.startsWith('www.')) {
-      urls.push(`https://www.${candidate}/favicon.ico`);
+      urls.push(`https://www.google.com/s2/favicons?domain=www.${candidate}&sz=128`);
       urls.push(`https://www.${candidate}/apple-touch-icon.png`);
+      urls.push(`https://www.${candidate}/favicon.ico`);
     }
   }
 

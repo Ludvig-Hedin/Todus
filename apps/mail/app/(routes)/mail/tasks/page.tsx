@@ -64,6 +64,8 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useTRPC } from '@/providers/query-provider';
+import { BackgroundRefreshIndicator } from '@/components/ui/background-refresh-indicator';
+import { removeTaskFromTaskCaches, upsertTaskInTaskCaches } from '@/lib/task-cache';
 import { Textarea } from '@/components/ui/textarea';
 import { Calendar } from '@/components/ui/calendar';
 import { format, isPast, isToday } from 'date-fns';
@@ -168,7 +170,12 @@ export default function TasksPage() {
   // Board drag state
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
 
-  const { data: foldersData } = useQuery(trpc.folders.list.queryOptions());
+  const { data: foldersData, isFetching: isFetchingFolders } = useQuery(
+    trpc.folders.list.queryOptions(void 0, {
+      staleTime: 1000 * 60 * 30,
+      refetchOnMount: false,
+    }),
+  );
   const folders = foldersData?.folders ?? [];
 
   // For board mode we need all statuses; otherwise filter
@@ -181,25 +188,31 @@ export default function TasksPage() {
     ...(searchText && { search: searchText }),
   };
 
-  const { data, isLoading } = useQuery(trpc.tasks.list.queryOptions(queryInput));
+  const { data, isLoading, isFetching } = useQuery(
+    trpc.tasks.list.queryOptions(queryInput, {
+      staleTime: 1000 * 60 * 5,
+      refetchOnMount: false,
+    }),
+  );
   const tasks = useMemo(() => data?.tasks ?? [], [data]);
-
-  const invalidateTasks = () => void queryClient.invalidateQueries(trpc.tasks.list.queryFilter());
 
   const createMutation = useMutation({
     ...trpc.tasks.create.mutationOptions(),
-    onSuccess: invalidateTasks,
+    onSuccess: ({ task }) => {
+      upsertTaskInTaskCaches(queryClient, task);
+    },
   });
   const updateMutation = useMutation({
     ...trpc.tasks.update.mutationOptions(),
-    onSuccess: () => {
-      invalidateTasks();
-      // Don't spread stale prev — invalidateTasks() will bring fresh data via query
+    onSuccess: ({ task }) => {
+      upsertTaskInTaskCaches(queryClient, task);
     },
   });
   const deleteMutation = useMutation({
     ...trpc.tasks.delete.mutationOptions(),
-    onSuccess: invalidateTasks,
+    onSuccess: (_result, variables) => {
+      removeTaskFromTaskCaches(queryClient, variables.id);
+    },
   });
   const createFolderMutation = useMutation({
     ...trpc.folders.create.mutationOptions(),
@@ -331,6 +344,8 @@ export default function TasksPage() {
   };
 
   const activeTask = activeTaskId ? tasks.find((t) => t.id === activeTaskId) : null;
+  const isBackgroundRefreshing =
+    (!!data && !isLoading && isFetching) || (!!foldersData && isFetchingFolders);
 
   // Board column groups (client-side split)
   const boardGroups = useMemo(() => {
@@ -348,9 +363,12 @@ export default function TasksPage() {
     <div className="bg-background flex h-screen flex-col overflow-hidden">
       {/* ── Header ── */}
       <div className="flex shrink-0 items-center justify-between border-b px-5 py-3">
-        <h1 className="text-xl font-semibold tracking-tight">
-          {activeFolder ? activeFolder.name : 'Tasks'}
-        </h1>
+        <div className="flex items-center gap-2">
+          <h1 className="text-xl font-semibold tracking-tight">
+            {activeFolder ? activeFolder.name : 'Tasks'}
+          </h1>
+          {isBackgroundRefreshing ? <BackgroundRefreshIndicator label="Updating tasks" /> : null}
+        </div>
         <div className="flex items-center gap-2">
           {/* View mode switcher — matches iOS segmented control */}
           <div className="bg-muted/50 flex items-center gap-0.5 rounded-lg border p-0.5">
@@ -1381,10 +1399,7 @@ function TaskDetailPanel({
             </div>
           )}
           {(() => {
-            const createdAt =
-              typeof task.createdAt === 'string' && task.createdAt.trim()
-                ? new Date(task.createdAt)
-                : null;
+            const createdAt = task.createdAt ? new Date(task.createdAt) : null;
 
             return createdAt && !Number.isNaN(createdAt.getTime()) ? (
               <div className="flex items-center justify-between">

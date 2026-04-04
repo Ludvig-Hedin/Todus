@@ -1,35 +1,35 @@
 /**
- * Meetings hub — list of all meetings with calendar sync, status filters,
- * and time-based grouping (Today, This Week, Earlier).
+ * Meetings hub — time-grouped list with calendar sync, status filters, and search.
+ *
+ * Design: Matches the mail list aesthetic — Geist type, tight letter-spacing,
+ * neutral hover states, soft borders at 60% opacity, blue accent only for
+ * active/unread indicators. Status conveyed through subtle tinted text rather
+ * than loud colored badges.
  */
 import {
-  Video,
-  RefreshCw,
-  Calendar as CalendarIcon,
+  CalendarIcon,
   Clock,
   AlertCircle,
   CheckCircle2,
   Loader2,
   Search,
-  Plus,
+  RefreshCw,
 } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState, useMemo } from 'react';
 import { useTRPC } from '@/providers/query-provider';
 import type { Outputs } from '@zero/server/trpc';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { authProxy } from '@/lib/auth-proxy';
 import type { Route } from './+types/page';
 import { Link } from 'react-router';
+import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import {
   format,
   isToday,
   isThisWeek,
-  parseISO,
-  formatDistanceToNow,
 } from 'date-fns';
 
 type Meeting = Outputs['meet']['listMeetings']['meetings'][number];
@@ -42,43 +42,53 @@ export async function clientLoader({ request }: Route.ClientLoaderArgs) {
   return {};
 }
 
+/* ── Status config ─────────────────────────────────────────────────────────
+ * Restrained palette: muted tinted text with near-transparent backgrounds.
+ * No loud saturated badges — status is secondary information, not primary. */
 const STATUS_CONFIG: Record<
   MeetingStatus,
-  { label: string; className: string; icon: typeof Video }
+  { label: string; dotClass: string; textClass: string; icon: typeof CalendarIcon }
 > = {
   scheduled: {
     label: 'Scheduled',
-    className: 'text-blue-600 bg-blue-50 dark:bg-blue-950/30 dark:text-blue-400',
+    dotClass: 'bg-blue-400/70 dark:bg-blue-400/50',
+    textClass: 'text-muted-foreground',
     icon: CalendarIcon,
   },
   bot_joining: {
-    label: 'Joining',
-    className: 'text-yellow-600 bg-yellow-50 dark:bg-yellow-950/30 dark:text-yellow-400',
+    label: 'Starting',
+    dotClass: 'bg-amber-400/80 dark:bg-amber-400/60',
+    textClass: 'text-amber-600 dark:text-amber-400',
     icon: Loader2,
   },
   recording: {
     label: 'Recording',
-    className: 'text-red-600 bg-red-50 dark:bg-red-950/30 dark:text-red-400',
-    icon: Video,
+    dotClass: 'bg-red-400/80 dark:bg-red-400/60 animate-pulse',
+    textClass: 'text-red-600 dark:text-red-400',
+    icon: Clock,
   },
   processing: {
     label: 'Processing',
-    className: 'text-orange-600 bg-orange-50 dark:bg-orange-950/30 dark:text-orange-400',
+    dotClass: 'bg-orange-400/70 dark:bg-orange-400/50',
+    textClass: 'text-muted-foreground',
     icon: Loader2,
   },
   ready: {
     label: 'Ready',
-    className: 'text-green-600 bg-green-50 dark:bg-green-950/30 dark:text-green-400',
+    dotClass: 'bg-emerald-400/70 dark:bg-emerald-400/50',
+    textClass: 'text-muted-foreground',
     icon: CheckCircle2,
   },
   failed: {
     label: 'Failed',
-    className: 'text-red-600 bg-red-50 dark:bg-red-950/30 dark:text-red-400',
+    dotClass: 'bg-red-400/60 dark:bg-red-400/40',
+    textClass: 'text-muted-foreground',
     icon: AlertCircle,
   },
   cancelled: {
     label: 'Cancelled',
-    className: 'text-muted-foreground bg-muted/50',
+    dotClass: 'bg-muted-foreground/30',
+    textClass: 'text-muted-foreground',
     icon: AlertCircle,
   },
 };
@@ -97,7 +107,6 @@ export default function MeetingsPage() {
   const [statusFilter, setStatusFilter] = useState<MeetingStatus | 'all'>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Fetch meetings
   const { data, isLoading } = useQuery(
     trpc.meet.listMeetings.queryOptions({
       status: statusFilter === 'all' ? undefined : statusFilter,
@@ -107,18 +116,22 @@ export default function MeetingsPage() {
   );
   const meetings = useMemo(() => data?.meetings ?? [], [data]);
 
-  // Sync from calendar
   const syncMutation = useMutation(trpc.meet.syncFromCalendar.mutationOptions());
 
   const handleSync = () => {
-    syncMutation.mutate(
-      undefined,
-      {
-        onSuccess: () => {
-          queryClient.invalidateQueries({ queryKey: trpc.meet.listMeetings.queryKey() });
-        },
+    syncMutation.mutate(undefined, {
+      onSuccess: (data) => {
+        queryClient.invalidateQueries({ queryKey: trpc.meet.listMeetings.queryKey() });
+        const msg =
+          data.synced > 0
+            ? `Synced ${data.synced} meeting${data.synced !== 1 ? 's' : ''}${data.autoRecorded ? ` · ${data.autoRecorded} scheduled for recording` : ''}`
+            : 'Calendar is up to date';
+        toast.success(msg);
       },
-    );
+      onError: () => {
+        toast.error('Failed to sync calendar. Please try again.');
+      },
+    });
   };
 
   // Group meetings by time period
@@ -126,7 +139,6 @@ export default function MeetingsPage() {
     const today: Meeting[] = [];
     const thisWeek: Meeting[] = [];
     const earlier: Meeting[] = [];
-
     for (const m of meetings) {
       const date = new Date(m.startsAt);
       if (isToday(date)) today.push(m);
@@ -138,68 +150,68 @@ export default function MeetingsPage() {
 
   return (
     <div className="flex h-full flex-col">
-      {/* Header */}
-      <div className="flex items-center justify-between border-b px-6 py-4">
-        <div className="flex items-center gap-3">
-          <Video className="text-muted-foreground h-5 w-5" />
-          <h1 className="text-lg font-semibold">Meetings</h1>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleSync}
-            disabled={syncMutation.isPending}
-          >
-            <RefreshCw
-              className={cn('mr-1.5 h-3.5 w-3.5', syncMutation.isPending && 'animate-spin')}
-            />
-            {syncMutation.isPending ? 'Syncing...' : 'Sync Calendar'}
-          </Button>
-        </div>
+      {/* Header — matches settings content header: slim bar, border-border/60 */}
+      <div className="flex items-center justify-between border-b border-border/60 px-5 py-3">
+        <h1 className="text-[15px] font-semibold tracking-tight">Meetings</h1>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 gap-1.5 text-xs text-muted-foreground"
+          onClick={handleSync}
+          disabled={syncMutation.isPending}
+        >
+          <RefreshCw
+            className={cn('h-3 w-3', syncMutation.isPending && 'animate-spin')}
+          />
+          {syncMutation.isPending ? 'Syncing' : 'Sync'}
+        </Button>
       </div>
 
-      {/* Filters + search */}
-      <div className="flex items-center gap-3 border-b px-6 py-3">
+      {/* Search + filters — compact, no heavy dividers */}
+      <div className="flex items-center gap-2 border-b border-border/60 px-5 py-2">
         <div className="relative flex-1">
-          <Search className="text-muted-foreground absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2" />
+          <Search className="text-muted-foreground/60 absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2" />
           <Input
-            placeholder="Search meetings..."
+            placeholder="Search meetings…"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="h-8 pl-8"
+            className="h-7 border-none bg-accent/40 pl-7 text-[13px] shadow-none placeholder:text-muted-foreground/50 focus-visible:ring-0"
           />
         </div>
-        <div className="flex gap-1">
+        <div className="flex gap-0.5">
           {FILTER_OPTIONS.map((opt) => (
-            <Button
+            <button
+              type="button"
               key={opt.value}
-              variant={statusFilter === opt.value ? 'default' : 'ghost'}
-              size="sm"
-              className="h-7 px-2.5 text-xs"
+              className={cn(
+                'rounded-md px-2 py-1 text-[11px] font-medium tracking-tight transition-colors',
+                statusFilter === opt.value
+                  ? 'bg-accent text-foreground'
+                  : 'text-muted-foreground hover:text-foreground',
+              )}
               onClick={() => setStatusFilter(opt.value)}
             >
               {opt.label}
-            </Button>
+            </button>
           ))}
         </div>
       </div>
 
       {/* Meeting list */}
-      <div className="flex-1 overflow-y-auto px-6 py-4">
+      <div className="flex-1 overflow-y-auto">
         {isLoading ? (
           <div className="flex items-center justify-center py-20">
-            <Loader2 className="text-muted-foreground h-6 w-6 animate-spin" />
+            <Loader2 className="text-muted-foreground/50 h-5 w-5 animate-spin" />
           </div>
         ) : meetings.length === 0 ? (
           <EmptyState onSync={handleSync} isSyncing={syncMutation.isPending} />
         ) : (
-          <div className="space-y-6">
+          <div className="px-2 py-2">
             {grouped.today.length > 0 && (
               <MeetingSection title="Today" meetings={grouped.today} />
             )}
             {grouped.thisWeek.length > 0 && (
-              <MeetingSection title="This Week" meetings={grouped.thisWeek} />
+              <MeetingSection title="This week" meetings={grouped.thisWeek} />
             )}
             {grouped.earlier.length > 0 && (
               <MeetingSection title="Earlier" meetings={grouped.earlier} />
@@ -211,13 +223,18 @@ export default function MeetingsPage() {
   );
 }
 
+/* ── Section ─────────────────────────────────────────────────────────────── */
+
 function MeetingSection({ title, meetings }: { title: string; meetings: Meeting[] }) {
   return (
-    <div>
-      <h2 className="text-muted-foreground mb-2 text-xs font-medium uppercase tracking-wider">
-        {title}
-      </h2>
-      <div className="space-y-1">
+    <div className="mb-1">
+      {/* Section header — matches mail list section style */}
+      <div className="px-3 pb-1 pt-3">
+        <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/70">
+          {title}
+        </span>
+      </div>
+      <div>
         {meetings.map((m) => (
           <MeetingRow key={m.id} meeting={m} />
         ))}
@@ -226,44 +243,48 @@ function MeetingSection({ title, meetings }: { title: string; meetings: Meeting[
   );
 }
 
+/* ── Row ─────────────────────────────────────────────────────────────────── */
+
 function MeetingRow({ meeting }: { meeting: Meeting }) {
   const status = STATUS_CONFIG[meeting.status] ?? STATUS_CONFIG.scheduled;
-  const StatusIcon = status.icon;
   const startsAt = new Date(meeting.startsAt);
 
   return (
     <Link
       to={`/mail/meetings/${meeting.id}`}
-      className="hover:bg-accent/50 flex items-center gap-3 rounded-lg px-3 py-2.5 transition-colors"
+      className={cn(
+        'group mx-1 flex items-center gap-3 rounded-lg px-3 py-2',
+        'transition-colors hover:bg-accent/60',
+      )}
     >
-      {/* Status icon */}
-      <div className={cn('flex h-8 w-8 items-center justify-center rounded-full', status.className)}>
-        <StatusIcon className="h-4 w-4" />
-      </div>
+      {/* Status dot — tiny, like the unread indicator in mail list */}
+      <div className={cn('h-1.5 w-1.5 shrink-0 rounded-full', status.dotClass)} />
 
-      {/* Title + time */}
+      {/* Title + time — tight, information-dense */}
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium">{meeting.title}</p>
-        <p className="text-muted-foreground text-xs">
+        <p className="truncate text-[13px] font-medium leading-tight tracking-tight">
+          {meeting.title}
+        </p>
+        <p className="mt-0.5 text-[11px] leading-tight text-muted-foreground">
           {format(startsAt, 'MMM d · h:mm a')}
           {meeting.endsAt && ` – ${format(new Date(meeting.endsAt), 'h:mm a')}`}
         </p>
       </div>
 
-      {/* Status badge */}
-      <Badge variant="secondary" className={cn('text-xs', status.className)}>
+      {/* Status label — quiet, right-aligned */}
+      <span className={cn('text-[11px] font-medium tracking-tight', status.textClass)}>
         {status.label}
-      </Badge>
+      </span>
 
-      {/* Summary indicator */}
+      {/* Recap indicator — subtle dot, like unread indicator */}
       {meeting.aiSummary && (
-        <Badge variant="outline" className="text-xs">
-          Recap
-        </Badge>
+        <div className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--mainBlue)]" title="Recap available" />
       )}
     </Link>
   );
 }
+
+/* ── Empty state ─────────────────────────────────────────────────────────── */
 
 function EmptyState({
   onSync,
@@ -273,18 +294,23 @@ function EmptyState({
   isSyncing: boolean;
 }) {
   return (
-    <div className="flex flex-col items-center justify-center py-20 text-center">
-      <div className="bg-muted mb-4 flex h-12 w-12 items-center justify-center rounded-full">
-        <Video className="text-muted-foreground h-6 w-6" />
+    <div className="flex flex-col items-center justify-center py-24 text-center">
+      <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-accent/60">
+        <CalendarIcon className="h-4 w-4 text-muted-foreground" />
       </div>
-      <h3 className="mb-1 text-sm font-medium">No meetings yet</h3>
-      <p className="text-muted-foreground mb-4 max-w-sm text-sm">
-        Sync your Google Calendar to import meetings with Google Meet links. We&apos;ll
-        automatically record and summarize them.
+      <p className="text-[13px] font-medium tracking-tight">No meetings yet</p>
+      <p className="mt-1 max-w-[280px] text-[12px] leading-relaxed text-muted-foreground">
+        Sync your calendar to import meetings. They&apos;ll be recorded automatically.
       </p>
-      <Button onClick={onSync} disabled={isSyncing}>
-        <RefreshCw className={cn('mr-1.5 h-4 w-4', isSyncing && 'animate-spin')} />
-        Sync from Calendar
+      <Button
+        variant="outline"
+        size="sm"
+        className="mt-4 h-7 gap-1.5 text-xs"
+        onClick={onSync}
+        disabled={isSyncing}
+      >
+        <RefreshCw className={cn('h-3 w-3', isSyncing && 'animate-spin')} />
+        Sync Calendar
       </Button>
     </div>
   );
