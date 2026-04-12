@@ -609,9 +609,10 @@ export const meetRouter = router({
 
         // Call AI for summary + action items
         const { generateText } = await import('ai');
-        const { openai } = await import('@ai-sdk/openai');
+        const { resolveModel } = await import('../../lib/ai-model-resolver');
 
-        const model = openai(env.OPENAI_MINI_MODEL || 'gpt-4o-mini');
+        // Use centralized model resolver — 'auto' preserves existing env-var cascade
+        const model = resolveModel({ provider: 'auto', modelId: '', ollamaBaseUrl: '', env });
         const systemPrompt = `You are a meeting analyst. Given a meeting transcript, produce:
 1. A concise summary (3-6 sentences) covering the key discussion points and decisions.
 2. A JSON array of action items, each with: { "description": string, "owner": string (speaker name or "Unassigned"), "dueDate": string | null }.
@@ -705,9 +706,10 @@ ${transcriptText.slice(0, 30000)}`; // Cap at ~30k chars to stay within context
           .join('\n');
 
         const { generateText } = await import('ai');
-        const { openai } = await import('@ai-sdk/openai');
+        const { resolveModel } = await import('../../lib/ai-model-resolver');
 
-        const model = openai(env.OPENAI_MINI_MODEL || 'gpt-4o-mini');
+        // Use centralized model resolver — 'auto' preserves existing env-var cascade
+        const model = resolveModel({ provider: 'auto', modelId: '', ollamaBaseUrl: '', env });
 
         const result = await generateText({
           model,

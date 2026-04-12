@@ -1,5 +1,43 @@
 # Project Changelog
 
+## [2026-04-08] Feature — Ollama integration + AI model selector
+
+- [Feature] Added user-facing AI provider/model selector in the chat sidebar header (compact) and a full AI settings page at `/settings/ai`.
+- [Feature] Users can now select from OpenAI, Anthropic, Google, Groq, OpenRouter, or Ollama (local) as their AI provider.
+- [Feature] Ollama integration: list installed models, pull new models with progress, delete models, connection status indicator, CORS troubleshooting help.
+- [Feature] Added `aiProvider`, `aiModel`, and `ollamaBaseUrl` to user settings schema.
+- [Refactor] Created centralized `ai-model-resolver.ts` — single source of truth for model construction across all backend endpoints.
+- [Refactor] Replaced hardcoded `openai(...)` calls in 10+ backend files with the resolver.
+- [UI] New settings nav item "AI & Models" with Cpu icon.
+- **New files:** `ai-model-resolver.ts`, `model-selector.tsx`, `use-ollama.ts`, `ollama-utils.ts`, `settings/ai/page.tsx`
+- **Modified files:** `schemas.ts`, `agent/index.ts`, `ai-sidebar.tsx`, `ai-chat.tsx`, `routes.ts`, `navigation.ts`, `compose.ts`, `search.ts`, `chat.ts`, `ai.ts`, `tools.ts`, `interests.ts`, `groups.ts`, `meet.ts`
+
+## [2026-04-08] Refactor — Adopt centralized AI model resolver across backend
+
+- [Refactor] Replaced direct `openai(...)` model construction calls with the centralized `resolveModel()` / `resolveModelFromSettings()` from `ai-model-resolver.ts` in five backend files.
+- [Refactor] `search.ts` uses `resolveModelFromSettings()` since it already loads user settings, enabling per-user provider selection.
+- [Refactor] `compose.ts`, `interests.ts`, `groups.ts`, and `meet.ts` use `resolveModel({ provider: 'auto', ... })` which preserves the existing env-var cascade (OpenRouter -> Google -> OpenAI -> Anthropic).
+- **Files:** `apps/server/src/trpc/routes/ai/compose.ts`, `apps/server/src/trpc/routes/ai/search.ts`, `apps/server/src/lib/analyze/interests.ts`, `apps/server/src/trpc/routes/groups.ts`, `apps/server/src/trpc/routes/meet.ts`
+
+## [2026-04-06] Fix — Missing Database Columns for meeting settings
+
+- [Fix] Fixed an issue where the `meetIntegration` table in `db/schema.ts` was missing several columns (such as `auto_delete_days`, `last_pruned_at`, `auto_generate_summary`, etc.) that were being queried by the backend meetings endpoints, which resulted in a crash under `meet.listMeetings`.
+- [Build] Generated a new Drizzle migration (`0049_fixed_karma.sql`) and pushed to the local database to apply the missing columns.
+- **Files:** `apps/server/src/db/schema.ts`
+
+## [2026-04-06] UX — Removed "Add Task" buttons from Tasks page (iOS)
+
+- [UX] Removed the "Add Task" button from the `TasksTabView` header to declutter the main task interface.
+- [UX] Removed the "Add Task" buttons and plus icons from the `BoardView` columns (headers and footers) to simplify the board layout.
+- [UX] Removed the tap-to-add gesture from board columns.
+- [UX] Updated empty state messaging in both List and Board views to guide users towards the central "Create" button in the tab bar or dragging existing tasks.
+- **Files:** `apps/ios/Todus/Todus/Features/Tasks/TasksTabView.swift`, `apps/ios/Todus/Todus/Features/Tasks/BoardColumnView.swift`, `apps/ios/Todus/Todus/Features/Tasks/InboxView.swift`
+
+## [2026-04-06] Fix — iOS CreateSheet Floating Position
+
+- [Fix] iOS `CreateSheet`: Added `.ignoresSafeArea(.container, edges: .bottom)` to the main `ZStack` so it properly ignores the safe area inset injected by `MainTabView`. This fixes the issue where the input UI was pushed to the top of the screen by double-counting the safe area and keyboard height.
+- **Files:** `apps/ios/Todus/Todus/Navigation/CreateSheet.swift`
+
 ## [2026-04-04] Fix — macOS Xcode target graph for shared auth
 
 - [Build] Fixed the macOS Xcode project so shared auth sources resolve from `packages/swift-auth/Sources/TodusAuth` instead of the stale removed `apps/swift-auth` path.

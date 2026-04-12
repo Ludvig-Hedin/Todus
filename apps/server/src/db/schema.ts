@@ -602,6 +602,14 @@ export const meetIntegration = createTable(
     isEnabled: boolean('is_enabled').notNull().default(true),
     autoJoin: boolean('auto_join').notNull().default(false),
     joinEarlyMinutes: integer('join_early_minutes').notNull().default(1),
+    autoGenerateSummary: boolean('auto_generate_summary').notNull().default(true),
+    summaryLanguage: text('summary_language').notNull().default('en'),
+    excludeAllDay: boolean('exclude_all_day').notNull().default(true),
+    minimumDurationMinutes: integer('minimum_duration_minutes').notNull().default(5),
+    notifyOnRecordingStart: boolean('notify_on_recording_start').notNull().default(true),
+    notifyOnRecapReady: boolean('notify_on_recap_ready').notNull().default(true),
+    autoDeleteDays: integer('auto_delete_days').notNull().default(0),
+    lastPrunedAt: timestamp('last_pruned_at'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at')
       .notNull()

@@ -211,7 +211,7 @@ struct InboxView: View {
 
             Text(
                 searchText.isEmpty
-                    ? "Tap Add Task to capture something new. Folders and other views can wait until you need them."
+                    ? "Folders and other views can wait until you need them."
                     : "Try a different search term or clear the filter to get back to your full list."
             )
             .font(.system(size: 14, weight: .medium))

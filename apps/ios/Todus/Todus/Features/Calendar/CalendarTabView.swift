@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import EventKit
 import EventKitUI
 
@@ -13,11 +14,36 @@ struct CalendarTabView: View {
     @State private var isLoading = false
     @State private var calendarHeaderHeight: CGFloat = 90
     @AppStorage("calendarMultiDayCount") private var multiDayCount: Int = 3
+    @State private var hasSwitchedViewFromZoom = false
 
     var body: some View {
         ZStack(alignment: .top) {
             // Content area — switches based on view mode
             contentView
+                .gesture(
+                    MagnifyGesture()
+                        .onChanged { value in
+                            guard !hasSwitchedViewFromZoom else { return }
+                            let mag = value.magnification
+                            let zoomInThreshold: CGFloat = 1.3
+                            let zoomOutThreshold: CGFloat = 0.75
+                            
+                            if mag > zoomInThreshold {
+                                hasSwitchedViewFromZoom = true
+                                let impact = UIImpactFeedbackGenerator(style: .medium)
+                                impact.impactOccurred()
+                                withAnimation(.easeOut(duration: 0.2)) { zoomIn() }
+                            } else if mag < zoomOutThreshold {
+                                hasSwitchedViewFromZoom = true
+                                let impact = UIImpactFeedbackGenerator(style: .medium)
+                                impact.impactOccurred()
+                                withAnimation(.easeOut(duration: 0.2)) { zoomOut() }
+                            }
+                        }
+                        .onEnded { _ in
+                            hasSwitchedViewFromZoom = false
+                        }
+                )
 
             // Header overlay — AppTopHeader with mode picker + nav bar
             headerOverlay
@@ -114,6 +140,28 @@ struct CalendarTabView: View {
                 onLoadMore: { await loadMoreListEvents() }
             )
             .padding(.top, calendarHeaderHeight)
+        }
+    }
+
+    // MARK: - Zoom Navigation
+
+    private func zoomIn() {
+        switch viewMode {
+        case .year: viewMode = .month
+        case .month: viewMode = .multiDay
+        case .multiDay: viewMode = .day
+        case .list: viewMode = .day
+        case .day: break // Already at maximum zoom
+        }
+    }
+
+    private func zoomOut() {
+        switch viewMode {
+        case .day: viewMode = .multiDay
+        case .multiDay: viewMode = .month
+        case .month: viewMode = .year
+        case .year: break // Already at minimum zoom
+        case .list: viewMode = .month
         }
     }
 

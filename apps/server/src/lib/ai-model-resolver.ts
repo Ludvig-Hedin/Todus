@@ -1,0 +1,159 @@
+/**
+ * Centralized AI model resolution.
+ *
+ * Converts a (provider, modelId) pair from user settings into a Vercel AI SDK
+ * LanguageModel instance. This replaces the scattered model selection logic that
+ * was previously hardcoded across 10+ files.
+ *
+ * Key design decisions:
+ * - Ollama uses the OpenAI-compatible endpoint (/v1/) so we reuse @ai-sdk/openai
+ *   with a custom baseURL — no new dependency needed.
+ * - When provider is 'ollama' and it's unreachable, we throw (no silent fallback).
+ * - When provider is 'auto', we preserve the existing env-var cascade.
+ */
+
+import { createOpenAI } from '@ai-sdk/openai';
+import { anthropic } from '@ai-sdk/anthropic';
+import { google } from '@ai-sdk/google';
+import { groq } from '@ai-sdk/groq';
+import type { LanguageModel } from 'ai';
+import type { ZeroEnv } from '../env';
+import type { UserSettings } from './schemas';
+
+// Re-export the provider enum values for consumers
+export const AI_PROVIDERS = ['auto', 'openai', 'anthropic', 'google', 'groq', 'openrouter', 'ollama'] as const;
+export type AIProvider = (typeof AI_PROVIDERS)[number];
+
+interface ResolveModelOpts {
+  provider: AIProvider;
+  modelId: string;
+  ollamaBaseUrl: string;
+  env: ZeroEnv;
+}
+
+/**
+ * Check whether an Ollama instance is reachable at the given base URL.
+ * Uses a short timeout to avoid blocking the request for too long.
+ */
+export async function isOllamaReachable(baseUrl: string, timeoutMs = 2000): Promise<boolean> {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    const res = await fetch(`${baseUrl}/api/tags`, { signal: controller.signal });
+    clearTimeout(timeout);
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Resolve the "auto" provider using the existing env-var cascade:
+ * OpenRouter (if key) → Google (if key) → OpenAI (if USE_OPENAI) → Anthropic
+ */
+function resolveAutoModel(env: ZeroEnv): LanguageModel {
+  const openRouterApiKey = env.OPENROUTER_API_SECRET ?? env.OPENROUTER_API_KEY;
+
+  if (openRouterApiKey) {
+    const modelId = (env.DEFAULT_MODEL || 'openai/gpt-4o-mini').trim();
+    const openRouterProvider = createOpenAI({
+      baseURL: 'https://openrouter.ai/api/v1',
+      apiKey: openRouterApiKey,
+    });
+    return openRouterProvider(modelId);
+  }
+
+  if (env.GOOGLE_GENERATIVE_AI_API_KEY) {
+    const modelId = (env.DEFAULT_MODEL || 'gemini-2.5-flash').trim();
+    return google(modelId);
+  }
+
+  if (env.USE_OPENAI === 'true') {
+    const modelId = (env.OPENAI_MODEL || 'gpt-4o').trim();
+    const oai = createOpenAI({});
+    return oai(modelId);
+  }
+
+  // Fallback: Anthropic
+  return anthropic('claude-3-5-sonnet-latest');
+}
+
+/**
+ * Create an Ollama-backed LanguageModel using the OpenAI-compatible API.
+ * Ollama exposes an OpenAI-compatible endpoint at /v1/ which we leverage
+ * through @ai-sdk/openai with a custom baseURL. The apiKey is required by
+ * the SDK but Ollama ignores it — we pass 'ollama' as a placeholder.
+ */
+function createOllamaModel(baseUrl: string, modelId: string): LanguageModel {
+  const ollamaProvider = createOpenAI({
+    baseURL: `${baseUrl}/v1`,
+    apiKey: 'ollama', // Ollama doesn't need a real API key but SDK requires non-empty
+  });
+  return ollamaProvider(modelId);
+}
+
+/**
+ * Resolve a Vercel AI SDK LanguageModel from provider + model settings.
+ *
+ * This is the single source of truth for model selection across the entire backend.
+ * All AI call-sites should use this instead of directly importing provider modules.
+ */
+export function resolveModel({ provider, modelId, ollamaBaseUrl, env }: ResolveModelOpts): LanguageModel {
+  switch (provider) {
+    case 'ollama': {
+      if (!modelId) {
+        throw new Error('[AIModel] Ollama provider selected but no model specified. Please select a model in Settings > AI.');
+      }
+      return createOllamaModel(ollamaBaseUrl, modelId);
+    }
+
+    case 'openai': {
+      const id = (modelId || env.OPENAI_MODEL || 'gpt-4o').trim();
+      // Use createOpenAI to allow arbitrary model IDs (the default openai() uses strict types)
+      const oai = createOpenAI({});
+      return oai(id);
+    }
+
+    case 'anthropic': {
+      const id = (modelId || 'claude-3-5-sonnet-latest').trim();
+      return anthropic(id as any);
+    }
+
+    case 'google': {
+      const id = (modelId || 'gemini-2.5-flash').trim();
+      return google(id as any);
+    }
+
+    case 'groq': {
+      const id = (modelId || 'llama-3.3-70b-versatile').trim();
+      return groq(id as any);
+    }
+
+    case 'openrouter': {
+      const apiKey = env.OPENROUTER_API_SECRET ?? env.OPENROUTER_API_KEY;
+      if (!apiKey) {
+        throw new Error('[AIModel] OpenRouter selected but no API key configured (OPENROUTER_API_KEY).');
+      }
+      const id = (modelId || env.DEFAULT_MODEL || 'openai/gpt-4o-mini').trim();
+      const openRouterProvider = createOpenAI({
+        baseURL: 'https://openrouter.ai/api/v1',
+        apiKey,
+      });
+      return openRouterProvider(id);
+    }
+
+    case 'auto':
+    default:
+      return resolveAutoModel(env);
+  }
+}
+
+/**
+ * Convenience: resolve a model directly from a UserSettings object.
+ */
+export function resolveModelFromSettings(settings: UserSettings | undefined, env: ZeroEnv): LanguageModel {
+  const provider = (settings?.aiProvider ?? 'auto') as AIProvider;
+  const modelId = settings?.aiModel ?? '';
+  const ollamaBaseUrl = settings?.ollamaBaseUrl ?? 'http://localhost:11434';
+  return resolveModel({ provider, modelId, ollamaBaseUrl, env });
+}

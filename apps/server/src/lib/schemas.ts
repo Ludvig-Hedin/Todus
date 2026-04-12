@@ -183,6 +183,13 @@ export const userSettingsSchema = z.object({
   autoRead: z.boolean().default(true),
   animations: z.boolean().default(false),
   assistantAutomationPolicy: assistantAutomationPolicySchema.default(defaultAssistantAutomationPolicy),
+  // AI provider & model selection — allows users to choose their preferred LLM provider
+  // and optionally use a local Ollama instance for privacy / cost / offline use.
+  aiProvider: z
+    .enum(['auto', 'openai', 'anthropic', 'google', 'groq', 'openrouter', 'ollama'])
+    .default('auto'),
+  aiModel: z.string().default(''),
+  ollamaBaseUrl: z.string().default('http://localhost:11434'),
 });
 
 export type UserSettings = z.infer<typeof userSettingsSchema>;
@@ -206,6 +213,9 @@ export const defaultUserSettings: UserSettings = {
   imageCompression: 'medium',
   animations: false,
   assistantAutomationPolicy: defaultAssistantAutomationPolicy,
+  aiProvider: 'auto',
+  aiModel: '',
+  ollamaBaseUrl: 'http://localhost:11434',
 };
 
 type DeepPartial<T> = T extends Array<infer U>

@@ -29,10 +29,9 @@ import type { Message as ChatMessage } from 'ai';
 import { getPromptName } from '../pipelines';
 import { connection } from '../db/schema';
 import { getPrompt } from '../lib/brain';
-import { openai } from '@ai-sdk/openai';
+import { resolveModel } from '../lib/ai-model-resolver';
 import { and, eq } from 'drizzle-orm';
 import { McpAgent } from 'agents/mcp';
-import { groq } from '@ai-sdk/groq';
 import { createDb } from '../db';
 import { getZeroDB } from '../lib/server-utils';
 import { z } from 'zod';
@@ -374,7 +373,7 @@ export class ZeroAgent extends AIChatAgent<typeof env> {
         );
 
         const result = streamText({
-          model: openai('gpt-4o'),
+          model: resolveModel({ provider: 'auto', modelId: '', ollamaBaseUrl: '', env }),
           messages: processedMessages,
           tools,
           onFinish,
@@ -720,7 +719,7 @@ export class ZeroAgent extends AIChatAgent<typeof env> {
   async buildGmailSearchQuery(query: string) {
     const sharedAIProfilePrompt = await this.getSharedAIProfilePrompt(this.name);
     const result = await generateText({
-      model: openai('gpt-4o'),
+      model: resolveModel({ provider: 'auto', modelId: '', ollamaBaseUrl: '', env }),
       system: sharedAIProfilePrompt
         ? `${sharedAIProfilePrompt}\n\n${GmailSearchAssistantSystemPrompt()}`
         : GmailSearchAssistantSystemPrompt(),
@@ -1289,7 +1288,7 @@ export class ZeroMCP extends McpAgent<typeof env, {}, { userId: string }> {
       async (s) => {
         const sharedAIProfilePrompt = await this.getSharedAIProfilePrompt();
         const result = await generateText({
-          model: openai('gpt-4o'),
+          model: resolveModel({ provider: 'auto', modelId: '', ollamaBaseUrl: '', env }),
           system: sharedAIProfilePrompt
             ? `${sharedAIProfilePrompt}\n\n${GmailSearchAssistantSystemPrompt()}`
             : GmailSearchAssistantSystemPrompt(),
@@ -1638,7 +1637,7 @@ const buildGmailSearchQuery = (getSharedAIProfilePrompt: () => Promise<string>) 
     execute: async ({ query }) => {
       const sharedAIProfilePrompt = await getSharedAIProfilePrompt();
       const result = await generateObject({
-        model: openai('gpt-4o'),
+        model: resolveModel({ provider: 'auto', modelId: '', ollamaBaseUrl: '', env }),
         system: sharedAIProfilePrompt
           ? `${sharedAIProfilePrompt}\n\n${GmailSearchAssistantSystemPrompt()}`
           : GmailSearchAssistantSystemPrompt(),

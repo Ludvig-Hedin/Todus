@@ -357,7 +357,7 @@ struct EmailInboxView: View {
                 refresh: true
             )
         }
-        .contentMargins(.bottom, 16, for: .scrollContent)
+        .contentMargins(.bottom, 130, for: .scrollContent)
     }
 
     // MARK: - People View
@@ -462,7 +462,7 @@ struct EmailInboxView: View {
                 refresh: true
             )
         }
-        .contentMargins(.bottom, 16, for: .scrollContent)
+        .contentMargins(.bottom, 130, for: .scrollContent)
         .navigationDestination(item: $selectedSender) { destination in
             SenderThreadsView(
                 senderEmail: destination.email,

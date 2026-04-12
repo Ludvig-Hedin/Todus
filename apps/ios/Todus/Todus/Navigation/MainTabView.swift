@@ -40,6 +40,12 @@ struct MainTabView: View {
 
     @State private var showTabBarCoachmarks = false
 
+    @State private var homeTabId = UUID()
+    @State private var tasksTabId = UUID()
+    @State private var emailTabId = UUID()
+    @State private var meetingsTabId = UUID()
+    @State private var calendarTabId = UUID()
+
     // MARK: - Body
 
     var body: some View {
@@ -127,6 +133,15 @@ struct MainTabView: View {
                             onMore: {
                                 dismissTabBarCoachmarks()
                                 showMoreSheet = true
+                            },
+                            onReselect: { tab in
+                                switch tab {
+                                case .home: homeTabId = UUID()
+                                case .tasks: tasksTabId = UUID()
+                                case .email: emailTabId = UUID()
+                                case .meetings: meetingsTabId = UUID()
+                                case .calendar: calendarTabId = UUID()
+                                }
                             }
                         )
                         .padding(.horizontal, 16)
@@ -331,10 +346,13 @@ struct MainTabView: View {
         switch tab {
         case .home:
             NavigationStack { HomeView() }
+                .id(homeTabId)
         case .tasks:
             NavigationStack { TasksTabView() }
+                .id(tasksTabId)
         case .email:
             NavigationStack { EmailInboxView() }
+                .id(emailTabId)
         // CalendarContainerView has its own UINavigationController.
         // Wrapping in NavigationStack broke safe-area propagation (clips bottom 30%).
         // ignoresSafeArea(.container, edges: .bottom) lets CalendarKit's scroll view
@@ -342,14 +360,17 @@ struct MainTabView: View {
         // If calendar permission denied/not-determined, show CalendarPermissionView instead.
         case .meetings:
             NavigationStack { MeetingsListView() }
+                .id(meetingsTabId)
         case .calendar:
             if calendarPermissionGranted {
                 CalendarTabView()
+                    .id(calendarTabId)
             } else {
                 NavigationStack {
                     CalendarPermissionView()
                         .background(AppTheme.backgroundTop)
                 }
+                .id(calendarTabId)
             }
         }
     }

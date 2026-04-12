@@ -15,7 +15,7 @@
  */
 
 import { generateObject } from 'ai';
-import { openai } from '@ai-sdk/openai';
+import { resolveModel } from '../ai-model-resolver';
 import { z } from 'zod';
 import { env } from 'cloudflare:workers';
 
@@ -91,7 +91,8 @@ ${sample.join('\n')}`;
 
   try {
     const { object } = await generateObject({
-      model: openai(env.OPENAI_MODEL || 'gpt-4o-mini'),
+      // Use centralized model resolver — 'auto' preserves existing env-var cascade
+      model: resolveModel({ provider: 'auto', modelId: '', ollamaBaseUrl: '', env }),
       schema,
       system: systemPrompt,
       prompt: userPrompt,

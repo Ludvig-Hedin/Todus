@@ -22,6 +22,8 @@ struct CustomTabBar: View {
     var onCreate: () -> Void
     /// Called when the user taps the burger button to open the More sheet.
     var onMore: (() -> Void)? = nil
+    /// Called when the user taps the already-selected tab.
+    var onReselect: ((AppTab) -> Void)? = nil
 
     /// Namespace for the matched geometry sliding indicator
     @Namespace private var tabIndicator
@@ -86,7 +88,11 @@ struct CustomTabBar: View {
     private func tabButton(_ tab: AppTab) -> some View {
         let isSelected = selectedTab == tab
         Button {
-            withAnimation(.snappy(duration: 0.25)) { selectedTab = tab }
+            if isSelected {
+                onReselect?(tab)
+            } else {
+                withAnimation(.snappy(duration: 0.25)) { selectedTab = tab }
+            }
         } label: {
             Image(
                 systemName: isSelected

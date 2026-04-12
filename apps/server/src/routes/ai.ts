@@ -3,7 +3,7 @@ import { injectMentionContextIntoMessages, mentionRefSchema } from '../lib/menti
 import { systemPrompt } from '../services/call-service/system-prompt';
 import { getSharedAIProfilePromptForUser } from '../lib/ai-profile';
 import { perplexity } from '@ai-sdk/perplexity';
-import { openai } from '@ai-sdk/openai';
+import { resolveModel } from '../lib/ai-model-resolver';
 import { tools } from './agent/tools';
 import { generateText } from 'ai';
 import { Tools } from '../types';
@@ -779,7 +779,7 @@ aiRouter.post('/call', async (c) => {
   console.log('[DEBUG] Creating toolset for connection:', connection.id);
   const toolset = await tools(connection.id);
   const { text } = await generateText({
-    model: openai(env.OPENAI_MODEL || 'gpt-4o'),
+    model: resolveModel({ provider: 'auto', modelId: '', ollamaBaseUrl: '', env }),
     system: await getSharedAIProfilePromptForUser(user.id)
       .then((sharedAIProfilePrompt) =>
         // Append profile AFTER base system instructions so core rules take precedence

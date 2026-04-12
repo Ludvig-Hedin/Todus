@@ -100,12 +100,12 @@ async function generateGroupAIResponse(
           : m.content,
     }));
 
-    // Use Vercel AI SDK with the same model as the main chat
+    // Use Vercel AI SDK with the centralized model resolver
     const { generateText } = await import('ai');
-    const { openai } = await import('@ai-sdk/openai');
+    const { resolveModel } = await import('../../lib/ai-model-resolver');
 
     const { text } = await generateText({
-      model: openai(env.OPENAI_MODEL || 'gpt-4o-mini'),
+      model: resolveModel({ provider: 'auto', modelId: '', ollamaBaseUrl: '', env }),
       system: `You are a helpful AI assistant participating in a group chat named "${groupName}".
 Multiple users are in this conversation. Respond helpfully and concisely.
 Do not address individuals by name unless it adds clarity. Do not repeat yourself.`,

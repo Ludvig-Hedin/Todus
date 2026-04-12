@@ -10,7 +10,7 @@ import { activeConnectionProcedure } from '../../trpc';
 import { getPrompt } from '../../../lib/brain';
 import { stripHtml } from 'string-strip-html';
 import { EPrompts } from '../../../types';
-import { openai } from '@ai-sdk/openai';
+import { resolveModel } from '../../../lib/ai-model-resolver';
 import { env } from '../../../env';
 import { generateText } from 'ai';
 import { z } from 'zod';
@@ -112,7 +112,8 @@ export async function composeEmail(input: ComposeEmailInput) {
 
   const composeModelId = env.OPENAI_MINI_MODEL || 'gpt-4o-mini';
   const { text } = await generateText({
-    model: openai(composeModelId),
+    // Use centralized model resolver — 'auto' preserves existing env-var cascade
+    model: resolveModel({ provider: 'auto', modelId: '', ollamaBaseUrl: '', env }),
     messages: [
       {
         role: 'system',
@@ -294,7 +295,8 @@ const generateSubject = async (message: string, styleProfile?: WritingStyleMatri
 
   const subjectModelId = env.OPENAI_MODEL || 'gpt-4o';
   const { text } = await generateText({
-    model: openai(subjectModelId),
+    // Use centralized model resolver — 'auto' preserves existing env-var cascade
+    model: resolveModel({ provider: 'auto', modelId: '', ollamaBaseUrl: '', env }),
     messages: [
       {
         role: 'system',

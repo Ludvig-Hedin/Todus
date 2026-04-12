@@ -12,6 +12,7 @@ import {
 import {
   CalendarDays,
   CheckSquare2,
+  Cpu,
   FileText,
   Home,
   MessageSquareIcon,
@@ -223,6 +224,12 @@ export const navigationConfig: Record<string, NavConfig> = {
             title: m['navigation.settings.meetings'](),
             url: '/settings/meetings',
             icon: Video,
+          },
+          {
+            // Using direct string until Paraglide compiles the new i18n key
+            title: 'AI & Models',
+            url: '/settings/ai',
+            icon: Cpu,
           },
           {
             title: m['navigation.settings.deleteAccount'](),

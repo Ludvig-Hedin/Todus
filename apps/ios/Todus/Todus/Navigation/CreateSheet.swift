@@ -62,6 +62,7 @@ struct CreateSheet: View {
             .animation(.easeOut(duration: 0.25), value: keyboard.height)
             .transition(.move(edge: .bottom).combined(with: .opacity))
         }
+        .ignoresSafeArea(.container, edges: .bottom)
         .animation(.snappy(duration: 0.18), value: showsSlashMenu)
         .animation(.snappy(duration: 0.15), value: isPickingAttachment)
         .animation(.snappy(duration: 0.2), value: selectedType)

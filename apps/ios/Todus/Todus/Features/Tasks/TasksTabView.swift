@@ -29,21 +29,7 @@ struct TasksTabView: View {
 
                     Spacer(minLength: 0)
 
-                    Button {
-                        services.requestCreateSheet = .task
-                    } label: {
-                        Label("Add Task", systemImage: "plus")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.primary)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 9)
-                            .background(AppTheme.surfacePrimary, in: Capsule())
-                            .overlay(
-                                Capsule()
-                                    .stroke(AppTheme.cardBorder, lineWidth: 1)
-                            )
-                    }
-                    .buttonStyle(.plain)
+
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 4)
@@ -89,6 +75,7 @@ struct TasksTabView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .contentMargins(.bottom, 130, for: .scrollContent)
             }
         }
         .toolbar(.hidden, for: .navigationBar)

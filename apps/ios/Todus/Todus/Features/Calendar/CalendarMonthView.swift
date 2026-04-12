@@ -32,18 +32,6 @@ struct CalendarMonthView: View {
             weekdayHeader
             Divider()
             monthScrollView
-        }
-        .gesture(
-            // Pinch to resize row height — spread fingers = taller, pinch = shorter
-            MagnifyGesture()
-                .onChanged { value in
-                    let newHeight = baseRowHeight * value.magnification
-                    rowHeight = min(max(newHeight, minRowHeight), maxRowHeight)
-                }
-                .onEnded { _ in
-                    baseRowHeight = rowHeight
-                }
-        )
     }
 
     // MARK: - Weekday Header

@@ -10,9 +10,6 @@ struct BoardColumnView: View {
     let onOpenDetails: (TaskRecord) -> Void
 
     @State private var isTargeted = false
-    @State private var isAddingTask = false
-    @State private var newTaskTitle = ""
-    @FocusState private var isNewTaskFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -23,10 +20,6 @@ struct BoardColumnView: View {
 
             VStack(spacing: 8) {
                 cards
-
-                if !isAddingTask {
-                    addTaskButton
-                }
             }
             .padding(.horizontal, 12)
             .padding(.bottom, 12)
@@ -37,9 +30,6 @@ struct BoardColumnView: View {
         .clipShape(backgroundShape)
         .dropDestination(for: String.self, action: handleDrop(items:location:), isTargeted: handleTargeting(_:))
         .contentShape(Rectangle())
-        .onTapGesture {
-            if !isAddingTask { beginAddingTask() }
-        }
     }
 
     @Query(sort: \TaskRecord.createdAt, order: .reverse)
@@ -87,20 +77,7 @@ struct BoardColumnView: View {
 
             Spacer(minLength: 0)
 
-            Button {
-                beginAddingTask()
-            } label: {
-                Image(systemName: "plus")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.primary.opacity(0.72))
-                    .frame(width: 28, height: 28)
-                    .background(AppTheme.surfacePrimary.opacity(0.9), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .stroke(AppTheme.cardBorder, lineWidth: 1)
-                    )
-            }
-            .buttonStyle(.plain)
+
         }
     }
 
@@ -108,10 +85,7 @@ struct BoardColumnView: View {
 
     private var cards: some View {
         VStack(spacing: 8) {
-            if isAddingTask {
-                inlineAddField
-                    .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
-            }
+
 
             if tasks.isEmpty {
                 emptyColumnState
@@ -134,7 +108,7 @@ struct BoardColumnView: View {
                 .tracking(-0.15)
                 .foregroundStyle(.primary.opacity(0.78))
 
-            Text("Add a task or drag one into this stage.")
+            Text("Drag a task into this stage.")
                 .font(.system(size: 11, weight: .medium))
                 .tracking(-0.1)
                 .foregroundStyle(AppTheme.mutedText)
@@ -150,70 +124,7 @@ struct BoardColumnView: View {
         )
     }
 
-    // MARK: - Inline Add Field
 
-    private var inlineAddField: some View {
-        HStack(spacing: 8) {
-            Circle()
-                .fill(status.tintColor.opacity(0.34))
-                .frame(width: 6, height: 6)
-
-            TextField("Task name…", text: $newTaskTitle)
-                .font(.system(size: 12, weight: .medium))
-                .tracking(-0.1)
-                .focused($isNewTaskFocused)
-                .submitLabel(.done)
-                .onSubmit { commitNewTask() }
-
-            if !newTaskTitle.isEmpty {
-                Button { commitNewTask() } label: {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.system(size: 15))
-                        .foregroundStyle(status.tintColor)
-                }
-                .buttonStyle(.plain)
-            }
-
-            Button { cancelAddingTask() } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(AppTheme.mutedText)
-                    .frame(width: 18, height: 18)
-                    .background(AppTheme.surfaceSecondary, in: Circle())
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(.horizontal, 11)
-        .padding(.vertical, 9)
-        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(AppTheme.cardBorder, lineWidth: 1)
-        )
-    }
-
-    // MARK: - Add Task Button
-
-    private var addTaskButton: some View {
-        Button { beginAddingTask() } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "plus")
-                    .font(.system(size: 9, weight: .bold))
-                Text("Add task")
-                    .font(.system(size: 11, weight: .semibold))
-                    .tracking(-0.1)
-            }
-            .foregroundStyle(.primary.opacity(0.62))
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 9)
-            .background(AppTheme.surfacePrimary.opacity(0.65), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .strokeBorder(AppTheme.cardBorder, style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
-            )
-        }
-        .buttonStyle(.plain)
-    }
 
     // MARK: - Background
 
@@ -240,30 +151,7 @@ struct BoardColumnView: View {
         }
     }
 
-    // MARK: - Actions
 
-    private func beginAddingTask() {
-        withAnimation(.snappy(duration: 0.2)) { isAddingTask = true }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { isNewTaskFocused = true }
-    }
-
-    private func cancelAddingTask() {
-        withAnimation(.snappy(duration: 0.18)) {
-            isAddingTask = false
-            newTaskTitle = ""
-            isNewTaskFocused = false
-        }
-    }
-
-    private func commitNewTask() {
-        let title = newTaskTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !title.isEmpty else { cancelAddingTask(); return }
-        withAnimation(.snappy(duration: 0.22)) {
-            captureService.captureInStatus(title: title, status: status, folder: nil, in: modelContext)
-            newTaskTitle = ""
-        }
-        isNewTaskFocused = true
-    }
 
     // MARK: - Drop Handling
 

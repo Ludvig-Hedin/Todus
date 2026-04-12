@@ -7,7 +7,7 @@ import { meeting, meetingTranscript, connection } from '../../db/schema';
 import { perplexity } from '@ai-sdk/perplexity';
 import { eq, desc, and, like, inArray } from 'drizzle-orm';
 import { colors } from '../../lib/prompts';
-import { openai } from '@ai-sdk/openai';
+import { resolveModel } from '../../lib/ai-model-resolver';
 import { generateText, tool } from 'ai';
 import { Tools } from '../../types';
 import { env } from '../../env';
@@ -438,7 +438,7 @@ const buildGmailSearchQuery = (connectionId: string) =>
       }
 
       const result = await generateText({
-        model: openai(env.OPENAI_MODEL || 'gpt-4o'),
+        model: resolveModel({ provider: 'auto', modelId: '', ollamaBaseUrl: '', env }),
         system: sharedAIProfilePrompt
           ? `${sharedAIProfilePrompt}\n\n${GmailSearchAssistantSystemPrompt()}`
           : GmailSearchAssistantSystemPrompt(),

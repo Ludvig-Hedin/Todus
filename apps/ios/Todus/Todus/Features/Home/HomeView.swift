@@ -57,12 +57,13 @@ struct HomeView: View {
 
                         // Pages not pinned to the tab bar — discoverable from Home
                         moreSection
-                        Spacer(minLength: 80)
+                        Spacer(minLength: 130)
                     }
                     .padding(.horizontal, 16)
                     .padding(.top, 12)
                 }
                 .scrollDismissesKeyboard(.interactively)
+                .clipped()
             }
         }
         .toolbar(.hidden, for: .navigationBar)

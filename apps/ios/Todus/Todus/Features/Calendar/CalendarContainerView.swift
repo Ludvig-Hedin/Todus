@@ -9,6 +9,7 @@ struct CalendarContainerView: UIViewControllerRepresentable {
     /// Measured dynamically from the SwiftUI AppTopHeader overlay so CalendarKit's scroll
     /// content starts below our custom header rather than sliding under it.
     var topInset: CGFloat = 90
+    var bottomInset: CGFloat = 130
 
     func makeUIViewController(context: Context) -> UINavigationController {
         let calendarVC = CalendarViewController()
@@ -19,6 +20,7 @@ struct CalendarContainerView: UIViewControllerRepresentable {
         nav.view.backgroundColor = .systemBackground
         // Push CalendarKit's scroll content below the SwiftUI AppTopHeader overlay
         calendarVC.additionalSafeAreaInsets.top = topInset
+        calendarVC.additionalSafeAreaInsets.bottom = bottomInset
         return nav
     }
 
@@ -26,6 +28,7 @@ struct CalendarContainerView: UIViewControllerRepresentable {
         // Keep the inset in sync if the header height changes (e.g. orientation change)
         if let calendarVC = uiViewController.viewControllers.first as? CalendarViewController {
             calendarVC.additionalSafeAreaInsets.top = topInset
+            calendarVC.additionalSafeAreaInsets.bottom = bottomInset
         }
     }
 }

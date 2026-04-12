@@ -63,7 +63,7 @@ import { ToolOrchestrator } from './orchestrator';
 import { eq, desc, isNotNull } from 'drizzle-orm';
 import migrations from './db/drizzle/migrations';
 import { getPromptName } from '../../pipelines';
-import { anthropic } from '@ai-sdk/anthropic';
+// anthropic import removed — model resolution now handled by ai-model-resolver.ts
 import { google } from '@ai-sdk/google';
 import { connection } from '../../db/schema';
 import type { WSMessage } from 'partyserver';
@@ -74,11 +74,11 @@ import { injectMentionContextIntoMessages } from '../../lib/mentions';
 import type { MentionRef } from '@zero/shared';
 import { type ZeroEnv } from '../../env';
 import { type Connection } from 'agents';
-import { openai } from '@ai-sdk/openai';
+import { resolveModel, type AIProvider } from '../../lib/ai-model-resolver';
 import * as schema from './db/schema';
 import { threads } from './db/schema';
 import { Effect, pipe } from 'effect';
-import { groq } from '@ai-sdk/groq';
+// groq import removed — model resolution now handled by ai-model-resolver.ts
 import { createDb } from '../../db';
 import type { Message } from 'ai';
 import { create } from './db';
@@ -1145,7 +1145,7 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
 
     const genQueryEffect = Effect.tryPromise(() =>
       generateText({
-        model: openai(this.env.OPENAI_MODEL || 'gpt-4o'),
+        model: resolveModel({ provider: 'auto', modelId: '', ollamaBaseUrl: '', env: this.env }),
         system: sharedAIProfilePrompt
           ? `${sharedAIProfilePrompt}\n\n${GmailSearchAssistantSystemPrompt()}`
           : GmailSearchAssistantSystemPrompt(),
@@ -1816,6 +1816,7 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
     currentFolder: string,
     currentFilter: string,
     mentions: MentionRef[] = [],
+    aiPrefs?: { aiProvider?: string; aiModel?: string; ollamaBaseUrl?: string },
   ) {
     const dataStreamResponse = createDataStreamResponse({
       execute: async (dataStream) => {
@@ -1841,49 +1842,14 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
         );
         const messagesWithMentions = injectMentionContextIntoMessages(processedMessages, mentions);
 
-        const validateModelId = (
-          provider: 'openrouter' | 'openai' | 'google' | 'anthropic',
-          modelId: string,
-        ) => {
-          const trimmed = modelId.trim();
-          if (!trimmed) {
-            const error = new Error(`[AIModel] Missing model id for ${provider}`);
-            console.warn(error.message);
-            throw error;
-          }
-
-          const allowedPrefixes = {
-            openrouter: ['openai/', 'google/', 'anthropic/', 'gpt-', 'gemini-', 'claude-'],
-            openai: ['gpt-', 'o1', 'o3', 'o4'],
-            google: ['gemini-'],
-            anthropic: ['claude-'],
-          } as const;
-
-          if (!allowedPrefixes[provider].some((prefix) => trimmed.startsWith(prefix))) {
-            const error = new Error(`[AIModel] Unsupported ${provider} model id: ${trimmed}`);
-            console.warn(error.message);
-            throw error;
-          }
-
-          return trimmed;
-        };
-
-        const openRouterModelId = validateModelId('openrouter', this.env.DEFAULT_MODEL || 'openai/gpt-4o-mini');
-        const googleModelId = validateModelId('google', this.env.DEFAULT_MODEL || 'gemini-2.5-flash');
-        const openAIModelId = validateModelId('openai', this.env.OPENAI_MODEL || 'gpt-4o');
-        const anthropicModelId = validateModelId('anthropic', 'claude-3-5-sonnet-latest');
-        const openRouterApiKey = this.env.OPENROUTER_API_SECRET ?? this.env.OPENROUTER_API_KEY;
-        const model =
-          openRouterApiKey
-            ? openai(openRouterModelId, {
-              baseURL: 'https://openrouter.ai/api/v1',
-              apiKey: openRouterApiKey,
-            })
-            : this.env.GOOGLE_GENERATIVE_AI_API_KEY
-              ? google(googleModelId)
-              : this.env.USE_OPENAI === 'true'
-                ? openai(openAIModelId)
-                : anthropic(anthropicModelId);
+        // Resolve AI model from user preferences (sent in WebSocket body) or fall back
+        // to the environment-variable-driven cascade (auto mode).
+        const model = resolveModel({
+          provider: (aiPrefs?.aiProvider ?? 'auto') as AIProvider,
+          modelId: aiPrefs?.aiModel ?? '',
+          ollamaBaseUrl: aiPrefs?.ollamaBaseUrl ?? 'http://localhost:11434',
+          env: this.env,
+        });
         const sharedAIProfilePrompt = await this.getSharedAIProfilePrompt();
 
         // ── Mem0: Inject cached memories into the system prompt ────────────
@@ -2033,14 +1999,25 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
 
           const { body } = data.init;
 
-          const { messages, threadId, currentFolder, currentFilter, mentions = [] } = JSON.parse(
-            body as string,
-          ) as {
+          const {
+            messages,
+            threadId,
+            currentFolder,
+            currentFilter,
+            mentions = [],
+            aiProvider,
+            aiModel,
+            ollamaBaseUrl,
+          } = JSON.parse(body as string) as {
             threadId: string;
             currentFolder: string;
             currentFilter: string;
             messages: Message[];
             mentions?: MentionRef[];
+            // User's AI provider/model preferences (sent from frontend model selector)
+            aiProvider?: string;
+            aiModel?: string;
+            ollamaBaseUrl?: string;
           };
           this.broadcastChatMessage(
             {
@@ -2069,6 +2046,7 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
               currentFolder,
               currentFilter,
               mentions,
+              { aiProvider, aiModel, ollamaBaseUrl },
             );
 
             if (response) {
@@ -2229,6 +2207,7 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
     currentFolder: string,
     currentFilter: string,
     mentions: MentionRef[] = [],
+    aiPrefs?: { aiProvider?: string; aiModel?: string; ollamaBaseUrl?: string },
   ) {
     return this.getDataStreamResponse(
       onFinish,
@@ -2236,6 +2215,7 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
       currentFolder,
       currentFilter,
       mentions,
+      aiPrefs,
     );
   }
 }
