@@ -13,6 +13,7 @@ Last updated: 2026-04-04
 
 ## Current Web/Server Fix Batch
 
+- `DONE` Scoped frontend `vite-tsconfig-paths` resolution to each app's local `tsconfig.json` so active builds stop crawling archived/reference workspaces and emitting irrelevant tsconfig parse errors.
 - `DONE` Realigned `apps/web` to the newer web implementation that had accidentally landed in `apps/mail`, keeping `apps/mail` unchanged and verifying the synced `apps/web` build passes.
 - `DONE` Shipped the first web/server performance pass for instant-feeling mail and tasks: inbox rows now render from thread summaries instead of per-row `mail.get` calls, thread detail is predictively prefetched, startup warmup preloads inbox/tasks/calendar/settings data, task mutations now patch cached task lists directly, and cached-first surfaces now show a subtle background-refresh indicator while data revalidates.
 - `DONE` Extended the loading-state pass to native iOS and macOS: cached inbox/home/calendar surfaces now keep warm content visible during refresh and show compact updating badges, while task tabs surface background shared-folder sync instead of looking idle.

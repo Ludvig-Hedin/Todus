@@ -27,7 +27,11 @@ export default defineConfig(({ mode }) => {
           plugins: [['babel-plugin-react-compiler', ReactCompilerConfig]],
         },
       }),
-      tsconfigPaths(),
+      tsconfigPaths({
+        // Limit path resolution to this app's tsconfig instead of crawling
+        // archived/reference workspaces that are not part of the active build.
+        projects: ['./tsconfig.json'],
+      }),
       tailwindcss(),
       {
         name: 'add-headers',
