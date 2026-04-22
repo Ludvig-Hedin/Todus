@@ -10,6 +10,8 @@ struct CreateSheet: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \FolderRecord.createdAt) private var folders: [FolderRecord]
 
+    /// Pre-selected type — set by the caller based on which tab/context opened the sheet.
+    var initialType: CreateItemType = .auto
     @Binding var isPresented: Bool
 
     // MARK: - State
@@ -19,6 +21,15 @@ struct CreateSheet: View {
     @State private var selectedFolder: FolderRecord? = nil
     @State private var selectedDate: Date? = nil
     @State private var isShowingDatePicker = false
+
+    // Email-specific secondary fields
+    @State private var recipientText = ""
+    @State private var subjectText = ""
+
+    // Event-specific secondary fields
+    @State private var locationText = ""
+    @State private var selectedEndDate: Date? = nil
+    @State private var isShowingEndDatePicker = false
 
     // Attachment state (ported from CaptureComposer)
     @State private var isPickingAttachment = false
@@ -62,7 +73,12 @@ struct CreateSheet: View {
             .animation(.easeOut(duration: 0.25), value: keyboard.height)
             .transition(.move(edge: .bottom).combined(with: .opacity))
         }
-        .ignoresSafeArea(.container, edges: .bottom)
+        // Ignore both container and keyboard safe areas at the bottom so the
+        // ZStack extends to the physical screen edge. The keyboard.height
+        // padding above handles manual positioning — without this the overlay
+        // gets pushed by keyboard avoidance AND by our own padding, putting the
+        // composer at the top of the screen.
+        .ignoresSafeArea(.all, edges: .bottom)
         .animation(.snappy(duration: 0.18), value: showsSlashMenu)
         .animation(.snappy(duration: 0.15), value: isPickingAttachment)
         .animation(.snappy(duration: 0.2), value: selectedType)
@@ -70,11 +86,22 @@ struct CreateSheet: View {
             await services.captureService.syncSharedFolders(in: modelContext)
         }
         .onAppear {
-            // Always default to auto — AI decides the type
-            selectedType = .auto
+            selectedType = initialType
+            // Auto-set start date for events if none selected
+            if initialType == .event, selectedDate == nil {
+                selectedDate = Date()
+                selectedEndDate = Date().addingTimeInterval(3600)
+            }
         }
         .sheet(isPresented: $isShowingDatePicker) {
-            datePickerSheet
+            datePickerSheet(isEndDate: false)
+                .presentationDetents([.height(420)])
+                .presentationDragIndicator(.visible)
+                .presentationBackground(AppTheme.backgroundTop)
+                .preferredColorScheme(services.appearancePreference.colorScheme)
+        }
+        .sheet(isPresented: $isShowingEndDatePicker) {
+            datePickerSheet(isEndDate: true)
                 .presentationDetents([.height(420)])
                 .presentationDragIndicator(.visible)
                 .presentationBackground(AppTheme.backgroundTop)
@@ -116,6 +143,18 @@ struct CreateSheet: View {
             }
             selectedPhotoItem = nil
         }
+        // Keep end date at least as late as start date when start changes
+        .onChange(of: selectedDate) { _, newStart in
+            guard let newStart, let end = selectedEndDate, end < newStart else { return }
+            selectedEndDate = newStart.addingTimeInterval(3600)
+        }
+        // Auto-populate end date when type switches to event
+        .onChange(of: selectedType) { _, newType in
+            if newType == .event, selectedDate == nil {
+                selectedDate = Date()
+                selectedEndDate = Date().addingTimeInterval(3600)
+            }
+        }
     }
 
     // MARK: - Input Area
@@ -125,18 +164,20 @@ struct CreateSheet: View {
     private var inputArea: some View {
         ZStack(alignment: .bottomLeading) {
             HStack(alignment: .bottom, spacing: 8) {
-                // Attachment trigger — circle button
-                Button {
-                    withAnimation(.snappy(duration: 0.15)) { isPickingAttachment.toggle() }
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundStyle(AppTheme.mutedText)
-                        .frame(width: attachButtonSize, height: attachButtonSize)
+                // Attachment trigger — circle button (hidden for email; full compose handles attachments)
+                if selectedType != .email {
+                    Button {
+                        withAnimation(.snappy(duration: 0.15)) { isPickingAttachment.toggle() }
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundStyle(AppTheme.mutedText)
+                            .frame(width: attachButtonSize, height: attachButtonSize)
+                    }
+                    .buttonStyle(.plain)
+                    .background(AppTheme.surfacePrimary, in: Circle())
+                    .overlay(Circle().stroke(AppTheme.strongBorder, lineWidth: 1))
                 }
-                .buttonStyle(.plain)
-                .background(AppTheme.surfacePrimary, in: Circle())
-                .overlay(Circle().stroke(AppTheme.strongBorder, lineWidth: 1))
 
                 // Main input box
                 mainInputBox
@@ -153,6 +194,11 @@ struct CreateSheet: View {
 
     private var mainInputBox: some View {
         VStack(spacing: 0) {
+            // Email: To + Subject fields above main body input
+            if selectedType == .email {
+                emailSecondaryFields
+            }
+
             // Attachment thumbnails
             if !pendingAttachments.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -172,16 +218,21 @@ struct CreateSheet: View {
             PasteHandlingTextInput(
                 text: $text,
                 placeholder: placeholderText,
-                isFocused: true,
+                isFocused: selectedType != .email,
                 maxHeight: 120,
                 onPasteImage: handlePastedImage
             )
             .frame(maxHeight: 120)
-            .padding(.top, pendingAttachments.isEmpty ? 10 : 6)
-            .padding(.bottom, 4)
+            .padding(.top, (pendingAttachments.isEmpty && selectedType != .email) ? 10 : 6)
+            .padding(.bottom, selectedType == .event ? 2 : 4)
             .padding(.horizontal, 14)
             .onChange(of: text) { _, value in
                 handleTextChange(value)
+            }
+
+            // Event: location field below main text
+            if selectedType == .event {
+                eventLocationField
             }
 
             // Toolbar: folder | date | spacer | voice | send
@@ -197,11 +248,73 @@ struct CreateSheet: View {
         )
     }
 
+    // MARK: - Secondary Fields
+
+    /// Email-specific: To + Subject text fields rendered above the body input.
+    private var emailSecondaryFields: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 6) {
+                Text("To")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(AppTheme.mutedText)
+                    .frame(width: 52, alignment: .trailing)
+                TextField("recipient@example.com", text: $recipientText)
+                    .font(.system(size: 14))
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .keyboardType(.emailAddress)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 9)
+
+            Divider()
+                .opacity(0.25)
+                .padding(.horizontal, 14)
+
+            HStack(spacing: 6) {
+                Text("Subject")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(AppTheme.mutedText)
+                    .frame(width: 52, alignment: .trailing)
+                TextField("Subject", text: $subjectText)
+                    .font(.system(size: 14))
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 9)
+
+            Divider()
+                .opacity(0.25)
+                .padding(.horizontal, 14)
+        }
+        .padding(.top, 6)
+    }
+
+    /// Event-specific: location field rendered below the title input.
+    private var eventLocationField: some View {
+        VStack(spacing: 0) {
+            Divider()
+                .opacity(0.25)
+                .padding(.horizontal, 14)
+
+            HStack(spacing: 8) {
+                Image(systemName: "location")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(AppTheme.mutedText)
+                    .frame(width: 16)
+                TextField("Location (optional)", text: $locationText)
+                    .font(.system(size: 14))
+                    .foregroundStyle(.primary)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 9)
+        }
+    }
+
     // MARK: - Toolbar
 
     private var toolbarRow: some View {
         HStack(spacing: 4) {
-            // Folder selector
+            // Folder selector — shown for task, auto, event
             if showsFolderPicker {
                 Menu {
                     Button {
@@ -241,17 +354,19 @@ struct CreateSheet: View {
                 .opacity(metadataControlOpacity)
             }
 
-            // Date selector
+            // Date selector — shown for task, auto, event (as start time)
             if showsDatePicker {
                 Button {
-                    if selectedDate == nil { selectedDate = Date().addingTimeInterval(3600) }
+                    if selectedDate == nil {
+                        selectedDate = selectedType == .event ? Date() : Date().addingTimeInterval(3600)
+                    }
                     isShowingDatePicker = true
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: selectedDate == nil ? "clock" : "clock.fill")
                             .font(.system(size: 13, weight: .semibold))
                         if let date = selectedDate {
-                            Text(dateLabel(for: date))
+                            Text(selectedType == .event ? "Starts \(dateLabel(for: date))" : dateLabel(for: date))
                                 .font(.system(size: 12, weight: .semibold))
                                 .lineLimit(1)
                         }
@@ -266,6 +381,37 @@ struct CreateSheet: View {
                 }
                 .buttonStyle(.plain)
                 .opacity(metadataControlOpacity)
+            }
+
+            // End time — event only, shown once a start date is set
+            if selectedType == .event, selectedDate != nil {
+                Button {
+                    if selectedEndDate == nil {
+                        selectedEndDate = (selectedDate ?? Date()).addingTimeInterval(3600)
+                    }
+                    isShowingEndDatePicker = true
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: selectedEndDate == nil ? "clock.badge.checkmark" : "clock.badge.checkmark.fill")
+                            .font(.system(size: 13, weight: .semibold))
+                        if let end = selectedEndDate {
+                            Text("Ends \(dateLabel(for: end))")
+                                .font(.system(size: 12, weight: .semibold))
+                                .lineLimit(1)
+                        } else {
+                            Text("End time")
+                                .font(.system(size: 12, weight: .semibold))
+                        }
+                    }
+                    .foregroundStyle(selectedEndDate == nil ? AppTheme.mutedText : .primary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(
+                        selectedEndDate != nil ? AppTheme.surfaceSecondary : Color.clear,
+                        in: Capsule()
+                    )
+                }
+                .buttonStyle(.plain)
             }
 
             Spacer()
@@ -301,9 +447,6 @@ struct CreateSheet: View {
             ForEach(CreateItemType.allCases) { type in
                 Button {
                     withAnimation(.snappy(duration: 0.15)) { selectedType = type }
-                    if type == .event, selectedDate == nil {
-                        selectedDate = Date()
-                    }
                 } label: {
                     Image(systemName: type.icon)
                         .font(.system(size: 15, weight: .semibold))
@@ -456,38 +599,51 @@ struct CreateSheet: View {
 
     // MARK: - Date Picker Sheet
 
-    private var datePickerSheet: some View {
+    private func datePickerSheet(isEndDate: Bool) -> some View {
         NavigationStack {
             VStack(spacing: 0) {
                 DatePicker(
-                    selectedType == .event ? "Event Date" : "Due Date",
+                    isEndDate ? "End Time" : (selectedType == .event ? "Event Date" : "Due Date"),
                     selection: Binding(
-                        get: { selectedDate ?? Date() },
-                        set: { selectedDate = $0 }
+                        get: {
+                            isEndDate
+                                ? (selectedEndDate ?? (selectedDate ?? Date()).addingTimeInterval(3600))
+                                : (selectedDate ?? Date())
+                        },
+                        set: {
+                            if isEndDate { selectedEndDate = $0 } else { selectedDate = $0 }
+                        }
                     ),
                     displayedComponents: [.date, .hourAndMinute]
                 )
                 .datePickerStyle(.graphical)
                 .padding(.horizontal, 16)
 
-                if selectedDate != nil {
+                if (isEndDate ? selectedEndDate : selectedDate) != nil {
                     Button(role: .destructive) {
-                        selectedDate = nil
-                        isShowingDatePicker = false
+                        if isEndDate {
+                            selectedEndDate = nil
+                            isShowingEndDatePicker = false
+                        } else {
+                            selectedDate = nil
+                            isShowingDatePicker = false
+                        }
                     } label: {
-                        Label("Clear Date", systemImage: "xmark.circle")
+                        Label("Clear \(isEndDate ? "End Time" : "Date")", systemImage: "xmark.circle")
                             .font(.system(size: 14, weight: .semibold))
                     }
                     .foregroundStyle(AppTheme.danger)
                     .padding(.top, 12)
                 }
             }
-            .navigationTitle(selectedType == .event ? "Set Event Date" : "Set Due Date")
+            .navigationTitle(isEndDate ? "Set End Time" : (selectedType == .event ? "Set Event Date" : "Set Due Date"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { isShowingDatePicker = false }
-                        .fontWeight(.semibold)
+                    Button("Done") {
+                        if isEndDate { isShowingEndDatePicker = false } else { isShowingDatePicker = false }
+                    }
+                    .fontWeight(.semibold)
                 }
             }
         }
@@ -499,8 +655,8 @@ struct CreateSheet: View {
         switch selectedType {
         case .auto:  return "Write a task, event, or email…"
         case .task:  return "New Task"
-        case .event: return "New Event"
-        case .email: return "New Email"
+        case .event: return "Event title"
+        case .email: return "Message body…"
         }
     }
 
@@ -549,7 +705,11 @@ struct CreateSheet: View {
             case .event:
                 await createEvent(input, attachments: attachments)
             case .email:
-                services.composeEmailSeedBody = input
+                services.composeEmailSeedBody = input.isEmpty ? nil : input
+                services.composeEmailSeedTo = recipientText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    ? nil : recipientText.trimmingCharacters(in: .whitespacesAndNewlines)
+                services.composeEmailSeedSubject = subjectText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    ? nil : subjectText.trimmingCharacters(in: .whitespacesAndNewlines)
                 services.showsComposeEmail = true
             case .auto:
                 createTask(input, attachments: attachments)
@@ -570,6 +730,7 @@ struct CreateSheet: View {
 
     private func createEvent(_ input: String, attachments: [String]) async {
         let startDate = selectedDate ?? Date()
+        let endDate = selectedEndDate ?? startDate.addingTimeInterval(3600)
         let hasAccess: Bool
         if services.calendarService.canCreateEvents() {
             hasAccess = true
@@ -586,7 +747,7 @@ struct CreateSheet: View {
             try await services.calendarService.createEvent(
                 title: input,
                 startDate: startDate,
-                endDate: startDate.addingTimeInterval(3600),
+                endDate: endDate,
                 folderID: selectedFolder?.id
             )
         } catch {

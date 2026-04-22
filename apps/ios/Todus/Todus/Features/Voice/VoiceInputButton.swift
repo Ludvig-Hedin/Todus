@@ -63,7 +63,9 @@ private final class AudioEngineHolder: @unchecked Sendable {
                 recognitionRequest = newRequest
                 hasInstalledTap = true
             }
+            AppLogger.shared.log("[VoiceInput] Audio engine started successfully")
         } catch {
+            AppLogger.shared.log("[VoiceInput] setupAndStartEngine failed: \(error.localizedDescription)")
             if didInstallTap {
                 engine?.inputNode.removeTap(onBus: 0)
             }
@@ -83,30 +85,48 @@ private final class AudioEngineHolder: @unchecked Sendable {
     }
 
     func cleanup() {
+        var engineToStop: AVAudioEngine?
+        var hadTap = false
+
         withLock {
             recognitionTask?.cancel()
             recognitionTask = nil
-            stopCaptureLocked()
-            do {
-                try AVAudioSession.sharedInstance().setActive(false, options: [])
-            } catch {
-                AppLogger.shared.log("Voice cleanup deactivation failed: \(error.localizedDescription)")
-            }
+            recognitionRequest?.endAudio()
+            engineToStop = audioEngine
+            hadTap = hasInstalledTap
             audioEngine = nil
             recognitionRequest = nil
+            hasInstalledTap = false
+        }
+
+        // engine.stop() and setActive(false) can block while iOS finalises hardware —
+        // run them on a background thread to avoid stalling the main actor.
+        Task.detached(priority: .utility) {
+            if hadTap { engineToStop?.inputNode.removeTap(onBus: 0) }
+            engineToStop?.stop()
+            try? AVAudioSession.sharedInstance().setActive(false, options: [])
+            AppLogger.shared.log("[VoiceInput] Audio session deactivated (cleanup)")
         }
     }
 
     func stopCapture() {
+        var engineToStop: AVAudioEngine?
+        var hadTap = false
+
         withLock {
-            stopCaptureLocked()
-            do {
-                try AVAudioSession.sharedInstance().setActive(false, options: [])
-            } catch {
-                AppLogger.shared.log("Voice stop deactivation failed: \(error.localizedDescription)")
-            }
+            recognitionRequest?.endAudio()
+            engineToStop = audioEngine
+            hadTap = hasInstalledTap
             audioEngine = nil
             recognitionRequest = nil
+            hasInstalledTap = false
+        }
+
+        Task.detached(priority: .utility) {
+            if hadTap { engineToStop?.inputNode.removeTap(onBus: 0) }
+            engineToStop?.stop()
+            try? AVAudioSession.sharedInstance().setActive(false, options: [])
+            AppLogger.shared.log("[VoiceInput] Audio session deactivated (stopCapture)")
         }
     }
 
@@ -130,18 +150,6 @@ private final class AudioEngineHolder: @unchecked Sendable {
         }
     }
 
-    private func stopCaptureLocked() {
-        recognitionRequest?.endAudio()
-        guard let engine = audioEngine else { return }
-        if engine.isRunning {
-            engine.stop()
-        }
-        if hasInstalledTap {
-            engine.inputNode.removeTap(onBus: 0)
-            hasInstalledTap = false
-        }
-    }
-
     private func withLock<T>(_ body: () throws -> T) rethrows -> T {
         lock.lock()
         defer { lock.unlock() }
@@ -161,6 +169,9 @@ private final class VoiceController {
     enum RecordingState: Equatable { case idle, recording, transcribing }
 
     var recordingState: RecordingState = .idle
+    /// Set to true when speech recognition or microphone permission is denied.
+    /// Triggers a user-visible alert from VoiceInputButton.
+    var permissionDenied = false
 
     private let holder = AudioEngineHolder()
     /// Best partial transcript accumulated while recording — used as fallback on timeout.
@@ -176,12 +187,28 @@ private final class VoiceController {
         guard recordingState == .idle else { return }
         latestTranscript = ""
         didFinishTranscription = false
+        permissionDenied = false
         self.onFinished = onFinished
+        AppLogger.shared.log("[VoiceInput] Requesting speech recognition permission")
         SFSpeechRecognizer.requestAuthorization { [weak self] status in
-            guard status == .authorized else { return }
+            AppLogger.shared.log("[VoiceInput] Speech auth status: \(status.rawValue)")
+            guard status == .authorized else {
+                AppLogger.shared.log("[VoiceInput] Speech recognition permission denied (status=\(status.rawValue))")
+                Task { @MainActor [weak self] in
+                    self?.permissionDenied = true
+                }
+                return
+            }
             // Min deployment is iOS 18 — AVAudioApplication API is always available.
             AVAudioApplication.requestRecordPermission { [weak self] granted in
-                guard granted else { return }
+                AppLogger.shared.log("[VoiceInput] Mic permission granted: \(granted)")
+                guard granted else {
+                    AppLogger.shared.log("[VoiceInput] Microphone permission denied")
+                    Task { @MainActor [weak self] in
+                        self?.permissionDenied = true
+                    }
+                    return
+                }
                 Task { @MainActor [weak self] in
                     await self?.beginAudioSession()
                 }
@@ -213,34 +240,43 @@ private final class VoiceController {
     // MARK: Private
 
     private func beginAudioSession() async {
-        guard holder.speechRecognizer?.isAvailable == true else { return }
+        guard holder.speechRecognizer?.isAvailable == true else {
+            AppLogger.shared.log("[VoiceInput] SFSpeechRecognizer unavailable (offline, restricted, or unsupported locale)")
+            return
+        }
 
+        AppLogger.shared.log("[VoiceInput] Starting audio session")
         do {
             // All audio session + engine setup runs off-main via the holder.
             try await holder.setupAndStartEngine()
         } catch {
+            AppLogger.shared.log("[VoiceInput] Audio session setup failed: \(error.localizedDescription)")
             holder.cleanup()
             return
         }
 
         guard let request = holder.currentRecognitionRequest(),
               let recognizer = holder.speechRecognizer else {
+            AppLogger.shared.log("[VoiceInput] No recognition request or recognizer after setup")
             holder.cleanup()
             return
         }
 
+        AppLogger.shared.log("[VoiceInput] Starting recognition task")
         let recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
             // Recognition callback fires on an arbitrary queue — dispatch ALL
             // property access back to the main actor to avoid cross-actor
             // mutations that can deadlock in Swift 6 strict concurrency.
             let text = result?.bestTranscription.formattedString ?? ""
             let isFinal = result?.isFinal == true || error != nil
+            if let error { AppLogger.shared.log("[VoiceInput] Recognition error: \(error.localizedDescription)") }
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 if !text.isEmpty {
                     self.latestTranscript = text
                 }
                 if isFinal {
+                    AppLogger.shared.log("[VoiceInput] Recognition final result: '\(self.latestTranscript)'")
                     let finalText = self.latestTranscript
                     self.latestTranscript = ""
                     // Full cleanup — stops engine, releases mic, deactivates audio session.
@@ -255,6 +291,7 @@ private final class VoiceController {
         holder.setRecognitionTask(recognitionTask)
 
         recordingState = .recording
+        AppLogger.shared.log("[VoiceInput] Recording started")
     }
 
     private func finishTranscription(_ text: String) {
@@ -282,8 +319,13 @@ struct VoiceInputButton: View {
     let onTranscribed: (String) -> Void
 
     @State private var controller = VoiceController()
+    @Environment(\.openURL) private var openURL
 
     var body: some View {
+        // @Bindable is required to create two-way bindings from an @Observable class
+        // stored in @State. Direct $controller.property doesn't go through the
+        // observation registrar properly without it.
+        @Bindable var ctrl = controller
         Button(action: handleTap) {
             ZStack {
                 switch controller.recordingState {
@@ -311,6 +353,16 @@ struct VoiceInputButton: View {
         .minTouchTarget()
         // Disable taps while transcribing — spinner is purely informational
         .disabled(controller.recordingState == .transcribing)
+        .alert("Microphone Access Required", isPresented: $ctrl.permissionDenied) {
+            Button("Open Settings") {
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    openURL(url)
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Enable Microphone and Speech Recognition access in Settings > Privacy & Security to use voice input.")
+        }
     }
 
     private func handleTap() {

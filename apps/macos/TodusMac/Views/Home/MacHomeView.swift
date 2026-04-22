@@ -26,6 +26,9 @@ struct MacHomeView: View {
     @State private var isHoveringTaskIndex: Int? = nil
     @State private var isHoveringEmailIndex: Int? = nil
     @State private var isLoadingAssistantBriefing = false
+    @State private var selectedCalendarEvent: CalendarEvent? = nil
+    @State private var selectedTask: TaskRecord? = nil
+    @State private var selectedEmailThread: EmailThread? = nil
 
     private var isAssistantBriefingRefreshing: Bool {
         isLoadingAssistantBriefing && services.emailService.assistantBriefing != nil
@@ -305,12 +308,14 @@ struct MacHomeView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
+        .popover(item: $selectedCalendarEvent, arrowEdge: .trailing) { event in
+            eventDetailPopover(event)
+        }
     }
 
     private func eventRow(_ event: CalendarEvent, index: Int) -> some View {
         Button {
-            // Navigate to the Calendar section
-            onNavigate?(.calendar(.all))
+            selectedCalendarEvent = event
         } label: {
             HStack(spacing: MacTheme.spacing8) {
                 // Calendar color dot
@@ -382,12 +387,15 @@ struct MacHomeView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
+        .sheet(item: $selectedTask) { task in
+            MacTaskDetailSheet(task: task)
+                .frame(minWidth: 420, minHeight: 320)
+        }
     }
 
     private func taskRow(_ task: TaskRecord, index: Int) -> some View {
         Button {
-            // Navigate to the Tasks section
-            onNavigate?(.tasks)
+            selectedTask = task
         } label: {
             HStack(spacing: MacTheme.spacing8) {
                 // Status icon
@@ -510,12 +518,15 @@ struct MacHomeView: View {
                 }
             }
         }
+        .sheet(item: $selectedEmailThread) { thread in
+            MacEmailThreadView(threadId: thread.id)
+                .frame(minWidth: 640, minHeight: 480)
+        }
     }
 
     private func emailCard(_ thread: EmailThread, index: Int) -> some View {
         Button {
-            // Navigate to Email inbox
-            onNavigate?(.email(.inbox))
+            selectedEmailThread = thread
         } label: {
             VStack(alignment: .leading, spacing: MacTheme.spacing4) {
                 // Top row: sender + time
@@ -628,6 +639,43 @@ struct MacHomeView: View {
             )
         }
         .buttonStyle(.plain)
+    }
+
+    // MARK: - Event Detail Popover
+
+    private func eventDetailPopover(_ event: CalendarEvent) -> some View {
+        let color = Color(red: event.calendarColorRed, green: event.calendarColorGreen, blue: event.calendarColorBlue)
+
+        return VStack(alignment: .leading, spacing: MacTheme.spacing8) {
+            HStack(spacing: MacTheme.spacing8) {
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(color)
+                    .frame(width: 4, height: 20)
+                Text(event.title)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(MacTheme.textPrimary)
+            }
+
+            if event.isAllDay {
+                Label("All day", systemImage: "clock")
+                    .font(.system(size: 12))
+                    .foregroundStyle(MacTheme.textSecondary)
+            } else {
+                Label {
+                    Text("\(event.startDate.formatted(date: .abbreviated, time: .shortened)) – \(event.endDate.formatted(date: .omitted, time: .shortened))")
+                } icon: {
+                    Image(systemName: "clock")
+                }
+                .font(.system(size: 12))
+                .foregroundStyle(MacTheme.textSecondary)
+            }
+
+            Label(event.calendarName, systemImage: "calendar")
+                .font(.system(size: 12))
+                .foregroundStyle(MacTheme.textSecondary)
+        }
+        .padding(MacTheme.spacing16)
+        .frame(minWidth: 220)
     }
 
     // MARK: - Shared Components

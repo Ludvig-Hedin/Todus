@@ -39,5 +39,6 @@ struct CalendarViewModePicker: View {
             .contentShape(Rectangle())
         }
         .menuStyle(.borderlessButton)
+        .tint(.primary)
     }
 }

@@ -66,6 +66,17 @@ struct EmailComposeView: View {
         _draft = State(initialValue: d)
     }
 
+    /// Create compose with pre-filled to, subject, and/or body (from CreateSheet)
+    init(to: String? = nil, subject: String? = nil, body: String? = nil) {
+        var d = EmailDraft()
+        if let to, !to.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            d.to = [to.trimmingCharacters(in: .whitespacesAndNewlines)]
+        }
+        if let subject { d.subject = subject }
+        if let body { d.body = body }
+        _draft = State(initialValue: d)
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {

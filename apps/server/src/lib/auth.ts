@@ -11,7 +11,7 @@ import { createAuthMiddleware, phoneNumber, jwt, bearer, mcp, emailOTP } from 'b
 import { type Account, betterAuth, type BetterAuthOptions } from 'better-auth';
 import { getBrowserTimezone, isValidTimezone } from './timezones';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
-import { getZeroDB, resetConnection } from './server-utils';
+import { getZeroDB } from './server-utils';
 import { getSocialProviders } from './auth-providers';
 import { marketingEmailDelivery } from '../db/schema';
 import { redis, resend, twilio } from './services';
@@ -181,11 +181,20 @@ const syncConnectionFromAccount = async (
     return;
   }
 
+  // Sign-in MUST NOT fail if connection setup fails. Better-Auth runs this hook
+  // as `account.create.after` / `account.update.after` during the OAuth callback.
+  // Any exception (or thrown Response redirect) propagates out of the auth handler
+  // and aborts the sign-in, leaving the user stuck on api.todus.app instead of
+  // being redirected to `callbackURL` (web) or `todus://auth-callback` (native).
+  // Connection errors are recoverable — the user can reconnect Gmail from settings.
   if (!account.accessToken || !account.refreshToken) {
-    console.error('Missing Access/Refresh Tokens', { account });
-    throw new APIError('EXPECTATION_FAILED', {
-      message: 'Missing Access/Refresh Tokens, contact us on Discord for support',
+    console.error('[syncConnectionFromAccount] Missing Access/Refresh Tokens', {
+      userId: account.userId,
+      provider: account.providerId,
+      hasAccess: !!account.accessToken,
+      hasRefresh: !!account.refreshToken,
     });
+    return;
   }
 
   const driver = createDriver(account.providerId, {
@@ -197,26 +206,24 @@ const syncConnectionFromAccount = async (
     },
   });
 
-  const userInfo = await driver.getUserInfo().catch(async () => {
-    if (account.accessToken) {
-      await driver.revokeToken(account.accessToken);
-      await resetConnection(account.id);
-    }
-    throw new Response(null, { status: 301, headers: { Location: '/' } });
-  });
+  let userInfo: Awaited<ReturnType<typeof driver.getUserInfo>> | undefined;
+  try {
+    userInfo = await driver.getUserInfo();
+  } catch (error) {
+    console.error('[syncConnectionFromAccount] getUserInfo failed', {
+      userId: account.userId,
+      provider: account.providerId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return;
+  }
 
   if (!userInfo?.address) {
-    try {
-      await Promise.allSettled(
-        [account.accessToken, account.refreshToken]
-          .filter(Boolean)
-          .map((t) => driver.revokeToken(t as string)),
-      );
-      await resetConnection(account.id);
-    } catch (error) {
-      console.error('Failed to revoke tokens:', error);
-    }
-    throw new Response(null, { status: 303, headers: { Location: '/' } });
+    console.error('[syncConnectionFromAccount] Missing email address in user info', {
+      userId: account.userId,
+      provider: account.providerId,
+    });
+    return;
   }
 
   const updatingInfo = {
@@ -228,47 +235,78 @@ const syncConnectionFromAccount = async (
     expiresAt: new Date(Date.now() + (account.accessTokenExpiresAt?.getTime() || 3600000)),
   };
 
-  const db = await getZeroDB(account.userId);
-  const [result] = await db.createConnection(
-    account.providerId as EProviders,
-    userInfo.address,
-    updatingInfo,
-  );
+  let result: { id: string } | undefined;
+  try {
+    const db = await getZeroDB(account.userId);
+    const created = await db.createConnection(
+      account.providerId as EProviders,
+      userInfo.address,
+      updatingInfo,
+    );
+    result = created[0];
 
-  const settingsRow = await db.findUserSettings();
-  const currentSettings = settingsRow?.settings ?? defaultUserSettings;
-  const shouldScheduleCampaign =
-    options.scheduleOnboardingCampaign && !currentSettings.welcomeEmailSent;
+    const settingsRow = await db.findUserSettings();
+    const currentSettings = settingsRow?.settings ?? defaultUserSettings;
+    const shouldScheduleCampaign =
+      options.scheduleOnboardingCampaign && !currentSettings.welcomeEmailSent;
 
-  if (shouldScheduleCampaign) {
-    await db.updateUserSettings({
-      ...currentSettings,
-      welcomeEmailSent: true,
+    if (shouldScheduleCampaign) {
+      await db.updateUserSettings({
+        ...currentSettings,
+        welcomeEmailSent: true,
+      });
+
+      if (env.NODE_ENV === 'production') {
+        await scheduleCampaign({
+          userId: account.userId,
+          address: userInfo.address,
+          name: userInfo.name || 'there',
+        });
+      }
+    }
+  } catch (error) {
+    console.error('[syncConnectionFromAccount] Failed to persist connection', {
+      userId: account.userId,
+      provider: account.providerId,
+      error: error instanceof Error ? error.message : String(error),
     });
+    return;
+  }
 
-    if (env.NODE_ENV === 'production') {
-      await scheduleCampaign({
-        userId: account.userId,
-        address: userInfo.address,
-        name: userInfo.name || 'there',
+  if (result && env.GOOGLE_S_ACCOUNT && env.GOOGLE_S_ACCOUNT !== '{}') {
+    try {
+      await env.subscribe_queue.send({
+        connectionId: result.id,
+        providerId: account.providerId,
+      });
+    } catch (error) {
+      console.error('[syncConnectionFromAccount] Failed to enqueue subscribe job', {
+        connectionId: result.id,
+        error: error instanceof Error ? error.message : String(error),
       });
     }
   }
+};
 
-  if (env.GOOGLE_S_ACCOUNT && env.GOOGLE_S_ACCOUNT !== '{}') {
-    await env.subscribe_queue.send({
-      connectionId: result.id,
-      providerId: account.providerId,
-    });
+// Better-Auth runs these as fire-and-forget `after` hooks during the OAuth
+// callback. Wrapping the inner call in try/catch is belt-and-suspenders —
+// `syncConnectionFromAccount` is already non-throwing, but we defend against
+// any future regression that could re-introduce an exception and break
+// sign-in (landing the user on api.todus.app instead of their callbackURL).
+const accountCreateHook = async (account: Account) => {
+  try {
+    await syncConnectionFromAccount(account, { scheduleOnboardingCampaign: true });
+  } catch (error) {
+    console.error('[accountCreateHook] unexpected error', error);
   }
 };
 
-const accountCreateHook = async (account: Account) => {
-  await syncConnectionFromAccount(account, { scheduleOnboardingCampaign: true });
-};
-
 const accountUpdateHook = async (account: Account) => {
-  await syncConnectionFromAccount(account, { scheduleOnboardingCampaign: false });
+  try {
+    await syncConnectionFromAccount(account, { scheduleOnboardingCampaign: false });
+  } catch (error) {
+    console.error('[accountUpdateHook] unexpected error', error);
+  }
 };
 
 export const createAuth = () => {

@@ -22,6 +22,8 @@ struct HomeView: View {
 
     // Sheet state
     @State private var selectedTask: TaskRecord? = nil
+    @State private var selectedCalendarEvent: CalendarEvent? = nil
+    @State private var selectedEmailThread: EmailThread? = nil
     @State private var showDocsSheet = false
 
     var body: some View {
@@ -34,7 +36,7 @@ struct HomeView: View {
                     .padding(.horizontal, 16)
                     .padding(.top, 4)
 
-                ScrollView {
+                ScrollView(.vertical) {
                     VStack(alignment: .leading, spacing: 24) {
                         greetingSection
 
@@ -55,10 +57,13 @@ struct HomeView: View {
                             emailSection
                         }
 
-                        // Pages not pinned to the tab bar — discoverable from Home
-                        moreSection
+                        // Pages not pinned to the tab bar — only shown in developer mode
+                        if services.developerModeEnabled {
+                            moreSection
+                        }
                         Spacer(minLength: 130)
                     }
+                    .frame(maxWidth: .infinity)
                     .padding(.horizontal, 16)
                     .padding(.top, 12)
                 }
@@ -75,7 +80,7 @@ struct HomeView: View {
         // Task detail sheet — opened when a task row is tapped
         .sheet(item: $selectedTask) { task in
             TaskDetailSheet(task: task)
-                .presentationDragIndicator(.visible)
+                .presentationDragIndicator(Visibility.visible)
                 .presentationBackground(AppTheme.backgroundTop)
         }
         .sheet(isPresented: $showDocsSheet) {
@@ -89,8 +94,19 @@ struct HomeView: View {
                         }
                     }
             }
-            .presentationDragIndicator(.visible)
+            .presentationDragIndicator(Visibility.visible)
             .preferredColorScheme(services.appearancePreference.colorScheme)
+        }
+        .sheet(item: $selectedCalendarEvent) { event in
+            EKEventDetailSheet(eventId: event.id)
+                .presentationDragIndicator(Visibility.visible)
+        }
+        .sheet(item: $selectedEmailThread) { thread in
+            NavigationStack {
+                EmailThreadView(threadId: thread.id)
+            }
+            .presentationDragIndicator(Visibility.visible)
+            .presentationBackground(AppTheme.backgroundTop)
         }
     }
 
@@ -212,9 +228,8 @@ struct HomeView: View {
     }
 
     private func eventRow(_ event: CalendarEvent) -> some View {
-        // Tapping an event navigates to the calendar tab to view it in context
         Button {
-            services.navigateTo = .calendar
+            selectedCalendarEvent = event
         } label: {
             HStack(spacing: 12) {
                 Circle()
@@ -343,6 +358,7 @@ struct HomeView: View {
             }
             .padding(.horizontal, 1)
         }
+        .frame(maxWidth: .infinity)
     }
 
     private func assistantMiniCard(title: String, detail: String, action: @escaping () -> Void) -> some View {
@@ -519,7 +535,7 @@ struct HomeView: View {
                 VStack(spacing: 8) {
                     ForEach(Array(services.emailService.threads.prefix(3))) { thread in
                         Button {
-                            services.navigateTo = .email
+                            selectedEmailThread = thread
                         } label: {
                             HStack(spacing: 12) {
                                 // Unread indicator dot
@@ -569,7 +585,7 @@ struct HomeView: View {
     /// Keeps the tab bar lean while ensuring every part of the app is reachable from Home.
     @ViewBuilder
     private var moreSection: some View {
-        let extraTabs = AppTab.allCases.filter { !services.tabBarTabs.contains($0) && $0 != .home }
+        let extraTabs = AppTab.allCases.filter { !services.tabBarTabs.contains($0) && $0 != .home && $0 != .create && $0 != .ai }
         // Always show this section — Docs is always here even when all tabs are in the bar
         VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {

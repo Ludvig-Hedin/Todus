@@ -2,82 +2,58 @@ import SwiftUI
 
 /// Reusable 24-hour time grid with positioned event blocks.
 /// Ported from macOS CalendarTimeGridView with iOS-specific adaptations:
-/// - 60pt hour height (vs macOS 52pt) for better touch targets
+/// - configurable hourHeight (60pt for day view, 48pt for multi-day)
 /// - AppTheme colors instead of MacTheme
 /// - iOS-appropriate interaction patterns
 struct CalendarTimeGridView: View {
     let columns: [CalendarTimeGridColumn]
     var highlightToday: Bool = true
+    var hourHeight: CGFloat = 60
     var onEventTap: ((CalendarEvent) -> Void)? = nil
     var onGridTap: ((Date) -> Void)? = nil
 
-    private let hourHeight: CGFloat = 60
     private let gutterWidth: CGFloat = 50
-    private let totalHeight: CGFloat = 24 * 60 // 24 hours × 60pt
+    private var totalHeight: CGFloat { 24 * hourHeight }
 
-    // Current time — updates every 60 seconds for the now indicator
     @State private var now = Date()
     private let timer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
 
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView(.vertical, showsIndicators: true) {
-                ZStack(alignment: .topLeading) {
-                    // Hour grid lines + labels
-                    hourGridLayer
+                HStack(alignment: .top, spacing: 0) {
+                    // Left gutter: hour labels only. No separator lines here so the
+                    // time column reads as negative space, matching CalendarKit's
+                    // DayView.
+                    hourLabelsGutter
+                        .frame(width: gutterWidth)
 
-                    // Event columns
-                    HStack(spacing: 0) {
-                        Color.clear
-                            .frame(width: gutterWidth)
+                    // Content area: hour lines + event columns + now line.
+                    ZStack(alignment: .topLeading) {
+                        hourLinesLayer
 
-                        ForEach(Array(columns.enumerated()), id: \.offset) { index, column in
-                            ZStack(alignment: .topLeading) {
-                                // Subtle today highlight
-                                if highlightToday && Calendar.current.isDateInToday(column.date) {
+                        HStack(spacing: 0) {
+                            ForEach(Array(columns.enumerated()), id: \.offset) { index, column in
+                                columnView(column: column)
+
+                                if index < columns.count - 1 {
                                     Rectangle()
-                                        .fill(Color.primary.opacity(0.015))
+                                        .fill(columnSeparatorColor)
+                                        .frame(width: 0.5)
                                 }
-
-                                // Tappable background for creating events
-                                if onGridTap != nil {
-                                    Color.clear
-                                        .contentShape(Rectangle())
-                                        .onTapGesture { location in
-                                            let minutesSinceMidnight = location.y / (hourHeight / 60)
-                                            let snappedMinutes = (Int(minutesSinceMidnight) / 30) * 30
-                                            let hour = snappedMinutes / 60
-                                            let minute = snappedMinutes % 60
-                                            let cal = Calendar.current
-                                            let dayStart = cal.startOfDay(for: column.date)
-                                            if let tappedDate = cal.date(bySettingHour: hour, minute: minute, second: 0, of: dayStart) {
-                                                onGridTap?(tappedDate)
-                                            }
-                                        }
-                                }
-
-                                // Positioned event blocks
-                                eventBlocksLayer(for: column)
-
-                                // Now indicator
-                                if Calendar.current.isDateInToday(column.date) {
-                                    nowIndicator
-                                }
-                            }
-                            .frame(maxWidth: .infinity)
-
-                            // Column separator
-                            if index < columns.count - 1 {
-                                Rectangle()
-                                    .fill(Color(UIColor.separator).opacity(0.15))
-                                    .frame(width: 0.5)
                             }
                         }
+                        .frame(height: totalHeight)
+
+                        // Now line spans the full content area (all columns), with
+                        // a red dot placed at the start of today's column.
+                        if let todayIndex = todayColumnIndex {
+                            nowIndicator(todayColumnIndex: todayIndex,
+                                         totalColumns: columns.count)
+                        }
                     }
-                    .frame(height: totalHeight)
                 }
                 .frame(height: totalHeight)
-                // Scroll anchor at ~7 AM
                 .overlay(alignment: .topLeading) {
                     Color.clear
                         .frame(width: 1, height: 1)
@@ -94,30 +70,76 @@ struct CalendarTimeGridView: View {
         }
     }
 
-    // MARK: - Hour Grid
+    // MARK: - Gutter (Hour Labels)
 
-    private var hourGridLayer: some View {
+    private var hourLabelsGutter: some View {
+        ZStack(alignment: .topTrailing) {
+            Color.clear.frame(height: totalHeight)
+            VStack(spacing: 0) {
+                ForEach(0..<24, id: \.self) { hour in
+                    ZStack(alignment: .topTrailing) {
+                        Color.clear.frame(height: hourHeight)
+                        if hour > 0 {
+                            Text(hourLabel(hour))
+                                .font(.system(size: 10, weight: .light))
+                                .foregroundStyle(.secondary)
+                                .padding(.trailing, 6)
+                                .offset(y: -6)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Hour Lines (content area only)
+
+    private var hourLinesLayer: some View {
         VStack(spacing: 0) {
-            ForEach(0..<24, id: \.self) { hour in
-                ZStack(alignment: .topLeading) {
-                    VStack(spacing: 0) {
-                        Rectangle()
-                            .fill(Color(UIColor.separator).opacity(0.15))
-                            .frame(height: 0.5)
-                        Spacer(minLength: 0)
-                    }
-
-                    if hour > 0 {
-                        Text(hourLabel(hour))
-                            .font(.system(size: 10, weight: .light))
-                            .foregroundStyle(.secondary)
-                            .frame(width: gutterWidth - 10, alignment: .trailing)
-                            .offset(y: -6)
-                    }
+            ForEach(0..<24, id: \.self) { _ in
+                VStack(spacing: 0) {
+                    Rectangle()
+                        .fill(hourLineColor)
+                        .frame(height: 0.5)
+                    Spacer(minLength: 0)
+                    Rectangle()
+                        .fill(halfHourLineColor)
+                        .frame(height: 0.5)
+                    Spacer(minLength: 0)
                 }
                 .frame(height: hourHeight)
             }
         }
+    }
+
+    // MARK: - Column
+
+    private func columnView(column: CalendarTimeGridColumn) -> some View {
+        ZStack(alignment: .topLeading) {
+            if highlightToday && Calendar.current.isDateInToday(column.date) {
+                Rectangle()
+                    .fill(Color.primary.opacity(0.02))
+            }
+
+            if onGridTap != nil {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture { location in
+                        let minutesSinceMidnight = location.y / (hourHeight / 60)
+                        let snappedMinutes = (Int(minutesSinceMidnight) / 30) * 30
+                        let hour = snappedMinutes / 60
+                        let minute = snappedMinutes % 60
+                        let cal = Calendar.current
+                        let dayStart = cal.startOfDay(for: column.date)
+                        if let tappedDate = cal.date(bySettingHour: hour, minute: minute, second: 0, of: dayStart) {
+                            onGridTap?(tappedDate)
+                        }
+                    }
+            }
+
+            eventBlocksLayer(for: column)
+        }
+        .frame(maxWidth: .infinity)
     }
 
     // MARK: - Event Blocks
@@ -144,27 +166,35 @@ struct CalendarTimeGridView: View {
 
     // MARK: - Now Indicator
 
-    private var nowIndicator: some View {
+    /// Red line spans the full content area (all visible columns), matching
+    /// Apple Calendar's multi-day behaviour. The leading red dot marks today's
+    /// column specifically.
+    private func nowIndicator(todayColumnIndex: Int, totalColumns: Int) -> some View {
         let cal = Calendar.current
         let minutesSinceMidnight = CGFloat(cal.component(.hour, from: now) * 60 + cal.component(.minute, from: now))
         let yOffset = minutesSinceMidnight * (hourHeight / 60)
 
-        return ZStack(alignment: .leading) {
-            Rectangle()
-                .fill(Color(red: 0.92, green: 0.23, blue: 0.21))
-                .frame(height: 1.5)
+        return GeometryReader { geo in
+            let width = geo.size.width
+            let columnWidth = totalColumns > 0 ? width / CGFloat(totalColumns) : width
+            ZStack(alignment: .topLeading) {
+                Rectangle()
+                    .fill(Color(red: 0.92, green: 0.23, blue: 0.21))
+                    .frame(width: width, height: 1.5)
 
-            Circle()
-                .fill(Color(red: 0.92, green: 0.23, blue: 0.21))
-                .frame(width: 8, height: 8)
-                .offset(x: -4)
+                Circle()
+                    .fill(Color(red: 0.92, green: 0.23, blue: 0.21))
+                    .frame(width: 8, height: 8)
+                    .offset(x: columnWidth * CGFloat(todayColumnIndex) - 4, y: -3.25)
+            }
+            .offset(y: yOffset)
         }
-        .offset(y: yOffset)
+        .frame(height: totalHeight)
+        .allowsHitTesting(false)
     }
 
     // MARK: - Event Layout Algorithm
 
-    /// Column-packing overlap resolution — same algorithm as macOS CalendarTimeGridView.
     private func layoutEvents(_ events: [CalendarEvent], in date: Date) -> [CalendarLayoutItem] {
         let cal = Calendar.current
         let dayStart = cal.startOfDay(for: date)
@@ -215,6 +245,11 @@ struct CalendarTimeGridView: View {
 
     // MARK: - Helpers
 
+    private var todayColumnIndex: Int? {
+        let cal = Calendar.current
+        return columns.firstIndex { cal.isDateInToday($0.date) }
+    }
+
     private func hourLabel(_ hour: Int) -> String {
         var comps = DateComponents()
         comps.hour = hour
@@ -223,17 +258,42 @@ struct CalendarTimeGridView: View {
         }
         return "\(hour):00"
     }
+
+    // MARK: - Colours
+
+    /// Mid-grey hour line that stays visible in both light and dark mode.
+    private var hourLineColor: Color {
+        Color(UIColor { trait in
+            trait.userInterfaceStyle == .dark
+                ? UIColor(white: 1.0, alpha: 0.18)
+                : UIColor(white: 0.0, alpha: 0.12)
+        })
+    }
+
+    private var halfHourLineColor: Color {
+        Color(UIColor { trait in
+            trait.userInterfaceStyle == .dark
+                ? UIColor(white: 1.0, alpha: 0.08)
+                : UIColor(white: 0.0, alpha: 0.05)
+        })
+    }
+
+    private var columnSeparatorColor: Color {
+        Color(UIColor { trait in
+            trait.userInterfaceStyle == .dark
+                ? UIColor(white: 1.0, alpha: 0.22)
+                : UIColor(white: 0.0, alpha: 0.15)
+        })
+    }
 }
 
 // MARK: - Supporting Types
 
-/// Represents a single column of events for a specific date in the time grid.
 struct CalendarTimeGridColumn {
     let date: Date
     let events: [CalendarEvent]
 }
 
-/// Internal layout item — positions an event block within the grid.
 struct CalendarLayoutItem: Identifiable {
     let event: CalendarEvent
     let yOffset: CGFloat

@@ -20,16 +20,16 @@ struct TasksTabView: View {
                 .onTapGesture { self.dismissKeyboard() }
 
             VStack(spacing: 10) {
-                HStack(alignment: .center, spacing: 12) {
-                    AppTopHeader(title: "Tasks")
-
-                    if services.captureService.isSyncingSharedFolders {
-                        InlineRefreshBadge(label: "Syncing")
+                AppTopHeader(title: "Tasks") {
+                    HStack(spacing: 8) {
+                        Text("Tasks")
+                            .font(.system(size: 18, weight: .bold))
+                            .tracking(-0.3)
+                            .foregroundStyle(.primary)
+                        if services.captureService.isSyncingSharedFolders {
+                            InlineRefreshBadge(label: "Syncing")
+                        }
                     }
-
-                    Spacer(minLength: 0)
-
-
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 4)

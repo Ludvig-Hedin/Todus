@@ -142,6 +142,8 @@ final class AppServices {
     /// Set true to trigger the global email compose sheet from MainTabView.
     var showsComposeEmail = false
     var composeEmailSeedBody: String? = nil
+    var composeEmailSeedTo: String? = nil
+    var composeEmailSeedSubject: String? = nil
     var showsAIChat = false
 
     /// Set by detail views (e.g. EmailThreadView) to hide the custom floating tab bar
@@ -418,8 +420,8 @@ final class AppServices {
         if let data = defaults.data(forKey: Keys.tabBarTabs),
            let rawValues = try? JSONDecoder().decode([String].self, from: data) {
             let decoded = rawValues.compactMap(AppTab.init(rawValue:))
-            // Always ensure home is first and present; clamp to max 4
-            var tabs = decoded.filter { $0 != .home }
+            // Always ensure home is first and present; exclude action-only tabs; clamp to max 4
+            var tabs = decoded.filter { $0 != .home && $0 != .create && $0 != .ai }
             tabs.insert(.home, at: 0)
             if decoded.isEmpty || tabs.count < 2 {
                 self.tabBarTabs = AppTab.defaultNavTabs

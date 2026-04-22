@@ -43,18 +43,16 @@ struct AuthView: View {
                     Text("Welcome to Todus")
                         .font(.system(size: 24, weight: .semibold))
 
-                    Text("Email, tasks, and calendar in one workspace.")
-                        .font(.system(size: 17, weight: .regular))
-                        .foregroundStyle(.primary.opacity(0.5))
-
                     Text(
                         otpPendingEmail == nil
-                            ? "Sign in to sync your workspace, or keep going with tasks only."
+                            ? "Email, tasks, and calendar in one workspace."
                             : "Enter the 6-digit code we sent to finish signing in."
                     )
-                        .font(.system(size: 14, weight: .regular))
-                        .foregroundStyle(.primary.opacity(0.4))
+                        .font(.system(size: 17, weight: .regular))
+                        .foregroundStyle(.primary.opacity(0.5))
+                        .multilineTextAlignment(.center)
                 }
+                .padding(.horizontal, 32)
 
                 Spacer()
 
@@ -88,6 +86,14 @@ struct AuthView: View {
         }
         .animation(.snappy(duration: 0.25), value: otpPendingEmail)
         .animation(.snappy(duration: 0.3), value: authService.lastErrorMessage != nil)
+        .onChange(of: otpPendingEmail) { _, newEmail in
+            // Clear the code field whenever we leave the OTP stage (success, failure from
+            // completeAuthentication, or manual back navigation) so the input is fresh
+            // the next time the OTP view appears
+            if newEmail == nil {
+                code = ""
+            }
+        }
     }
 
     /// Extracts the pending email if in OTP state
@@ -164,9 +170,18 @@ struct AuthView: View {
                         .stroke(Color(UIColor.separator), lineWidth: 1)
                 )
                 .onChange(of: code) { _, newValue in
-                    if newValue.count >= expectedCodeLength {
+                    // Guard: skip if already verifying (prevents double-submit when iOS
+                    // auto-fill fires onChange multiple times in rapid succession)
+                    if newValue.count >= expectedCodeLength && !authService.isLoading {
                         isCodeFocused = false
-                        Task { await authService.verifyEmailOTP(code: newValue) }
+                        Task {
+                            await authService.verifyEmailOTP(code: newValue)
+                            // Clear expired code after a failed attempt so the user can't
+                            // accidentally re-submit a code that was already consumed
+                            if authService.lastErrorMessage != nil {
+                                code = ""
+                            }
+                        }
                     }
                 }
                 .onAppear {
@@ -177,7 +192,12 @@ struct AuthView: View {
             if code.count >= expectedCodeLength {
                 Button {
                     isCodeFocused = false
-                    Task { await authService.verifyEmailOTP(code: code) }
+                    Task {
+                        await authService.verifyEmailOTP(code: code)
+                        if authService.lastErrorMessage != nil {
+                            code = ""
+                        }
+                    }
                 } label: {
                     Text("Verify code")
                         .font(.system(size: 16, weight: .semibold))
@@ -309,7 +329,7 @@ struct AuthView: View {
         Button {
             authService.continueAsGuest()
         } label: {
-            Text("Skip, use tasks only for now")
+            Text("Continue as guest")
                 .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(.secondary)
         }

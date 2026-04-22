@@ -22,6 +22,8 @@ struct CustomTabBar: View {
     var onCreate: () -> Void
     /// Called when the user taps the burger button to open the More sheet.
     var onMore: (() -> Void)? = nil
+    /// When false the burger button and its separator are hidden.
+    var showBurgerMenu: Bool = true
     /// Called when the user taps the already-selected tab.
     var onReselect: ((AppTab) -> Void)? = nil
 
@@ -43,21 +45,23 @@ struct CustomTabBar: View {
 
     private var navTabsPill: some View {
         HStack(spacing: 0) {
-            // Burger / More button — always first, opens the More sheet.
-            // Placed in the nav pill (not action pill) so it feels part of navigation.
-            Button { onMore?() } label: {
-                Image(systemName: "line.3.horizontal")
-                    .font(iconFont)
-                    .foregroundStyle(Color(UIColor.secondaryLabel))
-                    .frame(width: 44, height: 42)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(TabButtonStyle())
+            if showBurgerMenu {
+                // Burger / More button — always first, opens the More sheet.
+                // Placed in the nav pill (not action pill) so it feels part of navigation.
+                Button { onMore?() } label: {
+                    Image(systemName: "line.3.horizontal")
+                        .font(iconFont)
+                        .foregroundStyle(Color(UIColor.secondaryLabel))
+                        .frame(width: 44, height: 42)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(TabButtonStyle())
 
-            // Thin separator between burger and first tab
-            Rectangle()
-                .fill(Color(UIColor.separator).opacity(0.25))
-                .frame(width: 1, height: 22)
+                // Thin separator between burger and first tab
+                Rectangle()
+                    .fill(Color(UIColor.separator).opacity(0.25))
+                    .frame(width: 1, height: 22)
+            }
 
             // User-configured nav tabs (max 4)
             ForEach(tabs) { tab in

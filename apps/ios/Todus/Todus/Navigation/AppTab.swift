@@ -7,6 +7,10 @@ enum AppTab: String, CaseIterable, Identifiable, Hashable, Codable {
     case email
     case calendar
     case meetings
+    /// Action-only tab — tapping it opens the create sheet; never becomes a real navigation destination.
+    case create
+    /// AI/search tab — pinned to the trailing side via `Tab(role: .search)`.
+    case ai
 
     var id: String { rawValue }
 
@@ -18,6 +22,8 @@ enum AppTab: String, CaseIterable, Identifiable, Hashable, Codable {
         case .email:    return "Email"
         case .calendar: return "Calendar"
         case .meetings: return "Meetings"
+        case .create:   return "New"
+        case .ai:       return "AI"
         }
     }
 
@@ -29,6 +35,8 @@ enum AppTab: String, CaseIterable, Identifiable, Hashable, Codable {
         case .email:    return "Gmail inbox and threads"
         case .calendar: return "Events and schedule"
         case .meetings: return "Recorded meetings & AI summaries"
+        case .create:   return "Create a new item"
+        case .ai:       return "AI assistant"
         }
     }
 
@@ -48,6 +56,8 @@ enum AppTab: String, CaseIterable, Identifiable, Hashable, Codable {
         case .email:    return "envelope.fill"
         case .calendar: return "calendar.badge.plus"
         case .meetings: return "video.fill"
+        case .create:   return "plus.circle.fill"
+        case .ai:       return "sparkles"
         }
     }
 
@@ -60,6 +70,8 @@ enum AppTab: String, CaseIterable, Identifiable, Hashable, Codable {
         case .email:    return "envelope"
         case .calendar: return hasEvent ? "calendar.badge" : "calendar"
         case .meetings: return "video"
+        case .create:   return "plus.circle.fill"
+        case .ai:       return "sparkles"
         }
     }
 

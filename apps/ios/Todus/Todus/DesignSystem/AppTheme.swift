@@ -166,29 +166,29 @@ struct AppTopHeader<CustomTitle: View>: View {
                 showsGlobalSearch = true
             } label: {
                 Image(systemName: "magnifyingglass")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(.primary)
-                    .frame(width: 40, height: 36)
+                    .frame(width: 44, height: 40)
                     .interactiveHitTarget(expansion: 4)
             }
             .buttonStyle(.plain)
 
             Divider()
-                .frame(height: 18)
+                .frame(height: 20)
 
             Button {
                 showNotifications = true
             } label: {
                 Image(systemName: "bell.badge")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(.primary)
-                    .frame(width: 40, height: 36)
+                    .frame(width: 44, height: 40)
                     .interactiveHitTarget(expansion: 4)
             }
             .buttonStyle(.plain)
 
             Divider()
-                .frame(height: 18)
+                .frame(height: 20)
 
             Menu {
                 Button("Settings") {
@@ -206,12 +206,13 @@ struct AppTopHeader<CustomTitle: View>: View {
                 }
             } label: {
                 Image(systemName: "ellipsis.circle")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(.primary)
-                    .frame(width: 40, height: 36)
+                    .frame(width: 44, height: 40)
                     .interactiveHitTarget(expansion: 4)
             }
             .menuStyle(.borderlessButton)
+            .tint(.primary)
             .buttonStyle(.plain)
         }
         .glassActionPill()

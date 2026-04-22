@@ -668,13 +668,15 @@ const api = new Hono<HonoContext>()
           if (userId) {
             const db = await getZeroDB(userId);
             const user = await db.findUser();
-            c.set('sessionUser', user);
-            resolved = true;
+            if (user) {
+              c.set('sessionUser', user);
+              resolved = true;
 
-            TraceContext.completeSpan(traceId, tokenSpan.id, {
-              success: true,
-              userId,
-            });
+              TraceContext.completeSpan(traceId, tokenSpan.id, {
+                success: true,
+                userId,
+              });
+            }
           }
         } catch {
           // Not a JWT — try session token strategies below
@@ -892,29 +894,26 @@ const api = new Hono<HonoContext>()
     }
 
     try {
-      // Sign the raw session token as a cookie — same technique as Strategy 3 in the
-      // auth middleware. This goes through Better Auth's full session pipeline, which:
+      // The refreshToken from native clients is the signed session token value from the
+      // `set-auth-token` header (already signed by Better Auth's bearer plugin). Pass it
+      // directly as a Bearer token — the bearer plugin verifies the HMAC, then rewrites
+      // the request as a session cookie for Better Auth's session pipeline, which:
       // 1. Validates the session exists and hasn't expired
       // 2. Triggers updateAge to extend the session (sliding 90-day window)
       // 3. Returns the session context needed by getToken() to mint a JWT
       const auth = createAuth();
-      const cookiePrefix = env.NODE_ENV === 'development' ? 'better-auth-dev' : 'better-auth';
-      const signedToken = (
-        await serializeSignedCookie('', refreshToken, env.BETTER_AUTH_SECRET)
-      ).replace('=', '');
-
-      const cookieHeaders = new Headers({
-        cookie: `${cookiePrefix}.session_token=${signedToken}`,
+      const bearerHeaders = new Headers({
+        authorization: `Bearer ${refreshToken}`,
         origin: 'https://todus.app',
       });
 
-      const session = await auth.api.getSession({ headers: cookieHeaders });
+      const session = await auth.api.getSession({ headers: bearerHeaders });
       if (!session?.user) {
         return c.json({ error: 'Session expired' }, 401);
       }
 
       // Mint a fresh short-lived JWT using the validated session context
-      const jwtToken = await auth.api.getToken({ headers: cookieHeaders });
+      const jwtToken = await auth.api.getToken({ headers: bearerHeaders });
       if (!jwtToken?.token) {
         return c.json({ error: 'Failed to generate token' }, 500);
       }

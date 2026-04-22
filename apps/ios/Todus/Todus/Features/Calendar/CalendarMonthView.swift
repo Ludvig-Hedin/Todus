@@ -24,14 +24,26 @@ struct CalendarMonthView: View {
     /// Threshold below which we show dots instead of event titles
     private let dotModeThreshold: CGFloat = 60
 
-    /// How many months to show before/after the selected month
-    private let monthBuffer = 12
+    /// Months to show before/after the selected month. Large enough to feel
+    /// infinite in practice (±20 years); LazyVStack renders only visible rows.
+    private let monthBuffer = 240
 
     var body: some View {
         VStack(spacing: 0) {
             weekdayHeader
             Divider()
             monthScrollView
+        }
+        .gesture(
+            MagnifyGesture()
+                .onChanged { value in
+                    let proposed = baseRowHeight * value.magnification
+                    rowHeight = min(max(proposed, minRowHeight), maxRowHeight)
+                }
+                .onEnded { _ in
+                    baseRowHeight = rowHeight
+                }
+        )
     }
 
     // MARK: - Weekday Header
@@ -177,6 +189,17 @@ struct CalendarMonthView: View {
         }
         .frame(height: rowHeight)
         .frame(maxWidth: .infinity)
+        .padding(.top, 4)
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(Color(UIColor.separator).opacity(0.3))
+                .frame(height: 0.5)
+        }
+        .overlay(alignment: .leading) {
+            Rectangle()
+                .fill(Color(UIColor.separator).opacity(0.3))
+                .frame(width: 0.5)
+        }
         .contentShape(Rectangle())
         .onTapGesture {
             withAnimation(.easeOut(duration: 0.2)) {

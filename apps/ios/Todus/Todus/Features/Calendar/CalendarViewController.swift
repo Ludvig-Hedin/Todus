@@ -11,7 +11,11 @@ import EventKit
 import EventKitUI
 
 final class CalendarViewController: DayViewController {
-    private var eventStore = EKEventStore()
+    // nil until initialized off the main thread in viewDidLoad.
+    // EKEventStore() is a synchronous XPC call to the calendardd daemon that blocks
+    // the calling thread for up to 9+ seconds ("Fence Hang"). Initializing it here
+    // off the main thread prevents the startup hang visible in the iOS Performance HUD.
+    private var eventStore: EKEventStore?
 
     /// Cached events keyed by the start-of-day Date. `eventsForDate(_:)` returns cached
     /// data instantly (no main-thread XPC) and triggers a background fetch on cache miss.
@@ -41,8 +45,18 @@ final class CalendarViewController: DayViewController {
         style.timeline.eventGap = 2
         updateStyle(style)
 
-        requestAccessToCalendar()
-        subscribeToNotifications()
+        // Create EKEventStore off the main thread — its constructor makes a synchronous
+        // XPC call to calendardd that blocks the calling thread for up to 9+ seconds.
+        // Once ready, wire up notifications and request calendar access.
+        backgroundQueue.async { [weak self] in
+            let store = EKEventStore()
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.eventStore = store
+                self.subscribeToNotifications()
+                self.requestAccessToCalendar()
+            }
+        }
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -51,32 +65,42 @@ final class CalendarViewController: DayViewController {
     }
 
     private func requestAccessToCalendar() {
+        guard let store = eventStore else { return }
         let completionHandler: EKEventStoreRequestAccessCompletionHandler = { granted, error in
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 _ = granted; _ = error
                 self.initializeStore()
-                self.subscribeToNotifications()
-                self.reloadData()
             }
         }
 
         if #available(iOS 17.0, *) {
-            eventStore.requestFullAccessToEvents(completion: completionHandler)
+            store.requestFullAccessToEvents(completion: completionHandler)
         } else {
-            eventStore.requestAccess(to: .event, completion: completionHandler)
+            store.requestAccess(to: .event, completion: completionHandler)
         }
     }
 
     private func subscribeToNotifications() {
+        guard let store = eventStore else { return }
+        NotificationCenter.default.removeObserver(self, name: .EKEventStoreChanged, object: nil)
         NotificationCenter.default.addObserver(self,
                                                selector: #selector(storeChanged(_:)),
                                                name: .EKEventStoreChanged,
-                                               object: eventStore)
+                                               object: store)
     }
 
     private func initializeStore() {
-        eventStore = EKEventStore()
+        // Create a fresh store after authorization — also off main thread.
+        backgroundQueue.async { [weak self] in
+            let store = EKEventStore()
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.eventStore = store
+                self.subscribeToNotifications()
+                self.reloadData()
+            }
+        }
     }
 
     /// Debounced handler for EKEventStoreChanged — avoids rapid-fire reloads when
@@ -94,29 +118,22 @@ final class CalendarViewController: DayViewController {
 
     // MARK: - DayViewDataSource
 
-    /// Returns cached events instantly (no main-thread blocking). On cache miss, returns
-    /// an empty array and kicks off a background EventKit fetch that triggers `reloadData()`
-    /// when complete. This eliminates the 100-500ms+ synchronous XPC calls that were
-    /// blocking the main thread on every tab switch and calendar scroll.
+    /// Returns cached events instantly (no main-thread XPC) and triggers a background fetch on cache miss.
     override func eventsForDate(_ date: Date) -> [EventDescriptor] {
         let key = Calendar.current.startOfDay(for: date)
         if let cached = cachedEvents[key] {
             return cached
         }
-        // Cache miss — fetch on background queue, return empty for now.
-        // Skip if a fetch for this date is already in flight to avoid duplicate XPC calls.
         guard !inFlightDates.contains(key) else { return [] }
         fetchEvents(for: date)
         return []
     }
 
     /// Fetches EventKit events on a background queue and updates the cache + UI on main.
-    /// Captures `eventStore` locally to avoid accessing @MainActor-isolated self from
-    /// the background queue (EKEventStore is thread-safe for read operations).
     private func fetchEvents(for date: Date) {
+        guard let store = eventStore else { return }
         let key = Calendar.current.startOfDay(for: date)
         inFlightDates.insert(key)
-        let store = self.eventStore
         backgroundQueue.async { [weak self, store, date] in
             let startDate = date
             var oneDayComponents = DateComponents()
@@ -135,18 +152,18 @@ final class CalendarViewController: DayViewController {
             }
         }
     }
-    
+
     // MARK: - DayViewDelegate
-    
+
     // MARK: Event Selection
-    
+
     override func dayViewDidSelectEventView(_ eventView: EventView) {
         guard let ckEvent = eventView.descriptor as? EKWrapper else {
             return
         }
         presentDetailViewForEvent(ckEvent.ekEvent)
     }
-    
+
     private func presentDetailViewForEvent(_ ekEvent: EKEvent) {
         let eventController = EKEventViewController()
         eventController.event = ekEvent
@@ -155,24 +172,24 @@ final class CalendarViewController: DayViewController {
         navigationController?.pushViewController(eventController,
                                                  animated: true)
     }
-    
+
     // MARK: Event Editing
-    
+
     override func dayView(dayView: DayView, didLongPressTimelineAt date: Date) {
-        // Cancel editing current event and start creating a new one
         endEventEditing()
-        let newEKWrapper = createNewEvent(at: date)
+        guard let newEKWrapper = createNewEvent(at: date) else { return }
         create(event: newEKWrapper, animated: true)
     }
-    
-    private func createNewEvent(at date: Date) -> EKWrapper {
-        let newEKEvent = EKEvent(eventStore: eventStore)
-        newEKEvent.calendar = eventStore.defaultCalendarForNewEvents
-        
+
+    private func createNewEvent(at date: Date) -> EKWrapper? {
+        guard let store = eventStore else { return nil }
+        let newEKEvent = EKEvent(eventStore: store)
+        newEKEvent.calendar = store.defaultCalendarForNewEvents
+
         var components = DateComponents()
         components.hour = 1
         let endDate = calendar.date(byAdding: components, to: date)
-        
+
         newEKEvent.startDate = date
         newEKEvent.endDate = endDate
         newEKEvent.title = "New event"
@@ -181,7 +198,7 @@ final class CalendarViewController: DayViewController {
         newEKWrapper.editedEvent = newEKWrapper
         return newEKWrapper
     }
-    
+
     override func dayViewDidLongPressEventView(_ eventView: EventView) {
         guard let descriptor = eventView.descriptor as? EKWrapper else {
             return
@@ -190,22 +207,18 @@ final class CalendarViewController: DayViewController {
         beginEditing(event: descriptor,
                      animated: true)
     }
-    
+
     override func dayView(dayView: DayView, didUpdate event: EventDescriptor) {
         guard let editingEvent = event as? EKWrapper else { return }
         if let originalEvent = event.editedEvent {
             editingEvent.commitEditing()
-            
+
             if originalEvent === editingEvent {
-                // If editing event is the same as the original one, it has just been created.
-                // Showing editing view controller
                 presentEditingViewForEvent(editingEvent.ekEvent)
             } else {
-                // If editing event is different from the original,
-                // then it's pointing to the event already in the `eventStore`
-                // Let's save changes to oriignal event to the `eventStore`
+                guard let store = eventStore else { return }
                 do {
-                    try eventStore.save(editingEvent.ekEvent, span: .thisEvent)
+                    try store.save(editingEvent.ekEvent, span: .thisEvent)
                 } catch {
                     print("[CalendarViewController] Failed to save edited event: \(error)")
                 }
@@ -213,28 +226,27 @@ final class CalendarViewController: DayViewController {
         }
         reloadData()
     }
-    
-    
+
+
     private func presentEditingViewForEvent(_ ekEvent: EKEvent) {
+        guard let store = eventStore else { return }
         let eventEditViewController = EKEventEditViewController()
         eventEditViewController.event = ekEvent
-        eventEditViewController.eventStore = eventStore
+        eventEditViewController.eventStore = store
         eventEditViewController.editViewDelegate = self
         present(eventEditViewController, animated: true, completion: nil)
     }
-    
+
     override func dayView(dayView: DayView, didTapTimelineAt date: Date) {
-        // Single tap on an empty timeline slot should create an event immediately.
-        // This matches native-feeling quick scheduling behavior and avoids requiring long press.
         endEventEditing()
-        let newEKWrapper = createNewEvent(at: date)
+        guard let newEKWrapper = createNewEvent(at: date) else { return }
         create(event: newEKWrapper, animated: true)
     }
-    
+
     override func dayViewDidBeginDragging(dayView: DayView) {
         endEventEditing()
     }
-    
+
 }
 
 // MARK: - EKEventEditViewDelegate

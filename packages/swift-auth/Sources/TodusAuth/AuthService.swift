@@ -281,7 +281,7 @@ public final class AuthService: NSObject {
                (error as NSError).code == ASAuthorizationError.canceled.rawValue {
                 // User cancelled — no error message needed
             } else {
-                lastErrorMessage = "Apple Sign In was cancelled."
+                lastErrorMessage = "Something went wrong during sign in. Please try again."
             }
             authState = .guest
         }
@@ -577,7 +577,10 @@ public final class AuthService: NSObject {
         isLoading = true
         lastErrorMessage = nil
 
-        // Use /sign-in/email-otp which verifies OTP + creates session in one step
+        // Use /sign-in/email-otp which verifies OTP + creates session in one step.
+        // disableRedirect: true → Better Auth returns the session JSON directly instead of
+        // issuing a 302 redirect. Without this, URLSession follows the redirect and the
+        // set-auth-token header on the 302 response is lost, consuming the OTP silently.
         let url = backendURL.appending(path: "api/auth/sign-in/email-otp")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -586,11 +589,17 @@ public final class AuthService: NSObject {
         // parses hostname and checks against allowed domains (todus.app, localhost).
         request.setValue("https://todus.app", forHTTPHeaderField: "Origin")
 
-        let body: [String: String] = ["email": email, "otp": trimmedCode]
+        let body: [String: Any] = ["email": email, "otp": trimmedCode, "disableRedirect": true]
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
+            // Don't follow redirects — we need the headers on the initial response.
+            // If Better Auth still redirects (e.g. older server version), we handle the
+            // Location header below rather than letting URLSession silently swallow it.
+            let config = URLSessionConfiguration.default
+            let noRedirectSession = URLSession(
+                configuration: config, delegate: NoRedirectDelegate.shared, delegateQueue: nil)
+            let (data, response) = try await noRedirectSession.data(for: request)
             guard let http = response as? HTTPURLResponse else {
                 lastErrorMessage = "Verification failed."
                 isLoading = false
@@ -599,11 +608,18 @@ public final class AuthService: NSObject {
 
             authLog.info("Email OTP verify response: status=\(http.statusCode)")
 
-            if (200..<300).contains(http.statusCode) {
+            // Check redirect Location for a token (defensive — shouldn't happen with disableRedirect)
+            if (300..<400).contains(http.statusCode),
+               let location = http.value(forHTTPHeaderField: "Location"),
+               let locationURL = URL(string: location),
+               let comps = URLComponents(url: locationURL, resolvingAgainstBaseURL: false),
+               let token = comps.queryItems?.first(where: { $0.name == "token" })?.value {
+                authLog.info("Email OTP: token found in redirect Location header")
+                completeAuthentication(token: token, email: email)
+            } else if (200..<300).contains(http.statusCode) || (300..<400).contains(http.statusCode) {
                 if extractToken(from: data, response: http, email: email) {
                     authLog.info("Email OTP: authenticated successfully")
                 } else {
-                    // Token not in response — try fetching session
                     lastErrorMessage = "Verification succeeded but something went wrong. Please try again."
                     authState = .guest
                 }
@@ -621,7 +637,9 @@ public final class AuthService: NSObject {
             lastErrorMessage = "Network error. Check your connection."
         }
 
-        isLoading = false
+        if !isCompletingAuthentication {
+            isLoading = false
+        }
     }
 
     /// Returns to the email input stage from OTP verification

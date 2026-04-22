@@ -306,23 +306,23 @@ struct AIChatView: View {
                 .truncationMode(.tail)
         }
 
-        // New chat + options menu — trailing, with horizontal breathing room
+        // New chat button — separate item so it doesn't share a pill with the menu
         ToolbarItem(placement: .topBarTrailing) {
-            HStack(spacing: 14) {
-                // New chat button
-                Button {
-                    withAnimation(.snappy(duration: 0.2)) {
-                        chatService.clearHistory()
-                    }
-                } label: {
-                    Image(systemName: "square.and.pencil")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(.primary)
+            Button {
+                withAnimation(.snappy(duration: 0.2)) {
+                    chatService.clearHistory()
                 }
-                .buttonStyle(.plain)
+            } label: {
+                Image(systemName: "square.and.pencil")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.primary)
+            }
+            .buttonStyle(.plain)
+        }
 
-                // Ellipsis menu — conversation actions
-                Menu {
+        // Options menu — conversation actions
+        ToolbarItem(placement: .topBarTrailing) {
+            Menu {
                     // Rename
                     Button {
                         renameText = chatService.chatTitle ?? ""
@@ -372,13 +372,11 @@ struct AIChatView: View {
                     } label: {
                         Label("Delete Conversation", systemImage: "trash")
                     }
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(.primary)
-                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.primary)
             }
-            .padding(.trailing, 4)  // breathing room from the screen edge
         }
     }
 
@@ -646,7 +644,7 @@ struct AIChatView: View {
                 ("chart.bar",                  "How productive have I been this week?"),
                 ("pencil",                     "Rename or update outdated tasks"),
             ]
-        case .home:
+        case .home, .create, .ai:
             // Always show the universal morning/focus prompts; add service-specific ones conditionally
             pinned = [
                 ("sun.max",                    "Give me a morning briefing"),
@@ -1001,8 +999,8 @@ struct AIChatView: View {
                 }
             )
             .padding(.horizontal, 12)
-            .padding(.top, hasAccessories ? 2 : 8)
-            .padding(.bottom, 2)
+            .padding(.top, 8)
+            .padding(.bottom, 4)
 
             // ── Button row: [config]  spacer  [expand] [voice] [mic] [send] ──
             HStack(spacing: 8) {
@@ -1018,8 +1016,8 @@ struct AIChatView: View {
 
                 Spacer()
 
-                // Full-screen expand — only when text has reached max input height
-                if inputAtMaxHeight {
+                // Full-screen expand — only when text has reached max input height and there's content
+                if inputAtMaxHeight && !isEmpty {
                     Button { showsFullScreenInput.toggle() } label: {
                         Image(systemName: showsFullScreenInput
                               ? "arrow.down.right.and.arrow.up.left"
@@ -1044,7 +1042,7 @@ struct AIChatView: View {
                 .contentShape(Rectangle())
 
                 // Transcribe mic button
-                ChatVoiceInputButton(onTranscription: { transcribed in
+                VoiceInputButton(onTranscribed: { transcribed in
                     let current = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
                     inputText = current.isEmpty ? transcribed : current + " " + transcribed
                 })
@@ -1075,6 +1073,7 @@ struct AIChatView: View {
             .padding(.horizontal, 10)
             .padding(.bottom, 6)
         }
+        .fixedSize(horizontal: false, vertical: true)
         .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(AppTheme.strongBorder, lineWidth: 1))
         .animation(.snappy(duration: 0.18), value: chatService.isStreaming)
@@ -2035,46 +2034,27 @@ private struct SourceDetailSheet: View {
 
 // MARK: - ReasoningBox
 
-/// Sparkle icon with a slowly rotating gradient and a very subtle ambient glow.
-/// Used on the empty state and can be placed alongside streaming AI responses.
+/// Sparkle icon with a static gradient. No animation to keep the UI thread free.
 private struct AnimatedSparkleIcon: View {
     let size: CGFloat
 
-    @State private var rotation: Double = 0
-
-    private var gradientColors: [Color] {
-        [
-            Color(red: 0, green: 0xAA / 255.0, blue: 0xF5 / 255.0),
-            Color(red: 0xEF / 255.0, green: 0, blue: 0xC2 / 255.0),
-            Color(red: 1, green: 0, blue: 0x38 / 255.0),
-            Color(red: 0xF9 / 255.0, green: 0x9F / 255.0, blue: 0),
-        ]
+    private var gradient: LinearGradient {
+        LinearGradient(
+            stops: [
+                .init(color: Color(red: 0, green: 0xAA / 255.0, blue: 0xF5 / 255.0), location: 0.087),
+                .init(color: Color(red: 0xEF / 255.0, green: 0, blue: 0xC2 / 255.0), location: 0.269),
+                .init(color: Color(red: 1, green: 0, blue: 0x38 / 255.0), location: 0.580),
+                .init(color: Color(red: 0xF9 / 255.0, green: 0x9F / 255.0, blue: 0), location: 0.913),
+            ],
+            startPoint: UnitPoint(x: 0.25, y: 0),
+            endPoint: UnitPoint(x: 0.75, y: 1)
+        )
     }
 
     var body: some View {
-        // Angular gradient rotates continuously for a living feel
-        let animatedGradient = AngularGradient(
-            colors: gradientColors + [gradientColors[0]],
-            center: .center,
-            angle: .degrees(rotation)
-        )
-
         Image(systemName: "sparkles")
             .font(.system(size: size, weight: .semibold))
-            .foregroundStyle(animatedGradient)
-            // Very subtle glow — blurred copy behind the icon
-            .background(
-                Image(systemName: "sparkles")
-                    .font(.system(size: size, weight: .semibold))
-                    .foregroundStyle(animatedGradient)
-                    .blur(radius: 6)
-                    .opacity(0.35)
-            )
-            .onAppear {
-                withAnimation(.linear(duration: 4).repeatForever(autoreverses: false)) {
-                    rotation = 360
-                }
-            }
+            .foregroundStyle(gradient)
     }
 }
 
@@ -2283,20 +2263,34 @@ private final class VoiceRecorder: ObservableObject, @unchecked Sendable {
         recognitionTask = nil
         recognitionRequest?.endAudio()
         recognitionRequest = nil
-        stopCapture()
-        try? AVAudioSession.sharedInstance().setActive(false, options: [])
+        let engineToStop = audioEngine
+        let hadTap = hasInstalledTap
+        audioEngine = nil
+        hasInstalledTap = false
+
+        // engine.stop() and setActive(false) can block while iOS finalises hardware —
+        // run them on a background thread to avoid stalling the main actor.
+        Task.detached(priority: .utility) {
+            if hadTap { engineToStop?.inputNode.removeTap(onBus: 0) }
+            engineToStop?.stop()
+            try? AVAudioSession.sharedInstance().setActive(false, options: [])
+            AppLogger.shared.log("[ChatVoice] Audio session deactivated (cleanup)")
+        }
     }
 
     func stopCapture() {
-        guard let engine = audioEngine else { return }
-        if engine.isRunning {
-            engine.stop()
-        }
-        if hasInstalledTap {
-            engine.inputNode.removeTap(onBus: 0)
-            hasInstalledTap = false
-        }
+        recognitionRequest?.endAudio()
+        let engineToStop = audioEngine
+        let hadTap = hasInstalledTap
         audioEngine = nil
+        hasInstalledTap = false
+
+        Task.detached(priority: .utility) {
+            if hadTap { engineToStop?.inputNode.removeTap(onBus: 0) }
+            engineToStop?.stop()
+            try? AVAudioSession.sharedInstance().setActive(false, options: [])
+            AppLogger.shared.log("[ChatVoice] Audio session deactivated (stopCapture)")
+        }
     }
 }
 
@@ -2307,10 +2301,12 @@ private struct ChatVoiceInputButton: View {
     @State private var isTranscribing = false
     @State private var partialText: String = ""
     @State private var didDeliverTranscription = false
+    @State private var micPermissionDenied = false
 
     // Speech / audio — StateObject so they persist across renders and
     // aren't re-initialized (which blocks main thread on first access)
     @StateObject private var recorder = VoiceRecorder()
+    @Environment(\.openURL) private var openURL
 
     var body: some View {
         Group {
@@ -2345,6 +2341,16 @@ private struct ChatVoiceInputButton: View {
             }
         }
         .onDisappear { cleanup() }
+        .alert("Microphone Access Required", isPresented: $micPermissionDenied) {
+            Button("Open Settings") {
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    openURL(url)
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Enable Microphone and Speech Recognition access in Settings > Privacy & Security to use voice input.")
+        }
     }
 
     // MARK: - Recording Control
@@ -2352,8 +2358,15 @@ private struct ChatVoiceInputButton: View {
     private func startRecording() {
         Task { @MainActor in
             guard !isRecording, !isTranscribing else { return }
-            guard await requestPermissions() else { return }
+            AppLogger.shared.log("[ChatVoice] Requesting permissions")
+            let granted = await requestPermissions()
+            guard granted else {
+                AppLogger.shared.log("[ChatVoice] Permissions denied — showing alert")
+                micPermissionDenied = true
+                return
+            }
             do {
+                AppLogger.shared.log("[ChatVoice] Starting audio engine")
                 // Audio session + engine setup runs entirely off-main to prevent UI freeze.
                 // AVAudioSession.setActive, audioEngine.inputNode, prepare(), and start()
                 // can collectively block for several seconds during hardware initialization.
@@ -2362,8 +2375,10 @@ private struct ChatVoiceInputButton: View {
                 isRecording = true
                 didDeliverTranscription = false
                 partialText = ""
+                AppLogger.shared.log("[ChatVoice] Recording started")
 
                 guard let request = recorder.recognitionRequest else {
+                    AppLogger.shared.log("[ChatVoice] No recognition request after setup — aborting")
                     cleanup()
                     return
                 }
@@ -2373,26 +2388,20 @@ private struct ChatVoiceInputButton: View {
                     // avoids capturing framework objects across actor boundaries.
                     let text = result?.bestTranscription.formattedString ?? ""
                     let isFinal = result?.isFinal == true || error != nil
-                    #if DEBUG
-                    let errorDesc = error?.localizedDescription
-                    #endif
+                    if let error { AppLogger.shared.log("[ChatVoice] Recognition error: \(error.localizedDescription)") }
                     DispatchQueue.main.async {
                         if !text.isEmpty {
                             partialText = text
                         }
                         if isFinal {
-                            #if DEBUG
-                            if let errorDesc { print("Speech recognition error: \(errorDesc)") }
-                            #endif
+                            AppLogger.shared.log("[ChatVoice] Final result: '\(partialText)'")
                             stopRecordingInternal(finalize: true)
                         }
                     }
                 }
             } catch {
+                AppLogger.shared.log("[ChatVoice] Audio engine setup failed: \(error.localizedDescription)")
                 cleanup()
-                #if DEBUG
-                print("Failed to start recording: \(error)")
-                #endif
             }
         }
     }
@@ -2404,8 +2413,8 @@ private struct ChatVoiceInputButton: View {
     @MainActor
     private func stopRecordingInternal(finalize: Bool) {
         guard isRecording || isTranscribing else { return }
+        // stopCapture() calls endAudio() and hands engine teardown to a background task.
         recorder.stopCapture()
-        recorder.recognitionRequest?.endAudio()
         isRecording = false
         if finalize { isTranscribing = true }
 
@@ -2425,14 +2434,19 @@ private struct ChatVoiceInputButton: View {
     private func requestPermissions() async -> Bool {
         let speechAuth = await withCheckedContinuation { (continuation: CheckedContinuation<SFSpeechRecognizerAuthorizationStatus, Never>) in
             SFSpeechRecognizer.requestAuthorization { status in
+                AppLogger.shared.log("[ChatVoice] Speech auth status: \(status.rawValue)")
                 continuation.resume(returning: status)
             }
         }
-        guard speechAuth == .authorized else { return false }
+        guard speechAuth == .authorized else {
+            AppLogger.shared.log("[ChatVoice] Speech recognition permission denied (status=\(speechAuth.rawValue))")
+            return false
+        }
 
         let micGranted: Bool = await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
             // Min deployment is iOS 18 — AVAudioApplication API is always available.
             AVAudioApplication.requestRecordPermission { granted in
+                AppLogger.shared.log("[ChatVoice] Mic permission granted: \(granted)")
                 continuation.resume(returning: granted)
             }
         }

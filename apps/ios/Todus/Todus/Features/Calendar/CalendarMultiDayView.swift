@@ -1,85 +1,257 @@
 import SwiftUI
+import UIKit
 
 /// Multi-day view — shows 2 or 3 days side-by-side with a time grid.
 /// Configurable day count via @AppStorage("calendarMultiDayCount").
-/// Supports horizontal swipe to navigate between day groups.
-/// All-day bar is a single compact row matching CalendarKit's 1-day style.
+///
+/// Horizontal paging uses UIPageViewController under the hood (the same
+/// technology CalendarKit's day view uses) so swipes feel identical to the
+/// one-day view: native page-snap animation, proper gesture disambiguation,
+/// and full parallax between headers and the time grid.
 struct CalendarMultiDayView: View {
     @Binding var selectedDate: Date
     let events: [CalendarEvent]
     let dayCount: Int
     var onEventTap: ((CalendarEvent) -> Void)? = nil
 
-    // Swipe navigation state
-    @State private var dragOffset: CGFloat = 0
+    // Shared observable — lets pinch-to-zoom update every visible page instantly.
+    @State private var shared = MultiDayShared()
+    @State private var baseHourHeight: CGFloat = 48
+    private let minHourHeight: CGFloat = 28
+    private let maxHourHeight: CGFloat = 110
+
+    var body: some View {
+        MultiDayPager(
+            selectedDate: $selectedDate,
+            dayCount: dayCount,
+            events: events,
+            shared: shared,
+            onEventTap: onEventTap
+        )
+        .gesture(
+            MagnifyGesture()
+                .onChanged { value in
+                    let proposed = baseHourHeight * value.magnification
+                    shared.hourHeight = min(max(proposed, minHourHeight), maxHourHeight)
+                }
+                .onEnded { _ in
+                    baseHourHeight = shared.hourHeight
+                }
+        )
+    }
+}
+
+// MARK: - Shared observable state
+
+@Observable
+final class MultiDayShared {
+    var hourHeight: CGFloat = 48
+}
+
+// MARK: - Pager
+
+private struct MultiDayPager: UIViewControllerRepresentable {
+    @Binding var selectedDate: Date
+    let dayCount: Int
+    let events: [CalendarEvent]
+    let shared: MultiDayShared
+    let onEventTap: ((CalendarEvent) -> Void)?
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeUIViewController(context: Context) -> UIPageViewController {
+        let pvc = UIPageViewController(
+            transitionStyle: .scroll,
+            navigationOrientation: .horizontal,
+            options: [.interPageSpacing: 0]
+        )
+        pvc.dataSource = context.coordinator
+        pvc.delegate = context.coordinator
+        pvc.view.backgroundColor = .clear
+
+        let start = context.coordinator.startOfPage(for: selectedDate)
+        let page = context.coordinator.makePage(startDate: start)
+        pvc.setViewControllers([page], direction: .forward, animated: false)
+        return pvc
+    }
+
+    func updateUIViewController(_ pvc: UIPageViewController, context: Context) {
+        context.coordinator.parent = self
+
+        guard let current = pvc.viewControllers?.first as? MultiDayPageVC else { return }
+
+        let desired = context.coordinator.startOfPage(for: selectedDate)
+        let cal = Calendar.current
+
+        if !cal.isDate(current.startDate, inSameDayAs: desired) {
+            let direction: UIPageViewController.NavigationDirection =
+                desired > current.startDate ? .forward : .reverse
+            let replacement = context.coordinator.makePage(startDate: desired)
+            pvc.setViewControllers([replacement], direction: direction, animated: false)
+        } else {
+            // Same page — just refresh content (events, etc.)
+            current.refresh(
+                dayCount: dayCount,
+                events: events,
+                shared: shared,
+                onEventTap: onEventTap
+            )
+        }
+    }
+
+    // MARK: Coordinator
+
+    final class Coordinator: NSObject, UIPageViewControllerDataSource, UIPageViewControllerDelegate {
+        var parent: MultiDayPager
+
+        init(_ parent: MultiDayPager) { self.parent = parent }
+
+        func startOfPage(for date: Date) -> Date {
+            Calendar.current.startOfDay(for: date)
+        }
+
+        func makePage(startDate: Date) -> MultiDayPageVC {
+            MultiDayPageVC(
+                startDate: startDate,
+                dayCount: parent.dayCount,
+                events: parent.events,
+                shared: parent.shared,
+                onEventTap: parent.onEventTap
+            )
+        }
+
+        func pageViewController(
+            _ pvc: UIPageViewController,
+            viewControllerBefore vc: UIViewController
+        ) -> UIViewController? {
+            guard let current = vc as? MultiDayPageVC,
+                  let prev = Calendar.current.date(
+                    byAdding: .day,
+                    value: -parent.dayCount,
+                    to: current.startDate
+                  ) else { return nil }
+            return makePage(startDate: prev)
+        }
+
+        func pageViewController(
+            _ pvc: UIPageViewController,
+            viewControllerAfter vc: UIViewController
+        ) -> UIViewController? {
+            guard let current = vc as? MultiDayPageVC,
+                  let next = Calendar.current.date(
+                    byAdding: .day,
+                    value: parent.dayCount,
+                    to: current.startDate
+                  ) else { return nil }
+            return makePage(startDate: next)
+        }
+
+        func pageViewController(
+            _ pvc: UIPageViewController,
+            didFinishAnimating finished: Bool,
+            previousViewControllers: [UIViewController],
+            transitionCompleted completed: Bool
+        ) {
+            guard completed,
+                  let current = pvc.viewControllers?.first as? MultiDayPageVC else { return }
+            // Push the new start date up to the binding so nav bar / state sync.
+            DispatchQueue.main.async { [weak self] in
+                self?.parent.selectedDate = current.startDate
+            }
+        }
+    }
+}
+
+// MARK: - Page Hosting Controller
+
+private final class MultiDayPageVC: UIHostingController<MultiDayPageView> {
+    let startDate: Date
+
+    init(
+        startDate: Date,
+        dayCount: Int,
+        events: [CalendarEvent],
+        shared: MultiDayShared,
+        onEventTap: ((CalendarEvent) -> Void)?
+    ) {
+        self.startDate = startDate
+        super.init(
+            rootView: MultiDayPageView(
+                startDate: startDate,
+                dayCount: dayCount,
+                events: events,
+                shared: shared,
+                onEventTap: onEventTap
+            )
+        )
+        view.backgroundColor = .clear
+    }
+
+    @MainActor required dynamic init?(coder aDecoder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    func refresh(
+        dayCount: Int,
+        events: [CalendarEvent],
+        shared: MultiDayShared,
+        onEventTap: ((CalendarEvent) -> Void)?
+    ) {
+        rootView = MultiDayPageView(
+            startDate: startDate,
+            dayCount: dayCount,
+            events: events,
+            shared: shared,
+            onEventTap: onEventTap
+        )
+    }
+}
+
+// MARK: - Single Page
+
+private struct MultiDayPageView: View {
+    let startDate: Date
+    let dayCount: Int
+    let events: [CalendarEvent]
+    let shared: MultiDayShared
+    let onEventTap: ((CalendarEvent) -> Void)?
 
     var body: some View {
         let cal = Calendar.current
-        let dates = (0..<dayCount).compactMap { cal.date(byAdding: .day, value: $0, to: selectedDate) }
-        let weekNumber = cal.component(.weekOfYear, from: selectedDate)
+        let dates = (0..<dayCount).compactMap {
+            cal.date(byAdding: .day, value: $0, to: startDate)
+        }
+        let weekNumber = cal.component(.weekOfYear, from: startDate)
+        let allDayByDay = allDayEventsGrouped(dates: dates, cal: cal)
 
         VStack(spacing: 0) {
-            // Column headers — "Fri 3" / "Sat 4" / "Sun 5" with week number
             columnHeaders(dates: dates, weekNumber: weekNumber, cal: cal)
 
-            // All-day events bar — compact single row matching CalendarKit
-            let allDayByDay = allDayEventsGrouped(dates: dates, cal: cal)
             if allDayByDay.values.contains(where: { !$0.isEmpty }) {
                 allDayBar(dates: dates, allDayByDay: allDayByDay, cal: cal)
             }
 
             Divider()
 
-            // Time grid with columns
-            let gridColumns = dates.map { date in
-                let dayEvents = events.filter { !$0.isAllDay && cal.isDate($0.startDate, inSameDayAs: date) }
+            let columns = dates.map { date in
+                let dayEvents = events.filter {
+                    !$0.isAllDay && cal.isDate($0.startDate, inSameDayAs: date)
+                }
                 return CalendarTimeGridColumn(date: date, events: dayEvents)
             }
-
             CalendarTimeGridView(
-                columns: gridColumns,
+                columns: columns,
                 highlightToday: true,
-                onEventTap: { event in onEventTap?(event) },
-                onGridTap: nil
+                hourHeight: shared.hourHeight,
+                onEventTap: { event in onEventTap?(event) }
             )
         }
-        .offset(x: dragOffset)
-        .gesture(
-            // Horizontal swipe to navigate between day groups
-            DragGesture(minimumDistance: 30, coordinateSpace: .local)
-                .onChanged { value in
-                    // Only respond to mostly-horizontal drags to avoid conflicting
-                    // with the vertical time grid scroll
-                    if abs(value.translation.width) > abs(value.translation.height) {
-                        dragOffset = value.translation.width * 0.3
-                    }
-                }
-                .onEnded { value in
-                    let threshold: CGFloat = 50
-                    let isHorizontal = abs(value.translation.width) > abs(value.translation.height)
-
-                    withAnimation(.easeOut(duration: 0.2)) {
-                        dragOffset = 0
-                        if isHorizontal && value.translation.width < -threshold {
-                            // Swipe left → go forward by dayCount
-                            let cal = Calendar.current
-                            selectedDate = cal.date(byAdding: .day, value: dayCount, to: selectedDate) ?? selectedDate
-                        } else if isHorizontal && value.translation.width > threshold {
-                            // Swipe right → go back by dayCount
-                            let cal = Calendar.current
-                            selectedDate = cal.date(byAdding: .day, value: -dayCount, to: selectedDate) ?? selectedDate
-                        }
-                    }
-                }
-        )
-        .animation(.easeOut(duration: 0.2), value: selectedDate)
     }
 
     // MARK: - Column Headers
 
     private func columnHeaders(dates: [Date], weekNumber: Int, cal: Calendar) -> some View {
         HStack(spacing: 0) {
-            // Week number in gutter
             Text("W\(weekNumber)")
                 .font(.system(size: 10, weight: .regular))
                 .foregroundStyle(.secondary)
@@ -109,7 +281,7 @@ struct CalendarMultiDayView: View {
 
                 if index < dates.count - 1 {
                     Rectangle()
-                        .fill(Color(UIColor.separator).opacity(0.15))
+                        .fill(columnSeparatorColor)
                         .frame(width: 0.5)
                 }
             }
@@ -117,17 +289,13 @@ struct CalendarMultiDayView: View {
         .fixedSize(horizontal: false, vertical: true)
     }
 
-    // MARK: - All-Day Events Bar
+    // MARK: - All-Day Bar
 
-    /// Ultra-compact all-day bar matching CalendarKit's 1-day style.
-    /// Shows a single row per column with just 1 event title; extras shown as "+N".
-    /// Total height ~22pt — same as the CalendarKit day view all-day strip.
     private func allDayBar(dates: [Date], allDayByDay: [Date: [CalendarEvent]], cal: Calendar) -> some View {
         VStack(spacing: 0) {
             Divider()
 
             HStack(alignment: .center, spacing: 0) {
-                // "all-day" gutter label
                 Text(
                     String(
                         localized: "calendar.all-day",
@@ -135,16 +303,15 @@ struct CalendarMultiDayView: View {
                         comment: "Label for all-day calendar events"
                     )
                 )
-                    .font(.system(size: 10, weight: .light))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 44, alignment: .trailing)
-                    .padding(.trailing, 4)
+                .font(.system(size: 10, weight: .light))
+                .foregroundStyle(.secondary)
+                .frame(width: 44, alignment: .trailing)
+                .padding(.trailing, 4)
 
                 ForEach(Array(dates.enumerated()), id: \.offset) { index, date in
                     let dayStart = cal.startOfDay(for: date)
                     let dayAllDay = allDayByDay[dayStart] ?? []
 
-                    // Single compact row: first event title + overflow count
                     HStack(spacing: 3) {
                         if let first = dayAllDay.first {
                             let color = Color(
@@ -175,13 +342,13 @@ struct CalendarMultiDayView: View {
 
                     if index < dates.count - 1 {
                         Rectangle()
-                            .fill(Color(UIColor.separator).opacity(0.15))
+                            .fill(columnSeparatorColor)
                             .frame(width: 0.5)
                     }
                 }
             }
             .padding(.vertical, 2)
-            .frame(height: 22) // Fixed compact height matching CalendarKit
+            .frame(height: 22)
             .background(
                 Color(UIColor { trait in
                     trait.userInterfaceStyle == .dark
@@ -213,5 +380,13 @@ struct CalendarMultiDayView: View {
         }
 
         return grouped
+    }
+
+    private var columnSeparatorColor: Color {
+        Color(UIColor { trait in
+            trait.userInterfaceStyle == .dark
+                ? UIColor(white: 1.0, alpha: 0.22)
+                : UIColor(white: 0.0, alpha: 0.15)
+        })
     }
 }
