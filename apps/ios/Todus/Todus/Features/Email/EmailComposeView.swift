@@ -42,11 +42,6 @@ struct EmailComposeView: View {
         )
     }
 
-    /// Create a new email compose
-    init() {
-        _draft = State(initialValue: EmailDraft())
-    }
-
     /// Create a reply compose
     init(replyTo message: EmailMessage, threadId: String, body: String? = nil) {
         let replyDraft = EmailDraft(
@@ -57,13 +52,6 @@ struct EmailComposeView: View {
             replyToMessageId: message.id
         )
         _draft = State(initialValue: replyDraft)
-    }
-
-    /// Create compose with pre-filled body (from CreateSheet "Email" type)
-    init(body: String) {
-        var d = EmailDraft()
-        d.body = body
-        _draft = State(initialValue: d)
     }
 
     /// Create compose with pre-filled to, subject, and/or body (from CreateSheet)
