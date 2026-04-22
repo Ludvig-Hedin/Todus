@@ -78,7 +78,7 @@ struct CreateSheet: View {
         // padding above handles manual positioning — without this the overlay
         // gets pushed by keyboard avoidance AND by our own padding, putting the
         // composer at the top of the screen.
-        .ignoresSafeArea(.all, edges: .bottom)
+        .ignoresSafeArea([.container, .keyboard], edges: .bottom)
         .animation(.snappy(duration: 0.18), value: showsSlashMenu)
         .animation(.snappy(duration: 0.15), value: isPickingAttachment)
         .animation(.snappy(duration: 0.2), value: selectedType)
