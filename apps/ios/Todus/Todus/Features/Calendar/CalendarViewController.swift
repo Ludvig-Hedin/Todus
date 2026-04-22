@@ -17,6 +17,10 @@ final class CalendarViewController: DayViewController {
     // off the main thread prevents the startup hang visible in the iOS Performance HUD.
     private var eventStore: EKEventStore?
 
+    /// Called on the main thread whenever an EventKit save fails (e.g. permission denied,
+    /// locked calendar). Callers can observe this to show error UI.
+    var onSaveError: ((Error) -> Void)?
+
     /// Cached events keyed by the start-of-day Date. `eventsForDate(_:)` returns cached
     /// data instantly (no main-thread XPC) and triggers a background fetch on cache miss.
     private var cachedEvents: [Date: [EventDescriptor]] = [:]
@@ -221,6 +225,7 @@ final class CalendarViewController: DayViewController {
                     try store.save(editingEvent.ekEvent, span: .thisEvent)
                 } catch {
                     print("[CalendarViewController] Failed to save edited event: \(error)")
+                    onSaveError?(error)
                 }
             }
         }

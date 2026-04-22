@@ -19,6 +19,7 @@ struct CalendarTabView: View {
     @State private var isLoading = false
     @State private var calendarHeaderHeight: CGFloat = 90
     @AppStorage("calendarMultiDayCount") private var multiDayCount: Int = 3
+    @State private var eventSaveError: Error?
 
     /// Wrapped binding for the view-mode picker that records the previous mode
     /// before mutating `viewMode`, so the transition modifier can read both
@@ -92,8 +93,18 @@ struct CalendarTabView: View {
     private var contentView: some View {
         switch viewMode {
         case .day:
-            CalendarContainerView(topInset: calendarHeaderHeight)
-                .transition(viewTransition)
+            CalendarContainerView(topInset: calendarHeaderHeight, onSaveError: { error in
+                eventSaveError = error
+            })
+            .transition(viewTransition)
+            .alert("Could not save event", isPresented: Binding(
+                get: { eventSaveError != nil },
+                set: { if !$0 { eventSaveError = nil } }
+            )) {
+                Button("OK", role: .cancel) { eventSaveError = nil }
+            } message: {
+                Text(eventSaveError?.localizedDescription ?? "")
+            }
 
         case .multiDay:
             CalendarMultiDayView(
