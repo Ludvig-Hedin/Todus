@@ -676,6 +676,12 @@ const api = new Hono<HonoContext>()
                 success: true,
                 userId,
               });
+            } else {
+              TraceContext.completeSpan(traceId, tokenSpan.id, {
+                success: false,
+                reason: 'user_not_found',
+                userId,
+              });
             }
           }
         } catch {
