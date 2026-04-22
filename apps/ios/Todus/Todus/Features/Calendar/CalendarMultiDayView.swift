@@ -155,9 +155,7 @@ private struct MultiDayPager: UIViewControllerRepresentable {
             guard completed,
                   let current = pvc.viewControllers?.first as? MultiDayPageVC else { return }
             // Push the new start date up to the binding so nav bar / state sync.
-            DispatchQueue.main.async { [weak self] in
-                self?.parent.selectedDate = current.startDate
-            }
+            parent.selectedDate = current.startDate
         }
     }
 }
