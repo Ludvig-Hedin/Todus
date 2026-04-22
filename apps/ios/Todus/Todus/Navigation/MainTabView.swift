@@ -161,7 +161,11 @@ struct MainTabView: View {
             services.navigateTo = nil
         }
         .onChange(of: services.showsComposeEmail) { _, isPresented in
-            if !isPresented { services.composeEmailSeedBody = nil }
+            if !isPresented {
+                services.composeEmailSeedBody = nil
+                services.composeEmailSeedTo = nil
+                services.composeEmailSeedSubject = nil
+            }
         }
         .onChange(of: services.requestCreateSheet) { _, requested in
             guard let requested else { return }
