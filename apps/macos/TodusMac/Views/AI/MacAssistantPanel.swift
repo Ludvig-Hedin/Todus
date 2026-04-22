@@ -1536,44 +1536,27 @@ private struct MacVoiceInputButton: View {
 
 // MARK: - AnimatedSparkleIcon
 
-/// Sparkle icon with slowly rotating gradient and subtle ambient glow.
-/// Direct port of the iOS AnimatedSparkleIcon.
+/// Sparkle icon with a static gradient. No animation to keep the UI thread free.
 private struct AnimatedSparkleIcon: View {
     let size: CGFloat
 
-    @State private var rotation: Double = 0
-
-    private var gradientColors: [Color] {
-        [
-            Color(red: 0, green: 0xAA / 255.0, blue: 0xF5 / 255.0),
-            Color(red: 0xEF / 255.0, green: 0, blue: 0xC2 / 255.0),
-            Color(red: 1, green: 0, blue: 0x38 / 255.0),
-            Color(red: 0xF9 / 255.0, green: 0x9F / 255.0, blue: 0),
-        ]
+    private var gradient: LinearGradient {
+        LinearGradient(
+            stops: [
+                .init(color: Color(red: 0, green: 0xAA / 255.0, blue: 0xF5 / 255.0), location: 0.087),
+                .init(color: Color(red: 0xEF / 255.0, green: 0, blue: 0xC2 / 255.0), location: 0.269),
+                .init(color: Color(red: 1, green: 0, blue: 0x38 / 255.0), location: 0.580),
+                .init(color: Color(red: 0xF9 / 255.0, green: 0x9F / 255.0, blue: 0), location: 0.913),
+            ],
+            startPoint: UnitPoint(x: 0.25, y: 0),
+            endPoint: UnitPoint(x: 0.75, y: 1)
+        )
     }
 
     var body: some View {
-        let animatedGradient = AngularGradient(
-            colors: gradientColors + [gradientColors[0]],
-            center: .center,
-            angle: .degrees(rotation)
-        )
-
         Image(systemName: "sparkles")
             .font(.system(size: size, weight: .semibold))
-            .foregroundStyle(animatedGradient)
-            .background(
-                Image(systemName: "sparkles")
-                    .font(.system(size: size, weight: .semibold))
-                    .foregroundStyle(animatedGradient)
-                    .blur(radius: 5)
-                    .opacity(0.3)
-            )
-            .onAppear {
-                withAnimation(.linear(duration: 4).repeatForever(autoreverses: false)) {
-                    rotation = 360
-                }
-            }
+            .foregroundStyle(gradient)
     }
 }
 
