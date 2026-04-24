@@ -3199,6 +3199,8 @@ todus.app had zero Google-indexed pages. This overhaul adds all missing SEO infr
 
 [2026-04-04] [UX Fix] Corrected the cached-refresh loading-state work to target the real web app in `apps/web`, added subtle background update badges across inbox, home, tasks, and calendar, stopped invalidating restored inbox cache on startup, and switched the web home recent-mail panel to render from thread summaries instead of per-row thread fetches. User-facing and architectural change. (apps/web/components/ui/background-refresh-indicator.tsx, apps/web/components/mail/mail-list.tsx, apps/web/app/(routes)/mail/home/page.tsx, apps/web/app/(routes)/mail/tasks/page.tsx, apps/web/app/(routes)/mail/calendar/page.tsx, apps/web/providers/query-provider.tsx).
 
+[2026-04-24] [Tooling Fix] Repointed the root `pnpm ios*` scripts to the active native SwiftUI app in `apps/ios/Todus` so they no longer invoke the archived Expo app and fail with missing Expo module maps. Architectural tooling change. (`package.json`, `scripts/ios/open-native-project.sh`, `scripts/ios/build-native-simulator.sh`, `scripts/ios/build-native-device.sh`, `docs/development/SCRIPTS_GUIDE.md`).
+
 # 2026-04-04
 
 ## Fixed

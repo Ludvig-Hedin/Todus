@@ -4,10 +4,10 @@
 
 ### iOS (`apps/ios`)
 ```bash
-pnpm ios
-pnpm ios:simulator
-pnpm ios:build:preview
-pnpm ios:build:production
+pnpm ios                 # Open apps/ios/Todus/Todus.xcodeproj in Xcode
+pnpm ios:simulator       # Build the native SwiftUI iOS app for Simulator
+pnpm ios:build:preview   # Alias for the native simulator build
+pnpm ios:build:production # Release build for a generic iOS device without signing
 ```
 
 ### macOS Native App (`apps/macos`)
@@ -29,7 +29,7 @@ pnpm deploy:backend
 
 The old `native:*` scripts were removed from root `package.json`.
 
-Legacy app implementations are archived under `apps/archived/*` and should not be used for active development.
+Legacy app implementations are archived under `apps/archived/*` and should not be used for active development. In particular, the Expo app under `apps/archived/archived-rn` is reference-only and is not the active iOS build target.
 
 ## Development Commands
 
