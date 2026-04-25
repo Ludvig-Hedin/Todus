@@ -708,6 +708,11 @@ public final class AuthService: NSObject {
             return
         }
 
+        if components.scheme == "todus", components.host == "link-callback" {
+            debugAuthLog("Auth callback: received link-social callback")
+            return
+        }
+
         if let token = components.queryItems?.first(where: { $0.name == "token" })?.value, !token.isEmpty {
             if shouldIgnoreCallbackToken(token) {
                 debugAuthLog("Auth callback: ignoring duplicate token \(tokenPreview(token))")

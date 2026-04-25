@@ -1,5 +1,12 @@
 # Project Changelog
 
+## [2026-04-25] Fix — iOS Gmail OAuth connection flow
+
+- [Fix] iOS Gmail onboarding now uses the Gmail link-social flow instead of auth-only Google sign-in, so the OAuth redirect grants mail scopes and creates the backend connection row before the app marks Gmail as configured.
+- [Fix] iOS onboarding, empty-mail connect, and Settings now share `EmailService.connectGmail`, including forced connection polling while Better Auth account hooks persist the connection.
+- [Fix] Shared native auth ignores `todus://link-callback` if it is delivered through app URL handling, avoiding a false "Sign-in failed" state after a successful link-social OAuth flow on iOS/macOS.
+- **Files:** `apps/ios/Todus/Todus/Services/Email/EmailService.swift`, `apps/ios/Todus/Todus/App/GmailOnboardingView.swift`, `apps/ios/Todus/Todus/Features/Email/EmailConnectView.swift`, `apps/ios/Todus/Todus/Features/Settings/SettingsView.swift`, `packages/swift-auth/Sources/TodusAuth/AuthService.swift`
+
 ## [2026-04-25] Hardening — AI chat reliability across all actions (iOS + macOS + server)
 
 - [Fix] **macOS calendar update/delete were unreachable from chat.** `refreshCalendarSnapshot` now embeds each event's identifier as `[<id>]` next to the title and tells the model to pass it back as `id` to `update_calendar_event` / `delete_calendar_event`. Without this the model had no handle to target an existing event.

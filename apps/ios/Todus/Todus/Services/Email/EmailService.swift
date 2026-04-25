@@ -380,6 +380,51 @@ final class EmailService {
         }
     }
 
+    /// Initiates Gmail OAuth connection and waits for the backend connection row.
+    /// Google sign-in authenticates the Todus account, while link-social grants
+    /// Gmail scopes and persists the email connection used by the mail UI.
+    @discardableResult
+    func connectGmail(authService: AuthService) async -> Bool {
+        errorMessage = nil
+
+        do {
+            if authService.isAuthenticated {
+                try await authService.linkSocialAccount(provider: "google")
+            } else {
+                await authService.signInWithGoogle()
+                if !authService.isAuthenticated {
+                    errorMessage = authService.lastErrorMessage
+                        ?? "Sign in was not completed. Please try again."
+                    return false
+                }
+            }
+        } catch {
+            errorMessage = authService.lastErrorMessage
+                ?? "Could not open Google sign-in. Please try again."
+            return false
+        }
+
+        var attempt = 0
+        let maxAttempts = 6
+        while attempt < maxAttempts {
+            await checkConnection(force: true)
+            if hasConnection { break }
+            attempt += 1
+            if attempt < maxAttempts {
+                try? await Task.sleep(nanoseconds: 500_000_000)
+            }
+        }
+
+        if hasConnection {
+            await loadThreads(refresh: true)
+            return true
+        }
+
+        errorMessage =
+            "Could not link your Gmail account. Make sure you granted access to Gmail and try again."
+        return false
+    }
+
     // MARK: - Actions
 
     func sendEmail(_ draft: EmailDraft) async -> Bool {

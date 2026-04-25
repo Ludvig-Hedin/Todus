@@ -841,38 +841,14 @@ struct SettingsView: View {
         connectGmailError = nil
         defer { isConnectingGmail = false }
 
-        do {
-            if services.authService.isAuthenticated {
-                try await services.authService.linkSocialAccount(provider: "google")
-            } else {
-                await services.authService.signInWithGoogle()
-                if !services.authService.isAuthenticated {
-                    connectGmailError = services.authService.lastErrorMessage
-                        ?? "Sign in failed. Please try again."
-                    return
-                }
-            }
-        } catch {
-            connectGmailError = services.authService.lastErrorMessage
-                ?? "Could not open Google sign-in. Please try again."
-            return
-        }
-
-        // Backend account hooks run asynchronously after the OAuth redirect.
-        var attempt = 0
-        while attempt < 6 {
-            await services.emailService.checkConnection(force: true)
-            if services.emailService.hasConnection { break }
-            attempt += 1
-            if attempt < 6 {
-                try? await Task.sleep(nanoseconds: 500_000_000)
-            }
-        }
+        let didConnect = await services.emailService.connectGmail(authService: services.authService)
 
         await services.connectionsService.loadConnections()
 
-        if !services.emailService.hasConnection {
-            connectGmailError = "Could not link Gmail. Make sure you granted access and try again."
+        if !didConnect {
+            connectGmailError = services.emailService.errorMessage
+                ?? services.authService.lastErrorMessage
+                ?? "Could not link Gmail. Make sure you granted access and try again."
         }
     }
 

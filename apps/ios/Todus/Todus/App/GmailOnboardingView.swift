@@ -52,16 +52,14 @@ struct GmailOnboardingView: View {
                         isConnecting = true
                         errorMessage = nil
                         Task {
-                            await services.authService.signInWithGoogle()
-                            if services.authService.isAuthenticated {
-                                // Check Gmail API connection so EmailInboxView reflects the new state
-                                await services.emailService.checkConnection()
-                                if services.emailService.hasConnection {
-                                    await services.emailService.loadThreads(refresh: true)
-                                }
+                            let didConnect = await services.emailService.connectGmail(
+                                authService: services.authService
+                            )
+                            if didConnect {
                                 services.hasConfiguredGmailPrompt = true
                             } else {
-                                errorMessage = services.authService.lastErrorMessage
+                                errorMessage = services.emailService.errorMessage
+                                    ?? services.authService.lastErrorMessage
                                     ?? "Connection did not finish. You can try again or set this up later in Settings."
                             }
                             isConnecting = false
