@@ -16,25 +16,18 @@ struct MacTasksView: View {
     @State private var selectedTask: TaskRecord? = nil
     @State private var visibleTasks: [TaskRecord] = []
     @State private var completedTasks: [TaskRecord] = []
+    @State private var isConnectingReminders = false
     var onCreateItem: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Toolbar: view mode + search + sort
-            VStack(alignment: .leading, spacing: MacTheme.spacing6) {
-                toolbar
-                toolbarHint
-            }
-            .padding(.bottom, MacTheme.spacing12)
+            toolbar
+                .padding(.bottom, MacTheme.spacing12)
 
             // Folder strip
             if !folders.isEmpty {
                 folderStrip
-                    .padding(.bottom, MacTheme.spacing12)
-            }
-
-            if viewMode != .list {
-                completedVisibilityNote
                     .padding(.bottom, MacTheme.spacing12)
             }
 
@@ -72,6 +65,12 @@ struct MacTasksView: View {
 
             if services.isSyncingSharedFolders {
                 MacInlineRefreshBadge(label: "Syncing")
+            }
+
+            if !services.remindersSyncEnabled
+                || services.remindersSyncService.authorizationState() != .authorized
+            {
+                connectRemindersButton
             }
 
             Button {
@@ -158,38 +157,46 @@ struct MacTasksView: View {
         }
     }
 
-    private var toolbarHint: some View {
-        Text(toolbarHintText)
-            .font(MacTheme.cardSubtitleFont())
-            .foregroundStyle(MacTheme.textSecondary)
+    private var connectRemindersButton: some View {
+        Button {
+            Task { await connectAppleReminders() }
+        } label: {
+            HStack(spacing: 6) {
+                AppleRemindersIconView(size: 16)
+                if isConnectingReminders {
+                    ProgressView()
+                        .scaleEffect(0.65)
+                        .frame(width: 14, height: 14)
+                }
+                Text(isConnectingReminders ? "Connecting…" : "Connect Apple Reminders")
+                    .font(.system(size: 12, weight: .semibold))
+            }
+            .foregroundStyle(MacTheme.textPrimary)
+            .padding(.horizontal, MacTheme.spacing12)
+            .padding(.vertical, MacTheme.spacing6)
+            .background(MacTheme.surfaceCard, in: RoundedRectangle(cornerRadius: MacTheme.buttonRadius, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: MacTheme.buttonRadius, style: .continuous)
+                    .stroke(MacTheme.cardBorder, lineWidth: 0.5)
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(isConnectingReminders)
+        .help("Sync tasks with Apple Reminders")
+        .interactiveHitTarget(expansion: 6)
     }
 
-    private var toolbarHintText: String {
-        switch viewMode {
-        case .list:
-            return "List is the fastest way to triage active and completed work."
-        case .board:
-            return "Board helps you move active tasks across stages."
-        case .table:
-            return "Table is best when you need to compare status, priority, and due dates."
+    private func connectAppleReminders() async {
+        isConnectingReminders = true
+        services.remindersSyncEnabled = true
+        let granted = await services.requestRemindersPermissionIfNeeded()
+        if granted {
+            await services.importFromReminders(in: modelContext)
+            services.syncExistingTasksToReminders(in: modelContext)
+        } else {
+            services.remindersSyncEnabled = false
         }
-    }
-
-    private var completedVisibilityNote: some View {
-        HStack(spacing: MacTheme.spacing6) {
-            Image(systemName: "info.circle")
-                .font(.system(size: 11, weight: .medium))
-            Text("Completed tasks stay visible in List.")
-                .font(MacTheme.cardSubtitleFont())
-        }
-        .foregroundStyle(MacTheme.mutedText)
-        .padding(.horizontal, MacTheme.spacing12)
-        .padding(.vertical, MacTheme.spacing8)
-        .background(MacTheme.emptyStateSurface, in: RoundedRectangle(cornerRadius: MacTheme.buttonRadius, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: MacTheme.buttonRadius, style: .continuous)
-                .stroke(MacTheme.cardBorder, lineWidth: 0.5)
-        )
+        isConnectingReminders = false
     }
 
     private var viewModePicker: some View {
@@ -221,9 +228,9 @@ struct MacTasksView: View {
             }
         }
         .padding(2)
-        .background(MacTheme.surfaceCard, in: RoundedRectangle(cornerRadius: MacTheme.buttonRadius, style: .continuous))
+        .background(MacTheme.surfaceCard, in: Capsule(style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: MacTheme.buttonRadius, style: .continuous)
+            Capsule(style: .continuous)
                 .stroke(MacTheme.cardBorder, lineWidth: 0.5)
         )
     }
@@ -264,6 +271,7 @@ struct MacTasksView: View {
         }
         .buttonStyle(.plain)
         .interactiveHitTarget(expansion: 6)
+        .macClickablePointer()
     }
 
     // MARK: - Task Content
@@ -335,56 +343,33 @@ struct MacTasksView: View {
     // MARK: - Board View (Kanban)
 
     private var boardView: some View {
-        HStack(alignment: .top, spacing: MacTheme.spacing12) {
-            ForEach(TaskStatus.allCases) { status in
-                boardColumn(status: status)
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(alignment: .top, spacing: MacTheme.spacing12) {
+                ForEach(TaskStatus.allCases) { status in
+                    MacBoardColumn(
+                        status: status,
+                        tasks: visibleTasks.filter { $0.status == status },
+                        onSelect: { selectedTask = $0 },
+                        onSetStatus: { task, newStatus in
+                            applyTaskStatusOnBoard(task, to: newStatus)
+                        }
+                    )
+                }
             }
+            .padding(.trailing, MacTheme.spacing4)
         }
         .frame(maxHeight: .infinity, alignment: .top)
     }
 
-    private func boardColumn(status: TaskStatus) -> some View {
-        let tasks = visibleTasks.filter { $0.status == status }
-
-        return VStack(alignment: .leading, spacing: MacTheme.spacing8) {
-            HStack(spacing: MacTheme.spacing6) {
-                Image(systemName: status.systemImage)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(status.tintColor)
-
-                Text(status.title.uppercased())
-                    .font(MacTheme.sectionHeaderFont())
-                    .foregroundStyle(MacTheme.mutedText)
-                    .tracking(0.8)
-
-                if !tasks.isEmpty {
-                    Text("\(tasks.count)")
-                        .font(.system(size: 10, weight: .semibold, design: .rounded))
-                        .foregroundStyle(MacTheme.textSecondary)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
-                        .background(MacTheme.badgeSurface, in: RoundedRectangle(cornerRadius: MacTheme.pillRadius))
-                }
-
-                Spacer()
-            }
-            .padding(.bottom, MacTheme.spacing4)
-
-            ScrollView {
-                LazyVStack(spacing: MacTheme.spacing4) {
-                    ForEach(tasks) { task in
-                        MacTaskRow(task: task, onSelect: { selectedTask = task })
-                    }
-                }
-            }
+    private func applyTaskStatusOnBoard(_ task: TaskRecord, to status: TaskStatus) {
+        guard task.status != status else { return }
+        withAnimation(.easeOut(duration: 0.18)) {
+            task.status = status
+            task.updatedAt = .now
+            task.syncState = .pendingUpload
+            try? modelContext.save()
         }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-        .padding(MacTheme.spacing12)
-        .background(MacTheme.emptyStateSurface, in: RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous)
-                .stroke(MacTheme.cardBorder, lineWidth: 0.5)
-        )
+        recomputeTasks()
     }
 
     // MARK: - Table View
@@ -466,6 +451,7 @@ struct MacTasksView: View {
         .padding(.vertical, MacTheme.spacing6)
         .background(hoveringTableRow == task.id ? MacTheme.surfaceHover : Color.clear)
         .contentShape(Rectangle())
+        .macClickablePointer()
         .onTapGesture { selectedTask = task }
         .onHover { hovering in
             hoveringTableRow = hovering ? task.id : nil
@@ -500,6 +486,7 @@ struct MacTasksView: View {
             .interactiveHitTarget(expansion: 6)
             .font(.system(size: 12, weight: .semibold))
             .foregroundStyle(MacTheme.accent)
+            .macClickablePointer()
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -560,16 +547,116 @@ struct MacTasksView: View {
     }
 }
 
+// MARK: - Board column (drag & drop between stages)
+
+private struct MacBoardColumn: View {
+    @Query(sort: \TaskRecord.createdAt, order: .reverse) private var allTasks: [TaskRecord]
+
+    let status: TaskStatus
+    let tasks: [TaskRecord]
+    let onSelect: (TaskRecord) -> Void
+    let onSetStatus: (TaskRecord, TaskStatus) -> Void
+
+    @State private var isDropTargeted = false
+
+    private let columnWidth: CGFloat = 300
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: MacTheme.spacing8) {
+            HStack(spacing: MacTheme.spacing6) {
+                Image(systemName: status.systemImage)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(status.tintColor)
+
+                Text(status.title.uppercased())
+                    .font(MacTheme.sectionHeaderFont())
+                    .foregroundStyle(MacTheme.mutedText)
+                    .tracking(0.8)
+
+                if !tasks.isEmpty {
+                    Text("\(tasks.count)")
+                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                        .foregroundStyle(MacTheme.textSecondary)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(MacTheme.badgeSurface, in: RoundedRectangle(cornerRadius: MacTheme.pillRadius))
+                }
+
+                Spacer()
+            }
+            .padding(.bottom, MacTheme.spacing4)
+
+            ScrollView {
+                LazyVStack(spacing: MacTheme.spacing4) {
+                    if tasks.isEmpty {
+                        macBoardEmptyColumnHint
+                    } else {
+                        ForEach(tasks) { task in
+                            MacTaskRow(task: task, onSelect: { onSelect(task) }, allowsDrag: true)
+                        }
+                    }
+                }
+            }
+        }
+        .frame(width: columnWidth, alignment: .topLeading)
+        .padding(MacTheme.spacing12)
+        .background(
+            isDropTargeted ? status.tintColor.opacity(0.06) : MacTheme.emptyStateSurface,
+            in: RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous)
+                .stroke(isDropTargeted ? status.tintColor.opacity(0.22) : MacTheme.cardBorder, lineWidth: isDropTargeted ? 1 : 0.5)
+        )
+        .dropDestination(for: String.self, action: handleDrop, isTargeted: { targeted in
+            withAnimation(.easeOut(duration: 0.12)) { isDropTargeted = targeted }
+        })
+        .contentShape(Rectangle())
+    }
+
+    private var macBoardEmptyColumnHint: some View {
+        Text("Drop a task here")
+            .font(MacTheme.cardSubtitleFont())
+            .foregroundStyle(MacTheme.mutedText)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, MacTheme.spacing12)
+    }
+
+    private func handleDrop(items: [String], location _: CGPoint) -> Bool {
+        for item in items {
+            guard let id = UUID(uuidString: item),
+                  let task = allTasks.first(where: { $0.id == id }) else { continue }
+            onSetStatus(task, status)
+        }
+        isDropTargeted = false
+        return true
+    }
+}
+
 // MARK: - Task Row Component
 
 /// A single task row for the list and board views — desktop-optimized with hover states.
 struct MacTaskRow: View {
     let task: TaskRecord
     let onSelect: () -> Void
+    /// When true, the row participates in board drag-and-drop between columns.
+    var allowsDrag: Bool = false
 
     @State private var isHovered = false
 
     var body: some View {
+        Group {
+            if allowsDrag {
+                rowButton
+                    .draggable(task.id.uuidString)
+            } else {
+                rowButton
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var rowButton: some View {
         Button(action: onSelect) {
             HStack(spacing: MacTheme.spacing8) {
                 Image(systemName: task.status.systemImage)
@@ -621,6 +708,7 @@ struct MacTaskRow: View {
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
+        .macClickablePointer()
     }
 
     private func metaTag(text: String, icon: String, color: Color) -> some View {
@@ -678,6 +766,7 @@ struct MacTaskDetailSheet: View {
                     dismiss()
                 }
                 .font(.system(size: 13, weight: .medium))
+                .macClickablePointer()
             }
             .padding(MacTheme.spacing16)
 

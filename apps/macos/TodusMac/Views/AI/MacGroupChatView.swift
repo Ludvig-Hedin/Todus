@@ -55,11 +55,11 @@ struct MacGroupChatView: View {
                         HStack(spacing: 8) {
                             ZStack {
                                 Circle()
-                                    .fill(Color.blue.opacity(0.15))
+                                    .fill(Color.primary.opacity(0.15))
                                     .frame(width: 26, height: 26)
                                 Text(String((member.name ?? "?").prefix(1)).uppercased())
                                     .font(.system(size: 11, weight: .semibold))
-                                    .foregroundStyle(.blue)
+                                    .foregroundStyle(.primary)
                             }
                             VStack(alignment: .leading, spacing: 0) {
                                 Text(member.name ?? "Unknown")
@@ -77,6 +77,7 @@ struct MacGroupChatView: View {
                     }
                 }
                 .padding(.top, 6)
+                .background(MacScrollViewChromeAnchor())
             }
 
             Spacer(minLength: 0)
@@ -99,7 +100,9 @@ struct MacGroupChatView: View {
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 12)
+                    .background(MacScrollViewChromeAnchor())
                 }
+                .onAppear { MacScrollStyle.reapplyToAllWindows() }
                 .onChange(of: groupService.currentMessages.count) {
                     if let last = groupService.currentMessages.last {
                         withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
@@ -129,9 +132,10 @@ struct MacGroupChatView: View {
                 } label: {
                     Image(systemName: isSending ? "ellipsis" : "arrow.up.circle.fill")
                         .font(.system(size: 22))
-                        .foregroundColor(messageText.isEmpty || isSending ? .secondary : .blue)
+                        .foregroundColor(messageText.isEmpty || isSending ? .secondary : .primary)
                 }
                 .buttonStyle(.plain)
+                .macClickablePointer()
                 .disabled(messageText.trimmingCharacters(in: .whitespaces).isEmpty || isSending)
             }
             .padding(.horizontal, 12)
@@ -193,17 +197,16 @@ private struct MacGroupMessageBubble: View {
                     Text(message.content)
                         .font(.system(size: 13))
                         .padding(.horizontal, 12).padding(.vertical, 7)
-                        .background(.blue, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .foregroundStyle(.white)
+                        .background(Color.primary.opacity(0.12), in: RoundedRectangle(cornerRadius: MacTheme.buttonRadius, style: .continuous))
+                        .foregroundStyle(.primary)
                 }
 
             case "ai":
                 VStack(alignment: .leading, spacing: 3) {
                     Text("AI").font(.system(size: 10)).foregroundStyle(.secondary)
-                    Text(message.content)
-                        .font(.system(size: 13))
+                    MarkdownView(content: message.content, fontSize: 13)
                         .padding(.horizontal, 12).padding(.vertical, 7)
-                        .background(MacTheme.surfaceCard, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .background(MacTheme.surfaceCard, in: RoundedRectangle(cornerRadius: MacTheme.buttonRadius, style: .continuous))
                         .foregroundStyle(.primary)
                 }
                 Spacer(minLength: 80)
@@ -254,6 +257,7 @@ struct MacGroupListSection: View {
                         .frame(width: 20, height: 20)
                 }
                 .buttonStyle(.plain)
+                .macClickablePointer()
                 .focusEffectDisabled()
                 .help("Join a group")
 
@@ -264,6 +268,7 @@ struct MacGroupListSection: View {
                         .frame(width: 20, height: 20)
                 }
                 .buttonStyle(.plain)
+                .macClickablePointer()
                 .focusEffectDisabled()
                 .help("New group")
             }
@@ -285,11 +290,11 @@ struct MacGroupListSection: View {
                         HStack(spacing: 7) {
                             ZStack {
                                 RoundedRectangle(cornerRadius: 5, style: .continuous)
-                                    .fill(Color.blue.opacity(0.18))
+                                    .fill(Color.primary.opacity(0.18))
                                     .frame(width: 18, height: 18)
                                 Text(String(group.name.prefix(1)).uppercased())
                                     .font(.system(size: 9, weight: .semibold))
-                                    .foregroundStyle(.blue)
+                                    .foregroundStyle(.primary)
                             }
                             Text(group.name)
                                 .font(.system(size: 12.5))
@@ -308,6 +313,7 @@ struct MacGroupListSection: View {
                         .contentShape(RoundedRectangle(cornerRadius: 5))
                     }
                     .buttonStyle(.plain)
+                    .macClickablePointer()
                     .focusEffectDisabled()
                 }
             }

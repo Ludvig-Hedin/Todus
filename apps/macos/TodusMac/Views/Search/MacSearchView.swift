@@ -153,7 +153,7 @@ struct MacSearchView: View {
                 )
                 searchRow(
                     icon: "envelope",
-                    iconColor: .blue,
+                    iconColor: .primary,
                     title: "Compose email",
                     subtitle: "Write a new message",
                     type: "Action",

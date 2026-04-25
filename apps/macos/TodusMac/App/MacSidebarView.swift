@@ -237,10 +237,62 @@ struct MacSidebarView: View {
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(.thinMaterial)
+        // Hidden keyboard handlers — wire ⌥↑/⌥↓ to step through the visible sidebar
+        // rows. A custom VStack of buttons (vs List(selection:)) doesn't get
+        // arrow-key navigation for free, and binding bare arrows would steal them
+        // from text fields and message lists. ⌥+arrow is the conservative pick:
+        // it never conflicts with text editing or in-list navigation.
+        .background {
+            Group {
+                Button("") { stepSelection(by: 1) }
+                    .keyboardShortcut(.downArrow, modifiers: [.option])
+                Button("") { stepSelection(by: -1) }
+                    .keyboardShortcut(.upArrow, modifiers: [.option])
+            }
+            .opacity(0)
+            .allowsHitTesting(false)
+        }
         .task {
             // Load connections on sidebar appear for multi-account support
             await services.connectionsService.loadConnections()
         }
+    }
+
+    /// All sidebar rows in visible order — used by the arrow-key handlers to
+    /// step through selections. Mirrors the order of the buttons rendered in `body`,
+    /// expanding email / calendar children only when their group is open.
+    private var orderedSelections: [MacPrimarySelection] {
+        var rows: [MacPrimarySelection] = [.home, .tasks]
+        // Email parent + (optional) children
+        rows.append(.email(.inbox))
+        if isEmailExpanded {
+            // Primary first (inbox/drafts/sent), then secondary (archive/snoozed/spam/bin).
+            // Drop .inbox here so we don't duplicate the parent row's selection target.
+            for section in EmailSection.allCases.filter(\.isPrimary) where section != .inbox {
+                rows.append(.email(section))
+            }
+            for section in EmailSection.allCases.filter({ !$0.isPrimary }) {
+                rows.append(.email(section))
+            }
+        }
+        rows.append(.meetings)
+        rows.append(.docs)
+        // Calendar parent + (optional) children
+        rows.append(.calendar(.all))
+        if isCalendarExpanded {
+            for section in CalendarSection.allCases where section != .all {
+                rows.append(.calendar(section))
+            }
+        }
+        return rows
+    }
+
+    private func stepSelection(by delta: Int) {
+        let rows = orderedSelections
+        guard !rows.isEmpty else { return }
+        let currentIndex = rows.firstIndex(of: selection) ?? 0
+        let next = (currentIndex + delta + rows.count) % rows.count
+        selection = rows[next]
     }
 
     // MARK: - Footer per view
@@ -601,7 +653,7 @@ private struct SidebarConnectionRow: View {
 
     /// Parse the connection's hex color into a SwiftUI Color
     private var dotColor: Color {
-        Color(hex: connection.displayColor) ?? .blue
+        Color(hex: connection.displayColor) ?? .primary
     }
 
     var body: some View {
@@ -664,7 +716,7 @@ private struct ConnectionAvatarsRow: View {
         HStack(spacing: 4) {
             ForEach(connectionsService.connections) { connection in
                 let isEnabled = connectionsService.enabledConnectionIds.contains(connection.id)
-                let dotColor = Color(hex: connection.displayColor) ?? .blue
+                let dotColor = Color(hex: connection.displayColor) ?? .primary
 
                 Button {
                     connectionsService.toggleConnection(connection.id)

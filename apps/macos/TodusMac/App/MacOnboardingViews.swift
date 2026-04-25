@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 import AppKit
 
 private struct MacOnboardingShell<Content: View>: View {
@@ -45,7 +46,8 @@ private struct MacOnboardingShell<Content: View>: View {
     }
 }
 
-private struct MacOnboardingPrimaryButtonStyle: ButtonStyle {
+/// Primary capsule button (white on accent) — shared with inbox “Connect Gmail” and onboarding.
+struct MacOnboardingPrimaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 14, weight: .semibold))
@@ -139,6 +141,78 @@ struct MacGmailOnboardingView: View {
     }
 }
 
+struct MacRemindersOnboardingView: View {
+    @Environment(MacAppServices.self) private var services
+    @Environment(\.modelContext) private var modelContext
+    @State private var isConnecting = false
+    @State private var deniedMessage: String?
+
+    var body: some View {
+        MacOnboardingShell(
+            step: 3,
+            title: "Connect Apple Reminders",
+            subtitle: "Connect Apple Reminders to keep your tasks aligned. If you skip, Todus still works normally and you can turn sync on later in Settings.",
+            icon: AnyView(AppleRemindersIconView(size: 88))
+        ) {
+            VStack(spacing: 12) {
+                if let deniedMessage {
+                    onboardingMessage(text: deniedMessage, tint: Color.red)
+                } else {
+                    onboardingMessage(
+                        text: "We only ask once here. You can revisit this anytime in Settings.",
+                        tint: MacTheme.textSecondary
+                    )
+                }
+
+                Button {
+                    Task { await connect() }
+                } label: {
+                    HStack(spacing: 8) {
+                        AppleRemindersIconView(size: 20)
+                        if isConnecting {
+                            ProgressView()
+                                .tint(.white)
+                                .scaleEffect(0.85)
+                        }
+                        Text(isConnecting ? "Connecting…" : "Connect Apple Reminders")
+                    }
+                }
+                .buttonStyle(MacOnboardingPrimaryButtonStyle())
+                .disabled(isConnecting)
+
+                Button("Skip, set this up later in Settings") {
+                    services.hasConfiguredRemindersPrompt = true
+                }
+                .buttonStyle(MacOnboardingSecondaryButtonStyle())
+            }
+        }
+    }
+
+    private func connect() async {
+        isConnecting = true
+        deniedMessage = nil
+        let granted: Bool
+        switch services.remindersSyncService.authorizationState() {
+        case .authorized:
+            granted = true
+        case .notDetermined:
+            granted = await services.remindersSyncService.requestAccess()
+        case .restricted, .denied, .writeOnly:
+            granted = false
+        }
+        if granted {
+            services.remindersSyncEnabled = true
+            await services.importFromReminders(in: modelContext)
+            services.syncExistingTasksToReminders(in: modelContext)
+            services.hasConfiguredRemindersPrompt = true
+        } else {
+            services.remindersSyncEnabled = false
+            deniedMessage = "Permission was not granted. You can keep going and enable Reminders later in Settings."
+        }
+        isConnecting = false
+    }
+}
+
 struct MacCalendarOnboardingView: View {
     @Environment(MacAppServices.self) private var services
     @State private var isRequestingAccess = false
@@ -214,7 +288,7 @@ struct MacStartupOnboardingView: View {
 
     var body: some View {
         MacOnboardingShell(
-            step: 3,
+            step: 4,
             title: "Choose your launch page",
             subtitle: "Pick what opens first when Todus starts. This is just a preference and you can change it later in Settings.",
             icon: AnyView(Image(systemName: "sidebar.left")
@@ -239,7 +313,7 @@ struct MacStartupOnboardingView: View {
                                     .font(.system(size: 15, weight: .medium))
                                     .foregroundStyle(MacTheme.accent)
                                     .frame(width: 32, height: 32)
-                                    .background(MacTheme.surfaceHover, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                    .background(MacTheme.surfaceHover, in: RoundedRectangle(cornerRadius: MacTheme.compactRadius, style: .continuous))
 
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(option.title)

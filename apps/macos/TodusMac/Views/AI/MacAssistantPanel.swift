@@ -304,6 +304,9 @@ struct MacAssistantPanel: View {
     @State private var thinkingIndex = 0
     private let thinkingPhrases = ["Thinking", "Reading tasks", "Searching", "Writing"]
 
+    // Chat input dynamic height — driven by text content, reset on send
+    @State private var chatInputHeight: CGFloat = 18
+
     // Rename conversation
     @State private var showsRenameAlert = false
     @State private var renameText = ""
@@ -390,6 +393,7 @@ struct MacAssistantPanel: View {
             .overlay(Capsule().stroke(folderFilter == filter ? MacTheme.accent.opacity(0.25) : MacTheme.cardBorder, lineWidth: 0.5))
         }
         .buttonStyle(.plain)
+        .macClickablePointer()
     }
 
     /// Dark panel background — matches iOS AppTheme.backgroundTop
@@ -434,17 +438,19 @@ struct MacAssistantPanel: View {
                         activeGroupId: nil
                     )
                     .padding(12)
+                    .background(MacScrollViewChromeAnchor())
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .onAppear { MacScrollStyle.reapplyToAllWindows() }
 
             case .groupChat(let groupId):
                 MacGroupChatView(groupId: groupId)
             }
         }
         .background(panelBackground)
-        .clipShape(RoundedRectangle(cornerRadius: displayMode == .floating ? 14 : 0, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: displayMode == .floating ? MacTheme.rowRadius : 0, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: displayMode == .floating ? 14 : 0, style: .continuous)
+            RoundedRectangle(cornerRadius: displayMode == .floating ? MacTheme.rowRadius : 0, style: .continuous)
                 .stroke(MacTheme.cardBorder, lineWidth: displayMode == .floating ? 1 : 0)
         )
         // Resize handle — bottom-right corner (floating mode only)
@@ -601,6 +607,7 @@ struct MacAssistantPanel: View {
                         .frame(width: 26, height: 26)
                 }
                 .buttonStyle(.plain)
+                .macClickablePointer()
                 .help("Conversation History")
             } else {
                 Button {
@@ -612,6 +619,7 @@ struct MacAssistantPanel: View {
                         .frame(width: 26, height: 26)
                 }
                 .buttonStyle(.plain)
+                .macClickablePointer()
                 .help("Back to Chat")
             }
 
@@ -646,6 +654,7 @@ struct MacAssistantPanel: View {
                         .frame(width: 26, height: 26)
                 }
                 .buttonStyle(.plain)
+                .macClickablePointer()
                 .help("Group Chats")
             }
 
@@ -660,6 +669,7 @@ struct MacAssistantPanel: View {
                         .frame(width: 26, height: 26)
                 }
                 .buttonStyle(.plain)
+                .macClickablePointer()
                 .help("New Conversation")
             }
 
@@ -721,6 +731,7 @@ struct MacAssistantPanel: View {
                     .frame(width: 26, height: 26)
             }
             .menuStyle(.borderlessButton)
+            .macClickablePointer()
             .frame(width: 26)
             } // end if panelContent == .chat (ellipsis menu)
 
@@ -736,6 +747,7 @@ struct MacAssistantPanel: View {
                     .frame(width: 22, height: 22)
             }
             .buttonStyle(.plain)
+            .macClickablePointer()
             .help(displayMode == .floating ? "Dock to Side" : "Float Window")
 
             // Close
@@ -748,6 +760,7 @@ struct MacAssistantPanel: View {
                     .frame(width: 22, height: 22)
             }
             .buttonStyle(.plain)
+            .macClickablePointer()
             .help("Close (⌘L)")
         }
         .padding(.horizontal, 14)
@@ -785,11 +798,12 @@ struct MacAssistantPanel: View {
                             .font(.system(size: 11, weight: .medium))
                             .padding(.horizontal, 8)
                             .padding(.vertical, 5)
-                            .background(Color.blue.opacity(0.1), in: Capsule())
-                            .foregroundStyle(.blue)
+                            .background(Color.primary.opacity(0.1), in: Capsule())
+                            .foregroundStyle(.primary)
                     }
                     .buttonStyle(.plain)
-                }
+                    .macClickablePointer()
+    }
                 if !emailConnected && ["email", "home"].contains(currentSelection.category) {
                     Button {
                         openInternetAccountsSettings()
@@ -802,7 +816,8 @@ struct MacAssistantPanel: View {
                             .foregroundStyle(.orange)
                     }
                     .buttonStyle(.plain)
-                }
+                    .macClickablePointer()
+    }
             }
         }
         .alert("Configure Email in System Settings", isPresented: $showEmailSettingsFallbackAlert) {
@@ -864,7 +879,7 @@ struct MacAssistantPanel: View {
                                     .foregroundStyle(MacTheme.mutedText)
                             }
                             .buttonStyle(.plain)
-
+                            .macClickablePointer()
                             Spacer()
 
                             Button {
@@ -875,7 +890,8 @@ struct MacAssistantPanel: View {
                                     .foregroundStyle(MacTheme.mutedText)
                             }
                             .buttonStyle(.plain)
-                        }
+                            .macClickablePointer()
+    }
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
                     } else if pool.count > 3 {
@@ -887,6 +903,7 @@ struct MacAssistantPanel: View {
                                 .foregroundStyle(MacTheme.mutedText)
                         }
                         .buttonStyle(.plain)
+                        .macClickablePointer()
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
                     }
@@ -902,6 +919,7 @@ struct MacAssistantPanel: View {
                         .foregroundStyle(MacTheme.mutedText)
                     }
                     .buttonStyle(.plain)
+                    .macClickablePointer()
                     .padding(.horizontal, 12)
                     .padding(.bottom, 4)
                 }
@@ -939,7 +957,8 @@ struct MacAssistantPanel: View {
                                 }
                                 // email: user needs to go to system settings — no in-app action on macOS
                             },
-                            onOpenEmailSettings: openInternetAccountsSettings
+                            onOpenEmailSettings: openInternetAccountsSettings,
+                            onEdit: { edited in editMessage(edited) }
                         )
                         .id(message.id)
                     }
@@ -953,8 +972,12 @@ struct MacAssistantPanel: View {
                 }
                 .padding(14)
                 .padding(.bottom, 8)
+                // Ensures the nested SwiftUI `ScrollView`’s `NSScrollView` + `NSClipView` get
+                // overlay style and no track strip (global tree walk often misses this region).
+                .background(MacScrollViewChromeAnchor())
             }
             .scrollIndicators(.automatic)
+            .onAppear { MacScrollStyle.reapplyToAllWindows() }
             .onChange(of: chatService.messages.count) {
                 if let lastID = chatService.messages.last?.id {
                     withAnimation(.snappy(duration: 0.25)) {
@@ -1020,11 +1043,12 @@ struct MacAssistantPanel: View {
                                         .font(.system(size: 8, weight: .bold))
                                 }
                                 .buttonStyle(.plain)
-                            }
-                            .foregroundStyle(.blue)
+                                .macClickablePointer()
+    }
+                            .foregroundStyle(.primary)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 5)
-                            .background(Color.blue.opacity(0.12), in: Capsule())
+                            .background(Color.primary.opacity(0.12), in: Capsule())
                         }
 
                         // Pending attachment pills
@@ -1042,7 +1066,8 @@ struct MacAssistantPanel: View {
                                         .font(.system(size: 8, weight: .bold))
                                 }
                                 .buttonStyle(.plain)
-                            }
+                                .macClickablePointer()
+    }
                             .foregroundStyle(MacTheme.mutedText)
                             .padding(.horizontal, 8)
                             .padding(.vertical, 4)
@@ -1060,7 +1085,8 @@ struct MacAssistantPanel: View {
             // TextField.onSubmit fires on ALL Return presses with no way to distinguish
             // Shift/Option+Return, preventing users from entering line breaks.
             ZStack(alignment: .topLeading) {
-                MacChatTextInput(text: $inputText, onSend: sendMessage)
+                MacChatTextInput(text: $inputText, contentHeight: $chatInputHeight, onSend: sendMessage)
+                    .frame(height: chatInputHeight)
                     .padding(.horizontal, 14)
                     .padding(.top, (pageContextAttached || !pendingAttachments.isEmpty) ? 4 : 10)
                     .padding(.bottom, 6)
@@ -1086,6 +1112,7 @@ struct MacAssistantPanel: View {
                         .frame(width: 26, height: 26)
                 }
                 .buttonStyle(.plain)
+                .macClickablePointer()
                 .help("Attach File")
 
                 Spacer()
@@ -1106,10 +1133,12 @@ struct MacAssistantPanel: View {
                             .background(Color.secondary, in: Circle())
                     }
                     .buttonStyle(.plain)
+                    .macClickablePointer()
                     .help("Stop Generating")
                     .transition(.scale.combined(with: .opacity))
                 } else {
-                    let isEmpty = inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    let textEmpty = inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    let isEmpty = textEmpty && pendingAttachments.isEmpty
                     Button(action: sendMessage) {
                         Image(systemName: "arrow.up")
                             .font(.system(size: 11, weight: .bold))
@@ -1121,6 +1150,7 @@ struct MacAssistantPanel: View {
                             )
                     }
                     .buttonStyle(.plain)
+                    .macClickablePointer()
                     .disabled(isEmpty)
                     .help("Send (⌘↵)")
                     .transition(.scale.combined(with: .opacity))
@@ -1130,9 +1160,9 @@ struct MacAssistantPanel: View {
             .padding(.bottom, 8)
             .animation(.snappy(duration: 0.18), value: chatService.isStreaming)
         }
-        .background(MacTheme.surfaceCard, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(MacTheme.surfaceCard, in: RoundedRectangle(cornerRadius: MacTheme.rowRadius, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(cornerRadius: MacTheme.rowRadius, style: .continuous)
                 .stroke(MacTheme.cardBorder, lineWidth: 0.5)
         )
         .padding(.horizontal, 10)
@@ -1232,6 +1262,7 @@ struct MacAssistantPanel: View {
                                             .frame(width: 22, height: 22)
                                     }
                                     .menuStyle(.borderlessButton)
+                                    .macClickablePointer()
                                 }
                                 .padding(.horizontal, 14)
                                 .padding(.vertical, 8)
@@ -1239,6 +1270,7 @@ struct MacAssistantPanel: View {
                                 .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
+                            .macClickablePointer()
                         }
                     }
                 }
@@ -1293,7 +1325,8 @@ struct MacAssistantPanel: View {
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                    }
+                        .macClickablePointer()
+    }
                 }
             }
         }
@@ -1303,18 +1336,49 @@ struct MacAssistantPanel: View {
 
     private func sendMessage() {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+        let hasAttachments = !pendingAttachments.isEmpty
+        guard !text.isEmpty || hasAttachments else { return }
+
+        let messageText: String
+        if text.isEmpty, hasAttachments {
+            let n = pendingAttachments.count
+            messageText = n == 1
+                ? "View the attached file"
+                : "View the \(n) attached files"
+        } else {
+            messageText = text
+        }
+
+        let urls = pendingAttachments
         inputText = ""
+        chatInputHeight = 18
         pendingAttachments = []
         UserDefaults.standard.removeObject(forKey: "mac_ai_draft_input")
         // Set page context so the AI knows where the user is
         chatService.currentPageContext = pageContextAttached ? currentSelection.title + " view" : nil
-        chatService.send(userMessage: text, allTasks: Array(allTasks), modelContext: modelContext)
+        chatService.send(
+            userMessage: messageText,
+            attachmentURLs: urls,
+            allTasks: Array(allTasks),
+            modelContext: modelContext
+        )
     }
 
     private func sendSuggestion(_ text: String) {
         chatService.currentPageContext = pageContextAttached ? currentSelection.title + " view" : nil
         chatService.send(userMessage: text, allTasks: Array(allTasks), modelContext: modelContext)
+    }
+
+    /// Right-click "Edit" on a user bubble: load its content back into the composer,
+    /// drop the edited turn and everything after it, and let the user re-send with
+    /// new wording. Attachments aren't restored — the original file URLs aren't kept
+    /// on macOS once the message is sent, so the user re-attaches if needed.
+    private func editMessage(_ message: MacChatMessage) {
+        guard message.role == .user, !chatService.isStreaming else { return }
+        inputText = message.content
+        pendingAttachments = []
+        chatService.truncateBefore(messageID: message.id)
+        UserDefaults.standard.set(message.content, forKey: "mac_ai_draft_input")
     }
 
     // MARK: - Context-Aware Suggestion Pool (matches iOS per-tab logic)
@@ -1518,6 +1582,7 @@ private struct MacVoiceInputButton: View {
             .animation(.snappy(duration: 0.18), value: controller.recordingState)
         }
         .buttonStyle(.plain)
+        .macClickablePointer()
         .disabled(controller.recordingState == .transcribing)
         .help(controller.recordingState == .idle ? "Voice Input" : "Stop Recording")
     }
@@ -1571,6 +1636,9 @@ private struct MacMessageBubble: View {
     var onRetry: () -> Void = {}
     var onConnect: ((String) -> Void)?
     var onOpenEmailSettings: () -> Void = {}
+    /// Right-click / long-press "Edit" on a user message — parent pre-fills the composer
+    /// and truncates the conversation so the edited turn re-runs on send.
+    var onEdit: ((MacChatMessage) -> Void)?
 
     @State private var showActions = false
     @State private var didCopy = false
@@ -1578,11 +1646,26 @@ private struct MacMessageBubble: View {
 
     private enum ThumbsState { case up, down }
 
+    /// Plain-text payload the context menu copies.
+    private var copyableText: String {
+        message.content.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var canEdit: Bool {
+        message.role == .user && !message.isStreaming && onEdit != nil
+    }
+
     var body: some View {
         VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 6) {
             HStack(alignment: .top) {
                 if message.role == .user { Spacer(minLength: 50) }
-                if message.role == .user { userBubble } else { assistantBubble }
+                if message.role == .user {
+                    userBubble
+                        .contextMenu { bubbleMenu }
+                } else {
+                    assistantBubble
+                        .contextMenu { bubbleMenu }
+                }
                 if message.role == .assistant { Spacer(minLength: 0) }
             }
 
@@ -1609,16 +1692,38 @@ private struct MacMessageBubble: View {
     // MARK: User Bubble
 
     private var userBubble: some View {
-        Text(message.content)
-            .font(.system(size: 13, weight: .medium))
-            .lineSpacing(2)
-            .foregroundStyle(.primary)
-            // fixedSize ensures the bubble expands vertically for multi-line messages
-            .fixedSize(horizontal: false, vertical: true)
-            .textSelection(.enabled)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(MacTheme.surfaceCard, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        VStack(alignment: .trailing, spacing: 6) {
+            if !message.attachmentFileNames.isEmpty {
+                HStack(spacing: 4) {
+                    ForEach(message.attachmentFileNames, id: \.self) { name in
+                        let isImage = ["png", "jpg", "jpeg", "heic", "heif", "gif", "webp"]
+                            .contains((name as NSString).pathExtension.lowercased())
+                        HStack(spacing: 4) {
+                            Image(systemName: isImage ? "photo" : "doc")
+                                .font(.system(size: 9, weight: .semibold))
+                            Text(name)
+                                .font(.system(size: 10, weight: .medium))
+                                .lineLimit(1)
+                        }
+                        .foregroundStyle(MacTheme.mutedText)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(MacTheme.surfaceCard, in: Capsule())
+                    }
+                }
+            }
+            if !message.content.isEmpty {
+                Text(message.content)
+                    .font(.system(size: 13, weight: .medium))
+                    .lineSpacing(2)
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(MacTheme.surfaceCard, in: RoundedRectangle(cornerRadius: MacTheme.buttonRadius, style: .continuous))
+            }
+        }
     }
 
     // MARK: Assistant Bubble
@@ -1666,7 +1771,7 @@ private struct MacMessageBubble: View {
                     lc.contains("email is not connected")
 
                 if !calendarConnected && mentionsCalendarConnectionIssue {
-                    macConnectBanner(label: "Connect Calendar", icon: "calendar", color: .blue) {
+                    macConnectBanner(label: "Connect Calendar", icon: "calendar", color: .primary) {
                         onConnect?("calendar")
                     }
                 }
@@ -1691,10 +1796,11 @@ private struct MacMessageBubble: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
-            .background(color.opacity(0.1), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .background(color.opacity(0.1), in: RoundedRectangle(cornerRadius: MacTheme.compactRadius, style: .continuous))
             .foregroundStyle(color)
         }
         .buttonStyle(.plain)
+        .macClickablePointer()
         .padding(.top, 2)
         .transition(.opacity.combined(with: .scale(scale: 0.95)))
     }
@@ -1705,31 +1811,12 @@ private struct MacMessageBubble: View {
 
     @ViewBuilder
     private var assistantContent: some View {
-        fullMarkdownText(message.content)
+        MarkdownView(content: message.content, fontSize: 13)
             .overlay(alignment: .bottomLeading) {
-                // Blinking cursor during streaming
                 if message.isStreaming { MacBlinkingCursor() }
             }
-            .lineSpacing(3)
             .foregroundStyle(.primary.opacity(0.85))
             .textSelection(.enabled)
-    }
-
-    @ViewBuilder
-    private func fullMarkdownText(_ content: String) -> some View {
-        let normalized = content.replacingOccurrences(
-            of: "(?<!\n)\n(?!\n)",
-            with: "\n\n",
-            options: .regularExpression
-        )
-        if let attributed = try? AttributedString(
-            markdown: normalized,
-            options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .full)
-        ) {
-            Text(attributed)
-        } else {
-            Text(content)
-        }
     }
 
     // MARK: Web Search
@@ -1783,6 +1870,7 @@ private struct MacMessageBubble: View {
                         .overlay(Capsule().stroke(MacTheme.cardBorder, lineWidth: 0.5))
                     }
                     .buttonStyle(.plain)
+                    .macClickablePointer()
                     .help(source.title)
                 }
             }
@@ -1844,7 +1932,7 @@ private struct MacMessageBubble: View {
     private func mutationColor(_ m: MacTaskMutation) -> Color {
         switch m.action {
         case .create: return .green
-        case .update: return .blue
+        case .update: return .primary
         case .delete: return .red
         }
     }
@@ -1862,6 +1950,7 @@ private struct MacMessageBubble: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .macClickablePointer()
             .disabled(!canRetry)
             .help("Retry")
 
@@ -1882,6 +1971,7 @@ private struct MacMessageBubble: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .macClickablePointer()
             .help(didCopy ? "Copied!" : "Copy")
 
             // Thumbs up
@@ -1892,12 +1982,12 @@ private struct MacMessageBubble: View {
             } label: {
                 Image(systemName: thumbsState == .up ? "hand.thumbsup.fill" : "hand.thumbsup")
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(thumbsState == .up ? Color.blue : MacTheme.mutedText)
+                    .foregroundStyle(thumbsState == .up ? Color.primary : MacTheme.mutedText)
                     .frame(width: 26, height: 26)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-
+            .macClickablePointer()
             // Thumbs down
             Button {
                 withAnimation(.snappy(duration: 0.15)) {
@@ -1911,8 +2001,31 @@ private struct MacMessageBubble: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-        }
+            .macClickablePointer()
+    }
         .padding(.leading, 2)
+    }
+
+    // MARK: Right-click / long-press menu — copy + edit (user only)
+
+    @ViewBuilder
+    private var bubbleMenu: some View {
+        Button {
+            guard !copyableText.isEmpty else { return }
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(copyableText, forType: .string)
+        } label: {
+            Label("Copy", systemImage: "doc.on.doc")
+        }
+        .disabled(copyableText.isEmpty)
+
+        if canEdit {
+            Button {
+                onEdit?(message)
+            } label: {
+                Label("Edit message", systemImage: "pencil")
+            }
+        }
     }
 }
 
@@ -1954,7 +2067,7 @@ private struct MacReasoningBox: View {
                 .foregroundStyle(MacTheme.mutedText)
             }
             .buttonStyle(.plain)
-
+            .macClickablePointer()
             if isExpanded {
                 Text(content)
                     .font(.system(size: 11))
@@ -1966,9 +2079,9 @@ private struct MacReasoningBox: View {
             }
         }
         .padding(10)
-        .background(MacTheme.surfaceCard.opacity(0.5), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(MacTheme.surfaceCard.opacity(0.5), in: RoundedRectangle(cornerRadius: MacTheme.compactRadius, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
+            RoundedRectangle(cornerRadius: MacTheme.compactRadius, style: .continuous)
                 .stroke(MacTheme.cardBorder, lineWidth: 0.5)
         )
         .onChange(of: isStreaming) { _, streaming in
@@ -2005,12 +2118,13 @@ private struct SuggestionRow: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
             .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                RoundedRectangle(cornerRadius: MacTheme.compactRadius, style: .continuous)
                     .fill(isHovered ? MacTheme.surfaceHover : .clear)
             )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .macClickablePointer()
         .onHover { isHovered = $0 }
         .animation(.easeOut(duration: 0.1), value: isHovered)
     }
@@ -2043,13 +2157,15 @@ private struct MacBlinkingCursor: View {
 
 private struct MacChatTextInput: NSViewRepresentable {
     @Binding var text: String
+    @Binding var contentHeight: CGFloat
     let onSend: () -> Void
 
-    func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
+    func makeCoordinator() -> Coordinator { Coordinator(text: $text, contentHeight: $contentHeight) }
 
     func makeNSView(context: Context) -> NSScrollView {
         let scrollView = NSScrollView()
         scrollView.hasVerticalScroller = true
+        scrollView.scrollerStyle = .overlay
         scrollView.autohidesScrollers = true
         scrollView.drawsBackground = false
         scrollView.borderType = .noBorder
@@ -2070,35 +2186,63 @@ private struct MacChatTextInput: NSViewRepresentable {
         textView.textContainer?.lineFragmentPadding = 0
 
         scrollView.documentView = textView
+        MacScrollStyle.applyChrome(to: scrollView)
         return scrollView
     }
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        MacScrollStyle.applyChrome(to: scrollView)
         guard let textView = scrollView.documentView as? MacChatNSTextView else { return }
         textView.onSend = onSend
         // Only sync when text changed externally (e.g., cleared after send)
         if textView.string != text {
             textView.string = text
+            let h = Self.measuredHeight(of: textView)
+            DispatchQueue.main.async { self.contentHeight = h }
         }
     }
 
-    func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSScrollView, context: Context) -> CGSize? {
-        guard let textView = nsView.documentView as? NSTextView,
-              let width = proposal.width, width > 0 else { return nil }
-        textView.sizeToFit()
-        let contentHeight = textView.frame.height
-        // Grow from 1 line (≈18pt) up to max 120pt, then scroll
-        let height = min(max(contentHeight, 18), 120)
-        return CGSize(width: width, height: height)
+    // Counts visual line fragments, adding one extra for the cursor line after a trailing newline.
+    // NSLayoutManager's usedRect excludes that empty trailing line, causing the input to stay
+    // one line tall when the user presses Return on an otherwise-empty field.
+    static func measuredHeight(of textView: NSTextView) -> CGFloat {
+        guard let lm = textView.layoutManager,
+              let tc = textView.textContainer,
+              let font = textView.font else { return 18 }
+        lm.ensureLayout(for: tc)
+        var lineCount = 0
+        var idx = 0
+        let total = lm.numberOfGlyphs
+        if total == 0 {
+            lineCount = 1
+        } else {
+            while idx < total {
+                var range = NSRange()
+                lm.lineFragmentRect(forGlyphAt: idx, effectiveRange: &range)
+                lineCount += 1
+                let next = NSMaxRange(range)
+                guard next > idx else { break }
+                idx = next
+            }
+        }
+        if textView.string.hasSuffix("\n") { lineCount += 1 }
+        let lineHeight = lm.defaultLineHeight(for: font)
+        return min(max(ceil(CGFloat(lineCount) * lineHeight), 18), 120)
     }
 
     final class Coordinator: NSObject, NSTextViewDelegate {
         @Binding var text: String
-        init(text: Binding<String>) { _text = text }
+        @Binding var contentHeight: CGFloat
+
+        init(text: Binding<String>, contentHeight: Binding<CGFloat>) {
+            _text = text
+            _contentHeight = contentHeight
+        }
 
         func textDidChange(_ notification: Notification) {
             guard let tv = notification.object as? NSTextView else { return }
             text = tv.string
+            contentHeight = MacChatTextInput.measuredHeight(of: tv)
         }
     }
 }

@@ -29,7 +29,7 @@ struct MacEmailInboxView: View {
     @State private var viewMode: MacInboxViewMode = .threads
     /// When in People mode, the currently selected sender email to show their threads
     @State private var selectedSenderEmail: String? = nil
-    @FocusState private var isConnectGmailFocused: Bool
+    @State private var isConnectGmailLoading = false
 
     /// Which email folder to show — matches backend FOLDERS constant.
     /// Values: "inbox", "draft", "sent", "archive", "snoozed", "spam", "bin"
@@ -204,6 +204,7 @@ struct MacEmailInboxView: View {
                     )
                 }
                 .buttonStyle(.plain)
+                .macClickablePointer()
                 .disabled(nudge.threadIds.isEmpty)
             }
         }
@@ -231,6 +232,7 @@ struct MacEmailInboxView: View {
                         .foregroundStyle(MacTheme.mutedText)
                 }
                 .buttonStyle(.plain)
+                .macClickablePointer()
             }
 
             if isBackgroundRefreshing {
@@ -287,6 +289,7 @@ struct MacEmailInboxView: View {
                         )
                 }
                 .buttonStyle(.plain)
+                .macClickablePointer()
             }
         }
         .padding(2)
@@ -398,6 +401,7 @@ struct MacEmailInboxView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .macClickablePointer()
         .onHover { hovering in
             hoveredThreadId = hovering ? thread.id : nil
         }
@@ -496,6 +500,7 @@ struct MacEmailInboxView: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .macClickablePointer()
                     .onHover { hovering in
                         hoveredThreadId = hovering ? group.email : nil
                     }
@@ -577,6 +582,7 @@ struct MacEmailInboxView: View {
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .macClickablePointer()
                         Divider().opacity(0.2).padding(.leading, MacTheme.spacing16)
                     }
                 }
@@ -590,9 +596,7 @@ struct MacEmailInboxView: View {
         VStack {
             Spacer()
             VStack(spacing: MacTheme.spacing12) {
-                Image(systemName: "envelope")
-                    .font(.system(size: 28, weight: .light))
-                    .foregroundStyle(MacTheme.mutedText.opacity(0.5))
+                GmailIconView(size: 56)
                 Text("Connect Gmail to see your inbox")
                     .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(MacTheme.textSecondary)
@@ -601,10 +605,17 @@ struct MacEmailInboxView: View {
                     .font(MacTheme.cardSubtitleFont())
                     .foregroundStyle(MacTheme.mutedText)
                     .multilineTextAlignment(.center)
+                if let err = services.emailService.errorMessage, !err.isEmpty {
+                    Text(err)
+                        .font(.system(size: 12, weight: .regular))
+                        .foregroundStyle(.red)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 240)
+                }
                 connectGmailButton
             }
             .padding(MacTheme.spacing24)
-            .frame(maxWidth: 260)
+            .frame(maxWidth: 280)
             .background(MacTheme.emptyStateSurface, in: RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous)
@@ -617,27 +628,25 @@ struct MacEmailInboxView: View {
 
     private var connectGmailButton: some View {
         Button {
-            Task { await services.emailService.connectGmail(authService: services.authService) }
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "link")
-                    .font(.system(size: 12, weight: .medium))
-                Text("Connect Gmail")
-                    .font(.system(size: 13, weight: .semibold))
+            guard !isConnectGmailLoading else { return }
+            Task { @MainActor in
+                isConnectGmailLoading = true
+                _ = await services.emailService.connectGmail(authService: services.authService)
+                isConnectGmailLoading = false
             }
-            .foregroundStyle(.white)
-            .padding(.horizontal, MacTheme.spacing20)
-            .padding(.vertical, MacTheme.spacing8)
-            .background(MacTheme.accent, in: Capsule(style: .continuous))
+        } label: {
+            HStack(spacing: 8) {
+                GmailIconView(size: 20)
+                if isConnectGmailLoading {
+                    ProgressView()
+                        .tint(.white)
+                        .scaleEffect(0.85)
+                }
+                Text(isConnectGmailLoading ? "Connecting…" : "Connect Gmail")
+            }
         }
-        .buttonStyle(.plain)
-        .focused($isConnectGmailFocused)
-        .overlay(
-            Capsule(style: .continuous)
-                .stroke(isConnectGmailFocused ? MacTheme.accent.opacity(0.75) : Color.clear, lineWidth: 2)
-        )
-        .pointerStyle(.link)
-        .padding(.top, MacTheme.spacing4)
+        .buttonStyle(MacOnboardingPrimaryButtonStyle())
+        .disabled(isConnectGmailLoading)
     }
 
     private func loadingState(message: String) -> some View {
@@ -1012,12 +1021,12 @@ struct MacSenderAvatarView: View {
     }
 
     private var avatarBackgroundColor: Color {
-        let colors: [Color] = [.blue, .purple, .orange, .pink, .teal, .indigo, .mint, .cyan]
+        let colors: [Color] = [.brown, .purple, .orange, .pink, .teal, .indigo, .mint, .cyan]
         return colors[avatarPaletteIndex].opacity(0.16)
     }
 
     private var avatarForegroundColor: Color {
-        let colors: [Color] = [.blue, .purple, .orange, .pink, .teal, .indigo, .mint, .cyan]
+        let colors: [Color] = [.brown, .purple, .orange, .pink, .teal, .indigo, .mint, .cyan]
         return colors[avatarPaletteIndex]
     }
 }

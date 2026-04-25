@@ -86,6 +86,42 @@ actor CalendarService {
         }
     }
 
+    /// Update fields on an existing event. Nil fields are left unchanged.
+    /// Throws if the event can't be found or the save fails.
+    func updateEvent(
+        identifier: String,
+        title: String? = nil,
+        startDate: Date? = nil,
+        endDate: Date? = nil,
+        notes: String? = nil
+    ) throws {
+        guard let event = eventStore.event(withIdentifier: identifier) else {
+            throw NSError(
+                domain: "CalendarService",
+                code: 404,
+                userInfo: [NSLocalizedDescriptionKey: "Event not found"]
+            )
+        }
+        if let title { event.title = title }
+        if let startDate { event.startDate = startDate }
+        if let endDate { event.endDate = endDate }
+        if let notes { event.notes = notes }
+        try eventStore.save(event, span: .thisEvent)
+    }
+
+    /// Delete an event by identifier. Throws if not found or save fails.
+    func deleteEvent(identifier: String) throws {
+        guard let event = eventStore.event(withIdentifier: identifier) else {
+            throw NSError(
+                domain: "CalendarService",
+                code: 404,
+                userInfo: [NSLocalizedDescriptionKey: "Event not found"]
+            )
+        }
+        try eventStore.remove(event, span: .thisEvent)
+        setFolderID(nil, for: identifier)
+    }
+
     func setFolderID(_ folderID: UUID?, for eventIdentifier: String?) {
         guard let eventIdentifier else { return }
         var map = folderMap

@@ -14,6 +14,8 @@
 	<string>6.0</string>
 	<key>CFBundleName</key>
 	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundleIconName</key>
+	<string>AppIcon</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -22,6 +24,8 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>NSCalendarsUsageDescription</key>
 	<string>Todus shows your today's events on the home dashboard.</string>
+	<key>NSRemindersUsageDescription</key>
+	<string>Todus can sync your tasks with Apple Reminders.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Todus uses the microphone for voice-to-text input in the AI assistant.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>

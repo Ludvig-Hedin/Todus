@@ -249,7 +249,7 @@ struct MacMeetingDetailView: View {
         VStack(alignment: .leading, spacing: 8) {
             Label("Action Items", systemImage: "checklist")
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.blue)
+                .foregroundStyle(.primary)
 
             ForEach(Array(items.enumerated()), id: \.offset) { _, item in
                 HStack(alignment: .top, spacing: 8) {
@@ -273,8 +273,8 @@ struct MacMeetingDetailView: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.blue.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.blue.opacity(0.1)))
+        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(0.1)))
     }
 
     private func transcriptSection(_ segments: [MeetingTranscriptSegment]) -> some View {
@@ -307,7 +307,7 @@ struct MacMeetingDetailView: View {
                     VStack(alignment: .leading, spacing: 1) {
                         Text(seg.speakerName)
                             .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.blue)
+                            .foregroundStyle(.primary)
 
                         Text(seg.text)
                             .font(.system(size: 12))
@@ -431,7 +431,7 @@ struct MacMeetingDetailView: View {
 
     private func statusColor(_ status: String) -> Color {
         switch status {
-        case "scheduled": .blue
+        case "scheduled": .primary
         case "bot_joining", "processing": .orange
         case "recording": .red
         case "ready": .green

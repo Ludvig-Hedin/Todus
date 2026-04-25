@@ -140,6 +140,7 @@ struct MacMeetingDetailView: View {
                         .background(Color.accentColor.opacity(0.12), in: Capsule())
                     }
                     .buttonStyle(.plain)
+                    .macClickablePointer()
                     .disabled(isSchedulingBot)
                 }
             }
@@ -170,13 +171,13 @@ struct MacMeetingDetailView: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+        .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: MacTheme.compactRadius, style: .continuous))
     }
 
     private func videoPlayer(url: URL) -> some View {
         VideoPlayer(player: player)
             .aspectRatio(16/9, contentMode: .fit)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .clipShape(RoundedRectangle(cornerRadius: MacTheme.compactRadius, style: .continuous))
             .task(id: url) {
                 if playerUrl != url {
                     playerUrl = url
@@ -197,7 +198,7 @@ struct MacMeetingDetailView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 40)
-        .background(Color.primary.opacity(0.03), in: RoundedRectangle(cornerRadius: 8))
+        .background(Color.primary.opacity(0.03), in: RoundedRectangle(cornerRadius: MacTheme.compactRadius, style: .continuous))
     }
 
     private func summarySection(_ meeting: MeetingDetailResponse) -> some View {
@@ -215,8 +216,8 @@ struct MacMeetingDetailView: View {
                 }
                 .padding(14)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.purple.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.purple.opacity(0.1)))
+                .background(Color.purple.opacity(0.04), in: RoundedRectangle(cornerRadius: MacTheme.compactRadius, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: MacTheme.compactRadius, style: .continuous).stroke(Color.purple.opacity(0.1)))
             } else if meeting.transcript != nil && !meeting.transcript!.isEmpty {
                 HStack {
                     Label("Generate AI recap from transcript", systemImage: "sparkles")
@@ -244,8 +245,8 @@ struct MacMeetingDetailView: View {
                     .disabled(isGeneratingSummary)
                 }
                 .padding(14)
-                .background(Color.primary.opacity(0.03), in: RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(0.06)))
+                .background(Color.primary.opacity(0.03), in: RoundedRectangle(cornerRadius: MacTheme.compactRadius, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: MacTheme.compactRadius, style: .continuous).stroke(Color.primary.opacity(0.06)))
             }
         }
     }
@@ -254,7 +255,7 @@ struct MacMeetingDetailView: View {
         VStack(alignment: .leading, spacing: 8) {
             Label("Action Items", systemImage: "checklist")
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.blue)
+                .foregroundStyle(.primary)
 
             ForEach(Array(items.enumerated()), id: \.offset) { _, item in
                 HStack(alignment: .top, spacing: 8) {
@@ -278,8 +279,8 @@ struct MacMeetingDetailView: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.blue.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.blue.opacity(0.1)))
+        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: MacTheme.compactRadius, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: MacTheme.compactRadius, style: .continuous).stroke(Color.primary.opacity(0.1)))
     }
 
     private func transcriptSection(_ segments: [MeetingTranscriptSegment]) -> some View {
@@ -297,6 +298,7 @@ struct MacMeetingDetailView: View {
                     }
                     .font(.system(size: 11))
                     .buttonStyle(.plain)
+                    .macClickablePointer()
                     .foregroundStyle(Color.accentColor)
                 }
             }
@@ -312,7 +314,7 @@ struct MacMeetingDetailView: View {
                     VStack(alignment: .leading, spacing: 1) {
                         Text(seg.speakerName)
                             .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.blue)
+                            .foregroundStyle(.primary)
 
                         Text(seg.text)
                             .font(.system(size: 12))
@@ -324,8 +326,8 @@ struct MacMeetingDetailView: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.green.opacity(0.03), in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.green.opacity(0.1)))
+        .background(Color.green.opacity(0.03), in: RoundedRectangle(cornerRadius: MacTheme.compactRadius, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: MacTheme.compactRadius, style: .continuous).stroke(Color.green.opacity(0.1)))
     }
 
     // MARK: - Q&A
@@ -345,7 +347,7 @@ struct MacMeetingDetailView: View {
                     qaLoadingRow
                 }
                 .padding(8)
-                .background(Color.primary.opacity(0.02), in: RoundedRectangle(cornerRadius: 8))
+                .background(Color.primary.opacity(0.02), in: RoundedRectangle(cornerRadius: MacTheme.compactRadius, style: .continuous))
             }
 
             HStack(spacing: 6) {
@@ -359,12 +361,13 @@ struct MacMeetingDetailView: View {
                         .foregroundStyle(Color.accentColor)
                 }
                 .buttonStyle(.plain)
+                .macClickablePointer()
                 .disabled(qaInput.trimmingCharacters(in: .whitespaces).isEmpty || isAskingQuestion)
             }
         }
         .padding(14)
-        .background(Color.purple.opacity(0.03), in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.purple.opacity(0.1)))
+        .background(Color.purple.opacity(0.03), in: RoundedRectangle(cornerRadius: MacTheme.compactRadius, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: MacTheme.compactRadius, style: .continuous).stroke(Color.purple.opacity(0.1)))
     }
 
     private var qaInputField: some View {
@@ -399,7 +402,7 @@ struct MacMeetingDetailView: View {
                     msg.role == "user"
                         ? Color.accentColor.opacity(0.15)
                         : Color.primary.opacity(0.05),
-                    in: RoundedRectangle(cornerRadius: 8)
+                    in: RoundedRectangle(cornerRadius: MacTheme.compactRadius, style: .continuous)
                 )
                 .frame(maxWidth: 400, alignment: msg.role == "user" ? .trailing : .leading)
                 .textSelection(.enabled)
@@ -475,7 +478,7 @@ struct MacMeetingDetailView: View {
 
     private func statusColor(_ status: String) -> Color {
         switch status {
-        case "scheduled": .blue
+        case "scheduled": .primary
         case "bot_joining", "processing": .orange
         case "recording": .red
         case "ready": .green

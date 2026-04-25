@@ -71,6 +71,7 @@ struct MacMeetingsView: View {
                         .rotationEffect(.degrees(rotationAngle))
                 }
                 .buttonStyle(.plain)
+                .macClickablePointer()
                 .help("Sync from Google Calendar")
                 .disabled(services.meetingsService.isSyncing)
             }
@@ -227,6 +228,7 @@ struct MacMeetingsView: View {
                 )
         }
         .buttonStyle(.plain)
+        .macClickablePointer()
     }
 
     // Group meetings by time period — future meetings appear as "Upcoming"
@@ -319,6 +321,7 @@ struct MacMeetingRowView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .macClickablePointer()
     }
 
     private var statusIcon: String {
@@ -348,7 +351,7 @@ struct MacMeetingRowView: View {
 
     private var statusColor: Color {
         switch meeting.status {
-        case "scheduled": .blue
+        case "scheduled": .primary
         case "bot_joining", "processing": .orange
         case "recording": .red
         case "ready": .green

@@ -80,6 +80,43 @@ enum MacPrimarySelection: Hashable {
         case .docs: "docs"
         }
     }
+
+    /// Serialized form used to persist selection across launches via @AppStorage.
+    /// Stored as a single string ("home", "email:inbox", "calendar:work", etc.) so it
+    /// round-trips cleanly through UserDefaults.
+    var storageKey: String {
+        switch self {
+        case .home: return "home"
+        case .tasks: return "tasks"
+        case .email(let section): return "email:\(section.rawValue)"
+        case .calendar(let section): return "calendar:\(section.rawValue)"
+        case .meetings: return "meetings"
+        case .docs: return "docs"
+        }
+    }
+
+    /// Restore from `storageKey`. Returns nil if the encoded value is unknown so the
+    /// caller can fall back to a sensible default (e.g. `.home`).
+    static func fromStorageKey(_ raw: String) -> MacPrimarySelection? {
+        switch raw {
+        case "home": return .home
+        case "tasks": return .tasks
+        case "meetings": return .meetings
+        case "docs": return .docs
+        default:
+            let parts = raw.split(separator: ":", maxSplits: 1).map(String.init)
+            guard parts.count == 2 else { return nil }
+            switch parts[0] {
+            case "email":
+                if let section = EmailSection(rawValue: parts[1]) { return .email(section) }
+            case "calendar":
+                if let section = CalendarSection(rawValue: parts[1]) { return .calendar(section) }
+            default:
+                return nil
+            }
+            return nil
+        }
+    }
 }
 
 // MARK: - Root View
@@ -91,14 +128,32 @@ struct MacRootView: View {
     // Live task count for sidebar badge
     @Query(filter: #Predicate<TaskRecord> { !$0.completed }) private var incompleteTasks: [TaskRecord]
 
-    @State private var selection: MacPrimarySelection = .home
-    @State private var isEmailExpanded = true
-    @State private var isCalendarExpanded = true
-    @State private var isAssistantPresented = false
-    @State private var assistantDisplayMode: AssistantDisplayMode = .floating
+    // Persisted UI state — survives app relaunches via UserDefaults.
+    // selection: encoded via MacPrimarySelection.storageKey ("home", "email:inbox", etc.)
+    // The selection itself is mirrored into local @State so the view tree can bind
+    // a SwiftUI Binding<MacPrimarySelection> (the enum has associated values, so it
+    // can't live directly in @AppStorage which only handles raw types).
+    @AppStorage("mac_sidebar_selection") private var selectionStorageKey: String = "home"
+    @AppStorage("mac_email_expanded") private var isEmailExpanded = true
+    @AppStorage("mac_calendar_expanded") private var isCalendarExpanded = true
+    @AppStorage("mac_assistant_presented") private var isAssistantPresented = false
+    @AppStorage("mac_assistant_display_mode") private var assistantDisplayModeRaw: String = AssistantDisplayMode.floating.rawValue
     // Side pane resize — user can drag the divider to adjust width
-    @State private var sidePaneWidth: CGFloat = 380
+    @AppStorage("mac_side_pane_width") private var sidePaneWidth: Double = 380
+    @State private var selection: MacPrimarySelection = .home
     @State private var sidePaneDragStartWidth: CGFloat?
+
+    private var assistantDisplayMode: AssistantDisplayMode {
+        AssistantDisplayMode(rawValue: assistantDisplayModeRaw) ?? .floating
+    }
+
+    /// Two-way binding for `assistantDisplayMode` backed by `assistantDisplayModeRaw`.
+    private var assistantDisplayModeBinding: Binding<AssistantDisplayMode> {
+        Binding(
+            get: { AssistantDisplayMode(rawValue: assistantDisplayModeRaw) ?? .floating },
+            set: { assistantDisplayModeRaw = $0.rawValue }
+        )
+    }
 
     @State private var isComposePresented = false
     @State private var isCreatePresented = false
@@ -130,6 +185,9 @@ struct MacRootView: View {
             } else if !services.hasConfiguredCalendarPrompt {
                 MacCalendarOnboardingView()
                     .transition(.opacity.combined(with: .move(edge: .trailing)))
+            } else if !services.hasConfiguredRemindersPrompt {
+                MacRemindersOnboardingView()
+                    .transition(.opacity.combined(with: .move(edge: .trailing)))
             } else if !services.hasConfiguredStartupViewPrompt {
                 MacStartupOnboardingView()
                     .transition(.opacity.combined(with: .move(edge: .trailing)))
@@ -139,17 +197,21 @@ struct MacRootView: View {
                     .transition(.opacity)
             }
         }
-        .tint(MacTheme.accentColor(for: accentColorKey))
+        // Disable system focus rings on buttons/cards — keeps keyboard focus without blue chrome.
+        .focusEffectDisabled()
+        // Primary text tint so symbols and controls are not system / accent blue.
+        .tint(Color.primary)
         .animation(.snappy(duration: 0.3), value: services.authService.showsOnboarding)
         .animation(.snappy(duration: 0.3), value: services.authService.isAuthenticated)
         .animation(.snappy(duration: 0.3), value: services.hasConfiguredGmailPrompt)
         .animation(.snappy(duration: 0.3), value: services.hasConfiguredCalendarPrompt)
+        .animation(.snappy(duration: 0.3), value: services.hasConfiguredRemindersPrompt)
         .animation(.snappy(duration: 0.3), value: services.hasConfiguredStartupViewPrompt)
         .safeAreaInset(edge: .top, spacing: 0) {
             if let onboardingStep = onboardingStep {
                 HStack {
                     Spacer()
-                    Text("\(onboardingStep) of 3")
+                    Text("\(onboardingStep) of 4")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 10)
@@ -245,20 +307,24 @@ struct MacRootView: View {
                     .gesture(
                         DragGesture()
                             .onChanged { value in
-                                if sidePaneDragStartWidth == nil { sidePaneDragStartWidth = sidePaneWidth }
-                                let start = sidePaneDragStartWidth ?? sidePaneWidth
-                                // Negative translation = dragging left = wider panel
-                                sidePaneWidth = max(280, min(600, start - value.translation.width))
+                                if sidePaneDragStartWidth == nil { sidePaneDragStartWidth = CGFloat(sidePaneWidth) }
+                                let start = sidePaneDragStartWidth ?? CGFloat(sidePaneWidth)
+                                // Negative translation = dragging left = wider panel.
+                                // Clamp to keep the panel usable: never narrower than 280pt
+                                // (assistant chat is unreadable below this) or wider than 600pt
+                                // (would crowd the main content area on smaller windows).
+                                let proposed = start - value.translation.width
+                                sidePaneWidth = Double(max(280, min(600, proposed)))
                             }
                             .onEnded { _ in sidePaneDragStartWidth = nil }
                     )
 
                 MacAssistantPanel(
                     isPresented: $isAssistantPresented,
-                    displayMode: $assistantDisplayMode,
+                    displayMode: assistantDisplayModeBinding,
                     currentSelection: selection
                 )
-                .frame(width: sidePaneWidth)
+                .frame(width: CGFloat(sidePaneWidth))
                 .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }
@@ -268,7 +334,7 @@ struct MacRootView: View {
             if isAssistantPresented && assistantDisplayMode == .floating {
                 MacAssistantPanel(
                     isPresented: $isAssistantPresented,
-                    displayMode: $assistantDisplayMode,
+                    displayMode: assistantDisplayModeBinding,
                     currentSelection: selection
                 )
                 // Panel self-manages its size via floatingSize state — no fixed frame here
@@ -297,7 +363,10 @@ struct MacRootView: View {
             }
         }
         .animation(.snappy(duration: 0.3), value: services.networkMonitor.isConnected)
-        .onChange(of: selection) { _, _ in }
+        .onChange(of: selection) { _, newValue in
+            // Persist sidebar selection so the next launch restores the same view.
+            selectionStorageKey = newValue.storageKey
+        }
         .onAppear {
             applyStartupSelectionIfNeeded()
         }
@@ -386,6 +455,7 @@ struct MacRootView: View {
                     .help("Daily Brief")
                     .accessibilityLabel("Notifications")
                     .accessibilityHint("Opens your daily brief with tasks, events, and emails")
+                    .macClickablePointer()
                     .popover(isPresented: $isNotificationsPresented, arrowEdge: .bottom) {
                         MacNotificationCenterView()
                     }
@@ -422,6 +492,7 @@ struct MacRootView: View {
                     .tint(Color.primary.opacity(0.55))
                     .help("More Options")
                     .accessibilityLabel("More options menu")
+                    .macClickablePointer()
 
                     // Create / compose
                     Button {
@@ -433,15 +504,16 @@ struct MacRootView: View {
                             .frame(width: 28, height: 28)
                             .background(
                                 MacTheme.surfaceCard.opacity(0.95),
-                                in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                in: RoundedRectangle(cornerRadius: MacTheme.compactRadius, style: .continuous)
                             )
                             .overlay(
-                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                RoundedRectangle(cornerRadius: MacTheme.compactRadius, style: .continuous)
                                     .stroke(MacTheme.cardBorder.opacity(0.9), lineWidth: 0.6)
                             )
                     }
                     .help("New Item (⌘N)")
                     .accessibilityLabel("Create new item")
+                    .macClickablePointer()
                     .keyboardShortcut("n", modifiers: .command)
 
                     // Search — ⌘K (command palette convention)
@@ -454,13 +526,14 @@ struct MacRootView: View {
                             .frame(width: 28, height: 28)
                             .background(
                                 MacTheme.surfaceCard.opacity(0.95),
-                                in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                in: RoundedRectangle(cornerRadius: MacTheme.compactRadius, style: .continuous)
                             )
                             .overlay(
-                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                RoundedRectangle(cornerRadius: MacTheme.compactRadius, style: .continuous)
                                     .stroke(MacTheme.cardBorder.opacity(0.9), lineWidth: 0.6)
                             )
                     }
+                    .macClickablePointer()
                     .keyboardShortcut("k", modifiers: .command)
                     .help("Search (⌘K)")
                     .accessibilityLabel("Search")
@@ -575,7 +648,8 @@ struct MacRootView: View {
         guard !services.authService.showsOnboarding else { return nil }
         if !services.hasConfiguredGmailPrompt { return 1 }
         if !services.hasConfiguredCalendarPrompt { return 2 }
-        if !services.hasConfiguredStartupViewPrompt { return 3 }
+        if !services.hasConfiguredRemindersPrompt { return 3 }
+        if !services.hasConfiguredStartupViewPrompt { return 4 }
         return nil
     }
 
@@ -594,7 +668,15 @@ struct MacRootView: View {
 
     private func applyStartupSelectionIfNeeded() {
         guard !hasAppliedStartupSelection else { return }
-        selection = startupSelection
+        // Restore the persisted sidebar selection if present; fall back to the user's
+        // configured startup view (Home / Inbox / Tasks / Meetings) only when no
+        // valid persisted selection exists. This way relaunching the app returns the
+        // user to the screen they last viewed, without overriding their preference.
+        if let restored = MacPrimarySelection.fromStorageKey(selectionStorageKey) {
+            selection = restored
+        } else {
+            selection = startupSelection
+        }
         hasAppliedStartupSelection = true
     }
 

@@ -299,9 +299,13 @@ final class EmailService {
     // MARK: - Connections
 
     /// Check if the user has any email connections (Gmail/Outlook).
-    func checkConnection() async {
+    /// Pass `force: true` during the connect-gmail flow to bypass the 30s cache —
+    /// the backend hook that creates the connection runs asynchronously after OAuth,
+    /// so callers polling for a just-created connection must skip the cache.
+    func checkConnection(force: Bool = false) async {
         let now = Date()
-        if let lastConnectionCheckAt,
+        if !force,
+           let lastConnectionCheckAt,
            now.timeIntervalSince(lastConnectionCheckAt) < connectionCheckInterval,
            hasResolvedConnection {
             return
@@ -322,14 +326,52 @@ final class EmailService {
         }
     }
 
-    /// Initiates Gmail OAuth connection by re-triggering Google sign-in.
-    /// Google sign-in grants auth + mail scopes; after OAuth the connection is checked.
-    func connectGmail(authService: AuthService) async {
-        await authService.signInWithGoogle()
-        await checkConnection()
+    /// Initiates Gmail OAuth connection. Mirrors the web app's
+    /// `authClient.linkSocial({ provider: 'google' })` flow: always opens a fresh
+    /// Google OAuth consent session via the native link-social bridge so the
+    /// backend's `account.create.after` / `account.update.after` hooks persist a
+    /// connection row for the current user. We then poll `connections.list`
+    /// until the row appears (the hook runs asynchronously after the redirect).
+    @discardableResult
+    func connectGmail(authService: AuthService) async -> Bool {
+        errorMessage = nil
+
+        do {
+            if authService.isAuthenticated {
+                try await authService.linkSocialAccount(provider: "google")
+            } else {
+                await authService.signInWithGoogle()
+                if !authService.isAuthenticated {
+                    errorMessage = authService.lastErrorMessage
+                        ?? "Sign in was not completed. Please try again."
+                    return false
+                }
+            }
+        } catch {
+            errorMessage = authService.lastErrorMessage
+                ?? "Could not open Google sign-in. Please try again."
+            return false
+        }
+
+        var attempt = 0
+        let maxAttempts = 6
+        while attempt < maxAttempts {
+            await checkConnection(force: true)
+            if hasConnection { break }
+            attempt += 1
+            if attempt < maxAttempts {
+                try? await Task.sleep(nanoseconds: 500_000_000)
+            }
+        }
+
         if hasConnection {
             await loadThreads(refresh: true)
+            return true
         }
+
+        errorMessage =
+            "Could not link your Gmail account. Make sure you granted access to Gmail and try again."
+        return false
     }
 
     // MARK: - Actions

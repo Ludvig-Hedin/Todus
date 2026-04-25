@@ -298,7 +298,7 @@ private struct MacMeetingRowView: View {
             .padding(.vertical, 10)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                RoundedRectangle(cornerRadius: 8)
+                RoundedRectangle(cornerRadius: MacTheme.compactRadius, style: .continuous)
                     .fill(isSelected ? Color.accentColor.opacity(0.12) : Color.clear)
             )
             .padding(.horizontal, 8)
@@ -317,7 +317,7 @@ private struct MacMeetingRowView: View {
     private var statusColor: Color {
         switch meeting.status {
         case "scheduled", "bot_joining", "recording":
-            return .blue
+            return .primary
         case "processing":
             return .orange
         case "ready":

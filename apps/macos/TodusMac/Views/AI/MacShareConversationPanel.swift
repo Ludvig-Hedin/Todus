@@ -79,7 +79,7 @@ struct MacShareConversationPanel: View {
             }
         }
         .frame(width: 340)
-        .background(MacTheme.surfaceCard, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(MacTheme.surfaceCard, in: RoundedRectangle(cornerRadius: MacTheme.buttonRadius, style: .continuous))
     }
 
     // MARK: - Form

@@ -27,17 +27,21 @@ struct MacSettingsView: View {
     @State private var isLoadingSessions = false
     @State private var isRevokingAllSessions = false
     @State private var revokingSessionIDs: Set<String> = []
+    @State private var sessionsLoadError: String? = nil
     @State private var settingsError: String?
     @State private var showAutoSendConfirmation = false
     @State private var excludedSenderPatternsText = ""
+    @State private var isConnectingReminders = false
 
     // Preferences
     @AppStorage("preferredColorScheme") private var preferredColorScheme = "system"
     @AppStorage("taskRemindersEnabled") private var taskRemindersEnabled = true
     @AppStorage("calendarRemindersEnabled") private var calendarRemindersEnabled = true
-    @AppStorage("swipeGesturesEnabled") private var swipeGesturesEnabled = true
+    // NOTE: Swipe gestures are an iOS-only concept. The previous toggle here was
+    // never wired into anything on macOS, so the row is intentionally removed
+    // from the UI rather than left dead. Re-add the @AppStorage + the row in
+    // emailPreferencesSection if/when trackpad swipe gestures are implemented.
     @AppStorage("threadGroupingEnabled") private var threadGroupingEnabled = true
-    @AppStorage("mac_reminders_enabled") private var remindersEnabled = false
 
     // Accent color — stored key, resolved via MacTheme.accentColor(for:)
     @AppStorage("mac_accent_color") private var accentColorKey = "blue"
@@ -331,6 +335,23 @@ struct MacSettingsView: View {
                             .font(.system(size: 12.5))
                             .foregroundStyle(MacTheme.textSecondary)
                     }
+                } else if let error = sessionsLoadError {
+                    rowContainer {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Couldn't load sessions")
+                                .font(.system(size: 12.5, weight: .medium))
+                                .foregroundStyle(MacTheme.textPrimary)
+                            Text(error)
+                                .font(.system(size: 11))
+                                .foregroundStyle(MacTheme.textSecondary)
+                            Button("Try again") {
+                                Task { await loadActiveSessions() }
+                            }
+                            .font(.system(size: 11))
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.blue)
+                        }
+                    }
                 } else if activeSessions.isEmpty {
                     rowContainer {
                         VStack(alignment: .leading, spacing: 2) {
@@ -515,6 +536,7 @@ struct MacSettingsView: View {
                             .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(Color(red: 0.82, green: 0.32, blue: 0.32).opacity(0.7))
                             .buttonStyle(.plain)
+                            .macClickablePointer()
                     } else {
                         connectButton {
                             Task { await services.emailService.connectGmail(authService: services.authService) }
@@ -548,17 +570,36 @@ struct MacSettingsView: View {
                 brandServiceRow(
                     icon: { AppleRemindersIconView(size: 26) },
                     name: "Apple Reminders",
-                    status: remindersEnabled ? "Connected" : "Not connected",
-                    isConnected: remindersEnabled
+                    status: services.remindersSyncEnabled ? "Connected" : "Not connected",
+                    isConnected: services.remindersSyncEnabled
                 ) {
-                    if remindersEnabled {
+                    if services.remindersSyncEnabled {
                         Image(systemName: "checkmark.circle.fill")
                             .foregroundStyle(.green.opacity(0.7))
                             .font(.system(size: 13))
                     } else {
-                        connectButton {
-                            remindersEnabled = true
+                        Button {
+                            guard !isConnectingReminders else { return }
+                            isConnectingReminders = true
+                            Task {
+                                services.remindersSyncEnabled = true
+                                let granted = await services.requestRemindersPermissionIfNeeded()
+                                if granted {
+                                    await services.importFromReminders(in: modelContext)
+                                    services.syncExistingTasksToReminders(in: modelContext)
+                                } else {
+                                    services.remindersSyncEnabled = false
+                                }
+                                isConnectingReminders = false
+                            }
+                        } label: {
+                            Text(isConnectingReminders ? "Connecting…" : "Connect")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(MacTheme.accent)
                         }
+                        .buttonStyle(.plain)
+                        .macClickablePointer()
+                        .disabled(isConnectingReminders)
                     }
                 }
             }
@@ -632,8 +673,6 @@ struct MacSettingsView: View {
     private var emailPreferencesSection: some View {
         settingsGroup(title: "Email") {
             settingsCard {
-                settingsToggle(icon: "hand.draw", label: "Swipe Gestures", isOn: $swipeGesturesEnabled)
-                cardDivider
                 settingsToggle(icon: "text.bubble", label: "Group by Thread", isOn: $threadGroupingEnabled)
             }
         }
@@ -667,7 +706,7 @@ struct MacSettingsView: View {
                     .scrollContentBackground(.hidden)
                     .padding(8)
                     .background(Color.white.opacity(0.04))
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: MacTheme.compactRadius, style: .continuous))
                 }
 
                 cardDivider
@@ -686,7 +725,7 @@ struct MacSettingsView: View {
                     .scrollContentBackground(.hidden)
                     .padding(8)
                     .background(Color.white.opacity(0.04))
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: MacTheme.compactRadius, style: .continuous))
                 }
 
                 cardDivider
@@ -949,7 +988,7 @@ struct MacSettingsView: View {
                     .frame(minHeight: 88)
                     .padding(8)
                     .background(Color.white.opacity(0.04))
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: MacTheme.compactRadius, style: .continuous))
 
                     Text("One pattern per line. Use this to suppress newsletters, no-reply mail, and other low-value automation from the assistant queues.")
                         .font(.system(size: 11.5))
@@ -1136,6 +1175,7 @@ struct MacSettingsView: View {
                 .toggleStyle(.switch)
                 .controlSize(.small)
                 .labelsHidden()
+                .tint(.accentColor)
         }
     }
 
@@ -1275,6 +1315,7 @@ struct MacSettingsView: View {
             }
         }
         .buttonStyle(.plain)
+        .macClickablePointer()
     }
 
     /// Branded service row — custom icon view, name, status, trailing action.
@@ -1314,6 +1355,7 @@ struct MacSettingsView: View {
                 .foregroundStyle(MacTheme.accent)
         }
         .buttonStyle(.plain)
+        .macClickablePointer()
     }
 
     // MARK: - Helpers
@@ -1333,6 +1375,7 @@ struct MacSettingsView: View {
 
     private func loadActiveSessions() async {
         isLoadingSessions = true
+        sessionsLoadError = nil
         defer { isLoadingSessions = false }
 
         do {
@@ -1340,6 +1383,7 @@ struct MacSettingsView: View {
             activeSessions = response.sessions
         } catch {
             AppLogger.shared.log("[Settings] Load sessions failed: \(error)")
+            sessionsLoadError = error.localizedDescription
         }
     }
 

@@ -82,6 +82,7 @@ struct MacCreateSheet: View {
                     .background(MacTheme.accent, in: Capsule(style: .continuous))
                 }
                 .buttonStyle(.plain)
+                .macClickablePointer()
                 .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 .opacity(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.4 : 1)
                 .keyboardShortcut(.return, modifiers: .command)
@@ -131,6 +132,7 @@ struct MacCreateSheet: View {
                     )
                 }
                 .buttonStyle(.plain)
+                .macClickablePointer()
             }
         }
         .padding(3)
@@ -201,6 +203,7 @@ struct MacCreateSheet: View {
             .overlay(Capsule(style: .continuous).stroke(MacTheme.cardBorder, lineWidth: 0.5))
         }
         .buttonStyle(.plain)
+        .macClickablePointer()
         .popover(isPresented: $isShowingDatePicker) {
             VStack {
                 DatePicker(

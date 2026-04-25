@@ -275,6 +275,7 @@ struct MacNotificationCenterView: View {
                 Spacer()
                 Button("Done") { dismiss() }
                     .buttonStyle(.plain)
+                    .macClickablePointer()
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(.secondary)
             }
@@ -331,7 +332,7 @@ struct MacNotificationCenterView: View {
                     Spacer()
                 }
                 .padding(10)
-                .background(Color.primary.opacity(0.03), in: RoundedRectangle(cornerRadius: 8))
+                .background(Color.primary.opacity(0.03), in: RoundedRectangle(cornerRadius: MacTheme.compactRadius, style: .continuous))
                 .redacted(reason: .placeholder)
             }
         }
@@ -443,14 +444,15 @@ struct MacNotificationCenterView: View {
                     .foregroundStyle(.tertiary)
             }
             .padding(10)
-            .background(Color.primary.opacity(0.03), in: RoundedRectangle(cornerRadius: 8))
+            .background(Color.primary.opacity(0.03), in: RoundedRectangle(cornerRadius: MacTheme.compactRadius, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 8)
+                RoundedRectangle(cornerRadius: MacTheme.compactRadius, style: .continuous)
                     .stroke(Color.primary.opacity(0.06), lineWidth: 0.5)
             )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .macClickablePointer()
     }
 
     // MARK: - Helpers
@@ -459,7 +461,7 @@ struct MacNotificationCenterView: View {
         switch priority {
         case "high": .red
         case "medium": .orange
-        case "low": .blue
+        case "low": .secondary
         default: .secondary
         }
     }

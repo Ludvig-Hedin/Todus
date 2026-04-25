@@ -177,7 +177,7 @@ struct AppleRemindersLogo: View {
 
             VStack(spacing: 0) {
                 Spacer()
-                reminderRow(dotColor: .blue, dotRadius: dotR, lineH: lineH, width: w)
+                reminderRow(dotColor: .primary, dotRadius: dotR, lineH: lineH, width: w)
                 Spacer().frame(height: rowSpacing)
                 reminderRow(dotColor: .red, dotRadius: dotR, lineH: lineH, width: w)
                 Spacer().frame(height: rowSpacing)

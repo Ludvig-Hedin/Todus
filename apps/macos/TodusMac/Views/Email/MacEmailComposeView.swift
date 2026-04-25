@@ -59,6 +59,8 @@ struct MacEmailComposeView: View {
             HStack {
                 Button("Cancel") { dismiss() }
                     .font(.system(size: 13))
+                    .keyboardShortcut(.cancelAction)
+                    .macClickablePointer()
 
                 Spacer()
 
@@ -91,6 +93,7 @@ struct MacEmailComposeView: View {
                     }
                 }
                 .disabled(!canSend || services.emailService.isSending)
+                .macClickablePointer()
                 .keyboardShortcut(.return, modifiers: .command)
             }
             .padding(MacTheme.spacing16)

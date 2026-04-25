@@ -17,13 +17,18 @@ enum MacTheme {
     static let spacing32: CGFloat = 32
 
     // MARK: - Corner Radii
+    /// Kept in sync with `AppTheme.Radius` on iOS — soft, continuous corners everywhere.
 
     /// Cards, sections, settings panels
-    static let cardRadius: CGFloat = 10
+    static let cardRadius: CGFloat = 18
+    /// List rows, wide tiles (matches `AppTheme.Radius.row`)
+    static let rowRadius: CGFloat = 16
+    /// Nested panels, tinted callouts, meeting rows (between button and card)
+    static let compactRadius: CGFloat = 12
     /// Small interactive elements (badges, pills)
-    static let pillRadius: CGFloat = 5
+    static let pillRadius: CGFloat = 7
     /// Buttons, inputs, search bars — large enough to appear pill-like at typical heights
-    static let buttonRadius: CGFloat = 12
+    static let buttonRadius: CGFloat = 14
 
     // MARK: - Colors
 
@@ -104,7 +109,7 @@ enum MacTheme {
     /// Left color bar width on event blocks (used only for timed events in month view)
     static let calendarEventBarWidth: CGFloat = 3
     /// Event pill corner radius — matches Apple Calendar's rounded event blocks
-    static let calendarEventRadius: CGFloat = 3
+    static let calendarEventRadius: CGFloat = 4
     /// Grid line color — extremely subtle, almost invisible like Apple Calendar
     static let calendarGridLine = Color(light: Color.black.opacity(0.08), dark: Color.white.opacity(0.07))
     /// Current-time indicator color — Apple's signature red
@@ -217,6 +222,11 @@ private struct InteractiveHitTargetModifier: ViewModifier {
 extension View {
     func interactiveHitTarget(expansion: CGFloat = 6) -> some View {
         modifier(InteractiveHitTargetModifier(expansion: expansion))
+    }
+
+    /// Web-style hand cursor on hover for primary click targets.
+    func macClickablePointer() -> some View {
+        pointerStyle(.link)
     }
 }
 

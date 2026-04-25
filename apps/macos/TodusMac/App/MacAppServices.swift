@@ -15,7 +15,10 @@ final class MacAppServices {
         static let startupView = "MacApp.startupView"
         static let hasConfiguredGmailPrompt = "MacApp.hasConfiguredGmailPrompt"
         static let hasConfiguredCalendarPrompt = "MacApp.hasConfiguredCalendarPrompt"
+        static let hasConfiguredRemindersPrompt = "MacApp.hasConfiguredRemindersPrompt"
         static let hasConfiguredStartupViewPrompt = "MacApp.hasConfiguredStartupViewPrompt"
+        static let remindersSyncEnabled = "mac_reminders_enabled"
+        static let remindersSyncDirection = "MacApp.remindersSyncDirection"
     }
 
     let authService: AuthService
@@ -29,6 +32,8 @@ final class MacAppServices {
     let meetingsService: MeetingsService
     let connectionsService: ConnectionsService
     private let defaults = UserDefaults.standard
+    let remindersSyncService = AppleRemindersSyncService()
+    let remindersSyncState = RemindersSyncState()
     var showsAssistantPanel = false
     var isSyncingSharedFolders = false
 
@@ -72,6 +77,27 @@ final class MacAppServices {
         }
     }
 
+    var hasConfiguredRemindersPrompt: Bool {
+        didSet {
+            defaults.set(hasConfiguredRemindersPrompt, forKey: Keys.hasConfiguredRemindersPrompt)
+        }
+    }
+
+    /// When true, tasks sync with Apple Reminders (same key as Settings `mac_reminders_enabled`).
+    var remindersSyncEnabled: Bool {
+        didSet {
+            remindersSyncState.isEnabled = remindersSyncEnabled
+            defaults.set(remindersSyncEnabled, forKey: Keys.remindersSyncEnabled)
+        }
+    }
+
+    var remindersSyncDirection: RemindersSyncDirection {
+        didSet {
+            remindersSyncState.direction = remindersSyncDirection
+            defaults.set(remindersSyncDirection.rawValue, forKey: Keys.remindersSyncDirection)
+        }
+    }
+
     var hasConfiguredStartupViewPrompt: Bool {
         didSet {
             defaults.set(hasConfiguredStartupViewPrompt, forKey: Keys.hasConfiguredStartupViewPrompt)
@@ -79,6 +105,11 @@ final class MacAppServices {
     }
 
     init() {
+        if defaults.bool(forKey: Keys.hasConfiguredStartupViewPrompt),
+           defaults.object(forKey: Keys.hasConfiguredRemindersPrompt) == nil {
+            defaults.set(true, forKey: Keys.hasConfiguredRemindersPrompt)
+        }
+
         let backendURL = Self.loadBackendURL()
         let auth = AuthService(backendURL: backendURL)
         let api = TodosAPIClient(baseURL: backendURL, authService: auth)
@@ -95,7 +126,15 @@ final class MacAppServices {
         self.startupView = defaults.string(forKey: Keys.startupView) ?? "home"
         self.hasConfiguredGmailPrompt = defaults.bool(forKey: Keys.hasConfiguredGmailPrompt)
         self.hasConfiguredCalendarPrompt = defaults.bool(forKey: Keys.hasConfiguredCalendarPrompt)
+        self.hasConfiguredRemindersPrompt = defaults.bool(forKey: Keys.hasConfiguredRemindersPrompt)
         self.hasConfiguredStartupViewPrompt = defaults.bool(forKey: Keys.hasConfiguredStartupViewPrompt)
+        if let dir = defaults.string(forKey: Keys.remindersSyncDirection),
+           let parsed = RemindersSyncDirection(rawValue: dir) {
+            self.remindersSyncDirection = parsed
+        } else {
+            self.remindersSyncDirection = .twoWay
+        }
+        self.remindersSyncEnabled = defaults.object(forKey: Keys.remindersSyncEnabled) as? Bool ?? false
         if let data = defaults.data(forKey: Keys.assistantAutomationPolicy),
            let savedPolicy = try? JSONDecoder().decode(AssistantAutomationPolicy.self, from: data) {
             self.assistantAutomationPolicy = savedPolicy
@@ -115,6 +154,8 @@ final class MacAppServices {
         self.connectionsService = ConnectionsService(api: api)
         self.aiChatService.contextAboutYou = contextAboutYou
         self.aiChatService.customInstructions = customInstructions
+        self.remindersSyncState.isEnabled = self.remindersSyncEnabled
+        self.remindersSyncState.direction = self.remindersSyncDirection
     }
 
     func loadSharedAIProfile() async {
@@ -184,6 +225,42 @@ final class MacAppServices {
         }
 
         try context.save()
+    }
+
+    func requestRemindersPermissionIfNeeded() async -> Bool {
+        guard remindersSyncEnabled else { return false }
+        switch remindersSyncService.authorizationState() {
+        case .authorized, .writeOnly:
+            // The sync workers (`upsert`, `delete`, `syncAllTasks`) accept either
+            // `.authorized` or `.writeOnly`. Treat the gate the same way so users
+            // who grant write-only access don't get falsely rejected here while
+            // the underlying writes would succeed.
+            return true
+        case .notDetermined:
+            return await remindersSyncService.requestAccess()
+        case .restricted, .denied:
+            return false
+        }
+    }
+
+    func syncExistingTasksToReminders(in context: ModelContext) {
+        guard remindersSyncEnabled else { return }
+        guard remindersSyncDirection != .fromReminders else { return }
+        let descriptor = FetchDescriptor<TaskRecord>()
+        let tasks: [TaskRecord]
+        do {
+            tasks = try context.fetch(descriptor)
+        } catch {
+            AppLogger.shared.log("[MacAppServices] Failed to fetch tasks for reminders sync: \(error)")
+            return
+        }
+        remindersSyncService.syncAllTasks(tasks, in: context)
+    }
+
+    func importFromReminders(in context: ModelContext) async {
+        guard remindersSyncEnabled else { return }
+        guard remindersSyncDirection != .toReminders else { return }
+        await remindersSyncService.importFromReminders(in: context)
     }
 
     func signOut() {

@@ -2,6 +2,7 @@ import Foundation
 import Observation
 import SwiftData
 import OSLog
+import UniformTypeIdentifiers
 
 // MARK: - MacAIChatService
 
@@ -57,6 +58,9 @@ final class MacAIChatService {
     // Cached calendar context string
     private var calendarSnapshot: String? = nil
 
+    /// Serialized file payloads for user messages (file URLs are not always re-readable after picking).
+    private var attachmentPayloadsByUserMessageId: [UUID: [MacSerializedFilePayload]] = [:]
+
     init(
         backendURL: URL,
         apiClient: TodosAPIClient,
@@ -79,16 +83,33 @@ final class MacAIChatService {
     // MARK: - Public API
 
     /// Send a user message and stream the AI response.
-    func send(userMessage: String, allTasks: [TaskRecord], modelContext: ModelContext) {
+    func send(
+        userMessage: String,
+        attachmentURLs: [URL] = [],
+        allTasks: [TaskRecord],
+        modelContext: ModelContext
+    ) {
         let trimmed = userMessage.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !isStreaming else { return }
+        guard (!trimmed.isEmpty || !attachmentURLs.isEmpty), !isStreaming else { return }
 
         if chatTitle == nil {
-            chatTitle = String(trimmed.prefix(60))
+            if !trimmed.isEmpty {
+                chatTitle = String(trimmed.prefix(60))
+            } else if let name = attachmentURLs.first?.lastPathComponent, !name.isEmpty {
+                chatTitle = String(name.prefix(60))
+            }
         }
 
         isConversationSaved = false
-        messages.append(MacChatMessage(role: .user, content: trimmed))
+        let displayNames = attachmentURLs.map { $0.lastPathComponent }
+        let userMsg = MacChatMessage(role: .user, content: trimmed, attachmentFileNames: displayNames)
+        messages.append(userMsg)
+        if !attachmentURLs.isEmpty {
+            let serialized = Self.buildSerializedAttachments(urls: attachmentURLs)
+            if !serialized.isEmpty {
+                attachmentPayloadsByUserMessageId[userMsg.id] = serialized
+            }
+        }
 
         let assistantID = UUID()
         messages.append(MacChatMessage(id: assistantID, role: .assistant, isStreaming: true))
@@ -162,6 +183,22 @@ final class MacAIChatService {
         }
     }
 
+    /// Drop a message (and every turn that follows it) from the conversation.
+    /// Used by right-click/long-press "Edit message": the edited user turn is
+    /// re-sent via `send`, so the old copy plus any dependent reply must go
+    /// first to avoid stacking the new branch below the stale one.
+    func truncateBefore(messageID: UUID) {
+        guard !isStreaming else { return }
+        guard let idx = messages.firstIndex(where: { $0.id == messageID }) else { return }
+        let removedIDs = messages[idx..<messages.count].map(\.id)
+        messages.removeSubrange(idx..<messages.count)
+        for id in removedIDs {
+            attachmentPayloadsByUserMessageId.removeValue(forKey: id)
+        }
+        isConversationSaved = false
+        errorMessage = nil
+    }
+
     /// Cancel an in-progress stream.
     func cancelStream() {
         streamingTask?.cancel()
@@ -187,6 +224,7 @@ final class MacAIChatService {
         currentConversationFolderID = nil
         errorMessage = nil
         isConversationSaved = true
+        attachmentPayloadsByUserMessageId.removeAll()
     }
 
     /// Auto-save when the panel is hidden. Safe to call multiple times.
@@ -203,7 +241,8 @@ final class MacAIChatService {
             MacChatMessage(
                 role: saved.role == "user" ? .user : .assistant,
                 content: saved.content,
-                isStreaming: false
+                isStreaming: false,
+                attachmentFileNames: saved.attachmentFileNames
             )
         }
         chatTitle = conversation.title
@@ -211,6 +250,7 @@ final class MacAIChatService {
         currentConversationFolderID = conversation.folderID
         errorMessage = nil
         isConversationSaved = true
+        attachmentPayloadsByUserMessageId.removeAll()
     }
 
     func moveConversation(_ conversation: MacChatConversation, to folderID: UUID?) {
@@ -252,46 +292,112 @@ final class MacAIChatService {
     ) async {
         defer { finaliseStream(messageID: assistantMessageID) }
 
-        // Pre-fetch calendar events so buildPayload stays sync
         await refreshCalendarSnapshot()
+
+        let basePayload = buildPayload(allTasks: allTasks, conversationMessages: requestMessages)
+
+        var followUpMessages: [MacChatMessagePayload] = []
+        let maxSteps = 5
+        var stepsTaken = 0
+        var producedAnyContent = false
+
+        while stepsTaken < maxSteps {
+            stepsTaken += 1
+            let step = await runStep(
+                assistantMessageID: assistantMessageID,
+                basePayload: basePayload,
+                extraMessages: followUpMessages,
+                modelContext: modelContext
+            )
+            if step.hardError { return }
+            if step.producedContent { producedAnyContent = true }
+            if step.toolCalls.isEmpty {
+                if !producedAnyContent { appendFallback(to: assistantMessageID) }
+                return
+            }
+
+            let toolResults = await executeToolCalls(
+                step.toolCalls,
+                assistantMessageID: assistantMessageID,
+                modelContext: modelContext
+            )
+            followUpMessages.append(
+                MacChatMessagePayload.assistantWithToolCalls(
+                    content: step.assistantContent,
+                    toolCalls: step.toolCalls.map { $0.toChatToolCall() }
+                )
+            )
+            followUpMessages.append(contentsOf: toolResults)
+        }
+
+        if !producedAnyContent { appendFallback(to: assistantMessageID) }
+    }
+
+    private struct MacStepResult {
+        var toolCalls: [MacAccumulatedToolCall] = []
+        var assistantContent: String = ""
+        var producedContent: Bool = false
+        var hardError: Bool = false
+    }
+
+    private func runStep(
+        assistantMessageID: UUID,
+        basePayload: MacChatRequest,
+        extraMessages: [MacChatMessagePayload],
+        modelContext: ModelContext
+    ) async -> MacStepResult {
+        var result = MacStepResult()
+
+        guard authService?.bearerToken != nil else {
+            appendError("Not signed in. Please log in and try again.", to: assistantMessageID)
+            result.hardError = true
+            return result
+        }
+
+        // Follow-up steps drop attachments because the server already inlined them
+        // on step 1. Re-sending duplicates the base64 image data and re-triggers the
+        // server-side web search on the same user query.
+        let isFollowUp = !extraMessages.isEmpty
+        var combinedMessages = basePayload.messages
+        combinedMessages.append(contentsOf: extraMessages)
+        let payload = MacChatRequest(
+            messages: combinedMessages,
+            tasks: basePayload.tasks,
+            model: basePayload.model,
+            stream: basePayload.stream,
+            attachments: isFollowUp ? nil : basePayload.attachments
+        )
 
         let url = backendURL.appending(path: "api/ai/chat")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        // Origin required by Better Auth CSRF middleware — without this the bearer plugin
-        // cannot resolve the session, causing a 401 even though the token is valid.
         request.setValue("https://todus.app", forHTTPHeaderField: "Origin")
         if let token = authService?.bearerToken {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
 
-        // Pre-flight: no token → fail fast
-        guard authService?.bearerToken != nil else {
-            appendError("Not signed in. Please log in and try again.", to: assistantMessageID)
-            return
-        }
-
-        let payload = buildPayload(allTasks: allTasks, conversationMessages: requestMessages)
         guard let body = try? JSONEncoder().encode(payload) else {
             appendError("Failed to encode request.", to: assistantMessageID)
-            return
+            result.hardError = true
+            return result
         }
         request.httpBody = body
+
+        var toolCallBuffer: [Int: MacAccumulatedToolCall] = [:]
 
         do {
             let (asyncBytes, response) = try await URLSession.shared.bytes(for: request)
             guard let http = response as? HTTPURLResponse else {
                 appendError("Invalid response from server.", to: assistantMessageID)
-                return
+                result.hardError = true
+                return result
             }
             debugHTTPResponse(http, context: "chat stream")
-            // Capture rotated Bearer token from Better Auth's set-auth-token header
             authService?.captureRotatedToken(from: http)
             guard (200..<300).contains(http.statusCode) else {
                 switch http.statusCode {
                 case 401:
-                    // Match iOS AIChatService: transient 401s often recover after get-session refresh.
                     if let auth = authService {
                         let refreshed = await auth.attemptSilentRefresh()
                         if refreshed {
@@ -313,10 +419,10 @@ final class MacAIChatService {
                 case 502: appendError("AI provider error. The upstream AI service may be down.", to: assistantMessageID)
                 default:  appendError(diagnosticHTTPMessage(statusCode: http.statusCode), to: assistantMessageID)
                 }
-                return
+                result.hardError = true
+                return result
             }
 
-            // Parse Server-Sent Events line by line
             for try await line in asyncBytes.lines {
                 if Task.isCancelled { break }
                 guard line.hasPrefix("data: ") else { continue }
@@ -325,31 +431,216 @@ final class MacAIChatService {
 
                 guard let data = jsonString.data(using: .utf8) else { continue }
 
-                // Try custom event first (web search status, sources, reasoning)
                 if let customEvent = try? JSONDecoder().decode(MacSSECustomEvent.self, from: data),
                    !customEvent.type.isEmpty {
                     handleCustomEvent(customEvent, messageID: assistantMessageID)
                     continue
                 }
 
-                // Standard OpenRouter SSE chunk
                 guard let chunk = try? JSONDecoder().decode(MacSSEChunk.self, from: data) else { continue }
+                guard let delta = chunk.choices.first?.delta else { continue }
 
-                // Append delta content token-by-token
-                if let delta = chunk.choices.first?.delta.content, !delta.isEmpty {
-                    appendToken(delta, to: assistantMessageID)
+                if let text = delta.content, !text.isEmpty {
+                    result.assistantContent += text
+                    result.producedContent = true
+                    appendToken(text, to: assistantMessageID)
                 }
 
-                // Process tool calls (task/calendar/email mutations)
-                if let toolCalls = chunk.choices.first?.delta.toolCalls {
-                    await processToolCalls(toolCalls, assistantMessageID: assistantMessageID, modelContext: modelContext)
+                if let toolCalls = delta.toolCalls {
+                    for tc in toolCalls {
+                        let idx = tc.index ?? 0
+                        var acc = toolCallBuffer[idx] ?? MacAccumulatedToolCall()
+                        if let id = tc.id, !id.isEmpty { acc.id = id }
+                        if let name = tc.function?.name, !name.isEmpty { acc.name = name }
+                        if let args = tc.function?.arguments, !args.isEmpty { acc.arguments += args }
+                        toolCallBuffer[idx] = acc
+                    }
                 }
             }
         } catch {
             if !Task.isCancelled {
                 log.error("chat stream failed: \(error.localizedDescription, privacy: .public)")
                 appendError(error.localizedDescription, to: assistantMessageID)
+                result.hardError = true
             }
+            return result
+        }
+
+        if !tokenBuffer.isEmpty,
+           let idx = messages.firstIndex(where: { $0.id == assistantMessageID }) {
+            messages[idx].content += tokenBuffer
+            tokenBuffer = ""
+        }
+
+        result.toolCalls = toolCallBuffer.keys.sorted().compactMap { idx -> MacAccumulatedToolCall? in
+            guard var tc = toolCallBuffer[idx], !tc.name.isEmpty else { return nil }
+            if tc.id.isEmpty { tc.id = "call_\(UUID().uuidString)" }
+            if tc.arguments.isEmpty { tc.arguments = "{}" }
+            return tc
+        }
+        return result
+    }
+
+    private func executeToolCalls(
+        _ calls: [MacAccumulatedToolCall],
+        assistantMessageID: UUID,
+        modelContext: ModelContext
+    ) async -> [MacChatMessagePayload] {
+        var out: [MacChatMessagePayload] = []
+        for call in calls {
+            let resultJSON = await executeSingleToolCall(
+                call, assistantMessageID: assistantMessageID, modelContext: modelContext
+            )
+            out.append(MacChatMessagePayload.toolResult(toolCallId: call.id, name: call.name, content: resultJSON))
+        }
+        return out
+    }
+
+    private func executeSingleToolCall(
+        _ call: MacAccumulatedToolCall,
+        assistantMessageID: UUID,
+        modelContext: ModelContext
+    ) async -> String {
+        guard let argsData = call.arguments.data(using: .utf8) else {
+            return Self.encodeToolResult(success: false, message: "Invalid tool arguments")
+        }
+
+        switch call.name {
+        case "create_task":
+            guard let args = try? JSONDecoder().decode(MacCreateTaskArgs.self, from: argsData) else {
+                return Self.encodeToolResult(success: false, message: "Invalid create_task arguments")
+            }
+            let dueDate = args.dueDate.flatMap { ISO8601DateFormatter().date(from: $0) }
+            let task = TaskRecord(rawInput: args.title, title: args.title)
+            task.dueDate = dueDate
+            if let priorityStr = args.priority {
+                task.priority = AppTaskPriority(rawValue: priorityStr) ?? .none
+            }
+            modelContext.insert(task)
+            do {
+                try modelContext.save()
+            } catch {
+                modelContext.delete(task)
+                AppLogger.shared.log("[MacAIChatService] Failed to save created task: \(error)")
+                return Self.encodeToolResult(success: false, message: "Failed to save task: \(error.localizedDescription)")
+            }
+            appendMutation(MacTaskMutation(action: .create, title: args.title, dueDate: dueDate), to: assistantMessageID)
+            return Self.encodeToolResult(success: true, message: "Task '\(args.title)' created")
+
+        case "update_task":
+            guard let args = try? JSONDecoder().decode(MacUpdateTaskArgs.self, from: argsData),
+                  let taskID = UUID(uuidString: args.id) else {
+                return Self.encodeToolResult(success: false, message: "Invalid update_task arguments")
+            }
+            applyUpdateTask(taskID: taskID, args: args, modelContext: modelContext)
+            appendMutation(MacTaskMutation(action: .update, taskID: taskID, title: args.title), to: assistantMessageID)
+            return Self.encodeToolResult(success: true, message: "Task updated")
+
+        case "delete_task":
+            guard let args = try? JSONDecoder().decode(MacDeleteTaskArgs.self, from: argsData),
+                  let taskID = UUID(uuidString: args.id) else {
+                return Self.encodeToolResult(success: false, message: "Invalid delete_task arguments")
+            }
+            applyDeleteTask(taskID: taskID, modelContext: modelContext)
+            appendMutation(MacTaskMutation(action: .delete, taskID: taskID), to: assistantMessageID)
+            return Self.encodeToolResult(success: true, message: "Task deleted")
+
+        case "create_calendar_event":
+            guard let args = try? JSONDecoder().decode(MacCreateCalendarEventArgs.self, from: argsData) else {
+                return Self.encodeToolResult(success: false, message: "Invalid create_calendar_event arguments")
+            }
+            let iso = ISO8601DateFormatter()
+            guard let startDate = iso.date(from: args.startDate) else {
+                return Self.encodeToolResult(success: false, message: "Invalid startDate — expected ISO 8601")
+            }
+            guard let cal = calendarService, cal.canCreateEvents() else {
+                return Self.encodeToolResult(success: false, message: "Calendar permission not granted")
+            }
+            let endDate = args.endDate.flatMap { iso.date(from: $0) }
+            do {
+                try await cal.createEvent(title: args.title, startDate: startDate, endDate: endDate)
+                appendMutation(MacTaskMutation(action: .create, title: "📅 \(args.title)"), to: assistantMessageID)
+                return Self.encodeToolResult(success: true, message: "Calendar event '\(args.title)' created")
+            } catch {
+                return Self.encodeToolResult(success: false, message: "Failed to create event: \(error.localizedDescription)")
+            }
+
+        case "update_calendar_event":
+            guard let args = try? JSONDecoder().decode(MacUpdateCalendarEventArgs.self, from: argsData) else {
+                return Self.encodeToolResult(success: false, message: "Invalid update_calendar_event arguments")
+            }
+            guard let cal = calendarService else {
+                return Self.encodeToolResult(success: false, message: "Calendar not available")
+            }
+            let iso = ISO8601DateFormatter()
+            let start = args.startDate.flatMap { iso.date(from: $0) }
+            let end = args.endDate.flatMap { iso.date(from: $0) }
+            do {
+                try await cal.updateEvent(
+                    identifier: args.id,
+                    title: args.title,
+                    startDate: start,
+                    endDate: end,
+                    notes: args.notes
+                )
+                appendMutation(MacTaskMutation(action: .update, title: "📅 \(args.title ?? "Event")"), to: assistantMessageID)
+                return Self.encodeToolResult(success: true, message: "Event updated")
+            } catch {
+                return Self.encodeToolResult(success: false, message: "Failed to update event: \(error.localizedDescription)")
+            }
+
+        case "delete_calendar_event":
+            guard let args = try? JSONDecoder().decode(MacDeleteCalendarEventArgs.self, from: argsData) else {
+                return Self.encodeToolResult(success: false, message: "Invalid delete_calendar_event arguments")
+            }
+            guard let cal = calendarService else {
+                return Self.encodeToolResult(success: false, message: "Calendar not available")
+            }
+            do {
+                try await cal.deleteEvent(identifier: args.id)
+                appendMutation(MacTaskMutation(action: .delete, title: "📅 Event removed"), to: assistantMessageID)
+                return Self.encodeToolResult(success: true, message: "Event deleted")
+            } catch {
+                return Self.encodeToolResult(success: false, message: "Failed to delete event: \(error.localizedDescription)")
+            }
+
+        case "send_email":
+            guard let args = try? JSONDecoder().decode(MacSendEmailArgs.self, from: argsData),
+                  let email = emailService else {
+                return Self.encodeToolResult(success: false, message: "Invalid send_email arguments or email unavailable")
+            }
+            let draft = EmailDraft(
+                to: args.to,
+                subject: args.subject,
+                body: args.body,
+                replyToThreadId: args.threadId
+            )
+            let sent = await email.sendEmail(draft)
+            if sent {
+                appendMutation(MacTaskMutation(action: .create, title: "✉️ Sent: \(args.subject)"), to: assistantMessageID)
+                return Self.encodeToolResult(success: true, message: "Email sent: \(args.subject)")
+            } else {
+                return Self.encodeToolResult(success: false, message: "Failed to send email")
+            }
+
+        default:
+            return Self.encodeToolResult(success: false, message: "Unknown tool '\(call.name)'")
+        }
+    }
+
+    private static func encodeToolResult(success: Bool, message: String) -> String {
+        struct ToolResult: Encodable { let success: Bool; let message: String }
+        if let data = try? JSONEncoder().encode(ToolResult(success: success, message: message)),
+           let json = String(data: data, encoding: .utf8) {
+            return json
+        }
+        return "{\"success\":\(success),\"message\":\"(encoding failed)\"}"
+    }
+
+    private func appendFallback(to messageID: UUID) {
+        guard let idx = messages.firstIndex(where: { $0.id == messageID }) else { return }
+        if messages[idx].content.isEmpty {
+            messages[idx].content = "Done."
         }
     }
 
@@ -410,9 +701,11 @@ final class MacAIChatService {
         modelContext: ModelContext
     ) async {
         for toolCall in toolCalls {
-            guard let argsData = toolCall.function.arguments.data(using: .utf8) else { continue }
+            guard let fn = toolCall.function,
+                  let argsStr = fn.arguments,
+                  let argsData = argsStr.data(using: .utf8) else { continue }
 
-            switch toolCall.function.name {
+            switch fn.name ?? "" {
             case "create_task":
                 if let args = try? JSONDecoder().decode(MacCreateTaskArgs.self, from: argsData) {
                     let dueDate = args.dueDate.flatMap { ISO8601DateFormatter().date(from: $0) }
@@ -498,6 +791,43 @@ final class MacAIChatService {
 
     // MARK: - Payload Building
 
+    private static let maxAttachmentBytes = 5 * 1024 * 1024
+    private static let maxTotalAttachmentBytes = 12 * 1024 * 1024
+
+    private static func buildSerializedAttachments(urls: [URL]) -> [MacSerializedFilePayload] {
+        var total = 0
+        var out: [MacSerializedFilePayload] = []
+        for url in urls {
+            let access = url.startAccessingSecurityScopedResource()
+            defer { if access { url.stopAccessingSecurityScopedResource() } }
+            guard let data = try? Data(contentsOf: url) else { continue }
+            if data.count > maxAttachmentBytes { continue }
+            if total + data.count > maxTotalAttachmentBytes { break }
+            total += data.count
+            let name = url.lastPathComponent
+            var mime = "application/octet-stream"
+            let ext = url.pathExtension.lowercased()
+            if let ut = UTType(filenameExtension: ext), let m = ut.preferredMIMEType {
+                mime = m
+            }
+            var lastModMs = 0
+            if let vals = try? url.resourceValues(forKeys: [.contentModificationDateKey]),
+               let d = vals.contentModificationDate {
+                lastModMs = Int(d.timeIntervalSince1970 * 1000)
+            }
+            out.append(
+                MacSerializedFilePayload(
+                    name: name.isEmpty ? "attachment" : name,
+                    type: mime,
+                    size: data.count,
+                    lastModified: lastModMs,
+                    base64: data.base64EncodedString()
+                )
+            )
+        }
+        return out
+    }
+
     private func buildPayload(
         allTasks: [TaskRecord],
         conversationMessages: [MacChatMessage]? = nil
@@ -552,13 +882,13 @@ final class MacAIChatService {
         You CAN create, update, and delete tasks via tool calls.
 
         \(calendarContext)
-        You CAN create calendar events via the create_calendar_event tool.
+        You CAN create, update, and delete calendar events via create_calendar_event, update_calendar_event, and delete_calendar_event. Pass the bracketed event identifier as `id` when updating or deleting.
 
         \(emailContext)
 
         CAPABILITIES — you can:
         • Read, create, update, and delete tasks (use create_task, update_task, delete_task tools)
-        • Read calendar events and create new ones (use create_calendar_event tool)
+        • Read calendar events and create, update, or delete them (calendar tools above)
         • Read email threads and send new emails or replies (use send_email tool)
 
         FORMATTING RULES — follow these exactly:
@@ -575,14 +905,24 @@ final class MacAIChatService {
             let role = msg.role == .user ? "user" : "assistant"
             return MacChatMessagePayload(role: role, content: msg.content)
         }
-        if apiMessages.last?.role == "assistant" && apiMessages.last?.content.isEmpty == true {
+        if apiMessages.last?.role == "assistant", (apiMessages.last?.content ?? "").isEmpty {
             apiMessages.removeLast()
         }
+
+        let attachmentPayload: [MacSerializedFilePayload]? = {
+            guard let lastUser = activeMessages.reversed().first(where: { $0.role == .user })
+            else { return nil }
+            let cached = attachmentPayloadsByUserMessageId[lastUser.id]
+            if let cached, !cached.isEmpty { return cached }
+            return nil
+        }()
 
         return MacChatRequest(
             messages: apiMessages,
             tasks: Array(taskSummaries),
-            model: selectedModel
+            model: selectedModel,
+            stream: true,
+            attachments: attachmentPayload
         )
     }
 
@@ -659,11 +999,14 @@ final class MacAIChatService {
         let weekEnd = Calendar.current.date(byAdding: .day, value: 7, to: Date()) ?? Date()
         let weekEvents = await cal.events(from: Date(), to: weekEnd)
 
+        // Include event identifiers so the AI can reference them in update/delete tool calls.
+        // Without `[id]`, the model has no handle to pass as `id` to update_calendar_event /
+        // delete_calendar_event — those tools become effectively unreachable.
         let todayStr = today.isEmpty ? "No events today." : today.map {
-            "- \($0.title) (\(shortTime($0.startDate)) – \(shortTime($0.endDate)))"
+            "- [\($0.id)] \($0.title) (\(shortTime($0.startDate)) – \(shortTime($0.endDate)))"
         }.joined(separator: "\n")
         let weekStr = weekEvents.isEmpty ? "No events this week." : weekEvents.prefix(20).map {
-            "- \($0.title) on \(shortDate($0.startDate))"
+            "- [\($0.id)] \($0.title) on \(shortDate($0.startDate))"
         }.joined(separator: "\n")
 
         calendarSnapshot = """
@@ -672,6 +1015,7 @@ final class MacAIChatService {
         \(todayStr)
         This week:
         \(weekStr)
+        You CAN create, update, and delete calendar events via the create_calendar_event, update_calendar_event, and delete_calendar_event tools. Pass the bracketed identifier as `id` when updating or deleting.
         """
     }
 
@@ -687,7 +1031,8 @@ final class MacAIChatService {
             messages: messages.map {
                 MacChatConversation.SavedMessage(
                     role: $0.role == .user ? "user" : "assistant",
-                    content: $0.content
+                    content: $0.content,
+                    attachmentFileNames: $0.attachmentFileNames
                 )
             }
         )
@@ -910,6 +1255,8 @@ struct MacChatMessage: Identifiable {
     var reasoningContent: String
     /// Duration of reasoning phase in ms
     var reasoningDurationMs: Int?
+    /// Display names for files attached to this user message
+    var attachmentFileNames: [String]
 
     init(
         id: UUID = UUID(),
@@ -921,7 +1268,8 @@ struct MacChatMessage: Identifiable {
         searchQueries: [String] = [],
         searchState: SearchPhase = .none,
         reasoningContent: String = "",
-        reasoningDurationMs: Int? = nil
+        reasoningDurationMs: Int? = nil,
+        attachmentFileNames: [String] = []
     ) {
         self.id = id
         self.role = role
@@ -933,6 +1281,7 @@ struct MacChatMessage: Identifiable {
         self.searchState = searchState
         self.reasoningContent = reasoningContent
         self.reasoningDurationMs = reasoningDurationMs
+        self.attachmentFileNames = attachmentFileNames
     }
 }
 
@@ -978,21 +1327,137 @@ struct MacChatConversation: Identifiable, Codable {
     struct SavedMessage: Codable {
         let role: String
         let content: String
+        var attachmentFileNames: [String]
+
+        init(role: String, content: String, attachmentFileNames: [String] = []) {
+            self.role = role
+            self.content = content
+            self.attachmentFileNames = attachmentFileNames
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            role = try c.decode(String.self, forKey: .role)
+            content = try c.decode(String.self, forKey: .content)
+            attachmentFileNames = try c.decodeIfPresent([String].self, forKey: .attachmentFileNames) ?? []
+        }
+
+        func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode(role, forKey: .role)
+            try c.encode(content, forKey: .content)
+            try c.encode(attachmentFileNames, forKey: .attachmentFileNames)
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case role, content, attachmentFileNames
+        }
     }
 }
 
 // MARK: - Request / Response Models
 
+private struct MacSerializedFilePayload: Encodable {
+    let name: String
+    let type: String
+    let size: Int
+    let lastModified: Int
+    let base64: String
+}
+
 private struct MacChatRequest: Encodable {
     let messages: [MacChatMessagePayload]
     let tasks: [MacTaskSummary]
     let model: String
-    let stream: Bool = true
+    let stream: Bool
+    let attachments: [MacSerializedFilePayload]?
+
+    enum CodingKeys: String, CodingKey {
+        case messages, tasks, model, stream, attachments
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(messages, forKey: .messages)
+        try c.encode(tasks, forKey: .tasks)
+        try c.encode(model, forKey: .model)
+        try c.encode(stream, forKey: .stream)
+        if let attachments, !attachments.isEmpty {
+            try c.encode(attachments, forKey: .attachments)
+        }
+    }
 }
 
+/// OpenAI-style chat message for `/api/ai/chat` — supports text, assistant tool calls, and tool results.
 private struct MacChatMessagePayload: Encodable {
     let role: String
-    let content: String
+    let content: String?
+    let toolCalls: [MacChatToolCall]?
+    let toolCallId: String?
+    let name: String?
+
+    enum CodingKeys: String, CodingKey {
+        case role, content, name
+        case toolCalls = "tool_calls"
+        case toolCallId = "tool_call_id"
+    }
+
+    init(
+        role: String,
+        content: String? = nil,
+        toolCalls: [MacChatToolCall]? = nil,
+        toolCallId: String? = nil,
+        name: String? = nil
+    ) {
+        self.role = role
+        self.content = content
+        self.toolCalls = toolCalls
+        self.toolCallId = toolCallId
+        self.name = name
+    }
+
+    static func assistantWithToolCalls(content: String, toolCalls: [MacChatToolCall]) -> MacChatMessagePayload {
+        // Use nil (omitted in JSON) when content is empty — some OpenRouter-routed
+        // models (notably Anthropic via OpenRouter) reject `"content": ""` paired with
+        // `tool_calls`. nil → field is dropped → universally accepted as tool-only.
+        MacChatMessagePayload(
+            role: "assistant",
+            content: content.isEmpty ? nil : content,
+            toolCalls: toolCalls
+        )
+    }
+
+    static func toolResult(toolCallId: String, name: String, content: String) -> MacChatMessagePayload {
+        MacChatMessagePayload(role: "tool", content: content, toolCallId: toolCallId, name: name)
+    }
+}
+
+private struct MacChatToolCall: Encodable {
+    let id: String
+    let type: String
+    let function: MacChatToolFunction
+
+    init(id: String, name: String, arguments: String) {
+        self.id = id
+        self.type = "function"
+        self.function = MacChatToolFunction(name: name, arguments: arguments)
+    }
+}
+
+private struct MacChatToolFunction: Encodable {
+    let name: String
+    let arguments: String
+}
+
+/// Accumulator for a tool call streamed across multiple SSE chunks.
+private struct MacAccumulatedToolCall {
+    var id: String = ""
+    var name: String = ""
+    var arguments: String = ""
+
+    func toChatToolCall() -> MacChatToolCall {
+        MacChatToolCall(id: id, name: name, arguments: arguments)
+    }
 }
 
 private struct MacTaskSummary: Encodable {
@@ -1044,13 +1509,16 @@ private struct MacSSEDelta: Decodable {
     }
 }
 
+/// Streaming tool_call fragment: fields are optional because the stream splits deltas.
 private struct MacSSEToolCall: Decodable {
-    let function: MacSSEToolFunction
+    let index: Int?
+    let id: String?
+    let function: MacSSEToolFunction?
 }
 
 private struct MacSSEToolFunction: Decodable {
-    let name: String
-    let arguments: String
+    let name: String?
+    let arguments: String?
 }
 
 // MARK: - Tool Call Argument Models
@@ -1079,6 +1547,18 @@ private struct MacCreateCalendarEventArgs: Decodable {
     let startDate: String
     let endDate: String?
     let notes: String?
+}
+
+private struct MacUpdateCalendarEventArgs: Decodable {
+    let id: String
+    let title: String?
+    let startDate: String?
+    let endDate: String?
+    let notes: String?
+}
+
+private struct MacDeleteCalendarEventArgs: Decodable {
+    let id: String
 }
 
 private struct MacSendEmailArgs: Decodable {
