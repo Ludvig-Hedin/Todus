@@ -38,6 +38,9 @@ struct EmailThreadView: View {
     @State private var isSummarizing = false
     /// Scroll offset drives the scroll-aware header title
     @State private var scrollOffset: CGFloat = 0
+    @State private var showLabelEditor = false
+    @State private var showReminderOptions = false
+    @State private var reminderNotice: String?
 
     private var emailService: EmailService { services.emailService }
 
@@ -95,7 +98,13 @@ struct EmailThreadView: View {
         .toolbar(.hidden, for: .tabBar)
         .background { SwipeBackEnabler() }
         .onAppear { services.hideTabBar = true }
-        .onDisappear { services.hideTabBar = false }
+        .onDisappear {
+            services.hideTabBar = false
+            // Clear thread context so the next AI-sheet open from a non-thread
+            // tab doesn't leak the previous subject into the context pill.
+            services.aiChatService.currentThreadSubject = nil
+            services.aiChatService.currentThreadId = nil
+        }
         .task { await loadThread() }
         .sheet(isPresented: $showCompose) {
             if let lastMessage = detail?.messages.last {
@@ -103,12 +112,38 @@ struct EmailThreadView: View {
                     .preferredColorScheme(services.appearancePreference.colorScheme)
             }
         }
+        .sheet(isPresented: $showLabelEditor) {
+            EditLabelsSheet(
+                threadId: threadId,
+                appliedLabels: detail?.labels ?? [],
+                onChange: { Task { await loadThread() } }
+            )
+            .preferredColorScheme(services.appearancePreference.colorScheme)
+        }
         .alert("Mail Assistant", isPresented: Binding(
             get: { assistantNotice != nil },
             set: { if !$0 { assistantNotice = nil } }
         )) {
             Button("OK", role: .cancel) {}
         } message: { Text(assistantNotice ?? "") }
+        .alert("Reminder Set", isPresented: Binding(
+            get: { reminderNotice != nil },
+            set: { if !$0 { reminderNotice = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: { Text(reminderNotice ?? "") }
+        .confirmationDialog("Set reminder", isPresented: $showReminderOptions, titleVisibility: .visible) {
+            Button("In 1 hour") {
+                Task { await scheduleReminder(for: .oneHour) }
+            }
+            Button("Tonight") {
+                Task { await scheduleReminder(for: .tonight) }
+            }
+            Button("Tomorrow morning") {
+                Task { await scheduleReminder(for: .tomorrowMorning) }
+            }
+            Button("Cancel", role: .cancel) {}
+        }
     }
 
     // MARK: - Main Layout
@@ -144,17 +179,10 @@ struct EmailThreadView: View {
 
                 Spacer()
 
-                // Ask AI button — matches tab bar gradient, standalone circle
-                Button { openAssistant() } label: {
-                    Image(systemName: "lasso.badge.sparkles")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(aiGradient)
-                        .frame(width: 38, height: 38)
-                }
-                .buttonStyle(LiquidGlassButtonStyle(cornerRadius: 19))
-                .minTouchTarget()
-
-                // Grouped action icons in a single glass capsule
+                // Grouped action icons in a single glass capsule:
+                //   archive · mark-as-unread · delete · more (ellipsis menu)
+                // The Ask AI button was removed — the global AI FAB stays visible
+                // above the reply bar for thread-level questions.
                 HStack(spacing: 0) {
                     Button {
                         Task { await emailService.markAsUnread(ids: [threadId]); dismiss() }
@@ -183,6 +211,8 @@ struct EmailThreadView: View {
                             .frame(width: 42, height: 38)
                     }
                     .buttonStyle(.plain)
+
+                    moreOptionsMenu
                 }
                 .background(.ultraThinMaterial, in: Capsule(style: .continuous))
                 .overlay(Capsule(style: .continuous).stroke(AppTheme.cardBorder.opacity(0.5), lineWidth: 0.5))
@@ -235,6 +265,13 @@ struct EmailThreadView: View {
                                     value: -geo.frame(in: .named("threadScroll")).origin.y)
                 }
                 .frame(height: 0)
+
+                // Labels chips — only render when there are non-system labels.
+                if hasVisibleLabels(detail) {
+                    labelsRow(detail)
+                        .padding(.top, 12)
+                        .padding(.bottom, 2)
+                }
 
                 // Subject row — full width, star button to the right
                 subjectRow(detail)
@@ -503,7 +540,61 @@ struct EmailThreadView: View {
                 }
             }
         }
+        // Card background so the conversation reads as a single grouped surface in
+        // both light and dark mode. Light: white card on muted gray app bg. Dark:
+        // subtle lift over the near-black background.
+        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.card, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppTheme.Radius.card, style: .continuous)
+                .stroke(AppTheme.rowStroke, lineWidth: 1)
+        )
+        .padding(.horizontal, 16)
         .padding(.bottom, 24)
+    }
+
+    // MARK: - Labels Row
+    // Shown above the subject. Each label renders as a small chip; trailing
+    // "+ Add label" button opens the editor sheet so the user can toggle labels.
+
+    private func labelsRow(_ detail: EmailThreadDetail) -> some View {
+        let labels = detail.labels ?? []
+        // Filter out system-only labels users don't expect to see as chips.
+        let visible = labels.filter { label in
+            let n = label.name.uppercased()
+            // Hide top-level Gmail system labels — STARRED is shown via the star button
+            // on the subject row, INBOX/SENT/UNREAD/IMPORTANT are inherent state.
+            return !["STARRED", "\\STARRED", "INBOX", "SENT", "UNREAD",
+                     "IMPORTANT", "DRAFT", "TRASH", "SPAM"].contains(n)
+        }
+
+        return ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(visible, id: \.id) { label in
+                    LabelChip(name: prettyLabelName(label.name))
+                }
+
+                // Add-label affordance — also serves as the empty-state CTA.
+                Button {
+                    showLabelEditor = true
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 10, weight: .bold))
+                        Text(visible.isEmpty ? "Add label" : "Edit")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .foregroundStyle(AppTheme.mutedText)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 4)
+                    .overlay(
+                        Capsule(style: .continuous)
+                            .stroke(AppTheme.rowStroke, lineWidth: 1)
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 16)
+        }
     }
 
     // MARK: - Bottom Bar
@@ -511,34 +602,35 @@ struct EmailThreadView: View {
     // that fades content out behind the buttons.
 
     private var bottomBar: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                ForEach([
-                    ("arrowshape.turn.up.left", "Reply"),
-                    ("arrowshape.turn.up.left.2", "Reply all"),
-                    ("arrowshape.turn.up.right", "Forward")
-                ], id: \.1) { icon, label in
-                    Button {
-                        composeMode = label == "Reply" ? .reply : label == "Reply all" ? .replyAll : .forward
-                        showCompose = true
-                    } label: {
-                        HStack(spacing: 5) {
-                            Image(systemName: icon)
-                                .font(.system(size: 12, weight: .semibold))
-                            Text(label)
-                                .font(.system(size: 14, weight: .semibold))
-                        }
-                        .foregroundStyle(.primary)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 44)
+        HStack(spacing: 8) {
+            ForEach([
+                ("arrowshape.turn.up.left", "Reply"),
+                ("arrowshape.turn.up.left.2", "Reply all"),
+                ("arrowshape.turn.up.right", "Forward")
+            ], id: \.1) { icon, label in
+                Button {
+                    composeMode = label == "Reply" ? .reply : label == "Reply all" ? .replyAll : .forward
+                    showCompose = true
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: icon)
+                            .font(.system(size: 12, weight: .semibold))
+                        Text(label)
+                            .font(.system(size: 14, weight: .semibold))
                     }
-                    .buttonStyle(LiquidGlassButtonStyle(cornerRadius: AppTheme.Radius.control))
+                    .foregroundStyle(.primary)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 44)
                 }
+                // Fully pill-shaped — radius matches the button half-height so it
+                // remains a true Capsule on every device size.
+                .buttonStyle(LiquidGlassButtonStyle(cornerRadius: 22))
             }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 8)
         }
-        // Single smooth gradient covering the full bottom bar area — no solid fill
+        .padding(.horizontal, 16)
+        .padding(.bottom, 8)
+        // Gradient extends through the home indicator area so there's no
+        // visible see-through gap behind the buttons.
         .background(
             LinearGradient(
                 stops: [
@@ -550,7 +642,8 @@ struct EmailThreadView: View {
                 startPoint: .top,
                 endPoint: .bottom
             )
-            .padding(.top, -30) // Extend gradient above the buttons for a smooth fade
+            .padding(.top, -30) // Smooth fade above the buttons
+            .ignoresSafeArea(edges: .bottom)
             .allowsHitTesting(false)
         )
     }
@@ -558,16 +651,23 @@ struct EmailThreadView: View {
     // MARK: - Action Handlers
 
     private func loadThread() async {
-        detail = await emailService.loadThread(id: threadId)
+        // Run the thread fetch, the assistant context fetch, and markAsRead in parallel.
+        // Previously the assistant call only started after the thread had returned, doubling
+        // the time-to-summary. With Gmail's API + Cloudflare round-trip both calls together
+        // are roughly the same wall-clock as either one in isolation.
+        async let threadDetail = emailService.loadThread(id: threadId)
+        async let assistant = emailService.loadAssistant(threadId: threadId)
+        async let markRead: Void = emailService.markAsRead(ids: [threadId])
+
+        let resolvedDetail = await threadDetail
+        detail = resolvedDetail
         isLoading = false
 
-        isStarred = detail?.labels?.contains(where: {
+        isStarred = resolvedDetail?.labels?.contains(where: {
             let n = $0.name.uppercased()
             return n == "STARRED" || n == "\\STARRED"
         }) ?? false
 
-        async let markRead: Void = emailService.markAsRead(ids: [threadId])
-        async let assistant = emailService.loadAssistant(threadId: threadId)
         applyAssistantContext(await assistant)
         isLoadingAssistant = false
         await markRead
@@ -631,8 +731,262 @@ struct EmailThreadView: View {
 
     private func openAssistant() {
         services.currentTab = .email
-        services.aiChatService.currentPageContext = "Email thread: \(detail?.messages.first?.subject ?? "Message")"
+        let subject = detail?.messages.first?.subject ?? "Message"
+        services.aiChatService.currentPageContext = "Email thread: \(subject)"
+        services.aiChatService.currentThreadSubject = subject
+        services.aiChatService.currentThreadId = threadId
         services.showsAIChat = true
+    }
+
+    // MARK: - More Options Menu (ellipsis in header capsule)
+
+    private var moreOptionsMenu: some View {
+        Menu {
+            Section {
+                Button {
+                    showLabelEditor = true
+                } label: { Label("Edit labels", systemImage: "tag") }
+
+                Button {
+                    showReminderOptions = true
+                } label: { Label("Set reminder", systemImage: "alarm") }
+
+            }
+
+            Section {
+                Button {
+                    Task {
+                        await emailService.markAsSpam(ids: [threadId])
+                        dismiss()
+                    }
+                } label: { Label("Report spam", systemImage: "exclamationmark.octagon") }
+
+                Button(role: .destructive) {
+                    showDeleteConfirmation = true
+                } label: { Label("Move to Trash", systemImage: "trash") }
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(.primary)
+                .frame(width: 42, height: 38)
+        }
+    }
+
+    // MARK: - Labels helpers
+
+    private func hasVisibleLabels(_ detail: EmailThreadDetail) -> Bool {
+        guard let labels = detail.labels else { return false }
+        return labels.contains { label in
+            !["STARRED", "\\STARRED", "INBOX", "SENT", "UNREAD",
+              "IMPORTANT", "DRAFT", "TRASH", "SPAM"].contains(label.name.uppercased())
+        }
+    }
+
+    private enum ReminderPreset {
+        case oneHour
+        case tonight
+        case tomorrowMorning
+    }
+
+    private func scheduleReminder(for preset: ReminderPreset) async {
+        guard let message = detail?.messages.last ?? detail?.messages.first else { return }
+        let remindAt = reminderDate(for: preset)
+        let didSchedule = await services.notificationService.scheduleEmailReminder(
+            threadId: threadId,
+            from: message.from.name.isEmpty ? message.from.email : message.from.name,
+            subject: message.subject,
+            remindAt: remindAt
+        )
+        if didSchedule {
+            reminderNotice = "We'll remind you on \(remindAt.formatted(date: .abbreviated, time: .shortened))."
+        } else {
+            reminderNotice = "Turn on notifications for Todus to use email reminders."
+        }
+    }
+
+    private func reminderDate(for preset: ReminderPreset) -> Date {
+        let now = Date()
+        let calendar = Calendar.current
+        switch preset {
+        case .oneHour:
+            return now.addingTimeInterval(3600)
+        case .tonight:
+            let todayAtSeven = calendar.date(
+                bySettingHour: 19,
+                minute: 0,
+                second: 0,
+                of: now
+            ) ?? now.addingTimeInterval(3600)
+            if todayAtSeven > now {
+                return todayAtSeven
+            }
+            return calendar.date(byAdding: .day, value: 1, to: todayAtSeven) ?? now.addingTimeInterval(3600)
+        case .tomorrowMorning:
+            let tomorrow = calendar.date(byAdding: .day, value: 1, to: now) ?? now
+            return calendar.date(
+                bySettingHour: 9,
+                minute: 0,
+                second: 0,
+                of: tomorrow
+            ) ?? now.addingTimeInterval(3600)
+        }
+    }
+
+    /// Convert a Gmail label name into a friendly display string.
+    /// `CATEGORY_PROMOTIONS` → `Promotions`; user labels are returned as-is.
+    private func prettyLabelName(_ raw: String) -> String {
+        if raw.hasPrefix("CATEGORY_") {
+            return raw.dropFirst("CATEGORY_".count).capitalized
+        }
+        return raw
+    }
+}
+
+// MARK: - Label Chip
+
+private struct LabelChip: View {
+    let name: String
+
+    var body: some View {
+        Text(name)
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(AppTheme.subtleText)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 4)
+            .background(AppTheme.surfaceSecondary, in: Capsule(style: .continuous))
+            .overlay(
+                Capsule(style: .continuous).stroke(AppTheme.rowStroke, lineWidth: 1)
+            )
+    }
+}
+
+// MARK: - Edit Labels Sheet
+
+/// Lists every user label and toggles the thread's membership via `mail.modifyLabels`.
+private struct EditLabelsSheet: View {
+    @Environment(AppServices.self) private var services
+    @Environment(\.dismiss) private var dismiss
+
+    let threadId: String
+    let appliedLabels: [EmailThreadDetail.ThreadLabel]
+    let onChange: () -> Void
+
+    @State private var availableLabels: [EmailLabel] = []
+    @State private var selectedIds: Set<String> = []
+    @State private var initialIds: Set<String> = []
+    @State private var isLoading = true
+    @State private var isSaving = false
+    @State private var errorMessage: String?
+    @State private var showLabelSaveError = false
+    @State private var labelSaveErrorText = ""
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if isLoading {
+                    ProgressView().tint(.secondary)
+                } else if let errorMessage {
+                    VStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(.system(size: 24, weight: .light))
+                            .foregroundStyle(AppTheme.mutedText)
+                        Text(errorMessage)
+                            .font(.system(size: 13))
+                            .foregroundStyle(AppTheme.subtleText)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 32)
+                    }
+                } else if availableLabels.isEmpty {
+                    Text("No labels yet. Create one in Gmail to use it here.")
+                        .font(.system(size: 13))
+                        .foregroundStyle(AppTheme.mutedText)
+                        .padding(.horizontal, 32)
+                        .multilineTextAlignment(.center)
+                } else {
+                    List {
+                        ForEach(availableLabels) { label in
+                            Button {
+                                if selectedIds.contains(label.id) {
+                                    selectedIds.remove(label.id)
+                                } else {
+                                    selectedIds.insert(label.id)
+                                }
+                            } label: {
+                                HStack {
+                                    Text(label.name)
+                                        .foregroundStyle(.primary)
+                                    Spacer()
+                                    if selectedIds.contains(label.id) {
+                                        Image(systemName: "checkmark")
+                                            .font(.system(size: 14, weight: .semibold))
+                                            .foregroundStyle(.tint)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .listStyle(.insetGrouped)
+                }
+            }
+            .navigationTitle("Edit labels")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button {
+                        Task { await save() }
+                    } label: {
+                        if isSaving { ProgressView().controlSize(.mini) }
+                        else { Text("Save").fontWeight(.semibold) }
+                    }
+                    .disabled(isSaving || selectedIds == initialIds)
+                }
+            }
+        }
+            .task { await load() }
+            .alert("Couldn't update labels", isPresented: $showLabelSaveError) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(labelSaveErrorText)
+            }
+    }
+
+    private func load() async {
+        // Pre-select the labels already on this thread.
+        initialIds = Set(appliedLabels.map(\.id))
+        selectedIds = initialIds
+
+        do {
+            availableLabels = try await services.emailService.listLabels()
+                .filter { $0.type == "user" } // hide Gmail system labels (INBOX, SPAM, …)
+                .sorted { $0.name.lowercased() < $1.name.lowercased() }
+            isLoading = false
+        } catch {
+            errorMessage = "Could not load labels."
+            isLoading = false
+        }
+    }
+
+    private func save() async {
+        isSaving = true
+        let added = Array(selectedIds.subtracting(initialIds))
+        let removed = Array(initialIds.subtracting(selectedIds))
+        let success = await services.emailService.modifyLabels(
+            threadId: threadId,
+            add: added,
+            remove: removed
+        )
+        isSaving = false
+        if success {
+            onChange()
+            dismiss()
+        } else {
+            labelSaveErrorText = "Please try again. Your selections are preserved."
+            showLabelSaveError = true
+        }
     }
 }
 
@@ -807,11 +1161,12 @@ private struct MessageRow: View {
             }
         }
         .task(id: isExpanded) {
-            // Defer WKWebView creation slightly so the view appears instantly with plain text,
-            // then swaps in the full HTML rendering after a short delay
+            // Defer WKWebView creation just enough that the row first renders with plain
+            // text, then swaps in the full HTML rendering. A short delay also gives
+            // SwiftUI a chance to commit the row's frame before the WebView lays itself out.
             if isExpanded && !htmlReady && !message.body.isEmpty {
-                try? await Task.sleep(for: .milliseconds(150))
-                withAnimation(.easeIn(duration: 0.2)) { htmlReady = true }
+                try? await Task.sleep(for: .milliseconds(40))
+                withAnimation(.easeIn(duration: 0.15)) { htmlReady = true }
             }
         }
     }

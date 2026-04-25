@@ -124,6 +124,7 @@ enum MacPrimarySelection: Hashable {
 struct MacRootView: View {
     @Environment(MacAppServices.self) private var services
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.scenePhase) private var scenePhase
 
     // Live task count for sidebar badge
     @Query(filter: #Predicate<TaskRecord> { !$0.completed }) private var incompleteTasks: [TaskRecord]
@@ -138,8 +139,13 @@ struct MacRootView: View {
     @AppStorage("mac_calendar_expanded") private var isCalendarExpanded = true
     @AppStorage("mac_assistant_presented") private var isAssistantPresented = false
     @AppStorage("mac_assistant_display_mode") private var assistantDisplayModeRaw: String = AssistantDisplayMode.floating.rawValue
+    @AppStorage("mac_compact_sidebar") private var compactSidebar = false
     // Side pane resize — user can drag the divider to adjust width
     @AppStorage("mac_side_pane_width") private var sidePaneWidth: Double = 380
+    /// Live floating geometry — **not** @AppStorage; binding updates every frame during drag/resize. Disk sync on gesture end to avoid jank.
+    @State private var assistantFloatSize: CGSize = CGSize(width: 400, height: 560)
+    @State private var assistantFloatOffset: CGSize = .zero
+    @State private var didLoadAssistantFloatLayout = false
     @State private var selection: MacPrimarySelection = .home
     @State private var sidePaneDragStartWidth: CGFloat?
 
@@ -155,6 +161,43 @@ struct MacRootView: View {
         )
     }
 
+    private var assistantFloatingSizeBinding: Binding<CGSize> {
+        Binding(
+            get: { assistantFloatSize },
+            set: { assistantFloatSize = $0 }
+        )
+    }
+
+    private var assistantFloatingOffsetBinding: Binding<CGSize> {
+        Binding(
+            get: { assistantFloatOffset },
+            set: { assistantFloatOffset = $0 }
+        )
+    }
+
+    private func loadAssistantFloatLayoutIfNeeded() {
+        guard !didLoadAssistantFloatLayout else { return }
+        didLoadAssistantFloatLayout = true
+        let d = UserDefaults.standard
+        let w = d.double(forKey: "mac_assistant_floating_width")
+        let h = d.double(forKey: "mac_assistant_floating_height")
+        let ox = d.double(forKey: "mac_assistant_floating_offset_x")
+        let oy = d.double(forKey: "mac_assistant_floating_offset_y")
+        assistantFloatSize = CGSize(
+            width: w > 0 ? w : 400,
+            height: h > 0 ? h : 560
+        )
+        assistantFloatOffset = CGSize(width: ox, height: oy)
+    }
+
+    private func syncAssistantFloatLayoutToDisk() {
+        let d = UserDefaults.standard
+        d.set(assistantFloatSize.width, forKey: "mac_assistant_floating_width")
+        d.set(assistantFloatSize.height, forKey: "mac_assistant_floating_height")
+        d.set(assistantFloatOffset.width, forKey: "mac_assistant_floating_offset_x")
+        d.set(assistantFloatOffset.height, forKey: "mac_assistant_floating_offset_y")
+    }
+
     @State private var isComposePresented = false
     @State private var isCreatePresented = false
     @State private var isSearchPresented = false
@@ -164,6 +207,8 @@ struct MacRootView: View {
     @State private var calendarViewMode: String = "Week"
     @State private var calendarSelectedDate: Date = Date()
     @State private var composeEmailSeedBody: String = ""
+    @State private var composeEmailSeedTo: String = ""
+    @State private var composeEmailSeedSubject: String = ""
     @State private var hasBootstrappedAuthState = false
     @State private var hasAppliedStartupSelection = false
 
@@ -191,6 +236,12 @@ struct MacRootView: View {
             } else if !services.hasConfiguredStartupViewPrompt {
                 MacStartupOnboardingView()
                     .transition(.opacity.combined(with: .move(edge: .trailing)))
+            } else if !services.hasConfiguredNotificationsPrompt {
+                MacNotificationsOnboardingView()
+                    .transition(.opacity.combined(with: .move(edge: .trailing)))
+            } else if !services.hasConfiguredDefaultMailPrompt {
+                MacDefaultMailOnboardingView()
+                    .transition(.opacity.combined(with: .move(edge: .trailing)))
             } else {
                 // Authenticated or guest → show main app shell
                 mainAppView
@@ -207,11 +258,13 @@ struct MacRootView: View {
         .animation(.snappy(duration: 0.3), value: services.hasConfiguredCalendarPrompt)
         .animation(.snappy(duration: 0.3), value: services.hasConfiguredRemindersPrompt)
         .animation(.snappy(duration: 0.3), value: services.hasConfiguredStartupViewPrompt)
+        .animation(.snappy(duration: 0.3), value: services.hasConfiguredNotificationsPrompt)
+        .animation(.snappy(duration: 0.3), value: services.hasConfiguredDefaultMailPrompt)
         .safeAreaInset(edge: .top, spacing: 0) {
             if let onboardingStep = onboardingStep {
                 HStack {
                     Spacer()
-                    Text("\(onboardingStep) of 4")
+                    Text("\(onboardingStep) of 6")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 10)
@@ -233,6 +286,17 @@ struct MacRootView: View {
         }
         .onChange(of: isAssistantPresented) { _, isPresented in
             services.showsAssistantPanel = isPresented
+        }
+        // mailto: deep link — open compose with pre-filled fields when set by TodusMacApp
+        .onChange(of: services.pendingMailto) { _, pending in
+            guard let p = pending else { return }
+            let hasField = p.to != nil || p.subject != nil || p.body != nil
+            guard hasField else { return }
+            composeEmailSeedTo = p.to ?? ""
+            composeEmailSeedSubject = p.subject ?? ""
+            composeEmailSeedBody = p.body ?? ""
+            withAnimation(.snappy(duration: 0.18)) { isComposePresented = true }
+            services.pendingMailto = nil
         }
         .task {
             guard !hasBootstrappedAuthState else { return }
@@ -311,6 +375,8 @@ struct MacRootView: View {
                 MacCreateSheet(
                     defaultType: defaultCreateType,
                     onComposeEmail: { body in
+                        composeEmailSeedTo = ""
+                        composeEmailSeedSubject = ""
                         composeEmailSeedBody = body
                         isComposePresented = true
                     },
@@ -327,9 +393,13 @@ struct MacRootView: View {
             if isComposePresented {
                 Divider()
                 MacEmailComposeView(
-                    seedBody: composeEmailSeedBody,
+                    to: composeEmailSeedTo,
+                    subject: composeEmailSeedSubject,
+                    body: composeEmailSeedBody,
                     onClose: {
                         withAnimation(.snappy(duration: 0.18)) { isComposePresented = false }
+                        composeEmailSeedTo = ""
+                        composeEmailSeedSubject = ""
                         composeEmailSeedBody = ""
                     }
                 )
@@ -367,6 +437,9 @@ struct MacRootView: View {
                 MacAssistantPanel(
                     isPresented: $isAssistantPresented,
                     displayMode: assistantDisplayModeBinding,
+                    floatingSize: assistantFloatingSizeBinding,
+                    floatingOffset: assistantFloatingOffsetBinding,
+                    onFloatingLayoutCommit: syncAssistantFloatLayoutToDisk,
                     currentSelection: selection
                 )
                 .frame(width: CGFloat(sidePaneWidth))
@@ -382,9 +455,13 @@ struct MacRootView: View {
                 MacAssistantPanel(
                     isPresented: $isAssistantPresented,
                     displayMode: assistantDisplayModeBinding,
+                    floatingSize: assistantFloatingSizeBinding,
+                    floatingOffset: assistantFloatingOffsetBinding,
+                    onFloatingLayoutCommit: syncAssistantFloatLayoutToDisk,
                     currentSelection: selection
                 )
-                // Panel self-manages its size via floatingSize state — no fixed frame here
+                .animation(nil, value: assistantFloatSize)
+                .animation(nil, value: assistantFloatOffset)
                 .padding(.trailing, 20)
                 .padding(.bottom, 20)
                 .transition(.scale(scale: 0.92, anchor: .bottomTrailing).combined(with: .opacity))
@@ -414,7 +491,14 @@ struct MacRootView: View {
             // Persist sidebar selection so the next launch restores the same view.
             selectionStorageKey = newValue.storageKey
         }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .background { syncAssistantFloatLayoutToDisk() }
+        }
+        .onChange(of: assistantDisplayModeRaw) { _, _ in
+            if isAssistantPresented { syncAssistantFloatLayoutToDisk() }
+        }
         .onAppear {
+            loadAssistantFloatLayoutIfNeeded()
             applyStartupSelectionIfNeeded()
         }
     }
@@ -436,7 +520,11 @@ struct MacRootView: View {
                     selection = .calendar(.all)
                 }
             )
-            .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 260)
+            .navigationSplitViewColumnWidth(
+                min: compactSidebar ? 176 : 200,
+                ideal: compactSidebar ? 196 : 220,
+                max: compactSidebar ? 220 : 260
+            )
         } detail: {
             ZStack(alignment: .bottomTrailing) {
                 // Content-area base background — slightly tinted to match iOS app tone
@@ -684,6 +772,8 @@ struct MacRootView: View {
         if !services.hasConfiguredCalendarPrompt { return 2 }
         if !services.hasConfiguredRemindersPrompt { return 3 }
         if !services.hasConfiguredStartupViewPrompt { return 4 }
+        if !services.hasConfiguredNotificationsPrompt { return 5 }
+        if !services.hasConfiguredDefaultMailPrompt { return 6 }
         return nil
     }
 
@@ -702,11 +792,8 @@ struct MacRootView: View {
 
     private func applyStartupSelectionIfNeeded() {
         guard !hasAppliedStartupSelection else { return }
-        // Restore the persisted sidebar selection if present; fall back to the user's
-        // configured startup view (Home / Inbox / Tasks / Meetings) only when no
-        // valid persisted selection exists. This way relaunching the app returns the
-        // user to the screen they last viewed, without overriding their preference.
-        if let restored = MacPrimarySelection.fromStorageKey(selectionStorageKey) {
+        if services.restoreLastViewedPage,
+           let restored = MacPrimarySelection.fromStorageKey(selectionStorageKey) {
             selection = restored
         } else {
             selection = startupSelection

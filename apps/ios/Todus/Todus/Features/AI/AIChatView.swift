@@ -109,7 +109,7 @@ struct AIChatView: View {
     var body: some View {
         NavigationStack {
             ZStack(alignment: .bottom) {
-                AppTheme.backgroundTop.ignoresSafeArea()
+                AppTheme.sheetBackground.ignoresSafeArea()
 
                 if chatService.messages.isEmpty {
                     // Show error state when backend is unreachable and no conversation exists
@@ -128,7 +128,7 @@ struct AIChatView: View {
             // Top gradient fade — same height as header buttons, fades content below toolbar
             .safeAreaInset(edge: .top) {
                 LinearGradient(
-                    colors: [AppTheme.backgroundTop.opacity(0.5), AppTheme.backgroundTop.opacity(0)],
+                    colors: [AppTheme.sheetBackground.opacity(0.5), AppTheme.sheetBackground.opacity(0)],
                     startPoint: .top,
                     endPoint: .bottom
                 )
@@ -147,6 +147,7 @@ struct AIChatView: View {
         .sheet(isPresented: $showsConfig) {
             AIChatConfigSheet()
                 .presentationDragIndicator(.visible)
+                .appSheetBackground()
                 .preferredColorScheme(services.appearancePreference.colorScheme)
         }
         // Prompt library — presets + user-saved prompts
@@ -179,6 +180,7 @@ struct AIChatView: View {
         .sheet(item: $eventDetailSheetID) { item in
             EKEventDetailSheet(eventId: item.id)
                 .presentationDragIndicator(.visible)
+                .appSheetBackground()
         }
         // Delete confirmation dialog
         .confirmationDialog("Delete this conversation?", isPresented: $showsDeleteConfirm, titleVisibility: .visible) {
@@ -603,16 +605,41 @@ struct AIChatView: View {
                 .background {
                     VStack(spacing: 0) {
                         LinearGradient(
-                            colors: [AppTheme.backgroundTop.opacity(0), AppTheme.backgroundTop.opacity(0.94)],
+                            colors: [AppTheme.sheetBackground.opacity(0), AppTheme.sheetBackground.opacity(0.94)],
                             startPoint: .top,
                             endPoint: .bottom
                         )
                         .frame(height: 48)
-                        AppTheme.backgroundTop.opacity(0.97)
+                        AppTheme.sheetBackground.opacity(0.97)
                     }
                     .ignoresSafeArea(edges: .bottom)
                 }
         }
+    }
+
+    /// Non-empty trimmed thread subject, or `nil` when the assistant is not
+    /// grounded on a real email thread (matches icon + title + suggestions).
+    private var trimmedThreadSubject: String? {
+        if let s = chatService.currentThreadSubject?.trimmingCharacters(in: .whitespaces),
+           !s.isEmpty {
+            return s
+        }
+        return nil
+    }
+
+    /// Icon for the context pill — switches to an envelope when an email
+    /// thread is in scope, otherwise mirrors the active tab.
+    private var contextPillIcon: String {
+        trimmedThreadSubject == nil ? currentTab.activeIcon : "envelope.fill"
+    }
+
+    /// Title for the context pill — when in an email thread, prefers the
+    /// truncated subject so it's clear which message the AI is grounded on.
+    private var contextPillTitle: String {
+        if let subject = trimmedThreadSubject {
+            return subject
+        }
+        return currentTab.title
     }
 
     /// Full pool of up to 10 context-aware suggestions. First 3 are shown by default.
@@ -629,6 +656,26 @@ struct AIChatView: View {
         case .email:
             // Only show email suggestions when email is actually connected
             guard emailConnected else { return [] }
+            // When the user opened the assistant from inside a thread we know a
+            // single thread is in scope, so the prompts shift from inbox-wide
+            // triage to thread-specific actions.
+            if trimmedThreadSubject != nil {
+                pinned = [
+                    ("doc.text",                "Summarize this email"),
+                    ("arrowshape.turn.up.left", "Draft a reply"),
+                    ("checklist",               "Extract tasks from this email"),
+                ]
+                extended = [
+                    ("calendar.badge.plus",     "Suggest a meeting time based on this thread"),
+                    ("text.viewfinder",         "Pull out the key dates and decisions"),
+                    ("person.2",                "Who's on this thread and what do they want?"),
+                    ("questionmark.bubble",     "Help me answer the questions raised here"),
+                    ("flag",                    "Is this thread urgent? What should I prioritize?"),
+                    ("text.bubble",             "Give me three reply options with different tones"),
+                    ("arrow.uturn.right",       "Suggest a polite way to decline"),
+                ]
+                break
+            }
             pinned = [
                 ("envelope.open",              "Summarize my recent emails"),
                 ("arrowshape.turn.up.left",    "Draft a reply to my latest email"),
@@ -853,12 +900,12 @@ struct AIChatView: View {
                     .background {
                         VStack(spacing: 0) {
                             LinearGradient(
-                                colors: [AppTheme.backgroundTop.opacity(0), AppTheme.backgroundTop.opacity(0.94)],
+                                colors: [AppTheme.sheetBackground.opacity(0), AppTheme.sheetBackground.opacity(0.94)],
                                 startPoint: .top,
                                 endPoint: .bottom
                             )
                             .frame(height: 48)
-                            AppTheme.backgroundTop.opacity(0.97)
+                            AppTheme.sheetBackground.opacity(0.97)
                         }
                         .ignoresSafeArea(edges: .bottom)
                     }
@@ -1103,13 +1150,18 @@ struct AIChatView: View {
             if hasAccessories {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
-                        // Page context pill — shows which tab/page the user is on
+                        // Page context pill — when the user opened the assistant
+                        // from inside an email thread we show the truncated subject
+                        // (much more useful than the generic "Email" tab label).
                         if pageContextAttached {
                             HStack(spacing: 6) {
-                                Image(systemName: currentTab.activeIcon)
+                                Image(systemName: contextPillIcon)
                                     .font(.system(size: 13, weight: .semibold))
-                                Text(currentTab.title)
+                                Text(contextPillTitle)
                                     .font(.system(size: 13, weight: .medium))
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
+                                    .frame(maxWidth: 220)
                                 Button {
                                     withAnimation(.snappy(duration: 0.15)) {
                                         pageContextAttached = false
@@ -1430,8 +1482,19 @@ struct AIChatView: View {
         pendingAttachments = []
         // Clear persisted draft since the message was sent
         UserDefaults.standard.removeObject(forKey: "ai_draft_input")
-        // Set the current page context so the AI knows where the user is
-        chatService.currentPageContext = pageContextAttached ? currentTab.title + " tab" : nil
+        // Set the current page context so the AI knows where the user is.
+        // If an email thread is in scope, prefer the subject — the model gets a
+        // much stronger hint than a generic "Email tab" label.
+        if pageContextAttached {
+            if let subject = chatService.currentThreadSubject?.trimmingCharacters(in: .whitespaces),
+               !subject.isEmpty {
+                chatService.currentPageContext = "Email thread: \(subject)"
+            } else {
+                chatService.currentPageContext = currentTab.title + " tab"
+            }
+        } else {
+            chatService.currentPageContext = nil
+        }
         chatService.send(
             userMessage: messageText,
             mentions: mentions,
@@ -1683,6 +1746,7 @@ private struct MessageBubble: View {
     /// and truncates the conversation so the edited turn re-runs on send.
     var onEdit: ((AIChatMessage) -> Void)?
 
+    @Environment(AppServices.self) private var services
     @State private var showActions = false
     @State private var didCopy = false
     @State private var thumbsState: ThumbsState? = nil
@@ -1928,9 +1992,37 @@ private struct MessageBubble: View {
         }
     }
 
-    /// Handles actions from generative UI card taps — forwards to parent via onNavigate callback.
+    /// Handles actions from generative UI card taps. Side-effecting actions (autosave, send,
+    /// clipboard, undo) are executed locally; navigation actions are forwarded to the parent.
     private func handleSpecAction(_ action: String, params: [String: String]) {
-        onNavigate?(action, params)
+        switch action {
+        case "copy_text":
+            if let content = params["content"] {
+                UIPasteboard.general.string = content
+            }
+        case "update_draft":
+            guard let draftId = params["draftId"], let payloadStr = params["payload"],
+                  let payload = DraftService.decodePayload(payloadStr) else { return }
+            Task { try? await services.draftService.update(draftId: draftId, payload: payload) }
+        case "send_draft":
+            guard let payloadStr = params["payload"],
+                  let payload = DraftService.decodePayload(payloadStr) else { return }
+            let draftId = params["draftId"]
+            Task { try? await services.draftService.send(draftId: draftId, payload: payload) }
+        case "attach_to_draft":
+            // Attachment picking belongs to the host composer; surface the intent for now.
+            onNavigate?(action, params)
+        case "undo":
+            guard let undoAction = params["undoAction"] else { return }
+            var nestedParams: [String: String] = [:]
+            if let nestedRaw = params["undoParams"], let data = nestedRaw.data(using: .utf8),
+               let dict = try? JSONDecoder().decode([String: String].self, from: data) {
+                nestedParams = dict
+            }
+            handleSpecAction(undoAction, params: nestedParams)
+        default:
+            onNavigate?(action, params)
+        }
     }
 
     @ViewBuilder
@@ -2777,7 +2869,7 @@ struct ChatHistoryView: View {
             await services.captureService.syncSharedFolders(in: modelContext)
         }
         // Background matches main chat sheet — set via presentationBackground at call site
-        .background(AppTheme.backgroundTop.ignoresSafeArea())
+        .background(AppTheme.sheetBackground.ignoresSafeArea())
         .confirmationDialog(
             "Move Conversation",
             isPresented: Binding(
@@ -2921,6 +3013,8 @@ struct AIChatConfigSheet: View {
                     Text("Models are routed via OpenRouter.")
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(AppTheme.sheetBackground.ignoresSafeArea())
             .navigationTitle("AI Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -3089,7 +3183,9 @@ private struct PromptLibrarySheet: View {
                     }
                 }
                 .listStyle(.plain)
+                .scrollContentBackground(.hidden)
             }
+            .background(AppTheme.sheetBackground.ignoresSafeArea())
             .navigationTitle("Prompt Library")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -3149,6 +3245,8 @@ private struct ConversationDataSheet: View {
                 }
             }
             .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
+            .background(AppTheme.sheetBackground.ignoresSafeArea())
             .navigationTitle("Conversation Data")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -3195,7 +3293,7 @@ private struct FullScreenComposeView: View {
                     .padding(.horizontal, 16)
                     .padding(.top, 8)
                     .scrollContentBackground(.hidden)
-                    .background(AppTheme.backgroundTop)
+                    .background(AppTheme.sheetBackground)
                     .focused($isFocused)
 
                 // Send button floating over the editor — only shows when there's text
@@ -3213,7 +3311,7 @@ private struct FullScreenComposeView: View {
                     .transition(.scale.combined(with: .opacity))
                 }
             }
-            .background(AppTheme.backgroundTop)
+            .background(AppTheme.sheetBackground)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {

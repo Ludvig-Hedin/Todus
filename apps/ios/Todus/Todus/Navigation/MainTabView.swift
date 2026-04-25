@@ -1,15 +1,14 @@
 import SwiftUI
+import UIKit
 
 /// Root navigation shell.
 ///
 /// Layout:
-///   Native bottom tab bar: Home | Tasks | [+] | Email | Calendar
-///   AI floating button: sparkles gradient FAB above the right side of the tab bar.
+///   Hidden native `TabView` for content/state preservation.
+///   Visible floating `CustomTabBar` sourced from `services.tabBarTabs`.
 ///
-/// • The [+] tab is intercepted — tapping it shows the create sheet and the
-///   selected tab is immediately reverted to the prior one.
-/// • `services.hideTabBar` hides both the native tab bar and the AI FAB
-///   (used by EmailThreadView for its own bottom bar).
+/// • The create and AI actions live in the floating bar.
+/// • `services.hideTabBar` hides the floating bar while detail views manage their own bottom chrome.
 struct MainTabView: View {
     @Environment(AppServices.self) private var services
     @Environment(\.scenePhase) private var scenePhase
@@ -29,8 +28,10 @@ struct MainTabView: View {
     @State private var tasksTabId = UUID()
     @State private var emailTabId = UUID()
     @State private var calendarTabId = UUID()
+    @State private var meetingsTabId = UUID()
 
     @State private var sheetTab: AppTab? = nil
+    @State private var showMoreSheet = false
 
     // MARK: - Body
 
@@ -51,15 +52,12 @@ struct MainTabView: View {
         .animation(.easeInOut(duration: 0.3), value: services.networkMonitor.isConnected)
         .animation(.easeInOut(duration: 0.3), value: services.authService.isSessionExpired)
         .ignoresSafeArea(.keyboard)
-        // FAB is in the outer overlay so its reference point is the ZStack's safe-area-
-        // inset bottom edge (= above the home indicator). Tab bar adds another 49pt on
-        // top of that, so padding(.bottom, 49 + 12) clears the tab bar with 12pt of air.
-        .overlay(alignment: .bottomTrailing) {
+        .overlay(alignment: .bottom) {
             if !services.hideTabBar && !showCreateSheet {
-                aiFAB
-                    .padding(.trailing, 20)
-                    .padding(.bottom, 49 + 12)
-                    .transition(.opacity)
+                customTabBar
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 12)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         .animation(.easeOut(duration: 0.15), value: services.hideTabBar)
@@ -80,11 +78,6 @@ struct MainTabView: View {
                 .tabItem { Image(systemName: "checklist") }
                 .tag(AppTab.tasks)
 
-            // Action tab — intercepted immediately; content is never shown.
-            Color.clear.ignoresSafeArea()
-                .tabItem { Image(systemName: "plus.circle.fill") }
-                .tag(AppTab.create)
-
             NavigationStack { EmailInboxView() }
                 .id(emailTabId)
                 .tabItem { Image(systemName: selectedTab == .email ? "envelope.fill" : "envelope") }
@@ -103,19 +96,20 @@ struct MainTabView: View {
             .id(calendarTabId)
             .tabItem { Image(systemName: "calendar") }
             .tag(AppTab.calendar)
+
+            NavigationStack { MeetingsListView() }
+                .id(meetingsTabId)
+                .tabItem { Image(systemName: "video") }
+                .tag(AppTab.meetings)
         }
-        .tint(AppTheme.accentBlue)
-        .toolbar(services.hideTabBar ? .hidden : .visible, for: .tabBar)
+        .tint(Color(UIColor.label))
+        .toolbar(.hidden, for: .tabBar)
         .onChange(of: selectedTab) { old, new in
-            switch new {
-            case .create:
-                let revertTo: AppTab = (old == .create) ? .home : old
-                selectedTab = revertTo
-                createSheetInitialType = createType(for: revertTo)
-                withAnimation(.snappy(duration: 0.2)) { showCreateSheet = true }
-            default:
-                previousNavigationTab = new
-                services.currentTab = new
+            guard new != old else { return }
+            previousNavigationTab = new
+            services.currentTab = new
+            if new == .calendar {
+                calendarPermissionGranted = services.calendarService.canReadEvents()
             }
         }
         .overlay {
@@ -127,6 +121,8 @@ struct MainTabView: View {
         .sheet(isPresented: settingsBinding) {
             SettingsView()
                 .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+                .appSheetBackground()
                 .preferredColorScheme(services.appearancePreference.colorScheme)
         }
         .sheet(isPresented: aiChatBinding, onDismiss: {
@@ -136,6 +132,7 @@ struct MainTabView: View {
                 .presentationDetents([.medium, .large])
                 .presentationBackgroundInteraction(.enabled(upThrough: .medium))
                 .presentationDragIndicator(.visible)
+                .appSheetBackground()
                 .preferredColorScheme(services.appearancePreference.colorScheme)
         }
         .sheet(isPresented: composeEmailBinding, onDismiss: {
@@ -150,16 +147,40 @@ struct MainTabView: View {
             )
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
+            .appSheetBackground()
             .preferredColorScheme(services.appearancePreference.colorScheme)
         }
         .sheet(item: $sheetTab) { tab in
             NavigationStack { sheetContent(for: tab) }
+                .presentationDragIndicator(.visible)
+                .appSheetBackground()
                 .preferredColorScheme(services.appearancePreference.colorScheme)
+        }
+        .sheet(isPresented: $showMoreSheet) {
+            MoreSheetView { tab in
+                showMoreSheet = false
+                if services.tabBarTabs.contains(tab) {
+                    selectedTab = tab
+                } else {
+                    services.navigateToSheet = tab
+                }
+            }
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+            .appSheetBackground()
+            .preferredColorScheme(services.appearancePreference.colorScheme)
         }
         .onChange(of: services.navigateTo) { _, newTab in
             guard let tab = newTab else { return }
             selectedTab = tab
             services.navigateTo = nil
+        }
+        .onChange(of: services.tabBarTabs) { _, tabs in
+            guard tabs.contains(selectedTab) || selectedTab == .meetings else { return }
+            if selectedTab == .meetings && tabs.contains(.meetings) { return }
+            if !tabs.contains(selectedTab) {
+                selectedTab = .home
+            }
         }
         .onChange(of: services.showsComposeEmail) { _, isPresented in
             if !isPresented {
@@ -176,7 +197,7 @@ struct MainTabView: View {
         }
         .onChange(of: services.navigateToSheet) { _, tab in
             guard let tab else { return }
-            if tab == .meetings {
+            if tab == .meetings && !services.tabBarTabs.contains(.meetings) {
                 sheetTab = tab
             } else {
                 selectedTab = tab
@@ -185,7 +206,9 @@ struct MainTabView: View {
             services.navigateToSheet = nil
         }
         .onAppear {
-            if selectedTab == .create { selectedTab = .home }
+            if !visibleContentTabs.contains(selectedTab) {
+                selectedTab = .home
+            }
             calendarPermissionGranted = services.calendarService.canReadEvents()
         }
         .onChange(of: scenePhase) { _, phase in
@@ -193,35 +216,35 @@ struct MainTabView: View {
                 calendarPermissionGranted = services.calendarService.canReadEvents()
             }
         }
-    }
-
-    // MARK: - AI Floating Action Button
-
-    private var aiFAB: some View {
-        Button {
-            services.showsAIChat = true
-        } label: {
-            Image(systemName: "sparkles")
-                .font(.system(size: 22, weight: .semibold))
-                .foregroundStyle(aiGradient)
-                .frame(width: 56, height: 56)
-                .fabGlass()
+        .onReceive(NotificationCenter.default.publisher(for: .todusCalendarAuthorizationDidChange)) { _ in
+            calendarPermissionGranted = services.calendarService.canReadEvents()
         }
-        .buttonStyle(FABButtonStyle())
     }
 
-    /// Figma: linear-gradient(151deg, #00AAF5 8.66%, #EF00C2 26.94%, #FF0038 57.95%, #F99F00 91.34%)
-    private var aiGradient: LinearGradient {
-        LinearGradient(
-            stops: [
-                .init(color: Color(red: 0,          green: 0xAA/255.0, blue: 0xF5/255.0), location: 0.087),
-                .init(color: Color(red: 0xEF/255.0, green: 0,          blue: 0xC2/255.0), location: 0.269),
-                .init(color: Color(red: 1,          green: 0,          blue: 0x38/255.0), location: 0.580),
-                .init(color: Color(red: 0xF9/255.0, green: 0x9F/255.0, blue: 0),         location: 0.913),
-            ],
-            startPoint: UnitPoint(x: 0.25, y: 0),
-            endPoint: UnitPoint(x: 0.75, y: 1)
+    // MARK: - Floating Tab Bar
+
+    private var customTabBar: some View {
+        CustomTabBar(
+            selectedTab: $selectedTab,
+            tabs: services.tabBarTabs,
+            onAI: {
+                services.showsAIChat = true
+            },
+            onCreate: {
+                createSheetInitialType = createType(for: selectedTab)
+                withAnimation(.snappy(duration: 0.2)) { showCreateSheet = true }
+            },
+            onMore: {
+                showMoreSheet = true
+            },
+            onReselect: { tab in
+                resetNavigation(for: tab)
+            }
         )
+    }
+
+    private var visibleContentTabs: Set<AppTab> {
+        [.home, .tasks, .email, .calendar, .meetings]
     }
 
     // MARK: - Helpers
@@ -232,6 +255,23 @@ struct MainTabView: View {
         case .calendar: return .event
         case .email:    return .email
         default:        return .auto
+        }
+    }
+
+    private func resetNavigation(for tab: AppTab) {
+        switch tab {
+        case .home:
+            homeTabId = UUID()
+        case .tasks:
+            tasksTabId = UUID()
+        case .email:
+            emailTabId = UUID()
+        case .calendar:
+            calendarTabId = UUID()
+        case .meetings:
+            meetingsTabId = UUID()
+        case .create, .ai:
+            break
         }
     }
 
@@ -339,4 +379,3 @@ private struct FABButtonStyle: ButtonStyle {
             .animation(.snappy(duration: 0.15), value: configuration.isPressed)
     }
 }
-

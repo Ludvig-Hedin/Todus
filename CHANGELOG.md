@@ -1,10 +1,114 @@
 # Project Changelog
 
+## [2026-04-25] Fix — Native navigation/settings credibility pass (iOS + macOS)
+
+- [Fix] **iOS:** `MainTabView` now uses the existing floating `CustomTabBar` fed by `services.tabBarTabs`, while the underlying `TabView` keeps content state alive. Tab-bar onboarding and Settings customization now change the real navigation shell, including support for pinning **Meetings** into the main bar.
+- [Fix] **iOS:** Thread overflow menu now has a real **Set reminder** flow with quick presets (1 hour, tonight, tomorrow morning) backed by local notifications instead of a dead-end placeholder. Reminder scheduling now reports failure when notification permission is off.
+- [Fix] **iOS:** Default-mail onboarding copy/button now matches what the app can actually do on-device: it opens Todus inside Settings and explains the manual step back to **Default Apps → Email**, instead of falsely implying the CTA jumps straight there.
+- [Fix] **iOS:** Email Settings toggles are now wired through the inbox. `Swipe Gestures` disables/enables mail swipe actions, and `Group by Thread` persists and drives the Threads/People inbox mode instead of being a dead preference.
+- [Fix] **macOS:** Launch behavior now separates **Open on Launch** from **Resume Last Viewed Page**. `startupView` is honored by default, and last-view restore remains available as an explicit Settings toggle instead of silently overriding the launch page preference.
+- [Fix] **macOS:** Existing preferences now affect real UI. `Compact Sidebar` changes sidebar column width, `Show Unread Badge` controls unread indicators/badges in Mail surfaces, and `Group by Thread` persists and drives the Threads/People inbox mode.
+- [Files] `apps/ios/Todus/Todus/Navigation/MainTabView.swift`, `apps/ios/Todus/Todus/Features/Tasks/CustomTabBar.swift`, `apps/ios/Todus/Todus/Features/Email/EmailInboxView.swift`, `apps/ios/Todus/Todus/Features/Email/EmailThreadView.swift`, `apps/ios/Todus/Todus/Services/Notifications/NotificationService.swift`, `apps/ios/Todus/Todus/App/DefaultMailOnboardingView.swift`, `apps/macos/TodusMac/App/MacAppServices.swift`, `apps/macos/TodusMac/App/MacRootView.swift`, `apps/macos/TodusMac/App/MacSidebarView.swift`, `apps/macos/TodusMac/Views/Email/MacEmailInboxView.swift`, `apps/macos/TodusMac/Views/Settings/MacSettingsView.swift`
+
+## [2026-04-25] Polish — Subscription UI fixes + voice metering (web + iOS + macOS + server)
+
+- [Feature] **Voice chat AI usage now tracked.** `/api/ai/voice-ws` (Gemini Live proxy) gets a pre-flight credit check + per-session-minute metering on close. Estimate: 0.10 credits/minute (~$0.10/min Gemini Live blended audio rate). Idempotent close handling — both client and upstream close events route through a single `trackVoiceUsage()` flag.
+- [Hardening] **Voice chat only starts billing on first billable user input.** Opening the voice sheet and idling no longer consumes credits; the proxy starts metering only after the first client audio/text/media payload. The temporary `/admin/run-migrations` repair route is no longer guarded by a committed token and now stays disabled unless `ADMIN_RUN_MIGRATIONS_TOKEN` is configured as a server secret.
+- [Fix] **Legacy users no longer see "No AI credits on the free plan."** `subscription.getStatus` now self-heals: if cache shows `aiUsageLimit=0`, it synchronously calls `refreshSubscriptionCache()` which lazy-creates the Autumn customer + attaches `free`. Idempotent; one slow call, then fast forever. Existing users from before billing existed get hydrated on first settings open.
+- [Fix] **Wrong upgrade URL.** iOS + macOS were opening `https://app.todus.app/pricing` (which doesn't exist) — fixed to derive the web host by stripping the `api.` subdomain prefix, with `https://todus.app/pricing` as the fallback root.
+- [UX] **No more dollar amounts in the billing UI.** Per the user's call (the credit→USD conversion is internal), removed all `$N` references and "1 credit ≈ $1" footnotes from web, iOS, and macOS billing pages. Plan-includes lists now read "15 credits / month" instead of "$15 of AI usage".
+- [UX] **Bigger, cleaner usage card on all three apps.** Headline is now a 5xl tabular-numerals "X / Y left" credits-remaining number, prominent percent-remaining sub, full-width thicker progress bar, used/total tabular footer. Out-of-credits banner has an inline Upgrade button (web) instead of a separate row.
+- [Files] `apps/server/src/lib/billing.ts`, `apps/server/src/trpc/routes/subscription.ts`, `apps/server/src/routes/ai.ts`, `apps/mail/app/(routes)/settings/billing/page.tsx`, `apps/ios/Todus/Todus/Features/Settings/BillingSettingsView.swift`, `apps/macos/TodusMac/Views/Settings/MacSettingsView.swift`
+- [Verified] Server + web `tsc --noEmit`: 0 new errors. Voice metering uses `trackCreditsUsed()` (a new generic credit-debit helper) so future per-minute or per-image AI surfaces can plug in without a token-conversion shim.
+
+## [2026-04-25] macOS Settings — Developer mode + Auth Debug gating
+
+- [UX] **macOS:** Settings includes a **Developer Mode** toggle (orange switch) for the same allowlisted account as iOS (`TodusDeveloperAccess`). **Auth Debug** and other debug-only rows show only when Developer Mode is on; the toggle itself is hidden for non-allowlisted users.
+- [Architectural] **macOS:** `MacAppServices` persists `developerModeEnabled` under `TaskApp.developerModeEnabled` (shared key with iOS). The Xcode target now compiles `TodusDeveloperAccess.swift` and `TodusHTTPClient.swift` from `packages/swift-auth` into the app module; redundant `import TodusAuth` was removed from mac sources so the build matches the single-module `Todus` target.
+- **Files:** `MacAppServices.swift`, `MacSettingsView.swift`, `MacAIChatService.swift`, `TodosAPIClient.swift`, `MacNotificationCenterView.swift`, `TodusMac.xcodeproj/project.pbxproj`
+
+## [2026-04-25] UX — Tasks view-mode tabs match Calendar segmented control
+
+- [UI] iOS and macOS Tasks `List` / `Board` / `Table` (and iOS `Dates`) picker now use the same **recessed track** (0.88 light / 0.13 dark) and **selected pill** (white / 0.22 dark) plus light shadow as the macOS **Calendar** `Day|Week|Month|Year` control — much clearer active state in light and dark mode.
+- [Architectural] `MacTheme.segmentedTrack` / `MacTheme.segmentedSelectedPill` and `AppTheme` equivalents; Calendar’s picker reuses the macOS theme tokens.
+- **Files:** `MacTheme.swift`, `AppTheme.swift`, `MacTasksView.swift`, `TasksTabView.swift`, `MacCalendarView.swift`
+
+## [2026-04-25] Fix — Docs production schema repair
+
+- [Ops] **Backend:** `/admin/run-migrations` now repairs the docs storage schema through the production Hyperdrive connection: creates `mail0_doc_workspace`, `mail0_doc`, docs foreign keys, indexes, and `mail0_doc.is_starred` idempotently. `mode=info` also reports docs table columns so the repair can be verified before/after running it.
+- [User-facing] Once this backend is deployed and the admin repair or normal Drizzle migrations are applied, macOS/web Docs will stop returning HTTP 412 “missing doc tables”.
+- **Files:** `apps/server/src/main.ts`
+
+## [2026-04-25] Ops — GitHub Action applies Drizzle migrations to production
+
+- [Ops] **db-migrate-production** workflow (manual + on push to `main` when server migrations change) runs `pnpm run -C apps/server db:migrate` with the **`PRODUCTION_DATABASE_URL`** repository secret so `api.todus.app` stays aligned with the repo. Add the same **direct Postgres URL** as the Cloudflare Hyperdrive **origin** (see `docs/development/README.md`). Does not run from this repo alone until the secret is set and the workflow is triggered.
+- **Files:** `.github/workflows/db-migrate-production.yml`, `docs/development/README.md`
+
+## [2026-04-25] UX — Docs: clear errors when storage isn’t ready (web + macOS)
+
+- [UX] **Mail + Web:** `DocTree` no longer auto-creates a workspace or stays on skeletons when `docs.workspaces.list` fails (e.g. `PRECONDITION_FAILED` / missing doc tables). Sidebar shows the server message and **Retry**; landing page shows the same message instead of a broken “New page” action.
+- [UX] **macOS:** All-docs pane shows **Couldn’t load docs** with the API message and **Retry** when load failed and the list is empty (instead of “No pages yet”). Toolbar **New document** is disabled until a successful refresh when in that error state.
+- **Files:** `apps/mail/components/docs/doc-tree.tsx`, `apps/web/components/docs/doc-tree.tsx`, `apps/mail/app/(routes)/mail/docs/page.tsx`, `apps/web/app/(routes)/mail/docs/page.tsx`, `apps/macos/TodusMac/Views/Docs/MacDocsShellView.swift`
+
+## [2026-04-25] Fix — Drizzle migrations run clean on a fresh local database
+
+- [Ops] **Backend:** `0044_pale_luminals.sql` no longer fails on `DROP INDEX "meet_integration_user_id_idx"` or duplicate recall unique blocks from `0043`. `0049_fixed_karma.sql` no longer re-creates assistant/marketing DDL already applied in `0046`–`0048`, so `pnpm db:migrate` completes on an empty DB. Local dev: `createdb todus` (or `psql -c 'CREATE DATABASE todus'`) before migrate; SQL like `CREATE ROLE` must run **inside** `psql`, not the shell.
+- **Files:** `apps/server/src/db/migrations/0044_pale_luminals.sql`, `apps/server/src/db/migrations/0049_fixed_karma.sql`
+
+## [2026-04-25] UX — macOS Calendar: Day/Week horizontal scroll in time
+
+- [UX] **macOS:** In **Day** and **Week** views, two-finger **left/right** is easier to trigger over the vertical hour grid (relaxed `adx`/`ady` weight). **Shift + scroll** moves by day/week so the time grid is not also scrolled. Month/Year behavior unchanged.
+- **Files:** `apps/macos/TodusMac/Views/Calendar/CalendarTrackpadNavigation.swift`, `apps/macos/TodusMac/Views/Calendar/MacCalendarView.swift`
+
+## [2026-04-25] UX — macOS Calendar week header + all-day row
+
+- [UX] **macOS:** Calendar pane header shows only the month/year title (sidebar app icon removed duplicate mark). Week **all-day** row: label uses a fixed-width `ZStack` so `padding` no longer widens the gutter (day headers + hourly grid + all-day columns align). **all-day** text has no extra background; `calendarAllDayBg` applies only to the day columns, not the label column.
+- **Files:** `apps/macos/TodusMac/Views/Calendar/MacCalendarView.swift`
+
+## [2026-04-25] UX — macOS Calendar: trackpad, pinch, keyboard, year view
+
+- [UX] **macOS:** Calendar supports **two-finger horizontal** navigation (faster, lower threshold), **pinch in/out** to change view density (Day ↔ Week ↔ Month ↔ Year), **⌘1–4** to jump view modes, **smoother vertical** month paging (`basedOnSize` bounce), and **year view** that scrolls the selected year into view. The **current calendar month** shows a small **red dot** next to the name. Pointer hit tests use the key window’s `isKeyWindow` to avoid `NSApp` main-actor warnings.
+- **Files:** `apps/macos/TodusMac/Views/Calendar/CalendarTrackpadNavigation.swift`, `apps/macos/TodusMac/Views/Calendar/MacCalendarView.swift`, `TASK.md`
+
+## [2026-04-25] Fix — Apple Calendar brand icon (blank white tile)
+
+- [Fix] **Native:** `AppleCalendarLogo` no longer uses `Canvas` + `Path(SVG d)`; Swift’s path parser often returns `nil` for those `d` strings, so the inner art never drew and only the white `AppIconContainer` was visible (Calendar access screen, settings, tab header). The icon is again **layout-based** (red header strip, white “MON”, dark “12”) so it always renders in the inner square. **iOS + macOS:** `BrandIcons.swift` / `MacBrandIcons.swift`.
+- [User-facing] Calendar permission, Settings, and calendar tab headers show the full calendar mark again instead of an empty box.
+
+## [2026-04-25] Fix — iOS Calendar tab stuck on “Open Settings” after granting access
+
+- [Fix] **iOS:** Tapping **Allow Access** no longer swaps the UI to **Open Settings** before the system dialog finishes. The Calendar tab’s permission flag now refreshes when `requestAccess()` completes (notification) and when switching to the Calendar tab, not only on app foreground.
+- [User-facing] Users who already granted **Full Access** in Settings see the real calendar after connecting; no spurious “open Settings” loop.
+- **Files:** `apps/ios/Todus/Todus/Services/Calendar/CalendarService.swift`, `apps/ios/Todus/Todus/Navigation/MainTabView.swift`, `apps/ios/Todus/Todus/Features/Calendar/CalendarPermissionView.swift`, `apps/ios/Todus/status_ios.md`
+
+## [2026-04-25] Fix — Docs: missing DB tables + macOS create affordance
+
+- [Fix] **Backend:** `docs.*` and `docs.workspaces.*` now map Postgres “relation does not exist” for doc tables to `PRECONDITION_FAILED` with a clear message instead of an opaque HTTP 500.
+- [UX] **macOS:** Docs shows **New document** in the All docs toolbar, a **+** in the My space header, and a primary **New document** in the empty state; creating surfaces tRPC error text (e.g. migration hint) in an alert. `TodosAPIClient` surfaces tRPC `error.json.message` for failed HTTP responses app-wide.
+- [Ops] Production must include doc tables from migration `0044_pale_luminals.sql` (and later doc migrations). Until then, the app explains that Docs storage is not available until migrations are applied.
+- **Files:** `apps/server/src/trpc/routes/docs.ts`, `apps/macos/TodusMac/Services/API/TodosAPIClient.swift`, `apps/macos/TodusMac/Services/Docs/MacDocsService.swift`, `apps/macos/TodusMac/Views/Docs/MacDocsShellView.swift`
+
 ## [2026-04-25] Fix — Native meetings load with legacy production schema
 
 - [Fix] **Backend:** `meet.listMeetings`, `meet.getMeeting`, `meet.getIntegration`, and calendar sync now tolerate production databases missing newer `mail0_meet_integration` settings/retention columns. The route falls back to the original integration columns with safe defaults and skips retention pruning when retention columns are absent, preventing HTTP 500s in iOS/macOS Meetings.
 - [User-facing] Restores the native Meetings page instead of showing "Failed to load meetings. Server error (http 500)."
 - **Files:** `apps/server/src/trpc/routes/meet.ts`
+
+## [2026-04-25] Fix — macOS calendar time column (labels + color)
+
+- [Fix] **macOS:** Hour labels disappeared because the foreground gutter used an opaque fill above `hourGridLayer`. The time column is now a clear spacer so labels and tint from `hourGridLayer` show through; `calendarGutterBackground` matches `contentBackground` so the strip is not lighter than the main grid.
+- **Files:** `apps/macos/TodusMac/Views/Calendar/CalendarTimeGridView.swift`, `apps/macos/TodusMac/DesignSystem/MacTheme.swift`
+
+## [2026-04-25] Fix — macOS Week calendar column alignment
+
+- [UX] **macOS:** Week view day headers, all-day row, and the scrolling time grid share one measured column width (via `GeometryReader` + `MacTheme.calendarDayColumnWidth`) so columns stay aligned with the day grid. The time-label gutter uses `calendarGutterBackground`; horizontal hour lines only run to the right of that column, not under the stamps.
+- **Files:** `apps/macos/TodusMac/Views/Calendar/MacCalendarView.swift`, `apps/macos/TodusMac/Views/Calendar/CalendarTimeGridView.swift`, `apps/macos/TodusMac/DesignSystem/MacTheme.swift`
+
+## [2026-04-25] UX — macOS AI assistant floating panel
+
+- [UX] **macOS:** Floating AI assistant size and position are passed from `MacRootView` (live `@State` + explicit `UserDefaults` sync on move/resize end, mode change, and background) so drags are smooth — no per-frame `AppStorage` writes. Move only from the **title bar strip** (not toolbar buttons): open/closed hand cursors. Resize from **all four edges and corners** (5pt/16pt hit targets) with `resizeUpDown` / `resizeLeftRight` and SF Symbol diagonal cursors; `highPriorityGesture` and disabled layout animation reduce jank.
+- [UX] **macOS (earlier in day):** Floating size/position were initially stored in `AppStorage` and passed from `MacRootView` so they survive dock ↔ float. Max float width 800pt.
+- **Files:** `apps/macos/TodusMac/App/MacRootView.swift`, `apps/macos/TodusMac/Views/AI/MacAssistantPanel.swift`
 
 ## [2026-04-25] Fix — Native email inbox loads with legacy production schema
 
@@ -12,6 +116,21 @@
 - [Fix] **Backend:** Bearer-token requests no longer have their real connection error masked by a failed Better Auth sign-out/get-session path.
 - [User-facing] Restores native Email Inbox loading instead of showing "Couldn't load Inbox / Failed to load emails."
 - **Files:** `apps/server/src/lib/server-utils.ts`, `apps/server/src/trpc/trpc.ts`, `apps/server/src/trpc/routes/connections.ts`, `apps/server/src/trpc/routes/assistant.ts`, `apps/server/src/main.ts`
+
+## [2026-04-25] Fix — iOS Home scroll under tab bar
+
+- [UX] **iOS:** Home dashboard scroll no longer hard-clips at the tab bar. Matches Tasks: `ScrollView` uses `contentMargins(.bottom, 130, for: .scrollContent)` and drops `.clipped()` so content can scroll with the same bottom inset as the Tasks list.
+- **Files:** `apps/ios/Todus/Todus/Features/Home/HomeView.swift`
+
+## [2026-04-25] Fix — Apple Calendar icon (iOS + macOS) — superseded
+
+- **Superseded by** the same-day entry **“Fix — Apple Calendar brand icon (blank white tile)”** above: a **Canvas + Path(SVG `d`)** pass for `AppleCalendarLogo` was tried, but Swift’s path parser often yielded `nil`, so the inner art did not draw. The **current** implementation in `BrandIcons.swift` / `MacBrandIcons.swift` is **layout-based** (red header, “MON”, “12”), not Canvas/SVG `d` paths.
+- **Files (historical context only):** `apps/ios/Todus/Todus/DesignSystem/BrandIcons.swift`, `apps/macos/TodusMac/DesignSystem/MacBrandIcons.swift`
+
+## [2026-04-25] Fix — Apple Reminders icon (iOS + macOS)
+
+- [UX] **Native:** Replaced the layout-mock Reminders glyph with `Canvas` art matching the Reminders light app icon (1024×1024 coordinates: bars + colored rings). **macOS:** `AppIconContainer` now pins the inner icon to a square and clips like iOS so the glyph no longer crops or bleeds past the white app-icon tile.
+- **Files:** `apps/ios/Todus/Todus/DesignSystem/BrandIcons.swift`, `apps/macos/TodusMac/DesignSystem/MacBrandIcons.swift`
 
 ## [2026-04-25] Fix — Native Gmail linking uses current app session
 
@@ -3405,6 +3524,8 @@ todus.app had zero Google-indexed pages. This overhaul adds all missing SEO infr
 [2026-04-04] [UX Fix] Corrected the cached-refresh loading-state work to target the real web app in `apps/web`, added subtle background update badges across inbox, home, tasks, and calendar, stopped invalidating restored inbox cache on startup, and switched the web home recent-mail panel to render from thread summaries instead of per-row thread fetches. User-facing and architectural change. (apps/web/components/ui/background-refresh-indicator.tsx, apps/web/components/mail/mail-list.tsx, apps/web/app/(routes)/mail/home/page.tsx, apps/web/app/(routes)/mail/tasks/page.tsx, apps/web/app/(routes)/mail/calendar/page.tsx, apps/web/providers/query-provider.tsx).
 
 [2026-04-24] [Tooling Fix] Repointed the root `pnpm ios*` scripts to the active native SwiftUI app in `apps/ios/Todus` so they no longer invoke the archived Expo app and fail with missing Expo module maps. Architectural tooling change. (`package.json`, `scripts/ios/open-native-project.sh`, `scripts/ios/build-native-simulator.sh`, `scripts/ios/build-native-device.sh`, `docs/development/SCRIPTS_GUIDE.md`).
+
+[2026-04-25] [Fix] Closed review-found regressions in AI billing and legacy schema compatibility by hydrating legacy billing state on AI access, billing chat/search usage against the concrete resolved model, and restoring legacy `mail0_connection` fallback reads inside the Zero chat agent. Architectural safety fix. (`apps/server/src/lib/ai-model-resolver.ts`, `apps/server/src/lib/billing.ts`, `apps/server/src/routes/chat.ts`).
 
 # 2026-04-04
 

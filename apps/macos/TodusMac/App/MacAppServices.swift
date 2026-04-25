@@ -14,12 +14,18 @@ final class MacAppServices {
         static let customInstructions = "MacApp.customInstructions"
         static let assistantAutomationPolicy = "MacApp.assistantAutomationPolicy"
         static let startupView = "MacApp.startupView"
+        static let restoreLastViewedPage = "MacApp.restoreLastViewedPage"
         static let hasConfiguredGmailPrompt = "MacApp.hasConfiguredGmailPrompt"
         static let hasConfiguredCalendarPrompt = "MacApp.hasConfiguredCalendarPrompt"
         static let hasConfiguredRemindersPrompt = "MacApp.hasConfiguredRemindersPrompt"
         static let hasConfiguredStartupViewPrompt = "MacApp.hasConfiguredStartupViewPrompt"
+        static let hasConfiguredNotificationsPrompt = "MacApp.hasConfiguredNotificationsPrompt"
+        static let hasConfiguredDefaultMailPrompt = "MacApp.hasConfiguredDefaultMailPrompt"
+        static let emailNotificationsEnabled = "MacApp.emailNotificationsEnabled"
         static let remindersSyncEnabled = "mac_reminders_enabled"
         static let remindersSyncDirection = "MacApp.remindersSyncDirection"
+        /// Shared with iOS so one account’s preference can match across devices if desired.
+        static let developerModeEnabled = "TaskApp.developerModeEnabled"
     }
 
     let authService: AuthService
@@ -27,6 +33,7 @@ final class MacAppServices {
     let emailService: EmailService
     let calendarService: CalendarService
     let networkMonitor: NetworkMonitor
+    let notificationService: MacNotificationService
     let aiChatService: MacAIChatService
     let shareConversationService: ShareConversationService
     let groupChatService: GroupChatService
@@ -65,6 +72,12 @@ final class MacAppServices {
     var startupView: String {
         didSet {
             defaults.set(startupView, forKey: Keys.startupView)
+        }
+    }
+
+    var restoreLastViewedPage: Bool {
+        didSet {
+            defaults.set(restoreLastViewedPage, forKey: Keys.restoreLastViewedPage)
         }
     }
 
@@ -107,6 +120,45 @@ final class MacAppServices {
         }
     }
 
+    var hasConfiguredNotificationsPrompt: Bool {
+        didSet { defaults.set(hasConfiguredNotificationsPrompt, forKey: Keys.hasConfiguredNotificationsPrompt) }
+    }
+
+    var hasConfiguredDefaultMailPrompt: Bool {
+        didSet { defaults.set(hasConfiguredDefaultMailPrompt, forKey: Keys.hasConfiguredDefaultMailPrompt) }
+    }
+
+    var emailNotificationsEnabled: Bool {
+        didSet { defaults.set(emailNotificationsEnabled, forKey: Keys.emailNotificationsEnabled) }
+    }
+
+    /// Single pending `mailto:` payload — set when the OS routes a link to Todus.
+    /// Any of `to` / `subject` / `body` may be non-nil; MacRootView observes this
+    /// and opens compose (observing the whole value fixes subject-only / body-only links).
+    struct PendingMailto: Equatable {
+        var to: String?
+        var subject: String?
+        var body: String?
+    }
+
+    var pendingMailto: PendingMailto? = nil
+
+    var developerModeEnabled: Bool {
+        didSet {
+            defaults.set(developerModeEnabled, forKey: Keys.developerModeEnabled)
+        }
+    }
+
+    /// Whether the signed-in user may see the Developer Mode toggle (allowlisted accounts only).
+    var isDeveloperModeUIAvailable: Bool {
+        TodusDeveloperAccess.isAllowlisted(email: authService.userEmail)
+    }
+
+    /// Developer features: allowlisted email and toggle on.
+    var effectiveDeveloperModeEnabled: Bool {
+        developerModeEnabled && isDeveloperModeUIAvailable
+    }
+
     init() {
         if defaults.bool(forKey: Keys.hasConfiguredStartupViewPrompt),
            defaults.object(forKey: Keys.hasConfiguredRemindersPrompt) == nil {
@@ -124,13 +176,18 @@ final class MacAppServices {
         self.emailService = email
         self.calendarService = calendar
         self.networkMonitor = NetworkMonitor()
+        self.notificationService = MacNotificationService()
         self.contextAboutYou = defaults.string(forKey: Keys.contextAboutYou) ?? ""
         self.customInstructions = defaults.string(forKey: Keys.customInstructions) ?? ""
         self.startupView = defaults.string(forKey: Keys.startupView) ?? "home"
+        self.restoreLastViewedPage = defaults.object(forKey: Keys.restoreLastViewedPage) as? Bool ?? false
         self.hasConfiguredGmailPrompt = defaults.bool(forKey: Keys.hasConfiguredGmailPrompt)
         self.hasConfiguredCalendarPrompt = defaults.bool(forKey: Keys.hasConfiguredCalendarPrompt)
         self.hasConfiguredRemindersPrompt = defaults.bool(forKey: Keys.hasConfiguredRemindersPrompt)
         self.hasConfiguredStartupViewPrompt = defaults.bool(forKey: Keys.hasConfiguredStartupViewPrompt)
+        self.hasConfiguredNotificationsPrompt = defaults.bool(forKey: Keys.hasConfiguredNotificationsPrompt)
+        self.hasConfiguredDefaultMailPrompt = defaults.bool(forKey: Keys.hasConfiguredDefaultMailPrompt)
+        self.emailNotificationsEnabled = defaults.object(forKey: Keys.emailNotificationsEnabled) as? Bool ?? true
         if let dir = defaults.string(forKey: Keys.remindersSyncDirection),
            let parsed = RemindersSyncDirection(rawValue: dir) {
             self.remindersSyncDirection = parsed
@@ -144,6 +201,7 @@ final class MacAppServices {
         } else {
             self.assistantAutomationPolicy = .recommended
         }
+        self.developerModeEnabled = defaults.bool(forKey: Keys.developerModeEnabled)
         self.aiChatService = MacAIChatService(
             backendURL: backendURL,
             apiClient: api,

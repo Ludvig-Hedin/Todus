@@ -88,9 +88,12 @@ struct MacSettingsView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     accountSection
                     activeSessionsSection
-#if DEBUG
-                    authDebugSection
-#endif
+                    if services.isDeveloperModeUIAvailable {
+                        developerModeToggleSection
+                    }
+                    if services.effectiveDeveloperModeEnabled {
+                        authDebugSection
+                    }
                     generalSection
                     connectedServicesSection
                     appearanceSection
@@ -474,6 +477,35 @@ struct MacSettingsView: View {
 
                 cardDivider
 
+                rowContainer {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(MacTheme.mutedText)
+                        .frame(width: 18)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Resume Last Viewed Page")
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(MacTheme.textPrimary)
+                        Text("When off, Todus always opens on the launch page above.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(MacTheme.textSecondary)
+                    }
+                    Spacer()
+                    Toggle(
+                        "",
+                        isOn: Binding(
+                            get: { services.restoreLastViewedPage },
+                            set: { services.restoreLastViewedPage = $0 }
+                        )
+                    )
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .labelsHidden()
+                    .tint(MacTheme.switchTint)
+                }
+
+                cardDivider
+
                 settingsToggle(icon: "sidebar.left", label: "Compact Sidebar", isOn: $compactSidebar)
 
                 cardDivider
@@ -520,9 +552,36 @@ struct MacSettingsView: View {
         }
     }
 
-    // MARK: - Connected Services
+    // MARK: - Developer (allowlisted users only)
 
-#if DEBUG
+    private var developerModeToggleSection: some View {
+        settingsGroup(title: "Developer") {
+            settingsCard {
+                rowContainer {
+                    Image(systemName: "wrench.and.screwdriver")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(MacTheme.mutedText)
+                        .frame(width: 18)
+                    Text("Developer Mode")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(MacTheme.textPrimary)
+                    Spacer()
+                    Toggle(
+                        "",
+                        isOn: Binding(
+                            get: { services.developerModeEnabled },
+                            set: { services.developerModeEnabled = $0 }
+                        )
+                    )
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .labelsHidden()
+                    .tint(.orange)
+                }
+            }
+        }
+    }
+
     private var authDebugSection: some View {
         settingsGroup(title: "Auth Debug") {
             settingsCard {
@@ -540,7 +599,8 @@ struct MacSettingsView: View {
             }
         }
     }
-#endif
+
+    // MARK: - Connected Services
 
     private var connectedServicesSection: some View {
         settingsGroup(title: "Connected Services") {
@@ -1389,11 +1449,41 @@ struct MacSettingsView: View {
 
     // MARK: - Billing & Subscription
 
+    private static let billingPlanIncludes: [MacSubscriptionService.Plan: [String]] = [
+        .free: [
+            "1 email connection",
+            "7.5 credits / month of AI chat",
+            "Basic AI email assistance",
+        ],
+        .pro: [
+            "Unlimited email connections",
+            "15 credits / month of AI chat & voice",
+            "Auto-labeling, thread summaries, priority models",
+            "Manage payment & cancel anytime",
+        ],
+        .team: [
+            "Everything in Pro",
+            "Shared inbox + collaboration",
+            "Org-level billing",
+        ],
+        .enterprise: [
+            "Custom limits and SLAs",
+            "SSO + advanced security controls",
+            "Dedicated account support",
+        ],
+    ]
+
     private func formatCredits(_ value: Double) -> String {
-        let f = NumberFormatter()
-        f.minimumFractionDigits = 0
-        f.maximumFractionDigits = 2
-        return f.string(from: NSNumber(value: value)) ?? String(format: "%.2f", value)
+        if value == 0 { return "0" }
+        if value < 1 { return String(format: "%.2f", value) }
+        if value < 10 { return String(format: "%.1f", value) }
+        return String(Int(value.rounded()))
+    }
+
+    private var billingPercentRemaining: Int {
+        let sub = services.subscriptionService
+        guard sub.aiUsageLimit > 0 else { return 0 }
+        return max(0, 100 - Int((sub.aiUsagePercent * 100).rounded()))
     }
 
     private var billingResetLabel: String? {
@@ -1469,52 +1559,85 @@ struct MacSettingsView: View {
 
                 cardDivider
 
-                // Usage row
-                if sub.aiUsageLimit == 0 {
-                    rowContainer {
-                        Image(systemName: "sparkles")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(MacTheme.mutedText)
-                            .frame(width: 18)
-                        Text("No AI credits on the \(sub.plan.displayName) plan.")
-                            .font(.system(size: 12))
-                            .foregroundStyle(MacTheme.textSecondary)
-                        Spacer()
-                    }
-                } else {
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack(spacing: 7) {
-                            Image(systemName: "sparkles")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(MacTheme.mutedText)
-                                .frame(width: 18)
-                            HStack(alignment: .firstTextBaseline, spacing: 3) {
-                                Text(formatCredits(sub.aiUsageUsed))
-                                    .font(.system(size: 13, weight: .semibold).monospacedDigit())
+                // Big-number usage row — credits remaining headline + big bar.
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(alignment: .lastTextBaseline) {
+                        VStack(alignment: .leading, spacing: 1) {
+                            HStack(alignment: .firstTextBaseline, spacing: 5) {
+                                Text(formatCredits(sub.aiUsageRemaining))
+                                    .font(.system(size: 28, weight: .semibold).monospacedDigit())
                                     .foregroundStyle(MacTheme.textPrimary)
-                                Text("/ \(formatCredits(sub.aiUsageLimit)) credits used")
+                                Text("/ \(formatCredits(sub.aiUsageLimit)) left")
                                     .font(.system(size: 11))
                                     .foregroundStyle(MacTheme.textSecondary)
+                                    .monospacedDigit()
                             }
-                            Spacer()
-                            Text("\(formatCredits(sub.aiUsageRemaining)) left")
-                                .font(.system(size: 10.5).monospacedDigit())
-                                .foregroundStyle(MacTheme.textSecondary)
-                        }
-                        ProgressView(value: sub.aiUsagePercent)
-                            .tint(billingProgressTint)
-                            .padding(.leading, 25)
-                            .padding(.trailing, 4)
-                        if let billingResetLabel {
-                            Text("Resets on \(billingResetLabel)")
+                            Text(sub.aiUsageLimit > 0
+                                 ? "\(billingPercentRemaining)% remaining this period"
+                                 : "No credits on this plan")
                                 .font(.system(size: 10.5))
                                 .foregroundStyle(MacTheme.textSecondary)
-                                .padding(.leading, 25)
+                        }
+                        Spacer()
+                        if let billingResetLabel {
+                            Text("Resets \(billingResetLabel)")
+                                .font(.system(size: 10.5))
+                                .foregroundStyle(MacTheme.textSecondary)
                         }
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
+
+                    ProgressView(value: sub.aiUsageLimit > 0 ? sub.aiUsagePercent : 0)
+                        .tint(billingProgressTint)
+                        .scaleEffect(x: 1, y: 1.7, anchor: .center)
+
+                    HStack {
+                        Text("Used: \(formatCredits(sub.aiUsageUsed))")
+                            .monospacedDigit()
+                        Spacer()
+                        Text("Total: \(formatCredits(sub.aiUsageLimit))")
+                            .monospacedDigit()
+                    }
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(MacTheme.textSecondary)
+
+                    if sub.aiUsagePercent >= 1 && sub.aiUsageLimit > 0 {
+                        Text("Out of AI credits this period.\(sub.plan.isPaid ? "" : " Upgrade to keep chatting.")")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.red.opacity(0.85))
+                    } else if sub.aiUsagePercent >= 0.8 && sub.aiUsageLimit > 0 {
+                        Text("You've used \(Int(sub.aiUsagePercent * 100))% of your AI credits.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.orange)
+                    }
                 }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+
+                cardDivider
+
+                // Plan-includes block — shows what the user's current plan covers.
+                let includes = Self.billingPlanIncludes[sub.plan] ?? Self.billingPlanIncludes[.free] ?? []
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Includes")
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundStyle(MacTheme.mutedText)
+                        .padding(.leading, 25)
+                    ForEach(includes, id: \.self) { item in
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundStyle(sub.plan.isPaid ? MacTheme.accent : MacTheme.mutedText)
+                                .frame(width: 12, alignment: .leading)
+                            Text(item)
+                                .font(.system(size: 12))
+                                .foregroundStyle(MacTheme.textPrimary)
+                            Spacer()
+                        }
+                        .padding(.leading, 25)
+                    }
+                }
+                .padding(.vertical, 8)
+                .padding(.trailing, 12)
 
                 if let billingError {
                     cardDivider
@@ -1541,13 +1664,13 @@ struct MacSettingsView: View {
     }
 
     private func upgradePricingURL() -> String {
-        // Marketing pricing page is on the web app. Mirror the iOS heuristic:
-        // if backend host is `api.todus.app`, the pricing page is on `app.todus.app`.
+        // The web app lives at todus.app — strip the `api.` subdomain when
+        // it's set as the backend, fall back to the prod root.
         let backend = services.apiClient.baseURL.absoluteString
         if let host = URL(string: backend)?.host, host.hasPrefix("api.") {
-            return "https://\(host.replacingOccurrences(of: "api.", with: "app."))/pricing"
+            return "https://\(String(host.dropFirst("api.".count)))/pricing"
         }
-        return "https://app.todus.app/pricing"
+        return "https://todus.app/pricing"
     }
 
     private func openBillingPortal() async {

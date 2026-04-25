@@ -4,6 +4,8 @@ import SwiftUI
 
 struct MacSidebarView: View {
     @Environment(MacAppServices.self) private var services
+    @AppStorage("mac_compact_sidebar") private var compactSidebar = false
+    @AppStorage("mac_show_unread_badge") private var showUnreadBadge = true
 
     @Binding var selection: MacPrimarySelection
     @Binding var isEmailExpanded: Bool
@@ -18,6 +20,12 @@ struct MacSidebarView: View {
     var onCreateItem: (() -> Void)? = nil
     /// Callback when a day is tapped in the mini calendar
     var onCalendarDayTap: ((Date) -> Void)? = nil
+
+    private var inboxUnreadCount: Int? {
+        guard showUnreadBadge else { return nil }
+        let count = services.emailService.threads.filter(\.unread).count
+        return count > 0 ? count : nil
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -46,6 +54,7 @@ struct MacSidebarView: View {
                     title: "Email",
                     systemImage: "envelope",
                     isSelected: isEmailSelected && !isEmailExpanded,
+                    badgeCount: inboxUnreadCount,
                     trailingSystemImage: isEmailExpanded ? "chevron.down" : "chevron.right",
                     action: {
                         withAnimation(.snappy(duration: 0.18)) {
@@ -233,8 +242,8 @@ struct MacSidebarView: View {
             }
             .padding(.horizontal, 6)
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 8)
+        .padding(.horizontal, compactSidebar ? 6 : 8)
+        .padding(.vertical, compactSidebar ? 6 : 8)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(.thinMaterial)
         // Hidden keyboard handlers — wire ⌥↑/⌥↓ to step through the visible sidebar
@@ -446,7 +455,17 @@ private struct SidebarItemButton: View {
             ZStack {
                 // Badge or chevron (always rendered, hidden when + is shown)
                 Group {
-                    if let badgeCount {
+                    if let badgeCount, let trailingSystemImage {
+                        HStack(spacing: 4) {
+                            Text("\(badgeCount)")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                            Image(systemName: trailingSystemImage)
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(.tertiary)
+                        }
+                    } else if let badgeCount {
                         Text("\(badgeCount)")
                             .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(.secondary)
@@ -478,7 +497,7 @@ private struct SidebarItemButton: View {
                     .opacity(isHovered ? 1 : 0)
                 }
             }
-            .frame(width: 20, height: 20) // fixed slot — no layout shift
+            .frame(width: badgeCount != nil && trailingSystemImage != nil ? 34 : 20, height: 20)
             .animation(.easeOut(duration: 0.1), value: isHovered)
         }
         .padding(.horizontal, 10)

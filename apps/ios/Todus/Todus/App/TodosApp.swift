@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import UIKit
 import UserNotifications
 
 @main
@@ -25,6 +26,11 @@ struct TodosApp: App {
                     .environment(services)
                     .modelContainer(modelContainer)
                     .onOpenURL { url in
+                        // mailto: links — open compose with pre-filled fields
+                        if url.scheme == "mailto" {
+                            handleMailtoURL(url, services: services)
+                            return
+                        }
                         services.authService.handleAuthCallback(url: url)
                         services.authStore.handleIncomingAuthCallback(url: url)
                         // todus://share?slug=abc123 — open shared conversation viewer
@@ -40,6 +46,8 @@ struct TodosApp: App {
                     )) { wrapper in
                         SharedConversationView(slug: wrapper.slug)
                             .environment(services)
+                            .presentationDragIndicator(.visible)
+                            .appSheetBackground()
                     }
                     .tint(AppTheme.accent)
                     .preferredColorScheme(services.appearancePreference.colorScheme)
@@ -161,6 +169,32 @@ struct TodosApp: App {
     }
 }
 
+/// Parse a `mailto:` URL and open the email compose sheet with pre-filled fields.
+/// Format: `mailto:to@example.com?subject=Hello&body=World`
+@MainActor
+private func handleMailtoURL(_ url: URL, services: AppServices) {
+    // The recipient lives in the URL path ("to@example.com") or as a `to` query param.
+    var to = url.path
+    var subject: String? = nil
+    var body: String? = nil
+
+    if let components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
+        for item in components.queryItems ?? [] {
+            switch item.name.lowercased() {
+            case "to":      if let v = item.value, !v.isEmpty { to = v }
+            case "subject": subject = item.value
+            case "body":    body = item.value
+            default: break
+            }
+        }
+    }
+
+    services.composeEmailSeedTo = to.isEmpty ? nil : to
+    services.composeEmailSeedSubject = subject
+    services.composeEmailSeedBody = body
+    services.showsComposeEmail = true
+}
+
 /// Identifiable wrapper for a share slug — used to drive the SharedConversationView sheet
 /// from a `todus://share?slug=...` deep link.
 private struct SlugWrapper: Identifiable {
@@ -194,6 +228,15 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
         UNUserNotificationCenter.current().delegate = self
+
+        // Tame root scroll views so vertical screens don’t feel like a two-axis “canvas”
+        // (diagonal drifts + horizontal rubber-banding). Nested horizontal carousels
+        // (folder chips, nudge cards, etc.) still scroll on their own axis; they just
+        // won’t get horizontal edge bounce, which matches a mail/tasks app better.
+        let scroll = UIScrollView.appearance()
+        scroll.isDirectionalLockEnabled = true
+        scroll.alwaysBounceHorizontal = false
+
         return true
     }
 }

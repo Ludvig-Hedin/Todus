@@ -21,6 +21,8 @@ private struct MacSenderGroup: Identifiable {
 /// Clicking a thread shows it inline rather than in a modal sheet, matching the web app's side-panel pattern.
 struct MacEmailInboxView: View {
     @Environment(MacAppServices.self) private var services
+    @AppStorage("threadGroupingEnabled") private var threadGroupingEnabled = true
+    @AppStorage("mac_show_unread_badge") private var showUnreadBadge = true
     @State private var searchText = ""
     @State private var selectedThreadId: String? = nil
     @State private var filteredThreads: [EmailThread] = []
@@ -30,6 +32,10 @@ struct MacEmailInboxView: View {
     /// When in People mode, the currently selected sender email to show their threads
     @State private var selectedSenderEmail: String? = nil
     @State private var isConnectGmailLoading = false
+    @State private var listPanelWidth: CGFloat = 300
+    @State private var dragStartWidth: CGFloat = 300
+    private let minPanelWidth: CGFloat = 200
+    private let maxPanelWidth: CGFloat = 600
 
     /// Which email folder to show — matches backend FOLDERS constant.
     /// Values: "inbox", "draft", "sent", "archive", "snoozed", "spam", "bin"
@@ -41,12 +47,29 @@ struct MacEmailInboxView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            // LEFT: thread list panel (fixed width)
+            // LEFT: thread list panel (resizable)
             leftPanel
-                .frame(width: 300)
+                .frame(width: listPanelWidth)
                 .background(MacTheme.contentBackground)
 
-            Divider()
+            // Draggable divider
+            Rectangle()
+                .fill(Color.clear)
+                .frame(width: 5)
+                .overlay(Divider(), alignment: .center)
+                .onHover { hovering in
+                    if hovering { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+                }
+                .gesture(
+                    DragGesture(minimumDistance: 1)
+                        .onChanged { value in
+                            // translation is always relative to drag start, so adding to
+                            // the captured pre-drag width gives the correct absolute value.
+                            let newWidth = dragStartWidth + value.translation.width
+                            listPanelWidth = min(maxPanelWidth, max(minPanelWidth, newWidth))
+                        }
+                        .onEnded { _ in dragStartWidth = listPanelWidth }
+                )
 
             // RIGHT: thread detail, sender thread list, or placeholder
             if let threadId = selectedThreadId {
@@ -81,7 +104,18 @@ struct MacEmailInboxView: View {
             recomputeFiltered()
             debounceServerSearch()
         }
-        .onAppear { recomputeFiltered() }
+        .onAppear {
+            syncViewModeFromPreference()
+            recomputeFiltered()
+        }
+        .onChange(of: viewMode) { _, newMode in
+            let prefersThreads = newMode == .threads
+            guard threadGroupingEnabled != prefersThreads else { return }
+            threadGroupingEnabled = prefersThreads
+        }
+        .onChange(of: threadGroupingEnabled) { _, _ in
+            syncViewModeFromPreference()
+        }
     }
 
     // MARK: - Left Panel
@@ -239,65 +273,62 @@ struct MacEmailInboxView: View {
                 MacInlineRefreshBadge()
             }
         }
-        .padding(.horizontal, MacTheme.spacing8)
+        .padding(.horizontal, MacTheme.spacing12)
         .padding(.vertical, MacTheme.spacing6)
-        .background(MacTheme.surfaceCard, in: RoundedRectangle(cornerRadius: MacTheme.buttonRadius, style: .continuous))
+        .background(MacTheme.surfaceCard, in: Capsule(style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: MacTheme.buttonRadius, style: .continuous)
+            Capsule(style: .continuous)
                 .stroke(MacTheme.cardBorder, lineWidth: 0.5)
         )
     }
 
     private var mailboxHeader: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text("Mailbox")
-                    .font(.system(size: 10, weight: .semibold))
-                    .tracking(0.6)
-                    .foregroundStyle(MacTheme.mutedText)
-                    .textCase(.uppercase)
-
-                Spacer()
-
-                // View mode toggle — threads vs people
-                macViewModePicker
-            }
-
+        HStack(spacing: MacTheme.spacing8) {
             Text(folderTitle)
-                .font(.system(size: 15, weight: .semibold))
+                .font(.system(size: 17, weight: .bold))
                 .foregroundStyle(MacTheme.textPrimary)
+
+            macViewModePicker
+
+            Spacer()
         }
     }
 
+    /// Threads vs People dropdown — shows the active mode label and expands into a menu
+    /// for switching, matching the calendar tab pattern.
     private var macViewModePicker: some View {
-        HStack(spacing: 1) {
+        Menu {
             ForEach(MacInboxViewMode.allCases, id: \.rawValue) { mode in
                 Button {
                     withAnimation(.easeInOut(duration: 0.15)) {
                         viewMode = mode
-                        // Reset sender selection when switching modes
                         if mode == .threads { selectedSenderEmail = nil }
                     }
                 } label: {
-                    Image(systemName: mode == .threads ? "list.bullet" : "person.2")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(viewMode == mode ? MacTheme.accent : MacTheme.mutedText)
-                        .frame(width: 24, height: 20)
-                        .background(
-                            viewMode == mode ? MacTheme.accent.opacity(0.12) : Color.clear,
-                            in: RoundedRectangle(cornerRadius: 4, style: .continuous)
-                        )
+                    Label {
+                        Text(mode.rawValue)
+                    } icon: {
+                        if mode == viewMode {
+                            Image(systemName: "checkmark")
+                        }
+                    }
                 }
-                .buttonStyle(.plain)
-                .macClickablePointer()
             }
+        } label: {
+            HStack(spacing: 3) {
+                Text(viewMode.rawValue)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(MacTheme.textPrimary)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundStyle(MacTheme.mutedText)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .contentShape(Rectangle())
         }
-        .padding(2)
-        .background(MacTheme.surfaceHover.opacity(0.5), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 5, style: .continuous)
-                .stroke(MacTheme.cardBorder.opacity(0.5), lineWidth: 0.5)
-        )
+        .menuStyle(.borderlessButton)
+        .fixedSize()
     }
 
     private var searchStatusRow: some View {
@@ -376,10 +407,10 @@ struct MacEmailInboxView: View {
 
                         Spacer(minLength: 0)
 
-                        if thread.unread {
+                        if showUnreadBadge && thread.unread {
                             Circle()
-                                .fill(MacTheme.accent)
-                                .frame(width: 6, height: 6)
+                                .fill(Color.blue)
+                                .frame(width: 7, height: 7)
                         }
                     }
 
@@ -473,7 +504,7 @@ struct MacEmailInboxView: View {
 
                                     Spacer(minLength: 0)
 
-                                    if group.unreadCount > 0 {
+                                    if showUnreadBadge && group.unreadCount > 0 {
                                         Text("\(group.unreadCount)")
                                             .font(.system(size: 10, weight: .bold))
                                             .foregroundStyle(.white)
@@ -555,10 +586,10 @@ struct MacEmailInboxView: View {
 
                                     Spacer(minLength: MacTheme.spacing8)
 
-                                    if thread.unread {
+                                    if showUnreadBadge && thread.unread {
                                         Circle()
-                                            .fill(MacTheme.accent)
-                                            .frame(width: 6, height: 6)
+                                            .fill(Color.blue)
+                                            .frame(width: 7, height: 7)
                                     }
 
                                     Text(formatTime(thread.date))
@@ -738,6 +769,15 @@ struct MacEmailInboxView: View {
             try? await Task.sleep(for: .milliseconds(500))
             guard !Task.isCancelled else { return }
             await services.emailService.loadThreads(folder: folder, query: searchText, refresh: true)
+        }
+    }
+
+    private func syncViewModeFromPreference() {
+        let preferredMode: MacInboxViewMode = threadGroupingEnabled ? .threads : .people
+        guard viewMode != preferredMode else { return }
+        viewMode = preferredMode
+        if preferredMode == .threads {
+            selectedSenderEmail = nil
         }
     }
 
@@ -958,20 +998,19 @@ struct MacSenderAvatarView: View {
         let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let candidates = MacAvatarCache.shared.resolvedURLs[normalizedEmail] ?? []
 
-        ZStack {
-            initialsCircle
-
+        Group {
             if urlIndex < candidates.count {
                 AsyncImage(url: candidates[urlIndex]) { phase in
                     switch phase {
                     case .success(let image):
-                        // White background ensures transparent logos are visible
-                        // and the colored initials circle doesn't bleed through.
-                        Circle()
-                            .fill(Color.white)
-                        image
-                            .resizable()
-                            .scaledToFill()
+                        // White backdrop keeps transparent logos legible; ZStack ensures
+                        // only one layer is visible at a time (no bleed from initials).
+                        ZStack {
+                            Circle().fill(Color.white)
+                            image
+                                .resizable()
+                                .scaledToFill()
+                        }
                     case .failure:
                         initialsCircle
                             .onAppear { urlIndex += 1 }
@@ -981,6 +1020,8 @@ struct MacSenderAvatarView: View {
                         initialsCircle
                     }
                 }
+            } else {
+                initialsCircle
             }
         }
         .frame(width: size, height: size)

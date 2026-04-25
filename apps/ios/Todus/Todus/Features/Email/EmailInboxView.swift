@@ -123,6 +123,8 @@ struct EmailInboxView: View {
     /// Last visible thread ID, captured so we can restore scroll position after switching
     /// between People view and Threads view (or returning from a thread detail).
     @State private var lastVisibleId: String?
+    /// Tracks the search field focus so we can show a blur button when active.
+    @FocusState private var searchFieldFocused: Bool
 
     // Deterministic skeleton widths — computed once to avoid visual jitter from CGFloat.random in view body
     private static let skeletonNameWidths: [CGFloat]    = [120, 140, 130, 155, 125, 145]
@@ -198,8 +200,17 @@ struct EmailInboxView: View {
             EmailThreadView(threadId: threadId)
         }
         .onAppear {
+            syncViewModeFromPreference()
             recomputeFilteredThreads()
             consumePendingThreadNavigation()
+        }
+        .onChange(of: viewMode) { _, newMode in
+            let shouldGroupByThread = newMode == .threads
+            guard services.threadGroupingEnabled != shouldGroupByThread else { return }
+            services.threadGroupingEnabled = shouldGroupByThread
+        }
+        .onChange(of: services.threadGroupingEnabled) { _, _ in
+            syncViewModeFromPreference()
         }
         .onChange(of: emailService.threads) { recomputeFilteredThreads() }
         .onChange(of: emailService.hasResolvedConnection) { _, resolved in
@@ -241,80 +252,22 @@ struct EmailInboxView: View {
 
     private var threadList: some View {
         VStack(spacing: 0) {
-            AppTopHeader(title: "Mail")
+            inboxHeader
                 .padding(.horizontal, 16)
                 .padding(.top, 4)
                 .padding(.bottom, 4)
 
-            // Sub-header — folder title + picker menu + optional loading spinner
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 6) {
-                    Text("Mailbox")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(AppTheme.mutedText)
-                        .textCase(.uppercase)
-
-                    Spacer()
-
-                    if isBackgroundRefreshing {
-                        InlineRefreshBadge()
-                    }
-
-                    // View mode toggle — threads vs people
-                    viewModePicker
-                }
-
-                HStack(spacing: 8) {
-                    Menu {
-                        ForEach(primaryFolders, id: \.rawValue) { folder in
-                            Button {
-                                selectedFolder = folder
-                            } label: {
-                                Label(folder.title, systemImage: folder.systemImage)
-                            }
-                        }
-
-                        Divider()
-
-                        ForEach(secondaryFolders, id: \.rawValue) { folder in
-                            Button {
-                                selectedFolder = folder
-                            } label: {
-                                Label(folder.title, systemImage: folder.systemImage)
-                            }
-                        }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Text(selectedFolder.title)
-                                .font(.system(size: 18, weight: .bold))
-                                .tracking(-0.3)
-                                .foregroundStyle(.primary)
-                            Image(systemName: "chevron.down")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(AppTheme.mutedText)
-                        }
-                    }
-                    .buttonStyle(.plain)
-
-                    Spacer(minLength: 0)
-                }
-
-                folderQuickSwitchRow
-
-                // Multi-account filter chips — shown only when the user has 2+ connections.
-                // Each chip toggles visibility for that account's emails.
-                if connectionsService.hasMultipleConnections {
-                    connectionFilterChips
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 4)
-            .padding(.bottom, 8)
-
-            // Search bar
-            searchBar
+            folderAndSearchRow
                 .padding(.horizontal, 16)
+                .padding(.top, 8)
                 .padding(.bottom, 8)
+
+            // Multi-account filter chips — shown only when the user has 2+ connections.
+            if connectionsService.hasMultipleConnections {
+                connectionFilterChips
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 6)
+            }
 
             if !searchText.isEmpty {
                 searchFeedbackRow
@@ -334,6 +287,70 @@ struct EmailInboxView: View {
         }
     }
 
+    /// Top header — page name "Mail" with the threads/people view-mode dropdown
+    /// to its right, mirroring the calendar tab pattern.
+    private var inboxHeader: some View {
+        AppTopHeader(title: "Mail") {
+            HStack(spacing: 8) {
+                Text("Mail")
+                    .font(.system(size: 18, weight: .bold))
+                    .tracking(-0.3)
+                    .foregroundStyle(.primary)
+
+                viewModeDropdown
+
+                if isBackgroundRefreshing {
+                    InlineRefreshBadge()
+                }
+            }
+        }
+    }
+
+    /// Folder picker dropdown + search bar on the same row.
+    private var folderAndSearchRow: some View {
+        HStack(spacing: 8) {
+            Menu {
+                ForEach(primaryFolders, id: \.rawValue) { folder in
+                    Button {
+                        selectedFolder = folder
+                    } label: {
+                        Label(folder.title, systemImage: folder.systemImage)
+                    }
+                }
+
+                Divider()
+
+                ForEach(secondaryFolders, id: \.rawValue) { folder in
+                    Button {
+                        selectedFolder = folder
+                    } label: {
+                        Label(folder.title, systemImage: folder.systemImage)
+                    }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Text(selectedFolder.title)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.primary)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(AppTheme.surfaceSecondary, in: Capsule(style: .continuous))
+                .overlay(
+                    Capsule(style: .continuous)
+                        .stroke(AppTheme.cardBorder, lineWidth: 0.5)
+                )
+            }
+            .buttonStyle(.plain)
+            .fixedSize(horizontal: true, vertical: false)
+
+            searchBar
+        }
+    }
+
     // MARK: - Thread List Content (extracted from threadList)
 
     private var threadListContent: some View {
@@ -346,57 +363,7 @@ struct EmailInboxView: View {
                 }
 
                 ForEach(filteredThreads) { thread in
-                    EmailRowView(thread: thread)
-                        .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.visible)
-                        .listRowSeparatorTint(AppTheme.divider)
-                        .onTapGesture {
-                            // Remember scroll anchor so we can restore on return
-                            lastVisibleId = thread.id
-                            selectedThreadId = thread.id
-                        }
-                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                            Button(role: .destructive) {
-                                Task { await emailService.archiveThreads(ids: [thread.id]) }
-                            } label: {
-                                Label("Archive", systemImage: "archivebox")
-                            }
-                            .tint(.orange)
-
-                            // Delete is destructive AND irreversible — require confirmation
-                            // before invoking the mutation. The swipe still pops a button,
-                            // but actual deletion goes through .confirmationDialog below.
-                            Button(role: .destructive) {
-                                pendingDeleteThread = thread
-                            } label: {
-                                Label("Delete", systemImage: "trash")
-                            }
-                        }
-                        .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                            if thread.unread {
-                                Button {
-                                    Task { await emailService.markAsRead(ids: [thread.id]) }
-                                } label: {
-                                    Label("Read", systemImage: "envelope.open")
-                                }
-                                .tint(.primary)
-                            } else {
-                                Button {
-                                    Task { await emailService.markAsUnread(ids: [thread.id]) }
-                                } label: {
-                                    Label("Unread", systemImage: "envelope.badge")
-                                }
-                                .tint(.primary)
-                            }
-
-                            Button {
-                                Task { await emailService.toggleStar(ids: [thread.id]) }
-                            } label: {
-                                Label("Star", systemImage: "star")
-                            }
-                            .tint(.yellow)
-                        }
+                    inboxThreadRow(thread)
                 }
 
                 if emailService.nextPageToken != nil {
@@ -486,6 +453,72 @@ struct EmailInboxView: View {
             paginationFailed = true
         } else {
             paginationFailed = false
+        }
+    }
+
+    @ViewBuilder
+    private func inboxThreadRow(_ thread: EmailThread) -> some View {
+        let baseRow = EmailRowView(thread: thread)
+            .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.visible)
+            .listRowSeparatorTint(AppTheme.divider)
+            .onTapGesture {
+                lastVisibleId = thread.id
+                selectedThreadId = thread.id
+            }
+
+        if services.swipeGesturesEnabled {
+            baseRow
+                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                    Button(role: .destructive) {
+                        Task { await emailService.archiveThreads(ids: [thread.id]) }
+                    } label: {
+                        Label("Archive", systemImage: "archivebox")
+                    }
+                    .tint(.orange)
+
+                    Button(role: .destructive) {
+                        pendingDeleteThread = thread
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                }
+                .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                    if thread.unread {
+                        Button {
+                            Task { await emailService.markAsRead(ids: [thread.id]) }
+                        } label: {
+                            Label("Read", systemImage: "envelope.open")
+                        }
+                        .tint(.primary)
+                    } else {
+                        Button {
+                            Task { await emailService.markAsUnread(ids: [thread.id]) }
+                        } label: {
+                            Label("Unread", systemImage: "envelope.badge")
+                        }
+                        .tint(.primary)
+                    }
+
+                    Button {
+                        Task { await emailService.toggleStar(ids: [thread.id]) }
+                    } label: {
+                        Label("Star", systemImage: "star")
+                    }
+                    .tint(.yellow)
+                }
+        } else {
+            baseRow
+        }
+    }
+
+    private func syncViewModeFromPreference() {
+        let preferredMode: InboxViewMode = services.threadGroupingEnabled ? .threads : .people
+        guard viewMode != preferredMode else { return }
+        viewMode = preferredMode
+        if preferredMode == .threads {
+            selectedSender = nil
         }
     }
 
@@ -601,36 +634,40 @@ struct EmailInboxView: View {
         }
     }
 
-    // MARK: - View Mode Picker
+    // MARK: - View Mode Dropdown
 
-    private var viewModePicker: some View {
-        HStack(spacing: 2) {
+    /// Threads vs People dropdown — shows the active mode label, expands into a menu
+    /// matching the calendar view-mode picker pattern.
+    private var viewModeDropdown: some View {
+        Menu {
             ForEach(InboxViewMode.allCases, id: \.rawValue) { mode in
                 Button {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        viewMode = mode
-                    }
+                    withAnimation(.easeInOut(duration: 0.2)) { viewMode = mode }
                 } label: {
-                    Image(systemName: mode == .threads ? "list.bullet" : "person.2")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(viewMode == mode ? AppTheme.accent : AppTheme.mutedText)
-                        .frame(width: 30, height: 26)
-                        .background(
-                            viewMode == mode ? AppTheme.accent.opacity(0.12) : Color.clear,
-                            in: RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        )
+                    Label {
+                        Text(mode.rawValue)
+                    } icon: {
+                        if mode == viewMode {
+                            Image(systemName: "checkmark")
+                        }
+                    }
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel(mode == .threads ? "Thread list" : "People by sender")
-                .accessibilityAddTraits(viewMode == mode ? [.isSelected] : [])
             }
+        } label: {
+            HStack(spacing: 4) {
+                Text(viewMode.rawValue)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.primary)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .contentShape(Rectangle())
         }
-        .padding(2)
-        .background(AppTheme.surfaceSecondary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.inline, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: AppTheme.Radius.inline, style: .continuous)
-                .stroke(AppTheme.cardBorder, lineWidth: 0.5)
-        )
+        .menuStyle(.borderlessButton)
+        .tint(.primary)
     }
 
     /// Assistant nudges rendered as List-compatible rows. Placed inside the scrollable List
@@ -799,6 +836,7 @@ struct EmailInboxView: View {
                 .font(.system(size: 14))
                 .autocorrectionDisabled()
                 .textInputAutocapitalization(.never)
+                .focused($searchFieldFocused)
                 .onSubmit {
                     Task {
                         await emailService.loadThreads(
@@ -809,10 +847,15 @@ struct EmailInboxView: View {
                     }
                 }
 
-            if !searchText.isEmpty {
+            // Show clear/blur button while focused so the user can dismiss the keyboard
+            // without first emptying the field. Tapping clears any text and ends focus.
+            if searchFieldFocused || !searchText.isEmpty {
                 Button {
-                    searchText = ""
-                    Task { await emailService.loadThreads(folder: selectedFolder.rawValue, refresh: true) }
+                    if !searchText.isEmpty {
+                        searchText = ""
+                        Task { await emailService.loadThreads(folder: selectedFolder.rawValue, refresh: true) }
+                    }
+                    searchFieldFocused = false
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 14))
@@ -820,91 +863,26 @@ struct EmailInboxView: View {
                 }
                 .buttonStyle(.plain)
                 .minTouchTarget()
+                .transition(.opacity)
             }
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 14)
         .padding(.vertical, 9)
-        // Glass effect on iOS 26; subtle surface card on older iOS
         .background {
             if #available(iOS 26.0, *) {
-                // glassEffect is applied below via modifier
+                // glassEffect is applied via .modifier below
                 Color.clear
             } else {
-                RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous)
+                Capsule(style: .continuous)
                     .fill(AppTheme.surfaceSecondary.opacity(0.6))
                     .overlay(
-                        RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous)
+                        Capsule(style: .continuous)
                             .stroke(AppTheme.cardBorder, lineWidth: 0.5)
                     )
             }
         }
         .modifier(SearchBarGlassModifier())
-    }
-
-    private var folderQuickSwitchRow: some View {
-        HStack(spacing: 8) {
-            ForEach(primaryFolders, id: \.rawValue) { folder in
-                Button {
-                    selectedFolder = folder
-                } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: folder.systemImage)
-                            .font(.system(size: 11, weight: .semibold))
-                        Text(folder.title)
-                            .font(.system(size: 12, weight: .semibold))
-                    }
-                    .foregroundStyle(selectedFolder == folder ? AppTheme.accent : AppTheme.mutedText)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 7)
-                    .background(
-                        selectedFolder == folder ? AppTheme.accent.opacity(0.12) : AppTheme.surfaceSecondary,
-                        in: Capsule(style: .continuous)
-                    )
-                    .overlay(
-                        Capsule(style: .continuous)
-                            .stroke(
-                                selectedFolder == folder ? AppTheme.accent.opacity(0.20) : AppTheme.cardBorder,
-                                lineWidth: 0.8
-                            )
-                    )
-                }
-                .buttonStyle(.plain)
-            }
-
-            Menu {
-                ForEach(secondaryFolders, id: \.rawValue) { folder in
-                    Button {
-                        selectedFolder = folder
-                    } label: {
-                        Label(folder.title, systemImage: folder.systemImage)
-                    }
-                }
-            } label: {
-                HStack(spacing: 4) {
-                    Text("More")
-                        .font(.system(size: 12, weight: .semibold))
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 10, weight: .bold))
-                }
-                .foregroundStyle(secondaryFolders.contains(selectedFolder) ? AppTheme.accent : AppTheme.mutedText)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-                .background(
-                    secondaryFolders.contains(selectedFolder) ? AppTheme.accent.opacity(0.12) : AppTheme.surfaceSecondary,
-                    in: Capsule(style: .continuous)
-                )
-                .overlay(
-                    Capsule(style: .continuous)
-                        .stroke(
-                            secondaryFolders.contains(selectedFolder) ? AppTheme.accent.opacity(0.20) : AppTheme.cardBorder,
-                            lineWidth: 0.8
-                        )
-                )
-            }
-            .buttonStyle(.plain)
-
-            Spacer(minLength: 0)
-        }
+        .animation(.easeInOut(duration: 0.15), value: searchFieldFocused)
     }
 
     private var searchFeedbackRow: some View {
@@ -930,14 +908,14 @@ struct EmailInboxView: View {
     /// (which gets full height naturally from the List inside it). Without this, the VStack centers.
     private var loadingState: some View {
         VStack(spacing: 0) {
-            AppTopHeader(title: "Mail")
+            inboxHeader
                 .padding(.horizontal, 16)
                 .padding(.top, 4)
-                .padding(.bottom, 6)
+                .padding(.bottom, 4)
 
-            // Search bar placeholder
-            searchBar
+            folderAndSearchRow
                 .padding(.horizontal, 16)
+                .padding(.top, 8)
                 .padding(.bottom, 10)
                 .disabled(true)
 
@@ -977,13 +955,14 @@ struct EmailInboxView: View {
     /// Shown after a successful load returns zero results — clearly "folder is empty", not "loading"
     private var emptyState: some View {
         VStack(spacing: 0) {
-            AppTopHeader(title: "Mail")
+            inboxHeader
                 .padding(.horizontal, 16)
                 .padding(.top, 4)
-                .padding(.bottom, 6)
+                .padding(.bottom, 4)
 
-            searchBar
+            folderAndSearchRow
                 .padding(.horizontal, 16)
+                .padding(.top, 8)
                 .padding(.bottom, 10)
 
             Divider().foregroundStyle(AppTheme.divider)
@@ -1042,13 +1021,14 @@ struct EmailInboxView: View {
     /// Shown when a load fails and there are no cached threads — error is real, not just "empty"
     private var errorState: some View {
         VStack(spacing: 0) {
-            AppTopHeader(title: "Mail")
+            inboxHeader
                 .padding(.horizontal, 16)
                 .padding(.top, 4)
-                .padding(.bottom, 6)
+                .padding(.bottom, 4)
 
-            searchBar
+            folderAndSearchRow
                 .padding(.horizontal, 16)
+                .padding(.top, 8)
                 .padding(.bottom, 10)
 
             Divider().foregroundStyle(AppTheme.divider)
@@ -1087,7 +1067,7 @@ struct EmailInboxView: View {
     /// or fall back to an empty/connect state instead of staring at a perpetual skeleton.
     private var connectionTimeoutState: some View {
         VStack(spacing: 0) {
-            AppTopHeader(title: "Mail")
+            inboxHeader
                 .padding(.horizontal, 16)
                 .padding(.top, 4)
                 .padding(.bottom, 6)
@@ -1188,53 +1168,7 @@ struct SenderThreadsView: View {
     var body: some View {
         List {
             ForEach(threadsForSender) { thread in
-                EmailRowView(thread: thread)
-                    .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.visible)
-                    .listRowSeparatorTint(AppTheme.divider)
-                    .onTapGesture { selectedThreadId = thread.id }
-                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                        Button(role: .destructive) {
-                            Task { await emailService.archiveThreads(ids: [thread.id]) }
-                        } label: {
-                            Label("Archive", systemImage: "archivebox")
-                        }
-                        .tint(.orange)
-
-                        Button(role: .destructive) {
-                            Task { await emailService.deleteThreads(ids: [thread.id]) }
-                        } label: {
-                            Label("Delete", systemImage: "trash")
-                        }
-                    }
-                    .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                        if thread.unread {
-                            Button {
-                                Task { await emailService.markAsRead(ids: [thread.id]) }
-                            } label: {
-                                Label("Read", systemImage: "envelope.open")
-                            }
-                            .tint(.primary)
-                        } else {
-                            Button {
-                                Task { await emailService.markAsUnread(ids: [thread.id]) }
-                            } label: {
-                                Label("Unread", systemImage: "envelope.badge")
-                            }
-                            .tint(.primary)
-                        }
-
-                        Button {
-                            Task { await emailService.toggleStar(ids: [thread.id]) }
-                        } label: {
-                            Label(
-                                thread.isStarredInLabels ? "Unstar" : "Star",
-                                systemImage: thread.isStarredInLabels ? "star.fill" : "star"
-                            )
-                        }
-                        .tint(.yellow)
-                    }
+                senderThreadRow(thread)
             }
         }
         .listStyle(.plain)
@@ -1244,6 +1178,63 @@ struct SenderThreadsView: View {
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(item: $selectedThreadId) { threadId in
             EmailThreadView(threadId: threadId)
+        }
+    }
+
+    @ViewBuilder
+    private func senderThreadRow(_ thread: EmailThread) -> some View {
+        let baseRow = EmailRowView(thread: thread)
+            .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.visible)
+            .listRowSeparatorTint(AppTheme.divider)
+            .onTapGesture { selectedThreadId = thread.id }
+
+        if services.swipeGesturesEnabled {
+            baseRow
+                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                    Button(role: .destructive) {
+                        Task { await emailService.archiveThreads(ids: [thread.id]) }
+                    } label: {
+                        Label("Archive", systemImage: "archivebox")
+                    }
+                    .tint(.orange)
+
+                    Button(role: .destructive) {
+                        Task { await emailService.deleteThreads(ids: [thread.id]) }
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                }
+                .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                    if thread.unread {
+                        Button {
+                            Task { await emailService.markAsRead(ids: [thread.id]) }
+                        } label: {
+                            Label("Read", systemImage: "envelope.open")
+                        }
+                        .tint(.primary)
+                    } else {
+                        Button {
+                            Task { await emailService.markAsUnread(ids: [thread.id]) }
+                        } label: {
+                            Label("Unread", systemImage: "envelope.badge")
+                        }
+                        .tint(.primary)
+                    }
+
+                    Button {
+                        Task { await emailService.toggleStar(ids: [thread.id]) }
+                    } label: {
+                        Label(
+                            thread.isStarredInLabels ? "Unstar" : "Star",
+                            systemImage: thread.isStarredInLabels ? "star.fill" : "star"
+                        )
+                    }
+                    .tint(.yellow)
+                }
+        } else {
+            baseRow
         }
     }
 }
@@ -1264,7 +1255,7 @@ private extension EmailThread {
 private struct SearchBarGlassModifier: ViewModifier {
     func body(content: Content) -> some View {
         if #available(iOS 26.0, *) {
-            content.glassEffect(in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
+            content.glassEffect(in: Capsule(style: .continuous))
         } else {
             content
         }
