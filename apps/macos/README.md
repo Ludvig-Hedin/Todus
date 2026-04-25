@@ -46,6 +46,7 @@ apps/macos/
 
 - `pnpm macos` still points to the retired Electron flow and is intentionally not updated in this pass.
 - If Xcode command-line tools are blocked by a local license prompt, run `sudo xcodebuild -license` once before building.
+- **App icon:** `TodusMac/Resources/Assets.xcassets/AppIcon.appiconset` should contain only the standard macOS `icon_*` files referenced by `Contents.json`. Regenerate them with `python3 scripts/compose-macos-app-icon.py` from `apps/macos`; the script removes stale `mac_*` appearance variants because they make `actool` treat the catalog as having unassigned children.
 
 ## Full Local Reset
 
