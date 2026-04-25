@@ -1,9 +1,13 @@
+import {
+  findLegacyConnections,
+  getActiveConnection,
+  getZeroDB,
+  isMissingConnectionColorError,
+  type LegacyConnectionRow,
+} from '../../lib/server-utils';
 import { createRateLimiterMiddleware, privateProcedure, publicProcedure, router } from '../trpc';
-import { getActiveConnection, getZeroDB } from '../../lib/server-utils';
 import { Ratelimit } from '@upstash/ratelimit';
 import { TRPCError } from '@trpc/server';
-import { createDb } from '../../db';
-import { env } from '../../env';
 import { z } from 'zod';
 
 /** Default color palette for multi-account visual differentiation */
@@ -23,25 +27,6 @@ const deriveConnectionColor = (connection: { id: string; color: string | null })
   return CONNECTION_COLORS[hash % CONNECTION_COLORS.length];
 };
 
-type LegacyConnectionRow = {
-  id: string;
-  userId: string;
-  email: string;
-  name: string | null;
-  picture: string | null;
-  accessToken: string | null;
-  refreshToken: string | null;
-  scope: string;
-  providerId: 'google' | 'microsoft';
-  color: string | null;
-  expiresAt: Date;
-  createdAt: Date;
-  updatedAt: Date;
-};
-
-const isMissingConnectionColorError = (error: unknown) =>
-  error instanceof Error && error.message.includes('column "color" does not exist');
-
 async function loadConnectionsWithFallback(userId: string): Promise<LegacyConnectionRow[]> {
   const db = await getZeroDB(userId);
   try {
@@ -55,30 +40,7 @@ async function loadConnectionsWithFallback(userId: string): Promise<LegacyConnec
       '[connections.list] Falling back to legacy connection query because mail0_connection.color is missing',
     );
 
-    const { conn } = createDb(env.HYPERDRIVE.connectionString);
-    try {
-      return await conn<LegacyConnectionRow[]>`
-        select
-          id,
-          user_id as "userId",
-          email,
-          name,
-          picture,
-          access_token as "accessToken",
-          refresh_token as "refreshToken",
-          scope,
-          provider_id as "providerId",
-          null::text as "color",
-          expires_at as "expiresAt",
-          created_at as "createdAt",
-          updated_at as "updatedAt"
-        from mail0_connection
-        where user_id = ${userId}
-        order by updated_at desc, created_at desc
-      `;
-    } finally {
-      await conn.end();
-    }
+    return await findLegacyConnections(userId);
   }
 }
 

@@ -649,7 +649,16 @@ const api = new Hono<HonoContext>()
     c.set('auth', auth);
     // Named `authSession` to avoid shadowing the Drizzle `session` schema table import,
     // which is needed for the session token DB lookup fallback below.
-    const authSession = await auth.api.getSession({ headers: c.req.raw.headers });
+    const authSession = await auth.api
+      .getSession({ headers: c.req.raw.headers })
+      .catch((error: unknown) => {
+        if (!c.req.header('Authorization')) throw error;
+        console.warn(
+          '[auth] Better Auth getSession failed; continuing with bearer-token fallback',
+          error,
+        );
+        return null;
+      });
     c.set('sessionUser', authSession?.user);
 
     if (c.req.header('Authorization') && !authSession?.user) {
@@ -1147,16 +1156,15 @@ const api = new Hono<HonoContext>()
       scopes,
       requestSignUp,
       refreshToken,
-    } =
-      await c.req.json<{
-        provider: string;
-        callbackURL?: string;
-        disableRedirect?: boolean;
-        errorCallbackURL?: string;
-        scopes?: string[];
-        requestSignUp?: boolean;
-        refreshToken?: string;
-      }>();
+    } = await c.req.json<{
+      provider: string;
+      callbackURL?: string;
+      disableRedirect?: boolean;
+      errorCallbackURL?: string;
+      scopes?: string[];
+      requestSignUp?: boolean;
+      refreshToken?: string;
+    }>();
 
     const { db } = createDb(env.HYPERDRIVE.connectionString);
     const trimmedRefreshToken = refreshToken?.trim();

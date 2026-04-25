@@ -1801,12 +1801,21 @@ export const assistantRouter = router({
     .query(async ({ ctx, input }) => {
       const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
       try {
-        const rows = await db
-          .select()
-          .from(assistantOpenLoop)
-          .where(eq(assistantOpenLoop.userId, ctx.sessionUser.id))
-          .orderBy(desc(assistantOpenLoop.updatedAt))
-          .limit(input.limit);
+        let rows: (typeof assistantOpenLoop.$inferSelect)[];
+        try {
+          rows = await db
+            .select()
+            .from(assistantOpenLoop)
+            .where(eq(assistantOpenLoop.userId, ctx.sessionUser.id))
+            .orderBy(desc(assistantOpenLoop.updatedAt))
+            .limit(input.limit);
+        } catch (error) {
+          if (!isMissingAssistantSchemaError(error)) throw error;
+          console.warn(
+            '[assistant.listOpenLoops] Returning no loops because assistant tables are missing',
+          );
+          return { loops: [] };
+        }
         return {
           loops: rows
             .filter((row) => (input.queue ? row.queue === input.queue : true))

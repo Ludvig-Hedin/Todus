@@ -13,6 +13,72 @@ import { env } from '../env';
 
 const mbToBytes = (mb: number) => mb * 1024 * 1024;
 
+export type LegacyConnectionRow = typeof connection.$inferSelect;
+
+export const isMissingConnectionColorError = (error: unknown) =>
+  error instanceof Error && error.message.includes('column "color" does not exist');
+
+const selectLegacyConnectionFields = async (
+  userId: string,
+  connectionId?: string,
+): Promise<LegacyConnectionRow[]> => {
+  const { conn } = createDb(env.HYPERDRIVE.connectionString);
+  try {
+    if (connectionId) {
+      return await conn<LegacyConnectionRow[]>`
+        select
+          id,
+          user_id as "userId",
+          email,
+          name,
+          picture,
+          access_token as "accessToken",
+          refresh_token as "refreshToken",
+          scope,
+          provider_id as "providerId",
+          null::text as "color",
+          expires_at as "expiresAt",
+          created_at as "createdAt",
+          updated_at as "updatedAt"
+        from mail0_connection
+        where user_id = ${userId} and id = ${connectionId}
+        limit 1
+      `;
+    }
+
+    return await conn<LegacyConnectionRow[]>`
+      select
+        id,
+        user_id as "userId",
+        email,
+        name,
+        picture,
+        access_token as "accessToken",
+        refresh_token as "refreshToken",
+        scope,
+        provider_id as "providerId",
+        null::text as "color",
+        expires_at as "expiresAt",
+        created_at as "createdAt",
+        updated_at as "updatedAt"
+      from mail0_connection
+      where user_id = ${userId}
+      order by updated_at desc, created_at desc
+    `;
+  } finally {
+    await conn.end();
+  }
+};
+
+export const findLegacyConnections = async (userId: string): Promise<LegacyConnectionRow[]> =>
+  selectLegacyConnectionFields(userId);
+
+export const findLegacyConnection = async (
+  userId: string,
+  connectionId: string,
+): Promise<LegacyConnectionRow | undefined> =>
+  (await selectLegacyConnectionFields(userId, connectionId))[0];
+
 // 8GB
 const MAX_SHARD_SIZE = mbToBytes(8192);
 
@@ -30,7 +96,7 @@ class MockExecutionContext implements ExecutionContext {
       console.error('MockExecutionContext: Error in waitUntil', error);
     }
   }
-  passThroughOnException(): void { }
+  passThroughOnException(): void {}
   props: any;
 }
 
@@ -286,15 +352,15 @@ export const getThread: (
   connectionId: string,
   threadId: string,
 ) => {
-    const result = await Effect.runPromise(getThreadEffect(connectionId, threadId));
-    if (!result.result) {
-      throw new Error(`Thread ${threadId} not found`);
-    }
-    if (!result.shardId) {
-      throw new Error(`Thread ${threadId} not found in any shard`);
-    }
-    return { result: result.result, shardId: result.shardId };
-  };
+  const result = await Effect.runPromise(getThreadEffect(connectionId, threadId));
+  if (!result.result) {
+    throw new Error(`Thread ${threadId} not found`);
+  }
+  if (!result.shardId) {
+    throw new Error(`Thread ${threadId} not found in any shard`);
+  }
+  return { result: result.result, shardId: result.shardId };
+};
 
 export const modifyThreadLabelsInDB = async (
   connectionId: string,
@@ -552,11 +618,25 @@ export const getActiveConnection = async () => {
   const userData = await db.findUser();
 
   if (userData?.defaultConnectionId) {
-    const activeConnection = await db.findUserConnection(userData.defaultConnectionId);
+    const activeConnection = await db
+      .findUserConnection(userData.defaultConnectionId)
+      .catch(async (error) => {
+        if (!isMissingConnectionColorError(error)) throw error;
+        console.warn(
+          '[getActiveConnection] Falling back to legacy connection query because mail0_connection.color is missing',
+        );
+        return await findLegacyConnection(sessionUser.id, userData.defaultConnectionId!);
+      });
     if (activeConnection) return activeConnection;
   }
 
-  const firstConnection = await db.findFirstConnection();
+  const firstConnection = await db.findFirstConnection().catch(async (error) => {
+    if (!isMissingConnectionColorError(error)) throw error;
+    console.warn(
+      '[getActiveConnection] Falling back to legacy first-connection query because mail0_connection.color is missing',
+    );
+    return (await findLegacyConnections(sessionUser.id))[0];
+  });
   if (!firstConnection) {
     return null;
   }
@@ -594,8 +674,6 @@ export const verifyToken = async (token: string) => {
   const data = (await response.json()) as any;
   return !!data;
 };
-
-
 
 export const resetConnection = async (connectionId: string) => {
   const { db, conn } = createDb(env.HYPERDRIVE.connectionString);

@@ -1,9 +1,14 @@
-import { getActiveConnection, getZeroDB } from '../lib/server-utils';
+import {
+  findLegacyConnections,
+  getActiveConnection,
+  getZeroDB,
+  isMissingConnectionColorError,
+} from '../lib/server-utils';
 import { Ratelimit, type RatelimitConfig } from '@upstash/ratelimit';
+import { createLoggingMiddleware } from '../lib/trpc-logging';
 import type { HonoContext, HonoVariables } from '../ctx';
 import { getConnInfo } from 'hono/cloudflare-workers';
 import { initTRPC, TRPCError } from '@trpc/server';
-import { createLoggingMiddleware } from '../lib/trpc-logging';
 import { env } from '../env';
 
 import { redis } from '../lib/services';
@@ -25,19 +30,29 @@ export const privateProcedure = publicProcedure.use(async ({ ctx, next }) => {
   const { addRequestSpan, completeRequestSpan } = await import('../lib/trace-context');
 
   // Start auth validation span
-  const authSpan = addRequestSpan(ctx.c, 'trpc_auth_validation', {
-    hasSessionUser: !!ctx.sessionUser,
-    procedure: 'private',
-  }, {
-    'trpc.auth_required': 'true'
-  });
+  const authSpan = addRequestSpan(
+    ctx.c,
+    'trpc_auth_validation',
+    {
+      hasSessionUser: !!ctx.sessionUser,
+      procedure: 'private',
+    },
+    {
+      'trpc.auth_required': 'true',
+    },
+  );
 
   if (!ctx.sessionUser) {
     if (authSpan) {
-      completeRequestSpan(ctx.c, authSpan.id, {
-        success: false,
-        reason: 'no_session_user',
-      }, 'UNAUTHORIZED: No session user found');
+      completeRequestSpan(
+        ctx.c,
+        authSpan.id,
+        {
+          success: false,
+          reason: 'no_session_user',
+        },
+        'UNAUTHORIZED: No session user found',
+      );
     }
 
     throw new TRPCError({
@@ -59,11 +74,16 @@ export const activeConnectionProcedure = privateProcedure.use(async ({ ctx, next
   const { addRequestSpan, completeRequestSpan } = await import('../lib/trace-context');
 
   // Start connection validation span
-  const connectionSpan = addRequestSpan(ctx.c, 'trpc_connection_validation', {
-    userId: ctx.sessionUser.id,
-  }, {
-    'trpc.connection_required': 'true'
-  });
+  const connectionSpan = addRequestSpan(
+    ctx.c,
+    'trpc_connection_validation',
+    {
+      userId: ctx.sessionUser.id,
+    },
+    {
+      'trpc.connection_required': 'true',
+    },
+  );
 
   try {
     const activeConnection = await getActiveConnection();
@@ -87,22 +107,37 @@ export const activeConnectionProcedure = privateProcedure.use(async ({ ctx, next
   } catch (err) {
     if (err instanceof TRPCError && err.code === 'NOT_FOUND') {
       if (connectionSpan) {
-        completeRequestSpan(ctx.c, connectionSpan.id, {
-          success: false,
-          reason: 'connection_not_found',
-        }, 'No active connection found');
+        completeRequestSpan(
+          ctx.c,
+          connectionSpan.id,
+          {
+            success: false,
+            reason: 'connection_not_found',
+          },
+          'No active connection found',
+        );
       }
       throw err;
     }
 
     if (connectionSpan) {
-      completeRequestSpan(ctx.c, connectionSpan.id, {
-        success: false,
-        reason: 'connection_not_found',
-      }, err instanceof Error ? err.message : 'Failed to get active connection');
+      completeRequestSpan(
+        ctx.c,
+        connectionSpan.id,
+        {
+          success: false,
+          reason: 'connection_not_found',
+        },
+        err instanceof Error ? err.message : 'Failed to get active connection',
+      );
     }
 
-    await ctx.c.var.auth.api.signOut({ headers: ctx.c.req.raw.headers });
+    await ctx.c.var.auth.api.signOut({ headers: ctx.c.req.raw.headers }).catch((error: unknown) => {
+      console.warn(
+        '[activeConnectionProcedure] Failed to sign out after connection resolution error',
+        error,
+      );
+    });
     throw new TRPCError({
       code: 'BAD_REQUEST',
       message: err instanceof Error ? err.message : 'Failed to get active connection',
@@ -113,7 +148,13 @@ export const activeConnectionProcedure = privateProcedure.use(async ({ ctx, next
 /** Resolves ALL connections for the user — used by multi-account endpoints */
 export const multiConnectionProcedure = privateProcedure.use(async ({ ctx, next }) => {
   const db = await getZeroDB(ctx.sessionUser.id);
-  const connections = await db.findManyConnections();
+  const connections = await db.findManyConnections().catch(async (error) => {
+    if (!isMissingConnectionColorError(error)) throw error;
+    console.warn(
+      '[multiConnectionProcedure] Falling back to legacy connection query because mail0_connection.color is missing',
+    );
+    return await findLegacyConnections(ctx.sessionUser.id);
+  });
 
   if (!connections.length) {
     throw new TRPCError({
@@ -205,7 +246,10 @@ export const createRateLimiterMiddleware = (config: {
 
       if (!canBypassInDev) throw error;
 
-      console.warn(`Rate limiter unavailable for ${prefix}. Continuing without rate limiting.`, error);
+      console.warn(
+        `Rate limiter unavailable for ${prefix}. Continuing without rate limiting.`,
+        error,
+      );
       ctx.c.res.headers.append('X-RateLimit-Bypass', 'redis-unavailable');
     }
 
