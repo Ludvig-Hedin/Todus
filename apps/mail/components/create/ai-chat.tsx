@@ -1,4 +1,10 @@
 import { ChatSpecRenderer, extractUISpecFromMessage } from '../generative-ui';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from '../ui/context-menu';
 import { Avatar, AvatarFallback, AvatarImage } from '../ui/avatar';
 import { extractMentionRefsFromDoc } from '@/lib/editor-mentions';
 import { useAIFullScreen, useAISidebar } from '../ui/ai-sidebar';
@@ -19,9 +25,11 @@ import { VoiceButton } from '../voice-button';
 import { EditorContent } from '@tiptap/react';
 import { CurvedArrow } from '../icons/icons';
 import { Tools } from '../../types/tools';
+import { Copy, Pencil } from 'lucide-react';
 import { Button } from '../ui/button';
 import { format } from 'date-fns-tz';
 import { useQueryState } from 'nuqs';
+import { toast } from 'sonner';
 import './prosemirror.css';
 
 const ThreadPreview = ({ threadId }: { threadId: string }) => {
@@ -302,6 +310,7 @@ export function AIChat({
   error,
   handleSubmit,
   status,
+  setMessages,
   onMentionsChange,
 }: ReturnType<typeof useAgentChat> & {
   onMentionsChange?: (mentions: MentionRef[]) => void;
@@ -376,6 +385,39 @@ export function AIChat({
     editor.commands.focus();
   };
 
+  /// Copy the plain-text payload of a message to the clipboard.
+  /// Falls back silently if the Clipboard API is unavailable (older iOS Safari
+  /// embedded contexts) — toast still fires so the user knows the action registered.
+  const copyMessageText = useCallback(async (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    try {
+      await navigator.clipboard.writeText(trimmed);
+      toast.success('Copied');
+    } catch {
+      const ua =
+        typeof navigator !== 'undefined' ? `${navigator.platform} ${navigator.userAgent}` : '';
+      const isMac = /Mac|iPhone|iPad|iPod/i.test(ua);
+      const shortcut = isMac ? '⌘C' : 'Ctrl+C';
+      toast.error(`Couldn't copy — try selecting and using ${shortcut}`);
+    }
+  }, []);
+
+  /// Right-click / long-press "Edit message" on a user bubble:
+  /// drop the edited turn and every reply after it, pre-fill the composer with
+  /// the old wording, and focus it. User edits and presses enter to re-run.
+  const editUserMessage = useCallback(
+    (index: number, text: string) => {
+      if (status === 'streaming' || status === 'submitted') return;
+      setMessages(messages.slice(0, index));
+      setInput(text);
+      editor.commands.setContent(text);
+      onMentionsChange?.([]);
+      editor.commands.focus('end');
+    },
+    [messages, setMessages, setInput, editor, onMentionsChange, status],
+  );
+
   useEffect(() => {
     if (aiSidebarOpen === 'true') {
       editor.commands.focus();
@@ -438,15 +480,17 @@ export function AIChat({
                       ),
                   )}
                   {textParts.length > 0 && (
-                    <div
-                      className={cn(
-                        'flex w-fit flex-col gap-2 rounded-lg text-sm',
-                        message.role === 'user'
-                          ? 'overflow-wrap-anywhere text-offsetDark dark:text-subtleWhite ml-auto break-words bg-[#f0f0f0] px-2 py-1 dark:bg-[#252525]'
-                          : 'overflow-wrap-anywhere mr-auto break-words p-2',
-                      )}
-                    >
-                      {textParts.map((part) => {
+                    <ContextMenu>
+                      <ContextMenuTrigger asChild>
+                        <div
+                          className={cn(
+                            'flex w-fit flex-col gap-2 rounded-lg text-sm',
+                            message.role === 'user'
+                              ? 'overflow-wrap-anywhere text-offsetDark dark:text-subtleWhite ml-auto break-words bg-[#f0f0f0] px-2 py-1 dark:bg-[#252525]'
+                              : 'overflow-wrap-anywhere mr-auto break-words p-2',
+                          )}
+                        >
+                          {textParts.map((part) => {
                         if (!part.text) return null;
 
                         // Check for embedded UI specs in assistant messages
@@ -505,7 +549,32 @@ export function AIChat({
                             <span aria-hidden="true">→</span>
                           </a>
                         )}
-                    </div>
+                        </div>
+                      </ContextMenuTrigger>
+                      <ContextMenuContent className="w-48">
+                        <ContextMenuItem
+                          onSelect={() => {
+                            const plain = textParts.map((p) => p.text ?? '').join('\n');
+                            void copyMessageText(plain);
+                          }}
+                        >
+                          <Copy className="mr-2 h-3.5 w-3.5" />
+                          Copy
+                        </ContextMenuItem>
+                        {message.role === 'user' && (
+                          <ContextMenuItem
+                            disabled={status === 'streaming' || status === 'submitted'}
+                            onSelect={() => {
+                              const plain = textParts.map((p) => p.text ?? '').join('\n');
+                              editUserMessage(index, plain);
+                            }}
+                          >
+                            <Pencil className="mr-2 h-3.5 w-3.5" />
+                            Edit message
+                          </ContextMenuItem>
+                        )}
+                      </ContextMenuContent>
+                    </ContextMenu>
                   )}
                 </div>
               );

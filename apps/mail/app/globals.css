@@ -301,6 +301,12 @@
   input[type='button'],
   input[type='submit'],
   input[type='reset'],
+  input[type='checkbox']:not(:disabled),
+  input[type='radio']:not(:disabled),
+  input[type='file']:not(:disabled),
+  input[type='range']:not(:disabled),
+  label:where(:has(input[type='checkbox'])), /* clickable label wrapping checkbox */
+  label:where(:has(input[type='radio'])),
   select {
     cursor: pointer;
   }

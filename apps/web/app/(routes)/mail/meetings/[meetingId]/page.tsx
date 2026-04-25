@@ -63,9 +63,16 @@ export default function MeetingDetailPage() {
   const { data, isLoading } = useQuery(
     trpc.meet.getMeeting.queryOptions({ meetingId: meetingId! }),
   );
-  const meeting = data?.meeting;
   const media = data?.media;
-  const transcripts = data?.transcripts;
+  const transcripts = data?.transcript;
+  const meeting = data
+    ? (() => {
+        const { media: m, transcript: t, ...row } = data;
+        void m;
+        void t;
+        return row;
+      })()
+    : undefined;
 
   // Generate AI summary
   const summaryMutation = useMutation(trpc.meet.generateSummary.mutationOptions());
@@ -345,7 +352,7 @@ function ContentSection({
 function TranscriptSection({
   segments,
 }: {
-  segments: NonNullable<MeetingDetail['transcripts']>;
+  segments: NonNullable<MeetingDetail['transcript']>;
 }) {
   const [expanded, setExpanded] = useState(false);
   const displaySegments = expanded ? segments : segments.slice(0, 15);
