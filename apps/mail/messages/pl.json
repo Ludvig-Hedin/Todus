@@ -610,6 +610,7 @@
         "deleteAccount": "Usuń konto",
         "deleting": "Usuwanie...",
         "deleted": "Konto zostało pomyślnie usunięte",
+        "cancel": "Anuluj",
         "error": "Nie udało się usunąć konta"
       },
       "privacy": {

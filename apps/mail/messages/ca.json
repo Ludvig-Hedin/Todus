@@ -602,6 +602,7 @@
         "deleteAccount": "Elimina el compte",
         "deleting": "Eliminant...",
         "deleted": "Compte eliminat correctament",
+        "cancel": "Cancel·lar",
         "error": "No s'ha pogut eliminar el compte"
       },
       "privacy": {

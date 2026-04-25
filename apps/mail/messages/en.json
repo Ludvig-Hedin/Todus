@@ -610,6 +610,7 @@
         "deleteAccount": "Delete Account",
         "deleting": "Deleting...",
         "deleted": "Account deleted successfully",
+        "cancel": "Cancel",
         "error": "Failed to delete account"
       },
       "privacy": {
