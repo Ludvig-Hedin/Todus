@@ -31,6 +31,10 @@ enum AppTheme {
 
     /// Tint for tab bar, badges, and chrome that should read as primary content — not system blue.
     static let accentBlue = Color.primary
+
+    /// `Toggle` / `UISwitch` on-state — system blue so the track is visible in light and dark mode.
+    /// Never use `.tint(.primary)` on switches; it can render as white-on-white in dark mode.
+    static let switchTint = Color(UIColor.systemBlue)
     static let mutedGray = Color(UIColor { trait in
         trait.userInterfaceStyle == .dark
             ? UIColor(white: 0.55, alpha: 1)
@@ -457,10 +461,14 @@ struct AttachmentThumbnailView<Placeholder: View>: View {
             image = nil
             guard !Task.isCancelled else { return }
             let thumbnail = await Task(priority: .utility) {
-                AttachmentService.shared.loadThumbnail(
+                let t = AttachmentService.shared.loadThumbnail(
                     for: thumbnailName,
                     maxPixelSize: thumbnailSize * 3
                 )
+                if t == nil, AttachmentService.shared.isImageFile(thumbnailName) {
+                    return AttachmentService.shared.loadImage(for: thumbnailName)
+                }
+                return t
             }.value
             guard !Task.isCancelled else { return }
             await MainActor.run {

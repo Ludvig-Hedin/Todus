@@ -141,7 +141,7 @@ struct RemindersSetupView: View {
                     Label("Sync with Reminders", systemImage: "arrow.triangle.2.circlepath")
                 }
                 .font(.system(size: 14, weight: .medium))
-                .tint(Color.primary)
+                .tint(AppTheme.switchTint)
             } footer: {
                 Text("Keep your tasks in sync with Apple Reminders.")
                     .font(.system(size: 12))

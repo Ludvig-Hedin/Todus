@@ -22,6 +22,11 @@ struct CalendarTabView: View {
     @AppStorage("calendarMultiDayCount") private var multiDayCount: Int = 3
     @State private var eventSaveError: Error?
 
+    /// In-flight event-load task. Cancelled and replaced on every reload so
+    /// rapid date/mode changes don't race; whichever task finishes last
+    /// previously won, including stale ones.
+    @State private var loadTask: Task<Void, Never>?
+
     // MARK: - Pinch-to-switch zoom state
     /// Magnification at the last mode switch (or gesture start). Re-arms after each
     /// switch so the user can chain day → 3-day → month → year in one gesture.
@@ -79,22 +84,25 @@ struct CalendarTabView: View {
 
         if relative < 0.72, idx < Self.zoomLevels.count - 1 {
             // Pinching (contracting) → less detail → step toward year
-            pinchAnchorMag = magnitude
-            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
-                previousViewMode = viewMode
-                viewMode = Self.zoomLevels[idx + 1]
-                contentScale = 1.0
-            }
+            triggerModeSwitch(to: Self.zoomLevels[idx + 1], anchorMag: magnitude)
         } else if relative > 1.38, idx > 0 {
             // Spreading (expanding) → more detail → step toward day
-            pinchAnchorMag = magnitude
-            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
-                previousViewMode = viewMode
-                viewMode = Self.zoomLevels[idx - 1]
-                contentScale = 1.0
-            }
+            triggerModeSwitch(to: Self.zoomLevels[idx - 1], anchorMag: magnitude)
+        }
+    }
+
+    /// Atomic mode switch — resets `contentScale` synchronously so a follow-up
+    /// `onChanged` from the same continuing pinch can't override an in-flight
+    /// spring animation mid-flight (which produced a visible pop).
+    private func triggerModeSwitch(to newMode: CalendarViewMode, anchorMag: CGFloat) {
+        pinchAnchorMag = anchorMag
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        // Snap scale back to neutral *outside* the animation so subsequent
+        // `onChanged` deltas start from a clean 1.0 baseline.
+        contentScale = 1.0
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+            previousViewMode = viewMode
+            viewMode = newMode
         }
     }
 
@@ -108,17 +116,36 @@ struct CalendarTabView: View {
             headerOverlay
         }
         .highPriorityGesture(pinchModeGesture)
-        .task {
-            await loadEvents()
+        .onAppear {
+            // Route the initial load through the same task slot used by all
+            // subsequent reloads so a fast user interaction (pinch / picker
+            // tap) on appear can cancel the in-flight initial fetch.
+            scheduleLoadEvents()
         }
         .onChange(of: selectedDate) {
             if viewMode != .day {
-                Task { await loadEvents() }
+                scheduleLoadEvents()
             }
         }
         .onChange(of: viewMode) {
-            Task { await loadEvents() }
+            scheduleLoadEvents()
         }
+        // External calendar changes (event added in another app, permission
+        // toggled in Settings) — refresh so we don't render stale state.
+        .onReceive(NotificationCenter.default.publisher(for: .EKEventStoreChanged)) { _ in
+            scheduleLoadEvents()
+        }
+        .onDisappear {
+            loadTask?.cancel()
+            loadTask = nil
+        }
+    }
+
+    /// Cancel any in-flight load and start a fresh one. Prevents stale results
+    /// from a slow earlier task overwriting the freshly fetched window.
+    private func scheduleLoadEvents() {
+        loadTask?.cancel()
+        loadTask = Task { await loadEvents() }
     }
 
     // MARK: - Header
@@ -249,7 +276,12 @@ struct CalendarTabView: View {
     // MARK: - Event Loading
 
     private func loadEvents() async {
-        guard services.calendarService.canReadEvents() else { return }
+        guard services.calendarService.canReadEvents() else {
+            // Permission was revoked — clear stale events so the UI doesn't
+            // continue to render results that no longer reflect reality.
+            if !events.isEmpty { events = [] }
+            return
+        }
         guard viewMode != .day else { return }
 
         isLoading = true
@@ -262,7 +294,9 @@ struct CalendarTabView: View {
         case .multiDay:
             let dayStart = cal.startOfDay(for: selectedDate)
             start = dayStart
-            end = cal.date(byAdding: .day, value: multiDayCount, to: dayStart) ?? dayStart
+            // Pad end by an extra day so all-day events stored with an
+            // exclusive end-of-day boundary aren't dropped by the predicate.
+            end = cal.date(byAdding: .day, value: multiDayCount + 1, to: dayStart) ?? dayStart
         case .month:
             // Load a wide window to support the infinite-scroll buffer
             start = cal.date(byAdding: .month, value: -24, to: selectedDate) ?? selectedDate
@@ -277,7 +311,10 @@ struct CalendarTabView: View {
             end = cal.date(byAdding: .month, value: 3, to: dayStart) ?? dayStart
         }
 
-        events = await services.calendarService.events(from: start, to: end)
+        let fetched = await services.calendarService.events(from: start, to: end)
+        // Drop the result if a newer reload superseded us mid-fetch.
+        guard !Task.isCancelled else { return }
+        events = fetched
         isLoading = false
     }
 
@@ -335,7 +372,10 @@ private final class EKStoreHolder: @unchecked Sendable {
 
 private final class EKEventCoordinator: NSObject, EKEventViewDelegate {
     nonisolated func eventViewController(_ controller: EKEventViewController, didCompleteWith action: EKEventViewAction) {
-        MainActor.assumeIsolated {
+        // EventKitUI normally delivers this on the main actor, but using an
+        // explicit hop keeps us safe even if a future iOS version delivers
+        // the callback off-main (which `MainActor.assumeIsolated` would trap).
+        Task { @MainActor in
             if let nav = controller.navigationController, nav.presentingViewController != nil {
                 nav.dismiss(animated: true)
             } else {

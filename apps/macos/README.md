@@ -46,6 +46,7 @@ apps/macos/
 
 - `pnpm macos` still points to the retired Electron flow and is intentionally not updated in this pass.
 - If Xcode command-line tools are blocked by a local license prompt, run `sudo xcodebuild -license` once before building.
+- **Docs editor bundle:** The in-app Tiptap editor assets live under `TodusMac/Resources/DocEditor/`. After changing `packages/macos-doc-editor`, rebuild and refresh the copy: from the monorepo root, `pnpm --filter @zero/macos-doc-editor build` (see that package’s `name` in `package.json` if the filter differs), then build the `TodusMac` scheme in Xcode.
 - **App icon:** `TodusMac/Resources/Assets.xcassets/AppIcon.appiconset` should contain only the standard macOS `icon_*` files referenced by `Contents.json`. Regenerate them with `python3 scripts/compose-macos-app-icon.py` from `apps/macos`; the script removes stale `mac_*` appearance variants because they make `actool` treat the catalog as having unassigned children.
 
 ## Full Local Reset

@@ -238,6 +238,7 @@ struct NoteCardView: View {
             HStack(alignment: .top) {
                 Text(p.content)
                     .font(.subheadline)
+                    .textSelection(.enabled)
                 Spacer()
                 if p.isPinned {
                     Image(systemName: "pin.fill")
@@ -400,6 +401,7 @@ struct SearchResultCardView: View {
                     Text(summary)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
                 }
             }
             .padding(10)

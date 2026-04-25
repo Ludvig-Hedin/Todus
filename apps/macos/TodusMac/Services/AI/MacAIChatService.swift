@@ -368,102 +368,113 @@ final class MacAIChatService {
             attachments: isFollowUp ? nil : basePayload.attachments
         )
 
-        let url = backendURL.appending(path: "api/ai/chat")
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("https://todus.app", forHTTPHeaderField: "Origin")
-        if let token = authService?.bearerToken {
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        }
-
         guard let body = try? JSONEncoder().encode(payload) else {
             appendError("Failed to encode request.", to: assistantMessageID)
             result.hardError = true
             return result
         }
-        request.httpBody = body
 
         var toolCallBuffer: [Int: MacAccumulatedToolCall] = [:]
+        /// One automatic repeat after a successful silent refresh (matches `TodosAPIClient` retry behavior).
+        var allow401RefreshRetry = true
 
-        do {
-            let (asyncBytes, response) = try await URLSession.shared.bytes(for: request)
-            guard let http = response as? HTTPURLResponse else {
-                appendError("Invalid response from server.", to: assistantMessageID)
-                result.hardError = true
-                return result
+        requestLoop: while true {
+            let url = backendURL.appending(path: "api/ai/chat")
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue("https://todus.app", forHTTPHeaderField: "Origin")
+            if let token = authService?.bearerToken {
+                request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
             }
-            debugHTTPResponse(http, context: "chat stream")
-            authService?.captureRotatedToken(from: http)
-            guard (200..<300).contains(http.statusCode) else {
-                switch http.statusCode {
-                case 401:
-                    if let auth = authService {
+            if let sessionId = authService?.currentSessionId {
+                request.setValue(sessionId, forHTTPHeaderField: "X-Todus-Session-Id")
+            }
+            request.httpBody = body
+
+            do {
+                let (asyncBytes, response) = try await URLSession.shared.bytes(for: request)
+                guard let http = response as? HTTPURLResponse else {
+                    appendError("Invalid response from server.", to: assistantMessageID)
+                    result.hardError = true
+                    return result
+                }
+                debugHTTPResponse(http, context: "chat stream")
+                authService?.captureRotatedToken(from: http)
+                guard (200..<300).contains(http.statusCode) else {
+                    if http.statusCode == 401, allow401RefreshRetry, let auth = authService {
+                        allow401RefreshRetry = false
                         let refreshed = await auth.attemptSilentRefresh()
                         if refreshed {
-                            appendError("Session token refreshed. Please tap retry.", to: assistantMessageID)
-                        } else {
-                            auth.isSessionExpired = true
-                            appendError(diagnosticAuthMessage(
-                                statusCode: http.statusCode,
-                                fallback: "Session expired. Please log out and back in."
-                            ), to: assistantMessageID)
+                            continue requestLoop
                         }
-                    } else {
+                        auth.isSessionExpired = true
                         appendError(diagnosticAuthMessage(
                             statusCode: http.statusCode,
                             fallback: "Session expired. Please log out and back in."
                         ), to: assistantMessageID)
+                    } else if http.statusCode == 401 {
+                        appendError(diagnosticAuthMessage(
+                            statusCode: http.statusCode,
+                            fallback: "Session expired. Please log out and back in."
+                        ), to: assistantMessageID)
+                    } else {
+                        switch http.statusCode {
+                        case 503:
+                            appendError("AI service is not configured on the server (missing OPENROUTER_API_KEY).", to: assistantMessageID)
+                        case 502:
+                            appendError("AI provider error. The upstream AI service may be down.", to: assistantMessageID)
+                        default:
+                            appendError(diagnosticHTTPMessage(statusCode: http.statusCode), to: assistantMessageID)
+                        }
                     }
-                case 503: appendError("AI service is not configured on the server (missing OPENROUTER_API_KEY).", to: assistantMessageID)
-                case 502: appendError("AI provider error. The upstream AI service may be down.", to: assistantMessageID)
-                default:  appendError(diagnosticHTTPMessage(statusCode: http.statusCode), to: assistantMessageID)
+                    result.hardError = true
+                    return result
                 }
-                result.hardError = true
+
+                for try await line in asyncBytes.lines {
+                    if Task.isCancelled { break }
+                    guard line.hasPrefix("data: ") else { continue }
+                    let jsonString = String(line.dropFirst(6))
+                    if jsonString == "[DONE]" { break }
+
+                    guard let data = jsonString.data(using: .utf8) else { continue }
+
+                    if let customEvent = try? JSONDecoder().decode(MacSSECustomEvent.self, from: data),
+                       !customEvent.type.isEmpty {
+                        handleCustomEvent(customEvent, messageID: assistantMessageID)
+                        continue
+                    }
+
+                    guard let chunk = try? JSONDecoder().decode(MacSSEChunk.self, from: data) else { continue }
+                    guard let delta = chunk.choices.first?.delta else { continue }
+
+                    if let text = delta.content, !text.isEmpty {
+                        result.assistantContent += text
+                        result.producedContent = true
+                        appendToken(text, to: assistantMessageID)
+                    }
+
+                    if let toolCalls = delta.toolCalls {
+                        for tc in toolCalls {
+                            let idx = tc.index ?? 0
+                            var acc = toolCallBuffer[idx] ?? MacAccumulatedToolCall()
+                            if let id = tc.id, !id.isEmpty { acc.id = id }
+                            if let name = tc.function?.name, !name.isEmpty { acc.name = name }
+                            if let args = tc.function?.arguments, !args.isEmpty { acc.arguments += args }
+                            toolCallBuffer[idx] = acc
+                        }
+                    }
+                }
+                break requestLoop
+            } catch {
+                if !Task.isCancelled {
+                    log.error("chat stream failed: \(error.localizedDescription, privacy: .public)")
+                    appendError(error.localizedDescription, to: assistantMessageID)
+                    result.hardError = true
+                }
                 return result
             }
-
-            for try await line in asyncBytes.lines {
-                if Task.isCancelled { break }
-                guard line.hasPrefix("data: ") else { continue }
-                let jsonString = String(line.dropFirst(6))
-                if jsonString == "[DONE]" { break }
-
-                guard let data = jsonString.data(using: .utf8) else { continue }
-
-                if let customEvent = try? JSONDecoder().decode(MacSSECustomEvent.self, from: data),
-                   !customEvent.type.isEmpty {
-                    handleCustomEvent(customEvent, messageID: assistantMessageID)
-                    continue
-                }
-
-                guard let chunk = try? JSONDecoder().decode(MacSSEChunk.self, from: data) else { continue }
-                guard let delta = chunk.choices.first?.delta else { continue }
-
-                if let text = delta.content, !text.isEmpty {
-                    result.assistantContent += text
-                    result.producedContent = true
-                    appendToken(text, to: assistantMessageID)
-                }
-
-                if let toolCalls = delta.toolCalls {
-                    for tc in toolCalls {
-                        let idx = tc.index ?? 0
-                        var acc = toolCallBuffer[idx] ?? MacAccumulatedToolCall()
-                        if let id = tc.id, !id.isEmpty { acc.id = id }
-                        if let name = tc.function?.name, !name.isEmpty { acc.name = name }
-                        if let args = tc.function?.arguments, !args.isEmpty { acc.arguments += args }
-                        toolCallBuffer[idx] = acc
-                    }
-                }
-            }
-        } catch {
-            if !Task.isCancelled {
-                log.error("chat stream failed: \(error.localizedDescription, privacy: .public)")
-                appendError(error.localizedDescription, to: assistantMessageID)
-                result.hardError = true
-            }
-            return result
         }
 
         if !tokenBuffer.isEmpty,

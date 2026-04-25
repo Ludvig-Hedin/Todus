@@ -170,7 +170,7 @@ struct TaskDetailSheet: View {
     private var scheduleSection: some View {
         Section("Schedule") {
             Toggle("Due date", isOn: $hasDueDate)
-                .tint(Color.primary)
+                .tint(AppTheme.switchTint)
 
             if hasDueDate {
                 DatePicker("Due", selection: $dueDate)

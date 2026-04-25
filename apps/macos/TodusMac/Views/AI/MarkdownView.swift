@@ -21,6 +21,7 @@ struct MarkdownView: View {
                 MarkdownBlockView(block: block, fontSize: fontSize, isFirst: idx == 0)
             }
         }
+        .textSelection(.enabled)
         .frame(maxWidth: .infinity, alignment: .leading)
         .onChange(of: content, initial: true) { _, new in
             guard parsedKey != new else { return }

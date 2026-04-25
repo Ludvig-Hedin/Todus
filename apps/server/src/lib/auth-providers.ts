@@ -1,3 +1,5 @@
+import { type JWTPayload, decodeProtectedHeader, importJWK, jwtVerify } from 'jose';
+
 export interface EnvVarInfo {
   name: string;
   source: string;
@@ -14,6 +16,101 @@ export interface ProviderConfig {
   isCustom?: boolean;
   customRedirectPath?: string;
 }
+
+// Bundle IDs allowed to sign in via native Apple Sign-in. The iOS and macOS
+// apps each request the ID token with their own bundle identifier as the
+// audience claim, so Better Auth must accept both. Better Auth's built-in
+// verifier only takes a single `appBundleIdentifier`, so we plug a custom
+// verifier that whitelists the array.
+const APPLE_ALLOWED_AUDIENCES = ['com.ludvighedin.todus', 'com.ludvighedin.todus.macos'];
+
+// Cache resolved JWKs so we don't refetch Apple's JWKS endpoint on every
+// sign-in. Apple rotates keys infrequently; if a `kid` misses, we refetch.
+let appleKeyCache: Map<string, Awaited<ReturnType<typeof importJWK>>> | null = null;
+let appleJwksFetchedAt = 0;
+const APPLE_JWKS_TTL_MS = 60 * 60 * 1000; // 1 hour
+
+const refreshAppleJwks = async () => {
+  const res = await fetch('https://appleid.apple.com/auth/keys');
+  if (!res.ok) {
+    throw new Error(`Apple JWKS fetch failed: ${res.status}`);
+  }
+  const data = (await res.json()) as { keys: Array<{ kid: string; alg: string }> };
+  const cache = new Map<string, Awaited<ReturnType<typeof importJWK>>>();
+  for (const key of data.keys) {
+    cache.set(key.kid, await importJWK(key, key.alg));
+  }
+  appleKeyCache = cache;
+  appleJwksFetchedAt = Date.now();
+};
+
+const getAppleKey = async (kid: string) => {
+  const stale = !appleKeyCache || Date.now() - appleJwksFetchedAt > APPLE_JWKS_TTL_MS;
+  if (stale || !appleKeyCache?.has(kid)) {
+    await refreshAppleJwks();
+  }
+  const key = appleKeyCache?.get(kid);
+  if (!key) {
+    // Force a refresh on miss in case Apple rotated keys since the cached fetch.
+    await refreshAppleJwks();
+  }
+  return appleKeyCache?.get(kid);
+};
+
+export type AppleIdTokenPayload = JWTPayload & {
+  sub: string;
+  email?: string;
+  email_verified?: boolean | string;
+  name?: string;
+};
+
+export const verifyAppleIdTokenPayload = async (
+  token: string,
+  nonce?: string,
+): Promise<AppleIdTokenPayload | null> => {
+  try {
+    const header = decodeProtectedHeader(token);
+    const { kid, alg } = header;
+    if (!kid || !alg) {
+      console.error('[apple verifyIdToken] missing kid/alg in token header', { kid, alg });
+      return null;
+    }
+    const publicKey = await getAppleKey(kid);
+    if (!publicKey) {
+      console.error('[apple verifyIdToken] no JWK found for kid', { kid });
+      return null;
+    }
+    const { payload } = await jwtVerify(token, publicKey, {
+      algorithms: [alg],
+      issuer: 'https://appleid.apple.com',
+      audience: APPLE_ALLOWED_AUDIENCES,
+      maxTokenAge: '1h',
+    });
+    if (nonce && payload.nonce !== nonce) {
+      console.error('[apple verifyIdToken] nonce mismatch');
+      return null;
+    }
+    if (!payload.sub) {
+      console.error('[apple verifyIdToken] missing subject claim');
+      return null;
+    }
+    return payload as AppleIdTokenPayload;
+  } catch (error) {
+    // Log the actual cause so the next failure isn't an opaque 500. Returning
+    // false here lets Better Auth surface a 401 INVALID_TOKEN instead of an
+    // unhandled exception bubbling out as an empty 500.
+    console.error('[apple verifyIdToken] validation failed', {
+      error: error instanceof Error ? error.message : String(error),
+      code: (error as { code?: string })?.code,
+      audClaim: (error as { claim?: string })?.claim,
+    });
+    return null;
+  }
+};
+
+const verifyAppleIdToken = async (token: string, nonce?: string): Promise<boolean> => {
+  return (await verifyAppleIdTokenPayload(token, nonce)) !== null;
+};
 
 export const customProviders: ProviderConfig[] = [
   // {
@@ -89,9 +186,14 @@ export const authProviders = (env: Record<string, string>): ProviderConfig[] => 
     requiredEnvVars: ['APPLE_CLIENT_ID', 'APPLE_TEAM_ID', 'APPLE_KEY_ID', 'APPLE_PRIVATE_KEY'],
     config: {
       clientId: env.APPLE_CLIENT_ID,
-      // Native iOS Apple Sign-in tokens use the app's Bundle ID as the audience
-      // claim, not the Service ID. Better Auth needs this to validate native tokens.
+      // Kept for compatibility — Better Auth uses this as fallback audience if
+      // `verifyIdToken` is not provided. The custom verifier below is what
+      // actually validates production traffic against the multi-bundle list.
       appBundleIdentifier: env.APPLE_APP_BUNDLE_ID || 'com.ludvighedin.todus',
+      // Custom validator that accepts both iOS and macOS bundle IDs and
+      // converts JWT failures into a `false` return (→ 401) instead of an
+      // unhandled throw (→ empty 500 with no logs).
+      verifyIdToken: verifyAppleIdToken,
       clientSecret: {
         teamId: env.APPLE_TEAM_ID,
         keyId: env.APPLE_KEY_ID,

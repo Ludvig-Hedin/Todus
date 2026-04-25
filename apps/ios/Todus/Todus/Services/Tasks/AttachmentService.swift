@@ -31,13 +31,33 @@ final class AttachmentService: @unchecked Sendable {
     }
 
     /// Preferred MIME type for a stored filename (used when uploading to the AI backend).
+    /// Uses the extension when possible, then sniffs common image magics so vision models
+    /// still receive `image/*` if the file is JPEG/PNG but the extension is wrong.
     func mimeType(for filename: String) -> String {
         let ext = url(for: filename).pathExtension.lowercased()
         if let ut = UTType(filenameExtension: ext), let mime = ut.preferredMIMEType {
             return mime
         }
-        if isImageFile(filename) { return "image/jpeg" }
-        return "application/octet-stream"
+        return mimeTypeBySniffingFileHeader(for: filename) ?? (isImageFile(filename) ? "image/jpeg" : "application/octet-stream")
+    }
+
+    private func firstBytesOfFile(at fileURL: URL, max: Int) -> Data? {
+        guard let handle = try? FileHandle(forReadingFrom: fileURL) else { return nil }
+        defer { try? handle.close() }
+        return try? handle.read(upToCount: max)
+    }
+
+    private func mimeTypeBySniffingFileHeader(for filename: String) -> String? {
+        let fileURL = url(for: filename)
+        guard let data = firstBytesOfFile(at: fileURL, max: 32), data.count >= 12 else { return nil }
+        if data.starts(with: [0xFF, 0xD8, 0xFF]) { return "image/jpeg" }
+        if data.starts(with: [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) { return "image/png" }
+        if data.prefix(6).starts(with: [0x47, 0x49, 0x46, 0x38]) { return "image/gif" }
+        if data.count >= 12, data.starts(with: [0x52, 0x49, 0x46, 0x46]),
+           String(data: data.subdata(in: 8..<12), encoding: .ascii) == "WEBP" {
+            return "image/webp"
+        }
+        return nil
     }
 
     /// Returns UIImage for an attachment if it's a supported image format
@@ -49,7 +69,22 @@ final class AttachmentService: @unchecked Sendable {
 
     func isImageFile(_ filename: String) -> Bool {
         let ext = url(for: filename).pathExtension.lowercased()
-        return ["png", "jpg", "jpeg", "heic", "heif", "gif", "webp"].contains(ext)
+        if ["png", "jpg", "jpeg", "heic", "heif", "gif", "webp", "tiff", "tif", "bmp", "ico"].contains(ext) {
+            return true
+        }
+        return mimeTypeBySniffingFileHeader(for: filename)?.hasPrefix("image/") == true
+    }
+
+    /// Short label for the chat UI (avoids full UUID filenames).
+    func friendlyAttachmentLabel(filename: String, index: Int, total: Int) -> String {
+        if isImageFile(filename) {
+            if total <= 1 { return "Image" }
+            return "Image \(index + 1)"
+        }
+        let ext = url(for: filename).pathExtension.uppercased()
+        let tag = ext.isEmpty ? "FILE" : ext
+        if total <= 1 { return "File (\(tag))" }
+        return "File \(index + 1) (\(tag))"
     }
 
     func loadThumbnail(for filename: String, maxPixelSize: CGFloat) -> UIImage? {

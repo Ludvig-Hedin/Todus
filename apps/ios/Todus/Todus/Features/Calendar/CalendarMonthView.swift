@@ -2,10 +2,9 @@ import SwiftUI
 
 /// Apple Calendar-style month view with infinite vertical scroll.
 /// Shows multiple months in a continuous scrollable list.
-/// Pinch-to-resize adjusts row height (like Apple Calendar / Google Maps zoom):
-///   - Pinch in (spread fingers) = taller rows, showing event titles
-///   - Pinch out (pinch fingers) = shorter rows, falling back to dots
-/// Default row height fits 3 event titles per day cell.
+/// Row height is fixed at 90pt — fits the day number plus 3 event title pills.
+/// Pinch-to-zoom is handled at the parent `CalendarTabView` level and switches
+/// between view modes (month → year, month → 3-day, etc.).
 /// Tapping a day switches to Day view.
 struct CalendarMonthView: View {
     @Binding var selectedDate: Date

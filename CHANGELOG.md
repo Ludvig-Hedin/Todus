@@ -1,5 +1,59 @@
 # Project Changelog
 
+## [2026-04-25] Fix — Native Email OTP sign-in bridge
+
+- [Fix] **Backend:** Added `POST /api/auth/native-email-otp/verify` for iOS/macOS. It validates the existing Better Auth `sign-in` OTP record, creates a native session token, and returns structured JSON errors instead of the opaque empty-body 500 seen from `/api/auth/sign-in/email-otp`.
+- [Fix] **Backend:** The native OTP bridge now selects only core auth columns from `mail0_user`, so production logins do not fail if newer app-only user columns have not been migrated yet.
+- [Fix] **iOS + macOS:** Shared native `AuthService` now verifies email OTP against the native bridge and captures the returned session ID alongside the raw session token.
+- **Files:** `apps/server/src/main.ts`, `packages/swift-auth/Sources/TodusAuth/AuthService.swift`
+
+## [2026-04-24] Feature — Native Docs on macOS (Craft-style shell + bundled Tiptap)
+
+- [Feature] **macOS:** The Docs tab no longer embeds the full web app in `WKWebView` (which could not use native `Authorization` for `clientLoader`). It is now a **native** shell: sidebar (workspaces, tree, starred, new page), **All docs** with grid/list + search, and a full-screen **editor** with title, star, breadcrumb, and a **bundled** Tiptap page loaded from `file://` (`Resources/DocEditor`). Swift injects initial JSON and receives debounced `onUpdate` via `WKScriptMessageHandler` (`todusDoc`); saves go through `docs.*` tRPC. Format strip: bold, italic, H1/H2, lists, task list (JS bridge to `window.todusEditor.run`).
+- [Feature] **Backend:** `mail0_doc.is_starred` (default false). `docs.update` accepts optional `parentId`, `workspaceId`, and `isStarred` with workspace ownership checks for moves. Migration `0051_doc_starred_and_move.sql`.
+- [Build] **Monorepo:** `packages/macos-doc-editor` builds with esbuild; output is copied to `TodusMac/Resources/DocEditor` for the Xcode bundle. Rebuild after editor changes: `pnpm --filter @zero/macos-doc-editor build` (or the package’s `package.json` name if different).
+- [Cleanup] Removed duplicate `TodusMac/MacDocsView.swift` at the `TodusMac` folder root; `MacDocsView` lives under `Views/Docs/`.
+- **Files:** `apps/server/src/db/schema.ts`, `apps/server/src/db/migrations/0051_doc_starred_and_move.sql`, `apps/server/src/trpc/routes/docs.ts`, `packages/macos-doc-editor/`, `apps/macos/TodusMac/Resources/DocEditor/`, `apps/macos/TodusMac/Domain/MacDocTypes.swift`, `apps/macos/TodusMac/Services/Docs/MacDocsService.swift`, `apps/macos/TodusMac/Views/Docs/*.swift`, `apps/macos/TodusMac/App/MacAppServices.swift`, `apps/macos/TodusMac.xcodeproj/project.pbxproj`
+
+## [2026-04-25] Fix — macOS: Settings window no longer appears when logged out
+
+- [Fix] **macOS:** The dedicated Settings `Window` used to be **restored at launch** if it had been open when the app quit, so it could reappear next to the sign-in UI. Settings now uses `defaultLaunchBehavior(.suppressed)` (only opens via ⌘, / menu / sidebar). When the login screen is shown or the user signs out, any open Settings window is closed programmatically.
+
+## [2026-04-25] — macOS app icon: Figma full-bleed, light + dark
+
+- [UX] **macOS:** `AppIcon` is regenerated from 1024×1024 Figma (Apple template) sources with one PNG per size slot, **luminosity** `light` / `dark` for system appearance. Masters live under `TodusMac/Resources/AppIconSource/` (not in the asset catalog) for future re-exports. `actool` may still log a known “unassigned children” notice for mac app icons with appearance variants; the archive still produces a valid `AppIcon.icns`.
+
+## [2026-04-25] Feature — iOS AI chat: attachment thumbnails, full-screen preview, vision MIME fix
+
+- [Feature] **iOS:** Sent attachments in the user bubble now show a real image thumbnail (with `loadImage` fallback when thumbnail decode fails) and a short label (“Image”, “Image 2”, or “File (PDF)”) instead of the raw UUID filename. Tap opens a full-screen black preview with **Copy** (image to pasteboard) and **Save** (Photo Library; `NSPhotoLibraryAddUsageDescription` added). Non-image files get **Share** in the same sheet.
+- [Fix] **iOS:** `AttachmentService.mimeType` can sniff JPEG/PNG/GIF/WebP magic bytes so the server classifies borderline files as `image/*` and merges them as vision `image_url` parts (matching `mergeAttachmentsIntoLastUserMessage` in `ai.ts`).
+
+## [2026-04-25] Feature — Subscriptions, plan management, and AI usage tracking (web + iOS + macOS + server)
+
+- [Feature] **Backend:** Autumn-based subscriptions wired end-to-end. New users get an Autumn customer with the `free` product on signup. New `subscription` tRPC router exposes `getStatus` / `refresh` / `attach` / `cancel` / `getBillingPortalUrl` / `getPricingTable`.
+- [Feature] **Backend:** `mail0_user` cache columns (`plan`, `subscription_status`, `ai_usage_used`, `ai_usage_limit`, `ai_usage_reset_at`) so plan UI renders without an Autumn round-trip per request. Migration `0050_lame_tag.sql`.
+- [Feature] **Backend:** AI usage metering. `/api/ai/chat` now (1) blocks with `402 ai_credits_exhausted` when the user is out of credits, (2) requests OpenRouter `stream_options.include_usage`, (3) parses real token counts from the SSE stream, (4) computes USD cost from a per-model rate table, (5) tracks the cost as `ai_usage` credits in Autumn (1 credit = $1) — fire-and-forget so tracking failures never affect chat.
+- [Feature] **Backend:** Public webhook handler at `POST /webhooks/autumn` with HMAC-SHA256 signature verification (`AUTUMN_WEBHOOK_SECRET`). Refreshes the cached subscription state for the affected customer on any Autumn event.
+- [Feature] **Web:** New `/settings/billing` page with current plan, AI usage progress bar, manage / upgrade / cancel buttons, and warnings at 80% / 100% utilization. Sidebar entry added.
+- [Feature] **Web:** Pricing card now uses real product IDs (`pro_monthly` / `pro_annual`); upgrade flow opens Stripe Checkout via Autumn.
+- [Feature] **iOS:** `SubscriptionService` (cached read of plan + AI usage). New `BillingSettingsView` with manage-billing and cancel actions; nav entry added under Settings → Subscription. Free users get an "Upgrade to Pro" link out to the web pricing page (Apple's external-link policy).
+- [Feature] **macOS:** `MacSubscriptionService` and a new `billingSection` on `MacSettingsView` mirroring the iOS UI: plan summary, credit progress bar, manage/cancel/upgrade. Opens billing portal via `NSWorkspace`.
+- [Files] `apps/server/src/db/schema.ts`, `apps/server/src/lib/billing.ts`, `apps/server/src/lib/ai/model-pricing.ts`, `apps/server/src/trpc/routes/subscription.ts`, `apps/server/src/routes/autumn-webhook.ts`, `apps/server/src/routes/ai.ts`, `apps/server/src/lib/auth.ts`, `apps/server/src/main.ts`, `apps/server/src/env.ts`, `apps/server/src/trpc/index.ts`, `apps/server/src/db/migrations/0050_lame_tag.sql`, `apps/mail/app/(routes)/settings/billing/page.tsx`, `apps/mail/app/routes.ts`, `apps/mail/config/navigation.ts`, `apps/mail/components/pricing/pricing-card.tsx`, `apps/mail/components/ui/nav-user.tsx`, `apps/mail/hooks/use-billing.ts`, `apps/mail/lib/utils.ts`, `apps/ios/Todus/Todus/Services/Subscription/SubscriptionService.swift`, `apps/ios/Todus/Todus/Features/Settings/BillingSettingsView.swift`, `apps/ios/Todus/Todus/Features/Settings/SettingsView.swift`, `apps/ios/Todus/Todus/App/AppServices.swift`, `apps/macos/TodusMac/Services/Subscription/MacSubscriptionService.swift`, `apps/macos/TodusMac/Views/Settings/MacSettingsView.swift`, `apps/macos/TodusMac/App/MacAppServices.swift`
+- [Manual steps required] Run `pnpm db:push` (or `pnpm db:migrate` in prod) to apply migration `0050_lame_tag.sql`. Set `AUTUMN_SECRET_KEY` (already done by user). Once the webhook setting is found in the Autumn dashboard, set `AUTUMN_WEBHOOK_SECRET` via `wrangler secret put` and point Autumn at `https://api.todus.app/webhooks/autumn`.
+
+## [2026-04-25] Feature — Paste images and files into AI chat (iOS + macOS + web)
+
+- [Feature] **iOS:** Clipboard paste in the AI composer now supports photos (unchanged) plus non-image files via `NSItemProvider` (file URL, images, PDF, generic data) saved through `AttachmentService` and added to the pending-attachment row.
+- [Feature] **macOS:** `MacChatNSTextView` intercepts paste to add `NSImage` (written to a temp PNG), file URLs from Finder, or raw PNG/TIFF/PDF data from the pasteboard to `pendingAttachments` (same path as the + attach button).
+- [UX] **macOS:** Pending attachment row scrolls horizontally when crowded; each pill shows a 22px image preview (for image types), truncated name, uppercase format label, remove control, and drops paste temp files on remove.
+- [Feature] **Web** (`apps/mail` + `apps/web` mail chat): Pasting files or images into the assistant textarea queues them (removable chips), sends with `useChat` `append` + `experimental_attachments` (data URLs), and shows attached filenames on user bubbles when present.
+- **Files:** `CaptureComposer.swift`, `AIChatView.swift`, `MacAssistantPanel.swift`, `apps/mail/.../mail/chat/page.tsx`, `apps/web/.../mail/chat/page.tsx`
+
+## [2026-04-25] Fix — Toggle visibility (iOS + macOS)
+
+- [Fix] `Toggle` / switch controls no longer use `.tint(.primary)` (which could render as white-on-white in dark mode). Shared tokens `AppTheme.switchTint` and `MacTheme.switchTint` use system blue so the on-state is visible in light and dark mode.
+- **Files:** `AppTheme.swift`, `MacTheme.swift`, `SettingsView.swift` (incl. AI Assistant sub-list), `AIChatView.swift`, `RemindersSetupView.swift`, `TaskDetailSheet.swift`, `SignaturesView.swift`, `MacSettingsView.swift`, `MacTasksView.swift`
+
 ## [2026-04-25] Fix — iOS Gmail OAuth connection flow
 
 - [Fix] iOS Gmail onboarding now uses the Gmail link-social flow instead of auth-only Google sign-in, so the OAuth redirect grants mail scopes and creates the backend connection row before the app marks Gmail as configured.
@@ -66,7 +120,7 @@
 
 ## [2026-04-24] Fix — macOS app icon matches iOS
 
-- [UX] macOS Dock: the iOS 1024×1024 master leaves a large margin around the mark; that full-bleed asset read as a small “white tile” on the macOS squircle. Added `apps/macos/scripts/compose-macos-app-icon.py` to crop to the mark, scale it to ~86% of the canvas, and regenerate all `AppIcon.appiconset` sizes (a reference 1024 is written to `apps/macos/scripts/AppIcon-macos-master.png`, not bundled).
+- [UX] macOS Dock: naive scaling of a **rect** crop around the mark kept **white in the rect corners** (between glyph arms and the crop edge), so the icon still looked like a smaller sharp-edged white square on the system plate. The compose script now **floods** edge-connected “paper white” to **transparent**, keeps ink + **enclosed** counter whites, scales that blob to **~95%** of 1024, and writes `AppIcon-macos-master.png` + all `AppIcon.appiconset` sizes (`compose-macos-app-icon.py`).
 - [Fix] Regenerated the macOS `AppIcon` asset (all sizes in `AppIcon.appiconset` plus `AppIcon.icns`) from the same 1024×1024 source as the iOS app (`App-Icon-1024x1024@1x.png`); the Dock had been showing the generic placeholder when those assets were outdated or mismatched.
 - [Config] `Info.plist`: set `CFBundleIconName` to `AppIcon` so the bundle resolves the asset-catalog icon set reliably.
 - [Build] Stopped bundling a duplicate `AppIcon.icns` as a resource; `actool` already emits the app icon from `Assets.xcassets`, and the extra copy could race and fail the build.
@@ -109,6 +163,7 @@
 - [Fix] Scoped the server tRPC middleware to `/trpc/*` inside the `/api` sub-app and corrected its endpoint to `/trpc`, so `/api/ai/voice-ping` and `/api/ai/voice-ws` now reach the AI router instead of being misparsed as tRPC procedure paths.
 - [Fix] This restores the iOS voice-chat WebSocket upgrade path that was surfacing as `NSURLErrorDomain Code=-1011` / “There was a bad response from the server.”
 - [Architectural] The regression was in backend route registration, not the iOS audio stack: the broad tRPC middleware was shadowing sibling `/api/ai/*` routes after the `/api` mount.
+- [Fix] iOS voice chat now refreshes an expiring native bearer token before starting the WebSocket handshake, so the voice session no longer fails with a `401` upgrade when the app is otherwise still signed in.
 - **Files:** `apps/server/src/main.ts`
 
 ## [2026-04-24] Fix — iOS AI chat composer focus (keyboard / + button)

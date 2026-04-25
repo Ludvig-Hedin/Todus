@@ -30,11 +30,17 @@
 		48B499046340328F96E0AEF7 /* AppleRemindersSyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 491C11A04DB4DA05E30ED280 /* AppleRemindersSyncService.swift */; };
 		4BA429F138151D2591542720 /* MacMeetingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC576DC4D340857DE4F44A65 /* MacMeetingsView.swift */; };
 		4C73B49045690BB0BA55C141 /* MacDocsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6155C00DFE00B636BFF8D00 /* MacDocsView.swift */; };
+		A9B8C7D6E5F403021100A9B80 /* MacDocTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9B8C7D6E5F403021100A9B81 /* MacDocTypes.swift */; };
+		A9B8C7D6E5F403021100A9B82 /* MacDocsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9B8C7D6E5F403021100A9B83 /* MacDocsService.swift */; };
+		A9B8C7D6E5F403021100A9B84 /* TiptapDocEditorWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9B8C7D6E5F403021100A9B85 /* TiptapDocEditorWebView.swift */; };
+		A9B8C7D6E5F403021100A9B86 /* MacDocsShellView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9B8C7D6E5F403021100A9B87 /* MacDocsShellView.swift */; };
+		A9B8C7D6E5F403021100A9B88 /* MacDocEditorPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9B8C7D6E5F403021100A9B89 /* MacDocEditorPane.swift */; };
 		53D7BE88F236E8F472FF4D68 /* MacAssistantPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E9CA2173967A8D824F414D7 /* MacAssistantPanel.swift */; };
 		553EE990264F3CEFD8E517BC /* AppTaskPriority.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC585F2265934558433E3E36 /* AppTaskPriority.swift */; };
 		57FBCDF125B965458E0BECF3 /* TodusMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 046484DCDC536576B1BBB40C /* TodusMacApp.swift */; };
 		5ADF61DDFE8A3E3F7B49F343 /* MacHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AA56C7900CF82A6B22C847C /* MacHomeView.swift */; };
 		5F09630B9742564B1D9301A7 /* MacGroupChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 620A8071ABFD71C08BFB844C /* MacGroupChatView.swift */; };
+		605F1DB933214860F7655794 /* MacSubscriptionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E71956D64C1C0E4DEB2CBE25 /* MacSubscriptionService.swift */; };
 		666A1CA5E6CEB62136566AAF /* RemindersSyncState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1BDE1729E140EA151D0B3B6A /* RemindersSyncState.swift */; };
 		680812535C1CC7B2F7FDC9BB /* MacCalendarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0977C553BCC4593120370036 /* MacCalendarView.swift */; };
 		6F775FA79762FB29E75EBF88 /* EmailService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90565199B1A829021602D8C0 /* EmailService.swift */; };
@@ -61,13 +67,16 @@
 		C3ABBC6BB009FE7995D12B02 /* EventKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 99A1500ECA0199177C906A2A /* EventKit.framework */; };
 		C59D9C373A1BC750F7F6B712 /* AppLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 664A5E35FD54A0174263139C /* AppLogger.swift */; };
 		C7DF612D031A6CC198D17600 /* TaskRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54838BB181E398AEAE44D164 /* TaskRecord.swift */; };
+		CB7E7A3831E2B1DADD8BAF8B /* CalendarTrackpadNavigation.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7519142575177A0263B7A4A /* CalendarTrackpadNavigation.swift */; };
 		D1ED251E912D63B61727D06F /* EmailModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6B833B391C01BEE4CB84524 /* EmailModels.swift */; };
 		D690F1E9E68EB72DB2A0FF10 /* MacAppServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = 326E7A3F239A043BA44D3B8F /* MacAppServices.swift */; };
 		D714906DC9EE1D9E1B6A4FB0 /* MacBrandIcons.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBA2486E15EFC7C6F22C7D19 /* MacBrandIcons.swift */; };
 		D76EFB86A42A4E0974640454 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AE1D36D7DEA8080434732636 /* Assets.xcassets */; };
+		F8E7D6C5B4A3928170615544A /* DocEditor in Resources */ = {isa = PBXBuildFile; fileRef = E7D6C5B4A39281706155443 /* DocEditor */; };
 		D89DF48DA2B18922837710B9 /* MacEmailComposeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC7F6BC356E4ECE3D50717F5 /* MacEmailComposeView.swift */; };
 		E00A05101913579DC0E5D1C6 /* KeychainHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 458E1F394617FB142FC17275 /* KeychainHelper.swift */; };
 		E2D56D42AC089CCBC21CD21B /* MacAuthView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9DCCDC4628A7827493203AF /* MacAuthView.swift */; };
+		B8E4F1A02C3D4E5F60718290A1 /* MacEmailTextField.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9D0E1F2A3B4C5D6E7F8091A2B /* MacEmailTextField.swift */; };
 		EE6A839A831D903BC3DBC25D /* MacTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52580E22D0F58138E0CE848E /* MacTheme.swift */; };
 /* End PBXBuildFile section */
 
@@ -91,6 +100,11 @@
 		458E1F394617FB142FC17275 /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
 		491C11A04DB4DA05E30ED280 /* AppleRemindersSyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleRemindersSyncService.swift; sourceTree = "<group>"; };
 		4A87121AD344331AAA348FB3 /* SyncModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncModels.swift; sourceTree = "<group>"; };
+		A9B8C7D6E5F403021100A9B81 /* MacDocTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacDocTypes.swift; sourceTree = "<group>"; };
+		A9B8C7D6E5F403021100A9B83 /* MacDocsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacDocsService.swift; sourceTree = "<group>"; };
+		A9B8C7D6E5F403021100A9B85 /* TiptapDocEditorWebView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TiptapDocEditorWebView.swift; sourceTree = "<group>"; };
+		A9B8C7D6E5F403021100A9B87 /* MacDocsShellView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacDocsShellView.swift; sourceTree = "<group>"; };
+		A9B8C7D6E5F403021100A9B89 /* MacDocEditorPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacDocEditorPane.swift; sourceTree = "<group>"; };
 		4BD152C78EA2F5515F84D973 /* TaskSortOrder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskSortOrder.swift; sourceTree = "<group>"; };
 		51FB7C44A440DFC527210FE5 /* MacRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacRootView.swift; sourceTree = "<group>"; };
 		52580E22D0F58138E0CE848E /* MacTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacTheme.swift; sourceTree = "<group>"; };
@@ -117,7 +131,9 @@
 		A611068A14198E2651240FDA /* MacScrollStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacScrollStyle.swift; sourceTree = "<group>"; };
 		A8ABE7D86ADEB39CEA890CD6 /* TaskDateFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskDateFormatter.swift; sourceTree = "<group>"; };
 		A9DCCDC4628A7827493203AF /* MacAuthView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacAuthView.swift; sourceTree = "<group>"; };
+		C9D0E1F2A3B4C5D6E7F8091A2B /* MacEmailTextField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacEmailTextField.swift; sourceTree = "<group>"; };
 		AE1D36D7DEA8080434732636 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		E7D6C5B4A39281706155443 /* DocEditor */ = {isa = PBXFileReference; lastKnownFileType = folder; path = DocEditor; sourceTree = "<group>"; };
 		B26A21E1F1C02C4ACD3E4C30 /* CalendarTimeGridView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarTimeGridView.swift; sourceTree = "<group>"; };
 		B582ECD8716F2A249C77A507 /* GroupChatService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupChatService.swift; sourceTree = "<group>"; };
 		B6B833B391C01BEE4CB84524 /* EmailModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailModels.swift; sourceTree = "<group>"; };
@@ -135,8 +151,10 @@
 		E1B78F2ECE3BBD9BBD4D0603 /* CalendarService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarService.swift; sourceTree = "<group>"; };
 		E600FB3DFA1A854E9BB82907 /* ParseState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParseState.swift; sourceTree = "<group>"; };
 		E6155C00DFE00B636BFF8D00 /* MacDocsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacDocsView.swift; sourceTree = "<group>"; };
+		E71956D64C1C0E4DEB2CBE25 /* MacSubscriptionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacSubscriptionService.swift; sourceTree = "<group>"; };
 		E7D981A56C9B33E626FE9700 /* MacMeetingDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacMeetingDetailView.swift; sourceTree = "<group>"; };
 		EC7F6BC356E4ECE3D50717F5 /* MacEmailComposeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacEmailComposeView.swift; sourceTree = "<group>"; };
+		F7519142575177A0263B7A4A /* CalendarTrackpadNavigation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarTrackpadNavigation.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -173,6 +191,7 @@
 				C27FE022BFDFDA4FCC15BCB4 /* AssistantButton.swift */,
 				326E7A3F239A043BA44D3B8F /* MacAppServices.swift */,
 				A9DCCDC4628A7827493203AF /* MacAuthView.swift */,
+				C9D0E1F2A3B4C5D6E7F8091A2B /* MacEmailTextField.swift */,
 				2BC2CFEF093D8584286BE20B /* MacContentHeaderView.swift */,
 				673D4A873E62C0874909FABC /* MacOnboardingViews.swift */,
 				51FB7C44A440DFC527210FE5 /* MacRootView.swift */,
@@ -194,7 +213,10 @@
 		1256D6A2E7291B8E8190DDF1 /* Docs */ = {
 			isa = PBXGroup;
 			children = (
+				A9B8C7D6E5F403021100A9B89 /* MacDocEditorPane.swift */,
 				E6155C00DFE00B636BFF8D00 /* MacDocsView.swift */,
+				A9B8C7D6E5F403021100A9B87 /* MacDocsShellView.swift */,
+				A9B8C7D6E5F403021100A9B85 /* TiptapDocEditorWebView.swift */,
 			);
 			path = Docs;
 			sourceTree = "<group>";
@@ -221,10 +243,19 @@
 			path = "../../packages/swift-auth/Sources/TodusAuth";
 			sourceTree = "<group>";
 		};
+		1CA065321681C10271C65EFA /* Subscription */ = {
+			isa = PBXGroup;
+			children = (
+				E71956D64C1C0E4DEB2CBE25 /* MacSubscriptionService.swift */,
+			);
+			path = Subscription;
+			sourceTree = "<group>";
+		};
 		267FFD0121EB8EE6B9EA1B91 /* Resources */ = {
 			isa = PBXGroup;
 			children = (
 				AE1D36D7DEA8080434732636 /* Assets.xcassets */,
+				E7D6C5B4A39281706155443 /* DocEditor */,
 				0B4864E4D8074B1E115B4EB3 /* Info.plist */,
 				D781F56D4BD27C55F3E8F7F8 /* TodosConfig.plist */,
 				8D451E359ABBB69A4D11FDDE /* TodusMac.entitlements */,
@@ -365,20 +396,31 @@
 			children = (
 				CE5DFCE18508A16E4285A3F8 /* CalendarEventBlockView.swift */,
 				B26A21E1F1C02C4ACD3E4C30 /* CalendarTimeGridView.swift */,
+				F7519142575177A0263B7A4A /* CalendarTrackpadNavigation.swift */,
 				0977C553BCC4593120370036 /* MacCalendarView.swift */,
 			);
 			path = Calendar;
 			sourceTree = "<group>";
 		};
+		9E8D7C6B5A403021100F0E0D /* Docs */ = {
+			isa = PBXGroup;
+			children = (
+				A9B8C7D6E5F403021100A9B83 /* MacDocsService.swift */,
+			);
+			path = Docs;
+			sourceTree = "<group>";
+		};
 		C12516BFAEA2EBD4A1800BEB /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				9E8D7C6B5A403021100F0E0D /* Docs */,
 				30C40AB7AEB7407508612591 /* AI */,
 				51646B02A008AB1787EC9240 /* API */,
 				27876A2C1A129D8877C75612 /* Calendar */,
 				934068E9DD959380F2327182 /* Email */,
 				049CC7FF8B28C7D7CCA61994 /* Meetings */,
 				108C2712FFF1A36CD5F63CD0 /* Reminders */,
+				1CA065321681C10271C65EFA /* Subscription */,
 				664A5E35FD54A0174263139C /* AppLogger.swift */,
 				C3BDAD1AD783F244B0C7F441 /* ConnectionsService.swift */,
 				6CD4813CA22070B5E04AEB9E /* NetworkMonitor.swift */,
@@ -416,6 +458,7 @@
 		D00866200A3F46A024957A60 /* Domain */ = {
 			isa = PBXGroup;
 			children = (
+				A9B8C7D6E5F403021100A9B81 /* MacDocTypes.swift */,
 				BC585F2265934558433E3E36 /* AppTaskPriority.swift */,
 				0F0978AB24BCBA5061D06B50 /* CreateItemType.swift */,
 				B6B833B391C01BEE4CB84524 /* EmailModels.swift */,
@@ -525,6 +568,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				D76EFB86A42A4E0974640454 /* Assets.xcassets in Resources */,
+				F8E7D6C5B4A3928170615544A /* DocEditor in Resources */,
 				19F6CCD4CA1B0486DC9FC6F3 /* TodosConfig.plist in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -545,6 +589,7 @@
 				AF6D033EAB6384A3004D17B7 /* CalendarEventBlockView.swift in Sources */,
 				A021A447733E1411FF2A61C7 /* CalendarService.swift in Sources */,
 				3B8D7A98DF2A4ACFEA4A675E /* CalendarTimeGridView.swift in Sources */,
+				CB7E7A3831E2B1DADD8BAF8B /* CalendarTrackpadNavigation.swift in Sources */,
 				407A2C8184DC2BF170FA71E3 /* ConnectionsService.swift in Sources */,
 				2D555E443F1CAE9F0BCF376C /* CreateItemType.swift in Sources */,
 				D1ED251E912D63B61727D06F /* EmailModels.swift in Sources */,
@@ -556,11 +601,17 @@
 				D690F1E9E68EB72DB2A0FF10 /* MacAppServices.swift in Sources */,
 				53D7BE88F236E8F472FF4D68 /* MacAssistantPanel.swift in Sources */,
 				E2D56D42AC089CCBC21CD21B /* MacAuthView.swift in Sources */,
+				B8E4F1A02C3D4E5F60718290A1 /* MacEmailTextField.swift in Sources */,
 				D714906DC9EE1D9E1B6A4FB0 /* MacBrandIcons.swift in Sources */,
 				680812535C1CC7B2F7FDC9BB /* MacCalendarView.swift in Sources */,
 				16E2E04A85DA754EE034D0D1 /* MacContentHeaderView.swift in Sources */,
 				925EAACC9F2A49C38CE4FE49 /* MacCreateSheet.swift in Sources */,
 				4C73B49045690BB0BA55C141 /* MacDocsView.swift in Sources */,
+				A9B8C7D6E5F403021100A9B88 /* MacDocEditorPane.swift in Sources */,
+				A9B8C7D6E5F403021100A9B80 /* MacDocTypes.swift in Sources */,
+				A9B8C7D6E5F403021100A9B82 /* MacDocsService.swift in Sources */,
+				A9B8C7D6E5F403021100A9B86 /* MacDocsShellView.swift in Sources */,
+				A9B8C7D6E5F403021100A9B84 /* TiptapDocEditorWebView.swift in Sources */,
 				D89DF48DA2B18922837710B9 /* MacEmailComposeView.swift in Sources */,
 				21AB7C6A8D655F461E48E375 /* MacEmailInboxView.swift in Sources */,
 				3A35016EE897594FAC82E86E /* MacEmailThreadView.swift in Sources */,
@@ -576,6 +627,7 @@
 				2F99507599647B4DACBB4E59 /* MacSettingsView.swift in Sources */,
 				386E04C87DD0F4818121F3EE /* MacShareConversationPanel.swift in Sources */,
 				8DA443DB62DF856D9E4498DB /* MacSidebarView.swift in Sources */,
+				605F1DB933214860F7655794 /* MacSubscriptionService.swift in Sources */,
 				781AD1613378DF8ABEAE55FB /* MacTasksView.swift in Sources */,
 				EE6A839A831D903BC3DBC25D /* MacTheme.swift in Sources */,
 				7D3EA9502036072E10A5D8D6 /* MailAssistantModels.swift in Sources */,

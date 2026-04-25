@@ -66,6 +66,13 @@ private struct MultiDayPager: UIViewControllerRepresentable {
     func updateUIViewController(_ pvc: UIPageViewController, context: Context) {
         context.coordinator.parent = self
 
+        // Skip updates while the user is swiping — `viewControllers?.first`
+        // may transiently be the outgoing page, and replacing it mid-swipe
+        // animates in the wrong direction.  The Coordinator's
+        // `didFinishAnimating` will publish the final selectedDate, after
+        // which a subsequent update will re-enter this method on a stable VC.
+        if context.coordinator.isSwiping { return }
+
         guard let current = pvc.viewControllers?.first as? MultiDayPageVC else { return }
 
         let desired = context.coordinator.startOfPage(for: selectedDate)
@@ -91,6 +98,10 @@ private struct MultiDayPager: UIViewControllerRepresentable {
 
     final class Coordinator: NSObject, UIPageViewControllerDataSource, UIPageViewControllerDelegate {
         var parent: MultiDayPager
+        /// True between `willTransitionTo:` and `didFinishAnimating:` while a
+        /// swipe is in flight.  `updateUIViewController` checks this to avoid
+        /// reading the transient outgoing page.
+        var isSwiping = false
 
         init(_ parent: MultiDayPager) { self.parent = parent }
 
@@ -136,10 +147,18 @@ private struct MultiDayPager: UIViewControllerRepresentable {
 
         func pageViewController(
             _ pvc: UIPageViewController,
+            willTransitionTo pendingViewControllers: [UIViewController]
+        ) {
+            isSwiping = true
+        }
+
+        func pageViewController(
+            _ pvc: UIPageViewController,
             didFinishAnimating finished: Bool,
             previousViewControllers: [UIViewController],
             transitionCompleted completed: Bool
         ) {
+            isSwiping = false
             guard completed,
                   let current = pvc.viewControllers?.first as? MultiDayPageVC else { return }
             // Push the new start date up to the binding so nav bar / state sync.
@@ -353,8 +372,18 @@ private struct MultiDayPageView: View {
 
         for event in events where event.isAllDay {
             var currentDay = cal.startOfDay(for: event.startDate)
-            let endReference = max(event.startDate, event.endDate.addingTimeInterval(-1))
-            let lastDay = cal.startOfDay(for: endReference)
+            // EventKit stores all-day events with an *exclusive* endDate
+            // (00:00 the next day). Step back one calendar day from the
+            // start-of-day of `endDate` — using calendar arithmetic handles
+            // DST transitions correctly (a `-1s` shift could land in the
+            // missing hour during spring-forward and bump us to the wrong day).
+            let lastDay: Date
+            if event.endDate > event.startDate,
+               let dayBefore = cal.date(byAdding: .day, value: -1, to: cal.startOfDay(for: event.endDate)) {
+                lastDay = max(currentDay, dayBefore)
+            } else {
+                lastDay = currentDay
+            }
 
             while currentDay <= lastDay {
                 if visibleDates.contains(currentDay) {

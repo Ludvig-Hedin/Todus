@@ -72,6 +72,8 @@ export type ZeroEnv = {
   EARLY_ACCESS_ENABLED: string;
   GOOGLE_GENERATIVE_AI_API_KEY: string;
   AUTUMN_SECRET_KEY: string;
+  /** Optional shared secret for verifying Autumn webhook signatures. */
+  AUTUMN_WEBHOOK_SECRET?: string;
   AI_SYSTEM_PROMPT: string;
   PERPLEXITY_API_KEY: string;
   TAVILY_API_KEY: string;

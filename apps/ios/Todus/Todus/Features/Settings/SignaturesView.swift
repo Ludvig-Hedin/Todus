@@ -182,7 +182,7 @@ struct SignatureEditorView: View {
                 Toggle(isOn: $isActive) {
                     Label("Use as active signature", systemImage: "checkmark.seal")
                 }
-                .tint(.primary)
+                .tint(AppTheme.switchTint)
             } footer: {
                 Text("Only one signature can be active at a time.")
             }

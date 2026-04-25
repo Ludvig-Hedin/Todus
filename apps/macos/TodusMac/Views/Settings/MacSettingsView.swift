@@ -32,6 +32,10 @@ struct MacSettingsView: View {
     @State private var showAutoSendConfirmation = false
     @State private var excludedSenderPatternsText = ""
     @State private var isConnectingReminders = false
+    @State private var isOpeningBillingPortal = false
+    @State private var isCancelingSubscription = false
+    @State private var showCancelSubscriptionConfirm = false
+    @State private var billingError: String?
 
     // Preferences
     @AppStorage("preferredColorScheme") private var preferredColorScheme = "system"
@@ -92,6 +96,7 @@ struct MacSettingsView: View {
                     appearanceSection
                     emailPreferencesSection
                     aiAssistantSection
+                    billingSection
                     notificationsSection
                     privacySection
                     aboutAndLegalSection
@@ -113,6 +118,9 @@ struct MacSettingsView: View {
         }
         .task {
             await loadActiveSessions()
+        }
+        .task {
+            await services.subscriptionService.refresh()
         }
         .confirmationDialog(
             "Enable low-risk auto-send?",
@@ -151,6 +159,19 @@ struct MacSettingsView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("You can sign back in anytime.")
+        }
+        // Cancel subscription
+        .confirmationDialog(
+            "Cancel your Pro subscription?",
+            isPresented: $showCancelSubscriptionConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Cancel subscription", role: .destructive) {
+                Task { await performCancelSubscription() }
+            }
+            Button("Keep Pro", role: .cancel) {}
+        } message: {
+            Text("You'll keep access until the end of the current billing period.")
         }
         // Delete account — first confirmation
         .confirmationDialog(
@@ -1175,7 +1196,7 @@ struct MacSettingsView: View {
                 .toggleStyle(.switch)
                 .controlSize(.small)
                 .labelsHidden()
-                .tint(.accentColor)
+                .tint(MacTheme.switchTint)
         }
     }
 
@@ -1363,6 +1384,195 @@ struct MacSettingsView: View {
     private func openURL(_ string: String) {
         if let url = URL(string: string) {
             NSWorkspace.shared.open(url)
+        }
+    }
+
+    // MARK: - Billing & Subscription
+
+    private func formatCredits(_ value: Double) -> String {
+        let f = NumberFormatter()
+        f.minimumFractionDigits = 0
+        f.maximumFractionDigits = 2
+        return f.string(from: NSNumber(value: value)) ?? String(format: "%.2f", value)
+    }
+
+    private var billingResetLabel: String? {
+        guard let date = services.subscriptionService.aiUsageResetAt else { return nil }
+        let f = DateFormatter()
+        f.dateStyle = .medium
+        f.timeStyle = .none
+        return f.string(from: date)
+    }
+
+    private var billingSection: some View {
+        let sub = services.subscriptionService
+        return settingsGroup(title: "Subscription") {
+            settingsCard {
+                // Plan + actions row
+                rowContainer {
+                    Image(systemName: "creditcard")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(MacTheme.mutedText)
+                        .frame(width: 18)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(sub.plan.displayName)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(MacTheme.textPrimary)
+                        Text(sub.status == "active" ? (sub.plan.isPaid ? "Active" : "Free plan") : sub.status.capitalized)
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(MacTheme.textSecondary)
+                    }
+                    Spacer()
+                    if sub.plan.isPaid {
+                        Button {
+                            Task { await openBillingPortal() }
+                        } label: {
+                            HStack(spacing: 4) {
+                                if isOpeningBillingPortal {
+                                    ProgressView().controlSize(.small)
+                                }
+                                Text("Manage")
+                                    .font(.system(size: 11, weight: .medium))
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(MacTheme.accent)
+                        .disabled(isOpeningBillingPortal)
+                        .macClickablePointer()
+
+                        Button(role: .destructive) {
+                            showCancelSubscriptionConfirm = true
+                        } label: {
+                            if isCancelingSubscription {
+                                ProgressView().controlSize(.small)
+                            } else {
+                                Text("Cancel")
+                                    .font(.system(size: 11, weight: .medium))
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.red.opacity(0.85))
+                        .disabled(isCancelingSubscription)
+                        .macClickablePointer()
+                    } else {
+                        Button {
+                            openURL(upgradePricingURL())
+                        } label: {
+                            Text("Upgrade")
+                                .font(.system(size: 11, weight: .semibold))
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(MacTheme.accent)
+                        .macClickablePointer()
+                    }
+                }
+
+                cardDivider
+
+                // Usage row
+                if sub.aiUsageLimit == 0 {
+                    rowContainer {
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(MacTheme.mutedText)
+                            .frame(width: 18)
+                        Text("No AI credits on the \(sub.plan.displayName) plan.")
+                            .font(.system(size: 12))
+                            .foregroundStyle(MacTheme.textSecondary)
+                        Spacer()
+                    }
+                } else {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 7) {
+                            Image(systemName: "sparkles")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(MacTheme.mutedText)
+                                .frame(width: 18)
+                            HStack(alignment: .firstTextBaseline, spacing: 3) {
+                                Text(formatCredits(sub.aiUsageUsed))
+                                    .font(.system(size: 13, weight: .semibold).monospacedDigit())
+                                    .foregroundStyle(MacTheme.textPrimary)
+                                Text("/ \(formatCredits(sub.aiUsageLimit)) credits used")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(MacTheme.textSecondary)
+                            }
+                            Spacer()
+                            Text("\(formatCredits(sub.aiUsageRemaining)) left")
+                                .font(.system(size: 10.5).monospacedDigit())
+                                .foregroundStyle(MacTheme.textSecondary)
+                        }
+                        ProgressView(value: sub.aiUsagePercent)
+                            .tint(billingProgressTint)
+                            .padding(.leading, 25)
+                            .padding(.trailing, 4)
+                        if let billingResetLabel {
+                            Text("Resets on \(billingResetLabel)")
+                                .font(.system(size: 10.5))
+                                .foregroundStyle(MacTheme.textSecondary)
+                                .padding(.leading, 25)
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                }
+
+                if let billingError {
+                    cardDivider
+                    rowContainer {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.red.opacity(0.85))
+                            .frame(width: 18)
+                        Text(billingError)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.red.opacity(0.85))
+                        Spacer()
+                    }
+                }
+            }
+        }
+    }
+
+    private var billingProgressTint: Color {
+        let pct = services.subscriptionService.aiUsagePercent
+        if pct >= 1 { return .red }
+        if pct >= 0.8 { return .orange }
+        return MacTheme.accent
+    }
+
+    private func upgradePricingURL() -> String {
+        // Marketing pricing page is on the web app. Mirror the iOS heuristic:
+        // if backend host is `api.todus.app`, the pricing page is on `app.todus.app`.
+        let backend = services.apiClient.baseURL.absoluteString
+        if let host = URL(string: backend)?.host, host.hasPrefix("api.") {
+            return "https://\(host.replacingOccurrences(of: "api.", with: "app."))/pricing"
+        }
+        return "https://app.todus.app/pricing"
+    }
+
+    private func openBillingPortal() async {
+        billingError = nil
+        isOpeningBillingPortal = true
+        defer { isOpeningBillingPortal = false }
+        do {
+            if let url = try await services.subscriptionService.getBillingPortalUrl() {
+                NSWorkspace.shared.open(url)
+            } else {
+                billingError = "Couldn't open the billing portal."
+            }
+        } catch {
+            billingError = (error as? LocalizedError)?.errorDescription ?? "\(error)"
+        }
+    }
+
+    private func performCancelSubscription() async {
+        billingError = nil
+        isCancelingSubscription = true
+        defer { isCancelingSubscription = false }
+        do {
+            try await services.subscriptionService.cancel(productId: "pro_monthly")
+        } catch {
+            billingError = (error as? LocalizedError)?.errorDescription ?? "\(error)"
         }
     }
 

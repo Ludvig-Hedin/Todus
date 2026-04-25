@@ -13,15 +13,17 @@ struct AppIconContainer<Icon: View>: View {
         ZStack {
             RoundedRectangle(cornerRadius: size * cornerRadiusFraction, style: .continuous)
                 .fill(background)
-                .frame(width: size, height: size)
                 .shadow(color: .black.opacity(0.12), radius: 2, x: 0, y: 1)
 
             icon()
-                // 0.62 gives ~19% breathing room on each side — icons feel airy, not cramped
-                .frame(width: size * 0.62)
-                .aspectRatio(contentMode: .fit)
+                // 0.62 gives ~19% breathing room on each side — icons feel airy, not cramped.
+                // Both width AND height must be set; otherwise GeometryReader-based logos
+                // (Calendar, Reminders) fill all available height and overflow the container.
+                .frame(width: size * 0.62, height: size * 0.62)
         }
         .frame(width: size, height: size)
+        // Clip to the container shape so any logo painting outside its bounds is hidden.
+        .clipShape(RoundedRectangle(cornerRadius: size * cornerRadiusFraction, style: .continuous))
     }
 }
 

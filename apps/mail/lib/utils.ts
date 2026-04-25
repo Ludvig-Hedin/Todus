@@ -619,7 +619,7 @@ export const withExponentialBackoff = async <T>(
   }
 };
 
-const PRO_PLANS = ['pro-example', 'pro_annual', 'team', 'enterprise'] as const;
+const PRO_PLANS = ['pro_monthly', 'pro_annual', 'team', 'enterprise'] as const;
 
 export const isProCustomer = (customer: Customer) => {
   return customer?.products && Array.isArray(customer.products)

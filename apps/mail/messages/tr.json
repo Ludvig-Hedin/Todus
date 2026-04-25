@@ -175,7 +175,7 @@
           "match": {
             "countPlural=0": "ekler",
             "countPlural=one": "ek",
-            "countPlural=other": "ekler"
+            "countPlural=other": "ek"
           }
         }
       ],
@@ -191,7 +191,7 @@
           "match": {
             "countPlural=0": "dosyalar",
             "countPlural=one": "dosya",
-            "countPlural=other": "dosyalar"
+            "countPlural=other": "dosya"
           }
         }
       ],

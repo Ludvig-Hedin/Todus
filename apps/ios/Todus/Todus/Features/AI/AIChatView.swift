@@ -1147,6 +1147,16 @@ struct AIChatView: View {
                 mentionOptions: mentionOptions,
                 isFocused: isInputFocused,
                 maxHeight: 120,
+                onPasteImage: { image in
+                    if let filename = AttachmentService.shared.saveImage(image) {
+                        pendingAttachments.append(filename)
+                    }
+                },
+                onPasteFileData: { data, ext in
+                    if let filename = AttachmentService.shared.saveData(data, fileExtension: ext) {
+                        pendingAttachments.append(filename)
+                    }
+                },
                 onCommand: { _ in },
                 onFocusChange: { focused in isInputFocused = focused }
             )
@@ -1676,6 +1686,12 @@ private struct MessageBubble: View {
     @State private var showActions = false
     @State private var didCopy = false
     @State private var thumbsState: ThumbsState? = nil
+    @State private var previewAttachment: PreviewAttachment?
+
+    private struct PreviewAttachment: Identifiable {
+        let filename: String
+        var id: String { filename }
+    }
 
     private enum ThumbsState { case up, down }
 
@@ -1729,26 +1745,68 @@ private struct MessageBubble: View {
                     }
             }
         }
+        .fullScreenCover(item: $previewAttachment) { item in
+            AttachmentPreviewSheet(filename: item.filename) {
+                previewAttachment = nil
+            }
+        }
     }
 
     // MARK: User Bubble — no border, just background fill
 
+    @ViewBuilder
+    private func userAttachmentCell(filename: String, index: Int, total: Int) -> some View {
+        let isImage = AttachmentService.shared.isImageFile(filename)
+        let label = AttachmentService.shared.friendlyAttachmentLabel(
+            filename: filename,
+            index: index,
+            total: total
+        )
+        Button {
+            previewAttachment = PreviewAttachment(filename: filename)
+        } label: {
+            VStack(alignment: .center, spacing: 4) {
+                if isImage {
+                    AttachmentThumbnailView(filename: filename, size: 64) {
+                        RoundedRectangle(cornerRadius: AppTheme.Radius.compact, style: .continuous)
+                            .fill(AppTheme.surfaceSecondary)
+                            .overlay(
+                                Image(systemName: "photo")
+                                    .font(.system(size: 18))
+                                    .foregroundStyle(AppTheme.mutedText)
+                            )
+                    }
+                } else {
+                    RoundedRectangle(cornerRadius: AppTheme.Radius.compact, style: .continuous)
+                        .fill(AppTheme.surfaceSecondary)
+                        .frame(width: 64, height: 64)
+                        .overlay(
+                            Image(systemName: "doc.fill")
+                                .font(.system(size: 22))
+                                .foregroundStyle(AppTheme.mutedText)
+                        )
+                }
+                Text(label)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .frame(width: 72)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Attachment: \(label). Double tap to view full screen")
+    }
+
     private var userBubble: some View {
         VStack(alignment: .trailing, spacing: 8) {
             if !message.attachmentFileNames.isEmpty {
-                HStack(spacing: 6) {
-                    ForEach(message.attachmentFileNames, id: \.self) { name in
-                        HStack(spacing: 4) {
-                            Image(systemName: AttachmentService.shared.isImageFile(name) ? "photo" : "doc")
-                                .font(.system(size: 11, weight: .semibold))
-                            Text(name)
-                                .font(.system(size: 12, weight: .medium))
-                                .lineLimit(1)
-                        }
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
-                        .background(AppTheme.surfacePrimary.opacity(0.92), in: Capsule())
+                HStack(alignment: .top, spacing: 8) {
+                    ForEach(Array(message.attachmentFileNames.enumerated()), id: \.offset) { index, name in
+                        userAttachmentCell(
+                            filename: name,
+                            index: index,
+                            total: message.attachmentFileNames.count
+                        )
                     }
                 }
             }
@@ -1758,6 +1816,7 @@ private struct MessageBubble: View {
                     .tracking(-0.1)
                     .lineSpacing(3)
                     .foregroundStyle(.primary)
+                    .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 10)
@@ -2324,6 +2383,7 @@ private struct ReasoningBox: View {
                     .font(.system(size: 13))
                     .foregroundStyle(AppTheme.subtleText)
                     .lineSpacing(3)
+                    .textSelection(.enabled)
                     .padding(.top, 8)
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
@@ -2794,9 +2854,9 @@ struct AIChatConfigSheet: View {
                 // Tasks section
                 Section {
                     Toggle("Read tasks", isOn: Bindable(chatService).aiCanReadTasks)
-                        .tint(Color.primary)
+                        .tint(AppTheme.switchTint)
                     Toggle("Write tasks", isOn: Bindable(chatService).aiCanWriteTasks)
-                        .tint(Color.primary)
+                        .tint(AppTheme.switchTint)
                 } header: {
                     Text("Tasks")
                 } footer: {
@@ -2806,9 +2866,9 @@ struct AIChatConfigSheet: View {
                 // Calendar section
                 Section {
                     Toggle("Read calendar", isOn: Bindable(chatService).aiCanReadCalendar)
-                        .tint(Color.primary)
+                        .tint(AppTheme.switchTint)
                     Toggle("Create events", isOn: Bindable(chatService).aiCanWriteCalendar)
-                        .tint(Color.primary)
+                        .tint(AppTheme.switchTint)
                 } header: {
                     Text("Calendar")
                 } footer: {
@@ -2818,9 +2878,9 @@ struct AIChatConfigSheet: View {
                 // Email section
                 Section {
                     Toggle("Read emails", isOn: Bindable(chatService).aiCanReadEmail)
-                        .tint(Color.primary)
+                        .tint(AppTheme.switchTint)
                     Toggle("Send emails", isOn: Bindable(chatService).aiCanSendEmail)
-                        .tint(Color.primary)
+                        .tint(AppTheme.switchTint)
                 } header: {
                     Text("Email")
                 } footer: {

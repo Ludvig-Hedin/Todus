@@ -195,43 +195,98 @@ struct CalendarTimeGridView: View {
 
     // MARK: - Event Layout Algorithm
 
+    /// Cluster-based column layout: events that don't overlap any other event
+    /// in the same cluster get full width.  Within a cluster of N mutually
+    /// overlapping events, each gets 1/N width — but the cluster boundary is
+    /// drawn precisely so a busy morning doesn't permanently squish the
+    /// afternoon.
     private func layoutEvents(_ events: [CalendarEvent], in date: Date) -> [CalendarLayoutItem] {
         let cal = Calendar.current
         let dayStart = cal.startOfDay(for: date)
-        let timedEvents = events.filter { !$0.isAllDay }.sorted { $0.startDate < $1.startDate }
+        let dayMinutesPerPoint = hourHeight / 60
+        let minEventHeight: CGFloat = 24
+
+        // Sort by start, then by end (longer-first within the same start) so
+        // the column packer prefers the longest span as the cluster's anchor.
+        let timedEvents = events
+            .filter { !$0.isAllDay }
+            .sorted {
+                if $0.startDate != $1.startDate { return $0.startDate < $1.startDate }
+                return $0.endDate > $1.endDate
+            }
 
         guard !timedEvents.isEmpty else { return [] }
 
-        var columnEnds: [Date] = []
-        var eventColumns: [Int] = []
-
-        for event in timedEvents {
-            var assignedColumn = -1
-            for (col, endDate) in columnEnds.enumerated() {
-                if event.startDate >= endDate {
-                    assignedColumn = col
-                    columnEnds[col] = event.endDate
-                    break
-                }
-            }
-            if assignedColumn == -1 {
-                assignedColumn = columnEnds.count
-                columnEnds.append(event.endDate)
-            }
-            eventColumns.append(assignedColumn)
+        // Helper: visual end is max(event.endDate, event.startDate + minHeight).
+        // Two zero-duration events at the same instant should still be treated
+        // as overlapping for column-packing purposes.
+        let minDuration = TimeInterval((minEventHeight / dayMinutesPerPoint) * 60)
+        func visualEnd(_ ev: CalendarEvent) -> Date {
+            let raw = max(ev.endDate, ev.startDate.addingTimeInterval(minDuration))
+            return raw
         }
 
-        let totalColumns = columnEnds.count
-        let minEventHeight: CGFloat = 24
+        // Step 1 — split events into clusters of mutually-overlapping events.
+        // A cluster is a maximal contiguous run where each event starts before
+        // the running max-end of the cluster.
+        var clusters: [[Int]] = []     // indices into `timedEvents`
+        var currentCluster: [Int] = []
+        var currentClusterEnd: Date = .distantPast
+        for (idx, ev) in timedEvents.enumerated() {
+            if currentCluster.isEmpty || ev.startDate < currentClusterEnd {
+                currentCluster.append(idx)
+                currentClusterEnd = max(currentClusterEnd, visualEnd(ev))
+            } else {
+                clusters.append(currentCluster)
+                currentCluster = [idx]
+                currentClusterEnd = visualEnd(ev)
+            }
+        }
+        if !currentCluster.isEmpty { clusters.append(currentCluster) }
+
+        // Step 2 — within each cluster, pack into columns greedily.  Each
+        // event takes the lowest-numbered column whose latest event ends at
+        // or before this event's start.  Cluster width = max columns used.
+        var clusterColumn = [Int: Int](minimumCapacity: timedEvents.count)
+        var clusterWidth = [Int: Int](minimumCapacity: clusters.count)
+        for (clusterIdx, cluster) in clusters.enumerated() {
+            var columnEnds: [Date] = []
+            for evIdx in cluster {
+                let ev = timedEvents[evIdx]
+                var assigned = -1
+                for (col, end) in columnEnds.enumerated() where ev.startDate >= end {
+                    assigned = col
+                    columnEnds[col] = visualEnd(ev)
+                    break
+                }
+                if assigned == -1 {
+                    assigned = columnEnds.count
+                    columnEnds.append(visualEnd(ev))
+                }
+                clusterColumn[evIdx] = assigned
+            }
+            clusterWidth[clusterIdx] = max(columnEnds.count, 1)
+        }
+
+        // Step 3 — emit layout items.  Width fraction = 1 / cluster width.
+        var clusterIndexFor = [Int: Int]()
+        for (cIdx, cluster) in clusters.enumerated() {
+            for evIdx in cluster { clusterIndexFor[evIdx] = cIdx }
+        }
 
         return timedEvents.enumerated().map { index, event in
             let startMinutes = max(CGFloat(event.startDate.timeIntervalSince(dayStart) / 60), 0)
-            let endMinutes = max(CGFloat(event.endDate.timeIntervalSince(dayStart) / 60), 0)
-            let duration = max(endMinutes - startMinutes, minEventHeight / (hourHeight / 60))
+            // Compute the *visual* duration: at least minEventHeight tall, and
+            // never negative even if endDate < startDate (corrupt input).
+            let rawEndMinutes = CGFloat(event.endDate.timeIntervalSince(dayStart) / 60)
+            let rawDuration = max(rawEndMinutes - startMinutes, 0)
+            let duration = max(rawDuration, minEventHeight / dayMinutesPerPoint)
 
-            let yOffset = startMinutes * (hourHeight / 60)
-            let height = duration * (hourHeight / 60)
-            let col = eventColumns[index]
+            let yOffset = startMinutes * dayMinutesPerPoint
+            let height = duration * dayMinutesPerPoint
+            let cluster = clusterIndexFor[index] ?? 0
+            let totalColumns = clusterWidth[cluster] ?? 1
+            let col = clusterColumn[index] ?? 0
 
             return CalendarLayoutItem(
                 event: event,

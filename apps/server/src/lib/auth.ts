@@ -721,6 +721,35 @@ export const createAuth = () => {
                 timezone,
               });
             }
+
+            // Provision an Autumn customer and attach the free plan so plan UI
+            // and `ai_usage` credits resolve from day one. Each call is wrapped
+            // independently — a failure here must never block sign-up.
+            const autumn = new Autumn({ secretKey: env.AUTUMN_SECRET_KEY });
+            try {
+              await autumn.customers.create({
+                id: newSession.user.id,
+                name: newSession.user.name,
+                email: newSession.user.email,
+              });
+            } catch (error) {
+              console.error('[signup] Autumn customers.create failed', error);
+            }
+            try {
+              await autumn.attach({
+                customer_id: newSession.user.id,
+                product_id: 'free',
+              });
+            } catch (error) {
+              console.error('[signup] Autumn attach free product failed', error);
+            }
+            // Hydrate cached subscription columns on the user row from Autumn.
+            try {
+              const { refreshSubscriptionCache } = await import('./billing');
+              await refreshSubscriptionCache(newSession.user.id);
+            } catch (error) {
+              console.error('[signup] subscription cache hydration failed', error);
+            }
           }
         }
       }),

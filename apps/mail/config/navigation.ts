@@ -13,6 +13,7 @@ import {
   CalendarDays,
   CheckSquare2,
   Cpu,
+  CreditCard,
   FileText,
   Home,
   MessageSquareIcon,
@@ -230,6 +231,11 @@ export const navigationConfig: Record<string, NavConfig> = {
             title: 'AI & Models',
             url: '/settings/ai',
             icon: Cpu,
+          },
+          {
+            title: 'Billing',
+            url: '/settings/billing',
+            icon: CreditCard,
           },
           {
             title: m['navigation.settings.deleteAccount'](),

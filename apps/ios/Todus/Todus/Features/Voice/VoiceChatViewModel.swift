@@ -89,7 +89,7 @@ final class VoiceChatViewModel {
 
         do {
             // 1. Get backend WebSocket proxy URL + auth token (API key stays server-side)
-            let (wsURL, authToken) = try tokenService.getEndpoint()
+            let (wsURL, authToken) = try await tokenService.getEndpoint()
 
             // 2. Build system prompt using same pipeline as text chat
             let systemPrompt = await chatService.buildSystemPromptForVoice(allTasks: allTasks)

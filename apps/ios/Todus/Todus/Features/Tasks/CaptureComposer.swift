@@ -142,6 +142,8 @@ struct RichComposerInput: View {
     /// Max content height before scrolling kicks in (0 = unlimited)
     var maxHeight: CGFloat = 0
     var onPasteImage: ((UIImage) -> Void)? = nil
+    /// Pasted file data (e.g. from clipboard) — extension is a best-effort filename suffix (e.g. `pdf`, `png`).
+    var onPasteFileData: ((Data, String) -> Void)? = nil
     var onCommand: ((RichInputCommandAction) -> Void)? = nil
     /// Called when the text input gains or loses focus
     var onFocusChange: ((Bool) -> Void)? = nil
@@ -220,6 +222,9 @@ struct RichComposerInput: View {
                 maxHeight: maxHeight,
                 onPasteImage: { image in
                     onPasteImage?(image)
+                },
+                onPasteFileData: { data, ext in
+                    onPasteFileData?(data, ext)
                 },
                 onFocusChange: onFocusChange
             )
@@ -396,17 +401,27 @@ struct PasteHandlingTextInput: UIViewRepresentable {
     /// Max content height before scrolling kicks in (0 = unlimited)
     var maxHeight: CGFloat = 0
     let onPasteImage: (UIImage) -> Void
+    var onPasteFileData: ((Data, String) -> Void)?
     /// Called when the UITextView gains or loses focus — drives isInputExpanded in AIChatView
     var onFocusChange: ((Bool) -> Void)? = nil
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(text: $text, placeholder: placeholder, highlightTerms: highlightTerms, onPasteImage: onPasteImage, onFocusChange: onFocusChange, maxHeight: maxHeight)
+        Coordinator(
+            text: $text,
+            placeholder: placeholder,
+            highlightTerms: highlightTerms,
+            onPasteImage: onPasteImage,
+            onPasteFileData: onPasteFileData,
+            onFocusChange: onFocusChange,
+            maxHeight: maxHeight
+        )
     }
 
     func makeUIView(context: Context) -> PasteInterceptingTextView {
         let view = PasteInterceptingTextView()
         view.delegate = context.coordinator
         view.onPasteImage = onPasteImage
+        view.onPasteFileData = onPasteFileData
         view.backgroundColor = .clear
         view.font = UIFont.systemFont(ofSize: 16, weight: .medium)
         // Disabled so SwiftUI's layout drives the height based on content
@@ -440,7 +455,9 @@ struct PasteHandlingTextInput: UIViewRepresentable {
 
     func updateUIView(_ uiView: PasteInterceptingTextView, context: Context) {
         context.coordinator.highlightTerms = highlightTerms
+        context.coordinator.onPasteFileData = onPasteFileData
         uiView.highlightTerms = highlightTerms
+        uiView.onPasteFileData = onPasteFileData
 
         if let isFocused {
             if isFocused, !uiView.isFirstResponder {
@@ -484,6 +501,7 @@ struct PasteHandlingTextInput: UIViewRepresentable {
         let placeholder: String
         var highlightTerms: [String]
         let onPasteImage: (UIImage) -> Void
+        var onPasteFileData: ((Data, String) -> Void)?
         let onFocusChange: ((Bool) -> Void)?
         let maxHeight: CGFloat
         /// Tracks the last text value the coordinator wrote to the binding,
@@ -495,6 +513,7 @@ struct PasteHandlingTextInput: UIViewRepresentable {
             placeholder: String,
             highlightTerms: [String],
             onPasteImage: @escaping (UIImage) -> Void,
+            onPasteFileData: ((Data, String) -> Void)? = nil,
             onFocusChange: ((Bool) -> Void)? = nil,
             maxHeight: CGFloat = 0
         ) {
@@ -502,6 +521,7 @@ struct PasteHandlingTextInput: UIViewRepresentable {
             self.placeholder = placeholder
             self.highlightTerms = highlightTerms
             self.onPasteImage = onPasteImage
+            self.onPasteFileData = onPasteFileData
             self.onFocusChange = onFocusChange
             self.maxHeight = maxHeight
         }
@@ -645,6 +665,7 @@ struct PasteHandlingTextInput: UIViewRepresentable {
 /// not from available space — keeping the composer at single-line until the user types.
 final class PasteInterceptingTextView: UITextView {
     var onPasteImage: ((UIImage) -> Void)?
+    var onPasteFileData: ((Data, String) -> Void)?
     var highlightTerms: [String] = []
     var mentionHighlightColor: UIColor = UIColor.systemBlue.withAlphaComponent(0.14)
     /// When > 0, caps intrinsic height and enables scrolling beyond this threshold
@@ -715,12 +736,132 @@ final class PasteInterceptingTextView: UITextView {
     }
 
     override func paste(_ sender: Any?) {
-        // Check for image in pasteboard before falling through to default text paste
         if let image = UIPasteboard.general.image {
             onPasteImage?(image)
-        } else {
-            super.paste(sender)
+            return
         }
+        if ClipboardPasteFileLoader.pasteboardIsPlainTextOnly {
+            super.paste(sender)
+            return
+        }
+        Task { @MainActor in
+            let parts = await ClipboardPasteFileLoader.loadFileParts(
+                from: UIPasteboard.general.itemProviders
+            )
+            if !parts.isEmpty {
+                for (data, ext) in parts {
+                    onPasteFileData?(data, ext)
+                }
+            } else {
+                super.paste(sender)
+            }
+        }
+    }
+}
+
+// MARK: - Clipboard file paste (iOS)
+
+private enum ClipboardPasteFileLoader {
+    static var pasteboardIsPlainTextOnly: Bool {
+        let providers = UIPasteboard.general.itemProviders
+        guard !providers.isEmpty, providers.count == 1, let p = providers.first else { return false }
+        let types = p.registeredTypeIdentifiers
+        return types.count == 1 && types[0] == UTType.utf8PlainText.identifier
+    }
+
+    static func loadFileParts(from providers: [NSItemProvider]) async -> [(Data, String)] {
+        var out: [(Data, String)] = []
+        for p in providers {
+            if p.registeredTypeIdentifiers == [UTType.utf8PlainText.identifier] { continue }
+            if let one = await loadOneFile(from: p) {
+                out.append(one)
+            }
+        }
+        return out
+    }
+
+    private static func loadOneFile(from provider: NSItemProvider) async -> (Data, String)? {
+        if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+            if let url = await loadFileURL(from: provider) {
+                if url.isFileURL {
+                    let did = url.startAccessingSecurityScopedResource()
+                    defer { if did { url.stopAccessingSecurityScopedResource() } }
+                    if let d = try? Data(contentsOf: url) {
+                        let ext = url.pathExtension.isEmpty ? "dat" : url.pathExtension
+                        return (d, ext)
+                    }
+                }
+            }
+        }
+
+        for typeId in typePriority where provider.hasItemConformingToTypeIdentifier(typeId) {
+            if typeId == UTType.fileURL.identifier { continue }
+            if let d = await loadDataRepresentation(from: provider, typeId: typeId), !d.isEmpty {
+                let ext = fileExtensionForTypeId(typeId, data: d)
+                return (d, ext)
+            }
+        }
+        for typeId in provider.registeredTypeIdentifiers {
+            if typeId == UTType.utf8PlainText.identifier { continue }
+            if typeId == UTType.plainText.identifier { continue }
+            if let d = await loadDataRepresentation(from: provider, typeId: typeId), !d.isEmpty {
+                let ext = fileExtensionForTypeId(typeId, data: d)
+                return (d, ext)
+            }
+        }
+        return nil
+    }
+
+    private static var typePriority: [String] {
+        [
+            UTType.image.identifier,
+            UTType.png.identifier,
+            UTType.jpeg.identifier,
+            UTType.tiff.identifier,
+            UTType.gif.identifier,
+            UTType.pdf.identifier,
+            "public.heic",
+            "public.data",
+        ]
+    }
+
+    private static func fileExtensionForTypeId(_ typeId: String, data: Data) -> String {
+        if let u = UTType(typeId) {
+            if u.conforms(to: .image) {
+                if u == .png || u.conforms(to: .png) { return "png" }
+                if u == .jpeg || u.conforms(to: .jpeg) { return "jpg" }
+                if data.starts(with: [0x89, 0x50, 0x4E, 0x47]) { return "png" }
+                if data.starts(with: [0xFF, 0xD8, 0xFF]) { return "jpg" }
+            }
+            if u.conforms(to: .pdf) { return "pdf" }
+            if let s = u.preferredFilenameExtension { return s }
+        }
+        return "dat"
+    }
+
+    private static func loadFileURL(from provider: NSItemProvider) async -> URL? {
+        await withCheckedContinuation { c in
+            provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
+                if let u = item as? URL { c.resume(returning: u) }
+                else if let n = item as? NSURL { c.resume(returning: n as URL) }
+                else { c.resume(returning: nil) }
+            }
+        }
+    }
+
+    private static func loadDataRepresentation(from provider: NSItemProvider, typeId: String) async -> Data? {
+        await withCheckedContinuation { c in
+            provider.loadDataRepresentation(forTypeIdentifier: typeId) { data, _ in
+                c.resume(returning: data)
+            }
+        }
+    }
+}
+
+private extension Data {
+    func starts(with bytes: [UInt8]) -> Bool {
+        guard count >= bytes.count else { return false }
+        return bytes.enumerated().allSatisfy { self[$0.offset] == $0.element }
     }
 }
 

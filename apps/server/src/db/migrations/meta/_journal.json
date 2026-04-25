@@ -358,6 +358,20 @@
       "when": 1775512522081,
       "tag": "0049_fixed_karma",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1777122890182,
+      "tag": "0050_lame_tag",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1777200000000,
+      "tag": "0051_doc_starred_and_move",
+      "breakpoints": true
     }
   ]
 }

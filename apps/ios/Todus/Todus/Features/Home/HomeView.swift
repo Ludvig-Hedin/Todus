@@ -116,7 +116,7 @@ struct HomeView: View {
         }
         .sheet(isPresented: $showDocsSheet) {
             NavigationStack {
-                DocsWebView()
+                DocsBrowserView()
                     .navigationTitle("Docs")
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar {
@@ -1158,3 +1158,4 @@ struct HomeView: View {
         }
     }
 }
+

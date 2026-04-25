@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Observation
 import SwiftData
@@ -31,6 +32,8 @@ final class MacAppServices {
     let groupChatService: GroupChatService
     let meetingsService: MeetingsService
     let connectionsService: ConnectionsService
+    let subscriptionService: MacSubscriptionService
+    let docsService: MacDocsService
     private let defaults = UserDefaults.standard
     let remindersSyncService = AppleRemindersSyncService()
     let remindersSyncState = RemindersSyncState()
@@ -152,6 +155,8 @@ final class MacAppServices {
         self.groupChatService = GroupChatService(apiClient: api)
         self.meetingsService = MeetingsService(apiClient: api)
         self.connectionsService = ConnectionsService(api: api)
+        self.subscriptionService = MacSubscriptionService(apiClient: api)
+        self.docsService = MacDocsService(apiClient: api)
         self.aiChatService.contextAboutYou = contextAboutYou
         self.aiChatService.customInstructions = customInstructions
         self.remindersSyncState.isEnabled = self.remindersSyncEnabled
@@ -266,6 +271,21 @@ final class MacAppServices {
     func signOut() {
         emailService.resetForSignOut()
         authService.signOut()
+        closeSettingsWindowIfPresent()
+    }
+
+    /// Closes the dedicated Settings window (`Window(id: "settings")`) if it is open.
+    /// Used when signing out or when the login screen is shown so prefs do not stack on sign-in.
+    func closeSettingsWindowIfPresent() {
+        DispatchQueue.main.async {
+            let settingsAutosave = NSWindow.FrameAutosaveName("TodusMacSettingsWindow")
+            for window in NSApplication.shared.windows {
+                if window.title == "Settings"
+                    || window.frameAutosaveName == settingsAutosave {
+                    window.close()
+                }
+            }
+        }
     }
 
     /// Loads the backend URL from TodosConfig.plist.

@@ -1,0 +1,21 @@
+{
+  "name": "@zero/macos-doc-editor",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "clean": "rm -rf dist ../../apps/macos/TodusMac/Resources/DocEditor"
+  },
+  "dependencies": {
+    "@tiptap/core": "2.23.0",
+    "@tiptap/extension-task-item": "2.23.0",
+    "@tiptap/extension-task-list": "2.23.0",
+    "@tiptap/pm": "2.23.0",
+    "@tiptap/starter-kit": "2.23.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "typescript": "^5.8.3"
+  }
+}

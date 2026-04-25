@@ -1251,6 +1251,31 @@ importers:
         specifier: 8.32.1
         version: 8.32.1(eslint@9.27.0(jiti@2.4.2))(typescript@5.9.3)
 
+  packages/macos-doc-editor:
+    dependencies:
+      '@tiptap/core':
+        specifier: 2.23.0
+        version: 2.23.0(@tiptap/pm@2.23.0)
+      '@tiptap/extension-task-item':
+        specifier: 2.23.0
+        version: 2.23.0(@tiptap/core@2.23.0(@tiptap/pm@2.23.0))(@tiptap/pm@2.23.0)
+      '@tiptap/extension-task-list':
+        specifier: 2.23.0
+        version: 2.23.0(@tiptap/core@2.23.0(@tiptap/pm@2.23.0))
+      '@tiptap/pm':
+        specifier: 2.23.0
+        version: 2.23.0
+      '@tiptap/starter-kit':
+        specifier: 2.23.0
+        version: 2.23.0
+    devDependencies:
+      esbuild:
+        specifier: ^0.25.0
+        version: 0.25.5
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
   packages/shared:
     devDependencies:
       '@zero/tsconfig':

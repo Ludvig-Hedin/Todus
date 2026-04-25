@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// Design tokens for the macOS Todus app.
 /// "Refined Editorial" aesthetic — monochrome with whisper of accent.
@@ -52,6 +53,9 @@ enum MacTheme {
 
     /// Secondary text
     static let textSecondary = Color(light: Color(white: 0.42), dark: Color(white: 0.55))
+
+    /// `Toggle` / `NSSwitch` on-state. Root uses `.tint(.primary)` for monochrome chrome; switches need explicit blue.
+    static let switchTint = Color(nsColor: .systemBlue)
 
     /// Accent — resolves to SwiftUI's `Color.accentColor`, which is set by `.tint()`
     /// on the root view. This ensures ALL accent uses (sidebar icons, buttons, badges)

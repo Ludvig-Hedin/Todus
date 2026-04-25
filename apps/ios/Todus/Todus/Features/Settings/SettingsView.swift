@@ -33,7 +33,6 @@ struct SettingsView: View {
         NavigationStack {
             List {
                 accountSection
-                sessionsNavigationSection
                 connectedServicesSection
 
                 // Appearance sub-page + small preferences inline
@@ -48,13 +47,26 @@ struct SettingsView: View {
                 // AI Assistant — dedicated sub-page (contains large TextEditors)
                 aiAssistantNavigationSection
 
+                // Billing & subscription — plan + AI usage credits + manage portal
+                billingNavigationSection
+
                 // Notifications + Privacy
                 notificationsAndPrivacySection
+
+                // Security (Active Sessions) — moved near the bottom: it's an important
+                // but rarely-touched control, so it lives below the daily-use settings.
+                sessionsNavigationSection
 
                 aboutSection
 
                 if services.developerModeEnabled {
                     developerSection
+                }
+
+                // Destructive actions live at the very bottom so they aren't
+                // adjacent to the user's name/avatar at the top of the list.
+                if services.authService.isAuthenticated {
+                    dangerZoneSection
                 }
             }
             .listStyle(.insetGrouped)
@@ -89,6 +101,9 @@ struct SettingsView: View {
         }
         .task {
             await loadActiveSessions()
+        }
+        .task {
+            await services.subscriptionService.refresh()
         }
         .confirmationDialog(
             "Are you sure you want to log out?",
@@ -232,7 +247,9 @@ struct SettingsView: View {
                 }
             }
 
-            // Log out button — inside the account card
+            // Log out button — inside the account card. Delete account moved to the
+            // bottom "Danger Zone" section so destructive actions aren't adjacent to
+            // the user's profile.
             if services.authService.isAuthenticated {
                 Button(role: .destructive) {
                     showsLogoutConfirmation = true
@@ -240,17 +257,28 @@ struct SettingsView: View {
                     Label("Log out", systemImage: "rectangle.portrait.and.arrow.right")
                         .foregroundStyle(.red)
                 }
-
-                // Delete account — double confirmation required
-                Button(role: .destructive) {
-                    showsDeleteConfirmation = true
-                } label: {
-                    Label("Delete account", systemImage: "trash")
-                        .foregroundStyle(.red.opacity(0.7))
-                }
             }
         } header: {
             Text("Account")
+        }
+    }
+
+    // MARK: - Danger Zone (bottom of the list)
+
+    /// Bottom section for irreversible destructive actions — lives under About so it
+    /// isn't accidentally tapped while scanning account info at the top of the list.
+    private var dangerZoneSection: some View {
+        Section {
+            Button(role: .destructive) {
+                showsDeleteConfirmation = true
+            } label: {
+                Label("Delete Account", systemImage: "trash")
+                    .foregroundStyle(.red)
+            }
+        } header: {
+            Text("Danger Zone")
+        } footer: {
+            Text("Permanently deletes your account, tasks, email connections, and all data. This cannot be undone.")
         }
     }
 
@@ -305,6 +333,92 @@ struct SettingsView: View {
 
     // MARK: - Connected Services
 
+    /// Row for a single connected mail account (Google, Microsoft, …).
+    /// Shows the user's profile picture, a provider-badge overlay, and a status pill.
+    @ViewBuilder
+    private func connectedAccountRow(_ connection: ConnectionAccount) -> some View {
+        let isDisconnected = services.connectionsService.isDisconnected(connection.id)
+        HStack(spacing: 12) {
+            ZStack(alignment: .bottomTrailing) {
+                // User profile picture (Google avatar) when available, else colored
+                // initial fallback so the row remains identifiable while the image loads.
+                if let urlString = connection.picture, let url = URL(string: urlString) {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image.resizable().scaledToFill()
+                        default:
+                            connectionInitialBadge(for: connection)
+                        }
+                    }
+                    .frame(width: 36, height: 36)
+                    .clipShape(Circle())
+                } else {
+                    connectionInitialBadge(for: connection)
+                        .frame(width: 36, height: 36)
+                }
+
+                // Small Gmail/provider mark in the corner so the user can tell at a
+                // glance which service this account belongs to.
+                if connection.providerId == "google" {
+                    GmailIconView(size: 16)
+                        .background(Circle().fill(Color(UIColor.systemBackground)).frame(width: 18, height: 18))
+                        .offset(x: 2, y: 2)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(connection.email)
+                    .font(.system(size: 15, weight: .medium))
+                    .lineLimit(1)
+                Text(connection.providerName)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+
+            if isDisconnected {
+                statusPill(text: "Reconnect", color: .orange)
+            } else {
+                statusPill(text: "Connected", color: .green)
+            }
+
+            Button(role: .destructive) {
+                disconnectingConnectionId = connection.id
+                showsDisconnectGmail = true
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 18))
+                    .foregroundStyle(.secondary.opacity(0.5))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.vertical, 2)
+    }
+
+    /// Colored circle with the first letter of the email — fallback when no avatar URL.
+    @ViewBuilder
+    private func connectionInitialBadge(for connection: ConnectionAccount) -> some View {
+        Circle()
+            .fill(Color(hex: connection.displayColor))
+            .overlay {
+                Text(String(connection.email.prefix(1)).uppercased())
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.white)
+            }
+    }
+
+    /// Compact status pill — green "Connected" or orange "Reconnect".
+    @ViewBuilder
+    private func statusPill(text: String, color: Color) -> some View {
+        Text(text)
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(color)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(color.opacity(0.15), in: Capsule())
+    }
+
     private var connectedServicesSection: some View {
         Section {
             // Dynamic email connections from backend — replaces the old hardcoded Gmail row.
@@ -314,31 +428,36 @@ struct SettingsView: View {
                 // Fallback: show legacy Gmail row when connections haven't loaded yet
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 12) {
-                        GmailIconView(size: 30)
+                        GmailIconView(size: 36)
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Gmail")
-                                .font(.system(size: 15))
-                            Text(services.emailService.hasConnection ? "Connected" : "Not connected")
+                                .font(.system(size: 15, weight: .medium))
+                            Text(services.emailService.hasConnection ? "Linked to your account" : "Not connected")
                                 .font(.system(size: 12))
-                                .foregroundStyle(services.emailService.hasConnection ? .green : .secondary)
+                                .foregroundStyle(.secondary)
                         }
                         Spacer()
                         if services.emailService.hasConnection {
+                            statusPill(text: "Connected", color: .green)
                             Button(role: .destructive) {
                                 showsDisconnectGmail = true
                             } label: {
-                                Text("Disconnect")
-                                    .font(.system(size: 13, weight: .medium))
-                                    .foregroundStyle(.red.opacity(0.8))
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 18))
+                                    .foregroundStyle(.secondary.opacity(0.5))
                             }
+                            .buttonStyle(.plain)
                         } else {
                             Button {
                                 guard !isConnectingGmail else { return }
                                 Task { await performConnectGmail() }
                             } label: {
                                 Text(isConnectingGmail ? "Connecting…" : "Connect")
-                                    .font(.system(size: 13, weight: .medium))
-                                    .foregroundStyle(.primary)
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 6)
+                                    .background(Color.accentColor, in: Capsule())
                             }
                             .buttonStyle(.plain)
                             .disabled(isConnectingGmail)
@@ -353,80 +472,62 @@ struct SettingsView: View {
                 .padding(.vertical, 2)
             } else {
                 ForEach(services.connectionsService.connections) { connection in
-                    HStack(spacing: 12) {
-                        // Colored circle representing this connection
-                        Circle()
-                            .fill(Color(hex: connection.displayColor))
-                            .frame(width: 30, height: 30)
-                            .overlay {
-                                Text(connection.providerName.prefix(1))
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundStyle(.white)
-                            }
+                    connectedAccountRow(connection)
+                }
 
+                // "Add Gmail account" — uses the same inline OAuth flow as the legacy
+                // fallback so the user stays on the settings sheet. Toggling the
+                // onboarding flag from inside the sheet wouldn't trigger anything
+                // until the sheet is dismissed.
+                Button {
+                    guard !isConnectingGmail else { return }
+                    Task { await performConnectGmail() }
+                } label: {
+                    HStack(spacing: 12) {
+                        GmailIconView(size: 30)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(connection.providerName)
-                                .font(.system(size: 15))
-                            Text(connection.email)
+                            Text(isConnectingGmail ? "Connecting…" : "Add Gmail account")
+                                .font(.system(size: 15, weight: .medium))
+                                .foregroundStyle(.primary)
+                            Text("Sign in to connect another mailbox")
                                 .font(.system(size: 12))
                                 .foregroundStyle(.secondary)
-                                .lineLimit(1)
                         }
                         Spacer()
-                        if services.connectionsService.isDisconnected(connection.id) {
-                            Text("Disconnected")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(.orange)
+                        if isConnectingGmail {
+                            ProgressView().scaleEffect(0.7)
                         } else {
-                            Text("Connected")
-                                .font(.system(size: 12))
-                                .foregroundStyle(.green)
-                            Button(role: .destructive) {
-                                disconnectingConnectionId = connection.id
-                                showsDisconnectGmail = true
-                            } label: {
-                                Image(systemName: "xmark.circle")
-                                    .font(.system(size: 16))
-                                    .foregroundStyle(.red.opacity(0.6))
-                            }
-                            .buttonStyle(.plain)
+                            Image(systemName: "plus.circle.fill")
+                                .font(.system(size: 20))
+                                .foregroundStyle(.primary.opacity(0.7))
                         }
                     }
-                    .padding(.vertical, 2)
+                    .contentShape(Rectangle())
                 }
-
-                // Add Account button — allows connecting additional email accounts
-                Button {
-                    // Trigger the Gmail onboarding/connection flow
-                    services.hasConfiguredGmailPrompt = false
-                } label: {
-                    HStack(spacing: 10) {
-                        Image(systemName: "plus.circle.fill")
-                            .font(.system(size: 22))
-                            .foregroundStyle(.primary)
-                        Text("Add Account")
-                            .font(.system(size: 15))
-                            .foregroundStyle(.primary)
-                    }
-                }
+                .buttonStyle(.plain)
+                .disabled(isConnectingGmail)
                 .padding(.vertical, 2)
+
+                if let connectGmailError {
+                    Text(connectGmailError)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.red)
+                }
             }
 
             // Apple Calendar
             HStack(spacing: 12) {
-                AppleCalendarIconView(size: 30)
+                AppleCalendarIconView(size: 36)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Apple Calendar")
-                        .font(.system(size: 15))
-                    Text(calendarAccessGranted ? "Connected" : "Not connected")
+                        .font(.system(size: 15, weight: .medium))
+                    Text(calendarAccessGranted ? "Local calendar access" : "Read events from your iPhone")
                         .font(.system(size: 12))
-                        .foregroundStyle(calendarAccessGranted ? .green : .secondary)
+                        .foregroundStyle(.secondary)
                 }
                 Spacer()
                 if calendarAccessGranted {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
-                        .font(.system(size: 16))
+                    statusPill(text: "Connected", color: .green)
                 } else {
                     Button {
                         guard !isConnectingCalendar else { return }
@@ -437,8 +538,11 @@ struct SettingsView: View {
                         }
                     } label: {
                         Text(isConnectingCalendar ? "Connecting…" : "Connect")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(.primary)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(Color.accentColor, in: Capsule())
                     }
                     .buttonStyle(.plain)
                     .disabled(isConnectingCalendar)
@@ -449,19 +553,17 @@ struct SettingsView: View {
             // Apple Reminders
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 12) {
-                    AppleRemindersIconView(size: 30)
+                    AppleRemindersIconView(size: 36)
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Apple Reminders")
-                            .font(.system(size: 15))
-                        Text(services.remindersSyncEnabled ? "Connected" : "Not connected")
+                            .font(.system(size: 15, weight: .medium))
+                        Text(services.remindersSyncEnabled ? "Two-way sync enabled" : "Sync tasks with Reminders")
                             .font(.system(size: 12))
-                            .foregroundStyle(services.remindersSyncEnabled ? .green : .secondary)
+                            .foregroundStyle(.secondary)
                     }
                     Spacer()
                     if services.remindersSyncEnabled {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
-                            .font(.system(size: 16))
+                        statusPill(text: "Connected", color: .green)
                     } else {
                         Button {
                             guard !isConnectingReminders else { return }
@@ -483,8 +585,11 @@ struct SettingsView: View {
                             }
                         } label: {
                             Text(isConnectingReminders ? "Connecting…" : "Connect")
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(.primary)
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(Color.accentColor, in: Capsule())
                         }
                         .buttonStyle(.plain)
                         .disabled(isConnectingReminders)
@@ -607,6 +712,32 @@ struct SettingsView: View {
         }
     }
 
+    // MARK: - Billing & Subscription (NavigationLink → sub-view)
+
+    private var billingNavigationSection: some View {
+        Section {
+            NavigationLink {
+                BillingSettingsView()
+            } label: {
+                HStack {
+                    Label("Billing & Plan", systemImage: "creditcard")
+                    Spacer()
+                    if services.subscriptionService.plan.isPaid {
+                        Text(services.subscriptionService.plan.displayName)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("Free")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        } header: {
+            Text("Subscription")
+        }
+    }
+
     // MARK: - Email
 
     private var emailSection: some View {
@@ -617,7 +748,7 @@ struct SettingsView: View {
             )) {
                 Label("Swipe Gestures", systemImage: "hand.draw")
             }
-            .tint(.primary)
+            .tint(AppTheme.switchTint)
 
             NavigationLink {
                 SignaturesView()
@@ -637,7 +768,7 @@ struct SettingsView: View {
             )) {
                 Label("Group by Thread", systemImage: "text.bubble")
             }
-            .tint(.primary)
+            .tint(AppTheme.switchTint)
         } header: {
             Text("Email")
         }
@@ -655,7 +786,7 @@ struct SettingsView: View {
             )) {
                 Label("Task Due Reminders", systemImage: "checklist")
             }
-            .tint(.primary)
+            .tint(AppTheme.switchTint)
 
             Toggle(isOn: Binding(
                 get: { services.calendarRemindersEnabled },
@@ -663,7 +794,7 @@ struct SettingsView: View {
             )) {
                 Label("Calendar Reminders", systemImage: "calendar.badge.clock")
             }
-            .tint(.primary)
+            .tint(AppTheme.switchTint)
 
             // System notification settings link
             Button {
@@ -1080,12 +1211,10 @@ struct AIAssistantSettingsView: View {
                 Toggle(isOn: $ai.aiCanReadTasks) {
                     Label("Read my tasks", systemImage: "eye")
                 }
-                .tint(.primary)
 
                 Toggle(isOn: $ai.aiCanWriteTasks) {
                     Label("Create & edit tasks", systemImage: "pencil")
                 }
-                .tint(.primary)
 
                 Picker(selection: Binding(
                     get: { services.aiTonePreference },
@@ -1334,6 +1463,7 @@ struct AIAssistantSettingsView: View {
                 Text("Instructions the AI follows on every response — e.g. tone, format, or topics to avoid.")
             }
         }
+        .tint(AppTheme.switchTint)
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
         .background(AppTheme.sheetBackground)

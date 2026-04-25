@@ -196,24 +196,43 @@ private final class MacNotificationDigestService {
             return
         }
 
-        var req = URLRequest(url: backendURL.appending(path: "api/ai/chat"))
-        req.httpMethod = "POST"
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        if let token = authService?.bearerToken {
-            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        }
-        req.httpBody = body
+        var allow401RefreshRetry = true
+        requestLoop: while true {
+            var req = URLRequest(url: backendURL.appending(path: "api/ai/chat"))
+            req.httpMethod = "POST"
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.setValue("https://todus.app", forHTTPHeaderField: "Origin")
+            if let token = authService?.bearerToken {
+                req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            }
+            if let sessionId = authService?.currentSessionId {
+                req.setValue(sessionId, forHTTPHeaderField: "X-Todus-Session-Id")
+            }
+            req.httpBody = body
 
-        do {
-            let (data, response) = try await URLSession.shared.data(for: req)
-            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-                let code = (response as? HTTPURLResponse)?.statusCode ?? 0
-                errorMessage = "Server error (\(code))."
+            do {
+                let (data, response) = try await URLSession.shared.data(for: req)
+                guard let http = response as? HTTPURLResponse else {
+                    errorMessage = "Server error."
+                    return
+                }
+                authService?.captureRotatedToken(from: http)
+                if http.statusCode == 401, allow401RefreshRetry, let auth = authService {
+                    allow401RefreshRetry = false
+                    if await auth.attemptSilentRefresh() {
+                        continue requestLoop
+                    }
+                }
+                guard (200..<300).contains(http.statusCode) else {
+                    errorMessage = "Server error (\(http.statusCode))."
+                    return
+                }
+                items = try parseDigest(data)
+                break requestLoop
+            } catch {
+                errorMessage = error.localizedDescription
                 return
             }
-            items = try parseDigest(data)
-        } catch {
-            errorMessage = error.localizedDescription
         }
     }
 

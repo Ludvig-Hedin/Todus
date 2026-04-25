@@ -50,6 +50,8 @@
 	<string>Todus needs full Reminders access to sync your tasks.</string>
 	<key>NSRemindersUsageDescription</key>
 	<string>Todus syncs your tasks with Apple Reminders.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Todus saves images from chat to your photo library when you choose Save.</string>
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UIColorName</key>

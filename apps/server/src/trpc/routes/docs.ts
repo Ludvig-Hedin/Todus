@@ -224,12 +224,16 @@ export const docsRouter = router({
         contentText: z.string().optional(),
         emoji: z.string().nullable().optional(),
         order: z.number().optional(),
+        parentId: z.string().nullable().optional(),
+        workspaceId: z.string().nullable().optional(),
+        isStarred: z.boolean().optional(),
         linkedThreadId: z.string().nullable().optional(),
         linkedEventId: z.string().nullable().optional(),
         linkedTaskId: z.string().nullable().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      const userId = ctx.sessionUser.id;
       const { db, conn } = getDb();
       try {
         // Build partial update object — only include fields that were explicitly provided
@@ -239,15 +243,49 @@ export const docsRouter = router({
         if (input.contentText !== undefined) updateData.contentText = input.contentText;
         if (input.emoji !== undefined) updateData.emoji = input.emoji;
         if (input.order !== undefined) updateData.order = input.order;
+        if (input.isStarred !== undefined) updateData.isStarred = input.isStarred;
         if (input.linkedThreadId !== undefined) updateData.linkedThreadId = input.linkedThreadId;
         if (input.linkedEventId !== undefined) updateData.linkedEventId = input.linkedEventId;
         if (input.linkedTaskId !== undefined) updateData.linkedTaskId = input.linkedTaskId;
+
+        if (input.workspaceId !== undefined) {
+          if (input.workspaceId === null) {
+            updateData.workspaceId = null;
+          } else {
+            const [ws] = await db
+              .select({ id: docWorkspace.id })
+              .from(docWorkspace)
+              .where(and(eq(docWorkspace.id, input.workspaceId), eq(docWorkspace.userId, userId)));
+            if (!ws) {
+              throw new TRPCError({ code: 'FORBIDDEN', message: 'Workspace not found' });
+            }
+            updateData.workspaceId = input.workspaceId;
+          }
+        }
+
+        if (input.parentId !== undefined) {
+          if (input.parentId === null) {
+            updateData.parentId = null;
+          } else {
+            if (input.parentId === input.id) {
+              throw new TRPCError({ code: 'BAD_REQUEST', message: 'Invalid parent' });
+            }
+            const [parent] = await db
+              .select()
+              .from(doc)
+              .where(and(eq(doc.id, input.parentId), eq(doc.userId, userId)));
+            if (!parent) {
+              throw new TRPCError({ code: 'NOT_FOUND', message: 'Parent doc not found' });
+            }
+            updateData.parentId = input.parentId;
+          }
+        }
 
         const [updated] = await db
           .update(doc)
           .set(updateData)
           // Scope to userId to prevent users from modifying other users' docs
-          .where(and(eq(doc.id, input.id), eq(doc.userId, ctx.sessionUser.id)))
+          .where(and(eq(doc.id, input.id), eq(doc.userId, userId)))
           .returning();
 
         if (!updated) {

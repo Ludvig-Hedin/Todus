@@ -57,9 +57,9 @@ private struct MeetingsListResponse: Decodable {
 }
 
 private struct SyncResponse: Decodable {
-    let synced: Int?
-    let total: Int?
-    let autoRecorded: Int?
+    let synced: Int
+    let total: Int
+    let autoRecorded: Int
 }
 
 private struct ScheduleBotResponse: Decodable {
@@ -91,6 +91,8 @@ final class MeetingsService {
     var isLoading = false
     var isSyncing = false
     var loadError: String? = nil
+    private var currentStatusFilter: String? = nil
+    private var currentSearchQuery: String? = nil
 
     init(apiClient: TodosAPIClient) {
         self.apiClient = apiClient
@@ -98,6 +100,8 @@ final class MeetingsService {
 
     func loadMeetings(status: String? = nil, search: String? = nil) async {
         isLoading = true
+        currentStatusFilter = status
+        currentSearchQuery = search
         defer { isLoading = false }
 
         struct Input: Encodable {
@@ -135,7 +139,7 @@ final class MeetingsService {
 
         do {
             let _: SyncResponse = try await apiClient.trpcMutation("meet.syncFromCalendar")
-            await loadMeetings()
+            await loadMeetings(status: currentStatusFilter, search: currentSearchQuery)
         } catch {
             print("[MeetingsService] Failed to sync: \(error)")
         }
@@ -147,7 +151,7 @@ final class MeetingsService {
             let _: ScheduleBotResponse = try await apiClient.trpcMutation(
                 "meet.scheduleBot", input: Input(meetingId: meetingId)
             )
-            await loadMeetings()
+            await loadMeetings(status: currentStatusFilter, search: currentSearchQuery)
             return true
         } catch {
             print("[MeetingsService] Failed to schedule bot: \(error)")

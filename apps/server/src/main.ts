@@ -1,20 +1,21 @@
 import {
-  createUpdatedMatrixFromNewEmail,
-  initializeStyleMatrixFromEmail,
-  type EmailMatrix,
-  type WritingStyleMatrix,
-} from './services/writing-style-service';
-import {
   account,
   connection,
   note,
   session,
+  verification,
   user,
   userHotkeys,
   userSettings,
   writingStyleMatrix,
   emailTemplate,
 } from './db/schema';
+import {
+  createUpdatedMatrixFromNewEmail,
+  initializeStyleMatrixFromEmail,
+  type EmailMatrix,
+  type WritingStyleMatrix,
+} from './services/writing-style-service';
 import {
   toAttachmentFiles,
   type SerializedAttachment,
@@ -34,7 +35,9 @@ import { ThinkingMCP } from './lib/sequential-thinking';
 import { serializeSignedCookie } from 'better-call';
 
 import { recallWebhookRouter } from './routes/recall-webhook';
+import { autumnWebhookRouter } from './routes/autumn-webhook';
 import { contextStorage } from 'hono/context-storage';
+import { getBrowserTimezone } from './lib/timezones';
 import { defaultUserSettings } from './lib/schemas';
 import { createLocalJWKSet, jwtVerify } from 'jose';
 import { enableBrainFunction } from './lib/brain';
@@ -56,6 +59,16 @@ import { Hono } from 'hono';
 
 const SENTRY_HOST = 'o4509328786915328.ingest.us.sentry.io';
 const SENTRY_PROJECT_IDS = new Set(['4509328795303936']);
+const NATIVE_SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 90;
+
+const createNativeSessionToken = () => {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return btoa(String.fromCharCode(...bytes))
+    .replaceAll('+', '-')
+    .replaceAll('/', '_')
+    .replaceAll('=', '');
+};
 
 export class DbRpcDO extends RpcTarget {
   constructor(
@@ -960,6 +973,158 @@ const api = new Hono<HonoContext>()
       return c.json({ error: 'Token refresh failed' }, 500);
     }
   })
+  .post('/auth/native-email-otp/verify', async (c) => {
+    const body = await c.req
+      .json<{ email?: string; otp?: string }>()
+      .catch((): { email?: string; otp?: string } | null => null);
+    const email = body?.email?.trim().toLowerCase();
+    const otp = body?.otp?.trim();
+
+    if (!email || !otp) {
+      return c.json({ error: 'Missing email or OTP' }, 400);
+    }
+
+    const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
+    try {
+      const identifier = `sign-in-otp-${email}`;
+      const [storedVerification] = await db
+        .select()
+        .from(verification)
+        .where(eq(verification.identifier, identifier))
+        .orderBy(desc(verification.expiresAt), desc(verification.createdAt))
+        .limit(1);
+
+      if (!storedVerification) {
+        return c.json({ error: 'Invalid OTP' }, 400);
+      }
+
+      if (storedVerification.expiresAt < new Date()) {
+        await db.delete(verification).where(eq(verification.id, storedVerification.id));
+        return c.json({ error: 'OTP expired' }, 400);
+      }
+
+      const separatorIndex = storedVerification.value.lastIndexOf(':');
+      const storedOtp =
+        separatorIndex >= 0
+          ? storedVerification.value.slice(0, separatorIndex)
+          : storedVerification.value;
+      const attempts =
+        separatorIndex >= 0
+          ? Number.parseInt(storedVerification.value.slice(separatorIndex + 1), 10) || 0
+          : 0;
+
+      if (attempts >= 3) {
+        await db.delete(verification).where(eq(verification.id, storedVerification.id));
+        return c.json({ error: 'Too many attempts' }, 403);
+      }
+
+      if (storedOtp !== otp) {
+        await db
+          .update(verification)
+          .set({ value: `${storedOtp}:${attempts + 1}`, updatedAt: new Date() })
+          .where(eq(verification.id, storedVerification.id));
+        return c.json({ error: 'Invalid OTP' }, 400);
+      }
+
+      await db.delete(verification).where(eq(verification.id, storedVerification.id));
+
+      const now = new Date();
+      let [authUser] = await db
+        .select({
+          id: user.id,
+          email: user.email,
+          emailVerified: user.emailVerified,
+          name: user.name,
+          image: user.image,
+          createdAt: user.createdAt,
+          updatedAt: user.updatedAt,
+        })
+        .from(user)
+        .where(eq(user.email, email))
+        .limit(1);
+
+      if (!authUser) {
+        const userId = crypto.randomUUID();
+        const [createdUser] = await db
+          .insert(user)
+          .values({
+            id: userId,
+            email,
+            emailVerified: true,
+            name: '',
+            image: null,
+            createdAt: now,
+            updatedAt: now,
+          })
+          .returning({
+            id: user.id,
+            email: user.email,
+            emailVerified: user.emailVerified,
+            name: user.name,
+            image: user.image,
+            createdAt: user.createdAt,
+            updatedAt: user.updatedAt,
+          });
+        authUser = createdUser;
+
+        try {
+          const zeroDb = await getZeroDB(userId);
+          const existingSettings = await zeroDb.findUserSettings();
+          if (!existingSettings) {
+            await zeroDb.insertUserSettings({
+              ...defaultUserSettings,
+              timezone: getBrowserTimezone(),
+            });
+          }
+        } catch (error) {
+          console.error('[auth/native-email-otp] Failed to create default settings', {
+            userId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      } else if (!authUser.emailVerified) {
+        await db
+          .update(user)
+          .set({ emailVerified: true, updatedAt: now })
+          .where(eq(user.id, authUser.id));
+        authUser = { ...authUser, emailVerified: true, updatedAt: now };
+      }
+
+      const sessionId = crypto.randomUUID();
+      const token = createNativeSessionToken();
+      const expiresAt = new Date(now.getTime() + NATIVE_SESSION_MAX_AGE_SECONDS * 1000);
+
+      await db.insert(session).values({
+        id: sessionId,
+        token,
+        userId: authUser.id,
+        expiresAt,
+        createdAt: now,
+        updatedAt: now,
+        ipAddress: c.req.header('CF-Connecting-IP') ?? null,
+        userAgent: c.req.header('User-Agent') ?? null,
+      });
+
+      return c.json({
+        token,
+        sessionId,
+        user: {
+          id: authUser.id,
+          email: authUser.email,
+          emailVerified: authUser.emailVerified,
+          name: authUser.name,
+          image: authUser.image,
+          createdAt: authUser.createdAt,
+          updatedAt: authUser.updatedAt,
+        },
+      });
+    } catch (error) {
+      console.error('[auth/native-email-otp] Verification failed', error);
+      return c.json({ error: 'Verification failed' }, 500);
+    } finally {
+      await conn.end();
+    }
+  })
   .post('/auth/native-link-social', async (c) => {
     const auth = c.var.auth;
     const sessionUser = c.var.sessionUser;
@@ -1029,6 +1194,7 @@ const api = new Hono<HonoContext>()
     return await auth.handler(forwardedRequest);
   })
   .on(['GET', 'POST', 'OPTIONS'], '/auth/*', async (c) => {
+    const authPath = new URL(c.req.url).pathname;
     try {
       return await c.var.auth.handler(c.req.raw);
     } catch (err) {
@@ -1042,7 +1208,22 @@ const api = new Hono<HonoContext>()
         console.error('[auth] better-auth threw Response:', err.status, body);
         return err;
       }
-      throw err;
+      // Anything that isn't a Response is an unhandled exception — log the
+      // path, message, and stack so the next failure isn't an opaque 500.
+      console.error('[auth] unhandled exception in better-auth handler', {
+        path: authPath,
+        error: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack : undefined,
+      });
+      // Surface a JSON 500 instead of letting it bubble out as an empty body.
+      return c.json(
+        {
+          error: 'Internal Server Error',
+          message: err instanceof Error ? err.message : 'Unknown error',
+          path: authPath,
+        },
+        500,
+      );
     }
   })
   .use(
@@ -1055,7 +1236,7 @@ const api = new Hono<HonoContext>()
       endpoint: '/api/trpc',
       router: appRouter,
       createContext: (_, c) => {
-        return { c, sessionUser: c.var['sessionUser'], db: c.var['db'] };
+        return { c, auth: c.var['auth'], sessionUser: c.var['sessionUser'], db: c.var['db'] };
       },
       allowMethodOverride: true,
       onError: (opts) => {
@@ -1165,6 +1346,8 @@ const app = new Hono<HonoContext>()
   .route('/api', api)
   // Recall.ai webhooks must be outside /api — they have no session cookie/token
   .route('/webhooks/recall', recallWebhookRouter)
+  // Autumn webhooks: same reason — Autumn calls us server-to-server, no auth.
+  .route('/webhooks/autumn', autumnWebhookRouter)
   .use(
     '*',
     agentsMiddleware({
@@ -1178,6 +1361,90 @@ const app = new Hono<HonoContext>()
     }),
   )
   .get('/health', (c) => c.json({ message: 'Todus Server is Up!' }))
+  // One-shot admin endpoint. Production DB lives behind Hyperdrive and the
+  // direct connection string isn't available locally for `drizzle-kit migrate`,
+  // so this runs SQL via the same HYPERDRIVE binding the worker uses. Gated by
+  // a single-use token. REMOVE after use.
+  //
+  // Modes:
+  //   POST /admin/run-migrations           → apply schema fixes
+  //   POST /admin/run-migrations?mode=info → describe current DB schema
+  .post('/admin/run-migrations', async (c) => {
+    const ONE_SHOT_TOKEN = 'f9864a95de7160e0c2e0b6afb15b53b12c17bfb44e4aa2ea6810fdb473ccf7d2';
+    const auth = c.req.header('Authorization');
+    const expected = `Bearer ${ONE_SHOT_TOKEN}`;
+    if (!auth || auth !== expected) {
+      return c.json({ error: 'unauthorized' }, 401);
+    }
+
+    const mode = new URL(c.req.url).searchParams.get('mode') ?? 'apply';
+    const { conn } = createDb(env.HYPERDRIVE.connectionString);
+
+    try {
+      if (mode === 'info') {
+        // Inspect what's actually in the production DB so we know which
+        // migrations are missing.
+        const tables =
+          await conn`SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename LIKE 'mail0_%' ORDER BY tablename`;
+        const userColumns =
+          await conn`SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'mail0_user' ORDER BY ordinal_position`;
+        const accountColumns =
+          await conn`SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'mail0_account' ORDER BY ordinal_position`;
+        const sessionColumns =
+          await conn`SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'mail0_session' ORDER BY ordinal_position`;
+        return c.json({
+          ok: true,
+          mode: 'info',
+          tables: tables.map((t: { tablename: string }) => t.tablename),
+          mail0_user_columns: userColumns,
+          mail0_account_columns: accountColumns,
+          mail0_session_columns: sessionColumns,
+        });
+      }
+
+      // 0050 columns on mail0_user — use IF NOT EXISTS for idempotence.
+      const statements: Array<{ label: string; sql: string }> = [
+        {
+          label: '0050: mail0_user.plan',
+          sql: `ALTER TABLE "mail0_user" ADD COLUMN IF NOT EXISTS "plan" text DEFAULT 'free' NOT NULL`,
+        },
+        {
+          label: '0050: mail0_user.subscription_status',
+          sql: `ALTER TABLE "mail0_user" ADD COLUMN IF NOT EXISTS "subscription_status" text DEFAULT 'active' NOT NULL`,
+        },
+        {
+          label: '0050: mail0_user.ai_usage_used',
+          sql: `ALTER TABLE "mail0_user" ADD COLUMN IF NOT EXISTS "ai_usage_used" double precision DEFAULT 0 NOT NULL`,
+        },
+        {
+          label: '0050: mail0_user.ai_usage_limit',
+          sql: `ALTER TABLE "mail0_user" ADD COLUMN IF NOT EXISTS "ai_usage_limit" double precision DEFAULT 0 NOT NULL`,
+        },
+        {
+          label: '0050: mail0_user.ai_usage_reset_at',
+          sql: `ALTER TABLE "mail0_user" ADD COLUMN IF NOT EXISTS "ai_usage_reset_at" timestamp`,
+        },
+      ];
+
+      const results: Array<{ statement: string; ok: boolean; error?: string }> = [];
+      for (const stmt of statements) {
+        try {
+          await conn.unsafe(stmt.sql);
+          results.push({ statement: stmt.label, ok: true });
+          console.log(`[admin/run-migrations] applied: ${stmt.label}`);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          results.push({ statement: stmt.label, ok: false, error: message });
+          console.error(`[admin/run-migrations] failed: ${stmt.label}`, message);
+        }
+      }
+
+      const allOk = results.every((r) => r.ok);
+      return c.json({ ok: allOk, results }, allOk ? 200 : 207);
+    } finally {
+      await conn.end();
+    }
+  })
   .get('/', (c) => c.redirect(`${env.VITE_PUBLIC_APP_URL}`))
   .post('/monitoring/sentry', async (c) => {
     try {

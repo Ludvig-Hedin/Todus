@@ -262,6 +262,15 @@ struct MacRootView: View {
             await services.authService.fetchUserProfile()
             await services.loadSharedAIProfile()
         }
+        .onChange(of: services.authService.showsOnboarding) { _, showsLogin in
+            guard showsLogin else { return }
+            services.closeSettingsWindowIfPresent()
+        }
+        .onAppear {
+            if services.authService.showsOnboarding {
+                services.closeSettingsWindowIfPresent()
+            }
+        }
     }
 
     private var restoringSessionView: some View {
@@ -293,6 +302,42 @@ struct MacRootView: View {
             // Main content area (NavigationSplitView)
             mainNavigationView
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            // Inline create / compose side panels — replace the previous .sheet modal
+            // presentations so users can keep using the rest of the app while a draft
+            // or quick-add form is open.
+            if isCreatePresented {
+                Divider()
+                MacCreateSheet(
+                    defaultType: defaultCreateType,
+                    onComposeEmail: { body in
+                        composeEmailSeedBody = body
+                        isComposePresented = true
+                    },
+                    onClose: {
+                        withAnimation(.snappy(duration: 0.18)) { isCreatePresented = false }
+                    }
+                )
+                .frame(width: 440)
+                .frame(maxHeight: .infinity)
+                .background(MacTheme.contentBackground)
+                .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
+
+            if isComposePresented {
+                Divider()
+                MacEmailComposeView(
+                    seedBody: composeEmailSeedBody,
+                    onClose: {
+                        withAnimation(.snappy(duration: 0.18)) { isComposePresented = false }
+                        composeEmailSeedBody = ""
+                    }
+                )
+                .frame(width: 560)
+                .frame(maxHeight: .infinity)
+                .background(MacTheme.contentBackground)
+                .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
 
             // Side pane mode — docked assistant panel on the right
             if isAssistantPresented && assistantDisplayMode == .sidepane {
@@ -329,6 +374,8 @@ struct MacRootView: View {
             }
         }
         .animation(.snappy(duration: 0.25), value: isAssistantPresented && assistantDisplayMode == .sidepane)
+        .animation(.snappy(duration: 0.18), value: isCreatePresented)
+        .animation(.snappy(duration: 0.18), value: isComposePresented)
         // Floating mode — overlay panel positioned bottom-right
         .overlay(alignment: .bottomTrailing) {
             if isAssistantPresented && assistantDisplayMode == .floating {
@@ -616,21 +663,8 @@ struct MacRootView: View {
             .opacity(0)
             .allowsHitTesting(false)
         }
-        .sheet(isPresented: $isComposePresented) {
-            MacEmailComposeView(seedBody: composeEmailSeedBody)
-                .frame(minWidth: 520, minHeight: 380)
-                .onDisappear { composeEmailSeedBody = "" }
-        }
-        .sheet(isPresented: $isCreatePresented) {
-            MacCreateSheet(
-                defaultType: defaultCreateType,
-                onComposeEmail: { body in
-                    composeEmailSeedBody = body
-                    isComposePresented = true
-                }
-            )
-            .frame(minWidth: 440, minHeight: 300)
-        }
+        // Compose & create are now inline trailing panels in `mainAppView`,
+        // not modal sheets. Search remains a modal sheet (small, transient).
         .sheet(isPresented: $isSearchPresented) {
             searchSheet
                 .frame(minWidth: 480, minHeight: 360)

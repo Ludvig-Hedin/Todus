@@ -119,6 +119,8 @@ final class AppServices {
     let voiceTokenService: VoiceTokenService
     /// Meetings service — fetches/syncs meetings from backend
     let meetingsService: MeetingsService
+    /// Cached subscription / AI-usage state. Refreshed on app launch and after billing actions.
+    let subscriptionService: SubscriptionService
     private let defaults: UserDefaults
     private var isLoadingSharedProfile = false
     private var lastSharedProfileLoadAt: Date?
@@ -351,6 +353,7 @@ final class AppServices {
         self.groupChatService = GroupChatService(apiClient: apiClient)
         self.voiceTokenService = VoiceTokenService(authService: authService, backendURL: backendURL)
         self.meetingsService = MeetingsService(apiClient: apiClient)
+        self.subscriptionService = SubscriptionService(apiClient: apiClient)
 
         let storedAppearance = defaults.string(forKey: Keys.appearancePreference)
             .flatMap(AppAppearancePreference.init(rawValue:))

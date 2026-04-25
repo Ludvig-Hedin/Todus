@@ -1026,7 +1026,7 @@ struct MacAssistantPanel: View {
             // Context chip row — page context pill + attachment pills (above text field, inside the box)
             if pageContextAttached || !pendingAttachments.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
+                    HStack(alignment: .center, spacing: 6) {
                         // Page context pill — shows which page the user is on (matching iOS blue pill)
                         if pageContextAttached {
                             HStack(spacing: 5) {
@@ -1051,31 +1051,15 @@ struct MacAssistantPanel: View {
                             .background(Color.primary.opacity(0.12), in: Capsule())
                         }
 
-                        // Pending attachment pills
-                        ForEach(pendingAttachments, id: \.absoluteString) { url in
-                            HStack(spacing: 4) {
-                                Image(systemName: "doc")
-                                    .font(.system(size: 9, weight: .semibold))
-                                Text(url.lastPathComponent)
-                                    .font(.system(size: 10, weight: .medium))
-                                    .lineLimit(1)
-                                Button {
-                                    pendingAttachments.removeAll { $0 == url }
-                                } label: {
-                                    Image(systemName: "xmark")
-                                        .font(.system(size: 8, weight: .bold))
-                                }
-                                .buttonStyle(.plain)
-                                .macClickablePointer()
-    }
-                            .foregroundStyle(MacTheme.mutedText)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(MacTheme.surfaceCard, in: Capsule())
+                        ForEach(pendingAttachments, id: \.self) { url in
+                            MacPendingAttachmentChip(url: url) {
+                                removePendingAttachment(url)
+                            }
                         }
                     }
                     .padding(.horizontal, 12)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.top, 8)
                 .padding(.bottom, 2)
             }
@@ -1085,7 +1069,14 @@ struct MacAssistantPanel: View {
             // TextField.onSubmit fires on ALL Return presses with no way to distinguish
             // Shift/Option+Return, preventing users from entering line breaks.
             ZStack(alignment: .topLeading) {
-                MacChatTextInput(text: $inputText, contentHeight: $chatInputHeight, onSend: sendMessage)
+                MacChatTextInput(
+                    text: $inputText,
+                    contentHeight: $chatInputHeight,
+                    onSend: sendMessage,
+                    onPastedFileURLs: { urls in
+                        pendingAttachments.append(contentsOf: urls)
+                    }
+                )
                     .frame(height: chatInputHeight)
                     .padding(.horizontal, 14)
                     .padding(.top, (pageContextAttached || !pendingAttachments.isEmpty) ? 4 : 10)
@@ -1333,6 +1324,17 @@ struct MacAssistantPanel: View {
     }
 
     // MARK: - Actions
+
+    /// Removes a pending chip and deletes files we only keep for upload when they live in the system temp dir (e.g. paste-generated images).
+    private func removePendingAttachment(_ url: URL) {
+        pendingAttachments.removeAll { $0 == url }
+        guard url.isFileURL else { return }
+        let tmp = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()
+        let path = url.resolvingSymlinksInPath().path
+        if path.hasPrefix(tmp.path) {
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
 
     private func sendMessage() {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2159,6 +2161,7 @@ private struct MacChatTextInput: NSViewRepresentable {
     @Binding var text: String
     @Binding var contentHeight: CGFloat
     let onSend: () -> Void
+    var onPastedFileURLs: (([URL]) -> Void)?
 
     func makeCoordinator() -> Coordinator { Coordinator(text: $text, contentHeight: $contentHeight) }
 
@@ -2172,6 +2175,7 @@ private struct MacChatTextInput: NSViewRepresentable {
 
         let textView = MacChatNSTextView()
         textView.onSend = onSend
+        textView.onPasteFileURLs = onPastedFileURLs
         textView.delegate = context.coordinator
         textView.isRichText = false
         textView.allowsUndo = true
@@ -2194,6 +2198,7 @@ private struct MacChatTextInput: NSViewRepresentable {
         MacScrollStyle.applyChrome(to: scrollView)
         guard let textView = scrollView.documentView as? MacChatNSTextView else { return }
         textView.onSend = onSend
+        textView.onPasteFileURLs = onPastedFileURLs
         // Only sync when text changed externally (e.g., cleared after send)
         if textView.string != text {
             textView.string = text
@@ -2249,6 +2254,53 @@ private struct MacChatTextInput: NSViewRepresentable {
 
 private final class MacChatNSTextView: NSTextView {
     var onSend: (() -> Void)?
+    var onPasteFileURLs: (([URL]) -> Void)?
+
+    override func paste(_ sender: Any?) {
+        let pb = NSPasteboard.general
+        if let files = collectPastedFileURLs(from: pb), !files.isEmpty {
+            onPasteFileURLs?(files)
+            return
+        }
+        super.paste(sender)
+    }
+
+    /// Images, raw image data, file URLs, and PDFs from the pasteboard.
+    private func collectPastedFileURLs(from pb: NSPasteboard) -> [URL]? {
+        if let images = pb.readObjects(forClasses: [NSImage.self], options: nil) as? [NSImage] {
+            var out: [URL] = []
+            for image in images {
+                guard
+                    let tiff = image.tiffRepresentation,
+                    let rep = NSBitmapImageRep(data: tiff),
+                    let data = rep.representation(using: .png, properties: [:])
+                else { continue }
+                let url = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("paste-image-\(UUID().uuidString).png")
+                do {
+                    try data.write(to: url)
+                    out.append(url)
+                } catch { continue }
+            }
+            if !out.isEmpty { return out }
+        }
+        if let urlObjs = pb.readObjects(forClasses: [NSURL.self], options: nil) as? [URL] {
+            let fileURLs = urlObjs.filter { $0.isFileURL }
+            if !fileURLs.isEmpty { return fileURLs }
+        }
+        for (type, ext) in [(NSPasteboard.PasteboardType.png, "png"), (NSPasteboard.PasteboardType.tiff, "tiff"),
+                             (NSPasteboard.PasteboardType.pdf, "pdf")] {
+            if let data = pb.data(forType: type) {
+                let url = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("paste-\(UUID().uuidString).\(ext)")
+                do {
+                    try data.write(to: url)
+                    return [url]
+                } catch { break }
+            }
+        }
+        return nil
+    }
 
     override func keyDown(with event: NSEvent) {
         // Cmd+Return = send the message
@@ -2259,6 +2311,119 @@ private final class MacChatNSTextView: NSTextView {
         // Plain Return (and all other keys) = natural NSTextView behavior (newline)
         super.keyDown(with: event)
     }
+}
+
+// MARK: - Pending attachment chip (preview + format, iOS-style pill)
+
+private enum MacPendingAttachmentFormat {
+    static let imageExtensions: Set<String> = [
+        "png", "jpg", "jpeg", "heic", "heif", "gif", "webp", "tiff", "tif", "bmp", "ico",
+    ]
+
+    static func isImageFile(_ url: URL) -> Bool {
+        imageExtensions.contains(url.pathExtension.lowercased())
+    }
+
+    static func formatUppercase(_ url: URL) -> String {
+        let ext = url.pathExtension.uppercased()
+        return ext.isEmpty ? "FILE" : ext
+    }
+
+    /// File name without extension, truncated (format is shown separately).
+    static func displayName(_ url: URL) -> String {
+        var base = url.deletingPathExtension().lastPathComponent
+        if base.isEmpty { base = url.lastPathComponent }
+        if base.count > 20 {
+            return String(base.prefix(18)) + "…"
+        }
+        return base
+    }
+}
+
+private struct MacPendingAttachmentChip: View {
+    let url: URL
+    let onRemove: () -> Void
+
+    @State private var preview: NSImage?
+
+    private var isImage: Bool { MacPendingAttachmentFormat.isImageFile(url) }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Group {
+                if isImage, let img = preview {
+                    Image(nsImage: img)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 22, height: 22)
+                        .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                } else {
+                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                        .fill(MacTheme.surfaceCard)
+                        .frame(width: 22, height: 22)
+                        .overlay {
+                            Image(systemName: "doc")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(MacTheme.mutedText)
+                        }
+                }
+            }
+
+            HStack(spacing: 4) {
+                Text(MacPendingAttachmentFormat.displayName(url))
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(MacTheme.mutedText)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Text(MacPendingAttachmentFormat.formatUppercase(url))
+                    .font(.system(size: 9, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.tertiary)
+            }
+            .frame(minWidth: 0, maxWidth: 200, alignment: .leading)
+
+            Button(action: onRemove) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 8, weight: .bold))
+            }
+            .buttonStyle(.plain)
+            .macClickablePointer()
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(MacTheme.surfaceCard, in: Capsule())
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(MacTheme.cardBorder, lineWidth: 0.5)
+        )
+        .task(id: url.path) {
+            guard isImage else { return }
+            let u = url
+            let didAccess = u.startAccessingSecurityScopedResource()
+            defer {
+                if didAccess { u.stopAccessingSecurityScopedResource() }
+            }
+            guard let image = NSImage(contentsOf: u) else { return }
+            preview = macDownsampledThumbnail(image, maxPixels: 64)
+        }
+    }
+}
+
+/// Decodes a small bitmap for 22pt thumbnails so large photos do not stay fully resident.
+private func macDownsampledThumbnail(_ image: NSImage, maxPixels: CGFloat) -> NSImage {
+    var proposed = image.size
+    guard proposed.width > 0, proposed.height > 0 else { return image }
+    let scale = min(maxPixels / max(proposed.width, 1), maxPixels / max(proposed.height, 1), 1)
+    proposed = CGSize(width: max(proposed.width * scale, 1), height: max(proposed.height * scale, 1))
+    let img = NSImage(size: proposed)
+    img.lockFocus()
+    image.draw(
+        in: NSRect(origin: .zero, size: proposed),
+        from: NSRect(origin: .zero, size: image.size),
+        operation: .copy,
+        fraction: 1
+    )
+    img.unlockFocus()
+    return img
 }
 
 // MARK: - Seeded Random Number Generator

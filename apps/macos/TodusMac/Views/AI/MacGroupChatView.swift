@@ -196,6 +196,7 @@ private struct MacGroupMessageBubble: View {
                     }
                     Text(message.content)
                         .font(.system(size: 13))
+                        .textSelection(.enabled)
                         .padding(.horizontal, 12).padding(.vertical, 7)
                         .background(Color.primary.opacity(0.12), in: RoundedRectangle(cornerRadius: MacTheme.buttonRadius, style: .continuous))
                         .foregroundStyle(.primary)

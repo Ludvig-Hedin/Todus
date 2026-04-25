@@ -13,7 +13,8 @@ struct MacAuthView: View {
 
     @State private var email = ""
     @State private var code = ""
-    @FocusState private var isEmailFocused: Bool
+    /// Drives the AppKit email field’s first responder; plain `FocusState` can’t be passed to `NSViewRepresentable` as `Binding<Bool>`.
+    @State private var isEmailFieldFocused = false
     @FocusState private var isCodeFocused: Bool
 
     /// Blue accent used for primary action buttons (matches iOS app)
@@ -41,17 +42,14 @@ struct MacAuthView: View {
                 Text("Welcome to Todus")
                     .font(.system(size: 24, weight: .semibold))
 
-                Text("Email, tasks, and calendar in one workspace.")
-                    .font(.system(size: 15, weight: .regular))
-                    .foregroundStyle(.primary.opacity(0.5))
-
                 Text(
                     otpPendingEmail == nil
-                        ? "Sign in to sync your workspace, or keep going with tasks only."
+                        ? "Email, tasks, and calendar in one workspace."
                         : "Enter the 6-digit code we sent to finish signing in."
                 )
-                    .font(.system(size: 13, weight: .regular))
-                    .foregroundStyle(.primary.opacity(0.4))
+                    .font(.system(size: 15, weight: .regular))
+                    .foregroundStyle(.primary.opacity(0.5))
+                    .multilineTextAlignment(.center)
             }
 
             Spacer()
@@ -90,27 +88,26 @@ struct MacAuthView: View {
 
     private var emailInputView: some View {
         VStack(spacing: 10) {
-            TextField("Email", text: $email)
-                .textContentType(.emailAddress)
-                .autocorrectionDisabled()
-                .focused($isEmailFocused)
-                .font(.system(size: 14, weight: .medium))
-                .textFieldStyle(.plain)
-                .padding(.horizontal, 20)
-                .padding(.vertical, 12)
-                .background(
-                    Capsule()
-                        .fill(.background)
-                )
-                .overlay(
-                    Capsule()
-                        .stroke(.separator, lineWidth: 1)
-                )
-                .focusEffectDisabled()
-                .onSubmit {
+            MacEmailTextField(
+                text: $email,
+                isFocused: $isEmailFieldFocused,
+                onCommit: {
                     guard isValidEmail else { return }
                     Task { await authService.sendEmailOTP(email: email) }
                 }
+            )
+            .frame(minHeight: 22)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
+            .background(
+                Capsule()
+                    .fill(.background)
+            )
+            .overlay(
+                Capsule()
+                    .stroke(.separator, lineWidth: 1)
+            )
+            .focusEffectDisabled()
 
             // Send code button — only visible when email looks valid
             if isValidEmail {
@@ -324,14 +321,14 @@ struct MacAuthView: View {
             Button {
                 authService.continueAsGuest()
             } label: {
-                Text("Skip, use tasks only for now")
+                Text("Continue as guest")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
             .focusEffectDisabled()
             .pointerStyle(.link)
-            .padding(.top, 20)
+            .padding(.top, 16)
 
             // Terms / Privacy links
             HStack(spacing: 8) {

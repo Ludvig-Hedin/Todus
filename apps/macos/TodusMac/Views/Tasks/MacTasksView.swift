@@ -20,24 +20,47 @@ struct MacTasksView: View {
     var onCreateItem: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // Toolbar: view mode + search + sort
-            toolbar
-                .padding(.bottom, MacTheme.spacing12)
-
-            // Folder strip
-            if !folders.isEmpty {
-                folderStrip
+        // Split layout: task content on the left, detail panel inline on the right.
+        // Matches MacEmailInboxView / MacMeetingsView pattern so users can keep
+        // browsing the list while a task is open.
+        HStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 0) {
+                // Toolbar: view mode + search + sort
+                toolbar
                     .padding(.bottom, MacTheme.spacing12)
-            }
 
-            // Task list
-            if visibleTasks.isEmpty && completedTasks.isEmpty {
-                emptyState
-            } else {
-                taskContent
+                // Folder strip
+                if !folders.isEmpty {
+                    folderStrip
+                        .padding(.bottom, MacTheme.spacing12)
+                }
+
+                // Task list
+                if visibleTasks.isEmpty && completedTasks.isEmpty {
+                    emptyState
+                } else {
+                    taskContent
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+
+            if let task = selectedTask {
+                Divider()
+
+                MacTaskDetailSheet(task: task, onClose: {
+                    withAnimation(.snappy(duration: 0.15)) {
+                        selectedTask = nil
+                    }
+                })
+                .id(task.id)
+                .frame(width: 420)
+                .frame(maxHeight: .infinity)
+                .background(MacTheme.contentBackground)
+                .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .animation(.snappy(duration: 0.15), value: selectedTask?.id)
         .onAppear { recomputeTasks() }
         .task {
             do {
@@ -50,10 +73,6 @@ struct MacTasksView: View {
         .onChange(of: searchText) { recomputeTasks() }
         .onChange(of: sortOrder) { recomputeTasks() }
         .onChange(of: selectedFolderID) { recomputeTasks() }
-        .sheet(item: $selectedTask) { task in
-            MacTaskDetailSheet(task: task)
-                .frame(minWidth: 420, minHeight: 320)
-        }
     }
 
     // MARK: - Toolbar
@@ -740,11 +759,14 @@ struct MacTaskRow: View {
 
 /// Task detail sheet for viewing/editing a single task on macOS.
 struct MacTaskDetailSheet: View {
-    @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \FolderRecord.name) private var folders: [FolderRecord]
     let task: TaskRecord
+    /// Optional close handler. When provided (inline split-panel mode) the header
+    /// shows a close button. When nil, falls back to environment dismiss for legacy sheet usage.
+    var onClose: (() -> Void)? = nil
 
+    @Environment(\.dismiss) private var dismiss
     @State private var editedTitle: String = ""
     @State private var editedDescription: String = ""
     @State private var editedStatus: TaskStatus = .todo
@@ -753,17 +775,39 @@ struct MacTaskDetailSheet: View {
     @State private var hasDueDate = false
     @State private var selectedFolderID: UUID? = nil
 
+    private func close() {
+        if let onClose {
+            onClose()
+        } else {
+            dismiss()
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Header
-            HStack {
+            HStack(spacing: MacTheme.spacing8) {
+                if onClose != nil {
+                    Button {
+                        close()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(MacTheme.mutedText)
+                            .frame(width: 22, height: 22)
+                            .background(MacTheme.surfaceCard, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .interactiveHitTarget(expansion: 4)
+                    .help("Close")
+                }
                 Text("Task Details")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(MacTheme.textPrimary)
                 Spacer()
                 Button("Save") {
                     saveChanges()
-                    dismiss()
+                    close()
                 }
                 .font(.system(size: 13, weight: .medium))
                 .macClickablePointer()
@@ -845,6 +889,7 @@ struct MacTaskDetailSheet: View {
                             Toggle("", isOn: $hasDueDate)
                                 .toggleStyle(.switch)
                                 .controlSize(.mini)
+                                .tint(MacTheme.switchTint)
                         }
                         if hasDueDate {
                             DatePicker("", selection: Binding(

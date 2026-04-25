@@ -849,144 +849,152 @@ final class AIChatService {
         )
 
         let baseURL = configuration.effectiveBackendURL
-        let url = baseURL.appending(path: "api/ai/chat")
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        // Origin required by Better Auth CSRF middleware — without this the bearer plugin
-        // cannot resolve the session, causing a 401 even though the token is valid.
-        request.setValue("https://todus.app", forHTTPHeaderField: "Origin")
-        if let token = authService?.bearerToken {
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        }
 
         guard let body = try? JSONEncoder().encode(payload) else {
             appendError("Failed to encode request.", to: assistantMessageID)
             result.hardError = true
             return result
         }
-        request.httpBody = body
 
         // Accumulator keyed by tool_call index. Streaming tool calls arrive as
         // fragments: the first chunk has name + id, later chunks only append to
         // `arguments`. Without this accumulation, arguments JSON is discarded.
         var toolCallBuffer: [Int: AccumulatedToolCall] = [:]
+        /// One automatic repeat after a successful silent refresh (matches `TodosAPIClient` retry behavior).
+        var allow401RefreshRetry = true
 
-        do {
-            let (asyncBytes, response) = try await URLSession.shared.bytes(for: request)
-            guard let http = response as? HTTPURLResponse else {
-                appendError("Invalid response from server.", to: assistantMessageID)
-                result.hardError = true
-                return result
+        requestLoop: while true {
+            let url = baseURL.appending(path: "api/ai/chat")
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            // Origin required by Better Auth CSRF middleware — without this the bearer plugin
+            // cannot resolve the session, causing a 401 even though the token is valid.
+            request.setValue("https://todus.app", forHTTPHeaderField: "Origin")
+            if let token = authService?.bearerToken {
+                request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
             }
-            debugHTTPResponse(http, context: "chat stream")
-            authService?.captureRotatedToken(from: http)
-            guard (200..<300).contains(http.statusCode) else {
-                switch http.statusCode {
-                case 401:
-                    if let auth = authService {
+            if let sessionId = authService?.currentSessionId {
+                request.setValue(sessionId, forHTTPHeaderField: "X-Todus-Session-Id")
+            }
+            request.httpBody = body
+
+            do {
+                let (asyncBytes, response) = try await URLSession.shared.bytes(for: request)
+                guard let http = response as? HTTPURLResponse else {
+                    appendError("Invalid response from server.", to: assistantMessageID)
+                    result.hardError = true
+                    return result
+                }
+                debugHTTPResponse(http, context: "chat stream")
+                authService?.captureRotatedToken(from: http)
+                guard (200..<300).contains(http.statusCode) else {
+                    if http.statusCode == 401, allow401RefreshRetry, let auth = authService {
+                        allow401RefreshRetry = false
                         let refreshed = await auth.attemptSilentRefresh()
                         if refreshed {
-                            appendError("Session token refreshed. Please tap retry.", to: assistantMessageID)
-                        } else {
-                            auth.isSessionExpired = true
-                            appendError(diagnosticAuthMessage(
-                                statusCode: http.statusCode,
-                                fallback: "Session expired. Please log out and back in."
-                            ), to: assistantMessageID)
+                            continue requestLoop
                         }
-                    } else {
+                        auth.isSessionExpired = true
                         appendError(diagnosticAuthMessage(
                             statusCode: http.statusCode,
                             fallback: "Session expired. Please log out and back in."
                         ), to: assistantMessageID)
-                    }
-                case 429:
-                    // Parse Retry-After per RFC 7231: integer seconds or HTTP-date.
-                    var retrySeconds: Int? = nil
-                    if let header = http.value(forHTTPHeaderField: "Retry-After") {
-                        let trimmed = header.trimmingCharacters(in: .whitespaces)
-                        if let asInt = Int(trimmed) {
-                            retrySeconds = asInt
-                        } else {
-                            let formatter = DateFormatter()
-                            formatter.locale = Locale(identifier: "en_US_POSIX")
-                            formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
-                            if let date = formatter.date(from: trimmed) {
-                                retrySeconds = max(0, Int(date.timeIntervalSinceNow.rounded()))
+                    } else if http.statusCode == 401 {
+                        appendError(diagnosticAuthMessage(
+                            statusCode: http.statusCode,
+                            fallback: "Session expired. Please log out and back in."
+                        ), to: assistantMessageID)
+                    } else {
+                        switch http.statusCode {
+                        case 429:
+                            // Parse Retry-After per RFC 7231: integer seconds or HTTP-date.
+                            var retrySeconds: Int? = nil
+                            if let header = http.value(forHTTPHeaderField: "Retry-After") {
+                                let trimmed = header.trimmingCharacters(in: .whitespaces)
+                                if let asInt = Int(trimmed) {
+                                    retrySeconds = asInt
+                                } else {
+                                    let formatter = DateFormatter()
+                                    formatter.locale = Locale(identifier: "en_US_POSIX")
+                                    formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
+                                    if let date = formatter.date(from: trimmed) {
+                                        retrySeconds = max(0, Int(date.timeIntervalSinceNow.rounded()))
+                                    }
+                                }
                             }
+                            let banner: String
+                            if let s = retrySeconds, s > 0 {
+                                banner = "Rate limited — try again in \(s) seconds."
+                            } else {
+                                banner = "Rate limited — try again shortly."
+                            }
+                            rateLimitedMessage = banner
+                            streamFailed = true
+                            appendError(banner, to: assistantMessageID)
+                        case 503:
+                            appendError("AI service is not configured on the server (missing OPENROUTER_API_KEY).", to: assistantMessageID)
+                        case 502:
+                            appendError("AI provider error. The upstream AI service may be down.", to: assistantMessageID)
+                        default:
+                            appendError(diagnosticHTTPMessage(statusCode: http.statusCode), to: assistantMessageID)
                         }
                     }
-                    let banner: String
-                    if let s = retrySeconds, s > 0 {
-                        banner = "Rate limited — try again in \(s) seconds."
-                    } else {
-                        banner = "Rate limited — try again shortly."
-                    }
-                    rateLimitedMessage = banner
-                    streamFailed = true
-                    appendError(banner, to: assistantMessageID)
-                case 503:
-                    appendError("AI service is not configured on the server (missing OPENROUTER_API_KEY).", to: assistantMessageID)
-                case 502:
-                    appendError("AI provider error. The upstream AI service may be down.", to: assistantMessageID)
-                default:
-                    appendError(diagnosticHTTPMessage(statusCode: http.statusCode), to: assistantMessageID)
+                    result.hardError = true
+                    return result
                 }
-                result.hardError = true
+
+                for try await line in asyncBytes.lines {
+                    if Task.isCancelled { break }
+
+                    guard line.hasPrefix("data: ") else { continue }
+                    let jsonString = String(line.dropFirst(6))
+                    if jsonString == "[DONE]" { break }
+
+                    guard let data = jsonString.data(using: .utf8) else { continue }
+
+                    if let customEvent = try? JSONDecoder().decode(SSECustomEvent.self, from: data),
+                       !customEvent.type.isEmpty {
+                        handleCustomEvent(customEvent, messageID: assistantMessageID)
+                        continue
+                    }
+
+                    guard let chunk = try? JSONDecoder().decode(SSEChunk.self, from: data) else { continue }
+                    guard let delta = chunk.choices.first?.delta else { continue }
+
+                    if let text = delta.content, !text.isEmpty {
+                        result.assistantContent += text
+                        result.producedContent = true
+                        appendToken(text, to: assistantMessageID)
+                    }
+
+                    // Accumulate streaming tool call fragments by index.
+                    if let toolCalls = delta.toolCalls {
+                        for tc in toolCalls {
+                            let idx = tc.index ?? 0
+                            var acc = toolCallBuffer[idx] ?? AccumulatedToolCall()
+                            if let id = tc.id, !id.isEmpty { acc.id = id }
+                            if let name = tc.function?.name, !name.isEmpty { acc.name = name }
+                            if let args = tc.function?.arguments, !args.isEmpty { acc.arguments += args }
+                            toolCallBuffer[idx] = acc
+                        }
+                    }
+                }
+                break requestLoop
+            } catch {
+                if !Task.isCancelled {
+                    log.error("chat stream failed: \(error.localizedDescription, privacy: .public)")
+                    // Mid-stream URLSession failure (network drop, timeout). Surface a
+                    // banner so the user can tap to retry — do not auto-reconnect, since
+                    // partial assistant output may already be on screen. The outer
+                    // `streamResponse` defer-calls `finaliseStream` which clears
+                    // isStreaming, so we don't toggle that here.
+                    streamFailed = true
+                    appendError("Connection lost — tap to retry.", to: assistantMessageID)
+                    result.hardError = true
+                }
                 return result
             }
-
-            for try await line in asyncBytes.lines {
-                if Task.isCancelled { break }
-
-                guard line.hasPrefix("data: ") else { continue }
-                let jsonString = String(line.dropFirst(6))
-                if jsonString == "[DONE]" { break }
-
-                guard let data = jsonString.data(using: .utf8) else { continue }
-
-                if let customEvent = try? JSONDecoder().decode(SSECustomEvent.self, from: data),
-                   !customEvent.type.isEmpty {
-                    handleCustomEvent(customEvent, messageID: assistantMessageID)
-                    continue
-                }
-
-                guard let chunk = try? JSONDecoder().decode(SSEChunk.self, from: data) else { continue }
-                guard let delta = chunk.choices.first?.delta else { continue }
-
-                if let text = delta.content, !text.isEmpty {
-                    result.assistantContent += text
-                    result.producedContent = true
-                    appendToken(text, to: assistantMessageID)
-                }
-
-                // Accumulate streaming tool call fragments by index.
-                if let toolCalls = delta.toolCalls {
-                    for tc in toolCalls {
-                        let idx = tc.index ?? 0
-                        var acc = toolCallBuffer[idx] ?? AccumulatedToolCall()
-                        if let id = tc.id, !id.isEmpty { acc.id = id }
-                        if let name = tc.function?.name, !name.isEmpty { acc.name = name }
-                        if let args = tc.function?.arguments, !args.isEmpty { acc.arguments += args }
-                        toolCallBuffer[idx] = acc
-                    }
-                }
-            }
-        } catch {
-            if !Task.isCancelled {
-                log.error("chat stream failed: \(error.localizedDescription, privacy: .public)")
-                // Mid-stream URLSession failure (network drop, timeout). Surface a
-                // banner so the user can tap to retry — do not auto-reconnect, since
-                // partial assistant output may already be on screen. The outer
-                // `streamResponse` defer-calls `finaliseStream` which clears
-                // isStreaming, so we don't toggle that here.
-                streamFailed = true
-                appendError("Connection lost — tap to retry.", to: assistantMessageID)
-                result.hardError = true
-            }
-            return result
         }
 
         // Flush buffered tokens before handing off to the next step so the UI

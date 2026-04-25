@@ -21,6 +21,18 @@ struct MacCreateSheet: View {
     /// Callback to open email compose with seed body
     var onComposeEmail: ((String) -> Void)? = nil
 
+    /// Optional close handler for inline side-panel mode. Falls back to environment
+    /// dismiss when nil so the view still works if presented as a sheet.
+    var onClose: (() -> Void)? = nil
+
+    private func close() {
+        if let onClose {
+            onClose()
+        } else {
+            dismiss()
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             // Header
@@ -29,7 +41,7 @@ struct MacCreateSheet: View {
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(MacTheme.textPrimary)
                 Spacer()
-                Button("Cancel") { dismiss() }
+                Button("Cancel") { close() }
                     .font(.system(size: 13, weight: .medium))
                     .keyboardShortcut(.escape, modifiers: [])
             }
@@ -285,7 +297,7 @@ struct MacCreateSheet: View {
         case .auto:
             createTask(input)
         }
-        dismiss()
+        close()
     }
 
     private func createTask(_ input: String) {

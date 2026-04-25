@@ -4,7 +4,7 @@ import WebKit
 /// Wraps the Docs web page in a WKWebView with Bearer auth injection.
 /// Uses configuration.effectiveAppURL so local dev builds load localhost:3000
 /// and production builds load app.todus.app.
-struct DocsWebView: View {
+struct DocsBrowserView: View {
     @Environment(AppServices.self) private var services
 
     @State private var isLoading: Bool = true
@@ -14,7 +14,7 @@ struct DocsWebView: View {
         let docsURL = appURL.appendingPathComponent("mail/docs")
 
         return ZStack {
-            DocsWebViewRepresentable(
+            DocsBrowserViewRepresentable(
                 bearerToken: services.authService.bearerToken,
                 appURL: appURL,
                 docsURL: docsURL,
@@ -31,7 +31,7 @@ struct DocsWebView: View {
     }
 }
 
-struct DocsWebViewRepresentable: UIViewRepresentable {
+struct DocsBrowserViewRepresentable: UIViewRepresentable {
     let bearerToken: String?
     let appURL: URL
     let docsURL: URL
@@ -88,6 +88,7 @@ struct DocsWebViewRepresentable: UIViewRepresentable {
     /// Restricts in-WebView navigation to Todus-owned origins (or the configured app
     /// origin for local dev). External links open in the system browser via
     /// `UIApplication.open`. `javascript:` URLs are blocked outright.
+    @MainActor
     final class Coordinator: NSObject, WKNavigationDelegate {
         @Binding var isLoading: Bool
         var lastBearerToken: String = ""
@@ -101,7 +102,7 @@ struct DocsWebViewRepresentable: UIViewRepresentable {
         func webView(
             _ webView: WKWebView,
             decidePolicyFor navigationAction: WKNavigationAction,
-            decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+            decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void
         ) {
             guard let url = navigationAction.request.url else {
                 decisionHandler(.allow)
@@ -163,3 +164,6 @@ struct DocsWebViewRepresentable: UIViewRepresentable {
         }
     }
 }
+
+/// Name used by `MoreSheetView` and older call sites.
+typealias DocsWebView = DocsBrowserView

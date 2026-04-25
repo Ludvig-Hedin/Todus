@@ -8,6 +8,7 @@ import {
   primaryKey,
   unique,
   index,
+  doublePrecision,
 } from 'drizzle-orm/pg-core';
 import type { AnyPgColumn } from 'drizzle-orm/pg-core';
 import { defaultUserSettings } from '../lib/schemas';
@@ -26,6 +27,13 @@ export const user = createTable('user', {
   customPrompt: text('custom_prompt'),
   phoneNumber: text('phone_number').unique(),
   phoneNumberVerified: boolean('phone_number_verified'),
+  // Cached subscription state — Autumn is the source of truth, kept in sync via webhook.
+  // Lets us gate features and render plan UI without an Autumn round-trip per request.
+  plan: text('plan').notNull().default('free'),
+  subscriptionStatus: text('subscription_status').notNull().default('active'),
+  aiUsageUsed: doublePrecision('ai_usage_used').notNull().default(0),
+  aiUsageLimit: doublePrecision('ai_usage_limit').notNull().default(0),
+  aiUsageResetAt: timestamp('ai_usage_reset_at'),
 });
 
 export const session = createTable(
@@ -957,6 +965,8 @@ export const doc = createTable(
     contentText: text('content_text'),
     emoji: text('emoji'),
     order: integer('order').notNull().default(0),
+    // Starred in sidebar / “All docs” (syncs across clients)
+    isStarred: boolean('is_starred').notNull().default(false),
     // Cross-entity links — nullable, no FK (threads/events/tasks are external)
     linkedThreadId: text('linked_thread_id'),
     linkedEventId: text('linked_event_id'),

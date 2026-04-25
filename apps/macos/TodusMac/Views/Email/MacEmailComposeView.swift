@@ -9,15 +9,27 @@ struct MacEmailComposeView: View {
     @State private var draft: EmailDraft
     @State private var showSendError = false
     private let navigationTitle: String
+    /// Optional close handler — supplied when the view is rendered as an inline
+    /// side panel so it can collapse the panel instead of dismissing a sheet.
+    private let onCloseHandler: (() -> Void)?
+
+    private func close() {
+        if let onCloseHandler {
+            onCloseHandler()
+        } else {
+            dismiss()
+        }
+    }
 
     /// New email
-    init() {
+    init(onClose: (() -> Void)? = nil) {
         _draft = State(initialValue: EmailDraft())
         navigationTitle = "New Email"
+        onCloseHandler = onClose
     }
 
     /// Reply to a message
-    init(replyTo message: EmailMessage, threadId: String, body: String = "") {
+    init(replyTo message: EmailMessage, threadId: String, body: String = "", onClose: (() -> Void)? = nil) {
         var d = EmailDraft()
         d.to = [message.from.email]
         d.subject = message.subject.hasPrefix("Re:") ? message.subject : "Re: \(message.subject)"
@@ -26,18 +38,20 @@ struct MacEmailComposeView: View {
         d.replyToMessageId = message.id
         _draft = State(initialValue: d)
         navigationTitle = "Reply"
+        onCloseHandler = onClose
     }
 
     /// Pre-filled body
-    init(body: String) {
+    init(body: String, onClose: (() -> Void)? = nil) {
         var d = EmailDraft()
         d.body = body
         _draft = State(initialValue: d)
         navigationTitle = "New Email"
+        onCloseHandler = onClose
     }
 
     /// Optionally pre-filled from seed body (empty string = new email)
-    init(seedBody: String) {
+    init(seedBody: String, onClose: (() -> Void)? = nil) {
         if seedBody.isEmpty {
             _draft = State(initialValue: EmailDraft())
         } else {
@@ -46,6 +60,7 @@ struct MacEmailComposeView: View {
             _draft = State(initialValue: d)
         }
         navigationTitle = "New Email"
+        onCloseHandler = onClose
     }
 
     private var canSend: Bool {
@@ -57,7 +72,7 @@ struct MacEmailComposeView: View {
         VStack(spacing: 0) {
             // Header
             HStack {
-                Button("Cancel") { dismiss() }
+                Button("Cancel") { close() }
                     .font(.system(size: 13))
                     .keyboardShortcut(.cancelAction)
                     .macClickablePointer()
@@ -74,7 +89,7 @@ struct MacEmailComposeView: View {
                     Task {
                         let success = await services.emailService.sendEmail(draft)
                         if success {
-                            dismiss()
+                            close()
                         } else {
                             showSendError = true
                         }

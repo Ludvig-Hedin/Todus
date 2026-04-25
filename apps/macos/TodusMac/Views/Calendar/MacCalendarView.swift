@@ -21,6 +21,15 @@ struct MacCalendarView: View {
     @State private var selectedEvent: CalendarEvent? = nil
     /// Date passed from tap-to-create on the time grid — opens system Calendar's event creation
     @State private var createEventDate: Date? = nil
+    /// Vertical month list scroll position (yyyy-MM) — `nil` before first layout.
+    @State private var monthScrollID: String?
+    /// AppKit window-space rect for trackpad hit testing; `.null` = whole key window
+    @State private var trackpadContentRect: CGRect = .null
+
+    /// Re-binds the trackpad handler when mode or focus date changes.
+    private var trackpadActionSyncKey: String {
+        "\(viewMode)|\(selectedDate.timeIntervalSince1970)"
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -47,6 +56,14 @@ struct MacCalendarView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Trackpad: dominant horizontal scroll steps Day / Week / Month / Year like mobile swipe
+        .calendarTrackpadNavigation(
+            isEnabled: hasAccess,
+            targetRectInWindow: $trackpadContentRect,
+            updateWhen: trackpadActionSyncKey
+        ) { direction in
+            handleTrackpadHorizontalNavigate(direction)
+        }
         .task {
             hasAccess = services.calendarService.canReadEvents()
             if !hasAccess {
@@ -54,10 +71,19 @@ struct MacCalendarView: View {
             }
             await loadEvents()
         }
-        .onChange(of: selectedDate) {
+        .onChange(of: selectedDate) { _, d in
+            if viewMode == "Month" {
+                let t = monthToken(for: firstOfMonth(d))
+                if monthScrollID != t {
+                    withAnimation(Self.calendarPageSpring) { monthScrollID = t }
+                }
+            }
             Task { await loadEvents() }
         }
-        .onChange(of: viewMode) {
+        .onChange(of: viewMode) { _, newMode in
+            if newMode == "Month" {
+                monthScrollID = monthToken(for: firstOfMonth(selectedDate))
+            }
             Task { await loadEvents() }
         }
         // Keyboard shortcuts
@@ -216,18 +242,21 @@ struct MacCalendarView: View {
         .pointerStyle(.link)
     }
 
+    private static let calendarPageSpring: Animation = .interpolatingSpring(
+        stiffness: 280,
+        damping: 32,
+        initialVelocity: 0
+    )
+
     private func navigate(by offset: Int) {
         let cal = Calendar.current
-        // Month view uses instant swap (no animation) to avoid confusing grid cell movement.
-        // Other views use a subtle transition.
-        let animated = viewMode != "Month"
-        if animated {
-            withAnimation(.easeOut(duration: 0.2)) {
-                applyNavigation(offset: offset, cal: cal)
-            }
-        } else {
+        withAnimation(Self.calendarPageSpring) {
             applyNavigation(offset: offset, cal: cal)
         }
+    }
+
+    private func handleTrackpadHorizontalNavigate(_ direction: Int) {
+        navigate(by: direction)
     }
 
     private func applyNavigation(offset: Int, cal: Calendar) {
@@ -241,6 +270,44 @@ struct MacCalendarView: View {
         default:
             selectedDate = cal.date(byAdding: .weekOfYear, value: offset, to: selectedDate) ?? selectedDate
         }
+    }
+
+    /// First-of-month anchors for vertical month paging (2018-01 … 2036-12).
+    private static let stackedMonthStarts: [Date] = {
+        var c = Calendar.current
+        guard var d = c.date(from: DateComponents(year: 2018, month: 1, day: 1)) else { return [] }
+        var out: [Date] = []
+        while c.component(.year, from: d) <= 2036 {
+            out.append(d)
+            guard let n = c.date(byAdding: .month, value: 1, to: d) else { break }
+            d = n
+        }
+        return out
+    }()
+
+    private func firstOfMonth(_ date: Date) -> Date {
+        let c = Calendar.current
+        return c.date(from: c.dateComponents([.year, .month], from: date)) ?? date
+    }
+
+    private func monthToken(for monthStart: Date) -> String {
+        let c = Calendar.current
+        let y = c.component(.year, from: monthStart)
+        let m = c.component(.month, from: monthStart)
+        return String(format: "%d-%02d", y, m)
+    }
+
+    private func dateFromMonthToken(_ token: String) -> Date? {
+        let parts = token.split(separator: "-")
+        guard parts.count == 2, let y = Int(parts[0]), let m = Int(parts[1]) else { return nil }
+        return Calendar.current.date(from: DateComponents(year: y, month: m, day: 1))
+    }
+
+    private func rotatedWeekdaySymbols() -> [String] {
+        let cal = Calendar.current
+        let symbols = cal.shortWeekdaySymbols
+        let offset = cal.firstWeekday - 1
+        return Array(symbols[offset...]) + Array(symbols[..<offset])
     }
 
     // MARK: - Day View
@@ -473,21 +540,52 @@ struct MacCalendarView: View {
 
     // MARK: - Month View
 
-    /// Apple Calendar-style month grid: weekday headers, bordered cells,
-    /// events as colored pill blocks. Shows prev/next month days muted.
-    /// No animation on month swap — instant transition to avoid confusing grid movement.
+    /// Stacked month pages: vertical scroll snaps month-to-month; horizontal trackpad steps months.
     private var monthView: some View {
+        GeometryReader { outer in
+            let pageH = max(1, outer.size.height)
+            ScrollView(.vertical, showsIndicators: true) {
+                LazyVStack(spacing: 0) {
+                    ForEach(Self.stackedMonthStarts, id: \.self) { monthStart in
+                        monthStackPage(monthStart: monthStart, pageHeight: pageH)
+                    }
+                }
+                .scrollTargetLayout()
+            }
+            .scrollTargetBehavior(.viewAligned)
+            .scrollPosition(id: $monthScrollID)
+            .onAppear {
+                if monthScrollID == nil {
+                    monthScrollID = monthToken(for: firstOfMonth(selectedDate))
+                }
+            }
+            .onChange(of: monthScrollID) { _, new in
+                guard let new, let d = dateFromMonthToken(new) else { return }
+                if !Calendar.current.isDate(
+                    firstOfMonth(selectedDate),
+                    equalTo: d,
+                    toGranularity: .month
+                ) {
+                    selectedDate = d
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func monthStackPage(monthStart: Date, pageHeight: CGFloat) -> some View {
         let cal = Calendar.current
+        let gridDates = monthGridDates(for: monthStart)
+        let totalRows = max(1, gridDates.count / 7)
+        let headerAndDivider: CGFloat = 45
+        let available = max(0, pageHeight - headerAndDivider)
+        let rowHeight = max(48, available / CGFloat(totalRows))
+        let pageMonth = cal.component(.month, from: monthStart)
+        let syms = rotatedWeekdaySymbols()
 
-        // Weekday symbols rotated to locale's first weekday
-        let symbols = cal.shortWeekdaySymbols
-        let offset = cal.firstWeekday - 1
-        let rotatedSymbols = Array(symbols[offset...]) + Array(symbols[..<offset])
-
-        return VStack(spacing: 0) {
-            // Weekday header row — fixed at top
+        VStack(spacing: 0) {
             HStack(spacing: 0) {
-                ForEach(Array(rotatedSymbols.enumerated()), id: \.offset) { _, symbol in
+                ForEach(Array(syms.enumerated()), id: \.offset) { _, symbol in
                     Text(symbol)
                         .font(MacTheme.calendarWeekdayFont())
                         .foregroundStyle(MacTheme.mutedText)
@@ -499,29 +597,18 @@ struct MacCalendarView: View {
 
             Divider()
 
-            // Month grid — fills remaining height, scrollable vertically
-            GeometryReader { geo in
-                let gridDates = monthGridDates(for: selectedDate)
-                let totalRows = gridDates.count / 7
-                let rowHeight = max(80, geo.size.height / CGFloat(totalRows))
-                let selectedMonth = cal.component(.month, from: selectedDate)
-
-                ScrollView(.vertical, showsIndicators: true) {
-                    LazyVGrid(
-                        columns: Array(repeating: GridItem(.flexible(), spacing: 0), count: 7),
-                        spacing: 0
-                    ) {
-                        ForEach(Array(gridDates.enumerated()), id: \.offset) { _, date in
-                            let isCurrentMonth = cal.component(.month, from: date) == selectedMonth
-                            monthDayCell(date, rowHeight: rowHeight, isMuted: !isCurrentMonth)
-                        }
-                    }
+            LazyVGrid(
+                columns: Array(repeating: GridItem(.flexible(), spacing: 0), count: 7),
+                spacing: 0
+            ) {
+                ForEach(Array(gridDates.enumerated()), id: \.offset) { _, date in
+                    let isCurrentMonth = cal.component(.month, from: date) == pageMonth
+                    monthDayCell(date, rowHeight: rowHeight, isMuted: !isCurrentMonth)
                 }
-                // Disable animation on the grid content itself — prevents the "circus" effect
-                // when navigating months. The grid swaps instantly.
-                .animation(.none, value: selectedDate)
             }
         }
+        .frame(minHeight: pageHeight, alignment: .top)
+        .id(monthToken(for: monthStart))
     }
 
     /// Builds the full 6-row (42-cell) grid of dates for a month view.
@@ -961,10 +1048,17 @@ struct MacCalendarView: View {
             start = dayStart
             end = cal.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart
         case "Month":
-            // Load extra for prev/next month days visible in the grid (up to 6 days each side)
-            let monthInterval = cal.dateInterval(of: .month, for: selectedDate)!
-            start = cal.date(byAdding: .day, value: -10, to: monthInterval.start) ?? monthInterval.start
-            end = cal.date(byAdding: .day, value: 10, to: monthInterval.end) ?? monthInterval.end
+            // Previous + current + next month (vertical paging and grid bleed)
+            let m0 = firstOfMonth(selectedDate)
+            if let prevStart = cal.date(byAdding: .month, value: -1, to: m0),
+               let endAfterNext = cal.date(byAdding: .month, value: 2, to: m0) {
+                start = cal.startOfDay(for: prevStart)
+                end = endAfterNext
+            } else {
+                let monthInterval = cal.dateInterval(of: .month, for: selectedDate)!
+                start = monthInterval.start
+                end = monthInterval.end
+            }
         case "Year":
             // Load the full selected year for event dot indicators on mini-months
             let year = cal.component(.year, from: selectedDate)

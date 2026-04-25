@@ -215,6 +215,7 @@ struct MeetingDetailView: View {
                     Text(summary)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
                 }
                 .padding(14)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -309,6 +310,7 @@ struct MeetingDetailView: View {
                         Text(seg.text)
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
                     }
                 }
             }
@@ -334,6 +336,7 @@ struct MeetingDetailView: View {
 
                             Text(msg.content)
                                 .font(.caption)
+                                .textSelection(.enabled)
                                 .padding(8)
                                 .background(
                                     msg.role == "user"

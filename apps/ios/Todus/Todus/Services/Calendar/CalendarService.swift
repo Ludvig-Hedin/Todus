@@ -271,7 +271,17 @@ private extension EKEvent {
         }()
 
         return CalendarEvent(
-            id: eventIdentifier ?? UUID().uuidString,
+            // EventKit usually returns a stable `eventIdentifier`; when it
+            // doesn't (very rare — unsaved events surfaced through some APIs)
+            // build a deterministic id from the calendar/title/start so
+            // `Identifiable` views like ScrollViewReader and ForEach don't
+            // see new ids every refresh and lose anchors/animations.
+            id: eventIdentifier ?? Self.derivedID(
+                calendarTitle: calendar?.title,
+                title: title,
+                start: startDate,
+                end: endDate
+            ),
             title: title ?? "Untitled",
             startDate: startDate,
             endDate: endDate,
@@ -285,5 +295,23 @@ private extension EKEvent {
             calendarName: calendar?.title ?? "Calendar",
             folderID: folderID
         )
+    }
+
+    /// Stable fallback identifier: hash of calendar+title+start+end.  Same
+    /// across refreshes for the same underlying event (which is what we need
+    /// for SwiftUI identity), and disambiguates two same-titled events at the
+    /// same time on different calendars.
+    private static func derivedID(
+        calendarTitle: String?,
+        title: String?,
+        start: Date,
+        end: Date
+    ) -> String {
+        var hasher = Hasher()
+        hasher.combine(calendarTitle ?? "")
+        hasher.combine(title ?? "")
+        hasher.combine(start.timeIntervalSinceReferenceDate)
+        hasher.combine(end.timeIntervalSinceReferenceDate)
+        return "derived-\(hasher.finalize())"
     }
 }

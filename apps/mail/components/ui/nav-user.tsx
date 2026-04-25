@@ -597,7 +597,7 @@ export function NavUser() {
                   sideOffset={8}
                 >
                   <div className="space-y-1">
-                    {billingCustomer?.stripe_id ? (
+                    {isPro || billingCustomer?.stripe_id ? (
                       <DropdownMenuItem onClick={() => openBillingPortal()}>
                         <div className="flex items-center gap-2">
                           <BanknoteIcon size={16} className="opacity-60" />

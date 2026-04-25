@@ -93,6 +93,9 @@ struct TodusMacApp: App {
         .defaultSize(width: 760, height: 640)
         .defaultPosition(.center)
         .windowResizability(.contentSize)
+        // Auxiliary window: do not auto-present or restore at launch. Otherwise a
+        // previously-open Settings window reappears while the main scene shows sign-in.
+        .defaultLaunchBehavior(.suppressed)
     }
 
     /// Makes the window title bar / toolbar chrome match the content background.

@@ -480,6 +480,7 @@ private struct GroupMessageBubbleView: View {
                     }
                     Text(message.content)
                         .font(.system(size: 15))
+                        .textSelection(.enabled)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
                         .background(Color.primary.opacity(0.12), in: RoundedRectangle(cornerRadius: AppTheme.Radius.card, style: .continuous))

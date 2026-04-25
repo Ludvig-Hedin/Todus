@@ -281,7 +281,14 @@ public final class AuthService: NSObject {
                     extractToken(from: data, response: http, email: credential.email) {
                 authLog.info("Apple sign-in: token extracted from redirect response")
             } else {
-                authLog.error("Apple sign-in: failed to extract token. Status=\(http.statusCode)")
+                // Surface the response body so the next failure is diagnosable from
+                // the device log alone — without this, every backend rejection looks
+                // identical and forces a full server-side debug session.
+                let bodyPreview = String(data: data, encoding: .utf8)?.prefix(500) ?? ""
+                let requestId = http.value(forHTTPHeaderField: "x-request-id") ?? "(none)"
+                authLog.error(
+                    "Apple sign-in: failed. status=\(http.statusCode) requestId=\(requestId) body=\(bodyPreview)"
+                )
                 // Set authState first, then the error message — any view-driven state mutation
                 // observing the .guest transition won't clobber the message this way.
                 authState = .guest
@@ -569,16 +576,34 @@ public final class AuthService: NSObject {
         let body: [String: String] = ["email": trimmed, "type": "sign-in"]
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
+        // === DIAGNOSTIC: log everything we're about to send ===
+        // type=sign-in stores the OTP under `sign-in-otp-${email}` in Better Auth's verification
+        // table, which is the same key /sign-in/email-otp reads from on verify.
+        authLog.info("[OTP_SEND] → POST \(url.absoluteString, privacy: .public)")
+        authLog.info("[OTP_SEND] → body email=\(trimmed, privacy: .public) type=sign-in")
+        let reqHeaders = (request.allHTTPHeaderFields ?? [:])
+            .map { "\($0.key)=\($0.value)" }.sorted().joined(separator: ", ")
+        authLog.info("[OTP_SEND] → headers \(reqHeaders, privacy: .public)")
+
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse else {
+                authLog.error(
+                    "[OTP_SEND] ← non-HTTP response: \(String(describing: response), privacy: .public)"
+                )
                 lastErrorMessage = "Failed to send code."
                 isLoading = false
                 return
             }
 
-            let bodyStr = String(data: data, encoding: .utf8) ?? "(empty)"
-            authLog.info("Email OTP send response: status=\(http.statusCode), body=\(bodyStr)")
+            let respHeaders = http.allHeaderFields
+                .map { "\($0.key)=\($0.value)" }.sorted().joined(separator: ", ")
+            let bodyStr = String(data: data, encoding: .utf8) ?? "(non-utf8, \(data.count) bytes)"
+            authLog.info(
+                "[OTP_SEND] ← status=\(http.statusCode, privacy: .public) bodyBytes=\(data.count, privacy: .public)"
+            )
+            authLog.info("[OTP_SEND] ← headers \(respHeaders, privacy: .public)")
+            authLog.info("[OTP_SEND] ← body \(bodyStr, privacy: .public)")
 
             if (200..<300).contains(http.statusCode) {
                 authState = .otpPending(email: trimmed)
@@ -590,10 +615,14 @@ public final class AuthService: NSObject {
                 default:
                     lastErrorMessage = errorMsg ?? "Failed to send code. Please try again."
                 }
-                authLog.error("Email OTP send failed: status=\(http.statusCode), error=\(errorMsg ?? "unknown"), body=\(bodyStr)")
+                authLog.error(
+                    "[OTP_SEND] failure status=\(http.statusCode, privacy: .public) parsedMessage=\(errorMsg ?? "(none)", privacy: .public)"
+                )
             }
         } catch {
-            authLog.error("Email OTP send error: \(error.localizedDescription)")
+            authLog.error(
+                "[OTP_SEND] transport error: \(error.localizedDescription, privacy: .public)"
+            )
             lastErrorMessage = "Network error. Check your connection."
         }
 
@@ -601,7 +630,8 @@ public final class AuthService: NSObject {
     }
 
     /// Verifies the 6-digit OTP code and signs in.
-    /// Better-Auth's sign-in/email-otp endpoint verifies the code AND creates a session in one call.
+    /// Better-Auth's /sign-in/email-otp endpoint verifies the code AND creates a session in one
+    /// call, returning a 200 JSON `{ token, user, ... }` body — there is no redirect to disable.
     public func verifyEmailOTP(code: String) async {
         guard case .otpPending(let email) = authState else { return }
         let trimmedCode = code.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -613,11 +643,9 @@ public final class AuthService: NSObject {
         isLoading = true
         lastErrorMessage = nil
 
-        // Use /sign-in/email-otp which verifies OTP + creates session in one step.
-        // disableRedirect: true → Better Auth returns the session JSON directly instead of
-        // issuing a 302 redirect. Without this, URLSession follows the redirect and the
-        // set-auth-token header on the 302 response is lost, consuming the OTP silently.
-        let url = backendURL.appending(path: "api/auth/sign-in/email-otp")
+        // Use the native bridge instead of Better Auth's generic HTTP handler so iOS/macOS
+        // receive a raw session token in a stable JSON response.
+        let url = backendURL.appending(path: "api/auth/native-email-otp/verify")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -625,8 +653,24 @@ public final class AuthService: NSObject {
         // parses hostname and checks against allowed domains (todus.app, localhost).
         request.setValue("https://todus.app", forHTTPHeaderField: "Origin")
 
-        let body: [String: Any] = ["email": email, "otp": trimmedCode, "disableRedirect": true]
+        let body: [String: Any] = ["email": email, "otp": trimmedCode]
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+
+        // === DIAGNOSTIC: log everything we're about to send ===
+        let codeMask: String = {
+            guard !trimmedCode.isEmpty else { return "(empty)" }
+            return "len=\(trimmedCode.count) leading=\(trimmedCode.prefix(1))"
+        }()
+        authLog.info("[OTP_VERIFY] → POST \(url.absoluteString, privacy: .public)")
+        authLog.info(
+            "[OTP_VERIFY] → body email=\(email, privacy: .public) otp=\(codeMask, privacy: .public)"
+        )
+        let reqHeaders = (request.allHTTPHeaderFields ?? [:])
+            .map { "\($0.key)=\($0.value)" }.sorted().joined(separator: ", ")
+        authLog.info("[OTP_VERIFY] → headers \(reqHeaders, privacy: .public)")
+        authLog.info(
+            "[OTP_VERIFY] → bodyBytes=\(request.httpBody?.count ?? 0, privacy: .public)"
+        )
 
         do {
             // Don't follow redirects — we need the headers on the initial response.
@@ -635,32 +679,51 @@ public final class AuthService: NSObject {
             let config = URLSessionConfiguration.default
             let noRedirectSession = URLSession(
                 configuration: config, delegate: NoRedirectDelegate.shared, delegateQueue: nil)
+            // URLSessions created with a delegate retain that delegate until invalidated;
+            // mirror the pattern used in signInWithApple/signInWithGoogle (commit 945e1431).
+            defer { noRedirectSession.finishTasksAndInvalidate() }
             let (data, response) = try await noRedirectSession.data(for: request)
             guard let http = response as? HTTPURLResponse else {
+                authLog.error(
+                    "[OTP_VERIFY] ← non-HTTP response: \(String(describing: response), privacy: .public)"
+                )
                 lastErrorMessage = "Verification failed."
                 isLoading = false
                 return
             }
 
-            authLog.info("Email OTP verify response: status=\(http.statusCode)")
+            // === DIAGNOSTIC: log the full server response ===
+            let respHeaders = http.allHeaderFields
+                .map { "\($0.key)=\($0.value)" }.sorted().joined(separator: ", ")
+            let bodyStr = String(data: data, encoding: .utf8) ?? "(non-utf8, \(data.count) bytes)"
+            authLog.info(
+                "[OTP_VERIFY] ← status=\(http.statusCode, privacy: .public) bodyBytes=\(data.count, privacy: .public)"
+            )
+            authLog.info("[OTP_VERIFY] ← headers \(respHeaders, privacy: .public)")
+            authLog.info("[OTP_VERIFY] ← body \(bodyStr, privacy: .public)")
 
-            // Check redirect Location for a token (defensive — shouldn't happen with disableRedirect)
+            // Check redirect Location for a token (defensive — Better Auth's /sign-in/email-otp
+            // returns 200 JSON, not a redirect, but we keep this for older server versions).
             if (300..<400).contains(http.statusCode),
                let location = http.value(forHTTPHeaderField: "Location"),
                let locationURL = URL(string: location),
                let comps = URLComponents(url: locationURL, resolvingAgainstBaseURL: false),
                let token = comps.queryItems?.first(where: { $0.name == "token" })?.value {
-                authLog.info("Email OTP: token found in redirect Location header")
+                authLog.info("[OTP_VERIFY] token found in redirect Location header")
                 completeAuthentication(token: token, email: email)
             } else if (200..<300).contains(http.statusCode) || (300..<400).contains(http.statusCode) {
                 if extractToken(from: data, response: http, email: email) {
-                    authLog.info("Email OTP: authenticated successfully")
+                    authLog.info("[OTP_VERIFY] authenticated successfully")
                 } else {
+                    authLog.error("[OTP_VERIFY] success status but no token extractable from response")
                     lastErrorMessage = "Verification succeeded but something went wrong. Please try again."
                     authState = .guest
                 }
             } else {
                 let errorMsg = parseErrorMessage(from: data)
+                authLog.error(
+                    "[OTP_VERIFY] failure status=\(http.statusCode, privacy: .public) parsedMessage=\(errorMsg ?? "(none)", privacy: .public)"
+                )
                 switch http.statusCode {
                 case 400, 401:
                     lastErrorMessage = "Invalid or expired code. Request a new one."
@@ -669,7 +732,9 @@ public final class AuthService: NSObject {
                 }
             }
         } catch {
-            authLog.error("Email OTP verify error: \(error.localizedDescription)")
+            authLog.error(
+                "[OTP_VERIFY] transport error: \(error.localizedDescription, privacy: .public)"
+            )
             lastErrorMessage = "Network error. Check your connection."
         }
 
@@ -845,6 +910,25 @@ public final class AuthService: NSObject {
             // Network error — don't mark as expired, might just be offline
         }
         return false
+    }
+
+    /// Returns the best available bearer token for an authenticated request.
+    /// If the stored JWT is expired or about to expire, refresh it first and
+    /// fall back to the existing token if refresh is unavailable or fails.
+    public func validBearerToken() async -> String? {
+        guard let token = bearerToken, !token.isEmpty else {
+            return nil
+        }
+
+        if !isJWTExpiredOrExpiring(token) {
+            return token
+        }
+
+        if await refreshAccessToken(), let refreshed = bearerToken, !refreshed.isEmpty {
+            return refreshed
+        }
+
+        return token
     }
 
     // MARK: - Access + Refresh Token Pattern
@@ -1280,8 +1364,10 @@ public final class AuthService: NSObject {
 
         // Direct token field
         if let token = json["token"] as? String, !token.isEmpty {
-            let responseEmail = json["email"] as? String ?? email
-            completeAuthentication(token: token, email: responseEmail)
+            let user = json["user"] as? [String: Any]
+            let responseEmail = user?["email"] as? String ?? json["email"] as? String ?? email
+            let responseSessionId = json["sessionId"] as? String
+            completeAuthentication(token: token, email: responseEmail, sessionId: responseSessionId)
             return true
         }
 

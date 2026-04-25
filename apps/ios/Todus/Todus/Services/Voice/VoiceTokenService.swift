@@ -18,10 +18,11 @@ final class VoiceTokenService {
         self.backendURL = backendURL
     }
 
-    /// Returns the WebSocket proxy URL and the Bearer token for authentication.
-    /// The caller sets the token as an `Authorization` header on the WS handshake.
-    func getEndpoint() throws -> (url: URL, token: String) {
-        guard let token = authService.bearerToken else {
+    /// Returns the WebSocket proxy URL and a fresh-enough Bearer token for authentication.
+    /// Voice chat uses a WebSocket handshake instead of the normal API client, so it
+    /// must proactively refresh the JWT before connecting instead of waiting for a 401 retry.
+    func getEndpoint() async throws -> (url: URL, token: String) {
+        guard let token = await authService.validBearerToken() else {
             throw VoiceEndpointError.notAuthenticated
         }
 

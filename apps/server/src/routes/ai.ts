@@ -1,3 +1,4 @@
+import { hasAiCredits, trackAiUsage } from '../lib/billing';
 import { getCachedMemories, formatMemoriesForPrompt, addMemories, invalidateMemoryCache, preloadMemories } from '../lib/mem0';
 import { injectMentionContextIntoMessages, mentionRefSchema } from '../lib/mentions';
 import { systemPrompt } from '../services/call-service/system-prompt';
@@ -380,6 +381,21 @@ aiRouter.post('/chat', async (c) => {
   const apiKey = env.OPENROUTER_API_SECRET ?? env.OPENROUTER_API_KEY;
   if (!apiKey) return c.json({ error: 'AI not configured' }, 503);
 
+  // Pre-flight: block if the user has exhausted their AI credits.
+  // Cached read (~1ms). Fails open if the lookup itself errors — we never want
+  // a billing-cache hiccup to take chat down.
+  try {
+    const allowed = await hasAiCredits(user.id);
+    if (!allowed) {
+      return c.json(
+        { error: 'ai_credits_exhausted', message: 'Out of AI credits. Upgrade or wait for the next reset.' },
+        402,
+      );
+    }
+  } catch (error) {
+    console.error('[ai/chat] hasAiCredits check failed (allowing through)', error);
+  }
+
   const model = parsed.data.model || env.DEFAULT_MODEL || 'openai/gpt-4.1-mini';
 
   // ── Mem0: Inject cached memories into the message stream ─────────────────
@@ -494,6 +510,10 @@ aiRouter.post('/chat', async (c) => {
       model,
       messages: enrichedMessages,
       stream: shouldStream,
+      // Ask OpenRouter to include token usage in the final SSE chunk so we can
+      // bill the user for actual cost. No-op for non-streaming responses
+      // (which include `usage` on the response object directly).
+      ...(shouldStream ? { stream_options: { include_usage: true } } : {}),
       // Include tool definitions for task mutations
       tools: [
         {
@@ -702,6 +722,9 @@ aiRouter.post('/chat', async (c) => {
         const decoder = new TextDecoder();
         let reasoningStartTime = 0;
         let hasReasoning = false;
+        // OpenRouter emits usage on the final chunk when stream_options.include_usage=true.
+        let usagePromptTokens = 0;
+        let usageCompletionTokens = 0;
 
         while (true) {
           const { done, value } = await reader.read();
@@ -719,6 +742,12 @@ aiRouter.post('/chat', async (c) => {
               if (json === '[DONE]') continue;
               const sseChunk = JSON.parse(json);
               const delta = sseChunk?.choices?.[0]?.delta;
+
+              // Token usage arrives on the final chunk (often with empty choices).
+              if (sseChunk?.usage) {
+                usagePromptTokens = Number(sseChunk.usage.prompt_tokens ?? 0);
+                usageCompletionTokens = Number(sseChunk.usage.completion_tokens ?? 0);
+              }
 
               // Capture main content for Mem0
               if (delta?.content) assistantText += delta.content;
@@ -757,6 +786,22 @@ aiRouter.post('/chat', async (c) => {
             console.warn('[Mem0] Post-stream memory storage failed:', error);
           });
           c.executionCtx?.waitUntil?.(storePromise);
+        }
+
+        // 4. Bill the user for actual cost. Fire-and-forget — never block the
+        // close. If usage was missing from the stream (some models don't emit
+        // it), we skip — better than charging a guess.
+        if (userId && (usagePromptTokens > 0 || usageCompletionTokens > 0)) {
+          c.executionCtx?.waitUntil?.(
+            trackAiUsage({
+              userId,
+              model,
+              inputTokens: usagePromptTokens,
+              outputTokens: usageCompletionTokens,
+            }).catch((error) => {
+              console.error('[ai/chat] trackAiUsage failed', error);
+            }),
+          );
         }
 
         controller.close();

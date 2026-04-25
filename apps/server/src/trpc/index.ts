@@ -27,6 +27,7 @@ import { mailAssistantRouter } from './routes/mail-assistant';
 import { assistantRouter } from './routes/assistant';
 import { docsRouter } from './routes/docs';
 import { aiRouter } from './routes/ai';
+import { subscriptionRouter } from './routes/subscription';
 import { router } from './trpc';
 
 export const appRouter = router({
@@ -57,6 +58,7 @@ export const appRouter = router({
   tasks: tasksRouter,
   folders: foldersRouter,
   docs: docsRouter,
+  subscription: subscriptionRouter,
 });
 
 export type AppRouter = typeof appRouter;
