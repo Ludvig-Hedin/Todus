@@ -1,5 +1,11 @@
 # Project Changelog
 
+## [2026-04-25] Fix — Native Gmail linking uses current app session
+
+- [Fix] Native Gmail linking now sends the app's stored refresh/session token to `/api/auth/native-link-social`, and the backend validates that exact session for the authenticated user before forwarding to Better Auth `link-social`.
+- [Fix] This removes the production 401 path where `/api/auth/me` accepted the native JWT but Gmail linking failed with "No active Better Auth session found for account linking."
+- **Files:** `packages/swift-auth/Sources/TodusAuth/AuthService.swift`, `apps/server/src/main.ts`
+
 ## [2026-04-25] Fix — Native Email OTP sign-in bridge
 
 - [Fix] **Backend:** Added `POST /api/auth/native-email-otp/verify` for iOS/macOS. It validates the existing Better Auth `sign-in` OTP record, creates a native session token, and returns structured JSON errors instead of the opaque empty-body 500 seen from `/api/auth/sign-in/email-otp`.

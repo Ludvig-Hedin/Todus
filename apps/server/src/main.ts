@@ -1139,7 +1139,15 @@ const api = new Hono<HonoContext>()
       return c.json({ error: 'Missing bearer token' }, 401);
     }
 
-    const { provider, callbackURL, disableRedirect, errorCallbackURL, scopes, requestSignUp } =
+    const {
+      provider,
+      callbackURL,
+      disableRedirect,
+      errorCallbackURL,
+      scopes,
+      requestSignUp,
+      refreshToken,
+    } =
       await c.req.json<{
         provider: string;
         callbackURL?: string;
@@ -1147,18 +1155,36 @@ const api = new Hono<HonoContext>()
         errorCallbackURL?: string;
         scopes?: string[];
         requestSignUp?: boolean;
+        refreshToken?: string;
       }>();
 
     const { db } = createDb(env.HYPERDRIVE.connectionString);
-    const [activeSession] = await db
+    const trimmedRefreshToken = refreshToken?.trim();
+    const sessionLookup = db
       .select({ token: session.token })
       .from(session)
-      .where(and(eq(session.userId, sessionUser.id), gt(session.expiresAt, new Date())))
-      .orderBy(desc(session.updatedAt), desc(session.createdAt))
-      .limit(1);
+      .where(
+        trimmedRefreshToken
+          ? and(
+              eq(session.userId, sessionUser.id),
+              eq(session.token, trimmedRefreshToken),
+              gt(session.expiresAt, new Date()),
+            )
+          : and(eq(session.userId, sessionUser.id), gt(session.expiresAt, new Date())),
+      );
+    const [activeSession] = trimmedRefreshToken
+      ? await sessionLookup.limit(1)
+      : await sessionLookup.orderBy(desc(session.updatedAt), desc(session.createdAt)).limit(1);
 
     if (!activeSession?.token) {
-      return c.json({ error: 'No active Better Auth session found for account linking.' }, 401);
+      return c.json(
+        {
+          error: trimmedRefreshToken
+            ? 'Native session expired. Please sign in again before linking Gmail.'
+            : 'No active Better Auth session found for account linking.',
+        },
+        401,
+      );
     }
 
     const cookiePrefix = env.NODE_ENV === 'development' ? 'better-auth-dev' : 'better-auth';

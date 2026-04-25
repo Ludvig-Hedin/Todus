@@ -73,6 +73,7 @@ Last updated: 2026-04-25
 - `DONE` Fixed the privacy settings "remove trusted sender" control so it no longer submits the form when removing an address.
 - `DONE` Fixed native account linking to use the dedicated `/auth/native-link-social` bridge and cleared stale saved defaults when deleting a connection.
 - `DONE` Fixed iOS Gmail onboarding to use the Gmail link-social flow instead of auth-only Google sign-in, shared the native connection polling helper across onboarding/email/settings, and made shared native auth ignore `todus://link-callback` when received as an app URL.
+- `DONE` Fixed production native Gmail linking 401s by sending the app's stored refresh/session token to `/auth/native-link-social` and validating that exact Better Auth session before forwarding to `link-social`.
 - `IN_PROGRESS` Apply targeted fixes for AI profile prompt safety, session freshness filtering, navigation i18n, and device logout UX.
 - `PENDING` Verify whether the web settings-general AI profile fields exist in this branch before adding localization keys for them.
 

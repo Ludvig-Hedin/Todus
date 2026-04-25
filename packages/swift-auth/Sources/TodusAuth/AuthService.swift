@@ -482,7 +482,7 @@ public final class AuthService: NSObject {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
 
-        let payload: [String: Any] = [
+        var payload: [String: Any] = [
             "provider": provider,
             // Better Auth's link-social endpoint expects the *final* post-link redirect,
             // not the provider callback route. The web client hands it an app URL directly;
@@ -493,6 +493,9 @@ public final class AuthService: NSObject {
             // to decode Google's HTML login page instead of a JSON payload.
             "disableRedirect": true,
         ]
+        if let refreshToken, !refreshToken.isEmpty {
+            payload["refreshToken"] = refreshToken
+        }
         request.httpBody = try JSONSerialization.data(withJSONObject: payload)
 
         let config = URLSessionConfiguration.default
