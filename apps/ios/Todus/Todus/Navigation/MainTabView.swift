@@ -22,9 +22,9 @@ struct MainTabView: View {
 
     @State private var homeTabId = UUID()
     @State private var tasksTabId = UUID()
+    @State private var createTabId = UUID()
     @State private var emailTabId = UUID()
     @State private var calendarTabId = UUID()
-    @State private var meetingsTabId = UUID()
 
     @State private var sheetTab: AppTab? = nil
 
@@ -62,6 +62,11 @@ struct MainTabView: View {
                 .tabItem { Label(AppTab.tasks.title, systemImage: AppTab.tasks.inactiveIcon()) }
                 .tag(AppTab.tasks)
 
+            Color.clear
+                .id(createTabId)
+                .tabItem { Label(AppTab.create.title, systemImage: AppTab.create.inactiveIcon()) }
+                .tag(AppTab.create)
+
             NavigationStack { EmailInboxView() }
                 .id(emailTabId)
                 .tabItem { Label(AppTab.email.title, systemImage: AppTab.email.inactiveIcon()) }
@@ -80,15 +85,18 @@ struct MainTabView: View {
             .id(calendarTabId)
             .tabItem { Label(AppTab.calendar.title, systemImage: AppTab.calendar.inactiveIcon()) }
             .tag(AppTab.calendar)
-
-            NavigationStack { MeetingsListView() }
-                .id(meetingsTabId)
-                .tabItem { Label(AppTab.meetings.title, systemImage: AppTab.meetings.inactiveIcon()) }
-                .tag(AppTab.meetings)
         }
         .tint(Color(UIColor.label))
         .onChange(of: selectedTab) { old, new in
             guard new != old else { return }
+
+            if new == .create {
+                createSheetInitialType = createType(for: old)
+                selectedTab = old
+                withAnimation(.snappy(duration: 0.2)) { showCreateSheet = true }
+                return
+            }
+
             previousNavigationTab = new
             services.currentTab = new
             if new == .calendar {
@@ -141,7 +149,11 @@ struct MainTabView: View {
         }
         .onChange(of: services.navigateTo) { _, newTab in
             guard let tab = newTab else { return }
-            selectedTab = tab
+            if tab == .meetings {
+                sheetTab = .meetings
+            } else {
+                selectedTab = tab
+            }
             services.navigateTo = nil
         }
         .onChange(of: services.showsComposeEmail) { _, isPresented in
@@ -159,8 +171,12 @@ struct MainTabView: View {
         }
         .onChange(of: services.navigateToSheet) { _, tab in
             guard let tab else { return }
-            selectedTab = tab
-            sheetTab = nil
+            if tab == .meetings {
+                sheetTab = .meetings
+            } else {
+                selectedTab = tab
+                sheetTab = nil
+            }
             services.navigateToSheet = nil
         }
         .onAppear {
@@ -180,7 +196,16 @@ struct MainTabView: View {
     }
 
     private var visibleContentTabs: Set<AppTab> {
-        [.home, .tasks, .email, .calendar, .meetings]
+        [.home, .tasks, .email, .calendar]
+    }
+
+    private func createType(for tab: AppTab) -> CreateItemType {
+        switch tab {
+        case .tasks:    return .task
+        case .calendar: return .event
+        case .email:    return .email
+        default:        return .auto
+        }
     }
 
     // MARK: - Bindings

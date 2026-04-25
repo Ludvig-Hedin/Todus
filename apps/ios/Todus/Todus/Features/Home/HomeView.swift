@@ -83,9 +83,9 @@ struct HomeView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 .scrollDismissesKeyboard(.interactively)
-                // Match TasksTabView: let content scroll with bottom inset so rows can move past
-                // the floating tab bar instead of being clipped at a hard horizontal edge.
-                .contentMargins(.bottom, 130, for: .scrollContent)
+                // Keep the last cards clear of the native tab bar without reserving the old
+                // floating custom-bar height.
+                .contentMargins(.bottom, 32, for: .scrollContent)
             }
         }
         .toolbar(.hidden, for: .navigationBar)

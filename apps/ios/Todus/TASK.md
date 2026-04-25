@@ -46,6 +46,7 @@
 - [ ] **IOS-035** — Test AI chat sheet opens from tab bar
 - [ ] **IOS-036** — Add safe area insets for custom tab bar clearance
 - [x] **IOS-080** — Remove runtime floating tab bar and keep only the native iOS tab bar
+- [x] **IOS-081** — Restore the native tab bar center `+` action and remove Meetings from visible tabs
 
 #### iOS — Email Enhancements
 - [ ] **IOS-047** — Add email section to HomeView (unread count + recent threads)
