@@ -193,6 +193,16 @@ public final class AuthService: NSObject {
         lastErrorMessage = nil
         authState = .authenticating
 
+        // Guarantee isLoading is cleared on every exit path so the UI never gets stuck on
+        // a spinner when the OAuth flow errors mid-way. completeAuthentication() owns the
+        // loading state once it's running (sets isCompletingAuthentication = true before
+        // returning), so we only clear here when no completion task is in flight.
+        defer {
+            if !isCompletingAuthentication {
+                isLoading = false
+            }
+        }
+
         let provider = ASAuthorizationAppleIDProvider()
         let appleRequest = provider.createRequest()
         appleRequest.requestedScopes = [.email, .fullName]
@@ -207,9 +217,8 @@ public final class AuthService: NSObject {
 
             guard let idTokenData = credential.identityToken,
                   let idToken = String(data: idTokenData, encoding: .utf8) else {
-                lastErrorMessage = "Failed to get Apple ID token."
                 authState = .guest
-                isLoading = false
+                lastErrorMessage = "Failed to get Apple ID token."
                 return
             }
 
@@ -239,12 +248,14 @@ public final class AuthService: NSObject {
             // Don't follow redirects — we want the response directly
             let config = URLSessionConfiguration.default
             let session = URLSession(configuration: config, delegate: NoRedirectDelegate.shared, delegateQueue: nil)
+            // URLSessions created with a delegate retain that delegate until invalidated,
+            // so leaking the session leaks the delegate (and the underlying connections).
+            defer { session.finishTasksAndInvalidate() }
             let (data, response) = try await session.data(for: request)
 
             guard let http = response as? HTTPURLResponse else {
-                lastErrorMessage = "Apple Sign In failed. Invalid response."
                 authState = .guest
-                isLoading = false
+                lastErrorMessage = "Apple Sign In failed. Invalid response."
                 return
             }
 
@@ -271,23 +282,22 @@ public final class AuthService: NSObject {
                 authLog.info("Apple sign-in: token extracted from redirect response")
             } else {
                 authLog.error("Apple sign-in: failed to extract token. Status=\(http.statusCode)")
-                lastErrorMessage = "Apple Sign In failed. Please try again."
+                // Set authState first, then the error message — any view-driven state mutation
+                // observing the .guest transition won't clobber the message this way.
                 authState = .guest
+                lastErrorMessage = "Apple Sign In failed. Please try again."
             }
 
         } catch {
             authLog.error("Apple sign-in error: \(error.localizedDescription)")
+            authState = .guest
             if (error as NSError).domain == ASAuthorizationError.errorDomain,
                (error as NSError).code == ASAuthorizationError.canceled.rawValue {
                 // User cancelled — no error message needed
             } else {
+                // Set lastErrorMessage AFTER authState so it survives any state-driven reset
                 lastErrorMessage = "Something went wrong during sign in. Please try again."
             }
-            authState = .guest
-        }
-
-        if !isCompletingAuthentication {
-            isLoading = false
         }
     }
 
@@ -303,6 +313,16 @@ public final class AuthService: NSObject {
         isLoading = true
         lastErrorMessage = nil
         authState = .authenticating
+
+        // Guarantee isLoading and webAuthSession are cleared on every exit path. Before
+        // this defer, errors during the OAuth flow could leave isLoading=true forever
+        // when handleAuthCallback raced with the function's normal exit.
+        defer {
+            webAuthSession = nil
+            if !isCompletingAuthentication {
+                isLoading = false
+            }
+        }
 
         do {
             // Step 1: POST to get the Google OAuth redirect URL from Better-Auth.
@@ -326,6 +346,7 @@ public final class AuthService: NSObject {
             // Use no-redirect delegate to catch the redirect URL instead of following it
             let config = URLSessionConfiguration.default
             let session = URLSession(configuration: config, delegate: NoRedirectDelegate.shared, delegateQueue: nil)
+            defer { session.finishTasksAndInvalidate() }
             let (data, response) = try await session.data(for: request)
 
             guard let http = response as? HTTPURLResponse else {
@@ -353,9 +374,9 @@ public final class AuthService: NSObject {
             guard let oauthURL = googleAuthURL else {
                 let bodyStr = String(data: data, encoding: .utf8) ?? "(empty)"
                 authLog.error("Google sign-in: no redirect URL. status=\(http.statusCode), body=\(bodyStr)")
-                lastErrorMessage = "Google Sign In failed. Please try again."
+                // authState first, then error — see signInWithApple for rationale
                 authState = .guest
-                isLoading = false
+                lastErrorMessage = "Google Sign In failed. Please try again."
                 return
             }
 
@@ -391,7 +412,9 @@ public final class AuthService: NSObject {
                 webSession.prefersEphemeralWebBrowserSession = false
                 webSession.presentationContextProvider = self
                 self.webAuthSession = webSession
-                webSession.start()
+                if !webSession.start() {
+                    continuation.resume(throwing: AuthError.failedToStartWebAuthentication)
+                }
             }
 
             debugAuthLog("Google OAuth callback received for scheme \(callbackURL.scheme ?? "unknown")")
@@ -399,22 +422,19 @@ public final class AuthService: NSObject {
 
         } catch {
             let nsError = error as NSError
+            if !isAuthenticated {
+                authState = .guest
+            }
             if nsError.domain == ASWebAuthenticationSessionError.errorDomain,
                nsError.code == ASWebAuthenticationSessionError.canceledLogin.rawValue {
                 authLog.info("Google sign-in cancelled by user")
             } else {
                 authLog.error("Google sign-in error: domain=\(nsError.domain) code=\(nsError.code) desc=\(error.localizedDescription)")
+                // Set lastErrorMessage AFTER authState so it survives any state-driven reset
                 lastErrorMessage = "Google Sign In failed. Please try again."
             }
-            if !isAuthenticated {
-                authState = .guest
-            }
         }
-
-        webAuthSession = nil
-        if !isCompletingAuthentication {
-            isLoading = false
-        }
+        // webAuthSession + isLoading reset handled in defer at top of function
     }
 
     // MARK: - Link Additional Account (Multi-Account)
@@ -437,10 +457,14 @@ public final class AuthService: NSObject {
 
         isLoading = true
         defer { isLoading = false }
+        // Always release the ASWebAuthenticationSession reference, even if the await
+        // below throws (cancellation, network error, etc). Without this, the session
+        // ref leaks until the next link/sign-in attempt overwrites it.
+        defer { webAuthSession = nil }
 
         // Step 1: Get the OAuth URL from the native link bridge, passing our
         // Bearer token so the backend knows which user to link the new account to.
-        let linkURL = backendURL.appending(path: "auth/native-link-social")
+        let linkURL = backendURL.appending(path: "api/auth/native-link-social")
         var request = URLRequest(url: linkURL)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -451,31 +475,42 @@ public final class AuthService: NSObject {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
 
-        var callbackComponents = URLComponents(
-            url: backendURL.appendingPathComponent("api/auth/callback").appendingPathComponent(provider),
-            resolvingAgainstBaseURL: false
-        )
-        callbackComponents?.queryItems = [
-            URLQueryItem(name: "callbackURL", value: "todus://link-callback")
-        ]
-        guard let callbackURL = callbackComponents?.url else {
-            throw AuthError.networkError
-        }
-
-        let payload: [String: String] = [
+        let payload: [String: Any] = [
             "provider": provider,
-            "callbackURL": callbackURL.absoluteString
+            // Better Auth's link-social endpoint expects the *final* post-link redirect,
+            // not the provider callback route. The web client hands it an app URL directly;
+            // native needs the custom scheme so ASWebAuthenticationSession can intercept it.
+            "callbackURL": "todus://link-callback",
+            // Native must receive the Google OAuth URL and open it itself. If Better Auth is
+            // allowed to redirect immediately, URLSession follows the 302 and we end up trying
+            // to decode Google's HTML login page instead of a JSON payload.
+            "disableRedirect": true,
         ]
-        request.httpBody = try JSONEncoder().encode(payload)
+        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
 
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<400).contains(http.statusCode) else {
-            throw AuthError.networkError
+        let config = URLSessionConfiguration.default
+        let session = URLSession(configuration: config, delegate: NoRedirectDelegate.shared, delegateQueue: nil)
+        defer { session.finishTasksAndInvalidate() }
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw AuthError.invalidResponse
         }
 
-        struct OAuthRedirect: Decodable { let url: String }
-        let redirect = try JSONDecoder().decode(OAuthRedirect.self, from: data)
-        guard let oauthURL = URL(string: redirect.url) else {
+        var oauthURL: URL?
+        if (300..<400).contains(http.statusCode),
+           let location = http.value(forHTTPHeaderField: "Location"),
+           let locationURL = URL(string: location) {
+            oauthURL = locationURL
+        } else if (200..<300).contains(http.statusCode),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let urlString = json["url"] as? String,
+                  let decodedURL = URL(string: urlString) {
+            oauthURL = decodedURL
+        }
+
+        guard let oauthURL else {
+            let bodyStr = String(data: data, encoding: .utf8) ?? "(empty)"
+            authLog.error("Link social: no redirect URL. status=\(http.statusCode), body=\(bodyStr)")
             throw AuthError.networkError
         }
 
@@ -499,10 +534,11 @@ public final class AuthService: NSObject {
             webSession.prefersEphemeralWebBrowserSession = false
             webSession.presentationContextProvider = self
             self.webAuthSession = webSession
-            webSession.start()
+            if !webSession.start() {
+                continuation.resume(throwing: AuthError.failedToStartWebAuthentication)
+            }
         }
 
-        webAuthSession = nil
         debugAuthLog("Link account callback received — new connection should be available")
         // The caller should refresh the connections list after this completes
     }
@@ -660,9 +696,19 @@ public final class AuthService: NSObject {
 
     /// Handle the todus://auth-callback?token=... deep link from OAuth flows.
     public func handleAuthCallback(url: URL) {
-        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return }
+        // Validate scheme/host before parsing query items. A malformed URL (wrong
+        // scheme, wrong host, missing components) used to silently return, which
+        // left authState stuck at .authenticating and the UI on the spinner forever.
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            authLog.error("Auth callback: invalid URL components — \(url.absoluteString)")
+            isCompletingAuthentication = false
+            isLoading = false
+            authState = .guest
+            lastErrorMessage = "Sign-in failed. Please try again."
+            return
+        }
 
-        if let token = components.queryItems?.first(where: { $0.name == "token" })?.value {
+        if let token = components.queryItems?.first(where: { $0.name == "token" })?.value, !token.isEmpty {
             if shouldIgnoreCallbackToken(token) {
                 debugAuthLog("Auth callback: ignoring duplicate token \(tokenPreview(token))")
                 return
@@ -675,9 +721,13 @@ public final class AuthService: NSObject {
             authLog.info("Auth callback: token received \(self.tokenPreview(token)), refreshToken=\(callbackRefreshToken != nil ? "present" : "absent")")
             completeAuthentication(token: token, email: email, sessionId: sessionId, refreshToken: callbackRefreshToken)
         } else {
+            // No token query param — malformed callback. Reset all in-flight state so the
+            // UI returns to the email input screen instead of being stranded on a spinner.
             authLog.error("Auth callback: no token in URL — \(url.absoluteString)")
-            lastErrorMessage = "Sign in failed. No token received."
+            isCompletingAuthentication = false
+            isLoading = false
             authState = .guest
+            lastErrorMessage = "Sign-in failed. Please try again."
         }
     }
 
@@ -861,6 +911,14 @@ public final class AuthService: NSObject {
                    let newToken = json["token"] as? String, !newToken.isEmpty {
                     debugAuthLog("refreshAccessToken: new JWT obtained")
                     self.bearerToken = newToken
+                    // Capture session ID returned by the refresh endpoint so the
+                    // X-Todus-Session-Id header is sent on subsequent API calls.
+                    // This is the primary mechanism for Apple Sign-In / Email OTP
+                    // users who don't go through the /auth/mobile-token deep-link flow.
+                    if let sid = json["sessionId"] as? String, !sid.isEmpty {
+                        self.currentSessionId = sid
+                        debugAuthLog("refreshAccessToken: captured sessionId \(sid.prefix(8))…")
+                    }
                     self.isSessionExpired = false
                     return true
                 }
@@ -1222,12 +1280,15 @@ public final class AuthService: NSObject {
             return true
         }
 
-        // Nested session.token (some Better-Auth responses)
-        if let session = json["session"] as? [String: Any],
-           let token = session["token"] as? String, !token.isEmpty {
+        // Nested session.token (Better-Auth standard response for sign-in endpoints).
+        // Also extract session.id so we can identify which session this device is running
+        // in — used by the Active Sessions UI and the X-Todus-Session-Id request header.
+        if let sessionObj = json["session"] as? [String: Any],
+           let token = sessionObj["token"] as? String, !token.isEmpty {
             let user = json["user"] as? [String: Any]
             let responseEmail = user?["email"] as? String ?? email
-            completeAuthentication(token: token, email: responseEmail)
+            let responseSessionId = sessionObj["id"] as? String
+            completeAuthentication(token: token, email: responseEmail, sessionId: responseSessionId)
             return true
         }
 
@@ -1235,7 +1296,8 @@ public final class AuthService: NSObject {
         if let urlString = json["url"] as? String, let url = URL(string: urlString),
            let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
            let token = components.queryItems?.first(where: { $0.name == "token" })?.value {
-            completeAuthentication(token: token, email: email)
+            let sessionId = components.queryItems?.first(where: { $0.name == "sessionId" })?.value
+            completeAuthentication(token: token, email: email, sessionId: sessionId)
             return true
         }
 
@@ -1249,6 +1311,7 @@ public final class AuthService: NSObject {
         case invalidResponse
         case notAuthenticated
         case networkError
+        case failedToStartWebAuthentication
     }
 }
 
