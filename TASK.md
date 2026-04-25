@@ -1,6 +1,20 @@
 # Migration Backlog
 
-Last updated: 2026-04-04
+Last updated: 2026-04-25
+
+## macOS UI
+
+- `DONE` Home “Suggestions for you” (iOS + macOS): proactive assistant nudges from `assistant.listOpenLoops` (`loadAssistantNudges`), horizontal cards with sparkles header, thread sheet or Mail jump; macOS hides the block when Focus Mode is on; macOS build: `MacTheme.spacing8` only (no `spacing10` token).
+- `DONE` Home dashboard: horizontal overview chips (tasks, unread, today, meetings, docs), unified open-task list with due hints, three-column layout with upcoming calendar (tomorrow–2w) and API meetings, Docs callout row, meeting detail sheet from home.
+- `DONE` Home UX pass (macOS): contextual greeting subtitle, “Jump to” strip with plain-language chip copy + help/accessibility, tasks-first column order, section subtitles + “View all” links, overdue emphasis on tasks, primary “Open Docs” control, clearer empty/setup copy.
+- `DONE` Clickable affordance: `macClickablePointer()` (`PointerStyle.link`) on plain buttons, menus, and key toolbars; web globals extended for native form controls (checkbox/radio/file/range + wrapping labels).
+- `DONE` tRPC: `trpcServer` `endpoint` is `/api/trpc` so `fetchRequestHandler` resolves `meet.*` and other procedures (was HTTP 404 for every `/api/trpc/...` call when endpoint was only `/trpc`).
+- `DONE` App icon: `compose-macos-app-icon.py` scales the iOS mark to ~86% of the 1024 canvas (iOS safe margins were making the Dock icon look like a small white card); `Info.plist` `CFBundleIconName` = `AppIcon`; removed duplicate loose `AppIcon.icns` from the target.
+- `DONE` Meetings: server `meet.listMeetings` / `getMeeting` / `scheduleBot` / `syncFromCalendar` responses aligned with native decoders (total, flat detail, success flag, sync fields); Zod accepts null optionals from Swift.
+- `DONE` Tasks board: drag-and-drop between columns (status update + save); iOS board columns/cards restyled to match macOS row layout; iOS `TaskDateFormatter.shortDate` + `AIChatView` `AppTheme` fix for builds.
+- `DONE` Tasks: removed tab-mode hint copy and List completed-note; view-mode control uses matching capsule chrome; “Connect Apple Reminders” on Tasks; onboarding step 3/4 for Reminders (with migration for users who already completed startup); Settings Reminders connect uses EventKit.
+- `DONE` Overlay scrollbars app-wide (no track channel, thumb only while scrolling) plus clear scroll-view backgrounds; chat composer `NSScrollView` matches.
+- `DONE` AI chat: attachments are sent to `/api/ai/chat`, shown in the user bubble, and merged on the server (vision + text inlining + binary filename context).
 
 ## Unified Folders Expansion
 
@@ -13,6 +27,14 @@ Last updated: 2026-04-04
 
 ## Current Web/Server Fix Batch
 
+- `DONE` AI chat hardening pass (iOS + macOS + server): `refreshCalendarSnapshot` on macOS now embeds event identifiers so `update_calendar_event` / `delete_calendar_event` are actually reachable; server skips mention enrichment, web-search heuristics, and attachment merging on follow-up tool steps; clients drop `attachments`/`mentions` from follow-up payloads; `assistant_with_tool_calls` content is `nil` (not empty string) so providers don't reject the message; voice tool guards (`create/update/delete_calendar_event`, `send_email`) now use a per-condition guard chain matching text chat. Debug builds verified on both targets.
+- `DONE` AI chat tool-only response fix: AI chat now responds when the model emits only `tool_calls` (e.g. "create a reminder"). `SSEToolCall` deltas accumulate across fragments by `index`, the streaming pass is wrapped in a multi-step agent loop that sends tool results back to the model, and a "Done." fallback prevents empty bubbles. Server `chatMessageSchema` uses `passthrough` and accepts `tool_calls` / `tool_call_id` / `name`. iOS + macOS now also expose `update_calendar_event` / `delete_calendar_event` tools.
+- `DONE` Native auth refresh compatibility: `/api/auth/refresh-native-token` now accepts both Better Auth bearer tokens and the raw session token returned by `/auth/mobile-token`, rehydrating the latter through the signed cookie path before minting a fresh JWT so existing iOS/macOS sessions do not expire after 15 minutes; `NoRedirectDelegate` now stops at the first redirect so native auth bridge calls can inspect the original 3xx response instead of silently following it.
+- `DONE` Fixed OAuth connection identity + iOS voice parity regressions: server now resolves mailbox identity from the provider account (not the app user), stores correct token expiry timestamps, and keeps provider fallback behavior safe for non-Google accounts; iOS voice tools now match supported task/calendar contracts and the stop-timeout path no longer drops the latest partial transcript.
+- `DONE` Fixed the backend `/api` route stack so the tRPC middleware no longer intercepts sibling `/api/ai/*` routes; this restores the iOS live voice-chat WebSocket proxy at `/api/ai/voice-ws`.
+- `DONE` iOS AI chat: fixed composer focus — removed `ScrollView` tap-to-dismiss that hit the input `safeAreaInset` (text field, + button, padding); `simultaneousGesture` for focus on the input card; + attachment popover dismisses on tap outside via scrim `overlay` above messages (not behind); removed useless under-content clear layer.
+- `DONE` iOS AI chat: `[event:EVENTKIT_ID]` tokens in assistant text render as compact inline event cards (tighter when multiple); taps open `EKEventDetailSheet`; generative `CalendarEventCard` navigations use the same sheet instead of leaving chat; conversation scroll anchors to the latest user message at the top while the answer streams.
+- `DONE` iOS: `AppTopHeader` no longer allows the profile avatar and action pill to be horizontally compressed to nothing on the Tasks tab (custom title + wide pill on small widths); Email tab now shows the same `AppTopHeader` on the connect-Gmail state and uses a top-level "Mail" header + folder `Menu` label text instead of nesting a full `AppTopHeader` in the folder button.
 - `DONE` Scoped frontend `vite-tsconfig-paths` resolution to each app's local `tsconfig.json` so active builds stop crawling archived/reference workspaces and emitting irrelevant tsconfig parse errors.
 - `DONE` Realigned `apps/web` to the newer web implementation that had accidentally landed in `apps/mail`, keeping `apps/mail` unchanged and verifying the synced `apps/web` build passes.
 - `DONE` Shipped the first web/server performance pass for instant-feeling mail and tasks: inbox rows now render from thread summaries instead of per-row `mail.get` calls, thread detail is predictively prefetched, startup warmup preloads inbox/tasks/calendar/settings data, task mutations now patch cached task lists directly, and cached-first surfaces now show a subtle background-refresh indicator while data revalidates.

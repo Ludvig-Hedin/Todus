@@ -1,5 +1,126 @@
 # Project Changelog
 
+## [2026-04-25] Hardening — AI chat reliability across all actions (iOS + macOS + server)
+
+- [Fix] **macOS calendar update/delete were unreachable from chat.** `refreshCalendarSnapshot` now embeds each event's identifier as `[<id>]` next to the title and tells the model to pass it back as `id` to `update_calendar_event` / `delete_calendar_event`. Without this the model had no handle to target an existing event.
+- [Fix] **Follow-up tool steps no longer waste resources or confuse providers.** When iOS/macOS re-call `/api/ai/chat` with `tool` role messages from the previous step, the server now skips mention enrichment, web-search heuristics, and attachment merging (those only apply to the original user turn). The clients also drop `attachments` and `mentions` from follow-up payloads.
+- [Fix] **`assistant_with_tool_calls` content normalization.** iOS and macOS now send `content: nil` (omitted) instead of `content: ""` when an assistant message exists only to carry tool calls. Some providers reject empty-string content paired with `tool_calls`, which manifested as silent failures mid-loop.
+- [Fix] **Voice tool guards no longer conflate failure modes.** `create_calendar_event`, `update_calendar_event`, `delete_calendar_event`, and `send_email` in the voice tool path now use a per-condition guard chain (permission → args decode → ISO date parse → service availability → execute) matching the text-chat path, so users get a precise error instead of a generic "couldn't do that".
+- **Files:** `apps/server/src/routes/ai.ts`, `apps/ios/Todus/Todus/Services/AI/AIChatService.swift`, `apps/macos/TodusMac/Services/AI/MacAIChatService.swift`
+- **Verified:** Debug builds pass on both iOS and macOS targets.
+
+## [2026-04-25] Fix — AI chat silent on tool-only responses (iOS + macOS)
+
+- [Fix] AI chat ("Ain") now responds correctly when the model emits only `tool_calls` in its first SSE round (e.g. "create a reminder", "schedule a meeting"). Previously the assistant bubble was empty because (a) fragmented `tool_calls` deltas were rejected by a strict SSE schema, and (b) tool results were never sent back to the model for a natural-language confirmation.
+- [Fix] `SSEToolCall` fields (`index`, `id`, `function`) are now optional and accumulated across deltas keyed by `index`, matching the OpenAI streaming protocol.
+- [Fix] Streaming is wrapped in a multi-step agent loop (max 5 iterations): if a step returns tool calls, they are executed and the results are appended as `tool` role messages plus an `assistant_with_tool_calls` message before re-calling the model. The model then produces user-visible confirmation text.
+- [Fix] If the loop completes without any visible content, a fallback "Done." message is appended so the bubble is never empty.
+- [Fix] Server `chatMessageSchema` uses `.passthrough()` and explicitly accepts `tool_calls`, `tool_call_id`, and `name` so the multi-step protocol can round-trip through OpenRouter without zod stripping fields.
+- [Feature] iOS + macOS chat now declares `update_calendar_event` and `delete_calendar_event` tools alongside `create_calendar_event`, and includes execution handlers backed by `CalendarService.updateEvent` / `deleteEvent`.
+- **Files:** `apps/ios/Todus/Todus/Services/AI/AIChatService.swift`, `apps/macos/TodusMac/Services/AI/MacAIChatService.swift`, `apps/server/src/routes/ai.ts`
+
+## [2026-04-25] Fix — Native auth refresh token compatibility
+
+- [Fix] `/api/auth/refresh-native-token` now accepts both native refresh-token formats during the transition: bearer-plugin tokens from `set-auth-token` and the raw Better Auth session token returned by `/auth/mobile-token`.
+- [Fix] If bearer resolution fails, the server rehydrates the raw session token as a signed Better Auth cookie before minting a fresh JWT, so existing iOS/macOS sessions keep refreshing instead of expiring after the first 15-minute access-token window.
+- [Fix] `NoRedirectDelegate` now stops at the first redirect for native auth bridge requests, so Gmail linking, Apple sign-in, and OTP fallback flows can inspect the original 3xx `Location` / cookie headers instead of silently following the redirect and losing them.
+- **Files:** `apps/server/src/main.ts`, `packages/swift-auth/Sources/TodusAuth/NoRedirectDelegate.swift`
+
+## [2026-04-24] Feature — Home proactive AI suggestions (iOS + macOS)
+
+- [Feature] Home shows a **Suggestions for you** strip powered by existing open-loop nudges (`EmailService.loadAssistantNudges` / assistant inbox nudges): short explainer, horizontal cards, tap opens the thread or Mail when no thread id.
+- [UX] macOS: section respects Focus Mode (`mac_focus_mode_enabled`) and matches the editorial card styling; iOS: section after the greeting, before the briefing block.
+- [Fix] macOS: replaced invalid `MacTheme.spacing10` references with `spacing8` so the target compiles.
+
+## [2026-04-24] UX — pointer cursor for interactive controls (web + macOS)
+
+- [UX] Web (`apps/web`, `apps/mail`): base styles now set `cursor: pointer` for native `checkbox` / `radio` / `file` / `range` inputs and for labels that wrap a checkbox or radio; existing rules already covered `button`, links, and ARIA roles.
+- [UX] macOS: added `macClickablePointer()` (`PointerStyle.link`) and applied it across toolbars, settings, email/meetings/create flows, the AI panel, and other plain-style buttons; regenerated `TodusMac.xcodeproj` so `MacClickablePointer.swift` is included in the target.
+
+## [2026-04-24] UX — iOS & macOS: icon tint is primary, not system blue
+
+- [UX] Tab bar, toggles, lists, and AI chrome that used `Color.blue` or a blue accent now use `Color.primary` / primary text so SF Symbols and labels match the monochrome editorial look. macOS root `.tint` is `Color.primary` (the in-app accent picker no longer tints the whole shell).
+- [UX] Group/shared chat and share CTAs that used “white on near-primary” were adjusted to primary-on-subtle fill so dark mode keeps readable contrast.
+- **Files:** `AppTheme.swift` (`accentBlue`), `MainTabView.swift` (via token), `MacRootView.swift`, and affected feature views under `apps/ios/Todus` and `apps/macos/TodusMac`.
+
+## [2026-04-24] Fix — OAuth mailbox identity + iOS voice tool parity
+
+- [Fix] `syncConnectionFromAccount` now resolves the connected mailbox from the OAuth account itself instead of `mail0_user.email`, which fixes multi-account Google linking/reconnect flows that were overwriting the wrong connection email/token pair.
+- [Fix] Provider identity fallback is now provider-aware: Google uses `id_token` / OIDC userinfo, while non-Google providers fall back to the driver `getUserInfo()` path instead of calling Google endpoints with the wrong token type.
+- [Fix] Connection expiry now stores the provider's actual `accessTokenExpiresAt` timestamp instead of adding that absolute timestamp to `Date.now()`, which previously pushed some connection expiry values decades into the future.
+- [Fix] iOS voice chat now exposes the same supported task/calendar tool contract as text chat: removed unsupported `urgent` task priorities from voice tool schemas and added calendar update/delete tool declarations plus execution handlers.
+- [Fix] iOS voice input stop-timeout now uses the latest partial transcript at timeout time instead of the stale transcript captured when the user tapped stop, so trailing words are no longer dropped when the recognizer final callback arrives late.
+- **Files:** `apps/server/src/lib/auth.ts`, `apps/ios/Todus/Todus/Services/AI/AIChatService.swift`, `apps/ios/Todus/Todus/Features/Voice/VoiceInputButton.swift`
+
+## [2026-04-24] Fix – tRPC HTTP endpoint prefix (404 on native + web)
+
+- [Fix] Set `@hono/trpc-server` `endpoint` to `/api/trpc` so `fetchRequestHandler` strips the full pathname correctly (`/api/trpc/meet.listMeetings` → `meet.listMeetings`). The previous `/trpc` value left a `trpc/...` remainder and all procedures returned **HTTP 404**.
+- **File:** `apps/server/src/main.ts`
+
+## [2026-04-24] Fix — macOS app icon matches iOS
+
+- [UX] macOS Dock: the iOS 1024×1024 master leaves a large margin around the mark; that full-bleed asset read as a small “white tile” on the macOS squircle. Added `apps/macos/scripts/compose-macos-app-icon.py` to crop to the mark, scale it to ~86% of the canvas, and regenerate all `AppIcon.appiconset` sizes (a reference 1024 is written to `apps/macos/scripts/AppIcon-macos-master.png`, not bundled).
+- [Fix] Regenerated the macOS `AppIcon` asset (all sizes in `AppIcon.appiconset` plus `AppIcon.icns`) from the same 1024×1024 source as the iOS app (`App-Icon-1024x1024@1x.png`); the Dock had been showing the generic placeholder when those assets were outdated or mismatched.
+- [Config] `Info.plist`: set `CFBundleIconName` to `AppIcon` so the bundle resolves the asset-catalog icon set reliably.
+- [Build] Stopped bundling a duplicate `AppIcon.icns` as a resource; `actool` already emits the app icon from `Assets.xcassets`, and the extra copy could race and fail the build.
+
+## [2026-04-24] Fix — Meetings API aligned with native apps
+
+- [Fix] `meet.listMeetings` now returns `total` (and normalizes `actionItems` to `{ task, owner, dueDate }` so AI `description` fields decode on iOS/macOS). Inputs accept JSON `null` for optional fields (Swift encoders send null; Zod previously rejected them).
+- [Fix] `meet.getMeeting` returns a single flat payload with `transcript` and `media`, matching `MeetingDetailResponse` on native clients; web/mail meeting detail pages updated accordingly.
+- [Fix] `meet.scheduleBot` includes `success: true` for the native `ScheduleBotResponse` type; `SyncResponse` on iOS/macOS now matches `syncFromCalendar` (`synced`, `total`, `autoRecorded`).
+
+## [2026-04-24] Feature — Task board: macOS drag-and-drop + iOS parity
+
+- [Feature] macOS Tasks board: drag tasks between columns to update `TaskStatus`, persist with `syncState` pending upload, and highlight the drop target; horizontal scroll when columns do not fit.
+- [UX] iOS Tasks board: column chrome and cards aligned with the macOS kanban (uppercase stage labels, count badge, row-style cards with status icon, due/priority/folder meta, trailing chevron); shared short due-date formatter.
+- [Fix] iOS AI chat: attachment file chip used a non-existent `AppTheme.surfaceCard` token — use `surfacePrimary` so the target builds.
+- **Files:** `apps/macos/TodusMac/Views/Tasks/MacTasksView.swift`, `apps/ios/Todus/Todus/Features/Tasks/BoardColumnView.swift`, `BoardTaskCard.swift`, `DesignSystem/Formatters.swift`, `Features/AI/AIChatView.swift`
+
+## [2026-04-24] Feature — macOS Tasks: Reminders + onboarding
+
+- [UI] Tasks toolbar: removed per–view-mode hint text and the “completed tasks in List” note; segmented control track now uses a `Capsule` so the outer chrome matches the inner pills.
+- [Feature] “Connect Apple Reminders” on the Tasks page and a new onboarding step (step 3 of 4) after Calendar, aligned with iOS; EventKit sync uses the same flow as iOS (import + push existing tasks).
+- [Feature] Connected Services “Connect” for Apple Reminders now requests Reminders permission instead of only toggling a flag; added Reminders entitlement and `NSRemindersUsageDescription`.
+- [Migration] Users who already finished startup onboarding before this release skip the new Reminders screen once.
+
+## [2026-04-24] Fix — Native AI chat file attachments (iOS, macOS, server)
+
+- [Fix] Chat attachments are now serialized (base64 + MIME) in the `POST /api/ai/chat` body and merged into the last user turn on the server: images use OpenAI-style `image_url` parts; text-like files are inlined; other binaries get a short description so the model can still reason from filename and context.
+- [Fix] iOS: pending files are read from `AttachmentService` storage, `send` accepts `attachmentFileNames`, and user bubbles show attachment pills next to the message. Saved conversations persist attachment filenames (re-open shows labels; re-sending from disk works when files still exist).
+- [Fix] macOS: file picker URLs are read with security-scoped access, payloads cached by user message id for the stream/ retry round, the send button enables for attachment-only sends, and user bubbles list attached file names.
+- **Files:** `apps/server/src/routes/ai.ts`, `apps/ios/.../AIChatView.swift`, `AIChatService.swift`, `AIChatMessage.swift`, `AIChatConversation.swift`, `AttachmentService.swift`, `EmailAIDraftSheet.swift`, `apps/macos/.../MacAIChatService.swift`, `MacAssistantPanel.swift`
+
+## [2026-04-24] Polish — macOS scrollbars
+
+- [UI] macOS app now uses overlay scroll indicators: no track well, slim floating thumb that appears while scrolling and fades when idle; `NSScrollView` backgrounds are cleared so no strip shows behind the thumb.
+- [UI] Follow-up: clear `NSClipView` backgrounds and re-apply chrome on layout for SwiftUI `ScrollView`s (AI assistant + group chat); in-scroll `MacScrollViewChromeAnchor` + `NSScroller` small control size; composer `NSTextView` scroll view uses shared `applyChrome`.
+- **Files:** `apps/macos/TodusMac/DesignSystem/MacScrollStyle.swift`, `apps/macos/TodusMac/App/TodusMacApp.swift`, `apps/macos/TodusMac/Views/AI/MacAssistantPanel.swift`, `apps/macos/TodusMac/Views/AI/MacGroupChatView.swift`
+
+## [2026-04-24] Fix — iOS voice chat WebSocket route interception
+
+- [Fix] Scoped the server tRPC middleware to `/trpc/*` inside the `/api` sub-app and corrected its endpoint to `/trpc`, so `/api/ai/voice-ping` and `/api/ai/voice-ws` now reach the AI router instead of being misparsed as tRPC procedure paths.
+- [Fix] This restores the iOS voice-chat WebSocket upgrade path that was surfacing as `NSURLErrorDomain Code=-1011` / “There was a bad response from the server.”
+- [Architectural] The regression was in backend route registration, not the iOS audio stack: the broad tRPC middleware was shadowing sibling `/api/ai/*` routes after the `/api` mount.
+- **Files:** `apps/server/src/main.ts`
+
+## [2026-04-24] Fix — iOS AI chat composer focus (keyboard / + button)
+
+- [Fix] Removed a `ScrollView` `simultaneousGesture` that resigned the keyboard on every tap; that gesture also hit-tested the bottom `safeAreaInset` input row, so taps on the text field, padding, or the + button dismissed the keyboard and interfered with double-tap-to-copy on messages.
+- [Fix] The full-screen clear tap layer now only appears for the attachment picker (not while the field is focused); the input box uses a `simultaneousGesture` tap to request focus without stealing the UITextView’s first touch.
+- [Fix] The + attachment source popover can be dismissed by tapping outside it: a dimming scrim is applied in `.overlay` above the message/empty content _before_ `.safeAreaInset`, so it receives taps (unlike a `ZStack` layer behind the chat) and does not cover the input bar or popover.
+- **Files:** `apps/ios/Todus/Todus/Features/AI/AIChatView.swift`
+
+## [2026-04-24] Fix — iOS Gmail connect flow + backend fallback for schema drift
+
+- [Fix] Native iOS Gmail linking now requests a non-redirecting Better Auth OAuth URL, uses the correct `/api/auth/native-link-social` endpoint, and opens the returned Google consent URL in `ASWebAuthenticationSession` instead of trying to decode a followed redirect as JSON.
+- [Fix] Added an explicit `ASWebAuthenticationSession.start()` failure path so the app no longer silently stalls when the system cannot launch the web auth session.
+- [Fix] `connections.list` now falls back to a legacy raw query when the deployed database is missing `mail0_connection.color`, which restores Gmail connection checks and the connections UI on older schemas.
+- [Fix] `sessions.list` now degrades gracefully when `mail0_session_metadata` is missing, returning active sessions without device/location enrichment instead of a 500.
+- [Fix] `assistant.getBriefing` now returns a task-only fallback briefing when the deployed database is missing `meeting` or assistant tables, preventing the startup 500 seen in iOS logs.
+- [Architectural] These backend fallbacks are compatibility shims for environments where production code is ahead of applied Drizzle migrations; they keep user-facing surfaces working while the database is brought up to date.
+- **Files:** `packages/swift-auth/Sources/TodusAuth/AuthService.swift`, `apps/server/src/trpc/routes/connections.ts`, `apps/server/src/trpc/routes/sessions.ts`, `apps/server/src/trpc/routes/assistant.ts`
+
 ## [2026-04-13] Fix — Frontend Vite tsconfig path resolution
 
 - [Fix] Scoped `vite-tsconfig-paths` in the frontend Vite configs to each app's local `tsconfig.json` so builds no longer crawl `apps/archived` and `reference/` configs that are outside the active app.
@@ -55,17 +176,20 @@
 ## [2026-04-04] Feature — Unread dot repositioned + People view mode + avatar fixes
 
 ### Unread indicator moved to right of subject (iOS, macOS, Web)
+
 - [UI] Moved blue unread dot from left of avatar to right of subject line across all platforms
 - Emails now stretch correctly without the left-side dot misaligning the avatar column
 - **Files:** `EmailRowView.swift`, `MacEmailInboxView.swift`, `mail-list.tsx`
 
 ### People view mode (iOS, macOS)
+
 - [Feature] Added Threads/People toggle in inbox header (icon-based segmented control)
 - People mode groups emails by sender — shows avatar, name, email, thread count, unread badge
 - Tapping a person shows their threads (iOS: push navigation, macOS: detail panel)
 - **Files:** `EmailInboxView.swift`, `MacEmailInboxView.swift`
 
 ### Avatar transparent background fix + fallback priority
+
 - [Fix] iOS/macOS: White background behind loaded avatar images prevents colored initials bleeding through transparent logos
 - [Fix] All platforms: Google favicon service prioritized in local fallback chain for better icon coverage
 - **Files:** `SenderAvatarView.swift`, `MacEmailInboxView.swift`, `bimi-avatar.tsx`
