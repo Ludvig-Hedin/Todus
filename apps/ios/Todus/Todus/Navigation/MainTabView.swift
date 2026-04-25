@@ -51,10 +51,13 @@ struct MainTabView: View {
         }
         .animation(.easeInOut(duration: 0.3), value: services.networkMonitor.isConnected)
         .animation(.easeInOut(duration: 0.3), value: services.authService.isSessionExpired)
-        .ignoresSafeArea(.keyboard)
         .overlay(alignment: .bottom) {
             if !services.hideTabBar && !showCreateSheet {
                 customTabBar
+                    // Keep the floating bar from jumping when a keyboard appears in the
+                    // underlying tabs, but do not disable keyboard-safe-area handling
+                    // for sheets presented from this shell (such as AIChatView).
+                    .ignoresSafeArea(.keyboard)
                     .padding(.horizontal, 16)
                     .padding(.bottom, 12)
                     .transition(.move(edge: .bottom).combined(with: .opacity))

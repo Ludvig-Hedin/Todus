@@ -1,5 +1,11 @@
 # Project Changelog
 
+## [2026-04-26] Fix — iOS AI assistant composer stays above keyboard
+
+- [Fix] **iOS:** `MainTabView` no longer disables keyboard-safe-area handling for the entire shell. The floating custom tab bar still ignores keyboard movement, but sheets presented from the shell, including `AIChatView`, now keep their bottom insets attached to the keyboard correctly.
+- [User-facing] In the AI assistant sheet, the multiline chat composer now grows upward only. The bottom controls stay above the keyboard instead of expanding underneath it.
+- [Files] `apps/ios/Todus/Todus/Navigation/MainTabView.swift`, `CHANGELOG.md`
+
 ## [2026-04-25] Fix — Native navigation/settings credibility pass (iOS + macOS)
 
 - [Fix] **iOS:** `MainTabView` now uses the existing floating `CustomTabBar` fed by `services.tabBarTabs`, while the underlying `TabView` keeps content state alive. Tab-bar onboarding and Settings customization now change the real navigation shell, including support for pinning **Meetings** into the main bar.
