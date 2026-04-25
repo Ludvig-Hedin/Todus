@@ -1,8 +1,8 @@
 import { meeting, meetingMedia, meetingTranscript, meetIntegration } from '../../db/schema';
-import { privateProcedure, createRateLimiterMiddleware, router } from '../trpc';
 import { eq, and, desc, gte, lte, inArray, sql, isNull, count } from 'drizzle-orm';
-import { createRecallBot, cancelBot } from '../../lib/recall';
+import { privateProcedure, createRateLimiterMiddleware, router } from '../trpc';
 import { pruneExpiredMeetingRecordings } from '../../lib/meeting-retention';
+import { createRecallBot, cancelBot } from '../../lib/recall';
 import { isProCustomer } from '../../lib/utils';
 import { Ratelimit } from '@upstash/ratelimit';
 import { TRPCError } from '@trpc/server';
@@ -20,8 +20,133 @@ type RecallBotResult = {
   meeting_url_id?: string | null;
 };
 
+type Conn = ReturnType<typeof createDb>['conn'];
+type MeetIntegrationRow = typeof meetIntegration.$inferSelect;
+type MeetIntegrationPruningRow = Pick<MeetIntegrationRow, 'id' | 'autoDeleteDays' | 'lastPrunedAt'>;
+
 /** AI summaries may store action items with `description` — native apps expect `task`. */
 type ActionItemClient = { task: string; owner?: string | null; dueDate?: string | null };
+
+const isMissingMeetIntegrationColumnError = (error: unknown) =>
+  error instanceof Error &&
+  (error.message.includes('column') || error.message.includes('does not exist')) &&
+  (error.message.includes('mail0_meet_integration') ||
+    error.message.includes('auto_delete_days') ||
+    error.message.includes('last_pruned_at') ||
+    error.message.includes('auto_generate_summary') ||
+    error.message.includes('summary_language') ||
+    error.message.includes('exclude_all_day') ||
+    error.message.includes('minimum_duration_minutes') ||
+    error.message.includes('notify_on_recording_start') ||
+    error.message.includes('notify_on_recap_ready'));
+
+const applyMeetIntegrationDefaults = (
+  row: Pick<
+    MeetIntegrationRow,
+    | 'id'
+    | 'userId'
+    | 'botName'
+    | 'isEnabled'
+    | 'autoJoin'
+    | 'joinEarlyMinutes'
+    | 'createdAt'
+    | 'updatedAt'
+  >,
+): MeetIntegrationRow => ({
+  ...row,
+  autoGenerateSummary: true,
+  summaryLanguage: 'en',
+  excludeAllDay: true,
+  minimumDurationMinutes: 5,
+  notifyOnRecordingStart: true,
+  notifyOnRecapReady: true,
+  autoDeleteDays: 0,
+  lastPrunedAt: null,
+});
+
+async function selectMeetIntegrationWithDefaults(
+  db: Db,
+  conn: Conn,
+  userId: string,
+): Promise<MeetIntegrationRow | null> {
+  try {
+    const [row] = await db
+      .select()
+      .from(meetIntegration)
+      .where(eq(meetIntegration.userId, userId))
+      .limit(1);
+    return row || null;
+  } catch (error) {
+    if (!isMissingMeetIntegrationColumnError(error)) throw error;
+    console.warn(
+      '[meet] Falling back to legacy meet integration query because settings columns are missing',
+    );
+  }
+
+  const [row] = await conn<
+    Array<
+      Pick<
+        MeetIntegrationRow,
+        | 'id'
+        | 'userId'
+        | 'botName'
+        | 'isEnabled'
+        | 'autoJoin'
+        | 'joinEarlyMinutes'
+        | 'createdAt'
+        | 'updatedAt'
+      >
+    >
+  >`
+    select
+      id,
+      user_id as "userId",
+      bot_name as "botName",
+      is_enabled as "isEnabled",
+      auto_join as "autoJoin",
+      join_early_minutes as "joinEarlyMinutes",
+      created_at as "createdAt",
+      updated_at as "updatedAt"
+    from mail0_meet_integration
+    where user_id = ${userId}
+    limit 1
+  `;
+
+  return row ? applyMeetIntegrationDefaults(row) : null;
+}
+
+async function selectMeetIntegrationPruningState(
+  db: Db,
+  conn: Conn,
+  userId: string,
+): Promise<MeetIntegrationPruningRow | null> {
+  try {
+    const [row] = await db
+      .select({
+        id: meetIntegration.id,
+        autoDeleteDays: meetIntegration.autoDeleteDays,
+        lastPrunedAt: meetIntegration.lastPrunedAt,
+      })
+      .from(meetIntegration)
+      .where(eq(meetIntegration.userId, userId))
+      .limit(1);
+    return row || null;
+  } catch (error) {
+    if (!isMissingMeetIntegrationColumnError(error)) throw error;
+    console.warn(
+      '[meet] Skipping recording retention pruning because integration retention columns are missing',
+    );
+  }
+
+  const [row] = await conn<Array<{ id: string }>>`
+    select id
+    from mail0_meet_integration
+    where user_id = ${userId}
+    limit 1
+  `;
+
+  return row ? { id: row.id, autoDeleteDays: 0, lastPrunedAt: null } : null;
+}
 
 function normalizeActionItemsForClient(raw: unknown): ActionItemClient[] | null {
   if (raw == null) return null;
@@ -57,7 +182,15 @@ const listMeetingsInputSchema = z.preprocess(
   z
     .object({
       status: z
-        .enum(['scheduled', 'bot_joining', 'recording', 'processing', 'ready', 'failed', 'cancelled'])
+        .enum([
+          'scheduled',
+          'bot_joining',
+          'recording',
+          'processing',
+          'ready',
+          'failed',
+          'cancelled',
+        ])
         .optional(),
       search: z.string().optional(),
       from: z.string().datetime().optional(),
@@ -198,12 +331,8 @@ export const meetRouter = router({
   getIntegration: privateProcedure.query(async ({ ctx }) => {
     const { db, conn } = getDb();
     try {
-      const [row] = await db
-        .select()
-        .from(meetIntegration)
-        .where(eq(meetIntegration.userId, ctx.sessionUser.id))
-        .limit(1);
-      return { integration: row || null };
+      const integration = await selectMeetIntegrationWithDefaults(db, conn, ctx.sessionUser.id);
+      return { integration };
     } finally {
       await conn.end();
     }
@@ -228,11 +357,7 @@ export const meetRouter = router({
     .mutation(async ({ ctx, input }) => {
       const { db, conn } = getDb();
       try {
-        const [existing] = await db
-          .select()
-          .from(meetIntegration)
-          .where(eq(meetIntegration.userId, ctx.sessionUser.id))
-          .limit(1);
+        const existing = await selectMeetIntegrationWithDefaults(db, conn, ctx.sessionUser.id);
 
         if (existing) {
           // Build update object from all provided fields
@@ -278,15 +403,7 @@ export const meetRouter = router({
   listMeetings: privateProcedure.input(listMeetingsInputSchema).query(async ({ ctx, input }) => {
     const { db, conn } = getDb();
     try {
-      const [integration] = await db
-        .select({
-          id: meetIntegration.id,
-          autoDeleteDays: meetIntegration.autoDeleteDays,
-          lastPrunedAt: meetIntegration.lastPrunedAt,
-        })
-        .from(meetIntegration)
-        .where(eq(meetIntegration.userId, ctx.sessionUser.id))
-        .limit(1);
+      const integration = await selectMeetIntegrationPruningState(db, conn, ctx.sessionUser.id);
 
       await pruneExpiredMeetingRecordings(db, {
         integrationId: integration?.id,
@@ -309,10 +426,7 @@ export const meetRouter = router({
 
       const whereClause = and(...conditions);
 
-      const [countRow] = await db
-        .select({ total: count() })
-        .from(meeting)
-        .where(whereClause);
+      const [countRow] = await db.select({ total: count() }).from(meeting).where(whereClause);
 
       const total = Number(countRow?.total ?? 0);
 
@@ -340,15 +454,7 @@ export const meetRouter = router({
     .query(async ({ ctx, input }) => {
       const { db, conn } = getDb();
       try {
-        const [integration] = await db
-          .select({
-            id: meetIntegration.id,
-            autoDeleteDays: meetIntegration.autoDeleteDays,
-            lastPrunedAt: meetIntegration.lastPrunedAt,
-          })
-          .from(meetIntegration)
-          .where(eq(meetIntegration.userId, ctx.sessionUser.id))
-          .limit(1);
+        const integration = await selectMeetIntegrationPruningState(db, conn, ctx.sessionUser.id);
 
         await pruneExpiredMeetingRecordings(db, {
           integrationId: integration?.id,
@@ -883,19 +989,7 @@ ${transcriptText.slice(0, 30000)}`; // Cap at ~30k chars to stay within context
       });
 
       // Get user's integration
-      const [integration] = await db
-        .select({
-          id: meetIntegration.id,
-          botName: meetIntegration.botName,
-          autoJoin: meetIntegration.autoJoin,
-          excludeAllDay: meetIntegration.excludeAllDay,
-          minimumDurationMinutes: meetIntegration.minimumDurationMinutes,
-          autoDeleteDays: meetIntegration.autoDeleteDays,
-          lastPrunedAt: meetIntegration.lastPrunedAt,
-        })
-        .from(meetIntegration)
-        .where(eq(meetIntegration.userId, ctx.sessionUser.id))
-        .limit(1);
+      const integration = await selectMeetIntegrationWithDefaults(db, conn, ctx.sessionUser.id);
 
       // Batch-fetch all existing meetings for these calendar event IDs in one query
       // instead of one query per event (N+1 avoidance)
@@ -962,7 +1056,12 @@ ${transcriptText.slice(0, 30000)}`; // Cap at ~30k chars to stay within context
             })
             .where(eq(meeting.id, existing.id));
 
-          if (shouldAutoRecord && !existing.recallBotId && existing.status === 'scheduled' && startsAt > now) {
+          if (
+            shouldAutoRecord &&
+            !existing.recallBotId &&
+            existing.status === 'scheduled' &&
+            startsAt > now
+          ) {
             newMeetingIds.push({ id: existing.id, meetUrl, startsAt });
           }
         } else {

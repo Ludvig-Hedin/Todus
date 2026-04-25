@@ -1,5 +1,11 @@
 # Project Changelog
 
+## [2026-04-25] Fix — Native meetings load with legacy production schema
+
+- [Fix] **Backend:** `meet.listMeetings`, `meet.getMeeting`, `meet.getIntegration`, and calendar sync now tolerate production databases missing newer `mail0_meet_integration` settings/retention columns. The route falls back to the original integration columns with safe defaults and skips retention pruning when retention columns are absent, preventing HTTP 500s in iOS/macOS Meetings.
+- [User-facing] Restores the native Meetings page instead of showing "Failed to load meetings. Server error (http 500)."
+- **Files:** `apps/server/src/trpc/routes/meet.ts`
+
 ## [2026-04-25] Fix — Native email inbox loads with legacy production schema
 
 - [Fix] **Backend:** Native iOS/macOS mail endpoints now tolerate production databases that have not yet applied the connection color / assistant second-brain migrations. `mail.listThreads` can resolve the active connection without selecting `mail0_connection.color`, multi-connection reads use the same fallback, and `assistant.listOpenLoops` returns an empty nudges list instead of failing when assistant tables are missing.
