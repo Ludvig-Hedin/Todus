@@ -88,3 +88,7 @@ Todus.xcworkspace/
 
 # Swift Package Manager build artifacts
 packages/swift-auth/.build/
+
+# Expo prebuild artifacts (the active iOS app is apps/ios/Todus)
+/ios/
+/.expo/
