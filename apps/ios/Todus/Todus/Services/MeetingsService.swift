@@ -58,8 +58,8 @@ private struct MeetingsListResponse: Decodable {
 
 private struct SyncResponse: Decodable {
     let synced: Int
-    let created: Int
-    let updated: Int
+    let total: Int
+    let autoRecorded: Int
 }
 
 private struct ScheduleBotResponse: Decodable {

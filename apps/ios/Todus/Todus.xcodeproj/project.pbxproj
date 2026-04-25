@@ -15,6 +15,7 @@
 		13C07A65B70DD7813EF6F68D /* AppTaskPriority.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9A0A9C59C8274A248E7F19B /* AppTaskPriority.swift */; };
 		159C746E1BF52003FA2B909F /* SyncState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1229E9C510A1286935951ACA /* SyncState.swift */; };
 		1687702F789BCA6E6EF8688E /* AIChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 056835622DB127253111B077 /* AIChatView.swift */; };
+		BB1234567890ABCDEF123456 /* MarkdownView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC1234567890ABCDEF123456 /* MarkdownView.swift */; };
 		1ABEC124807AD4F90CECC510 /* CreateSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B8C4C7226F0FE95E3C83108 /* CreateSheet.swift */; };
 		1BE8A158151320ABB5E6D36D /* CalendarContainerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C393C0082291CAB42009E8EB /* CalendarContainerView.swift */; };
 		1C314B90EE9572DB232889DB /* AppleRemindersSyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D4F6F5B369E9F8603154EE9 /* AppleRemindersSyncService.swift */; };
@@ -152,6 +153,7 @@
 		0290541DD1C35CF9D68C47A3 /* CalendarViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarViewController.swift; sourceTree = "<group>"; };
 		044CB7D988EE526D230F0C77 /* AppleSignInDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleSignInDelegate.swift; sourceTree = "<group>"; };
 		056835622DB127253111B077 /* AIChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChatView.swift; sourceTree = "<group>"; };
+		CC1234567890ABCDEF123456 /* MarkdownView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownView.swift; sourceTree = "<group>"; };
 		0934538127F1DC3C85B53BCC /* EmptyGmailOnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmptyGmailOnboardingView.swift; sourceTree = "<group>"; };
 		0AB515CB0BDFF39DC9196B77 /* RemoteFirstTaskParsingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteFirstTaskParsingService.swift; sourceTree = "<group>"; };
 		0C0EF37FC791938CC81236A8 /* Todus.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Todus.entitlements; sourceTree = "<group>"; };
@@ -432,6 +434,7 @@
 			children = (
 				A5BF4AE0C22D8C0028338805 /* AIChatMessage.swift */,
 				056835622DB127253111B077 /* AIChatView.swift */,
+				CC1234567890ABCDEF123456 /* MarkdownView.swift */,
 				8EB6BB18CCC595B4F2BD4E4A /* CardViews.swift */,
 				A4E63434C6EBCA9F4070FB0C /* ChatUISpec.swift */,
 				76A558F735657405593AD572 /* ChatUISpecView.swift */,
@@ -830,6 +833,7 @@
 				F51C903DF28FFDF8819B5A30 /* AIChatMessage.swift in Sources */,
 				BCFB490AAA247E656CE2CD0F /* AIChatService.swift in Sources */,
 				1687702F789BCA6E6EF8688E /* AIChatView.swift in Sources */,
+				BB1234567890ABCDEF123456 /* MarkdownView.swift in Sources */,
 				C2D3E4F5A60718293A4B5C6D /* GroupChatService.swift in Sources */,
 				D3E4F5A6B708192A3B4C5D6E /* SharedConversationView.swift in Sources */,
 				E4F5A6B7C8091A2B3C4D5E6F /* GroupChatView.swift in Sources */,

@@ -151,11 +151,11 @@ final class AuthSessionStore {
             // No backend configured — development mode fallback
             authState = .magicLinkPending(email: trimmedEmail)
             lastErrorMessage = "No backend configured. Enter any 6-digit code to continue."
-            AppLogger.shared.log("sendMagicLink: no backend, dev mode fallback for \(trimmedEmail)")
+            AppLogger.shared.log("sendMagicLink: no backend, dev mode fallback for \(AppLogger.mask(trimmedEmail))")
             return
         }
 
-        AppLogger.shared.log("sendMagicLink: calling Supabase OTP for \(trimmedEmail)")
+        AppLogger.shared.log("sendMagicLink: calling Supabase OTP for \(AppLogger.mask(trimmedEmail))")
 
         // POST /auth/v1/otp — Supabase sends a 6-digit OTP to the email address.
         // `create_user: true` allows new users to sign up (matches "Allow new users to sign up" in dashboard).
@@ -191,7 +191,7 @@ final class AuthSessionStore {
             }
 
             authState = .magicLinkPending(email: trimmedEmail)
-            AppLogger.shared.log("sendMagicLink: success — code sent to \(trimmedEmail)")
+            AppLogger.shared.log("sendMagicLink: success — code sent to \(AppLogger.mask(trimmedEmail))")
         } catch {
             AppLogger.shared.log("sendMagicLink: network error — \(error.localizedDescription)")
             lastErrorMessage = "Network error. Check your connection and try again."
@@ -222,7 +222,7 @@ final class AuthSessionStore {
             return
         }
 
-        AppLogger.shared.log("verifyMagicLinkCode: verifying OTP for \(email)")
+        AppLogger.shared.log("verifyMagicLinkCode: verifying OTP for \(AppLogger.mask(email))")
 
         // POST /auth/v1/verify — validates the OTP token and returns a session JWT.
         let url = supabaseURL.appending(path: "auth/v1/verify")

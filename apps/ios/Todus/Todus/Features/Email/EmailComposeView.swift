@@ -19,7 +19,16 @@ struct EmailComposeView: View {
     @State private var showAIDraft = false
     /// Selected photo item from the formatting toolbar image picker
     @State private var selectedPhoto: PhotosPickerItem?
+    /// Debounce task for draft autosave — re-armed on every field change.
+    @State private var autosaveTask: Task<Void, Never>?
+    /// Stable identifier for this compose draft. Replies key off the thread/message,
+    /// new emails get a fresh UUID so several windows of the same composition don't collide.
+    @State private var draftStorageKey: String
     @FocusState private var focusedField: Field?
+
+    /// UserDefaults key prefix for autosaved drafts. Key suffix is the draft ID
+    /// (replyToThreadId for replies, a fresh UUID for new emails).
+    private static let autosaveKeyPrefix = "email_compose_autosave_v1."
 
     private enum Field: Hashable {
         case to, cc, bcc, subject, body
@@ -52,6 +61,8 @@ struct EmailComposeView: View {
             replyToMessageId: message.id
         )
         _draft = State(initialValue: replyDraft)
+        // Reply drafts are keyed by thread so re-opening the same reply restores it.
+        _draftStorageKey = State(initialValue: "reply.\(threadId)")
     }
 
     /// Create compose with pre-filled to, subject, and/or body (from CreateSheet)
@@ -63,7 +74,15 @@ struct EmailComposeView: View {
         if let subject { d.subject = subject }
         if let body { d.body = body }
         _draft = State(initialValue: d)
+        // New emails get a stable per-instance UUID. The autosave is restored on appear,
+        // so opening a fresh composer always starts blank unless a previous unsent draft
+        // exists under the special "new" key (see Self.newComposeStorageKey).
+        _draftStorageKey = State(initialValue: Self.newComposeStorageKey)
     }
+
+    /// Shared key for "new email" drafts so a single unsent draft is restored on reopen.
+    /// (Only one new-compose draft is preserved at a time; replies use their own thread key.)
+    private static let newComposeStorageKey = "new"
 
     var body: some View {
         NavigationStack {
@@ -126,6 +145,8 @@ struct EmailComposeView: View {
                         Task {
                             let success = await emailService.sendEmail(draft)
                             if success {
+                                // Clear the autosaved draft once it's safely on the wire
+                                clearAutosavedDraft()
                                 dismiss()
                             } else {
                                 showSendError = true
@@ -177,11 +198,14 @@ struct EmailComposeView: View {
                 )
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
-                .presentationBackground(AppTheme.backgroundTop)
+                .appSheetBackground()
                 .preferredColorScheme(services.appearancePreference.colorScheme)
             }
             .onAppear {
                 loadEventMentions()
+                // Restore any in-progress autosaved draft. Only overwrites empty fields so
+                // we don't clobber explicitly-passed initializer values.
+                restoreAutosavedDraft()
                 // Pre-select default from connection
                 if draft.fromConnectionId == nil {
                     draft.fromConnectionId = connectionsService.connections.first?.id
@@ -195,6 +219,13 @@ struct EmailComposeView: View {
                     focusedField = .body
                 }
             }
+            // Autosave on every meaningful field change. Debounced 1s so rapid typing
+            // doesn't thrash UserDefaults.
+            .onChange(of: draft.to) { scheduleAutosave() }
+            .onChange(of: draft.cc) { scheduleAutosave() }
+            .onChange(of: draft.bcc) { scheduleAutosave() }
+            .onChange(of: draft.subject) { scheduleAutosave() }
+            .onChange(of: draft.body) { scheduleAutosave() }
             .onChange(of: selectedPhoto) { _, newItem in
                 guard let newItem else { return }
                 Task {
@@ -284,7 +315,7 @@ struct EmailComposeView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
         }
-        .background(AppTheme.backgroundTop)
+        .background(AppTheme.sheetBackground)
     }
 
     private func formatButton(icon: String, label: String, action: @escaping () -> Void) -> some View {
@@ -580,7 +611,88 @@ struct EmailComposeView: View {
 
     private var canSend: Bool {
         let toAddress = draft.to.first ?? ""
-        return !toAddress.isEmpty && toAddress.contains("@") && !draft.subject.isEmpty
+        return isValidEmail(toAddress) && !draft.subject.isEmpty
+    }
+
+    /// Stricter email validation — requires a non-empty local part, an `@`, a non-empty
+    /// domain part, and at least one `.` in the domain. Replaces the previous "contains @"
+    /// check which accepted obvious junk like `@`, `a@`, or `b@b`.
+    private func isValidEmail(_ candidate: String) -> Bool {
+        let trimmed = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        let pattern = #"^[^\s@]+@[^\s@]+\.[^\s@]+$"#
+        return trimmed.range(of: pattern, options: .regularExpression) != nil
+    }
+
+    // MARK: - Draft Autosave
+
+    /// Schedules a debounced autosave. Cancels any in-flight autosave task so we
+    /// only commit once typing settles down (1s).
+    private func scheduleAutosave() {
+        autosaveTask?.cancel()
+        autosaveTask = Task {
+            try? await Task.sleep(for: .milliseconds(1000))
+            guard !Task.isCancelled else { return }
+            persistAutosaveSnapshot()
+        }
+    }
+
+    /// Serialises the current draft to UserDefaults under the draft key.
+    /// Stored as a small dictionary of strings so we don't depend on Codable
+    /// conformance from the shared EmailDraft model.
+    private func persistAutosaveSnapshot() {
+        // Don't persist a fully empty draft — there's nothing to recover.
+        let isEmpty = draft.to.allSatisfy(\.isEmpty)
+            && draft.cc.allSatisfy(\.isEmpty)
+            && draft.bcc.allSatisfy(\.isEmpty)
+            && draft.subject.isEmpty
+            && draft.body.isEmpty
+        if isEmpty {
+            clearAutosavedDraft()
+            return
+        }
+        let payload: [String: Any] = [
+            "to": draft.to,
+            "cc": draft.cc,
+            "bcc": draft.bcc,
+            "subject": draft.subject,
+            "body": draft.body,
+            "savedAt": Date().timeIntervalSince1970,
+        ]
+        UserDefaults.standard.set(payload, forKey: autosaveKey)
+    }
+
+    /// Reads any previously autosaved draft and merges it into `draft`. Initializer-
+    /// supplied values take precedence (we only fill empty fields) so passing an
+    /// explicit subject/body via `init(to:subject:body:)` still wins.
+    private func restoreAutosavedDraft() {
+        guard let payload = UserDefaults.standard.dictionary(forKey: autosaveKey) else { return }
+        if draft.to.isEmpty || (draft.to.first ?? "").isEmpty,
+           let saved = payload["to"] as? [String], !saved.isEmpty {
+            draft.to = saved
+        }
+        if draft.cc.isEmpty, let saved = payload["cc"] as? [String], !saved.isEmpty {
+            draft.cc = saved
+        }
+        if draft.bcc.isEmpty, let saved = payload["bcc"] as? [String], !saved.isEmpty {
+            draft.bcc = saved
+        }
+        if draft.subject.isEmpty, let saved = payload["subject"] as? String, !saved.isEmpty {
+            draft.subject = saved
+        }
+        if draft.body.isEmpty, let saved = payload["body"] as? String, !saved.isEmpty {
+            draft.body = saved
+        }
+    }
+
+    /// Removes the autosaved draft for this compose context. Called after a successful
+    /// send and when the draft becomes fully empty.
+    private func clearAutosavedDraft() {
+        UserDefaults.standard.removeObject(forKey: autosaveKey)
+    }
+
+    private var autosaveKey: String {
+        "\(Self.autosaveKeyPrefix)\(draftStorageKey)"
     }
 
     private func handleBodyCommand(_ action: RichInputCommandAction) {

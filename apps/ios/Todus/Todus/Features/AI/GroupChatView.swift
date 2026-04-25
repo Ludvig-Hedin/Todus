@@ -64,11 +64,11 @@ struct GroupListView: View {
                             // Group avatar placeholder
                             ZStack {
                                 Circle()
-                                    .fill(Color.blue.opacity(0.15))
+                                    .fill(Color.primary.opacity(0.15))
                                     .frame(width: 36, height: 36)
                                 Text(String(group.name.prefix(1)).uppercased())
                                     .font(.system(size: 14, weight: .semibold))
-                                    .foregroundStyle(.blue)
+                                    .foregroundStyle(.primary)
                             }
 
                             VStack(alignment: .leading, spacing: 2) {
@@ -100,7 +100,7 @@ struct GroupListView: View {
             CreateGroupSheet()
                 .presentationDragIndicator(.visible)
                 .presentationDetents([.medium])
-                .presentationBackground(AppTheme.backgroundTop)
+                .appSheetBackground()
         }
         // Group chat view
         .fullScreenCover(item: Binding(
@@ -350,7 +350,7 @@ struct GroupChatView: View {
                 .lineLimit(1...5)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
-                .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
                 .font(.system(size: 15))
 
                 Button {
@@ -358,7 +358,7 @@ struct GroupChatView: View {
                 } label: {
                     Image(systemName: isSending ? "ellipsis" : "arrow.up.circle.fill")
                         .font(.system(size: 26))
-                        .foregroundColor(messageText.isEmpty || isSending ? .secondary : .blue)
+                        .foregroundColor(messageText.isEmpty || isSending ? .secondary : .primary)
                 }
                 .disabled(messageText.trimmingCharacters(in: .whitespaces).isEmpty || isSending)
                 .buttonStyle(.plain)
@@ -455,11 +455,11 @@ private struct MemberAvatarView: View {
     var body: some View {
         ZStack {
             Circle()
-                .fill(Color.blue.opacity(0.2))
+                .fill(Color.primary.opacity(0.2))
                 .frame(width: 32, height: 32)
             Text(String((member.name ?? "?").prefix(1)).uppercased())
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.blue)
+                .foregroundStyle(.primary)
         }
         .overlay(Circle().stroke(AppTheme.backgroundTop, lineWidth: 2))
     }
@@ -482,19 +482,18 @@ private struct GroupMessageBubbleView: View {
                         .font(.system(size: 15))
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
-                        .background(.blue, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                        .foregroundStyle(.white)
+                        .background(Color.primary.opacity(0.12), in: RoundedRectangle(cornerRadius: AppTheme.Radius.card, style: .continuous))
+                        .foregroundStyle(.primary)
                 }
             } else if message.senderType == "ai" {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("AI")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
-                    Text(message.content)
-                        .font(.system(size: 15))
+                    MarkdownView(content: message.content, fontSize: 15)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
-                        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.card, style: .continuous))
                         .foregroundStyle(.primary)
                 }
                 Spacer(minLength: 60)

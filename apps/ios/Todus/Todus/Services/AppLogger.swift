@@ -45,6 +45,23 @@ final class AppLogger: @unchecked Sendable {
         (try? String(contentsOf: fileURL, encoding: .utf8)) ?? "(no logs yet)"
     }
 
+    /// Masks PII (emails, tokens) for safe logging. Keeps a short prefix so logs are
+    /// still useful for debugging without exposing the full identifier.
+    /// Example: `mask("ludvig@example.com")` → `"lud***@example.com"`.
+    static func mask(_ email: String) -> String {
+        let trimmed = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "(empty)" }
+        if let atIndex = trimmed.firstIndex(of: "@") {
+            let local = trimmed[..<atIndex]
+            let domain = trimmed[atIndex...]
+            let prefix = local.prefix(3)
+            return "\(prefix)***\(domain)"
+        }
+        // Not an email — treat as opaque token, only show first few chars
+        let prefix = trimmed.prefix(3)
+        return "\(prefix)***"
+    }
+
     /// Clear the log file (e.g. user-initiated from settings).
     func clear() {
         queue.async { [weak self] in

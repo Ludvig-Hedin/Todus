@@ -344,9 +344,13 @@ final class EmailService {
     // MARK: - Connections
 
     /// Check if the user has any email connections (Gmail/Outlook).
-    func checkConnection() async {
+    /// Pass `force: true` during the connect-gmail flow to bypass the 30s cache —
+    /// the backend hook that creates the connection runs asynchronously after OAuth,
+    /// so callers polling for a just-created connection must skip the cache.
+    func checkConnection(force: Bool = false) async {
         let now = Date()
-        if let lastConnectionCheckAt,
+        if !force,
+           let lastConnectionCheckAt,
            now.timeIntervalSince(lastConnectionCheckAt) < connectionCheckInterval,
            hasResolvedConnection {
             return
@@ -401,65 +405,80 @@ final class EmailService {
     }
 
     func markAsRead(ids: [String]) async {
+        // Capture prior state for rollback if the network call fails
+        let priorThreads = threads
+        // Optimistic update first so the UI feels instant
+        for i in threads.indices where ids.contains(threads[i].id) {
+            threads[i] = EmailThread(
+                id: threads[i].id, subject: threads[i].subject,
+                snippet: threads[i].snippet, from: threads[i].from,
+                date: threads[i].date, unread: false,
+                messageCount: threads[i].messageCount, labels: threads[i].labels
+            )
+        }
         do {
             let _: EmailEmptyResponse = try await api.trpcMutation("mail.markAsRead", input: IdsInput(ids: ids))
-            // Update local state
-            for i in threads.indices where ids.contains(threads[i].id) {
-                threads[i] = EmailThread(
-                    id: threads[i].id, subject: threads[i].subject,
-                    snippet: threads[i].snippet, from: threads[i].from,
-                    date: threads[i].date, unread: false,
-                    messageCount: threads[i].messageCount, labels: threads[i].labels
-                )
-            }
         } catch {
-            // Surface mutation failures so the user knows the action didn't stick
+            // Roll back optimistic state and surface the failure
+            threads = priorThreads
             errorMessage = "Could not mark as read. Please try again."
             AppLogger.shared.log("[EmailService] markAsRead error: \(error)")
         }
     }
 
     func markAsUnread(ids: [String]) async {
+        let priorThreads = threads
+        for i in threads.indices where ids.contains(threads[i].id) {
+            threads[i] = EmailThread(
+                id: threads[i].id, subject: threads[i].subject,
+                snippet: threads[i].snippet, from: threads[i].from,
+                date: threads[i].date, unread: true,
+                messageCount: threads[i].messageCount, labels: threads[i].labels
+            )
+        }
         do {
             let _: EmailEmptyResponse = try await api.trpcMutation("mail.markAsUnread", input: IdsInput(ids: ids))
-            for i in threads.indices where ids.contains(threads[i].id) {
-                threads[i] = EmailThread(
-                    id: threads[i].id, subject: threads[i].subject,
-                    snippet: threads[i].snippet, from: threads[i].from,
-                    date: threads[i].date, unread: true,
-                    messageCount: threads[i].messageCount, labels: threads[i].labels
-                )
-            }
         } catch {
+            threads = priorThreads
             errorMessage = "Could not mark as unread. Please try again."
             AppLogger.shared.log("[EmailService] markAsUnread error: \(error)")
         }
     }
 
     func archiveThreads(ids: [String]) async {
+        let priorThreads = threads
+        // Optimistically remove from list first so swipe action feels immediate
+        threads.removeAll { ids.contains($0.id) }
         do {
             let _: EmailEmptyResponse = try await api.trpcMutation("mail.bulkArchive", input: IdsInput(ids: ids))
-            threads.removeAll { ids.contains($0.id) }
         } catch {
+            // Restore the threads we removed if the server rejected the archive
+            threads = priorThreads
             errorMessage = "Could not archive. Please try again."
             AppLogger.shared.log("[EmailService] archiveThreads error: \(error)")
         }
     }
 
     func deleteThreads(ids: [String]) async {
+        let priorThreads = threads
+        threads.removeAll { ids.contains($0.id) }
         do {
             let _: EmailEmptyResponse = try await api.trpcMutation("mail.bulkDelete", input: IdsInput(ids: ids))
-            threads.removeAll { ids.contains($0.id) }
         } catch {
+            threads = priorThreads
             errorMessage = "Could not delete. Please try again."
             AppLogger.shared.log("[EmailService] deleteThreads error: \(error)")
         }
     }
 
     func toggleStar(ids: [String]) async {
+        // No local star field on EmailThread today, but capture the snapshot anyway
+        // so any future label-based optimistic update can be rolled back.
+        let priorThreads = threads
         do {
             let _: SuccessResponse = try await api.trpcMutation("mail.toggleStar", input: IdsInput(ids: ids))
         } catch {
+            threads = priorThreads
             errorMessage = "Could not update star. Please try again."
             AppLogger.shared.log("[EmailService] toggleStar error: \(error)")
         }

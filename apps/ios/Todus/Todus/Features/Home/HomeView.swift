@@ -1,10 +1,13 @@
 import SwiftUI
 import SwiftData
 import EventKit
+import UIKit
 
 /// The Home / Today tab — a dashboard showing upcoming events, due tasks, and recent emails.
 struct HomeView: View {
     @Environment(AppServices.self) private var services
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.modelContext) private var modelContext
     @Query(sort: \FolderRecord.createdAt) private var folders: [FolderRecord]
 
     // Tasks due today — SwiftData live query (excludes completed tasks)
@@ -24,7 +27,15 @@ struct HomeView: View {
     @State private var selectedTask: TaskRecord? = nil
     @State private var selectedCalendarEvent: CalendarEvent? = nil
     @State private var selectedEmailThread: EmailThread? = nil
+    @State private var proactiveSuggestionThread: HomeProactiveThreadRoute? = nil
+    @State private var isLoadingProactiveNudges = false
     @State private var showDocsSheet = false
+
+    /// Most recent foreground refresh — used to gate the scenePhase listener so we don't
+    /// double-refresh when the app comes back to foreground rapidly (e.g. after dismissing
+    /// a system permission prompt or share sheet).
+    @State private var lastRefresh: Date = .distantPast
+    private let foregroundRefreshThrottle: TimeInterval = 5
 
     var body: some View {
         ZStack {
@@ -39,6 +50,10 @@ struct HomeView: View {
                 ScrollView(.vertical) {
                     VStack(alignment: .leading, spacing: 24) {
                         greetingSection
+
+                        if showProactiveAssistantOnHome {
+                            proactiveAssistantSection
+                        }
 
                         if services.assistantAutomationPolicy.briefingEnabled
                             && services.assistantAutomationPolicy.showHomeBriefing {
@@ -74,14 +89,30 @@ struct HomeView: View {
         .toolbar(.hidden, for: .navigationBar)
         .task {
             await loadHomeData()
+            lastRefresh = Date()
         }
         .onAppear { recomputeTasksDueToday() }
         .onChange(of: allTasks) { recomputeTasksDueToday() }
+        // Refresh on foreground so events/inbox/assistant data don't go stale while the
+        // app is backgrounded. Throttled to skip if the last refresh was within 5s — this
+        // avoids a double-fetch when scenePhase fires .active immediately after our `.task`
+        // (or after dismissing a system permission prompt that briefly suspends the scene).
+        .onChange(of: scenePhase) { _, newPhase in
+            guard newPhase == .active else { return }
+            guard Date().timeIntervalSince(lastRefresh) >= foregroundRefreshThrottle else { return }
+            Task {
+                // Pull in any reminders the user added/edited in Apple Reminders while we
+                // were backgrounded — keeps the SwiftData task store aligned with system state.
+                await services.remindersSyncService.refreshFromReminders(in: modelContext)
+                await loadHomeData()
+                lastRefresh = Date()
+            }
+        }
         // Task detail sheet — opened when a task row is tapped
         .sheet(item: $selectedTask) { task in
             TaskDetailSheet(task: task)
                 .presentationDragIndicator(Visibility.visible)
-                .presentationBackground(AppTheme.backgroundTop)
+                .appSheetBackground()
         }
         .sheet(isPresented: $showDocsSheet) {
             NavigationStack {
@@ -106,8 +137,20 @@ struct HomeView: View {
                 EmailThreadView(threadId: thread.id)
             }
             .presentationDragIndicator(Visibility.visible)
-            .presentationBackground(AppTheme.backgroundTop)
+            .appSheetBackground()
         }
+        .sheet(item: $proactiveSuggestionThread) { route in
+            NavigationStack {
+                EmailThreadView(threadId: route.id)
+            }
+            .presentationDragIndicator(Visibility.visible)
+            .appSheetBackground()
+        }
+    }
+
+    /// Sheet route for opening a thread from AI suggestion cards.
+    private struct HomeProactiveThreadRoute: Identifiable {
+        let id: String
     }
 
     // MARK: - Greeting
@@ -169,9 +212,9 @@ struct HomeView: View {
             }
         }
         .padding(16)
-        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.row, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
+            RoundedRectangle(cornerRadius: AppTheme.Radius.row, style: .continuous)
                 .stroke(AppTheme.cardBorder, lineWidth: 1)
         )
     }
@@ -198,6 +241,157 @@ struct HomeView: View {
         services.emailService.isLoadingThreads && !services.emailService.threads.isEmpty
     }
 
+    private var showProactiveAssistantOnHome: Bool {
+        services.authService.isAuthenticated
+            && services.emailService.hasConnection
+            && services.assistantAutomationPolicy.assistantThreadActionsVisible
+            && services.assistantAutomationPolicy.briefingEnabled
+    }
+
+    private var proactiveNudgeCards: [MailAssistantNudge] {
+        services.emailService.assistantNudges.filter { $0.count > 0 }
+    }
+
+    private var proactiveAssistantSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0, green: 0xAA / 255, blue: 0xF5 / 255),
+                                Color(red: 0xEF / 255, green: 0, blue: 0xC2 / 255),
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .accessibilityHidden(true)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Suggestions for you")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.primary)
+                    Text("From your inbox — tap a card to open the thread.")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(AppTheme.mutedText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 12)
+
+                if isLoadingProactiveNudges {
+                    ProgressView()
+                        .padding(.trailing, 4)
+                }
+
+                Button("Mail") {
+                    services.navigateTo = .email
+                }
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Color.accentColor)
+            }
+
+            if isLoadingProactiveNudges && proactiveNudgeCards.isEmpty {
+                loadingState(message: "Checking your inbox…")
+            } else if !isLoadingProactiveNudges && proactiveNudgeCards.isEmpty {
+                Text("You’re caught up on what we’re tracking. New replies and drafts will surface here.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(AppTheme.mutedText)
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(AppTheme.surfaceSecondary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.compact, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: AppTheme.Radius.compact, style: .continuous)
+                            .stroke(AppTheme.cardBorder, lineWidth: 1)
+                    )
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 10) {
+                        ForEach(Array(proactiveNudgeCards.prefix(6))) { nudge in
+                            proactiveNudgeCard(nudge)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
+        }
+        .padding(16)
+        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.row, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppTheme.Radius.row, style: .continuous)
+                .stroke(
+                    LinearGradient(
+                        colors: [Color.accentColor.opacity(0.45), Color.accentColor.opacity(0.08)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 1
+                )
+        )
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("AI suggestions from your mail")
+    }
+
+    private func proactiveNudgeCard(_ nudge: MailAssistantNudge) -> some View {
+        Button {
+            if let id = nudge.threadIds.first {
+                proactiveSuggestionThread = HomeProactiveThreadRoute(id: id)
+            } else {
+                services.navigateTo = .email
+            }
+        } label: {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: iconForAssistantNudge(nudge.type))
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: 24)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(nudge.title)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.primary)
+                            .multilineTextAlignment(.leading)
+                            .lineLimit(2)
+                        Spacer(minLength: 4)
+                        Text("\(nudge.count)")
+                            .font(.system(size: 10, weight: .bold, design: .rounded))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(AppTheme.surfaceSecondary, in: Capsule())
+                    }
+                    Text(nudge.description)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(12)
+            .frame(width: 268, alignment: .leading)
+            .background(AppTheme.surfaceSecondary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.compact, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: AppTheme.Radius.compact, style: .continuous)
+                    .stroke(AppTheme.cardBorder, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(nudge.threadIds.isEmpty)
+    }
+
+    private func iconForAssistantNudge(_ type: AssistantNudgeType) -> String {
+        switch type {
+        case .replyNeeded: return "arrowshape.turn.up.left.fill"
+        case .meetingRequest: return "calendar.badge.clock"
+        case .followUp: return "clock.arrow.circlepath"
+        case .draftReady: return "doc.text.fill"
+        }
+    }
+
     // MARK: - Events Section
 
     private var eventsSection: some View {
@@ -216,7 +410,18 @@ struct HomeView: View {
             if isLoadingEvents && todaysEvents.isEmpty {
                 loadingState(message: "Loading today's events")
             } else if todaysEvents.isEmpty {
-                emptyState(message: "No events today", onTap: { services.navigateTo = .calendar })
+                // If we don't have calendar permission, the empty state can't tell the
+                // difference between "no events" and "we literally can't see your events".
+                // Surface that distinction so the user can act, instead of staring at a
+                // perpetually empty card.
+                if !services.calendarService.canReadEvents() {
+                    permissionEmptyState(
+                        message: "Enable calendar access in Settings to see today's events",
+                        actionTitle: "Open Settings"
+                    )
+                } else {
+                    emptyState(message: "No events today", onTap: { services.navigateTo = .calendar })
+                }
             } else {
                 VStack(spacing: 8) {
                     ForEach(todaysEvents.prefix(5)) { event in
@@ -239,7 +444,11 @@ struct HomeView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(event.title)
                         .font(.system(size: 14, weight: .medium))
-                        .lineLimit(1)
+                        // Allow two lines so longer event titles ("Q3 OKR review with the
+                        // platform team") aren't visually cut off mid-word in the home feed.
+                        .lineLimit(2)
+                        .truncationMode(.tail)
+                        .multilineTextAlignment(.leading)
                         .foregroundStyle(.primary)
 
                     if let folderName = folderName(for: event.folderID) {
@@ -270,9 +479,9 @@ struct HomeView: View {
                     .foregroundStyle(AppTheme.mutedText)
             }
             .padding(12)
-            .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous)
                     .stroke(AppTheme.cardBorder, lineWidth: 1)
             )
             .contentShape(Rectangle())
@@ -375,9 +584,9 @@ struct HomeView: View {
             }
             .padding(12)
             .frame(width: 180, alignment: .leading)
-            .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous)
                     .stroke(AppTheme.cardBorder, lineWidth: 1)
             )
         }
@@ -425,9 +634,9 @@ struct HomeView: View {
                             }
                             .padding(12)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
                             .overlay(
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous)
                                     .stroke(AppTheme.cardBorder, lineWidth: 1)
                             )
                         }
@@ -540,7 +749,7 @@ struct HomeView: View {
                             HStack(spacing: 12) {
                                 // Unread indicator dot
                                 Circle()
-                                    .fill(thread.unread ? Color.blue : Color.clear)
+                                    .fill(thread.unread ? Color.primary : Color.clear)
                                     .frame(width: 8, height: 8)
 
                                 VStack(alignment: .leading, spacing: 2) {
@@ -565,9 +774,9 @@ struct HomeView: View {
                                 }
                             }
                             .padding(12)
-                            .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
                             .overlay(
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous)
                                     .stroke(AppTheme.cardBorder, lineWidth: 1)
                             )
                             .contentShape(Rectangle())
@@ -655,11 +864,11 @@ struct HomeView: View {
         HStack(spacing: 14) {
             Image(systemName: icon)
                 .font(.system(size: 18, weight: .medium))
-                .foregroundStyle(isSecondary ? AppTheme.mutedText : .blue)
+                .foregroundStyle(isSecondary ? AppTheme.mutedText : .primary)
                 .frame(width: 36, height: 36)
                 .background(
-                    isSecondary ? AppTheme.surfaceSecondary : Color.blue.opacity(0.1),
-                    in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    isSecondary ? AppTheme.surfaceSecondary : Color.primary.opacity(0.1),
+                    in: RoundedRectangle(cornerRadius: AppTheme.Radius.compact, style: .continuous)
                 )
 
             VStack(alignment: .leading, spacing: 2) {
@@ -680,10 +889,10 @@ struct HomeView: View {
         .padding(14)
         .background(
             isSecondary ? AppTheme.surfaceSecondary : AppTheme.surfacePrimary,
-            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+            in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous)
                 .stroke(AppTheme.cardBorder, lineWidth: 1)
         )
         .contentShape(Rectangle())
@@ -726,7 +935,7 @@ struct HomeView: View {
             HStack(spacing: 14) {
                 Image(systemName: icon)
                     .font(.system(size: 18, weight: .medium))
-                    .foregroundStyle(.blue)
+                    .foregroundStyle(.primary)
                     .frame(width: 32)
 
                 VStack(alignment: .leading, spacing: 2) {
@@ -745,9 +954,9 @@ struct HomeView: View {
                     .foregroundStyle(AppTheme.mutedText)
             }
             .padding(14)
-            .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous)
                     .stroke(AppTheme.cardBorder, lineWidth: 1)
             )
             .contentShape(Rectangle())
@@ -796,15 +1005,44 @@ struct HomeView: View {
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.secondary)
                     .frame(width: 28, height: 28)
-                    .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.inline, style: .continuous))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        RoundedRectangle(cornerRadius: AppTheme.Radius.inline, style: .continuous)
                             .stroke(AppTheme.cardBorder, lineWidth: 1)
                     )
             }
             .buttonStyle(.plain)
             .minTouchTarget()
         }
+    }
+
+    /// Empty state for missing system permission (e.g. calendar/reminders access denied).
+    /// Tapping deep-links into Settings so the user can grant access without hunting for it.
+    private func permissionEmptyState(message: String, actionTitle: String) -> some View {
+        Button {
+            if let url = URL(string: UIApplication.openSettingsURLString) {
+                UIApplication.shared.open(url)
+            }
+        } label: {
+            VStack(spacing: 8) {
+                Text(message)
+                    .font(.system(size: 14))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                Text(actionTitle)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(AppTheme.accent)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(20)
+            .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous)
+                    .stroke(AppTheme.cardBorder, lineWidth: 1)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     /// Tappable empty state card — tapping triggers a navigation action.
@@ -815,9 +1053,9 @@ struct HomeView: View {
                 .foregroundStyle(.tertiary)
                 .frame(maxWidth: .infinity)
                 .padding(20)
-                .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous)
                         .stroke(AppTheme.cardBorder, lineWidth: 1)
                 )
                 .contentShape(Rectangle())
@@ -835,9 +1073,9 @@ struct HomeView: View {
             Spacer()
         }
         .padding(14)
-        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous)
                 .stroke(AppTheme.cardBorder, lineWidth: 1)
         )
     }
@@ -854,7 +1092,7 @@ struct HomeView: View {
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(AppTheme.accent)
                 .frame(width: 28, height: 28)
-                .background(AppTheme.surfaceSecondary, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .background(AppTheme.surfaceSecondary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.inline, style: .continuous))
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
@@ -902,6 +1140,15 @@ struct HomeView: View {
         }
 
         await loadTodaysEvents()
+
+        if services.authService.isAuthenticated,
+           services.emailService.hasConnection,
+           services.assistantAutomationPolicy.assistantThreadActionsVisible,
+           services.assistantAutomationPolicy.briefingEnabled {
+            isLoadingProactiveNudges = true
+            await services.emailService.loadAssistantNudges()
+            isLoadingProactiveNudges = false
+        }
 
         if services.assistantAutomationPolicy.briefingEnabled
             && services.assistantAutomationPolicy.showHomeBriefing {

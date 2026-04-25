@@ -21,7 +21,7 @@ struct SignaturesView: View {
                         Spacer()
                         if services.selectedSignatureID == nil {
                             Image(systemName: "checkmark")
-                                .foregroundStyle(.blue)
+                                .foregroundStyle(.primary)
                                 .fontWeight(.semibold)
                         }
                     }
@@ -76,7 +76,7 @@ struct SignaturesView: View {
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
-        .background(AppTheme.backgroundTop)
+        .background(AppTheme.sheetBackground)
         .navigationTitle("Signatures")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -104,7 +104,7 @@ struct SignaturesView: View {
             Group {
                 if services.selectedSignatureID == sig.id {
                     Image(systemName: "checkmark")
-                        .foregroundStyle(.blue)
+                        .foregroundStyle(.primary)
                         .fontWeight(.semibold)
                 } else {
                     Color.clear
@@ -182,7 +182,7 @@ struct SignatureEditorView: View {
                 Toggle(isOn: $isActive) {
                     Label("Use as active signature", systemImage: "checkmark.seal")
                 }
-                .tint(.blue)
+                .tint(.primary)
             } footer: {
                 Text("Only one signature can be active at a time.")
             }
@@ -204,7 +204,7 @@ struct SignatureEditorView: View {
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
-        .background(AppTheme.backgroundTop)
+        .background(AppTheme.sheetBackground)
         .navigationTitle(isNew ? "New Signature" : "Edit Signature")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

@@ -11,6 +11,10 @@ enum AppTheme {
     static let backgroundBottom = Color(UIColor { trait in
         trait.userInterfaceStyle == .dark ? UIColor(white: 0.05, alpha: 1) : UIColor(white: 0.94, alpha: 1)
     })
+    // Sheets sit slightly above the app background in dark mode so they read as a distinct layer.
+    static let sheetBackground = Color(UIColor { trait in
+        trait.userInterfaceStyle == .dark ? UIColor(white: 0.09, alpha: 1) : UIColor(white: 0.94, alpha: 1)
+    })
     static let surfacePrimary = Color(UIColor { trait in
         // Dark: 0.11 (up from 0.09) — slightly less stark against near-black background
         trait.userInterfaceStyle == .dark ? UIColor(white: 0.11, alpha: 1) : UIColor(white: 1.0, alpha: 1)
@@ -25,8 +29,8 @@ enum AppTheme {
     static let accent = Color.primary
     static let secondaryAccent = Color.secondary
 
-    // Tab bar colors — system blue matches our button color (AppPrimaryButtonStyle)
-    static let accentBlue = Color.blue
+    /// Tint for tab bar, badges, and chrome that should read as primary content — not system blue.
+    static let accentBlue = Color.primary
     static let mutedGray = Color(UIColor { trait in
         trait.userInterfaceStyle == .dark
             ? UIColor(white: 0.55, alpha: 1)
@@ -47,6 +51,25 @@ enum AppTheme {
     static let rowFill = surfacePrimary
     static let rowStroke = Color(uiColor: .separator).opacity(0.10)
     static let shadowColor = Color.black.opacity(0.06)
+
+    // MARK: - Corner radii (aligned with MacTheme — continuous rounded rects app-wide)
+
+    enum Radius {
+        /// Primary cards, sheets, prominent surfaces (`MacTheme.cardRadius`)
+        static let card: CGFloat = 18
+        /// List rows, medium tiles (`MacTheme` large content)
+        static let row: CGFloat = 16
+        /// Inputs, search fields, secondary panels (`MacTheme.buttonRadius`)
+        static let control: CGFloat = 14
+        /// Nested cards, columns, compact blocks (`MacTheme.compactRadius`)
+        static let compact: CGFloat = 12
+        /// Small clips, tight panels
+        static let inline: CGFloat = 10
+        /// Status / tag / badge chips (`MacTheme.pillRadius`)
+        static let chip: CGFloat = 7
+        /// Chat composer / large floating chrome
+        static let composer: CGFloat = 24
+    }
 }
 
 /// Shared tab-page header — single row: avatar + page title (left) + action pill (right).
@@ -74,33 +97,45 @@ struct AppTopHeader<CustomTitle: View>: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
+            // Keep the profile image + actions from shrinking on narrow devices when the
+            // custom title (e.g. Tasks + sync badge) and the action pill are both wide.
             avatarButton
+                .fixedSize(horizontal: true, vertical: false)
+                .layoutPriority(1)
 
-            if let customTitleContent {
-                customTitleContent
-            } else {
-                Text(title)
-                    .font(.system(size: 18, weight: .bold))
-                    .tracking(-0.3)
-                    .foregroundStyle(.primary)
+            Group {
+                if let customTitleContent {
+                    customTitleContent
+                } else {
+                    Text(title)
+                        .font(.system(size: 18, weight: .bold))
+                        .tracking(-0.3)
+                        .foregroundStyle(.primary)
+                }
             }
+            .lineLimit(1)
+            .minimumScaleFactor(0.78)
+            .frame(minWidth: 0, alignment: .leading)
+            .layoutPriority(0)
 
-            Spacer()
+            Spacer(minLength: 4)
 
             actionsPill
+                .fixedSize(horizontal: true, vertical: false)
+                .layoutPriority(1)
         }
         .sheet(isPresented: $showNotifications) {
             NotificationCenterView()
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
-                .presentationBackground(AppTheme.backgroundTop)
+                .appSheetBackground()
                 .preferredColorScheme(services.appearancePreference.colorScheme)
         }
         .sheet(isPresented: $showsGlobalSearch) {
             GlobalSearchView()
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
-                .presentationBackground(AppTheme.backgroundTop)
+                .appSheetBackground()
                 .preferredColorScheme(services.appearancePreference.colorScheme)
         }
     }
@@ -253,7 +288,7 @@ extension View {
 }
 
 struct SurfaceCardModifier: ViewModifier {
-    var cornerRadius: CGFloat = 16
+    var cornerRadius: CGFloat = AppTheme.Radius.card
     var fill: Color = AppTheme.surfacePrimary
     var stroke: Color = AppTheme.cardBorder
 
@@ -351,7 +386,7 @@ struct SwipeBackEnabler: UIViewControllerRepresentable {
 /// falling back to ultraThinMaterial rounded rectangle on older iOS.
 /// `cornerRadius` is used for the fallback path; iOS 26 always uses Capsule glass.
 struct LiquidGlassButtonStyle: ButtonStyle {
-    var cornerRadius: CGFloat = 12
+    var cornerRadius: CGFloat = AppTheme.Radius.control
 
     func makeBody(configuration: Configuration) -> some View {
         Group {
@@ -372,8 +407,20 @@ struct LiquidGlassButtonStyle: ButtonStyle {
 }
 
 extension View {
-    func glassCard(cornerRadius: CGFloat = 16, fill: Color = AppTheme.surfacePrimary, stroke: Color = AppTheme.cardBorder) -> some View {
+    func glassCard(cornerRadius: CGFloat = AppTheme.Radius.card, fill: Color = AppTheme.surfacePrimary, stroke: Color = AppTheme.cardBorder) -> some View {
         modifier(SurfaceCardModifier(cornerRadius: cornerRadius, fill: fill, stroke: stroke))
+    }
+
+    /// Sets the sheet's presentationBackground to `AppTheme.sheetBackground` with a
+    /// hairline top border so sheets lift slightly above the app background in dark mode.
+    func appSheetBackground() -> some View {
+        self.presentationBackground {
+            ZStack(alignment: .top) {
+                AppTheme.sheetBackground.ignoresSafeArea()
+                Color(UIColor.separator).opacity(0.20)
+                    .frame(height: 0.5)
+            }
+        }
     }
 
     func appIconButton(size: CGFloat = 36) -> some View {
@@ -403,7 +450,7 @@ struct AttachmentThumbnailView<Placeholder: View>: View {
             }
         }
         .frame(width: size, height: size)
-        .clipShape(RoundedRectangle(cornerRadius: max(8, size * 0.18), style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: max(AppTheme.Radius.chip, size * 0.2), style: .continuous))
         .task(id: [filename, String(format: "%.2f", size)].joined(separator: "-")) {
             let thumbnailName = filename
             let thumbnailSize = size

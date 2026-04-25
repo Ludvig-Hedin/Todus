@@ -39,7 +39,7 @@ struct TaskRowView: View {
                         if task.parseState == .pending {
                             Image(systemName: "sparkle")
                                 .font(.system(size: 10, weight: .semibold))
-                                .foregroundStyle(Color.blue.opacity(0.6))
+                                .foregroundStyle(Color.primary.opacity(0.6))
                                 .symbolEffect(.pulse.wholeSymbol, options: .repeating)
                         }
                     }
@@ -77,9 +77,9 @@ struct TaskRowView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .background(AppTheme.rowFill, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(AppTheme.rowFill, in: RoundedRectangle(cornerRadius: AppTheme.Radius.row, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
+            RoundedRectangle(cornerRadius: AppTheme.Radius.row, style: .continuous)
                 .stroke(AppTheme.rowStroke, lineWidth: 0.5)
         )
         .contentShape(Rectangle())
@@ -96,7 +96,7 @@ struct TaskRowView: View {
             } label: {
                 Label("Complete", systemImage: "checkmark")
             }
-            .tint(Color.blue)
+            .tint(Color.primary)
 
             Button {
                 onMoveRequested()
@@ -121,9 +121,9 @@ struct TaskRowView: View {
         .foregroundStyle(status.tintColor)
         .padding(.horizontal, 6)
         .padding(.vertical, 2)
-        .background(status.tintColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+        .background(status.tintColor.opacity(0.08), in: RoundedRectangle(cornerRadius: AppTheme.Radius.chip, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 5, style: .continuous)
+            RoundedRectangle(cornerRadius: AppTheme.Radius.chip, style: .continuous)
                 .stroke(status.tintColor.opacity(0.10), lineWidth: 0.5)
         )
     }
@@ -138,9 +138,9 @@ struct TaskRowView: View {
             .foregroundStyle(color)
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
-            .background(color.opacity(0.08), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+            .background(color.opacity(0.08), in: RoundedRectangle(cornerRadius: AppTheme.Radius.chip, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                RoundedRectangle(cornerRadius: AppTheme.Radius.chip, style: .continuous)
                     .stroke(color.opacity(0.10), lineWidth: 0.5)
             )
     }
@@ -159,9 +159,9 @@ struct TaskRowView: View {
         .foregroundStyle(color)
         .padding(.horizontal, 6)
         .padding(.vertical, 2)
-        .background(color.opacity(0.06), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+        .background(color.opacity(0.06), in: RoundedRectangle(cornerRadius: AppTheme.Radius.chip, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 5, style: .continuous)
+            RoundedRectangle(cornerRadius: AppTheme.Radius.chip, style: .continuous)
                 .stroke(color.opacity(0.08), lineWidth: 0.5)
         )
     }
@@ -175,9 +175,9 @@ struct TaskRowView: View {
             .foregroundStyle(AppTheme.mutedText.opacity(0.9))
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
-            .background(AppTheme.surfaceSecondary.opacity(0.45), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+            .background(AppTheme.surfaceSecondary.opacity(0.45), in: RoundedRectangle(cornerRadius: AppTheme.Radius.chip, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                RoundedRectangle(cornerRadius: AppTheme.Radius.chip, style: .continuous)
                     .stroke(AppTheme.cardBorder.opacity(0.75), lineWidth: 0.5)
             )
     }

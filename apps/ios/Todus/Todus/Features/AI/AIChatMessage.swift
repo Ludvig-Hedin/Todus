@@ -70,6 +70,8 @@ struct AIChatMessage: Identifiable {
     /// follow-up turns can still resolve the underlying entity IDs (task, thread, event)
     /// that were mentioned in earlier turns.
     var mentions: [RichInputMentionRef]
+    /// Local `AttachmentService` filenames included with this user message (for thread UI + resend on retry)
+    var attachmentFileNames: [String]
 
     init(
         id: UUID = UUID(),
@@ -84,7 +86,8 @@ struct AIChatMessage: Identifiable {
         searchState: SearchPhase = .none,
         reasoningContent: String = "",
         reasoningDurationMs: Int? = nil,
-        mentions: [RichInputMentionRef] = []
+        mentions: [RichInputMentionRef] = [],
+        attachmentFileNames: [String] = []
     ) {
         self.id = id
         self.role = role
@@ -99,6 +102,7 @@ struct AIChatMessage: Identifiable {
         self.reasoningContent = reasoningContent
         self.reasoningDurationMs = reasoningDurationMs
         self.mentions = mentions
+        self.attachmentFileNames = attachmentFileNames
     }
 
     /// Extracts and caches the UI spec from message content.
@@ -137,6 +141,11 @@ struct AIChatTaskMutation: Identifiable {
     var status: String?
     /// True once this mutation has been applied to the SwiftData store
     var applied: Bool
+    /// Whether the underlying tool call succeeded. `false` chips render as an
+    /// inline error label so failures aren't silently dropped.
+    var success: Bool
+    /// Optional error label rendered when `success == false`.
+    var errorMessage: String?
 
     init(
         id: UUID = UUID(),
@@ -146,7 +155,9 @@ struct AIChatTaskMutation: Identifiable {
         dueDate: Date? = nil,
         folderName: String? = nil,
         priority: String? = nil,
-        status: String? = nil
+        status: String? = nil,
+        success: Bool = true,
+        errorMessage: String? = nil
     ) {
         self.id = id
         self.action = action
@@ -157,5 +168,7 @@ struct AIChatTaskMutation: Identifiable {
         self.priority = priority
         self.status = status
         self.applied = false
+        self.success = success
+        self.errorMessage = errorMessage
     }
 }

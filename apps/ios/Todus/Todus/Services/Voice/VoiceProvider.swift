@@ -59,7 +59,7 @@ struct VoiceSessionConfig {
 
     /// Convenience initializer with Gemini Live defaults.
     static func geminiDefault(
-        model: String = "models/gemini-3.1-flash-live-preview",
+        model: String = "models/gemini-2.0-flash-live-001",
         systemInstruction: String,
         tools: [[String: Any]]? = nil,
         voiceName: String = "Puck"

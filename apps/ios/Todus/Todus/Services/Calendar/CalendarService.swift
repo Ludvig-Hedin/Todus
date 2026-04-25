@@ -90,6 +90,13 @@ actor CalendarService {
     }
 
     /// Fetch today's events (from midnight to midnight).
+    /// All-day timezone correctness: `Calendar.current.startOfDay(for:)` returns local-time
+    /// midnight in the user's current timezone, and `byAdding: .day, value: 1` does proper
+    /// DST-aware arithmetic (it's not a flat 86400s addition). EKEventStore's
+    /// `predicateForEvents(withStart:end:)` then matches any event that *overlaps* this
+    /// range — including all-day events stored with floating timezones — which is the
+    /// behaviour we want. Do not switch this to UTC boundaries: that would drop all-day
+    /// events for users east of UTC and double-count them west of UTC.
     func todaysEvents() -> [CalendarEvent] {
         let calendar = Calendar.current
         let startOfDay = calendar.startOfDay(for: Date())
@@ -123,6 +130,49 @@ actor CalendarService {
     /// Fetch the underlying EKEvent by identifier — used by SwiftUI views to present EKEventViewController.
     func ekEvent(for identifier: String) -> EKEvent? {
         eventStore.event(withIdentifier: identifier)
+    }
+
+    /// Sendable event snapshot for inline AI chat cards (avoids passing `EKEvent` off the actor).
+    func chatDisplayEvent(for identifier: String) -> CalendarEvent? {
+        guard let ev = eventStore.event(withIdentifier: identifier) else { return nil }
+        return ev.toCalendarEvent(folderID: folderID(for: ev.eventIdentifier))
+    }
+
+    /// Update fields on an existing event. Nil fields are left unchanged.
+    /// Throws if the event can't be found or the save fails.
+    func updateEvent(
+        identifier: String,
+        title: String? = nil,
+        startDate: Date? = nil,
+        endDate: Date? = nil,
+        notes: String? = nil
+    ) throws {
+        guard let event = eventStore.event(withIdentifier: identifier) else {
+            throw NSError(domain: "CalendarService", code: 404, userInfo: [NSLocalizedDescriptionKey: "Event not found"])
+        }
+        if let title { event.title = title }
+        if let startDate { event.startDate = startDate }
+        if let endDate { event.endDate = endDate }
+        if let notes { event.notes = notes }
+        if event.endDate < event.startDate {
+            throw NSError(
+                domain: "CalendarService",
+                code: 422,
+                userInfo: [NSLocalizedDescriptionKey: "Event end date must not be before start date"]
+            )
+        }
+        try eventStore.save(event, span: .thisEvent)
+        invalidateTodayCache()
+    }
+
+    /// Delete an event by identifier. Throws if not found or save fails.
+    func deleteEvent(identifier: String) throws {
+        guard let event = eventStore.event(withIdentifier: identifier) else {
+            throw NSError(domain: "CalendarService", code: 404, userInfo: [NSLocalizedDescriptionKey: "Event not found"])
+        }
+        try eventStore.remove(event, span: .thisEvent)
+        setFolderID(nil, for: identifier)
+        invalidateTodayCache()
     }
 
     func setFolderID(_ folderID: UUID?, for eventIdentifier: String?) {

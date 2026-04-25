@@ -151,7 +151,7 @@ struct TaskTableView: View {
         .sheet(item: $selectedTask) { task in
             TaskDetailSheet(task: task)
                 .presentationDragIndicator(.visible)
-                .presentationBackground(AppTheme.backgroundTop)
+                .appSheetBackground()
         }
         .alert(
             "Delete task?",
@@ -195,9 +195,9 @@ struct TaskTableView: View {
         .foregroundStyle(AppTheme.mutedText)
         .padding(.horizontal, 12)
         .padding(.vertical, 7)
-        .background(AppTheme.surfaceSecondary.opacity(0.6), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(AppTheme.surfaceSecondary.opacity(0.6), in: RoundedRectangle(cornerRadius: AppTheme.Radius.compact, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
+            RoundedRectangle(cornerRadius: AppTheme.Radius.compact, style: .continuous)
                 .stroke(AppTheme.cardBorder, lineWidth: 0.5)
         )
         .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 6, trailing: 16))
@@ -219,9 +219,9 @@ struct TaskTableView: View {
         .foregroundStyle(status.tintColor)
         .padding(.horizontal, 7)
         .padding(.vertical, 3)
-        .background(status.tintColor.opacity(0.10), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+        .background(status.tintColor.opacity(0.10), in: RoundedRectangle(cornerRadius: AppTheme.Radius.chip, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 5, style: .continuous)
+            RoundedRectangle(cornerRadius: AppTheme.Radius.chip, style: .continuous)
                 .stroke(status.tintColor.opacity(0.12), lineWidth: 0.5)
         )
     }

@@ -54,7 +54,7 @@ struct TaskDetailSheet: View {
             .listStyle(.insetGrouped)
             .listRowSpacing(10)
             .scrollContentBackground(.hidden)
-            .background(AppTheme.backgroundTop)
+            .background(AppTheme.sheetBackground)
             .navigationTitle("Edit Task")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -170,7 +170,7 @@ struct TaskDetailSheet: View {
     private var scheduleSection: some View {
         Section("Schedule") {
             Toggle("Due date", isOn: $hasDueDate)
-                .tint(Color.blue)
+                .tint(Color.primary)
 
             if hasDueDate {
                 DatePicker("Due", selection: $dueDate)
@@ -266,7 +266,7 @@ struct TaskDetailSheet: View {
                     HStack(spacing: 12) {
                         if AttachmentService.shared.isImageFile(name) {
                             AttachmentThumbnailView(filename: name, size: 40) {
-                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                RoundedRectangle(cornerRadius: AppTheme.Radius.inline, style: .continuous)
                                     .fill(AppTheme.surfaceSecondary)
                             }
                         } else {
@@ -274,7 +274,7 @@ struct TaskDetailSheet: View {
                                 .font(.system(size: 14))
                                 .foregroundStyle(AppTheme.mutedText)
                                 .frame(width: 40, height: 40)
-                                .background(AppTheme.surfaceSecondary, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                .background(AppTheme.surfaceSecondary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.inline, style: .continuous))
                         }
 
                         Text(name)

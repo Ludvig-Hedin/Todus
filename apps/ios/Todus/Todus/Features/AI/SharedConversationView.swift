@@ -99,8 +99,8 @@ struct SharedConversationView: View {
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
-                    .background(.blue, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .foregroundStyle(.white)
+                    .background(Color.primary.opacity(0.12), in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
+                    .foregroundStyle(.primary)
                 }
                 .buttonStyle(.plain)
                 .padding(.horizontal, 32)
@@ -214,15 +214,20 @@ private struct SharedMessageBubble: View {
     var body: some View {
         HStack {
             if isUser { Spacer(minLength: 60) }
-            Text(content)
-                .font(.system(size: 15))
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(
-                    isUser ? Color.blue : AppTheme.surfacePrimary,
-                    in: RoundedRectangle(cornerRadius: 16, style: .continuous)
-                )
-                .foregroundStyle(isUser ? .white : .primary)
+            if isUser {
+                Text(content)
+                    .font(.system(size: 15))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(Color.primary.opacity(0.12), in: RoundedRectangle(cornerRadius: AppTheme.Radius.card, style: .continuous))
+                    .foregroundStyle(.primary)
+            } else {
+                MarkdownView(content: content, fontSize: 15)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.card, style: .continuous))
+                    .foregroundStyle(.primary)
+            }
             if !isUser { Spacer(minLength: 60) }
         }
     }

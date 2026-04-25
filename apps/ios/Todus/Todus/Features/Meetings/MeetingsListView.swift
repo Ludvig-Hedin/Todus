@@ -230,7 +230,7 @@ struct MeetingRowView: View {
 
     private var statusColor: Color {
         switch meeting.status {
-        case "scheduled": .blue
+        case "scheduled": .primary
         case "bot_joining", "processing": .orange
         case "recording": .red
         case "ready": .green

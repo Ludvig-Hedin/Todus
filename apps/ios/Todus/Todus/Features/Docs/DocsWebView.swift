@@ -1,68 +1,165 @@
 import SwiftUI
 import WebKit
 
-/// Wraps the WKWebView-based Docs page in a SwiftUI view.
-/// Bearer token is injected into the initial request so the web app
-/// can recognise the native session without a cookie round-trip.
+/// Wraps the Docs web page in a WKWebView with Bearer auth injection.
+/// Uses configuration.effectiveAppURL so local dev builds load localhost:3000
+/// and production builds load app.todus.app.
 struct DocsWebView: View {
     @Environment(AppServices.self) private var services
 
+    @State private var isLoading: Bool = true
+
     var body: some View {
-        DocsWebViewRepresentable(bearerToken: services.authService.bearerToken)
-            .ignoresSafeArea()
+        let appURL = services.configuration.effectiveAppURL
+        let docsURL = appURL.appendingPathComponent("mail/docs")
+
+        return ZStack {
+            DocsWebViewRepresentable(
+                bearerToken: services.authService.bearerToken,
+                appURL: appURL,
+                docsURL: docsURL,
+                isLoading: $isLoading
+            )
+            if isLoading {
+                ProgressView()
+                    .controlSize(.regular)
+                    .padding(12)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+        }
+        .ignoresSafeArea()
     }
 }
 
-// MARK: - UIViewRepresentable
-
-/// UIViewRepresentable wrapper for WKWebView that loads the web Docs page.
 struct DocsWebViewRepresentable: UIViewRepresentable {
     let bearerToken: String?
-
-    // Production URL — points to the web Docs route.
-    // TODO: read from app config / environment when a config layer is added.
-    private var docsURL: URL {
-        URL(string: "https://app.todus.app/mail/docs")!
-    }
+    let appURL: URL
+    let docsURL: URL
+    @Binding var isLoading: Bool
 
     func makeUIView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
         let contentController = WKUserContentController()
-
-        // Mirror the device colour scheme into the WebView so the web app
-        // can apply its own dark-mode styles immediately on load.
         let darkModeScript = """
-            if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-                document.documentElement.classList.add('dark');
+            function applyDarkMode() {
+                if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches && document.documentElement) {
+                    document.documentElement.classList.add('dark');
+                }
+            }
+
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', applyDarkMode, { once: true });
+            } else {
+                applyDarkMode();
             }
         """
         let script = WKUserScript(
             source: darkModeScript,
-            injectionTime: .atDocumentStart,
+            injectionTime: .atDocumentEnd,
             forMainFrameOnly: true
         )
         contentController.addUserScript(script)
         config.userContentController = contentController
 
         let webView = WKWebView(frame: .zero, configuration: config)
-        // Let SwiftUI safe-area handling manage insets rather than the scroll view.
         webView.scrollView.contentInsetAdjustmentBehavior = .never
+        webView.navigationDelegate = context.coordinator
         return webView
     }
 
     func updateUIView(_ webView: WKWebView, context: Context) {
-        // Guard: avoid reloading if the correct page is already shown.
-        guard webView.url?.absoluteString != docsURL.absoluteString else { return }
+        let currentToken = bearerToken ?? ""
+        let didUrlChange = webView.url?.absoluteString != docsURL.absoluteString
+        let didTokenChange = context.coordinator.lastBearerToken != currentToken
+        guard didUrlChange || didTokenChange else { return }
 
         var request = URLRequest(url: docsURL)
-        // Attach the Bearer token as an Authorization header on the initial
-        // navigation so the web session is established without a cookie flow.
-        // Note: WKWebView does NOT forward this header on subsequent navigations —
-        // only the first load. That is intentional; the web app handles auth state
-        // after the initial handshake.
         if let token = bearerToken {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
         webView.load(request)
+        context.coordinator.lastBearerToken = currentToken
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(isLoading: $isLoading, appURL: appURL)
+    }
+
+    /// Restricts in-WebView navigation to Todus-owned origins (or the configured app
+    /// origin for local dev). External links open in the system browser via
+    /// `UIApplication.open`. `javascript:` URLs are blocked outright.
+    final class Coordinator: NSObject, WKNavigationDelegate {
+        @Binding var isLoading: Bool
+        var lastBearerToken: String = ""
+        let appURL: URL
+
+        init(isLoading: Binding<Bool>, appURL: URL) {
+            self._isLoading = isLoading
+            self.appURL = appURL
+        }
+
+        func webView(
+            _ webView: WKWebView,
+            decidePolicyFor navigationAction: WKNavigationAction,
+            decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+        ) {
+            guard let url = navigationAction.request.url else {
+                decisionHandler(.allow)
+                return
+            }
+
+            // Block javascript: URLs — never useful for docs content and a known XSS vector.
+            if url.scheme?.lowercased() == "javascript" {
+                decisionHandler(.cancel)
+                return
+            }
+
+            if isAllowedURL(url) {
+                decisionHandler(.allow)
+                return
+            }
+
+            if let scheme = url.scheme?.lowercased(),
+               scheme == "http" || scheme == "https" || scheme == "mailto" || scheme == "tel" {
+                Task { @MainActor in
+                    UIApplication.shared.open(url)
+                }
+            }
+            decisionHandler(.cancel)
+        }
+
+        func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+            Task { @MainActor in self.isLoading = true }
+        }
+
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            Task { @MainActor in self.isLoading = false }
+        }
+
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            Task { @MainActor in self.isLoading = false }
+        }
+
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+            Task { @MainActor in self.isLoading = false }
+        }
+
+        /// True for the configured app origin and any `*.todus.app` host.
+        /// Allows local dev (e.g. `localhost:3000`) by matching the configured appURL host.
+        private func isAllowedURL(_ url: URL) -> Bool {
+            guard let scheme = url.scheme?.lowercased(), scheme == "https" || scheme == "http" else {
+                return false
+            }
+            guard let host = url.host?.lowercased() else { return false }
+
+            // Match the configured app origin (production = app.todus.app, dev = localhost).
+            if let appHost = appURL.host?.lowercased(), host == appHost { return true }
+
+            // Allow Todus-owned production origins.
+            if host == "app.todus.app" { return true }
+            if host == "todus.app" { return true }
+            if host.hasSuffix(".todus.app") { return true }
+            return false
+        }
     }
 }

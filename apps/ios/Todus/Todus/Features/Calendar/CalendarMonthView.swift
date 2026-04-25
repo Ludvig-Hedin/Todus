@@ -12,14 +12,9 @@ struct CalendarMonthView: View {
     @Binding var viewMode: CalendarViewMode
     let events: [CalendarEvent]
 
-    // Pinch-to-resize row height.
-    // Default 90pt fits day number (28pt) + 3 event pills (~14pt each) + spacing.
-    // Min 40pt shows only day number + dots. Max 140pt for extra room.
-    @State private var rowHeight: CGFloat = 90
-    @State private var baseRowHeight: CGFloat = 90
+    /// Row height: 90pt fits day number (28pt) + 3 event pills (~14pt each) + spacing.
+    private let rowHeight: CGFloat = 90
     @State private var hasPerformedInitialScroll = false
-    private let minRowHeight: CGFloat = 40
-    private let maxRowHeight: CGFloat = 140
 
     /// Threshold below which we show dots instead of event titles
     private let dotModeThreshold: CGFloat = 60
@@ -34,16 +29,6 @@ struct CalendarMonthView: View {
             Divider()
             monthScrollView
         }
-        .gesture(
-            MagnifyGesture()
-                .onChanged { value in
-                    let proposed = baseRowHeight * value.magnification
-                    rowHeight = min(max(proposed, minRowHeight), maxRowHeight)
-                }
-                .onEnded { _ in
-                    baseRowHeight = rowHeight
-                }
-        )
     }
 
     // MARK: - Weekday Header
@@ -68,16 +53,33 @@ struct CalendarMonthView: View {
 
     // MARK: - Infinite Month Scroll
 
+    /// Pre-computed lookup table: start-of-day → sorted events for that day.
+    /// Captured once per body evaluation so LazyVGrid cells do O(1) lookups
+    /// instead of O(n) filter scans during scroll.
+    private var eventsByDay: [Date: [CalendarEvent]] {
+        let cal = Calendar.current
+        var dict: [Date: [CalendarEvent]] = [:]
+        for event in events {
+            let day = cal.startOfDay(for: event.startDate)
+            dict[day, default: []].append(event)
+        }
+        for key in dict.keys {
+            dict[key]?.sort { $0.startDate < $1.startDate }
+        }
+        return dict
+    }
+
     private var monthScrollView: some View {
         let cal = Calendar.current
         let monthOffsets = Array(-monthBuffer...monthBuffer)
+        let byDay = eventsByDay  // computed once; captured by the ForEach closure
 
         return ScrollViewReader { proxy in
             ScrollView(.vertical, showsIndicators: true) {
                 LazyVStack(spacing: 0) {
                     ForEach(monthOffsets, id: \.self) { offset in
                         if let monthDate = cal.date(byAdding: .month, value: offset, to: anchorMonth) {
-                            monthSection(for: monthDate)
+                            monthSection(for: monthDate, eventsByDay: byDay)
                                 .id(monthID(for: monthDate))
                         }
                     }
@@ -107,7 +109,7 @@ struct CalendarMonthView: View {
 
     // MARK: - Month Section
 
-    private func monthSection(for monthDate: Date) -> some View {
+    private func monthSection(for monthDate: Date, eventsByDay: [Date: [CalendarEvent]]) -> some View {
         let cal = Calendar.current
         let gridDates = monthGridDates(for: monthDate)
         let monthNum = cal.component(.month, from: monthDate)
@@ -121,7 +123,9 @@ struct CalendarMonthView: View {
             ) {
                 ForEach(Array(gridDates.enumerated()), id: \.offset) { _, date in
                     let isCurrentMonth = cal.component(.month, from: date) == monthNum
-                    monthDayCell(date, isMuted: !isCurrentMonth)
+                    let dayStart = cal.startOfDay(for: date)
+                    let dayEvents = eventsByDay[dayStart] ?? []
+                    monthDayCell(date, events: dayEvents, isMuted: !isCurrentMonth)
                 }
             }
         }
@@ -157,11 +161,9 @@ struct CalendarMonthView: View {
         return max(0, Int(availableHeight / eventSlotHeight))
     }
 
-    private func monthDayCell(_ date: Date, isMuted: Bool) -> some View {
+    private func monthDayCell(_ date: Date, events dayEvents: [CalendarEvent], isMuted: Bool) -> some View {
         let cal = Calendar.current
         let isToday = cal.isDateInToday(date)
-        let dayEvents = events.filter { cal.isDate($0.startDate, inSameDayAs: date) }
-            .sorted { $0.startDate < $1.startDate }
 
         return VStack(spacing: 1) {
             // Day number

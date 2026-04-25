@@ -159,9 +159,9 @@ struct CardContainerView<Content: View>: View {
         }
         .padding(padding)
         .background(Color(.systemBackground).opacity(0.5))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.compact, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 10)
+            RoundedRectangle(cornerRadius: AppTheme.Radius.compact, style: .continuous)
                 .stroke(Color(.separator).opacity(0.3), lineWidth: 0.5)
         )
     }

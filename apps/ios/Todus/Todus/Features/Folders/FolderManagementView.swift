@@ -27,7 +27,7 @@ struct FolderManagementView: View {
                     } label: {
                         Image(systemName: "plus.circle.fill")
                             .font(.system(size: 22))
-                            .foregroundStyle(newFolderName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? AppTheme.mutedText : Color.blue)
+                            .foregroundStyle(newFolderName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? AppTheme.mutedText : Color.primary)
                     }
                     .buttonStyle(.plain)
                     .disabled(newFolderName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -56,7 +56,7 @@ struct FolderManagementView: View {
             }
         }
         .scrollContentBackground(.hidden)
-        .background(AppTheme.backgroundTop)
+        .background(AppTheme.sheetBackground)
         .navigationTitle("Folders")
         .navigationBarTitleDisplayMode(.inline)
         .task {
@@ -102,7 +102,7 @@ struct FolderManagementView: View {
             } label: {
                 Label("Rename", systemImage: "pencil")
             }
-            .tint(Color.blue)
+            .tint(Color.primary)
         }
         .contextMenu {
             Button {

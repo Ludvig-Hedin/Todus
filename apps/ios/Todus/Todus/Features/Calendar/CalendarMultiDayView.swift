@@ -14,11 +14,9 @@ struct CalendarMultiDayView: View {
     let dayCount: Int
     var onEventTap: ((CalendarEvent) -> Void)? = nil
 
-    // Shared observable — lets pinch-to-zoom update every visible page instantly.
+    // Shared observable — exposes hourHeight to every page so all pages use the
+    // same grid density without being re-created.
     @State private var shared = MultiDayShared()
-    @State private var baseHourHeight: CGFloat = 48
-    private let minHourHeight: CGFloat = 28
-    private let maxHourHeight: CGFloat = 110
 
     var body: some View {
         MultiDayPager(
@@ -27,16 +25,6 @@ struct CalendarMultiDayView: View {
             events: events,
             shared: shared,
             onEventTap: onEventTap
-        )
-        .gesture(
-            MagnifyGesture()
-                .onChanged { value in
-                    let proposed = baseHourHeight * value.magnification
-                    shared.hourHeight = min(max(proposed, minHourHeight), maxHourHeight)
-                }
-                .onEnded { _ in
-                    baseHourHeight = shared.hourHeight
-                }
         )
     }
 }
@@ -253,7 +241,7 @@ private struct MultiDayPageView: View {
             Text("W\(weekNumber)")
                 .font(.system(size: 10, weight: .regular))
                 .foregroundStyle(.secondary)
-                .frame(width: 50, alignment: .trailing)
+                .frame(width: 46, alignment: .trailing)
                 .padding(.trailing, 4)
 
             ForEach(Array(dates.enumerated()), id: \.offset) { index, date in
@@ -303,7 +291,7 @@ private struct MultiDayPageView: View {
                 )
                 .font(.system(size: 10, weight: .light))
                 .foregroundStyle(.secondary)
-                .frame(width: 44, alignment: .trailing)
+                .frame(width: 46, alignment: .trailing)
                 .padding(.trailing, 4)
 
                 ForEach(Array(dates.enumerated()), id: \.offset) { index, date in

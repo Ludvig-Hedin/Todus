@@ -6,9 +6,10 @@ import EventKitUI
 /// Master coordinator for the Calendar tab — manages view mode, date selection,
 /// event loading, and switches between CalendarKit (Day) and pure SwiftUI views.
 ///
-/// Pinch-to-zoom now adjusts row height *inside* each view instead of switching
-/// modes. Mode switching goes through the dropdown picker, with an animated
-/// scale+fade transition whose direction reflects zoom-in vs zoom-out.
+/// A `highPriorityGesture` on the root ZStack detects pinch gestures and switches
+/// between view modes (day ↔ 3-day ↔ month ↔ year) when the accumulated pinch
+/// magnitude crosses a threshold, with haptic feedback and a spring transition.
+/// The picker and nav bar provide a secondary entry point for mode switching.
 struct CalendarTabView: View {
     @Environment(AppServices.self) private var services
 
@@ -20,6 +21,17 @@ struct CalendarTabView: View {
     @State private var calendarHeaderHeight: CGFloat = 90
     @AppStorage("calendarMultiDayCount") private var multiDayCount: Int = 3
     @State private var eventSaveError: Error?
+
+    // MARK: - Pinch-to-switch zoom state
+    /// Magnification at the last mode switch (or gesture start). Re-arms after each
+    /// switch so the user can chain day → 3-day → month → year in one gesture.
+    @State private var pinchAnchorMag: CGFloat = 1.0
+    /// Live scale applied to the content view during a pinch (follows the finger,
+    /// springs back when the gesture ends or a mode switch fires).
+    @State private var contentScale: CGFloat = 1.0
+    /// Zoom hierarchy for pinch: most detailed (day) → least detailed (year).
+    /// `.list` is intentionally excluded — it sits outside the zoom axis.
+    private static let zoomLevels: [CalendarViewMode] = [.day, .multiDay, .month, .year]
 
     /// Wrapped binding for the view-mode picker that records the previous mode
     /// before mutating `viewMode`, so the transition modifier can read both
@@ -34,13 +46,68 @@ struct CalendarTabView: View {
         )
     }
 
+    // MARK: - Pinch gesture
+
+    /// Recognises a pinch anywhere on the calendar tab and switches view modes
+    /// when the accumulated magnification crosses a threshold.  After each switch
+    /// the anchor is reset so the user can keep pinching through multiple levels
+    /// in one continuous gesture (day → 3-day → month → year).
+    private var pinchModeGesture: some Gesture {
+        MagnifyGesture()
+            .onChanged { value in
+                handlePinchChange(value.magnification)
+            }
+            .onEnded { _ in
+                // Spring the scale back to neutral if no switch was triggered.
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.8)) {
+                    contentScale = 1.0
+                }
+                pinchAnchorMag = 1.0
+            }
+    }
+
+    /// Processes one pinch frame.  Updates the live scale feedback and fires a
+    /// mode switch — with haptics and a spring animation — when the threshold is met.
+    private func handlePinchChange(_ magnitude: CGFloat) {
+        let relative = magnitude / pinchAnchorMag
+
+        // Mirror 12 % of the pinch movement as a subtle visual scale (±6 % max)
+        // so the content gently "breathes" with the gesture before snapping.
+        contentScale = max(0.94, min(1.06, 1.0 + (relative - 1.0) * 0.12))
+
+        guard let idx = Self.zoomLevels.firstIndex(of: viewMode) else { return }
+
+        if relative < 0.72, idx < Self.zoomLevels.count - 1 {
+            // Pinching (contracting) → less detail → step toward year
+            pinchAnchorMag = magnitude
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                previousViewMode = viewMode
+                viewMode = Self.zoomLevels[idx + 1]
+                contentScale = 1.0
+            }
+        } else if relative > 1.38, idx > 0 {
+            // Spreading (expanding) → more detail → step toward day
+            pinchAnchorMag = magnitude
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                previousViewMode = viewMode
+                viewMode = Self.zoomLevels[idx - 1]
+                contentScale = 1.0
+            }
+        }
+    }
+
     var body: some View {
         ZStack(alignment: .top) {
+            // Scale only the calendar content — header stays fixed while the
+            // content gently breathes during a pinch.
             contentView
+                .scaleEffect(contentScale)
 
             headerOverlay
         }
-        .ignoresSafeArea(.container, edges: .bottom)
+        .highPriorityGesture(pinchModeGesture)
         .task {
             await loadEvents()
         }
@@ -96,6 +163,7 @@ struct CalendarTabView: View {
             CalendarContainerView(topInset: calendarHeaderHeight, onSaveError: { error in
                 eventSaveError = error
             })
+            .ignoresSafeArea(.container, edges: .bottom)
             .transition(viewTransition)
             .alert("Could not save event", isPresented: Binding(
                 get: { eventSaveError != nil },

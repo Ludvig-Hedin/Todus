@@ -50,8 +50,10 @@ struct CreateSheet: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            // Scrim — strong enough to clearly separate modal from background
-            Color(UIColor(white: 0.06, alpha: 1)).opacity(0.55)
+            // Progressive blur scrim — fully transparent at the top, building to a
+            // heavy blur + dim behind the modal. A gradient mask gives the bottom-up
+            // falloff so content above the composer stays legible.
+            progressiveBlurScrim
                 .ignoresSafeArea()
                 .onTapGesture { close() }
 
@@ -97,14 +99,14 @@ struct CreateSheet: View {
             datePickerSheet(isEndDate: false)
                 .presentationDetents([.height(420)])
                 .presentationDragIndicator(.visible)
-                .presentationBackground(AppTheme.backgroundTop)
+                .appSheetBackground()
                 .preferredColorScheme(services.appearancePreference.colorScheme)
         }
         .sheet(isPresented: $isShowingEndDatePicker) {
             datePickerSheet(isEndDate: true)
                 .presentationDetents([.height(420)])
                 .presentationDragIndicator(.visible)
-                .presentationBackground(AppTheme.backgroundTop)
+                .appSheetBackground()
                 .preferredColorScheme(services.appearancePreference.colorScheme)
         }
         .photosPicker(isPresented: $isShowingPhotoPicker, selection: $selectedPhotoItem, matching: .images)
@@ -155,6 +157,32 @@ struct CreateSheet: View {
                 selectedEndDate = Date().addingTimeInterval(3600)
             }
         }
+    }
+
+    // MARK: - Scrim
+
+    /// Progressive blur: a blurred material layered with a dark tint, masked by a
+    /// bottom-up gradient so the top of the screen stays clear and content fades
+    /// into a soft blur as it approaches the modal.
+    private var progressiveBlurScrim: some View {
+        ZStack {
+            Rectangle()
+                .fill(.ultraThinMaterial)
+            Color.black.opacity(0.28)
+        }
+        .mask(
+            LinearGradient(
+                stops: [
+                    .init(color: .clear,               location: 0.00),
+                    .init(color: .black.opacity(0.25), location: 0.40),
+                    .init(color: .black.opacity(0.75), location: 0.70),
+                    .init(color: .black,               location: 0.92),
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        )
+        .allowsHitTesting(true)
     }
 
     // MARK: - Input Area
@@ -215,10 +243,14 @@ struct CreateSheet: View {
 
             // Text input — matches AIChatView: maxHeight caps at 120px so the
             // sheet stays compact and SwiftUI layout doesn't grow unboundedly.
+            // isFocused: nil — the view auto-focuses once in makeUIView and then
+            // manages its own responder state. Passing a Bool here made updateUIView
+            // call becomeFirstResponder on every render, stealing focus from the
+            // To/Subject/Location TextFields when tapped.
             PasteHandlingTextInput(
                 text: $text,
                 placeholder: placeholderText,
-                isFocused: selectedType != .email,
+                isFocused: nil,
                 maxHeight: 120,
                 onPasteImage: handlePastedImage
             )
@@ -240,10 +272,10 @@ struct CreateSheet: View {
         }
         .background(
             AppTheme.surfacePrimary,
-            in: RoundedRectangle(cornerRadius: 22, style: .continuous)
+            in: RoundedRectangle(cornerRadius: AppTheme.Radius.composer, style: .continuous)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
+            RoundedRectangle(cornerRadius: AppTheme.Radius.composer, style: .continuous)
                 .stroke(AppTheme.strongBorder, lineWidth: 1)
         )
     }
@@ -443,29 +475,37 @@ struct CreateSheet: View {
     // MARK: - Type Selector Pill
 
     private var typePill: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 2) {
             ForEach(CreateItemType.allCases) { type in
-                Button {
-                    withAnimation(.snappy(duration: 0.15)) { selectedType = type }
-                } label: {
-                    Image(systemName: type.icon)
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(selectedType == type ? AppTheme.accentBlue : AppTheme.mutedText)
-                        .frame(width: 50, height: 38)
-                        .background(
-                            selectedType == type ? AppTheme.accentBlue.opacity(0.12) : Color.clear,
-                            in: Capsule()
-                        )
-                }
-                .buttonStyle(.plain)
+                typePillButton(for: type)
             }
         }
         .padding(3)
         .background(AppTheme.surfacePrimary, in: Capsule())
-        .overlay(
-            Capsule()
-                .stroke(AppTheme.cardBorder, lineWidth: 1)
-        )
+        .overlay(Capsule().stroke(AppTheme.cardBorder, lineWidth: 1))
+    }
+
+    @ViewBuilder
+    private func typePillButton(for type: CreateItemType) -> some View {
+        let isSelected = selectedType == type
+        Button {
+            withAnimation(.snappy(duration: 0.2)) { selectedType = type }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: type.icon)
+                    .font(.system(size: 13, weight: .semibold))
+                Text(type.title)
+                    .font(.system(size: 13, weight: .semibold))
+            }
+            .foregroundStyle(isSelected ? AppTheme.accentBlue : AppTheme.mutedText)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(
+                isSelected ? AppTheme.accentBlue.opacity(0.14) : Color.clear,
+                in: Capsule()
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Slash Menu
@@ -481,10 +521,10 @@ struct CreateSheet: View {
         .padding(8)
         .background(
             AppTheme.surfacePrimary,
-            in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+            in: RoundedRectangle(cornerRadius: AppTheme.Radius.card, style: .continuous)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(cornerRadius: AppTheme.Radius.card, style: .continuous)
                 .stroke(AppTheme.strongBorder, lineWidth: 1)
         )
         .shadow(color: AppTheme.shadowColor, radius: 12, x: 0, y: -4)
@@ -542,8 +582,8 @@ struct CreateSheet: View {
             .buttonStyle(.plain)
         }
         .frame(width: 200)
-        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(AppTheme.cardBorder, lineWidth: 1))
+        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.row, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: AppTheme.Radius.row, style: .continuous).stroke(AppTheme.cardBorder, lineWidth: 1))
         .shadow(color: .black.opacity(0.18), radius: 16, y: 4)
     }
 
@@ -570,11 +610,11 @@ struct CreateSheet: View {
         ZStack(alignment: .topTrailing) {
             if AttachmentService.shared.isImageFile(filename) {
                 AttachmentThumbnailView(filename: filename, size: 52) {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    RoundedRectangle(cornerRadius: AppTheme.Radius.compact, style: .continuous)
                         .fill(AppTheme.surfaceSecondary)
                 }
             } else {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                RoundedRectangle(cornerRadius: AppTheme.Radius.compact, style: .continuous)
                     .fill(AppTheme.surfaceSecondary)
                     .frame(width: 52, height: 52)
                     .overlay(
@@ -672,12 +712,14 @@ struct CreateSheet: View {
         selectedDate == nil
     }
 
+    // Auto mode stays intentionally clean — just text + send. Folder/date
+    // metadata only belongs to explicit task/event intents.
     private var showsFolderPicker: Bool {
-        selectedType == .auto || selectedType == .task || selectedType == .event
+        selectedType == .task || selectedType == .event
     }
 
     private var showsDatePicker: Bool {
-        selectedType == .auto || selectedType == .task || selectedType == .event
+        selectedType == .task || selectedType == .event
     }
 
     // MARK: - Actions
@@ -809,7 +851,7 @@ struct CreateSheet: View {
     private func slashActionColor(for action: RichInputCommandAction) -> Color {
         switch action {
         case .dueToday:     return .orange
-        case .dueTomorrow:  return .blue
+        case .dueTomorrow:  return .primary
         case .dueNextWeek:  return .purple
         case .inOneHour:    return .green
         default:            return AppTheme.mutedText

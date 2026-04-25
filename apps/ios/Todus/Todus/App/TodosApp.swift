@@ -9,13 +9,18 @@ struct TodosApp: App {
     // Previously both were initialized synchronously in init(), blocking the main thread.
     @State private var services: AppServices?
     @State private var modelContainer: ModelContainer?
+    /// Set true if every ModelContainer init path (default, fallback file, in-memory) fails.
+    /// We render a non-crashing error view instead of `fatalError`'ing on launch.
+    @State private var modelContainerFailed: Bool = false
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     /// Slug from a todus://share?slug=... deep link — presents SharedConversationView when set
     @State private var sharedConversationSlug: String? = nil
 
     var body: some Scene {
         WindowGroup {
-            if let services, let modelContainer {
+            if modelContainerFailed {
+                modelContainerErrorView
+            } else if let services, let modelContainer {
                 RootView()
                     .environment(services)
                     .modelContainer(modelContainer)
@@ -71,16 +76,29 @@ struct TodosApp: App {
         do {
             container = try ModelContainer(for: schema)
         } catch {
+            AppLogger.shared.log(
+                "[TodosApp] ModelContainer default init failed: \(error.localizedDescription) — trying fallback file store"
+            )
             let fallbackURL = FileManager.default.temporaryDirectory.appendingPathComponent("TodosFallback.store")
             let fallbackConfiguration = ModelConfiguration(url: fallbackURL, allowsSave: true)
             do {
                 container = try ModelContainer(for: schema, configurations: fallbackConfiguration)
             } catch {
+                AppLogger.shared.log(
+                    "[TodosApp] ModelContainer fallback file store failed: \(error.localizedDescription) — trying in-memory store"
+                )
                 let inMemoryConfig = ModelConfiguration(isStoredInMemoryOnly: true)
                 do {
                     container = try ModelContainer(for: schema, configurations: inMemoryConfig)
                 } catch {
-                    fatalError("Failed to create model container even in memory: \(error)")
+                    // Last-ditch fallback failed too. Surface a friendly error view instead
+                    // of `fatalError`'ing — a crash on launch is the worst possible UX and
+                    // means the user can't even reach Settings to clear/reinstall.
+                    AppLogger.shared.log(
+                        "[TodosApp] ModelContainer in-memory init failed: \(error.localizedDescription) — rendering error UI"
+                    )
+                    self.modelContainerFailed = true
+                    return
                 }
             }
         }
@@ -93,9 +111,33 @@ struct TodosApp: App {
         appDelegate.modelContainer = container
 
         let svc = AppServices()
+        // Wire AppServices into AppDelegate so notification-action failures (which run
+        // outside SwiftUI environment) can surface a user-facing error state.
+        appDelegate.services = svc
 
         self.modelContainer = container
         self.services = svc
+    }
+
+    /// Last-resort fallback shown when no `ModelContainer` (file or in-memory) can be created.
+    /// Replaces a previous `fatalError` that crashed the app on launch — the user now sees a
+    /// recoverable message and can reinstall instead of looking at a black screen / crash.
+    private var modelContainerErrorView: some View {
+        ZStack {
+            AppTheme.backgroundTop.ignoresSafeArea()
+            VStack(spacing: 16) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 40))
+                    .foregroundStyle(.orange)
+                Text("Couldn't initialize local data")
+                    .font(.system(size: 18, weight: .semibold))
+                Text("Todus could not create a local data store on this device. Please reinstall the app to recover.")
+                    .font(.system(size: 14))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 32)
+            }
+        }
     }
 
     /// Branded splash screen shown during initialization — renders in < 1 frame.
@@ -143,6 +185,9 @@ private struct SnoozeContentSnapshot: Sendable {
 @MainActor
 class AppDelegate: NSObject, UIApplicationDelegate {
     var modelContainer: ModelContainer?
+    /// Optional handle so notification action failures can be surfaced in-app on the
+    /// next launch (e.g. "Couldn't update task from notification — please retry").
+    weak var services: AppServices?
 
     func application(
         _ application: UIApplication,
@@ -204,7 +249,12 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
                         do {
                             try context.save()
                         } catch {
-                            print("[TodosApp] Failed to save task completion from notification: \(error)")
+                            AppLogger.shared.log(
+                                "[TodosApp] Failed to save task completion from notification: \(error.localizedDescription)"
+                            )
+                            // Surface to next app open so the user knows the toggle didn't stick.
+                            self.services?.pendingNotificationActionError =
+                                "Couldn't mark task complete from notification — please retry."
                         }
                     }
                 }
@@ -238,7 +288,11 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
                 do {
                     try await currentCenter.add(request)
                 } catch {
-                    print("[TodosApp] Failed to reschedule snoozed notification: \(error)")
+                    AppLogger.shared.log(
+                        "[TodosApp] Failed to reschedule snoozed notification: \(error.localizedDescription)"
+                    )
+                    self.services?.pendingNotificationActionError =
+                        "Couldn't snooze notification — please retry."
                 }
 
             default:

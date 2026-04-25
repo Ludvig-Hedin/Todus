@@ -395,7 +395,7 @@ struct EmailThreadView: View {
                     .padding(.horizontal, 14)
                     .padding(.vertical, 8)
                     .background(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        RoundedRectangle(cornerRadius: AppTheme.Radius.compact, style: .continuous)
                             .stroke(AppTheme.rowStroke, lineWidth: 1)
                     )
                 }
@@ -415,9 +415,9 @@ struct EmailThreadView: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.card, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(cornerRadius: AppTheme.Radius.card, style: .continuous)
                 .stroke(AppTheme.rowStroke, lineWidth: 1)
         )
     }
@@ -532,7 +532,7 @@ struct EmailThreadView: View {
                         .frame(maxWidth: .infinity)
                         .frame(height: 44)
                     }
-                    .buttonStyle(LiquidGlassButtonStyle(cornerRadius: 12))
+                    .buttonStyle(LiquidGlassButtonStyle(cornerRadius: AppTheme.Radius.control))
                 }
             }
             .padding(.horizontal, 16)
@@ -657,11 +657,11 @@ private struct ThreadActionButton: View {
             .padding(.horizontal, 13)
             .padding(.vertical, 9)
             .background(
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                RoundedRectangle(cornerRadius: AppTheme.Radius.card + 2, style: .continuous)
                     .fill(isPrimary ? Color.primary : AppTheme.surfacePrimary)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                RoundedRectangle(cornerRadius: AppTheme.Radius.card + 2, style: .continuous)
                     .stroke(isPrimary ? Color.clear : AppTheme.rowStroke, lineWidth: 1)
             )
         }
@@ -828,9 +828,9 @@ private struct MessageRow: View {
             }
             detailRow(label: "Date", value: message.date.formatted(date: .long, time: .shortened), secondary: nil)
         }
-        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous)
                 .stroke(AppTheme.rowStroke, lineWidth: 1)
         )
     }
@@ -885,9 +885,9 @@ private struct MessageRow: View {
                     Spacer()
                 }
                 .padding(10)
-                .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.compact, style: .continuous))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    RoundedRectangle(cornerRadius: AppTheme.Radius.compact, style: .continuous)
                         .stroke(AppTheme.rowStroke, lineWidth: 1)
                 )
             }
@@ -896,7 +896,7 @@ private struct MessageRow: View {
 
     private func attachmentColor(for mimeType: String) -> Color {
         if mimeType.contains("pdf") { return .red }
-        if mimeType.contains("image") { return .blue }
+        if mimeType.contains("image") { return .primary }
         if mimeType.contains("word") || mimeType.contains("document") { return Color(red: 0.18, green: 0.44, blue: 0.78) }
         if mimeType.contains("sheet") || mimeType.contains("excel") { return .green }
         return .gray
@@ -953,6 +953,17 @@ struct EmailHTMLView: UIViewRepresentable {
         guard context.coordinator.lastLoadedHTML != html else { return }
         context.coordinator.lastLoadedHTML = html
         webView.loadHTMLString(wrappedHTML, baseURL: nil)
+    }
+
+    /// Each MessageRow created its own WKWebView (and a strong-referenced coordinator).
+    /// Without explicit teardown the webview, its delegate, and any outstanding
+    /// JavaScript evaluation continue to live on after the host view disappears,
+    /// leaking memory in long threads. Stop loading and detach the navigation
+    /// delegate so the webview can be deallocated promptly.
+    static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
+        webView.stopLoading()
+        webView.navigationDelegate = nil
+        coordinator.webView = nil
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }

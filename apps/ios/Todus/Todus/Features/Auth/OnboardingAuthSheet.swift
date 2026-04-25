@@ -92,9 +92,9 @@ struct AuthPageView: View {
                             .focused($isInputFocused)
                             .padding(.horizontal, 16)
                             .padding(.vertical, 12)
-                            .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
                             .overlay(
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous)
                                     .stroke(AppTheme.cardBorder, lineWidth: 1)
                             )
                             // Auto-submit as soon as the user types the 6th digit — no button tap needed
@@ -143,9 +143,9 @@ struct AuthPageView: View {
                             .focused($isInputFocused)
                             .padding(.horizontal, 16)
                             .padding(.vertical, 12)
-                            .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
                             .overlay(
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous)
                                     .stroke(AppTheme.cardBorder, lineWidth: 1)
                             )
 
@@ -181,7 +181,7 @@ struct AuthPageView: View {
                         .foregroundStyle(AppTheme.danger)
                         .padding(12)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(AppTheme.danger.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .background(AppTheme.danger.opacity(0.08), in: RoundedRectangle(cornerRadius: AppTheme.Radius.compact, style: .continuous))
                 }
 
                 Spacer(minLength: 24)

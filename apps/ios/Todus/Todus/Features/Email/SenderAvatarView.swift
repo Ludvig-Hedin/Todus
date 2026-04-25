@@ -288,7 +288,7 @@ struct SenderAvatarView: View {
     /// launches). Uses the same string hash as `BimiAvatar` on web — not `String.hashValue`.
     private var avatarColor: Color {
         let colors: [Color] = [
-            .blue, .purple, .orange, .pink, .teal, .indigo, .mint, .cyan, .brown, .green
+            .brown, .purple, .orange, .pink, .teal, .indigo, .mint, .cyan, .gray, .green
         ]
         let normalized = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let seed = !normalized.isEmpty ? normalized : name

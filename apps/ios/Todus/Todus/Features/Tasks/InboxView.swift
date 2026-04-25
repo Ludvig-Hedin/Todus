@@ -56,7 +56,7 @@ struct InboxView: View {
                                 }
                                 .padding(.horizontal, 16)
                                 .padding(.vertical, 8)
-                                .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.row, style: .continuous))
                                 // Tap to restore a completed task back to .todo
                                 .contentShape(Rectangle())
                                     .onTapGesture {
@@ -72,7 +72,7 @@ struct InboxView: View {
                                     } label: {
                                         Label("Restore", systemImage: "arrow.uturn.backward")
                                     }
-                                    .tint(Color.blue)
+                                    .tint(Color.primary)
                                 }
                                 .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                                     Button(role: .destructive) {
@@ -119,12 +119,12 @@ struct InboxView: View {
         .sheet(item: $taskPendingMove) { task in
             MoveToFolderSheet(task: task)
                 .presentationDragIndicator(.visible)
-                .presentationBackground(AppTheme.backgroundTop)
+                .appSheetBackground()
         }
         .sheet(item: $selectedTask) { task in
             TaskDetailSheet(task: task)
                 .presentationDragIndicator(.visible)
-                .presentationBackground(AppTheme.backgroundTop)
+                .appSheetBackground()
         }
         .alert("Clear completed tasks?", isPresented: $showsClearCompletedConfirmation) {
             Button("Cancel", role: .cancel) {}

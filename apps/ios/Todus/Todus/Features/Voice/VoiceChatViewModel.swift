@@ -117,14 +117,13 @@ final class VoiceChatViewModel {
         } catch {
             // Clean up provider if it was already connected before the error
             await provider.disconnect()
-            // Provide user-friendly error messages for common failure modes
             let message: String
             if let voiceError = error as? VoiceEndpointError {
                 message = voiceError.errorDescription ?? error.localizedDescription
-            } else if error.localizedDescription.lowercased().contains("bad") ||
-                      error.localizedDescription.lowercased().contains("websocket") {
-                message = "Voice service unavailable — check your connection and try again"
             } else {
+                // Show the raw error so Gemini/server errors are visible.
+                // "bad server response" means the server returned a non-101 HTTP status
+                // instead of upgrading to WebSocket — check server logs for the cause.
                 message = error.localizedDescription
             }
             connectionState = .failed(message)

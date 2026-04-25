@@ -165,7 +165,7 @@ struct CalendarYearView: View {
             .padding(8)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                RoundedRectangle(cornerRadius: AppTheme.Radius.inline, style: .continuous)
                     .fill(AppTheme.surfacePrimary.opacity(isCurrentMonth ? 1 : 0.5))
             )
             .contentShape(Rectangle())

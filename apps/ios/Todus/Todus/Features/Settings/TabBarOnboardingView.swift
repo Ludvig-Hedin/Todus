@@ -57,12 +57,12 @@ struct TabBarOnboardingView: View {
                                 // Live counter — turns blue at 4 (limit reached)
                                 Text("\(selectedTabs.count) / 4")
                                     .font(.system(size: 12, weight: .bold))
-                                    .foregroundStyle(selectedTabs.count >= 4 ? .blue : .secondary)
+                                    .foregroundStyle(selectedTabs.count >= 4 ? .primary : .secondary)
                                     .padding(.horizontal, 8)
                                     .padding(.vertical, 3)
                                     .background(
                                         Capsule()
-                                            .fill((selectedTabs.count >= 4 ? Color.blue : Color.secondary).opacity(0.1))
+                                            .fill((selectedTabs.count >= 4 ? Color.primary : Color.secondary).opacity(0.1))
                                     )
                                     .animation(.snappy(duration: 0.2), value: selectedTabs.count)
                             }
@@ -131,12 +131,11 @@ struct TabBarOnboardingView: View {
                     Button { commit() } label: {
                         Text("Use this setup")
                             .font(.system(size: 17, weight: .semibold))
-                            .foregroundStyle(.white)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 16)
-                            .background(.blue, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.borderedProminent)
+                    .tint(.primary)
 
                     Button("Skip for now") {
                         services.hasConfiguredTabBarPrompt = true
@@ -172,9 +171,9 @@ struct TabBarOnboardingView: View {
             // Icon
             Image(systemName: tab.activeIcon)
                 .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(.blue)
+                .foregroundStyle(.primary)
                 .frame(width: 32, height: 32)
-                .background(Color.blue.opacity(0.1), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .background(Color.primary.opacity(0.1), in: RoundedRectangle(cornerRadius: AppTheme.Radius.inline, style: .continuous))
 
             // Label
             VStack(alignment: .leading, spacing: 1) {
@@ -212,10 +211,10 @@ struct TabBarOnboardingView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
-        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.row, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 13, style: .continuous)
-                .stroke(Color.blue.opacity(0.2), lineWidth: 1)
+            RoundedRectangle(cornerRadius: AppTheme.Radius.row, style: .continuous)
+                .stroke(Color.primary.opacity(0.2), lineWidth: 1)
         )
         .padding(.bottom, 6)
         // Drag-to-reorder: long press then drag vertically
@@ -246,7 +245,7 @@ struct TabBarOnboardingView: View {
                 .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(atMax ? .tertiary : .secondary)
                 .frame(width: 32, height: 32)
-                .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: AppTheme.Radius.inline, style: .continuous))
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(tab.title)
@@ -268,16 +267,16 @@ struct TabBarOnboardingView: View {
             } label: {
                 Image(systemName: "plus.circle.fill")
                     .font(.system(size: 20))
-                    .foregroundStyle(atMax ? Color.secondary.opacity(0.35) : Color.blue)
+                    .foregroundStyle(atMax ? Color.secondary.opacity(0.35) : Color.primary)
             }
             .buttonStyle(.plain)
             .disabled(atMax)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
-        .background(AppTheme.surfacePrimary.opacity(0.5), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+        .background(AppTheme.surfacePrimary.opacity(0.5), in: RoundedRectangle(cornerRadius: AppTheme.Radius.row, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 13, style: .continuous)
+            RoundedRectangle(cornerRadius: AppTheme.Radius.row, style: .continuous)
                 .stroke(AppTheme.cardBorder, lineWidth: 1)
         )
         .padding(.bottom, 6)
@@ -355,7 +354,7 @@ struct TabBarOnboardingView: View {
 
     /// Empty slot shown when fewer than 4 tabs selected — dashed outline hint
     private var previewGhostSlot: some View {
-        RoundedRectangle(cornerRadius: 8, style: .continuous)
+        RoundedRectangle(cornerRadius: AppTheme.Radius.inline, style: .continuous)
             .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [4]))
             .foregroundStyle(.secondary.opacity(0.2))
             .frame(width: 52, height: 40)

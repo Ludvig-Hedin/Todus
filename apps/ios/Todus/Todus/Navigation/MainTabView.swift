@@ -55,14 +55,15 @@ struct MainTabView: View {
         // inset bottom edge (= above the home indicator). Tab bar adds another 49pt on
         // top of that, so padding(.bottom, 49 + 12) clears the tab bar with 12pt of air.
         .overlay(alignment: .bottomTrailing) {
-            if !services.hideTabBar {
+            if !services.hideTabBar && !showCreateSheet {
                 aiFAB
                     .padding(.trailing, 20)
                     .padding(.bottom, 49 + 12)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .transition(.opacity)
             }
         }
-        .animation(.snappy(duration: 0.25), value: services.hideTabBar)
+        .animation(.easeOut(duration: 0.15), value: services.hideTabBar)
+        .animation(.easeOut(duration: 0.15), value: showCreateSheet)
     }
 
     // MARK: - Tab View
@@ -71,22 +72,22 @@ struct MainTabView: View {
         TabView(selection: $selectedTab) {
             NavigationStack { HomeView() }
                 .id(homeTabId)
-                .tabItem { Label("Home", systemImage: selectedTab == .home ? "house.fill" : "house") }
+                .tabItem { Image(systemName: selectedTab == .home ? "house.fill" : "house") }
                 .tag(AppTab.home)
 
             NavigationStack { TasksTabView() }
                 .id(tasksTabId)
-                .tabItem { Label("Tasks", systemImage: "checklist") }
+                .tabItem { Image(systemName: "checklist") }
                 .tag(AppTab.tasks)
 
             // Action tab — intercepted immediately; content is never shown.
             Color.clear.ignoresSafeArea()
-                .tabItem { Label("New", systemImage: "plus.circle.fill") }
+                .tabItem { Image(systemName: "plus.circle.fill") }
                 .tag(AppTab.create)
 
             NavigationStack { EmailInboxView() }
                 .id(emailTabId)
-                .tabItem { Label("Email", systemImage: selectedTab == .email ? "envelope.fill" : "envelope") }
+                .tabItem { Image(systemName: selectedTab == .email ? "envelope.fill" : "envelope") }
                 .tag(AppTab.email)
 
             Group {
@@ -100,7 +101,7 @@ struct MainTabView: View {
                 }
             }
             .id(calendarTabId)
-            .tabItem { Label("Calendar", systemImage: "calendar") }
+            .tabItem { Image(systemName: "calendar") }
             .tag(AppTab.calendar)
         }
         .tint(AppTheme.accentBlue)

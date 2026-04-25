@@ -1,6 +1,7 @@
 import Foundation
 import ImageIO
 import UIKit
+import UniformTypeIdentifiers
 
 /// Manages local file storage for task attachments.
 /// Saves images and files to the app's Documents/Attachments directory
@@ -11,6 +12,11 @@ final class AttachmentService: @unchecked Sendable {
 
     private let attachmentsDir: URL
     private let thumbnailCache = NSCache<NSString, UIImage>()
+    /// Tracks the cache keys we've used per filename so a delete can evict only the
+    /// affected variants rather than wiping the entire cache. Keyed by attachment
+    /// filename → the set of `"<filename>-<maxPixelSize>"` keys created for it.
+    private var thumbnailKeysByFilename: [String: Set<NSString>] = [:]
+    private let thumbnailKeysLock = NSLock()
 
     private init() {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -22,6 +28,16 @@ final class AttachmentService: @unchecked Sendable {
     /// Returns the on-disk URL for a given attachment filename
     func url(for filename: String) -> URL {
         attachmentsDir.appendingPathComponent(filename)
+    }
+
+    /// Preferred MIME type for a stored filename (used when uploading to the AI backend).
+    func mimeType(for filename: String) -> String {
+        let ext = url(for: filename).pathExtension.lowercased()
+        if let ut = UTType(filenameExtension: ext), let mime = ut.preferredMIMEType {
+            return mime
+        }
+        if isImageFile(filename) { return "image/jpeg" }
+        return "application/octet-stream"
     }
 
     /// Returns UIImage for an attachment if it's a supported image format
@@ -70,7 +86,14 @@ final class AttachmentService: @unchecked Sendable {
 
         let image = UIImage(cgImage: cgImage)
         thumbnailCache.setObject(image, forKey: cacheKey)
+        rememberThumbnailKey(cacheKey, for: filename)
         return image
+    }
+
+    private func rememberThumbnailKey(_ key: NSString, for filename: String) {
+        thumbnailKeysLock.lock()
+        defer { thumbnailKeysLock.unlock() }
+        thumbnailKeysByFilename[filename, default: []].insert(key)
     }
 
     func importFile(at url: URL) async -> String? {
@@ -118,7 +141,14 @@ final class AttachmentService: @unchecked Sendable {
     /// Deletes an attachment file
     func delete(filename: String) {
         let fileURL = url(for: filename)
-        thumbnailCache.removeAllObjects()
+        // Only evict cached thumbnails for THIS filename. A single attachment delete
+        // shouldn't invalidate every other attachment's cached thumbnail.
+        thumbnailKeysLock.lock()
+        let keys = thumbnailKeysByFilename.removeValue(forKey: filename) ?? []
+        thumbnailKeysLock.unlock()
+        for key in keys {
+            thumbnailCache.removeObject(forKey: key)
+        }
         try? FileManager.default.removeItem(at: fileURL)
     }
 }

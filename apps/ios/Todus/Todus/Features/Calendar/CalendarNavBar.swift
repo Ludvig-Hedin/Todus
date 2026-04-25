@@ -33,7 +33,7 @@ struct CalendarNavBar: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
             }
-            .buttonStyle(LiquidGlassButtonStyle(cornerRadius: 16))
+            .buttonStyle(LiquidGlassButtonStyle(cornerRadius: AppTheme.Radius.row))
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 6)
@@ -74,7 +74,7 @@ struct CalendarNavBar: View {
                 .foregroundStyle(.primary.opacity(0.65))
                 .frame(width: 32, height: 32)
         }
-        .buttonStyle(LiquidGlassButtonStyle(cornerRadius: 16))
+        .buttonStyle(LiquidGlassButtonStyle(cornerRadius: AppTheme.Radius.row))
     }
 
     private func navigate(by offset: Int) {

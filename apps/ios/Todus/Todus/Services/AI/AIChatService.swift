@@ -15,6 +15,47 @@ final class AIChatService {
     var messages: [AIChatMessage] = []
     var isStreaming: Bool = false
     var errorMessage: String?
+    /// True when the SSE stream dropped mid-flight (network drop, etc.) and the user
+    /// can tap a banner to retry the last prompt. Reset on successful start of any new turn.
+    var streamFailed: Bool = false
+    /// User-facing rate limit message — set when the backend returns HTTP 429. Drives a
+    /// "Rate limited" banner; cleared on the next successful send.
+    var rateLimitedMessage: String?
+
+    // MARK: - Destructive-action confirmation
+    /// A delete_task tool call awaiting user confirmation. The view observes this and
+    /// presents a `.confirmationDialog`; tapping Delete or Cancel resumes the suspended
+    /// tool execution via `confirmPendingDelete(_:)`. (Bug #4)
+    var pendingDeleteConfirmation: PendingDeleteConfirmation? = nil
+
+    /// Pending delete-task confirmation surfaced to the UI before any state change.
+    struct PendingDeleteConfirmation: Identifiable {
+        let id = UUID()
+        let taskID: UUID
+        let title: String?
+    }
+
+    /// Continuations stored per-pending-confirmation so the suspended tool-call await
+    /// resumes only when the user explicitly confirms or cancels.
+    private var pendingDeleteContinuations: [UUID: CheckedContinuation<Bool, Never>] = [:]
+
+    /// Resume a paused delete tool call with the user's decision.
+    func confirmPendingDelete(_ confirmation: PendingDeleteConfirmation, confirm: Bool) {
+        if let cont = pendingDeleteContinuations.removeValue(forKey: confirmation.id) {
+            cont.resume(returning: confirm)
+        }
+        if pendingDeleteConfirmation?.id == confirmation.id {
+            pendingDeleteConfirmation = nil
+        }
+    }
+
+    private func awaitDeleteConfirmation(taskID: UUID, title: String?) async -> Bool {
+        let pending = PendingDeleteConfirmation(taskID: taskID, title: title)
+        return await withCheckedContinuation { continuation in
+            pendingDeleteContinuations[pending.id] = continuation
+            pendingDeleteConfirmation = pending
+        }
+    }
 
     /// Title for the current conversation — set from first user message.
     var chatTitle: String? = nil
@@ -159,15 +200,20 @@ final class AIChatService {
     func send(
         userMessage: String,
         mentions: [RichInputMentionRef] = [],
+        attachmentFileNames: [String] = [],
         allTasks: [TaskRecord],
         modelContext: ModelContext
     ) {
         let trimmed = userMessage.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !isStreaming else { return }
+        guard (!trimmed.isEmpty || !attachmentFileNames.isEmpty), !isStreaming else { return }
 
         // Set title from first user message (truncated to 60 chars)
         if chatTitle == nil {
-            chatTitle = String(trimmed.prefix(60))
+            if !trimmed.isEmpty {
+                chatTitle = String(trimmed.prefix(60))
+            } else if let first = attachmentFileNames.first {
+                chatTitle = String(first.prefix(60))
+            }
         }
 
         // New messages make the conversation unsaved
@@ -177,13 +223,20 @@ final class AIChatService {
 
         // Append user message with its mention refs so they persist across turns.
         // Follow-up turns can then resolve entity IDs from earlier mentions.
-        messages.append(AIChatMessage(role: .user, content: trimmed, mentions: mentions))
+        messages.append(AIChatMessage(
+            role: .user,
+            content: trimmed,
+            mentions: mentions,
+            attachmentFileNames: attachmentFileNames
+        ))
 
         // Append an empty placeholder the streaming response will fill
         let assistantID = UUID()
         messages.append(AIChatMessage(id: assistantID, role: .assistant, isStreaming: true))
         isStreaming = true
         errorMessage = nil
+        streamFailed = false
+        rateLimitedMessage = nil
 
         streamingTask = Task { [weak self] in
             guard let self else { return }
@@ -235,6 +288,8 @@ final class AIChatService {
         }
 
         errorMessage = nil
+        streamFailed = false
+        rateLimitedMessage = nil
         isConversationSaved = false
         currentTurnMentions = userMessage.mentions
         lastSubmittedMentions = userMessage.mentions
@@ -269,10 +324,37 @@ final class AIChatService {
         }
     }
 
+    /// Drop a message (and every turn that follows it) from the conversation.
+    /// Used by "Edit message": the edited user turn is re-submitted via `send`,
+    /// so the old copy plus any dependent assistant reply must disappear first
+    /// to avoid the new branch rendering below the stale one.
+    func truncateBefore(messageID: UUID) {
+        guard !isStreaming else { return }
+        guard let idx = messages.firstIndex(where: { $0.id == messageID }) else { return }
+        messages.removeSubrange(idx..<messages.count)
+        isConversationSaved = false
+        errorMessage = nil
+    }
+
+    /// Retry after a mid-stream connection drop. Surfaces the same path as the
+    /// in-conversation retry button so the user gets explicit control — we never
+    /// auto-reconnect because the model may already have charged for partial output.
+    func retryAfterStreamFailure(allTasks: [TaskRecord], modelContext: ModelContext) {
+        guard !isStreaming, streamFailed else { return }
+        retry(allTasks: allTasks, modelContext: modelContext)
+    }
+
     /// Cancel an in-progress stream.
     func cancelStream() {
         streamingTask?.cancel()
         streamingTask = nil
+        // Resume any suspended delete-task confirmations as cancelled so the suspended
+        // tool-call await doesn't leak (Bug #4 — destructive-action confirmation).
+        for (_, cont) in pendingDeleteContinuations {
+            cont.resume(returning: false)
+        }
+        pendingDeleteContinuations.removeAll()
+        pendingDeleteConfirmation = nil
         if let streamingMessageID = messages.first(where: \.isStreaming)?.id {
             finaliseStream(messageID: streamingMessageID)
         } else {
@@ -317,7 +399,8 @@ final class AIChatService {
                 role: saved.role == "user" ? .user : .assistant,
                 content: saved.content,
                 isStreaming: false,
-                mentions: saved.mentions
+                mentions: saved.mentions,
+                attachmentFileNames: saved.attachmentFileNames
             )
         }
         chatTitle = conversation.title
@@ -445,37 +528,85 @@ final class AIChatService {
             }
 
         case "create_calendar_event":
-            if aiCanWriteCalendar,
-               let args = try? JSONDecoder().decode(CreateCalendarEventArgs.self, from: argsData) {
+            guard aiCanWriteCalendar else {
+                return encodeToolResult(success: false, message: "AI is not allowed to modify calendar events")
+            }
+            guard let args = try? JSONDecoder().decode(CreateCalendarEventArgs.self, from: argsData) else {
+                return encodeToolResult(success: false, message: "Invalid create_calendar_event arguments")
+            }
+            let iso = ISO8601DateFormatter()
+            guard let startDate = iso.date(from: args.startDate) else {
+                return encodeToolResult(success: false, message: "Invalid startDate — expected ISO 8601")
+            }
+            guard let cal = calendarService, cal.canCreateEvents() else {
+                return encodeToolResult(success: false, message: "Calendar permission not granted")
+            }
+            let endDate = args.endDate.flatMap { iso.date(from: $0) }
+            do {
+                try await cal.createEvent(title: args.title, startDate: startDate, endDate: endDate)
+                return encodeToolResult(success: true, message: "Calendar event '\(args.title)' created")
+            } catch {
+                return encodeToolResult(success: false, message: "Failed to create event: \(error.localizedDescription)")
+            }
+
+        case "update_calendar_event":
+            guard aiCanWriteCalendar else {
+                return encodeToolResult(success: false, message: "AI is not allowed to modify calendar events")
+            }
+            if let args = try? JSONDecoder().decode(UpdateCalendarEventArgs.self, from: argsData),
+               let cal = calendarService {
                 let iso = ISO8601DateFormatter()
-                if let startDate = iso.date(from: args.startDate),
-                   let cal = calendarService, cal.canCreateEvents() {
-                    let endDate = args.endDate.flatMap { iso.date(from: $0) }
-                    do {
-                        try await cal.createEvent(title: args.title, startDate: startDate, endDate: endDate)
-                        return encodeToolResult(success: true, message: "Calendar event '\(args.title)' created")
-                    } catch {
-                        return encodeToolResult(success: false, message: "Failed to create event: \(error.localizedDescription)")
-                    }
+                let startDate = args.startDate.flatMap { iso.date(from: $0) }
+                let endDate = args.endDate.flatMap { iso.date(from: $0) }
+                do {
+                    try await cal.updateEvent(
+                        identifier: args.id,
+                        title: args.title,
+                        startDate: startDate,
+                        endDate: endDate,
+                        notes: args.notes
+                    )
+                    return encodeToolResult(success: true, message: "Calendar event updated")
+                } catch {
+                    return encodeToolResult(success: false, message: "Failed to update event: \(error.localizedDescription)")
+                }
+            }
+
+        case "delete_calendar_event":
+            guard aiCanWriteCalendar else {
+                return encodeToolResult(success: false, message: "AI is not allowed to modify calendar events")
+            }
+            if let args = try? JSONDecoder().decode(DeleteCalendarEventArgs.self, from: argsData),
+               let cal = calendarService {
+                do {
+                    try await cal.deleteEvent(identifier: args.id)
+                    return encodeToolResult(success: true, message: "Calendar event deleted")
+                } catch {
+                    return encodeToolResult(success: false, message: "Failed to delete event: \(error.localizedDescription)")
                 }
             }
 
         case "send_email":
-            if aiCanSendEmail,
-               let args = try? JSONDecoder().decode(SendEmailArgs.self, from: argsData),
-               let email = emailService {
-                let draft = EmailDraft(
-                    to: args.to,
-                    subject: args.subject,
-                    body: args.body,
-                    replyToThreadId: args.threadId
-                )
-                let sent = await email.sendEmail(draft)
-                if sent {
-                    return encodeToolResult(success: true, message: "Email sent: \(args.subject)")
-                } else {
-                    return encodeToolResult(success: false, message: "Failed to send email")
-                }
+            guard aiCanSendEmail else {
+                return encodeToolResult(success: false, message: "Email send access disabled by user")
+            }
+            guard let email = emailService else {
+                return encodeToolResult(success: false, message: "Email is not connected")
+            }
+            guard let args = try? JSONDecoder().decode(SendEmailArgs.self, from: argsData) else {
+                return encodeToolResult(success: false, message: "Invalid send_email arguments")
+            }
+            let draft = EmailDraft(
+                to: args.to,
+                subject: args.subject,
+                body: args.body,
+                replyToThreadId: args.threadId
+            )
+            let sent = await email.sendEmail(draft)
+            if sent {
+                return encodeToolResult(success: true, message: "Email sent: \(args.subject)")
+            } else {
+                return encodeToolResult(success: false, message: "Failed to send email")
             }
 
         default:
@@ -518,7 +649,7 @@ final class AIChatService {
                         "title": ["type": "string", "description": "Task title"],
                         "dueDate": ["type": "string", "description": "ISO 8601 due date (optional)"],
                         "folderName": ["type": "string", "description": "Folder name (optional)"],
-                        "priority": ["type": "string", "enum": ["none", "low", "medium", "high", "urgent"], "description": "Task priority"]
+                        "priority": ["type": "string", "enum": ["none", "low", "medium", "high"], "description": "Task priority"]
                     ],
                     "required": ["title"]
                 ] as [String: Any]
@@ -532,7 +663,7 @@ final class AIChatService {
                         "id": ["type": "string", "description": "Task UUID"],
                         "title": ["type": "string"],
                         "status": ["type": "string", "enum": ["todo", "doing", "done"]],
-                        "priority": ["type": "string", "enum": ["none", "low", "medium", "high", "urgent"]],
+                        "priority": ["type": "string", "enum": ["none", "low", "medium", "high"]],
                         "dueDate": ["type": "string"]
                     ],
                     "required": ["id"]
@@ -561,6 +692,32 @@ final class AIChatService {
                         "notes": ["type": "string", "description": "Event notes (optional)"]
                     ],
                     "required": ["title", "startDate"]
+                ] as [String: Any]
+            ],
+            [
+                "name": "update_calendar_event",
+                "description": "Update an existing calendar event",
+                "parameters": [
+                    "type": "object",
+                    "properties": [
+                        "id": ["type": "string", "description": "Event identifier"],
+                        "title": ["type": "string"],
+                        "startDate": ["type": "string", "description": "ISO 8601 start datetime"],
+                        "endDate": ["type": "string", "description": "ISO 8601 end datetime"],
+                        "notes": ["type": "string", "description": "Event notes (optional)"]
+                    ],
+                    "required": ["id"]
+                ] as [String: Any]
+            ],
+            [
+                "name": "delete_calendar_event",
+                "description": "Delete a calendar event",
+                "parameters": [
+                    "type": "object",
+                    "properties": [
+                        "id": ["type": "string", "description": "Event identifier to delete"]
+                    ],
+                    "required": ["id"]
                 ] as [String: Any]
             ],
             [
@@ -593,7 +750,104 @@ final class AIChatService {
         // Pre-fetch calendar events async so buildPayload stays sync
         await refreshCalendarSnapshot()
 
-        // Route through the main backend's /api/ai/chat endpoint with Bearer auth
+        // Build the initial payload once — reused across tool-agent loop steps.
+        let payload = buildPayload(allTasks: allTasks, conversationMessages: requestMessages)
+
+        // Multi-step loop: after each tool call round we re-query the model with
+        // tool results so it can produce a natural-language reply. Hard-capped to
+        // prevent runaway loops if the model keeps calling tools.
+        var followUpMessages: [ChatMessage] = []
+        let maxSteps = 5
+        var stepsTaken = 0
+        var producedAnyContent = false
+
+        while stepsTaken < maxSteps {
+            stepsTaken += 1
+            let step = await runStep(
+                assistantMessageID: assistantMessageID,
+                basePayload: payload,
+                extraMessages: followUpMessages,
+                modelContext: modelContext
+            )
+
+            if step.hardError {
+                // Already surfaced an error message to the user.
+                return
+            }
+            if step.producedContent {
+                producedAnyContent = true
+            }
+            if step.toolCalls.isEmpty {
+                // Stream ended without tool calls → final answer.
+                if !producedAnyContent {
+                    appendFallback(to: assistantMessageID)
+                }
+                return
+            }
+
+            // Execute tool calls locally, collect result messages to send back.
+            let toolResults = await executeToolCalls(
+                step.toolCalls,
+                assistantMessageID: assistantMessageID,
+                modelContext: modelContext
+            )
+
+            // Append assistant-with-tool-calls + tool-result messages for next turn.
+            followUpMessages.append(ChatMessage.assistantWithToolCalls(
+                content: step.assistantContent,
+                toolCalls: step.toolCalls.map { $0.toChatToolCall() }
+            ))
+            followUpMessages.append(contentsOf: toolResults)
+        }
+
+        // Max steps hit — ensure user sees something.
+        if !producedAnyContent {
+            appendFallback(to: assistantMessageID)
+        }
+    }
+
+    /// One request/stream cycle. Returns any accumulated tool calls and whether
+    /// the stream produced visible content (used to decide if we need a fallback).
+    private struct StepResult {
+        var toolCalls: [AccumulatedToolCall] = []
+        var assistantContent: String = ""
+        var producedContent: Bool = false
+        var hardError: Bool = false
+    }
+
+    private func runStep(
+        assistantMessageID: UUID,
+        basePayload: ChatRequest,
+        extraMessages: [ChatMessage],
+        modelContext: ModelContext
+    ) async -> StepResult {
+        var result = StepResult()
+
+        // Pre-flight: no token means certain 401 — fail fast with a clear message.
+        if authService?.bearerToken == nil {
+            appendError("Not signed in. Please log in and try again.", to: assistantMessageID)
+            result.hardError = true
+            return result
+        }
+
+        // Compose request with any accumulated follow-up (tool-result) messages.
+        // Follow-up steps (when extraMessages is non-empty) drop attachments + mentions
+        // because the server already inlined them in step 1. Re-sending would:
+        //   - Duplicate base64 image data → wasted bandwidth + tokens
+        //   - Re-trigger Tavily web search on the same query → wasted credits
+        //   - Re-append the <resolved_mentions> block to the user message
+        let isFollowUp = !extraMessages.isEmpty
+        var combinedMessages = basePayload.messages
+        combinedMessages.append(contentsOf: extraMessages)
+        let payload = ChatRequest(
+            messages: combinedMessages,
+            mentions: isFollowUp ? [] : basePayload.mentions,
+            tasks: basePayload.tasks,
+            model: basePayload.model,
+            stream: basePayload.stream,
+            attachments: isFollowUp ? nil : basePayload.attachments
+        )
+
         let baseURL = configuration.effectiveBackendURL
         let url = baseURL.appending(path: "api/ai/chat")
 
@@ -607,34 +861,30 @@ final class AIChatService {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
 
-        let payload = buildPayload(allTasks: allTasks, conversationMessages: requestMessages)
         guard let body = try? JSONEncoder().encode(payload) else {
             appendError("Failed to encode request.", to: assistantMessageID)
-            return
+            result.hardError = true
+            return result
         }
         request.httpBody = body
 
-        // Pre-flight: no token means certain 401 — fail fast with a clear message
-        if authService?.bearerToken == nil {
-            appendError("Not signed in. Please log in and try again.", to: assistantMessageID)
-            return
-        }
+        // Accumulator keyed by tool_call index. Streaming tool calls arrive as
+        // fragments: the first chunk has name + id, later chunks only append to
+        // `arguments`. Without this accumulation, arguments JSON is discarded.
+        var toolCallBuffer: [Int: AccumulatedToolCall] = [:]
 
         do {
             let (asyncBytes, response) = try await URLSession.shared.bytes(for: request)
             guard let http = response as? HTTPURLResponse else {
                 appendError("Invalid response from server.", to: assistantMessageID)
-                return
+                result.hardError = true
+                return result
             }
             debugHTTPResponse(http, context: "chat stream")
-            // Capture rotated Bearer token from Better Auth's set-auth-token header
             authService?.captureRotatedToken(from: http)
             guard (200..<300).contains(http.statusCode) else {
                 switch http.statusCode {
                 case 401:
-                    // Token exists in Keychain (user appears logged in) but backend session
-                    // may have expired. Try silent refresh — if it succeeds the next retry
-                    // (user taps retry button) will use the refreshed token automatically.
                     if let auth = authService {
                         let refreshed = await auth.attemptSilentRefresh()
                         if refreshed {
@@ -652,6 +902,31 @@ final class AIChatService {
                             fallback: "Session expired. Please log out and back in."
                         ), to: assistantMessageID)
                     }
+                case 429:
+                    // Parse Retry-After per RFC 7231: integer seconds or HTTP-date.
+                    var retrySeconds: Int? = nil
+                    if let header = http.value(forHTTPHeaderField: "Retry-After") {
+                        let trimmed = header.trimmingCharacters(in: .whitespaces)
+                        if let asInt = Int(trimmed) {
+                            retrySeconds = asInt
+                        } else {
+                            let formatter = DateFormatter()
+                            formatter.locale = Locale(identifier: "en_US_POSIX")
+                            formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
+                            if let date = formatter.date(from: trimmed) {
+                                retrySeconds = max(0, Int(date.timeIntervalSinceNow.rounded()))
+                            }
+                        }
+                    }
+                    let banner: String
+                    if let s = retrySeconds, s > 0 {
+                        banner = "Rate limited — try again in \(s) seconds."
+                    } else {
+                        banner = "Rate limited — try again shortly."
+                    }
+                    rateLimitedMessage = banner
+                    streamFailed = true
+                    appendError(banner, to: assistantMessageID)
                 case 503:
                     appendError("AI service is not configured on the server (missing OPENROUTER_API_KEY).", to: assistantMessageID)
                 case 502:
@@ -659,10 +934,10 @@ final class AIChatService {
                 default:
                     appendError(diagnosticHTTPMessage(statusCode: http.statusCode), to: assistantMessageID)
                 }
-                return
+                result.hardError = true
+                return result
             }
 
-            // Parse Server-Sent Events line by line
             for try await line in asyncBytes.lines {
                 if Task.isCancelled { break }
 
@@ -672,32 +947,308 @@ final class AIChatService {
 
                 guard let data = jsonString.data(using: .utf8) else { continue }
 
-                // Try custom event first (web search status, sources, reasoning)
-                // These have a "type" field that SSEChunk doesn't, so one will succeed and the other fail.
                 if let customEvent = try? JSONDecoder().decode(SSECustomEvent.self, from: data),
                    !customEvent.type.isEmpty {
                     handleCustomEvent(customEvent, messageID: assistantMessageID)
                     continue
                 }
 
-                // Fall through to existing OpenRouter SSE chunk parsing
                 guard let chunk = try? JSONDecoder().decode(SSEChunk.self, from: data) else { continue }
+                guard let delta = chunk.choices.first?.delta else { continue }
 
-                // Append delta content token-by-token → drives typewriter animation
-                if let delta = chunk.choices.first?.delta.content, !delta.isEmpty {
-                    appendToken(delta, to: assistantMessageID)
+                if let text = delta.content, !text.isEmpty {
+                    result.assistantContent += text
+                    result.producedContent = true
+                    appendToken(text, to: assistantMessageID)
                 }
 
-                // Respect aiCanWriteTasks setting before applying tool calls
-                if aiCanWriteTasks, let toolCalls = chunk.choices.first?.delta.toolCalls {
-                    await processToolCalls(toolCalls, assistantMessageID: assistantMessageID, modelContext: modelContext)
+                // Accumulate streaming tool call fragments by index.
+                if let toolCalls = delta.toolCalls {
+                    for tc in toolCalls {
+                        let idx = tc.index ?? 0
+                        var acc = toolCallBuffer[idx] ?? AccumulatedToolCall()
+                        if let id = tc.id, !id.isEmpty { acc.id = id }
+                        if let name = tc.function?.name, !name.isEmpty { acc.name = name }
+                        if let args = tc.function?.arguments, !args.isEmpty { acc.arguments += args }
+                        toolCallBuffer[idx] = acc
+                    }
                 }
             }
         } catch {
             if !Task.isCancelled {
                 log.error("chat stream failed: \(error.localizedDescription, privacy: .public)")
-                appendError(error.localizedDescription, to: assistantMessageID)
+                // Mid-stream URLSession failure (network drop, timeout). Surface a
+                // banner so the user can tap to retry — do not auto-reconnect, since
+                // partial assistant output may already be on screen. The outer
+                // `streamResponse` defer-calls `finaliseStream` which clears
+                // isStreaming, so we don't toggle that here.
+                streamFailed = true
+                appendError("Connection lost — tap to retry.", to: assistantMessageID)
+                result.hardError = true
             }
+            return result
+        }
+
+        // Flush buffered tokens before handing off to the next step so the UI
+        // doesn't pause visibly between tool execution and follow-up streaming.
+        if !tokenBuffer.isEmpty,
+           let idx = messages.firstIndex(where: { $0.id == assistantMessageID }) {
+            messages[idx].content += tokenBuffer
+            tokenBuffer = ""
+        }
+
+        // Finalize tool calls: only return ones with a valid name. Arguments may
+        // legitimately be "{}" when the tool has no required fields.
+        result.toolCalls = toolCallBuffer.keys.sorted().compactMap { idx -> AccumulatedToolCall? in
+            guard var tc = toolCallBuffer[idx], !tc.name.isEmpty else { return nil }
+            if tc.id.isEmpty { tc.id = "call_\(UUID().uuidString)" }
+            if tc.arguments.isEmpty { tc.arguments = "{}" }
+            return tc
+        }
+        return result
+    }
+
+    /// Execute every accumulated tool call and return the tool-result messages
+    /// to send back to the model. Writes mutation chips into the assistant bubble.
+    private func executeToolCalls(
+        _ calls: [AccumulatedToolCall],
+        assistantMessageID: UUID,
+        modelContext: ModelContext
+    ) async -> [ChatMessage] {
+        var results: [ChatMessage] = []
+        for call in calls {
+            let resultJSON = await executeSingleToolCall(
+                call,
+                assistantMessageID: assistantMessageID,
+                modelContext: modelContext
+            )
+            results.append(ChatMessage.toolResult(toolCallId: call.id, name: call.name, content: resultJSON))
+        }
+        return results
+    }
+
+    /// Map a tool name to the mutation Action used for failure chips so the user sees
+    /// when the AI tried to do something but the call errored out (instead of silently
+    /// returning an error JSON the model interprets in text).
+    private func failureAction(for toolName: String) -> AIChatTaskMutation.Action {
+        switch toolName {
+        case "create_task", "create_calendar_event", "send_email": return .create
+        case "update_task", "update_calendar_event":               return .update
+        case "delete_task", "delete_calendar_event":               return .delete
+        default:                                                    return .update
+        }
+    }
+
+    /// Surfaces a failed tool call in the chat as a `success=false` mutation chip so
+    /// errors aren't silently dropped into the JSON returned to the model.
+    private func appendToolFailureChip(
+        toolName: String,
+        message: String,
+        title: String? = nil,
+        to assistantMessageID: UUID
+    ) {
+        let action = failureAction(for: toolName)
+        appendMutation(
+            AIChatTaskMutation(
+                action: action,
+                title: title,
+                success: false,
+                errorMessage: message
+            ),
+            to: assistantMessageID
+        )
+    }
+
+    private func executeSingleToolCall(
+        _ call: AccumulatedToolCall,
+        assistantMessageID: UUID,
+        modelContext: ModelContext
+    ) async -> String {
+        guard let argsData = call.arguments.data(using: .utf8) else {
+            appendToolFailureChip(toolName: call.name, message: "Invalid tool arguments", to: assistantMessageID)
+            return encodeToolResult(success: false, message: "Invalid tool arguments")
+        }
+
+        switch call.name {
+        case "create_task":
+            guard aiCanWriteTasks else {
+                appendToolFailureChip(toolName: call.name, message: "Task write access disabled", to: assistantMessageID)
+                return encodeToolResult(success: false, message: "Task write access disabled by user")
+            }
+            guard let args = try? JSONDecoder().decode(CreateTaskArgs.self, from: argsData) else {
+                appendToolFailureChip(toolName: call.name, message: "Invalid create_task arguments", to: assistantMessageID)
+                return encodeToolResult(success: false, message: "Invalid create_task arguments")
+            }
+            let dueDate = args.dueDate.flatMap { ISO8601DateFormatter().date(from: $0) }
+            captureService.capture(rawComposerText: args.title, overrideDueDate: dueDate, in: modelContext)
+            appendMutation(AIChatTaskMutation(action: .create, title: args.title, dueDate: dueDate), to: assistantMessageID)
+            return encodeToolResult(success: true, message: "Task '\(args.title)' created")
+
+        case "update_task":
+            guard aiCanWriteTasks else {
+                appendToolFailureChip(toolName: call.name, message: "Task write access disabled", to: assistantMessageID)
+                return encodeToolResult(success: false, message: "Task write access disabled by user")
+            }
+            guard let args = try? JSONDecoder().decode(UpdateTaskArgs.self, from: argsData),
+                  let taskID = UUID(uuidString: args.id) else {
+                appendToolFailureChip(toolName: call.name, message: "Invalid update_task arguments", to: assistantMessageID)
+                return encodeToolResult(success: false, message: "Invalid update_task arguments")
+            }
+            applyUpdateTask(taskID: taskID, args: args, modelContext: modelContext)
+            appendMutation(AIChatTaskMutation(action: .update, taskID: taskID, title: args.title), to: assistantMessageID)
+            return encodeToolResult(success: true, message: "Task updated")
+
+        case "delete_task":
+            guard aiCanWriteTasks else {
+                appendToolFailureChip(toolName: call.name, message: "Task write access disabled", to: assistantMessageID)
+                return encodeToolResult(success: false, message: "Task write access disabled by user")
+            }
+            guard let args = try? JSONDecoder().decode(DeleteTaskArgs.self, from: argsData),
+                  let taskID = UUID(uuidString: args.id) else {
+                appendToolFailureChip(toolName: call.name, message: "Invalid delete_task arguments", to: assistantMessageID)
+                return encodeToolResult(success: false, message: "Invalid delete_task arguments")
+            }
+            // Look up the task title before deleting so the chip + confirmation can
+            // show context (Bug #9).
+            let descriptor = FetchDescriptor<TaskRecord>(predicate: #Predicate { $0.id == taskID })
+            let titleForChip = (try? modelContext.fetch(descriptor))?.first?.title
+            // Destructive action — gate behind explicit user confirmation (Bug #4).
+            // Suspends until the view resolves `pendingDeleteConfirmation`.
+            let confirmed = await awaitDeleteConfirmation(taskID: taskID, title: titleForChip)
+            guard confirmed else {
+                appendToolFailureChip(
+                    toolName: call.name,
+                    message: "Delete cancelled by user",
+                    title: titleForChip,
+                    to: assistantMessageID
+                )
+                return encodeToolResult(success: false, message: "Delete cancelled by user")
+            }
+            applyDeleteTask(taskID: taskID, modelContext: modelContext)
+            appendMutation(AIChatTaskMutation(action: .delete, taskID: taskID, title: titleForChip), to: assistantMessageID)
+            return encodeToolResult(success: true, message: "Task deleted")
+
+        case "create_calendar_event":
+            guard aiCanWriteCalendar else {
+                appendToolFailureChip(toolName: call.name, message: "Calendar write access disabled", to: assistantMessageID)
+                return encodeToolResult(success: false, message: "Calendar write access disabled by user")
+            }
+            guard let args = try? JSONDecoder().decode(CreateCalendarEventArgs.self, from: argsData) else {
+                appendToolFailureChip(toolName: call.name, message: "Invalid create_calendar_event arguments", to: assistantMessageID)
+                return encodeToolResult(success: false, message: "Invalid create_calendar_event arguments")
+            }
+            let iso = ISO8601DateFormatter()
+            guard let startDate = iso.date(from: args.startDate) else {
+                appendToolFailureChip(toolName: call.name, message: "Invalid startDate", title: "📅 \(args.title)", to: assistantMessageID)
+                return encodeToolResult(success: false, message: "Invalid startDate — expected ISO 8601")
+            }
+            guard let cal = calendarService, cal.canCreateEvents() else {
+                appendToolFailureChip(toolName: call.name, message: "Calendar permission not granted", title: "📅 \(args.title)", to: assistantMessageID)
+                return encodeToolResult(success: false, message: "Calendar permission not granted")
+            }
+            let endDate = args.endDate.flatMap { iso.date(from: $0) }
+            do {
+                try await cal.createEvent(title: args.title, startDate: startDate, endDate: endDate)
+                appendMutation(AIChatTaskMutation(action: .create, title: "📅 \(args.title)"), to: assistantMessageID)
+                return encodeToolResult(success: true, message: "Calendar event '\(args.title)' created")
+            } catch {
+                appendToolFailureChip(toolName: call.name, message: "Failed to create event: \(error.localizedDescription)", title: "📅 \(args.title)", to: assistantMessageID)
+                return encodeToolResult(success: false, message: "Failed to create event: \(error.localizedDescription)")
+            }
+
+        case "update_calendar_event":
+            guard aiCanWriteCalendar else {
+                appendToolFailureChip(toolName: call.name, message: "Calendar write access disabled", to: assistantMessageID)
+                return encodeToolResult(success: false, message: "Calendar write access disabled by user")
+            }
+            guard let args = try? JSONDecoder().decode(UpdateCalendarEventArgs.self, from: argsData) else {
+                appendToolFailureChip(toolName: call.name, message: "Invalid update_calendar_event arguments", to: assistantMessageID)
+                return encodeToolResult(success: false, message: "Invalid update_calendar_event arguments")
+            }
+            guard let cal = calendarService else {
+                appendToolFailureChip(toolName: call.name, message: "Calendar not available", title: "📅 \(args.title ?? "Event")", to: assistantMessageID)
+                return encodeToolResult(success: false, message: "Calendar not available")
+            }
+            let iso = ISO8601DateFormatter()
+            let start = args.startDate.flatMap { iso.date(from: $0) }
+            let end = args.endDate.flatMap { iso.date(from: $0) }
+            do {
+                try await cal.updateEvent(
+                    identifier: args.id,
+                    title: args.title,
+                    startDate: start,
+                    endDate: end,
+                    notes: args.notes
+                )
+                appendMutation(AIChatTaskMutation(action: .update, title: "📅 \(args.title ?? "Event")"), to: assistantMessageID)
+                return encodeToolResult(success: true, message: "Event updated")
+            } catch {
+                appendToolFailureChip(toolName: call.name, message: "Failed to update event: \(error.localizedDescription)", title: "📅 \(args.title ?? "Event")", to: assistantMessageID)
+                return encodeToolResult(success: false, message: "Failed to update event: \(error.localizedDescription)")
+            }
+
+        case "delete_calendar_event":
+            guard aiCanWriteCalendar else {
+                appendToolFailureChip(toolName: call.name, message: "Calendar write access disabled", to: assistantMessageID)
+                return encodeToolResult(success: false, message: "Calendar write access disabled by user")
+            }
+            guard let args = try? JSONDecoder().decode(DeleteCalendarEventArgs.self, from: argsData) else {
+                appendToolFailureChip(toolName: call.name, message: "Invalid delete_calendar_event arguments", to: assistantMessageID)
+                return encodeToolResult(success: false, message: "Invalid delete_calendar_event arguments")
+            }
+            guard let cal = calendarService else {
+                appendToolFailureChip(toolName: call.name, message: "Calendar not available", to: assistantMessageID)
+                return encodeToolResult(success: false, message: "Calendar not available")
+            }
+            do {
+                try await cal.deleteEvent(identifier: args.id)
+                appendMutation(AIChatTaskMutation(action: .delete, title: "📅 Event removed"), to: assistantMessageID)
+                return encodeToolResult(success: true, message: "Event deleted")
+            } catch {
+                appendToolFailureChip(toolName: call.name, message: "Failed to delete event: \(error.localizedDescription)", to: assistantMessageID)
+                return encodeToolResult(success: false, message: "Failed to delete event: \(error.localizedDescription)")
+            }
+
+        case "send_email":
+            guard aiCanSendEmail else {
+                appendToolFailureChip(toolName: call.name, message: "Email send access disabled", to: assistantMessageID)
+                return encodeToolResult(success: false, message: "Email send access disabled by user")
+            }
+            guard let email = emailService else {
+                appendToolFailureChip(toolName: call.name, message: "Email is not connected", to: assistantMessageID)
+                return encodeToolResult(success: false, message: "Email is not connected")
+            }
+            guard let args = try? JSONDecoder().decode(SendEmailArgs.self, from: argsData) else {
+                appendToolFailureChip(toolName: call.name, message: "Invalid send_email arguments", to: assistantMessageID)
+                return encodeToolResult(success: false, message: "Invalid send_email arguments")
+            }
+            let draft = EmailDraft(
+                to: args.to,
+                subject: args.subject,
+                body: args.body,
+                replyToThreadId: args.threadId
+            )
+            let sent = await email.sendEmail(draft)
+            if sent {
+                appendMutation(AIChatTaskMutation(action: .create, title: "✉️ Sent: \(args.subject)"), to: assistantMessageID)
+                return encodeToolResult(success: true, message: "Email sent: \(args.subject)")
+            } else {
+                appendToolFailureChip(toolName: call.name, message: "Failed to send email", title: "✉️ \(args.subject)", to: assistantMessageID)
+                return encodeToolResult(success: false, message: "Failed to send email")
+            }
+
+        default:
+            appendToolFailureChip(toolName: call.name, message: "Unknown tool '\(call.name)'", to: assistantMessageID)
+            return encodeToolResult(success: false, message: "Unknown tool '\(call.name)'")
+        }
+    }
+
+    /// Fallback text shown when the model ends a turn without ever producing
+    /// visible content — e.g. cheap models that emit tool_calls then nothing.
+    private func appendFallback(to messageID: UUID) {
+        guard let idx = messages.firstIndex(where: { $0.id == messageID }) else { return }
+        if messages[idx].content.isEmpty {
+            messages[idx].content = "Done."
         }
     }
 
@@ -758,6 +1309,36 @@ final class AIChatService {
 
     // MARK: - Payload Building
 
+    private static let maxAttachmentBytes = 5 * 1024 * 1024
+    private static let maxTotalAttachmentBytes = 12 * 1024 * 1024
+
+    /// Reads local attachment files and serializes them for `/api/ai/chat` (matches server `serializedFileSchema`).
+    private static func buildSerializedAttachments(fileNames: [String]) -> [SerializedFilePayload] {
+        var total = 0
+        var out: [SerializedFilePayload] = []
+        for name in fileNames {
+            let url = AttachmentService.shared.url(for: name)
+            guard let data = try? Data(contentsOf: url) else { continue }
+            if data.count > maxAttachmentBytes { continue }
+            if total + data.count > maxTotalAttachmentBytes { break }
+            total += data.count
+            let mime = AttachmentService.shared.mimeType(for: name)
+            var lastModMs = 0
+            if let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+               let d = attrs[.modificationDate] as? Date {
+                lastModMs = Int(d.timeIntervalSince1970 * 1000)
+            }
+            out.append(SerializedFilePayload(
+                name: name,
+                type: mime,
+                size: data.count,
+                lastModified: lastModMs,
+                base64: data.base64EncodedString()
+            ))
+        }
+        return out
+    }
+
     /// Build the full request payload including system prompt, conversation history, and task context.
     /// Internal visibility so voice chat can access the system prompt via `buildSystemPromptForVoice`.
     func buildPayload(
@@ -799,8 +1380,8 @@ final class AIChatService {
         }
 
         let calendarWriteNote = aiCanWriteCalendar
-            ? "You CAN create calendar events via the create_calendar_event tool."
-            : "You cannot create calendar events (write access disabled by user)."
+            ? "You CAN create, update, and delete calendar events via tool calls."
+            : "You cannot modify calendar events (write access disabled by user)."
 
         // ── Email — gated by aiCanReadEmail ──────────────────────────────────
         let emailContext: String
@@ -845,12 +1426,14 @@ final class AIChatService {
 
         CAPABILITIES — you can:
         • Read, create, update, and delete tasks (use create_task, update_task, delete_task tools)
-        • Read calendar events and create new ones (use create_calendar_event tool)
+        • Read calendar events and create, update, or delete them with tool calls
         • Read email threads and send new emails or replies (use send_email tool)
 
         FORMATTING RULES — follow these exactly:
+        • Always use markdown formatting. Use \n\n (a blank line) to separate every distinct paragraph, section, or thought — never write responses as one continuous block of text.
         • NEVER use markdown tables. Always use bullet lists (- item) for tabular data.
         • When referencing a task, write [task:UUID] on its own line — the app renders it as a native card.
+        • When listing calendar events the user can open, put [event:EVENT_ID] on its own line for each event (use the exact bracketed id from the Calendar section above) — the app renders them as compact tappable event cards.
         • Use ## for section headings, **bold** for emphasis, - for bullets.
         • Leave a blank line between sections and after bullet lists.
         • Be concise, action-oriented, and natural. Don't over-explain.
@@ -862,7 +1445,7 @@ final class AIChatService {
             let role = msg.role == .user ? "user" : "assistant"
             return ChatMessage(role: role, content: msg.content)
         }
-        if apiMessages.last?.role == "assistant" && apiMessages.last?.content.isEmpty == true {
+        if apiMessages.last?.role == "assistant", (apiMessages.last?.content ?? "").isEmpty {
             apiMessages.removeLast()
         }
 
@@ -885,11 +1468,20 @@ final class AIChatService {
             }
         }
 
+        let attachmentPayload: [SerializedFilePayload]? = {
+            guard let lastUser = activeMessages.reversed().first(where: { $0.role == .user }),
+                  !lastUser.attachmentFileNames.isEmpty else { return nil }
+            let serialized = Self.buildSerializedAttachments(fileNames: lastUser.attachmentFileNames)
+            return serialized.isEmpty ? nil : serialized
+        }()
+
         return ChatRequest(
             messages: apiMessages,
             mentions: allMentionPayloads,
             tasks: Array(taskSummaries),
-            model: selectedModel
+            model: selectedModel,
+            stream: true,
+            attachments: attachmentPayload
         )
     }
 
@@ -910,78 +1502,6 @@ final class AIChatService {
     }
 
     // MARK: - Tool Call Processing
-
-    private func processToolCalls(
-        _ toolCalls: [SSEToolCall],
-        assistantMessageID: UUID,
-        modelContext: ModelContext
-    ) async {
-        for toolCall in toolCalls {
-            guard let argsData = toolCall.function.arguments.data(using: .utf8) else { continue }
-
-            switch toolCall.function.name {
-            case "create_task":
-                if let args = try? JSONDecoder().decode(CreateTaskArgs.self, from: argsData) {
-                    let dueDate = args.dueDate.flatMap { ISO8601DateFormatter().date(from: $0) }
-                    captureService.capture(
-                        rawComposerText: args.title,
-                        overrideDueDate: dueDate,
-                        in: modelContext
-                    )
-                    let mutation = AIChatTaskMutation(action: .create, title: args.title, dueDate: dueDate)
-                    appendMutation(mutation, to: assistantMessageID)
-                }
-
-            case "update_task":
-                if let args = try? JSONDecoder().decode(UpdateTaskArgs.self, from: argsData),
-                   let taskID = UUID(uuidString: args.id) {
-                    applyUpdateTask(taskID: taskID, args: args, modelContext: modelContext)
-                    let mutation = AIChatTaskMutation(action: .update, taskID: taskID, title: args.title)
-                    appendMutation(mutation, to: assistantMessageID)
-                }
-
-            case "delete_task":
-                if let args = try? JSONDecoder().decode(DeleteTaskArgs.self, from: argsData),
-                   let taskID = UUID(uuidString: args.id) {
-                    applyDeleteTask(taskID: taskID, modelContext: modelContext)
-                    let mutation = AIChatTaskMutation(action: .delete, taskID: taskID)
-                    appendMutation(mutation, to: assistantMessageID)
-                }
-
-            case "create_calendar_event":
-                if aiCanWriteCalendar,
-                   let args = try? JSONDecoder().decode(CreateCalendarEventArgs.self, from: argsData) {
-                    let iso = ISO8601DateFormatter()
-                    if let startDate = iso.date(from: args.startDate),
-                       let cal = calendarService, cal.canCreateEvents() {
-                        let endDate = args.endDate.flatMap { iso.date(from: $0) }
-                        // CalendarService is actor-isolated — call with await
-                        try? await cal.createEvent(title: args.title, startDate: startDate, endDate: endDate)
-                        let mutation = AIChatTaskMutation(action: .create, title: "📅 \(args.title)")
-                        appendMutation(mutation, to: assistantMessageID)
-                    }
-                }
-
-            case "send_email":
-                if aiCanSendEmail,
-                   let args = try? JSONDecoder().decode(SendEmailArgs.self, from: argsData),
-                   let email = emailService {
-                    let draft = EmailDraft(
-                        to: args.to,
-                        subject: args.subject,
-                        body: args.body,
-                        replyToThreadId: args.threadId
-                    )
-                    Task { await email.sendEmail(draft) }
-                    let mutation = AIChatTaskMutation(action: .create, title: "✉️ Sent: \(args.subject)")
-                    appendMutation(mutation, to: assistantMessageID)
-                }
-
-            default:
-                break
-            }
-        }
-    }
 
     private func applyUpdateTask(taskID: UUID, args: UpdateTaskArgs, modelContext: ModelContext) {
         let descriptor = FetchDescriptor<TaskRecord>(predicate: #Predicate { $0.id == taskID })
@@ -1070,7 +1590,8 @@ final class AIChatService {
                 AIChatConversation.SavedMessage(
                     role: $0.role == .user ? "user" : "assistant",
                     content: $0.content,
-                    mentions: $0.mentions
+                    mentions: $0.mentions,
+                    attachmentFileNames: $0.attachmentFileNames
                 )
             }
         )
@@ -1280,11 +1801,12 @@ final class AIChatService {
         let weekEnd = cal7.date(byAdding: .day, value: 7, to: Date()) ?? Date()
         let weekEvents = await cal.events(from: Date(), to: weekEnd)
 
+        // Include event identifiers so the AI can reference them in update/delete tool calls.
         let todayStr = today.isEmpty ? "No events today." : today.map {
-            "- \($0.title) (\(Self.shortTime($0.startDate)) – \(Self.shortTime($0.endDate)))"
+            "- [\($0.id)] \($0.title) (\(Self.shortTime($0.startDate)) – \(Self.shortTime($0.endDate)))"
         }.joined(separator: "\n")
         let weekStr = weekEvents.isEmpty ? "No events this week." : weekEvents.prefix(20).map {
-            "- \($0.title) on \(Self.shortDate($0.startDate))"
+            "- [\($0.id)] \($0.title) on \(Self.shortDate($0.startDate))"
         }.joined(separator: "\n")
 
         calendarSnapshot = """
@@ -1293,7 +1815,7 @@ final class AIChatService {
         \(todayStr)
         This week:
         \(weekStr)
-        You CAN create calendar events via the create_calendar_event tool.
+        You CAN create, update, and delete calendar events via the create_calendar_event, update_calendar_event, and delete_calendar_event tools. Pass the bracketed identifier as `id` when updating or deleting.
         """
     }
 
@@ -1357,17 +1879,131 @@ final class AIChatService {
 }
 // MARK: - Request / Response Models
 
+/// Wire format for uploaded files — matches `serializedFileSchema` on the server.
+struct SerializedFilePayload: Encodable {
+    let name: String
+    let type: String
+    let size: Int
+    let lastModified: Int
+    let base64: String
+}
+
 struct ChatRequest: Encodable {
     let messages: [ChatMessage]
     let mentions: [MentionPayload]
     let tasks: [TaskSummaryPayload]
     let model: String
-    let stream: Bool = true
+    let stream: Bool
+    let attachments: [SerializedFilePayload]?
+
+    enum CodingKeys: String, CodingKey {
+        case messages, mentions, tasks, model, stream, attachments
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(messages, forKey: .messages)
+        try c.encode(mentions, forKey: .mentions)
+        try c.encode(tasks, forKey: .tasks)
+        try c.encode(model, forKey: .model)
+        try c.encode(stream, forKey: .stream)
+        if let attachments, !attachments.isEmpty {
+            try c.encode(attachments, forKey: .attachments)
+        }
+    }
 }
 
+/// OpenAI-compatible chat message. `content` is optional because assistant
+/// messages that only produce tool_calls legitimately have no text content.
 struct ChatMessage: Codable {
     let role: String
-    let content: String
+    let content: String?
+    let toolCalls: [ChatToolCall]?
+    let toolCallId: String?
+    let name: String?
+
+    enum CodingKeys: String, CodingKey {
+        case role, content, name
+        case toolCalls = "tool_calls"
+        case toolCallId = "tool_call_id"
+    }
+
+    init(
+        role: String,
+        content: String? = nil,
+        toolCalls: [ChatToolCall]? = nil,
+        toolCallId: String? = nil,
+        name: String? = nil
+    ) {
+        self.role = role
+        self.content = content
+        self.toolCalls = toolCalls
+        self.toolCallId = toolCallId
+        self.name = name
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        role = try c.decode(String.self, forKey: .role)
+        content = try c.decodeIfPresent(String.self, forKey: .content)
+        toolCalls = try c.decodeIfPresent([ChatToolCall].self, forKey: .toolCalls)
+        toolCallId = try c.decodeIfPresent(String.self, forKey: .toolCallId)
+        name = try c.decodeIfPresent(String.self, forKey: .name)
+    }
+
+    // Custom encoder so nil `content` is omitted entirely rather than encoded
+    // as JSON null. Some OpenRouter-routed models (notably Anthropic) reject
+    // both `"content": ""` and `"content": null` paired with `tool_calls`.
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(role, forKey: .role)
+        try c.encodeIfPresent(content, forKey: .content)
+        try c.encodeIfPresent(toolCalls, forKey: .toolCalls)
+        try c.encodeIfPresent(toolCallId, forKey: .toolCallId)
+        try c.encodeIfPresent(name, forKey: .name)
+    }
+
+    static func assistantWithToolCalls(content: String, toolCalls: [ChatToolCall]) -> ChatMessage {
+        // Use nil (omitted in JSON) when content is empty — some OpenRouter-routed
+        // models (notably Anthropic via OpenRouter) reject `"content": ""` paired with
+        // `tool_calls`. nil → field is dropped → the message is interpreted as
+        // tool-only, which every provider accepts.
+        ChatMessage(role: "assistant", content: content.isEmpty ? nil : content, toolCalls: toolCalls)
+    }
+
+    static func toolResult(toolCallId: String, name: String, content: String) -> ChatMessage {
+        ChatMessage(role: "tool", content: content, toolCallId: toolCallId, name: name)
+    }
+}
+
+struct ChatToolCall: Codable {
+    let id: String
+    let type: String
+    let function: ChatToolFunction
+
+    init(id: String, name: String, arguments: String) {
+        self.id = id
+        self.type = "function"
+        self.function = ChatToolFunction(name: name, arguments: arguments)
+    }
+}
+
+struct ChatToolFunction: Codable {
+    let name: String
+    let arguments: String
+}
+
+/// Accumulator for a tool call streamed across multiple SSE chunks.
+/// OpenAI/OpenRouter split the arguments JSON across many deltas — the first
+/// chunk carries `name` and `id`, subsequent chunks only append to `arguments`.
+struct AccumulatedToolCall {
+    var id: String = ""
+    var name: String = ""
+    var arguments: String = ""
+
+    func toChatToolCall() -> ChatToolCall {
+        ChatToolCall(id: id, name: name, arguments: arguments)
+    }
 }
 
 struct TaskSummaryPayload: Encodable {
@@ -1433,13 +2069,18 @@ private struct SSEDelta: Decodable {
     }
 }
 
+/// A streaming tool_call fragment. All fields are optional because OpenAI/OpenRouter
+/// split a single tool call across multiple deltas: the first chunk has `id`,
+/// `index`, `function.name`; later chunks carry only partial `function.arguments`.
 private struct SSEToolCall: Decodable {
-    let function: SSEToolFunction
+    let index: Int?
+    let id: String?
+    let function: SSEToolFunction?
 }
 
 private struct SSEToolFunction: Decodable {
-    let name: String
-    let arguments: String
+    let name: String?
+    let arguments: String?
 }
 
 // MARK: - Tool Call Argument Models
@@ -1468,6 +2109,18 @@ struct CreateCalendarEventArgs: Decodable {
     let startDate: String      // ISO 8601
     let endDate: String?
     let notes: String?
+}
+
+struct UpdateCalendarEventArgs: Decodable {
+    let id: String
+    let title: String?
+    let startDate: String?
+    let endDate: String?
+    let notes: String?
+}
+
+struct DeleteCalendarEventArgs: Decodable {
+    let id: String
 }
 
 struct SendEmailArgs: Decodable {

@@ -324,7 +324,8 @@ struct ChatUISpecParser {
     static func parse(_ content: String) -> ParseResult {
         let range = NSRange(content.startIndex..., in: content)
         guard let match = specPattern.firstMatch(in: content, options: [], range: range),
-              let jsonRange = Range(match.range(at: 1), in: content) else {
+              let jsonRange = Range(match.range(at: 1), in: content),
+              let matchRange = Range(match.range, in: content) else {
             return ParseResult(textBefore: content, spec: nil, textAfter: "")
         }
 
@@ -334,7 +335,6 @@ struct ChatUISpecParser {
             return try? JSONDecoder().decode(ChatUISpec.self, from: data)
         }()
 
-        let matchRange = Range(match.range, in: content)!
         let textBefore = String(content[content.startIndex..<matchRange.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
         let textAfter = String(content[matchRange.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
 

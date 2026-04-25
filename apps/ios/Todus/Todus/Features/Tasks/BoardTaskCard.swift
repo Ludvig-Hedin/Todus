@@ -7,70 +7,63 @@ struct BoardTaskCard: View {
     let task: TaskRecord
     let onOpenDetails: () -> Void
 
+    /// Desktop-style row: status icon, title, meta chips, trailing chevron (matches macOS `MacTaskRow` on the board).
     var body: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            HStack(alignment: .top, spacing: 8) {
-                RoundedRectangle(cornerRadius: 2, style: .continuous)
-                    .fill(task.status.tintColor.opacity(0.42))
-                    .frame(width: 4, height: 28)
+        HStack(spacing: 8) {
+            Image(systemName: task.status.systemImage)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(task.completed ? AppTheme.mutedText : task.status.tintColor)
+                .frame(width: 16, alignment: .center)
 
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(alignment: .top, spacing: 5) {
-                        Text(task.title)
-                            .font(.system(size: 12, weight: .semibold))
-                            .tracking(-0.2)
-                            .lineSpacing(1)
-                            .foregroundStyle(.primary.opacity(task.completed ? 0.44 : 0.9))
-                            .strikethrough(task.completed, color: .primary.opacity(0.2))
-                            .lineLimit(3)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(alignment: .top, spacing: 4) {
+                    Text(task.title)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.primary.opacity(task.completed ? 0.5 : 0.95))
+                        .strikethrough(task.completed, color: .primary.opacity(0.2))
+                        .lineLimit(2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
 
+                if task.dueDate != nil || task.priority != .none || task.folder != nil {
+                    HStack(spacing: 4) {
+                        if let dueDate = task.dueDate {
+                            boardMetaPill(
+                                title: TaskDateFormatter.shortDate.string(from: dueDate),
+                                systemImage: "calendar",
+                                tint: dueDateColor(dueDate)
+                            )
+                        }
                         if task.priority != .none {
-                            Image(systemName: "flag.fill")
-                                .font(.system(size: 8, weight: .bold))
-                                .foregroundStyle(priorityColor.opacity(0.9))
-                                .padding(.top, 2)
+                            boardMetaPill(
+                                title: task.priority.title,
+                                systemImage: "flag.fill",
+                                tint: priorityColor
+                            )
+                        }
+                        if let folder = task.folder {
+                            boardMetaPill(
+                                title: folder.name,
+                                systemImage: "folder",
+                                tint: AppTheme.mutedText
+                            )
                         }
                     }
-
-                    if !task.taskDescription.isEmpty && task.taskDescription != task.title {
-                        Text(task.taskDescription)
-                            .font(.system(size: 10, weight: .medium))
-                            .tracking(-0.1)
-                            .foregroundStyle(AppTheme.mutedText)
-                            .lineSpacing(1)
-                            .lineLimit(2)
-                    }
                 }
             }
 
-            if task.dueDate != nil || task.folder != nil {
-                HStack(spacing: 6) {
-                    if let dueDate = task.dueDate {
-                        boardMetaPill(
-                            title: TaskDateFormatter.dueFormatter.string(from: dueDate),
-                            systemImage: "calendar",
-                            tint: dueDateColor(dueDate)
-                        )
-                    }
+            Spacer(minLength: 0)
 
-                    if let folder = task.folder {
-                        boardMetaPill(
-                            title: folder.name,
-                            systemImage: "folder",
-                            tint: AppTheme.mutedText
-                        )
-                    }
-                }
-            }
+            Image(systemName: "chevron.right")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(AppTheme.mutedText.opacity(0.45))
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 11)
-        .padding(.vertical, 10)
-        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.compact, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(AppTheme.cardBorder.opacity(0.9), lineWidth: 1)
+            RoundedRectangle(cornerRadius: AppTheme.Radius.compact, style: .continuous)
+                .stroke(AppTheme.cardBorder.opacity(0.85), lineWidth: 0.5)
         )
         .contentShape(Rectangle())
         .onTapGesture {

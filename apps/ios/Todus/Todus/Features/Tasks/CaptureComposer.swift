@@ -238,10 +238,10 @@ struct RichComposerInput: View {
         .padding(8)
         .background(
             AppTheme.surfacePrimary,
-            in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+            in: RoundedRectangle(cornerRadius: AppTheme.Radius.card, style: .continuous)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(cornerRadius: AppTheme.Radius.card, style: .continuous)
                 .stroke(AppTheme.strongBorder, lineWidth: 1)
         )
         .shadow(color: AppTheme.shadowColor, radius: 12, x: 0, y: -4)

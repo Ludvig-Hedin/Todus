@@ -139,6 +139,10 @@ final class AppServices {
     /// MainTabView observes this and resets it to nil after presenting.
     var requestCreateSheet: CreateItemType? = nil
 
+    /// Surfaced when a notification action (complete / snooze) fails on the next app open.
+    /// Cleared by views once shown to the user. Plain text — render in a banner or alert.
+    var pendingNotificationActionError: String? = nil
+
     /// Set true to trigger the global email compose sheet from MainTabView.
     var showsComposeEmail = false
     var composeEmailSeedBody: String? = nil

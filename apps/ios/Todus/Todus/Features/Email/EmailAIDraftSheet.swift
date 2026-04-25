@@ -73,8 +73,8 @@ struct EmailAIDraftSheet: View {
                             .lineLimit(3...6)
                             .focused($instructionFocused)
                             .padding(12)
-                            .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(AppTheme.cardBorder, lineWidth: 1))
+                            .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous).stroke(AppTheme.cardBorder, lineWidth: 1))
                         }
 
                         // Generated draft preview
@@ -88,7 +88,7 @@ struct EmailAIDraftSheet: View {
                                 .font(.system(size: 13))
                                 .foregroundStyle(AppTheme.danger)
                                 .padding(12)
-                                .background(AppTheme.danger.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                                .background(AppTheme.danger.opacity(0.08), in: RoundedRectangle(cornerRadius: AppTheme.Radius.compact, style: .continuous))
                         }
 
                         Spacer(minLength: 40)
@@ -218,8 +218,8 @@ struct EmailAIDraftSheet: View {
             }
             .frame(maxHeight: 260)
             .padding(12)
-            .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(AppTheme.cardBorder, lineWidth: 1))
+            .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous).stroke(AppTheme.cardBorder, lineWidth: 1))
         }
     }
 
@@ -292,7 +292,9 @@ struct EmailAIDraftSheet: View {
             ],
             mentions: [],
             tasks: [],
-            model: model
+            model: model,
+            stream: true,
+            attachments: nil
         )
 
         guard let body = try? JSONEncoder().encode(payload) else {

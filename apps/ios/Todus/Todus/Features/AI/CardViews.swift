@@ -154,7 +154,7 @@ struct TaskCardView: View {
         switch priority {
         case "high": return .red
         case "medium": return .orange
-        case "low": return .blue
+        case "low": return .secondary
         default: return .secondary
         }
     }
@@ -174,7 +174,7 @@ struct CalendarEventCardView: View {
                 HStack(alignment: .top, spacing: 8) {
                     // Color bar
                     RoundedRectangle(cornerRadius: 2)
-                        .fill(Color.blue)
+                        .fill(Color.primary)
                         .frame(width: 3, height: 36)
 
                     VStack(alignment: .leading, spacing: 3) {
@@ -254,7 +254,7 @@ struct NoteCardView: View {
     private func noteColor(_ color: String?) -> Color {
         switch color {
         case "yellow": return Color.yellow.opacity(0.1)
-        case "blue": return Color.blue.opacity(0.1)
+        case "blue": return Color.primary.opacity(0.1)
         case "green": return Color.green.opacity(0.1)
         case "red": return Color.red.opacity(0.1)
         case "purple": return Color.purple.opacity(0.1)

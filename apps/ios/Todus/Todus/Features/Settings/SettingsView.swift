@@ -9,12 +9,18 @@ struct SettingsView: View {
     @State private var showsDeleteConfirmation = false
     @State private var showsDeleteAlert = false
     @State private var deleteConfirmText = ""
+    @State private var deleteConfirmError: String?
     @State private var isDeletingAccount = false
     @State private var showsDisconnectGmail = false
     /// ID of the connection selected for disconnection — used by the confirmation dialog
     @State private var disconnectingConnectionId: String?
     @State private var isConnectingCalendar = false
     @State private var isConnectingReminders = false
+    @State private var isConnectingGmail = false
+    @State private var connectGmailError: String?
+    /// Inline error when Reminders permission is denied — paired with an "Open Settings"
+    /// shortcut so users can fix the system permission without leaving Todus context.
+    @State private var remindersPermissionError: String?
     @State private var activeSessions: [ActiveSessionRecord] = []
     @State private var isLoadingSessions = false
     // revokingSessionIDs and isRevokingAllSessions live in SessionsSettingsView now
@@ -53,7 +59,7 @@ struct SettingsView: View {
             }
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
-            .background(AppTheme.backgroundBottom)
+            .background(AppTheme.sheetBackground)
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
@@ -115,14 +121,41 @@ struct SettingsView: View {
                 .autocorrectionDisabled()
                 .textInputAutocapitalization(.characters)
             Button("Delete Account", role: .destructive) {
-                guard deleteConfirmText == "DELETE" else { return }
+                // Case-sensitive match — surface a helpful error instead of silently
+                // no-op'ing if the user types "delete" or "Delete".
+                guard deleteConfirmText == "DELETE" else {
+                    deleteConfirmError = "Type DELETE in capital letters to confirm."
+                    return
+                }
+                deleteConfirmError = nil
                 Task { await performDeleteAccount() }
             }
             Button("Cancel", role: .cancel) {
                 deleteConfirmText = ""
+                deleteConfirmError = nil
             }
         } message: {
             Text("This action is irreversible. Type DELETE to proceed.")
+        }
+        // Inline error if the user typed something other than DELETE.
+        .alert(
+            "Confirmation didn't match",
+            isPresented: Binding(
+                get: { deleteConfirmError != nil },
+                set: { if !$0 { deleteConfirmError = nil } }
+            ),
+            presenting: deleteConfirmError
+        ) { _ in
+            Button("Try Again") {
+                deleteConfirmError = nil
+                deleteConfirmText = ""
+                showsDeleteAlert = true
+            }
+            Button("Cancel", role: .cancel) {
+                deleteConfirmText = ""
+            }
+        } message: { msg in
+            Text(msg)
         }
         // Disconnect Gmail confirmation
         .confirmationDialog(
@@ -195,7 +228,7 @@ struct SettingsView: View {
                     dismiss()
                 } label: {
                     Label("Sign in to your account", systemImage: "person.crop.circle.badge.plus")
-                        .foregroundStyle(.blue)
+                        .foregroundStyle(.primary)
                 }
             }
 
@@ -254,14 +287,14 @@ struct SettingsView: View {
         ZStack {
             Circle()
                 .fill(services.authService.isAuthenticated
-                      ? Color.blue.opacity(0.15)
+                      ? Color.primary.opacity(0.12)
                       : Color.secondary.opacity(0.12))
                 .frame(width: 48, height: 48)
             if let email = services.authService.userEmail ?? services.authStore.accountEmail,
                let first = email.first {
                 Text(String(first).uppercased())
                     .font(.system(size: 20, weight: .semibold, design: .rounded))
-                    .foregroundStyle(services.authService.isAuthenticated ? .blue : .secondary)
+                    .foregroundStyle(services.authService.isAuthenticated ? .primary : .secondary)
             } else {
                 Image(systemName: "person.fill")
                     .font(.system(size: 18))
@@ -279,24 +312,42 @@ struct SettingsView: View {
             // email address, and connection status.
             if services.connectionsService.connections.isEmpty {
                 // Fallback: show legacy Gmail row when connections haven't loaded yet
-                HStack(spacing: 12) {
-                    GmailIconView(size: 30)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Gmail")
-                            .font(.system(size: 15))
-                        Text(services.emailService.hasConnection ? "Connected" : "Not connected")
-                            .font(.system(size: 12))
-                            .foregroundStyle(services.emailService.hasConnection ? .green : .secondary)
-                    }
-                    Spacer()
-                    if services.emailService.hasConnection {
-                        Button(role: .destructive) {
-                            showsDisconnectGmail = true
-                        } label: {
-                            Text("Disconnect")
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(.red.opacity(0.8))
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 12) {
+                        GmailIconView(size: 30)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Gmail")
+                                .font(.system(size: 15))
+                            Text(services.emailService.hasConnection ? "Connected" : "Not connected")
+                                .font(.system(size: 12))
+                                .foregroundStyle(services.emailService.hasConnection ? .green : .secondary)
                         }
+                        Spacer()
+                        if services.emailService.hasConnection {
+                            Button(role: .destructive) {
+                                showsDisconnectGmail = true
+                            } label: {
+                                Text("Disconnect")
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundStyle(.red.opacity(0.8))
+                            }
+                        } else {
+                            Button {
+                                guard !isConnectingGmail else { return }
+                                Task { await performConnectGmail() }
+                            } label: {
+                                Text(isConnectingGmail ? "Connecting…" : "Connect")
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundStyle(.primary)
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(isConnectingGmail)
+                        }
+                    }
+                    if let connectGmailError {
+                        Text(connectGmailError)
+                            .font(.system(size: 12))
+                            .foregroundStyle(.red)
                     }
                 }
                 .padding(.vertical, 2)
@@ -352,10 +403,10 @@ struct SettingsView: View {
                     HStack(spacing: 10) {
                         Image(systemName: "plus.circle.fill")
                             .font(.system(size: 22))
-                            .foregroundStyle(.blue)
+                            .foregroundStyle(.primary)
                         Text("Add Account")
                             .font(.system(size: 15))
-                            .foregroundStyle(.blue)
+                            .foregroundStyle(.primary)
                     }
                 }
                 .padding(.vertical, 2)
@@ -387,7 +438,7 @@ struct SettingsView: View {
                     } label: {
                         Text(isConnectingCalendar ? "Connecting…" : "Connect")
                             .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(.blue)
+                            .foregroundStyle(.primary)
                     }
                     .buttonStyle(.plain)
                     .disabled(isConnectingCalendar)
@@ -396,42 +447,66 @@ struct SettingsView: View {
             .padding(.vertical, 2)
 
             // Apple Reminders
-            HStack(spacing: 12) {
-                AppleRemindersIconView(size: 30)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Apple Reminders")
-                        .font(.system(size: 15))
-                    Text(services.remindersSyncEnabled ? "Connected" : "Not connected")
-                        .font(.system(size: 12))
-                        .foregroundStyle(services.remindersSyncEnabled ? .green : .secondary)
-                }
-                Spacer()
-                if services.remindersSyncEnabled {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
-                        .font(.system(size: 16))
-                } else {
-                    Button {
-                        guard !isConnectingReminders else { return }
-                        isConnectingReminders = true
-                        Task {
-                            services.remindersSyncEnabled = true
-                            let granted = await services.requestRemindersPermissionIfNeeded()
-                            if granted {
-                                await services.importFromReminders(in: modelContext)
-                                services.syncExistingTasksToReminders(in: modelContext)
-                            } else {
-                                services.remindersSyncEnabled = false
-                            }
-                            isConnectingReminders = false
-                        }
-                    } label: {
-                        Text(isConnectingReminders ? "Connecting…" : "Connect")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(.blue)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 12) {
+                    AppleRemindersIconView(size: 30)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Apple Reminders")
+                            .font(.system(size: 15))
+                        Text(services.remindersSyncEnabled ? "Connected" : "Not connected")
+                            .font(.system(size: 12))
+                            .foregroundStyle(services.remindersSyncEnabled ? .green : .secondary)
                     }
-                    .buttonStyle(.plain)
-                    .disabled(isConnectingReminders)
+                    Spacer()
+                    if services.remindersSyncEnabled {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                            .font(.system(size: 16))
+                    } else {
+                        Button {
+                            guard !isConnectingReminders else { return }
+                            isConnectingReminders = true
+                            remindersPermissionError = nil
+                            Task {
+                                services.remindersSyncEnabled = true
+                                let granted = await services.requestRemindersPermissionIfNeeded()
+                                if granted {
+                                    await services.importFromReminders(in: modelContext)
+                                    services.syncExistingTasksToReminders(in: modelContext)
+                                } else {
+                                    // Permission denied — flip the toggle back and surface
+                                    // an inline error with a shortcut to system settings.
+                                    services.remindersSyncEnabled = false
+                                    remindersPermissionError = "Apple Reminders access denied. Enable it in Settings > Privacy > Reminders."
+                                }
+                                isConnectingReminders = false
+                            }
+                        } label: {
+                            Text(isConnectingReminders ? "Connecting…" : "Connect")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(.primary)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(isConnectingReminders)
+                    }
+                }
+
+                if let remindersPermissionError {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(remindersPermissionError)
+                            .font(.system(size: 12))
+                            .foregroundStyle(.red)
+                        Button {
+                            if let url = URL(string: UIApplication.openSettingsURLString) {
+                                UIApplication.shared.open(url)
+                            }
+                        } label: {
+                            Text("Open Settings")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(.primary)
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
             }
             .padding(.vertical, 2)
@@ -542,7 +617,7 @@ struct SettingsView: View {
             )) {
                 Label("Swipe Gestures", systemImage: "hand.draw")
             }
-            .tint(.blue)
+            .tint(.primary)
 
             NavigationLink {
                 SignaturesView()
@@ -562,7 +637,7 @@ struct SettingsView: View {
             )) {
                 Label("Group by Thread", systemImage: "text.bubble")
             }
-            .tint(.blue)
+            .tint(.primary)
         } header: {
             Text("Email")
         }
@@ -580,7 +655,7 @@ struct SettingsView: View {
             )) {
                 Label("Task Due Reminders", systemImage: "checklist")
             }
-            .tint(.blue)
+            .tint(.primary)
 
             Toggle(isOn: Binding(
                 get: { services.calendarRemindersEnabled },
@@ -588,7 +663,7 @@ struct SettingsView: View {
             )) {
                 Label("Calendar Reminders", systemImage: "calendar.badge.clock")
             }
-            .tint(.blue)
+            .tint(.primary)
 
             // System notification settings link
             Button {
@@ -759,6 +834,48 @@ struct SettingsView: View {
         dismiss()
     }
 
+    /// Links Gmail to the current account via the same OAuth flow as EmailConnectView,
+    /// then refreshes connection state so the row flips to "Connected".
+    private func performConnectGmail() async {
+        isConnectingGmail = true
+        connectGmailError = nil
+        defer { isConnectingGmail = false }
+
+        do {
+            if services.authService.isAuthenticated {
+                try await services.authService.linkSocialAccount(provider: "google")
+            } else {
+                await services.authService.signInWithGoogle()
+                if !services.authService.isAuthenticated {
+                    connectGmailError = services.authService.lastErrorMessage
+                        ?? "Sign in failed. Please try again."
+                    return
+                }
+            }
+        } catch {
+            connectGmailError = services.authService.lastErrorMessage
+                ?? "Could not open Google sign-in. Please try again."
+            return
+        }
+
+        // Backend account hooks run asynchronously after the OAuth redirect.
+        var attempt = 0
+        while attempt < 6 {
+            await services.emailService.checkConnection(force: true)
+            if services.emailService.hasConnection { break }
+            attempt += 1
+            if attempt < 6 {
+                try? await Task.sleep(nanoseconds: 500_000_000)
+            }
+        }
+
+        await services.connectionsService.loadConnections()
+
+        if !services.emailService.hasConnection {
+            connectGmailError = "Could not link Gmail. Make sure you granted access and try again."
+        }
+    }
+
     /// Disconnects an email connection on the backend.
     /// Uses disconnectingConnectionId if set (from the dynamic connections list),
     /// otherwise falls back to the legacy disconnectEmail() method.
@@ -792,6 +909,7 @@ struct SessionsSettingsView: View {
     @State private var isLoadingSessions = false
     @State private var isRevokingAllSessions = false
     @State private var revokingSessionIDs: Set<String> = []
+    @State private var loadError: String? = nil
 
     var body: some View {
         List {
@@ -801,6 +919,20 @@ struct SessionsSettingsView: View {
                     Text("Loading sessions…")
                         .font(.system(size: 14))
                         .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 4)
+            } else if let error = loadError {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Couldn't load sessions")
+                        .font(.system(size: 15, weight: .medium))
+                    Text(error)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                    Button("Try again") {
+                        Task { await loadSessions() }
+                    }
+                    .font(.system(size: 13, weight: .medium))
+                    .padding(.top, 2)
                 }
                 .padding(.vertical, 4)
             } else if activeSessions.isEmpty {
@@ -817,7 +949,7 @@ struct SessionsSettingsView: View {
                     ForEach(activeSessions) { session in
                         VStack(alignment: .leading, spacing: 6) {
                             HStack(spacing: 6) {
-                                Image(systemName: "laptopcomputer")
+                                Image(systemName: session.deviceIcon)
                                     .font(.system(size: 13, weight: .medium))
                                     .foregroundStyle(.secondary)
                                 Text(session.device)
@@ -826,10 +958,10 @@ struct SessionsSettingsView: View {
                                 if session.isCurrent == true {
                                     Text("This device")
                                         .font(.system(size: 11, weight: .medium))
-                                        .foregroundStyle(.white)
+                                        .foregroundStyle(.primary)
                                         .padding(.horizontal, 6)
                                         .padding(.vertical, 2)
-                                        .background(Color.blue, in: Capsule())
+                                        .background(Color.primary.opacity(0.12), in: Capsule())
                                 }
                                 Spacer()
                                 if session.isCurrent != true {
@@ -883,7 +1015,7 @@ struct SessionsSettingsView: View {
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
-        .background(AppTheme.backgroundBottom)
+        .background(AppTheme.sheetBackground)
         .navigationTitle("Active Sessions")
         .navigationBarTitleDisplayMode(.inline)
         .task { await loadSessions() }
@@ -896,12 +1028,14 @@ struct SessionsSettingsView: View {
 
     private func loadSessions() async {
         isLoadingSessions = true
+        loadError = nil
         defer { isLoadingSessions = false }
         do {
             let response = try await services.apiClient.listSessions()
             activeSessions = response.sessions
         } catch {
             AppLogger.shared.log("Load sessions failed: \(error.localizedDescription)")
+            loadError = error.localizedDescription
         }
     }
 
@@ -970,12 +1104,12 @@ struct AIAssistantSettingsView: View {
                 Toggle(isOn: $ai.aiCanReadTasks) {
                     Label("Read my tasks", systemImage: "eye")
                 }
-                .tint(.blue)
+                .tint(.primary)
 
                 Toggle(isOn: $ai.aiCanWriteTasks) {
                     Label("Create & edit tasks", systemImage: "pencil")
                 }
-                .tint(.blue)
+                .tint(.primary)
 
                 Picker(selection: Binding(
                     get: { services.aiTonePreference },
@@ -1166,7 +1300,7 @@ struct AIAssistantSettingsView: View {
                         .scrollContentBackground(.hidden)
                         .padding(8)
                         .background(Color.secondary.opacity(0.08))
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
                     Text("One pattern per line. Use this to suppress noisy automation, newsletters, and low-value system mail from the assistant queues.")
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
@@ -1192,7 +1326,7 @@ struct AIAssistantSettingsView: View {
                     .scrollContentBackground(.hidden)
                     .padding(8)
                     .background(Color.secondary.opacity(0.08))
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
                 }
                 .padding(.vertical, 4)
             } header: {
@@ -1215,7 +1349,7 @@ struct AIAssistantSettingsView: View {
                     .scrollContentBackground(.hidden)
                     .padding(8)
                     .background(Color.secondary.opacity(0.08))
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
                 }
                 .padding(.vertical, 4)
             } header: {
@@ -1226,13 +1360,12 @@ struct AIAssistantSettingsView: View {
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
-        .background(AppTheme.backgroundBottom)
+        .background(AppTheme.sheetBackground)
         .navigationTitle("AI Assistant")
         .navigationBarTitleDisplayMode(.inline)
-        .onDisappear {
-            // Save shared AI profile when leaving the AI settings page
-            Task { @MainActor in await services.saveSharedAIProfile() }
-        }
+        // Note: AI profile is saved synchronously by the parent SettingsView "Done" button.
+        // We intentionally do NOT save on .onDisappear here — that race could lose the most
+        // recent edits when the sheet dismisses before the async save completes.
     }
 }
 
@@ -1252,14 +1385,14 @@ struct AppearanceSettingsView: View {
                     } label: {
                         HStack(spacing: 14) {
                             // Compact swatch preview
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            RoundedRectangle(cornerRadius: AppTheme.Radius.inline, style: .continuous)
                                 .fill(previewBackground(for: preference))
                                 .frame(width: 44, height: 44)
                                 .overlay(
-                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    RoundedRectangle(cornerRadius: AppTheme.Radius.inline, style: .continuous)
                                         .strokeBorder(
                                             services.appearancePreference == preference
-                                                ? Color.blue
+                                                ? Color.primary
                                                 : Color(UIColor.separator).opacity(0.4),
                                             lineWidth: services.appearancePreference == preference ? 2 : 1
                                         )
@@ -1281,7 +1414,7 @@ struct AppearanceSettingsView: View {
                             Spacer()
                             if services.appearancePreference == preference {
                                 Image(systemName: "checkmark.circle.fill")
-                                    .foregroundStyle(.blue)
+                                    .foregroundStyle(.primary)
                             }
                         }
                         .contentShape(Rectangle())
@@ -1296,7 +1429,7 @@ struct AppearanceSettingsView: View {
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
-        .background(AppTheme.backgroundBottom)
+        .background(AppTheme.sheetBackground)
         .navigationTitle("Appearance")
         .navigationBarTitleDisplayMode(.inline)
     }

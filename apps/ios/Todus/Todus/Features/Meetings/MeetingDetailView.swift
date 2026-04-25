@@ -51,7 +51,7 @@ struct MeetingDetailView: View {
                         if let url = videoURL {
                             VideoPlayer(player: player)
                                 .aspectRatio(16/9, contentMode: .fit)
-                                .clipShape(RoundedRectangle(cornerRadius: 12))
+                                .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
                                 .onAppear {
                                     if playerUrl != url {
                                         playerUrl = url
@@ -122,7 +122,7 @@ struct MeetingDetailView: View {
     // MARK: - Sections
 
     private func headerSection(_ meeting: MeetingDetailResponse) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text(statusLabel(meeting.status))
                     .font(.caption)
@@ -141,7 +141,38 @@ struct MeetingDetailView: View {
             )
             .font(.subheadline)
             .foregroundStyle(.secondary)
+
+            // "Join" button — shown only when the meeting has a known conferencing URL
+            // (Zoom, Google Meet, Teams, Webex). Filtering by provider regex avoids
+            // surfacing arbitrary links that happen to be in the `meetUrl` field.
+            if let joinURL = Self.conferencingURL(in: meeting.meetUrl) {
+                Link(destination: joinURL) {
+                    Label("Join meeting", systemImage: "video.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .background(Color.accentColor.opacity(0.15), in: RoundedRectangle(cornerRadius: AppTheme.Radius.compact, style: .continuous))
+                        .foregroundStyle(Color.accentColor)
+                }
+                .buttonStyle(.plain)
+            }
         }
+    }
+
+    /// Pulls the first Zoom/Meet/Teams/Webex URL out of a free-text field. Used to gate the
+    /// Join button so we don't render it for an empty or malformed `meetUrl`.
+    private static func conferencingURL(in text: String) -> URL? {
+        guard !text.isEmpty else { return nil }
+        // Match the four major providers we currently care about. NSRegularExpression is
+        // used over String.range(of:options:.regularExpression) so we get a stable match
+        // range across Foundation versions.
+        let pattern = #"https?://(?:[^\s]*\.)?(zoom\.us|meet\.google\.com|teams\.microsoft\.com|webex\.com)/[^\s]+"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) else { return nil }
+        let nsText = text as NSString
+        let range = NSRange(location: 0, length: nsText.length)
+        guard let match = regex.firstMatch(in: text, options: [], range: range) else { return nil }
+        let urlString = nsText.substring(with: match.range)
+        return URL(string: urlString)
     }
 
     private func errorBanner(_ message: String) -> some View {
@@ -158,7 +189,7 @@ struct MeetingDetailView: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+        .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: AppTheme.Radius.compact, style: .continuous))
     }
 
     private func processingView(_ status: String) -> some View {
@@ -170,7 +201,7 @@ struct MeetingDetailView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 40)
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
     }
 
     private func summarySection(_ meeting: MeetingDetailResponse) -> some View {
@@ -187,7 +218,7 @@ struct MeetingDetailView: View {
                 }
                 .padding(14)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.purple.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
+                .background(Color.purple.opacity(0.06), in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
             } else if meeting.transcript != nil && !(meeting.transcript?.isEmpty ?? true) {
                 HStack {
                     Label("Generate AI recap", systemImage: "sparkles")
@@ -211,7 +242,7 @@ struct MeetingDetailView: View {
                     .disabled(isGeneratingSummary)
                 }
                 .padding(14)
-                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
             }
         }
     }
@@ -220,7 +251,7 @@ struct MeetingDetailView: View {
         VStack(alignment: .leading, spacing: 8) {
             Label("Action Items", systemImage: "checklist")
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.blue)
+                .foregroundStyle(.primary)
 
             ForEach(Array(items.enumerated()), id: \.offset) { _, item in
                 HStack(alignment: .top, spacing: 8) {
@@ -243,7 +274,7 @@ struct MeetingDetailView: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.blue.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
+        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
     }
 
     private func transcriptSection(_ segments: [MeetingTranscriptSegment]) -> some View {
@@ -274,7 +305,7 @@ struct MeetingDetailView: View {
                     VStack(alignment: .leading, spacing: 1) {
                         Text(seg.speakerName)
                             .font(.caption.weight(.semibold))
-                            .foregroundStyle(.blue)
+                            .foregroundStyle(.primary)
                         Text(seg.text)
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -284,7 +315,7 @@ struct MeetingDetailView: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.green.opacity(0.04), in: RoundedRectangle(cornerRadius: 12))
+        .background(Color.green.opacity(0.04), in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
     }
 
     // MARK: - Q&A
@@ -308,7 +339,7 @@ struct MeetingDetailView: View {
                                     msg.role == "user"
                                         ? Color.accentColor.opacity(0.15)
                                         : Color(.secondarySystemBackground),
-                                    in: RoundedRectangle(cornerRadius: 8)
+                                    in: RoundedRectangle(cornerRadius: AppTheme.Radius.inline, style: .continuous)
                                 )
                                 .frame(maxWidth: 260, alignment: msg.role == "user" ? .trailing : .leading)
 
@@ -341,7 +372,7 @@ struct MeetingDetailView: View {
             }
         }
         .padding(14)
-        .background(Color.purple.opacity(0.04), in: RoundedRectangle(cornerRadius: 12))
+        .background(Color.purple.opacity(0.04), in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
     }
 
     // MARK: - Actions
@@ -409,7 +440,7 @@ struct MeetingDetailView: View {
 
     private func statusColor(_ status: String) -> Color {
         switch status {
-        case "scheduled": .blue
+        case "scheduled": .primary
         case "bot_joining", "processing": .orange
         case "recording": .red
         case "ready": .green

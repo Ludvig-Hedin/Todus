@@ -8,6 +8,11 @@ private struct ShareConversationID: Identifiable {
     let id: String
 }
 
+/// EventKit id for presenting `EKEventDetailSheet` from generative UI card taps.
+private struct EventDetailSheetID: Identifiable {
+    let id: String
+}
+
 // MARK: - AIChatView
 
 /// Full-screen chat sheet. Streams AI responses with live markdown rendering and typewriter animation.
@@ -18,6 +23,7 @@ struct AIChatView: View {
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(AppServices.self) private var services
     @Query(sort: \TaskRecord.createdAt, order: .reverse) private var allTasks: [TaskRecord]
 
@@ -39,8 +45,12 @@ struct AIChatView: View {
     @State private var showsRenameAlert = false
     @State private var renameText = ""
     @State private var showsPromptLibrary = false
+    // Surfaced when a generative-UI card tap maps to an action this build doesn't handle.
+    @State private var unhandledCardActionMessage: String? = nil
     // ShareConversationSheet — use .sheet(item:) so blank sheet cannot appear when ID is nil
     @State private var shareSheetConversationId: ShareConversationID? = nil
+    /// System calendar event detail (from generative `CalendarEventCard` taps).
+    @State private var eventDetailSheetID: EventDetailSheetID? = nil
 
     // Suggestion expansion — "Show more" / "Refresh" / "Back"
     @State private var suggestionsExpanded = false
@@ -65,6 +75,11 @@ struct AIChatView: View {
     // Animated thinking text cycles while streaming
     @State private var thinkingIndex = 0
     private let thinkingPhrases = ["Thinking", "Reading tasks", "Searching", "Writing"]
+
+    // Auto-scroll behavior: only follow the bottom while the user is already there.
+    // Set to false when the user manually scrolls back so token streams don't yank
+    // them away from what they're reading.
+    @State private var userScrolledUp: Bool = false
 
     private var chatService: AIChatService { services.aiChatService }
 
@@ -96,23 +111,6 @@ struct AIChatView: View {
             ZStack(alignment: .bottom) {
                 AppTheme.backgroundTop.ignoresSafeArea()
 
-                // Tap-outside handler: dismiss attachment picker OR blur input focus
-                if isPickingAttachment || isInputFocused {
-                    Color.clear
-                        .contentShape(Rectangle())
-                        .ignoresSafeArea()
-                        .onTapGesture {
-                            if isPickingAttachment {
-                                withAnimation(.snappy(duration: 0.15)) { isPickingAttachment = false }
-                            }
-                            // Always resign input focus when tapping outside the input area
-                            if isInputFocused {
-                                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                                isInputFocused = false
-                            }
-                        }
-                }
-
                 if chatService.messages.isEmpty {
                     // Show error state when backend is unreachable and no conversation exists
                     if let error = chatService.errorMessage, !chatService.isStreaming {
@@ -143,7 +141,7 @@ struct AIChatView: View {
         .sheet(isPresented: $showsHistory) {
             ChatHistoryView()
                 .presentationDragIndicator(.visible)
-                .presentationBackground(AppTheme.backgroundTop)
+                .appSheetBackground()
                 .preferredColorScheme(services.appearancePreference.colorScheme)
         }
         .sheet(isPresented: $showsConfig) {
@@ -159,7 +157,7 @@ struct AIChatView: View {
             })
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
-            .presentationBackground(AppTheme.backgroundTop)
+            .appSheetBackground()
             .preferredColorScheme(services.appearancePreference.colorScheme)
         }
         // Conversation data sheet — shows token usage, cost, message stats
@@ -167,7 +165,7 @@ struct AIChatView: View {
             ConversationDataSheet(stats: conversationStats)
                 .presentationDetents([.medium])
                 .presentationDragIndicator(.visible)
-                .presentationBackground(AppTheme.backgroundTop)
+                .appSheetBackground()
                 .preferredColorScheme(services.appearancePreference.colorScheme)
         }
         // Share conversation sheet — creates a shareable public link
@@ -178,12 +176,44 @@ struct AIChatView: View {
             )
             .preferredColorScheme(services.appearancePreference.colorScheme)
         }
+        .sheet(item: $eventDetailSheetID) { item in
+            EKEventDetailSheet(eventId: item.id)
+                .presentationDragIndicator(.visible)
+        }
         // Delete confirmation dialog
         .confirmationDialog("Delete this conversation?", isPresented: $showsDeleteConfirm, titleVisibility: .visible) {
             Button("Delete", role: .destructive) { deleteConversation() }
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("This will clear all messages. This action cannot be undone.")
+        }
+        // Tool-call delete confirmation — suspends the AI's delete_task call until
+        // the user approves it (Bug #4). The service awaits this dialog's resolution
+        // via a CheckedContinuation, so cancelling actually aborts the tool call
+        // rather than letting the deletion silently proceed.
+        .confirmationDialog(
+            "Delete this task?",
+            isPresented: Binding(
+                get: { chatService.pendingDeleteConfirmation != nil },
+                set: { newVal in
+                    // If SwiftUI auto-dismisses without a button (e.g. backgrounded),
+                    // treat it as cancel so we never hang the tool call.
+                    if !newVal, let pending = chatService.pendingDeleteConfirmation {
+                        chatService.confirmPendingDelete(pending, confirm: false)
+                    }
+                }
+            ),
+            titleVisibility: .visible,
+            presenting: chatService.pendingDeleteConfirmation
+        ) { pending in
+            Button("Delete", role: .destructive) {
+                chatService.confirmPendingDelete(pending, confirm: true)
+            }
+            Button("Cancel", role: .cancel) {
+                chatService.confirmPendingDelete(pending, confirm: false)
+            }
+        } message: { pending in
+            Text("The AI wants to delete \"\(pending.title ?? "this task")\". This action cannot be undone.")
         }
         // Rename alert
         .alert("Rename Conversation", isPresented: $showsRenameAlert) {
@@ -193,6 +223,19 @@ struct AIChatView: View {
                 if !trimmed.isEmpty { chatService.chatTitle = trimmed }
             }
             Button("Cancel", role: .cancel) {}
+        }
+        // Unhandled generative-UI card action — surface so the user knows the tap did register
+        .alert(
+            "This action isn't supported yet",
+            isPresented: Binding(
+                get: { unhandledCardActionMessage != nil },
+                set: { if !$0 { unhandledCardActionMessage = nil } }
+            ),
+            presenting: unhandledCardActionMessage
+        ) { _ in
+            Button("OK", role: .cancel) {}
+        } message: { message in
+            Text(message)
         }
         // Attachment pickers — triggered by custom panel (not system confirmationDialog)
         .photosPicker(isPresented: $isShowingPhotoPicker, selection: $selectedPhotoItem, matching: .images)
@@ -235,7 +278,7 @@ struct AIChatView: View {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { sendMessage() }
             })
             .presentationDragIndicator(.visible)
-            .presentationBackground(AppTheme.backgroundTop)
+            .appSheetBackground()
             .preferredColorScheme(services.appearancePreference.colorScheme)
         }
         .onChange(of: selectedPhotoItem) { _, newItem in
@@ -268,6 +311,20 @@ struct AIChatView: View {
             chatService.autosave()
             // Persist draft input across dismissals
             UserDefaults.standard.set(inputText, forKey: "ai_draft_input")
+        }
+        // Persist the in-progress conversation when the app is backgrounded or about
+        // to become inactive — onDisappear alone doesn't fire on force-quit, so we'd
+        // otherwise lose any unsaved turns the user just streamed.
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .background || newPhase == .inactive {
+                chatService.autosave()
+                UserDefaults.standard.set(inputText, forKey: "ai_draft_input")
+            }
+        }
+        // Persist after every assistant turn completes so anything streamed survives
+        // a force-quit during the same session.
+        .onChange(of: chatService.isStreaming) { _, isStreaming in
+            if !isStreaming { chatService.autosave() }
         }
         .onAppear {
             // Restore draft input
@@ -417,9 +474,9 @@ struct AIChatView: View {
                 }
                 .padding(.horizontal, 24)
                 .padding(.vertical, 12)
-                .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous)
                         .stroke(AppTheme.cardBorder, lineWidth: 1)
                 )
             }
@@ -529,6 +586,11 @@ struct AIChatView: View {
             }
 
             Spacer()
+        }
+        // Tap outside the attachment source popover: scrim is on *top* of this VStack
+        // and applied *before* `safeAreaInset` so the bottom input + flyout stay interactive.
+        .overlay {
+            if isPickingAttachment { attachmentSourcePickerTapOutsideScrim }
         }
         // Pin the input section's bottom edge just above the keyboard — identical to
         // conversationView. safeAreaInset updates as the keyboard shows/hides and as
@@ -680,8 +742,8 @@ struct AIChatView: View {
                             .font(.system(size: 12, weight: .medium))
                             .padding(.horizontal, 10)
                             .padding(.vertical, 6)
-                            .background(Color.blue.opacity(0.1), in: Capsule())
-                            .foregroundStyle(.blue)
+                            .background(Color.primary.opacity(0.1), in: Capsule())
+                            .foregroundStyle(.primary)
                     }
                     .buttonStyle(.plain)
                 }
@@ -754,7 +816,8 @@ struct AIChatView: View {
                                     services.navigateTo = .email
                                     dismiss()
                                 }
-                            }
+                            },
+                            onEdit: { edited in editMessage(edited) }
                         )
                             .id(message.id)
                     }
@@ -770,10 +833,18 @@ struct AIChatView: View {
                 .padding(.top, 16)
                 .padding(.bottom, 120)
             }
+            // Tap outside the + attachment popover: must overlay the scroll view *before*
+            // `safeAreaInset` so the scrim is not above the input bar / popover.
+            .overlay {
+                if isPickingAttachment { attachmentSourcePickerTapOutsideScrim }
+            }
             .scrollDismissesKeyboard(.interactively)
             // Pin input section directly above keyboard — 8 pt gap above keyboard for breathing room
             .safeAreaInset(edge: .bottom) {
-                inputSection
+                VStack(spacing: 6) {
+                    streamFailureBanner
+                    inputSection
+                }
                     .padding(.horizontal, 8)
                     .padding(.top, 8)
                     .padding(.bottom, 12)
@@ -792,36 +863,119 @@ struct AIChatView: View {
                         .ignoresSafeArea(edges: .bottom)
                     }
             }
-            // Tapping anywhere in the scroll area dismisses the keyboard, including message content.
-            .simultaneousGesture(
-                TapGesture().onEnded {
-                    if isInputFocused {
-                        UIApplication.shared.sendAction(
-                            #selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil
-                        )
-                        isInputFocused = false
+            // Dismiss the keyboard with interactive scroll; do not add a `simultaneousGesture`
+            // on the whole `ScrollView` (it also hit-tests the `safeAreaInset` input bar).
+            .onChange(of: chatService.messages.count) { _, _ in
+                // New message appended — always honour the scroll-to-anchor so the user
+                // sees their just-sent message at the top. Reset the user-scrolled-up
+                // flag because the user is now interacting again.
+                userScrolledUp = false
+                scrollToLatestUserMessageTop(proxy: proxy)
+            }
+            // While the assistant streams, only follow the bottom if the user hasn't
+            // manually scrolled away. Detecting "near bottom" without a scroll-offset
+            // probe is tricky in pure SwiftUI; gating on a manual interaction flag set
+            // by the scroll-dismisses-keyboard / drag gesture (below) is a pragmatic
+            // approximation. Avoid scrolling on every token. (Bug #5)
+            .onChange(of: chatService.messages.last?.content) { oldContent, newContent in
+                let wasEmpty = oldContent?.isEmpty ?? true
+                let nowHasContent = !(newContent?.isEmpty ?? true)
+                // Only re-anchor when the message *first* gets content — that's the
+                // moment the bubble height jumps and the user message would otherwise
+                // disappear off-screen. After that, leave the scroll alone.
+                guard wasEmpty && nowHasContent, !userScrolledUp else { return }
+                if let anchor = chatService.messages.last(where: { $0.role == .user })?.id {
+                    withAnimation(.linear(duration: 0.1)) {
+                        proxy.scrollTo(anchor, anchor: .top)
                     }
+                }
+            }
+            // Scroll when web search sources arrive (changes message height) — but only
+            // if the user is still following the stream.
+            .onChange(of: chatService.messages.last?.sources.count) { _, _ in
+                guard !userScrolledUp else { return }
+                scrollToLatestUserMessageTop(proxy: proxy, animation: .snappy(duration: 0.2))
+            }
+            // A drag gesture on the scroll content means the user is reading earlier
+            // turns — flip the flag so streaming tokens don't pull them back. Reset
+            // when a new message is appended (handled above).
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 8).onChanged { _ in
+                    if !userScrolledUp { userScrolledUp = true }
                 }
             )
-            .onChange(of: chatService.messages.count) { _, _ in
-                scrollToBottom(proxy: proxy)
-            }
-            .onChange(of: chatService.messages.last?.content) { _, _ in
-                if let lastID = chatService.messages.last?.id {
-                    withAnimation(.linear(duration: 0.05)) {
-                        proxy.scrollTo(lastID, anchor: .bottom)
-                    }
-                }
-            }
-            // Scroll when web search sources arrive (changes message height)
-            .onChange(of: chatService.messages.last?.sources.count) { _, _ in
-                if let lastID = chatService.messages.last?.id {
-                    withAnimation(.snappy(duration: 0.2)) {
-                        proxy.scrollTo(lastID, anchor: .bottom)
-                    }
-                }
-            }
         }
+    }
+
+    // MARK: - Stream Failure / Rate Limit Banner
+
+    /// Inline banner shown above the composer when an SSE stream drops (network) or
+    /// the backend returns 429. Tapping it triggers a one-shot retry — we never auto
+    /// reconnect because mid-stream the model may already have produced partial output.
+    @ViewBuilder
+    private var streamFailureBanner: some View {
+        if let rateMsg = chatService.rateLimitedMessage {
+            bannerRow(
+                icon: "clock.badge.exclamationmark",
+                text: rateMsg,
+                color: .orange,
+                isTappable: chatService.streamFailed && !chatService.isStreaming,
+                action: {
+                    chatService.retryAfterStreamFailure(
+                        allTasks: Array(allTasks),
+                        modelContext: modelContext
+                    )
+                }
+            )
+        } else if chatService.streamFailed && !chatService.isStreaming {
+            bannerRow(
+                icon: "wifi.exclamationmark",
+                text: "Connection lost — tap to retry",
+                color: .orange,
+                isTappable: true,
+                action: {
+                    chatService.retryAfterStreamFailure(
+                        allTasks: Array(allTasks),
+                        modelContext: modelContext
+                    )
+                }
+            )
+        }
+    }
+
+    private func bannerRow(
+        icon: String,
+        text: String,
+        color: Color,
+        isTappable: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: { if isTappable { action() } }) {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .font(.system(size: 13, weight: .semibold))
+                Text(text)
+                    .font(.system(size: 13, weight: .medium))
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                Spacer(minLength: 0)
+                if isTappable {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+            }
+            .foregroundStyle(color)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(color.opacity(0.12), in: RoundedRectangle(cornerRadius: AppTheme.Radius.compact, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: AppTheme.Radius.compact, style: .continuous)
+                    .stroke(color.opacity(0.25), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(!isTappable)
+        .transition(.move(edge: .bottom).combined(with: .opacity))
     }
 
     // MARK: - Thinking Indicator
@@ -876,6 +1030,18 @@ struct AIChatView: View {
             }
         }
         .animation(.snappy(duration: 0.15), value: isPickingAttachment)
+    }
+
+    /// Dims the message/empty area and closes the + attachment popover on tap. Applied with
+    /// `.overlay` *before* `.safeAreaInset` so the input row and flyout sit above the scrim
+    /// (unlike a `ZStack` layer behind the main content, which never receives hit testing).
+    private var attachmentSourcePickerTapOutsideScrim: some View {
+        Color.black.opacity(0.16)
+            .ignoresSafeArea()
+            .contentShape(Rectangle())
+            .onTapGesture {
+                withAnimation(.snappy(duration: 0.15)) { isPickingAttachment = false }
+            }
     }
 
     private var mentionOptions: [RichInputMentionRef] {
@@ -954,10 +1120,10 @@ struct AIChatView: View {
                                 }
                                 .buttonStyle(.plain)
                             }
-                            .foregroundStyle(.blue)
+                            .foregroundStyle(.primary)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 7)
-                            .background(Color.blue.opacity(0.12), in: Capsule())
+                            .background(Color.primary.opacity(0.12), in: Capsule())
                         }
 
                         // Attachment thumbnails
@@ -965,9 +1131,10 @@ struct AIChatView: View {
                             attachmentThumbnail(filename: filename)
                         }
                     }
-                    .padding(.horizontal, 12)
+                    .padding(.leading, 14)
+                    .padding(.trailing, 12)
                 }
-                .padding(.top, 6)
+                .padding(.top, 10)
                 .padding(.bottom, 0)
             }
 
@@ -996,8 +1163,9 @@ struct AIChatView: View {
                         }
                 }
             )
-            .padding(.horizontal, 12)
-            .padding(.top, 8)
+            .padding(.leading, 14)
+            .padding(.trailing, 12)
+            .padding(.top, 12)
             .padding(.bottom, 4)
 
             // ── Button row: [config]  spacer  [expand] [voice] [mic] [send] ──
@@ -1072,15 +1240,19 @@ struct AIChatView: View {
             .padding(.bottom, 6)
         }
         .fixedSize(horizontal: false, vertical: true)
-        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(AppTheme.strongBorder, lineWidth: 1))
+        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.composer, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: AppTheme.Radius.composer, style: .continuous).stroke(AppTheme.strongBorder, lineWidth: 1))
         .animation(.snappy(duration: 0.18), value: chatService.isStreaming)
         .animation(.easeOut(duration: 0.12), value: isEmpty)
         .animation(.snappy(duration: 0.15), value: pendingAttachments.count)
         .animation(.snappy(duration: 0.15), value: inputAtMaxHeight)
-        // Tapping anywhere on the input box (padding areas) focuses the text field
-        .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .onTapGesture { isInputFocused = true }
+        // Use simultaneous tap so the UITextView still receives the same tap (a plain
+        // `onTapGesture` on the container can win the gesture arena and feel like the
+        // field blurs or ignores the first touch).
+        .contentShape(RoundedRectangle(cornerRadius: AppTheme.Radius.composer, style: .continuous))
+        .simultaneousGesture(
+            TapGesture().onEnded { isInputFocused = true }
+        )
     }
 
     /// Attachment thumbnail — adapts to context:
@@ -1099,7 +1271,7 @@ struct AIChatView: View {
             HStack(spacing: 6) {
                 if isImage {
                     AttachmentThumbnailView(filename: filename, size: 22) {
-                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        RoundedRectangle(cornerRadius: AppTheme.Radius.chip, style: .continuous)
                             .fill(AppTheme.surfaceSecondary)
                     }
                 } else {
@@ -1127,11 +1299,11 @@ struct AIChatView: View {
             ZStack(alignment: .topTrailing) {
                 if isImage {
                     AttachmentThumbnailView(filename: filename, size: 56) {
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        RoundedRectangle(cornerRadius: AppTheme.Radius.compact, style: .continuous)
                             .fill(AppTheme.surfaceSecondary)
                     }
                 } else {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    RoundedRectangle(cornerRadius: AppTheme.Radius.compact, style: .continuous)
                         .fill(AppTheme.surfaceSecondary)
                         .frame(width: 56, height: 56)
                         .overlay(
@@ -1184,8 +1356,8 @@ struct AIChatView: View {
             .buttonStyle(.plain)
         }
         .frame(width: 210)
-        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(AppTheme.cardBorder, lineWidth: 1))
+        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.row, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: AppTheme.Radius.row, style: .continuous).stroke(AppTheme.cardBorder, lineWidth: 1))
         .shadow(color: .black.opacity(0.2), radius: 16, y: 4)
     }
 
@@ -1241,11 +1413,10 @@ struct AIChatView: View {
             messageText = text
         }
 
+        let filesToSend = pendingAttachments
         inputText = ""
         let mentions = inputMentions
         inputMentions = []
-        // Clear attachments — they're shown in the UI but not yet sent to the backend.
-        // Clearing prevents them from lingering after the message is sent.
         pendingAttachments = []
         // Clear persisted draft since the message was sent
         UserDefaults.standard.removeObject(forKey: "ai_draft_input")
@@ -1254,30 +1425,72 @@ struct AIChatView: View {
         chatService.send(
             userMessage: messageText,
             mentions: mentions,
+            attachmentFileNames: filesToSend,
             allTasks: Array(allTasks),
             modelContext: modelContext
         )
     }
 
-    private func scrollToBottom(proxy: ScrollViewProxy) {
-        guard let lastID = chatService.messages.last?.id else { return }
-        withAnimation(.snappy(duration: 0.25)) {
-            proxy.scrollTo(lastID, anchor: .bottom)
+    /// Long-press "Edit" on a user bubble: load its content + mentions + attachments back
+    /// into the composer, drop the edited turn and everything after it, and focus the input.
+    /// User then tweaks the text and presses send — the turn re-runs with the new wording.
+    private func editMessage(_ message: AIChatMessage) {
+        guard message.role == .user, !chatService.isStreaming else { return }
+        inputText = message.content
+        inputMentions = message.mentions
+        pendingAttachments = message.attachmentFileNames
+        chatService.truncateBefore(messageID: message.id)
+        isInputFocused = true
+        UserDefaults.standard.set(message.content, forKey: "ai_draft_input")
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+    }
+
+    /// Keeps the most recent user message near the top of the scroll view so long assistant replies
+    /// stay below it instead of pinning to the end of the thread.
+    private func scrollToLatestUserMessageTop(proxy: ScrollViewProxy, animation: Animation? = .snappy(duration: 0.25)) {
+        if let anchor = chatService.messages.last(where: { $0.role == .user })?.id {
+            withAnimation(animation) {
+                proxy.scrollTo(anchor, anchor: .top)
+            }
+        } else if let lastID = chatService.messages.last?.id {
+            withAnimation(animation) {
+                proxy.scrollTo(lastID, anchor: .bottom)
+            }
         }
     }
 
     // MARK: - Conversation Actions
 
-    /// Build markdown-formatted text of the entire conversation
-    private func conversationAsMarkdown() -> String {
-        chatService.messages.map { msg in
+    /// Build markdown-formatted text of the entire conversation.
+    ///
+    /// `redactPII` strips obvious PII (email addresses) before returning so the output
+    /// is safer to share externally. The user's own clipboard copy keeps the raw
+    /// markdown — we only redact when sharing via UIActivityViewController.
+    /// NOTE: this only redacts email addresses. Attachment payloads (image bytes,
+    /// document files) are NOT included in the export today; if/when they're added,
+    /// the share path must also strip them — see `shareConversation()`.
+    private func conversationAsMarkdown(redactPII: Bool = false) -> String {
+        let raw = chatService.messages.map { msg in
             let tag = msg.role == .user ? "**User**" : "**Assistant**"
             return "\(tag)\n\(msg.content)"
         }.joined(separator: "\n\n---\n\n")
+        return redactPII ? Self.redactEmailAddresses(in: raw) : raw
+    }
+
+    /// Replace email addresses with `***@***` so a shared transcript doesn't leak
+    /// the user's contacts to whoever they hand it to.
+    private static func redactEmailAddresses(in text: String) -> String {
+        let pattern = #"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
+            return text
+        }
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        return regex.stringByReplacingMatches(in: text, options: [], range: range, withTemplate: "***@***")
     }
 
     private func copyConversation() {
-        UIPasteboard.general.string = conversationAsMarkdown()
+        // Local clipboard copy for the user — keep raw, no redaction.
+        UIPasteboard.general.string = conversationAsMarkdown(redactPII: false)
     }
 
     private func duplicateChat() {
@@ -1291,7 +1504,11 @@ struct AIChatView: View {
     }
 
     private func shareConversation() {
-        let text = conversationAsMarkdown()
+        // Going out to UIActivityViewController — redact email addresses so they
+        // don't end up in someone else's hands. Attachments aren't in the markdown
+        // today, but if they're added later this is the choke point that needs to
+        // also strip them.
+        let text = conversationAsMarkdown(redactPII: true)
         let av = UIActivityViewController(activityItems: [text], applicationActivities: nil)
         if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
            let root = scene.windows.first?.rootViewController {
@@ -1370,11 +1587,8 @@ struct AIChatView: View {
             dismiss()
 
         case "navigate_event":
-            if let _ = params["eventId"] {
-                // Calendar events use EventKit — switch to calendar tab.
-                // Deep-link to a specific event is not supported yet by CalendarKit.
-                services.navigateTo = .calendar
-                dismiss()
+            if let eid = params["eventId"] {
+                eventDetailSheetID = EventDetailSheetID(id: eid)
             }
 
         case "navigate_draft":
@@ -1385,34 +1599,53 @@ struct AIChatView: View {
             }
 
         default:
+            // Surface to the user so they know the tap registered but the action isn't wired up.
             print("[GenerativeUI] Unhandled action: \(action) params: \(params)")
+            unhandledCardActionMessage =
+                "Tapping \"\(action)\" cards isn't wired up in this build yet. We've recorded it."
         }
     }
 }
 
 // MARK: - Content Parsing
 
-/// Splits AI response text into plain-text segments and [task:UUID] reference tokens.
-/// The task references will be rendered as interactive MiniTaskCard views.
+/// Splits AI response into markdown segments, `[task:UUID]`, and `[event:EVENTKIT_ID]` tokens.
+/// Task and event tokens render as native cards (see `MiniTaskCard`, `MiniEventCard`).
 private enum ContentPart {
     case text(String)
     case taskRef(UUID)
+    case eventRef(String)
 }
 
 private func parseMessageContent(_ content: String) -> [ContentPart] {
-    // Match [task:xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx]
     guard #available(iOS 16, *) else { return [.text(content)] }
-    let pattern = /\[task:([0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12})\]/
+    let taskPattern = /\[task:([0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12})\]/
+    let eventPattern = /\[event:([^\]]+)\]/
+
+    struct MergedRef {
+        let range: Range<String.Index>
+        let part: ContentPart
+    }
+    var merged: [MergedRef] = []
+    for m in content.matches(of: taskPattern) {
+        if let uuid = UUID(uuidString: String(m.1)) {
+            merged.append(MergedRef(range: m.range, part: .taskRef(uuid)))
+        }
+    }
+    for m in content.matches(of: eventPattern) {
+        let eid = String(m.1).trimmingCharacters(in: .whitespacesAndNewlines)
+        if !eid.isEmpty { merged.append(MergedRef(range: m.range, part: .eventRef(eid))) }
+    }
+    merged.sort { $0.range.lowerBound < $1.range.lowerBound }
+
     var parts: [ContentPart] = []
     var lastEnd = content.startIndex
-
-    for match in content.matches(of: pattern) {
-        let pre = String(content[lastEnd..<match.range.lowerBound])
+    for ref in merged {
+        guard ref.range.lowerBound >= lastEnd else { continue }
+        let pre = String(content[lastEnd..<ref.range.lowerBound])
         if !pre.isEmpty { parts.append(.text(pre)) }
-        if let uuid = UUID(uuidString: String(match.1)) {
-            parts.append(.taskRef(uuid))
-        }
-        lastEnd = match.range.upperBound
+        parts.append(ref.part)
+        lastEnd = ref.range.upperBound
     }
     let tail = String(content[lastEnd...])
     if !tail.isEmpty { parts.append(.text(tail)) }
@@ -1436,6 +1669,9 @@ private struct MessageBubble: View {
     var onNavigate: ((String, [String: String]) -> Void)?
     /// Callback when user taps a connect-service button in the message — "calendar" or "email".
     var onConnect: ((String) -> Void)?
+    /// Long-press "Edit" on a user message — parent pre-fills the composer
+    /// and truncates the conversation so the edited turn re-runs on send.
+    var onEdit: ((AIChatMessage) -> Void)?
 
     @State private var showActions = false
     @State private var didCopy = false
@@ -1443,11 +1679,27 @@ private struct MessageBubble: View {
 
     private enum ThumbsState { case up, down }
 
+    /// Plain-text payload the long-press menu copies. Trimmed so trailing
+    /// whitespace from streaming doesn't land on the pasteboard.
+    private var copyableText: String {
+        message.content.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var canEdit: Bool {
+        message.role == .user && !message.isStreaming && onEdit != nil
+    }
+
     var body: some View {
         VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 8) {
             HStack {
                 if message.role == .user { Spacer(minLength: 60) }
-                if message.role == .user { userBubble } else { assistantBubble }
+                if message.role == .user {
+                    userBubble
+                        .contextMenu { bubbleMenu }
+                } else {
+                    assistantBubble
+                        .contextMenu { bubbleMenu }
+                }
                 if message.role == .assistant { Spacer(minLength: 0) }
             }
 
@@ -1482,23 +1734,39 @@ private struct MessageBubble: View {
     // MARK: User Bubble — no border, just background fill
 
     private var userBubble: some View {
-        Text(message.content)
-            .font(.system(size: 16, weight: .medium))
-            .tracking(-0.1)
-            .lineSpacing(3)
-            .foregroundStyle(.primary)
-            // fixedSize ensures the bubble expands vertically for multi-line messages
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            // cornerRadius 20 ≈ half the single-line bubble height (~40pt), so
-            // one-line messages appear pill/capsule-shaped. Multi-line messages
-            // keep nicely rounded corners without looking boxy.
-            .background(
-                AppTheme.surfacePrimary,
-                in: RoundedRectangle(cornerRadius: 20, style: .continuous)
-            )
-            // Intentionally no stroke overlay — cleaner look per design feedback
+        VStack(alignment: .trailing, spacing: 8) {
+            if !message.attachmentFileNames.isEmpty {
+                HStack(spacing: 6) {
+                    ForEach(message.attachmentFileNames, id: \.self) { name in
+                        HStack(spacing: 4) {
+                            Image(systemName: AttachmentService.shared.isImageFile(name) ? "photo" : "doc")
+                                .font(.system(size: 11, weight: .semibold))
+                            Text(name)
+                                .font(.system(size: 12, weight: .medium))
+                                .lineLimit(1)
+                        }
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(AppTheme.surfacePrimary.opacity(0.92), in: Capsule())
+                    }
+                }
+            }
+            if !message.content.isEmpty {
+                Text(message.content)
+                    .font(.system(size: 16, weight: .medium))
+                    .tracking(-0.1)
+                    .lineSpacing(3)
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(
+                        AppTheme.surfacePrimary,
+                        in: RoundedRectangle(cornerRadius: AppTheme.Radius.card + 2, style: .continuous)
+                    )
+            }
+        }
     }
 
     // MARK: Assistant Bubble
@@ -1541,7 +1809,7 @@ private struct MessageBubble: View {
             if !message.isStreaming && !message.content.isEmpty {
                 let lc = message.content.lowercased()
                 if !calendarConnected && (lc.contains("calendar") || lc.contains("not connected")) {
-                    connectBanner(service: "calendar", icon: "calendar", color: .blue)
+                    connectBanner(service: "calendar", icon: "calendar", color: .primary)
                 }
                 if !emailConnected && (lc.contains("email") || lc.contains("inbox") || lc.contains("not connected")) {
                     connectBanner(service: "email", icon: "envelope", color: .orange)
@@ -1567,7 +1835,7 @@ private struct MessageBubble: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 7)
-            .background(color.opacity(0.1), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .background(color.opacity(0.1), in: RoundedRectangle(cornerRadius: AppTheme.Radius.compact, style: .continuous))
             .foregroundStyle(color)
         }
         .buttonStyle(.plain)
@@ -1579,9 +1847,17 @@ private struct MessageBubble: View {
     @ViewBuilder
     private var assistantContent: some View {
         let parts = parseMessageContent(message.content)
+        let eventCount = parts.reduce(0) { n, p in
+            if case .eventRef = p { return n + 1 }
+            return n
+        }
         VStack(alignment: .leading, spacing: 8) {
-            ForEach(parts.indices, id: \.self) { i in
-                contentPartView(parts[i], isLastPart: i == parts.count - 1)
+            ForEach(Array(parts.enumerated()), id: \.offset) { i, part in
+                contentPartView(
+                    part,
+                    isLastPart: i == parts.count - 1,
+                    eventCompact: eventCount > 1
+                )
             }
             // Render generative UI spec if present (parsed after streaming completes)
             if let spec = message.uiSpec {
@@ -1599,16 +1875,11 @@ private struct MessageBubble: View {
     }
 
     @ViewBuilder
-    private func contentPartView(_ part: ContentPart, isLastPart: Bool) -> some View {
+    private func contentPartView(_ part: ContentPart, isLastPart: Bool, eventCompact: Bool) -> some View {
         switch part {
         case .text(let txt):
-            // Always use full markdown rendering so headings, bullets, and code blocks
-            // appear immediately during streaming. The typewriter animation comes from
-            // tokens being appended, not from a phase switch.
-            // heading sizes from AttributedString are preserved — no .font() override applied.
-            fullMarkdownText(txt)
+            MarkdownView(content: txt)
                 .overlay(alignment: .bottomLeading) {
-                    // Blinking cursor at the end of the last text chunk while streaming
                     if isLastPart && message.isStreaming { BlinkingCursor() }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -1618,101 +1889,13 @@ private struct MessageBubble: View {
                 MiniTaskCard(task: task)
                     .transition(.scale(scale: 0.95).combined(with: .opacity))
             }
+
+        case .eventRef(let eventId):
+            MiniEventCard(eventId: eventId, compact: eventCompact)
+                .transition(.scale(scale: 0.95).combined(with: .opacity))
         }
     }
 
-
-    /// Helper that builds a full-parsed AttributedString with citation styling applied.
-    /// Adds explicit paragraph spacing (6pt) so AI responses don't render as a single
-    /// blob — SwiftUI's Text has no default gap between CommonMark paragraphs.
-    private static func styledFullMarkdown(
-        _ content: String,
-        sources: [WebSource],
-        styleCitations: (inout AttributedString) -> Void
-    ) -> AttributedString? {
-        guard var attributed = try? AttributedString(
-            markdown: content,
-            options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .full)
-        ) else { return nil }
-
-        // Add paragraph spacing so paragraph breaks are visually distinct.
-        // Without this, SwiftUI's Text renders paragraphs back-to-back with
-        // only a line break and no gap — making multi-paragraph AI responses
-        // look like a single block of text.
-        let nsAttr = NSMutableAttributedString(attributed)
-        let fullRange = NSRange(location: 0, length: nsAttr.length)
-        nsAttr.enumerateAttribute(.paragraphStyle, in: fullRange) { value, range, _ in
-            let existing = (value as? NSParagraphStyle) ?? .default
-            let mutable = existing.mutableCopy() as! NSMutableParagraphStyle
-            mutable.paragraphSpacing = 6
-            nsAttr.addAttribute(.paragraphStyle, value: mutable, range: range)
-        }
-        attributed = AttributedString(nsAttr)
-
-        if !sources.isEmpty { styleCitations(&attributed) }
-        return attributed
-    }
-
-    /// Full markdown — used for all AI response rendering (both during and after streaming).
-    /// Renders headings, list bullets, code blocks immediately so users see formatting as
-    /// tokens arrive (typewriter effect). Single `\n` is normalized to `\n\n` because
-    /// CommonMark collapses single newlines to a space, running paragraphs together.
-    /// Does NOT apply an explicit `.font()` override so heading sizes from AttributedString
-    /// markdown parsing (h1/h2/h3) are preserved with correct sizes and weights.
-    @ViewBuilder
-    private func fullMarkdownText(_ content: String) -> some View {
-        // Normalize: single \n → \n\n so markdown sees paragraph breaks, not spaces.
-        let normalized = content.replacingOccurrences(
-            of: "(?<!\n)\n(?!\n)",
-            with: "\n\n",
-            options: .regularExpression
-        )
-        let attributed = Self.styledFullMarkdown(normalized, sources: message.sources, styleCitations: styleCitations)
-        if let attributed {
-            Text(attributed)
-                .lineSpacing(2)
-                .foregroundStyle(.primary)
-        } else {
-            Text(content)
-                .font(.system(size: 16))
-                .lineSpacing(2)
-                .foregroundStyle(.primary)
-        }
-    }
-
-    /// Post-process an AttributedString to highlight [1], [2] etc. citation markers.
-    /// Makes them blue, slightly smaller, and links them to the source URL.
-    private func styleCitations(_ attributed: inout AttributedString) {
-        // Find [n] patterns in the plain text and style them
-        let plainText = String(attributed.characters)
-        guard let regex = try? NSRegularExpression(pattern: #"\[(\d{1,2})\]"#) else { return }
-        let nsRange = NSRange(plainText.startIndex..., in: plainText)
-        let matches = regex.matches(in: plainText, range: nsRange)
-
-        // Process in reverse so indices stay valid
-        for match in matches.reversed() {
-            guard let fullRange = Range(match.range, in: plainText),
-                  let numberRange = Range(match.range(at: 1), in: plainText),
-                  let citationNumber = Int(plainText[numberRange]),
-                  citationNumber >= 1, citationNumber <= message.sources.count
-            else { continue }
-
-            // Convert String range to AttributedString range
-            let attrStart = AttributedString.Index(fullRange.lowerBound, within: attributed)
-            let attrEnd = AttributedString.Index(fullRange.upperBound, within: attributed)
-            guard let start = attrStart, let end = attrEnd else { continue }
-
-            let source = message.sources[citationNumber - 1]
-
-            // Style: blue, slightly smaller, with link to source URL
-            attributed[start..<end].foregroundColor = .accentColor
-            attributed[start..<end].font = .system(size: 12, weight: .semibold)
-            attributed[start..<end].baselineOffset = 4 // Superscript effect
-            if let url = URL(string: source.url) {
-                attributed[start..<end].link = url
-            }
-        }
-    }
 
     // MARK: Mutation Chips
 
@@ -1742,6 +1925,8 @@ private struct MessageBubble: View {
     }
 
     private func mutationIcon(_ m: AIChatTaskMutation) -> String {
+        // Failures get a distinctive icon so the user spots them immediately.
+        if !m.success { return "exclamationmark.triangle.fill" }
         switch m.action {
         case .create: return "plus.circle.fill"
         case .update: return "pencil.circle.fill"
@@ -1750,17 +1935,31 @@ private struct MessageBubble: View {
     }
 
     private func mutationLabel(_ m: AIChatTaskMutation) -> String {
+        // Surface the error so failed tool calls aren't silently dropped (Bug #3).
+        if !m.success {
+            let actionVerb: String
+            switch m.action {
+            case .create: actionVerb = "Couldn't create"
+            case .update: actionVerb = "Couldn't update"
+            case .delete: actionVerb = "Couldn't delete"
+            }
+            let titleSuffix = m.title.map { " \"\($0)\"" } ?? ""
+            let errorSuffix = m.errorMessage.map { ": \($0)" } ?? ""
+            return "\(actionVerb)\(titleSuffix)\(errorSuffix)"
+        }
         switch m.action {
         case .create: return "Created: \(m.title ?? "task")"
         case .update: return "Updated: \(m.title ?? "task")"
-        case .delete: return "Deleted task"
+        // Bug #9: include the task title when the AI deletes one.
+        case .delete: return "Deleted: \(m.title ?? "task")"
         }
     }
 
     private func mutationColor(_ m: AIChatTaskMutation) -> Color {
+        if !m.success { return AppTheme.danger }
         switch m.action {
         case .create: return .green
-        case .update: return .blue
+        case .update: return .primary
         case .delete: return AppTheme.danger
         }
     }
@@ -1812,7 +2011,7 @@ private struct MessageBubble: View {
             } label: {
                 Image(systemName: thumbsState == .up ? "hand.thumbsup.fill" : "hand.thumbsup")
                     .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(thumbsState == .up ? Color.blue : AppTheme.mutedText)
+                    .foregroundStyle(thumbsState == .up ? Color.primary : AppTheme.mutedText)
                     .frame(width: 32, height: 32)
                     .contentShape(Rectangle())
             }
@@ -1833,6 +2032,28 @@ private struct MessageBubble: View {
             .buttonStyle(.plain)
         }
         .padding(.leading, 4)
+    }
+
+    // MARK: Long-press menu — copy + edit (user only)
+
+    @ViewBuilder
+    private var bubbleMenu: some View {
+        Button {
+            guard !copyableText.isEmpty else { return }
+            UIPasteboard.general.string = copyableText
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+        } label: {
+            Label("Copy", systemImage: "doc.on.doc")
+        }
+        .disabled(copyableText.isEmpty)
+
+        if canEdit {
+            Button {
+                onEdit?(message)
+            } label: {
+                Label("Edit message", systemImage: "pencil")
+            }
+        }
     }
 }
 
@@ -2000,9 +2221,9 @@ private struct SourceDetailSheet: View {
                         .font(.system(size: 15, weight: .medium))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
-                        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
                         .overlay(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous)
                                 .stroke(AppTheme.cardBorder, lineWidth: 1)
                         )
                     }
@@ -2110,10 +2331,10 @@ private struct ReasoningBox: View {
         .padding(12)
         .background(
             AppTheme.surfacePrimary.opacity(0.5),
-            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+            in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous)
                 .stroke(AppTheme.cardBorder, lineWidth: 0.5)
         )
         // Auto-collapse when streaming finishes with a slight delay
@@ -2140,7 +2361,7 @@ private struct MiniTaskCard: View {
             HStack(spacing: 12) {
                 Image(systemName: task.completed ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 18))
-                    .foregroundStyle(task.completed ? Color.blue : AppTheme.mutedText)
+                    .foregroundStyle(task.completed ? Color.primary : AppTheme.mutedText)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(task.title)
@@ -2163,13 +2384,95 @@ private struct MiniTaskCard: View {
                     .foregroundStyle(AppTheme.mutedText)
             }
             .padding(12)
-            .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(AppTheme.cardBorder, lineWidth: 1))
+            .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous).stroke(AppTheme.cardBorder, lineWidth: 1))
         }
         .buttonStyle(.plain)
         .sheet(isPresented: $showDetail) {
             TaskDetailSheet(task: task)
                 .presentationDragIndicator(.visible)
+        }
+    }
+}
+
+// MARK: - MiniEventCard
+
+/// Compact tappable event card for `[event:EVENTKIT_ID]` in assistant text (mirrors `MiniTaskCard`).
+private struct MiniEventCard: View {
+    let eventId: String
+    var compact: Bool
+
+    @Environment(AppServices.self) private var services
+    @State private var title: String = "Event"
+    @State private var subtitle: String = ""
+    @State private var barColor: Color = .primary
+    @State private var showDetail = false
+
+    var body: some View {
+        Button { showDetail = true } label: {
+            HStack(alignment: .top, spacing: compact ? 8 : 10) {
+                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                    .fill(barColor)
+                    .frame(width: 3, height: compact ? 30 : 40)
+
+                VStack(alignment: .leading, spacing: compact ? 1 : 2) {
+                    Text(title)
+                        .font(.system(size: compact ? 13 : 14, weight: .semibold))
+                        .tracking(-0.1)
+                        .foregroundStyle(.primary)
+                        .lineLimit(compact ? 1 : 2)
+                        .multilineTextAlignment(.leading)
+
+                    if !subtitle.isEmpty {
+                        Text(subtitle)
+                            .font(.system(size: compact ? 10 : 11, weight: .medium))
+                            .foregroundStyle(AppTheme.mutedText)
+                            .lineLimit(1)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(AppTheme.mutedText)
+            }
+            .padding(compact ? 8 : 12)
+            .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous)
+                    .stroke(AppTheme.cardBorder, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .task(id: eventId) { await loadEvent() }
+        .sheet(isPresented: $showDetail) {
+            EKEventDetailSheet(eventId: eventId)
+                .presentationDragIndicator(.visible)
+        }
+    }
+
+    private func loadEvent() async {
+        let ev = await services.calendarService.chatDisplayEvent(for: eventId)
+        await MainActor.run {
+            guard let ev else {
+                title = "Calendar event"
+                subtitle = "Details may be unavailable"
+                return
+            }
+            let t = ev.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            title = t.isEmpty ? "Event" : t
+            if ev.isAllDay {
+                subtitle = "All day · \(ev.startDate.formatted(date: .abbreviated, time: .omitted))"
+            } else {
+                let startS = ev.startDate.formatted(date: .abbreviated, time: .shortened)
+                let endS = ev.endDate.formatted(date: .omitted, time: .shortened)
+                subtitle = "\(startS) – \(endS)"
+            }
+            barColor = Color(
+                red: ev.calendarColorRed,
+                green: ev.calendarColorGreen,
+                blue: ev.calendarColorBlue
+            )
         }
     }
 }
@@ -2405,8 +2708,8 @@ struct ChatHistoryView: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 13)
-            .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(AppTheme.cardBorder, lineWidth: 1))
+            .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.card, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: AppTheme.Radius.card, style: .continuous).stroke(AppTheme.cardBorder, lineWidth: 1))
             .padding(.horizontal, 16)
             .padding(.bottom, 16)
         }
@@ -2491,9 +2794,9 @@ struct AIChatConfigSheet: View {
                 // Tasks section
                 Section {
                     Toggle("Read tasks", isOn: Bindable(chatService).aiCanReadTasks)
-                        .tint(Color.blue)
+                        .tint(Color.primary)
                     Toggle("Write tasks", isOn: Bindable(chatService).aiCanWriteTasks)
-                        .tint(Color.blue)
+                        .tint(Color.primary)
                 } header: {
                     Text("Tasks")
                 } footer: {
@@ -2503,9 +2806,9 @@ struct AIChatConfigSheet: View {
                 // Calendar section
                 Section {
                     Toggle("Read calendar", isOn: Bindable(chatService).aiCanReadCalendar)
-                        .tint(Color.blue)
+                        .tint(Color.primary)
                     Toggle("Create events", isOn: Bindable(chatService).aiCanWriteCalendar)
-                        .tint(Color.blue)
+                        .tint(Color.primary)
                 } header: {
                     Text("Calendar")
                 } footer: {
@@ -2515,9 +2818,9 @@ struct AIChatConfigSheet: View {
                 // Email section
                 Section {
                     Toggle("Read emails", isOn: Bindable(chatService).aiCanReadEmail)
-                        .tint(Color.blue)
+                        .tint(Color.primary)
                     Toggle("Send emails", isOn: Bindable(chatService).aiCanSendEmail)
-                        .tint(Color.blue)
+                        .tint(Color.primary)
                 } header: {
                     Text("Email")
                 } footer: {
@@ -2543,7 +2846,7 @@ struct AIChatConfigSheet: View {
                                 if chatService.selectedModel == model.id {
                                     Image(systemName: "checkmark")
                                         .font(.system(size: 13, weight: .semibold))
-                                        .foregroundStyle(.blue)
+                                        .foregroundStyle(.primary)
                                 }
                             }
                             // contentShape ensures the full row area is tappable,

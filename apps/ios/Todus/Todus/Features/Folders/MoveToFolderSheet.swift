@@ -41,7 +41,7 @@ struct MoveToFolderSheet: View {
                 }
             }
             .scrollContentBackground(.hidden)
-            .background(AppTheme.backgroundTop)
+            .background(AppTheme.sheetBackground)
             .navigationTitle("Move task")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

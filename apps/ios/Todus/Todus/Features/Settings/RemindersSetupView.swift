@@ -116,9 +116,9 @@ struct RemindersOnboardingView: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
             .frame(maxWidth: .infinity)
-            .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: AppTheme.Radius.row, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                RoundedRectangle(cornerRadius: AppTheme.Radius.row, style: .continuous)
                     .stroke(tint.opacity(0.12), lineWidth: 1)
             )
     }
@@ -141,7 +141,7 @@ struct RemindersSetupView: View {
                     Label("Sync with Reminders", systemImage: "arrow.triangle.2.circlepath")
                 }
                 .font(.system(size: 14, weight: .medium))
-                .tint(Color.blue)
+                .tint(Color.primary)
             } footer: {
                 Text("Keep your tasks in sync with Apple Reminders.")
                     .font(.system(size: 12))
@@ -190,7 +190,7 @@ struct RemindersSetupView: View {
             }
         }
         .scrollContentBackground(.hidden)
-        .background(AppTheme.backgroundTop)
+        .background(AppTheme.sheetBackground)
         .navigationTitle("Apple Reminders")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {

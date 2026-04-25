@@ -89,7 +89,7 @@ struct ShareConversationSheet: View {
         }
         .presentationDragIndicator(.visible)
         .presentationDetents([.medium, .large])
-        .presentationBackground(AppTheme.backgroundTop)
+        .appSheetBackground()
     }
 
     // MARK: - Form
@@ -119,7 +119,7 @@ struct ShareConversationSheet: View {
                             if visibility == option {
                                 Image(systemName: "checkmark")
                                     .font(.system(size: 14, weight: .semibold))
-                                    .foregroundStyle(.blue)
+                                    .foregroundStyle(.primary)
                             }
                         }
                         .contentShape(Rectangle())
@@ -165,7 +165,7 @@ struct ShareConversationSheet: View {
 
             Image(systemName: "link.circle.fill")
                 .font(.system(size: 56, weight: .light))
-                .foregroundStyle(.blue)
+                .foregroundStyle(.primary)
 
             VStack(spacing: 8) {
                 Text("Share link ready")
@@ -186,7 +186,7 @@ struct ShareConversationSheet: View {
                         .font(.system(size: 15, weight: .semibold))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
-                        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
                 }
                 .buttonStyle(.plain)
 
@@ -197,8 +197,8 @@ struct ShareConversationSheet: View {
                             .font(.system(size: 15, weight: .semibold))
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 12)
-                            .background(.blue, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                            .foregroundStyle(.white)
+                            .background(Color.primary.opacity(0.12), in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
+                            .foregroundStyle(.primary)
                     }
                     .buttonStyle(.plain)
                 }

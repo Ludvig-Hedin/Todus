@@ -161,10 +161,10 @@ struct AppleCalendarLogo: View {
 struct AppleCalendarIconView: View {
     var size: CGFloat = 30
     var body: some View {
-        AppleCalendarLogo()
-            .frame(width: size, height: size)
-            .clipShape(RoundedRectangle(cornerRadius: size * 0.225, style: .continuous))
-            .shadow(color: .black.opacity(0.12), radius: 2, x: 0, y: 1)
+        AppIconContainer(size: size, background: .white) {
+            AppleCalendarLogo()
+        }
+        .aspectRatio(1, contentMode: .fit)
     }
 }
 
@@ -186,7 +186,7 @@ struct AppleRemindersLogo: View {
 
             VStack(spacing: 0) {
                 Spacer()
-                reminderRow(dotColor: .blue, dotRadius: dotR, lineH: lineH, width: w)
+                reminderRow(dotColor: .primary, dotRadius: dotR, lineH: lineH, width: w)
                 Spacer().frame(height: rowSpacing)
                 reminderRow(dotColor: .red, dotRadius: dotR, lineH: lineH, width: w)
                 Spacer().frame(height: rowSpacing)
@@ -214,12 +214,9 @@ struct AppleRemindersLogo: View {
 struct AppleRemindersIconView: View {
     var size: CGFloat = 30
     var body: some View {
-        // Use AppIconContainer so the logo gets proper padding and the white rounded-rect
-        // background matches the GmailIconView style — no longer stretches to fill its frame.
         AppIconContainer(size: size, background: .white) {
             AppleRemindersLogo()
         }
-        .frame(width: size)
-        .aspectRatio(contentMode: .fit)
+        .aspectRatio(1, contentMode: .fit)
     }
 }

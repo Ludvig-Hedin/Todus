@@ -34,7 +34,7 @@ struct BoardView: View {
         .sheet(item: $selectedTask) { task in
             TaskDetailSheet(task: task)
                 .presentationDragIndicator(.visible)
-                .presentationBackground(AppTheme.backgroundTop)
+                .appSheetBackground()
         }
         .onAppear { recomputeTasksByStatus() }
         .onChange(of: boardChangeDigest) { recomputeTasksByStatus() }

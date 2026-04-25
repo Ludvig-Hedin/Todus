@@ -14,6 +14,9 @@ struct GlobalSearchView: View {
     @State private var query = ""
     @State private var calendarResults: [CalendarEvent] = []
     @FocusState private var isSearchFocused: Bool
+    /// Debounce handle for calendar lookups — cancelled on each keystroke so we
+    /// only fetch events after the user has paused typing for ~250 ms.
+    @State private var calendarSearchTask: Task<Void, Never>?
 
     // MARK: - Derived results (all local — no extra network calls)
 
@@ -95,7 +98,11 @@ struct GlobalSearchView: View {
                 isSearchFocused = true
             }
         }
-        .onChange(of: trimmedQuery) { updateCalendarResults() }
+        .onChange(of: trimmedQuery) { scheduleCalendarSearch() }
+        .onDisappear {
+            calendarSearchTask?.cancel()
+            calendarSearchTask = nil
+        }
     }
 
     // MARK: - Search Field
@@ -126,9 +133,9 @@ struct GlobalSearchView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 11)
-        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.row, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
+            RoundedRectangle(cornerRadius: AppTheme.Radius.row, style: .continuous)
                 .stroke(AppTheme.strongBorder, lineWidth: 1)
         )
     }
@@ -212,7 +219,7 @@ struct GlobalSearchView: View {
             HStack(spacing: 12) {
                 Image(systemName: task.completed ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 16, weight: .medium))
-                    .foregroundStyle(task.completed ? Color.blue : AppTheme.subtleText)
+                    .foregroundStyle(task.completed ? Color.primary : AppTheme.subtleText)
                     .frame(width: 20)
 
                 VStack(alignment: .leading, spacing: 2) {
@@ -235,8 +242,8 @@ struct GlobalSearchView: View {
                     .foregroundStyle(AppTheme.mutedText)
             }
             .padding(12)
-            .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(AppTheme.cardBorder, lineWidth: 1))
+            .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous).stroke(AppTheme.cardBorder, lineWidth: 1))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -253,7 +260,7 @@ struct GlobalSearchView: View {
             HStack(spacing: 12) {
                 // Unread dot
                 Circle()
-                    .fill(thread.unread ? Color.blue : Color.clear)
+                    .fill(thread.unread ? Color.primary : Color.clear)
                     .frame(width: 7, height: 7)
 
                 VStack(alignment: .leading, spacing: 2) {
@@ -278,8 +285,8 @@ struct GlobalSearchView: View {
                 }
             }
             .padding(12)
-            .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(AppTheme.cardBorder, lineWidth: 1))
+            .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous).stroke(AppTheme.cardBorder, lineWidth: 1))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -321,8 +328,8 @@ struct GlobalSearchView: View {
                     .foregroundStyle(AppTheme.mutedText)
             }
             .padding(12)
-            .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(AppTheme.cardBorder, lineWidth: 1))
+            .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous).stroke(AppTheme.cardBorder, lineWidth: 1))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -353,8 +360,8 @@ struct GlobalSearchView: View {
             Spacer()
         }
         .padding(12)
-        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(AppTheme.cardBorder, lineWidth: 1))
+        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous).stroke(AppTheme.cardBorder, lineWidth: 1))
     }
 
     // MARK: - Empty States
@@ -396,8 +403,8 @@ struct GlobalSearchView: View {
                 .foregroundStyle(.secondary)
         }
         .frame(width: 64, height: 56)
-        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(AppTheme.cardBorder, lineWidth: 1))
+        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous).stroke(AppTheme.cardBorder, lineWidth: 1))
     }
 
     private var noResultsView: some View {
@@ -417,16 +424,26 @@ struct GlobalSearchView: View {
 
     // MARK: - Calendar Fetch
 
-    private func updateCalendarResults() {
+    /// Debounces calendar searches so that EventKit isn't queried on every keystroke.
+    /// Cancels any in-flight task; if the query is empty, clears immediately.
+    private func scheduleCalendarSearch() {
+        calendarSearchTask?.cancel()
+
         guard !trimmedQuery.isEmpty, services.calendarService.canReadEvents() else {
             calendarResults = []
             return
         }
+
         let q = trimmedQuery.lowercased()
         let sixMonthsAgo = Calendar.current.date(byAdding: .month, value: -6, to: Date()) ?? Date()
         let oneYearAhead = Calendar.current.date(byAdding: .year, value: 1, to: Date()) ?? Date()
-        Task {
+
+        calendarSearchTask = Task { @MainActor in
+            // ~250 ms debounce — feels responsive without thrashing EventKit.
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled else { return }
             let events = await services.calendarService.events(from: sixMonthsAgo, to: oneYearAhead)
+            guard !Task.isCancelled else { return }
             calendarResults = events.filter { $0.title.lowercased().contains(q) }
         }
     }

@@ -39,7 +39,17 @@ private actor RemindersStorageActor {
         return try await store.requestFullAccessToReminders()
     }
 
-    /// Creates or updates a reminder. Returns the calendarItemIdentifier on success.
+    /// Result of a save operation — `identifier` is the calendarItemIdentifier of the saved
+    /// reminder; `existingNotFound` is true when the caller passed an `existingIdentifier`
+    /// but the reminder no longer exists in the system (e.g. the user deleted it from the
+    /// Reminders app). The caller should clear the local pointer in that case.
+    struct SaveResult: Sendable {
+        let identifier: String
+        let existingNotFound: Bool
+    }
+
+    /// Creates or updates a reminder. Returns a `SaveResult` indicating the new identifier
+    /// and whether the previously-tracked reminder had been deleted out from under us.
     func save(
         title: String,
         notes: String,
@@ -48,11 +58,16 @@ private actor RemindersStorageActor {
         completionDate: Date?,
         dueDate: Date?,
         existingIdentifier: String?
-    ) throws -> String {
+    ) throws -> SaveResult {
         // Reuse existing reminder if we have a valid identifier, otherwise create a new one.
-        let reminder = existingIdentifier.flatMap {
+        // If we were given an identifier but the lookup fails, the reminder was deleted
+        // externally — fall back to creating a fresh one and tell the caller to clear the
+        // stale local pointer (bug #10: ghost task on Reminders deletion).
+        let existing = existingIdentifier.flatMap {
             store.calendarItem(withIdentifier: $0) as? EKReminder
-        } ?? EKReminder(eventStore: store)
+        }
+        let existingNotFound = existingIdentifier != nil && existing == nil
+        let reminder = existing ?? EKReminder(eventStore: store)
 
         reminder.title = title
         reminder.notes = notes
@@ -75,7 +90,10 @@ private actor RemindersStorageActor {
         // syncAllTasks fires multiple Tasks, all queued on this actor, so they serialize
         // automatically without needing a manual batched commit.
         try store.save(reminder, commit: true)
-        return reminder.calendarItemIdentifier
+        return SaveResult(
+            identifier: reminder.calendarItemIdentifier,
+            existingNotFound: existingNotFound
+        )
     }
 
     func delete(identifier: String) throws {
@@ -163,23 +181,58 @@ final class AppleRemindersSyncService {
         // this task (freeing the main thread) while the storage actor does the XPC work.
         // After the await, execution resumes on the main actor to update SwiftData safely.
         Task {
-            guard let identifier = try? await storage.save(
-                title: title,
-                notes: notes,
-                priority: priority,
-                isCompleted: isCompleted,
-                completionDate: completionDate,
-                dueDate: dueDate,
-                existingIdentifier: existingIdentifier
-            ) else { return }
+            let result: RemindersStorageActor.SaveResult
+            do {
+                result = try await storage.save(
+                    title: title,
+                    notes: notes,
+                    priority: priority,
+                    isCompleted: isCompleted,
+                    completionDate: completionDate,
+                    dueDate: dueDate,
+                    existingIdentifier: existingIdentifier
+                )
+            } catch let error as EKError {
+                // EventKit save failed. If the reminder we were tracking has been deleted in
+                // the Reminders app (or otherwise rejected), clear the local pointer so the
+                // next upsert creates a fresh reminder rather than trying to update a ghost.
+                // EventKit doesn't expose a dedicated "not found" code, so on any EKError with
+                // a prior identifier we drop it and let the next pass re-create.
+                if existingIdentifier != nil {
+                    let descriptor = FetchDescriptor<TaskRecord>(predicate: #Predicate { $0.id == taskID })
+                    if let task = try? context.fetch(descriptor).first {
+                        task.reminderIdentifier = nil
+                        try? context.save()
+                    }
+                }
+                AppLogger.shared.log("AppleRemindersSyncService.upsert failed: \(error.localizedDescription)")
+                return
+            } catch {
+                AppLogger.shared.log("AppleRemindersSyncService.upsert failed: \(error.localizedDescription)")
+                return
+            }
 
             // Back on the main actor — safe to use the SwiftData ModelContext.
             let descriptor = FetchDescriptor<TaskRecord>(predicate: #Predicate { $0.id == taskID })
             guard let task = try? context.fetch(descriptor).first else { return }
-            task.reminderIdentifier = identifier
+            // If the previously-tracked reminder was missing, our save() created a fresh
+            // one; either way we now point at a live identifier.
+            task.reminderIdentifier = result.identifier
             task.syncState = .pendingUpload
+            if result.existingNotFound {
+                AppLogger.shared.log(
+                    "AppleRemindersSyncService.upsert: previous reminder missing, recreated as \(result.identifier)"
+                )
+            }
             try? context.save()
         }
+    }
+
+    /// Public entry point for re-importing reminders at runtime (e.g. on app foreground).
+    /// Mirrors `importFromReminders` but is called explicitly from views — `importFromReminders`
+    /// is intended for the onboarding path and is no longer the only way to refresh.
+    func refreshFromReminders(in context: ModelContext) async {
+        await importFromReminders(in: context)
     }
 
     func delete(_ task: TaskRecord) {

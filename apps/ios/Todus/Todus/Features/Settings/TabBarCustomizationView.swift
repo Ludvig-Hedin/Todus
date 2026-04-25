@@ -108,7 +108,7 @@ struct TabBarCustomizationView: View {
                             } label: {
                                 Image(systemName: activeTabs.count < 4 ? "plus.circle.fill" : "plus.circle")
                                     .font(.system(size: 22))
-                                    .foregroundStyle(activeTabs.count < 4 ? .blue : .secondary)
+                                    .foregroundStyle(activeTabs.count < 4 ? .primary : .secondary)
                             }
                             .buttonStyle(.plain)
                             .disabled(activeTabs.count >= 4)
@@ -124,11 +124,11 @@ struct TabBarCustomizationView: View {
     private func tabIcon(_ tab: AppTab, active: Bool) -> some View {
         Image(systemName: active ? tab.activeIcon : tab.inactiveIcon())
             .font(.system(size: 15, weight: .medium))
-            .foregroundStyle(active ? .blue : .secondary)
+            .foregroundStyle(active ? .primary : .secondary)
             .frame(width: 32, height: 32)
             .background(
-                (active ? Color.blue : Color.secondary).opacity(0.1),
-                in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                (active ? Color.primary : Color.secondary).opacity(0.1),
+                in: RoundedRectangle(cornerRadius: AppTheme.Radius.inline, style: .continuous)
             )
     }
 

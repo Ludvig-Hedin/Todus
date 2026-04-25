@@ -72,7 +72,7 @@ struct NotificationCenterView: View {
 
     private var shimmerRow: some View {
         HStack(spacing: 12) {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
+            RoundedRectangle(cornerRadius: AppTheme.Radius.inline, style: .continuous)
                 .fill(AppTheme.surfaceSecondary)
                 .frame(width: 36, height: 36)
 
@@ -91,9 +91,9 @@ struct NotificationCenterView: View {
             Spacer()
         }
         .padding(14)
-        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous)
                 .stroke(AppTheme.cardBorder, lineWidth: 1)
         )
         .redacted(reason: .placeholder)
@@ -208,9 +208,9 @@ struct NotificationCenterView: View {
                     .foregroundStyle(AppTheme.mutedText)
             }
             .padding(12)
-            .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous)
                     .stroke(AppTheme.cardBorder, lineWidth: 1)
             )
             .contentShape(Rectangle())
@@ -224,7 +224,7 @@ struct NotificationCenterView: View {
         switch priority {
         case "high": return .red
         case "medium": return .orange
-        case "low": return .blue
+        case "low": return .secondary
         default: return .secondary
         }
     }

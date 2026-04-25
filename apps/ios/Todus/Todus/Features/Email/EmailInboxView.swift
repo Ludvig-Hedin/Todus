@@ -103,12 +103,26 @@ struct EmailInboxView: View {
     @State private var filteredThreads: [EmailThread] = []
     /// Debounce task for server-side search — cancelled on each new keystroke.
     @State private var searchDebounceTask: Task<Void, Never>?
+    /// Active in-flight search Task. Held separately so a stale request can be cancelled
+    /// before its results are applied, even if the debounce wrapper has already fired.
+    @State private var searchTask: Task<Void, Never>?
     /// Active folder — defaults to inbox, switchable via the folder menu in the header
     @State private var selectedFolder: EmailFolder = .inbox
     /// View mode — threads (default) or people (grouped by sender)
     @State private var viewMode: InboxViewMode = .threads
     /// Selected sender when in People view mode — uses SenderDestination to disambiguate from thread navigation
     @State private var selectedSender: SenderDestination?
+    /// Thread queued for delete confirmation. Setting this presents the confirmation dialog.
+    @State private var pendingDeleteThread: EmailThread?
+    /// True after a pagination request fails so we can show a tap-to-retry CTA instead of an
+    /// indefinite spinner. Reset whenever a new pagination attempt starts.
+    @State private var paginationFailed = false
+    /// True after the connection check has been spinning for too long with no resolution —
+    /// switches the loading state to a softer "Still checking…" message and offers recovery.
+    @State private var connectionCheckTimedOut = false
+    /// Last visible thread ID, captured so we can restore scroll position after switching
+    /// between People view and Threads view (or returning from a thread detail).
+    @State private var lastVisibleId: String?
 
     // Deterministic skeleton widths — computed once to avoid visual jitter from CGFloat.random in view body
     private static let skeletonNameWidths: [CGFloat]    = [120, 140, 130, 155, 125, 145]
@@ -126,10 +140,26 @@ struct EmailInboxView: View {
         ZStack {
             AppTheme.backgroundTop.ignoresSafeArea()
 
-            if emailService.isCheckingConnection && !emailService.hasResolvedConnection {
+            if emailService.isCheckingConnection && !emailService.hasResolvedConnection && !connectionCheckTimedOut {
                 loadingState
+                    .task {
+                        // If the connection check hangs for more than 10s, flip into a recoverable
+                        // state so the user isn't stuck staring at a skeleton forever.
+                        try? await Task.sleep(for: .seconds(10))
+                        if emailService.isCheckingConnection && !emailService.hasResolvedConnection {
+                            connectionCheckTimedOut = true
+                        }
+                    }
+            } else if connectionCheckTimedOut && !emailService.hasResolvedConnection {
+                connectionTimeoutState
             } else if !emailService.hasConnection {
-                EmailConnectView()
+                VStack(spacing: 0) {
+                    AppTopHeader(title: "Mail")
+                        .padding(.horizontal, 16)
+                        .padding(.top, 4)
+                    EmailConnectView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             } else if emailService.isLoadingThreads && emailService.threads.isEmpty {
                 // First load — show skeleton rather than empty state to avoid flicker
                 loadingState
@@ -172,6 +202,11 @@ struct EmailInboxView: View {
             consumePendingThreadNavigation()
         }
         .onChange(of: emailService.threads) { recomputeFilteredThreads() }
+        .onChange(of: emailService.hasResolvedConnection) { _, resolved in
+            // Once the connection check returns, drop the timeout flag so subsequent
+            // re-checks don't keep showing the timeout copy.
+            if resolved { connectionCheckTimedOut = false }
+        }
         // Deep navigation from AI chat cards — pick up pending thread ID set by AIChatView
         .onChange(of: services.pendingEmailThreadId) { _, _ in
             consumePendingThreadNavigation()
@@ -180,16 +215,24 @@ struct EmailInboxView: View {
             // Instant local filtering for immediate visual feedback
             recomputeFilteredThreads()
             // Debounced server search — waits 500ms after last keystroke so we don't
-            // spam the API on every character, but still search automatically.
+            // spam the API on every character, but still search automatically. Cancel
+            // both the debounce task AND the in-flight network task on each keystroke
+            // so a stale slow response can't overwrite a newer fast one.
             searchDebounceTask?.cancel()
+            searchTask?.cancel()
             searchDebounceTask = Task {
                 try? await Task.sleep(for: .milliseconds(500))
                 guard !Task.isCancelled else { return }
-                await emailService.loadThreads(
-                    folder: selectedFolder.rawValue,
-                    query: searchText.isEmpty ? nil : searchText,
-                    refresh: true
-                )
+                let task = Task {
+                    guard !Task.isCancelled else { return }
+                    await emailService.loadThreads(
+                        folder: selectedFolder.rawValue,
+                        query: searchText.isEmpty ? nil : searchText,
+                        refresh: true
+                    )
+                }
+                searchTask = task
+                await task.value
             }
         }
     }
@@ -198,7 +241,12 @@ struct EmailInboxView: View {
 
     private var threadList: some View {
         VStack(spacing: 0) {
-            // Header — folder title + picker menu + optional loading spinner
+            AppTopHeader(title: "Mail")
+                .padding(.horizontal, 16)
+                .padding(.top, 4)
+                .padding(.bottom, 4)
+
+            // Sub-header — folder title + picker menu + optional loading spinner
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 6) {
                     Text("Mailbox")
@@ -237,7 +285,10 @@ struct EmailInboxView: View {
                         }
                     } label: {
                         HStack(spacing: 4) {
-                            AppTopHeader(title: selectedFolder.title)
+                            Text(selectedFolder.title)
+                                .font(.system(size: 18, weight: .bold))
+                                .tracking(-0.3)
+                                .foregroundStyle(.primary)
                             Image(systemName: "chevron.down")
                                 .font(.system(size: 12, weight: .semibold))
                                 .foregroundStyle(AppTheme.mutedText)
@@ -286,78 +337,156 @@ struct EmailInboxView: View {
     // MARK: - Thread List Content (extracted from threadList)
 
     private var threadListContent: some View {
-        List {
-            // AI nudges section at the top
-            if services.assistantAutomationPolicy.assistantThreadActionsVisible &&
-               !emailService.assistantNudges.isEmpty && searchText.isEmpty {
-                assistantNudgesInList
-            }
+        ScrollViewReader { proxy in
+            List {
+                // AI nudges section at the top
+                if services.assistantAutomationPolicy.assistantThreadActionsVisible &&
+                   !emailService.assistantNudges.isEmpty && searchText.isEmpty {
+                    assistantNudgesInList
+                }
 
-            ForEach(filteredThreads) { thread in
-                EmailRowView(thread: thread)
-                    .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.visible)
-                    .listRowSeparatorTint(AppTheme.divider)
-                    .onTapGesture { selectedThreadId = thread.id }
-                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                        Button(role: .destructive) {
-                            Task { await emailService.archiveThreads(ids: [thread.id]) }
-                        } label: {
-                            Label("Archive", systemImage: "archivebox")
+                ForEach(filteredThreads) { thread in
+                    EmailRowView(thread: thread)
+                        .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.visible)
+                        .listRowSeparatorTint(AppTheme.divider)
+                        .onTapGesture {
+                            // Remember scroll anchor so we can restore on return
+                            lastVisibleId = thread.id
+                            selectedThreadId = thread.id
                         }
-                        .tint(.orange)
-
-                        Button(role: .destructive) {
-                            Task { await emailService.deleteThreads(ids: [thread.id]) }
-                        } label: {
-                            Label("Delete", systemImage: "trash")
-                        }
-                    }
-                    .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                        if thread.unread {
-                            Button {
-                                Task { await emailService.markAsRead(ids: [thread.id]) }
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            Button(role: .destructive) {
+                                Task { await emailService.archiveThreads(ids: [thread.id]) }
                             } label: {
-                                Label("Read", systemImage: "envelope.open")
+                                Label("Archive", systemImage: "archivebox")
                             }
-                            .tint(.blue)
-                        } else {
-                            Button {
-                                Task { await emailService.markAsUnread(ids: [thread.id]) }
+                            .tint(.orange)
+
+                            // Delete is destructive AND irreversible — require confirmation
+                            // before invoking the mutation. The swipe still pops a button,
+                            // but actual deletion goes through .confirmationDialog below.
+                            Button(role: .destructive) {
+                                pendingDeleteThread = thread
                             } label: {
-                                Label("Unread", systemImage: "envelope.badge")
+                                Label("Delete", systemImage: "trash")
                             }
-                            .tint(.blue)
                         }
+                        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                            if thread.unread {
+                                Button {
+                                    Task { await emailService.markAsRead(ids: [thread.id]) }
+                                } label: {
+                                    Label("Read", systemImage: "envelope.open")
+                                }
+                                .tint(.primary)
+                            } else {
+                                Button {
+                                    Task { await emailService.markAsUnread(ids: [thread.id]) }
+                                } label: {
+                                    Label("Unread", systemImage: "envelope.badge")
+                                }
+                                .tint(.primary)
+                            }
 
-                        Button {
-                            Task { await emailService.toggleStar(ids: [thread.id]) }
-                        } label: {
-                            Label("Star", systemImage: "star")
+                            Button {
+                                Task { await emailService.toggleStar(ids: [thread.id]) }
+                            } label: {
+                                Label("Star", systemImage: "star")
+                            }
+                            .tint(.yellow)
                         }
-                        .tint(.yellow)
-                    }
+                }
+
+                if emailService.nextPageToken != nil {
+                    paginationFooter
+                }
             }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .refreshable {
+                await emailService.loadThreads(
+                    folder: selectedFolder.rawValue,
+                    query: searchText.isEmpty ? nil : searchText,
+                    refresh: true
+                )
+            }
+            .contentMargins(.bottom, 130, for: .scrollContent)
+            // Confirm before destructive delete — archive remains unconfirmed (it's reversible).
+            .confirmationDialog(
+                "Delete this conversation?",
+                isPresented: Binding(
+                    get: { pendingDeleteThread != nil },
+                    set: { if !$0 { pendingDeleteThread = nil } }
+                ),
+                titleVisibility: .visible,
+                presenting: pendingDeleteThread
+            ) { thread in
+                Button("Delete", role: .destructive) {
+                    let id = thread.id
+                    pendingDeleteThread = nil
+                    Task { await emailService.deleteThreads(ids: [id]) }
+                }
+                Button("Cancel", role: .cancel) { pendingDeleteThread = nil }
+            } message: { thread in
+                Text("\"\(thread.subject)\" will be moved to Trash.")
+            }
+            .onAppear {
+                // Restore scroll anchor when returning from a thread or switching view modes
+                if let id = lastVisibleId, filteredThreads.contains(where: { $0.id == id }) {
+                    proxy.scrollTo(id, anchor: .top)
+                }
+            }
+        }
+    }
 
-            if emailService.nextPageToken != nil {
+    /// Pagination footer — shows a spinner while loading the next page, or a tap-to-retry CTA
+    /// if the previous attempt errored. Triggers the next-page fetch on appear.
+    @ViewBuilder
+    private var paginationFooter: some View {
+        Group {
+            if paginationFailed {
+                Button {
+                    paginationFailed = false
+                    Task { await loadNextPage() }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 12, weight: .semibold))
+                        Text("Tap to retry")
+                            .font(.system(size: 13, weight: .semibold))
+                    }
+                    .foregroundStyle(AppTheme.mutedText)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                }
+                .buttonStyle(.plain)
+            } else {
                 ProgressView()
                     .frame(maxWidth: .infinity)
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-                    .onAppear { Task { await emailService.loadThreads(folder: selectedFolder.rawValue) } }
+                    .onAppear { Task { await loadNextPage() } }
             }
         }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
-        .refreshable {
-            await emailService.loadThreads(
-                folder: selectedFolder.rawValue,
-                query: searchText.isEmpty ? nil : searchText,
-                refresh: true
-            )
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+    }
+
+    /// Fetch the next page of threads. Detects failure by observing whether the
+    /// service produced an error message during the call so we can flip into the
+    /// retry footer state.
+    private func loadNextPage() async {
+        let priorError = emailService.errorMessage
+        await emailService.loadThreads(
+            folder: selectedFolder.rawValue,
+            query: searchText.isEmpty ? nil : searchText
+        )
+        // If a fresh errorMessage appeared during this call, treat it as a pagination failure.
+        if let current = emailService.errorMessage, current != priorError {
+            paginationFailed = true
+        } else {
+            paginationFailed = false
         }
-        .contentMargins(.bottom, 130, for: .scrollContent)
     }
 
     // MARK: - People View
@@ -497,9 +626,9 @@ struct EmailInboxView: View {
             }
         }
         .padding(2)
-        .background(AppTheme.surfaceSecondary, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .background(AppTheme.surfaceSecondary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.inline, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
+            RoundedRectangle(cornerRadius: AppTheme.Radius.inline, style: .continuous)
                 .stroke(AppTheme.cardBorder, lineWidth: 0.5)
         )
     }
@@ -550,9 +679,9 @@ struct EmailInboxView: View {
                 }
                 .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.row, style: .continuous))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    RoundedRectangle(cornerRadius: AppTheme.Radius.row, style: .continuous)
                         .stroke(AppTheme.rowStroke, lineWidth: 1)
                 )
             }
@@ -701,10 +830,10 @@ struct EmailInboxView: View {
                 // glassEffect is applied below via modifier
                 Color.clear
             } else {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous)
                     .fill(AppTheme.surfaceSecondary.opacity(0.6))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous)
                             .stroke(AppTheme.cardBorder, lineWidth: 0.5)
                     )
             }
@@ -785,13 +914,11 @@ struct EmailInboxView: View {
                     .scaleEffect(0.6)
             }
 
-            Text(
-                emailService.isLoadingThreads
-                    ? "Searching \(selectedFolder.title.lowercased())…"
-                    : "Filtering loaded \(selectedFolder.title.lowercased()) threads"
-            )
-            .font(.system(size: 12, weight: .medium))
-            .foregroundStyle(AppTheme.mutedText)
+            // Search hits the server (server-side filtering), so use the same copy whether
+            // the request is in-flight or just finished — both states represent server search.
+            Text("Searching \(selectedFolder.title.lowercased())…")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(AppTheme.mutedText)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -803,13 +930,10 @@ struct EmailInboxView: View {
     /// (which gets full height naturally from the List inside it). Without this, the VStack centers.
     private var loadingState: some View {
         VStack(spacing: 0) {
-            // Match the thread list header layout — shows current folder name
-            HStack(spacing: 6) {
-                AppTopHeader(title: selectedFolder.title)
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 4)
-            .padding(.bottom, 6)
+            AppTopHeader(title: "Mail")
+                .padding(.horizontal, 16)
+                .padding(.top, 4)
+                .padding(.bottom, 6)
 
             // Search bar placeholder
             searchBar
@@ -853,12 +977,10 @@ struct EmailInboxView: View {
     /// Shown after a successful load returns zero results — clearly "folder is empty", not "loading"
     private var emptyState: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 6) {
-                AppTopHeader(title: selectedFolder.title)
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 4)
-            .padding(.bottom, 6)
+            AppTopHeader(title: "Mail")
+                .padding(.horizontal, 16)
+                .padding(.top, 4)
+                .padding(.bottom, 6)
 
             searchBar
                 .padding(.horizontal, 16)
@@ -884,7 +1006,7 @@ struct EmailInboxView: View {
                     } label: {
                         Text("Clear Search")
                             .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(.blue)
+                            .foregroundStyle(.primary)
                     }
                     .buttonStyle(.plain)
                     .padding(.top, 4)
@@ -905,7 +1027,7 @@ struct EmailInboxView: View {
                     } label: {
                         Text("Refresh")
                             .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(.blue)
+                            .foregroundStyle(.primary)
                     }
                     .buttonStyle(.plain)
                     .padding(.top, 4)
@@ -920,12 +1042,10 @@ struct EmailInboxView: View {
     /// Shown when a load fails and there are no cached threads — error is real, not just "empty"
     private var errorState: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 6) {
-                AppTopHeader(title: selectedFolder.title)
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 4)
-            .padding(.bottom, 6)
+            AppTopHeader(title: "Mail")
+                .padding(.horizontal, 16)
+                .padding(.top, 4)
+                .padding(.bottom, 6)
 
             searchBar
                 .padding(.horizontal, 16)
@@ -952,7 +1072,47 @@ struct EmailInboxView: View {
                 } label: {
                     Text("Try Again")
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.blue)
+                        .foregroundStyle(.primary)
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 4)
+            }
+            Spacer()
+        }
+    }
+
+    // MARK: - Connection Timeout State
+
+    /// Shown when the connection check has been pending for too long. Lets the user retry
+    /// or fall back to an empty/connect state instead of staring at a perpetual skeleton.
+    private var connectionTimeoutState: some View {
+        VStack(spacing: 0) {
+            AppTopHeader(title: "Mail")
+                .padding(.horizontal, 16)
+                .padding(.top, 4)
+                .padding(.bottom, 6)
+
+            Divider().foregroundStyle(AppTheme.divider)
+
+            Spacer()
+            VStack(spacing: 12) {
+                Image(systemName: "wifi.exclamationmark")
+                    .font(.system(size: 44, weight: .light))
+                    .foregroundStyle(AppTheme.mutedText)
+                Text("Still checking…")
+                    .font(.system(size: 17, weight: .semibold))
+                Text("This is taking longer than usual. Check your connection and try again.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(AppTheme.subtleText)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 32)
+                Button {
+                    connectionCheckTimedOut = false
+                    Task { await emailService.checkConnection(force: true) }
+                } label: {
+                    Text("Try Again")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.primary)
                 }
                 .buttonStyle(.plain)
                 .padding(.top, 4)
@@ -1055,14 +1215,14 @@ struct SenderThreadsView: View {
                             } label: {
                                 Label("Read", systemImage: "envelope.open")
                             }
-                            .tint(.blue)
+                            .tint(.primary)
                         } else {
                             Button {
                                 Task { await emailService.markAsUnread(ids: [thread.id]) }
                             } label: {
                                 Label("Unread", systemImage: "envelope.badge")
                             }
-                            .tint(.blue)
+                            .tint(.primary)
                         }
 
                         Button {
@@ -1104,7 +1264,7 @@ private extension EmailThread {
 private struct SearchBarGlassModifier: ViewModifier {
     func body(content: Content) -> some View {
         if #available(iOS 26.0, *) {
-            content.glassEffect(in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            content.glassEffect(in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
         } else {
             content
         }

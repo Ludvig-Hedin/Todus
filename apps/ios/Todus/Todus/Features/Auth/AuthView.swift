@@ -139,9 +139,18 @@ struct AuthView: View {
                         .frame(height: 48)
                         .background(accentBlue, in: Capsule())
                         .foregroundStyle(.white)
+                        .opacity(authService.isLoading ? 0.6 : 1)
                 }
                 .buttonStyle(.plain)
                 .disabled(authService.isLoading)
+                .overlay {
+                    // Match the spinner pattern used by socialButtons so the user gets
+                    // visual feedback while sendEmailOTP awaits the network round-trip
+                    if authService.isLoading {
+                        ProgressView()
+                            .tint(.white)
+                    }
+                }
             }
         }
     }
@@ -169,33 +178,46 @@ struct AuthView: View {
                     Capsule()
                         .stroke(Color(UIColor.separator), lineWidth: 1)
                 )
+                .accessibilityLabel("Verification code")
+                .accessibilityHint("Enter the 6-digit code sent to your email")
                 .onChange(of: code) { _, newValue in
                     // Guard: skip if already verifying (prevents double-submit when iOS
                     // auto-fill fires onChange multiple times in rapid succession)
                     if newValue.count >= expectedCodeLength && !authService.isLoading {
-                        isCodeFocused = false
+                        // Don't dismiss focus eagerly — keeping the keyboard up while
+                        // verifying avoids a visible bounce when verification fails and
+                        // we re-focus to let the user retry. Focus naturally drops on
+                        // success when the OTP screen is unmounted.
                         Task {
                             await authService.verifyEmailOTP(code: newValue)
-                            // Clear expired code after a failed attempt so the user can't
-                            // accidentally re-submit a code that was already consumed
+                            // On failure, clear the consumed code and refocus the field.
+                            // Doing the refocus here (only after a failed attempt) avoids
+                            // the keyboard flicker the previous .onAppear-toggle caused.
                             if authService.lastErrorMessage != nil {
                                 code = ""
+                                isCodeFocused = true
                             }
                         }
                     }
                 }
                 .onAppear {
-                    isCodeFocused = true
+                    // Initial focus when the OTP stage first renders. We deliberately do
+                    // not toggle focus on every state change — see the .onChange handler
+                    // for refocus-on-failure logic.
+                    if !isCodeFocused {
+                        isCodeFocused = true
+                    }
                 }
 
             // Show Verify when code is complete, Resend when not
             if code.count >= expectedCodeLength {
                 Button {
-                    isCodeFocused = false
+                    // Keep focus while verifying so the keyboard doesn't bounce on failure
                     Task {
                         await authService.verifyEmailOTP(code: code)
                         if authService.lastErrorMessage != nil {
                             code = ""
+                            isCodeFocused = true
                         }
                     }
                 } label: {
@@ -364,22 +386,25 @@ struct AuthView: View {
     // MARK: - Error Banner
 
     private func errorBanner(_ message: String) -> some View {
+        // Use .footnote (which scales with Dynamic Type) instead of a fixed 13pt size.
+        // The icon weight stays semibold and the message stays medium so visual hierarchy
+        // is preserved while text now respects the user's Dynamic Type preference.
         HStack(spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 13, weight: .semibold))
+                .font(.footnote.weight(.semibold))
                 .foregroundStyle(.red)
             Text(message)
-                .font(.system(size: 13, weight: .medium))
+                .font(.footnote.weight(.medium))
                 .foregroundStyle(.red.opacity(0.9))
             Spacer()
         }
         .padding(14)
         .background(
             Color.red.opacity(0.08),
-            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+            in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous)
                 .stroke(Color.red.opacity(0.15), lineWidth: 1)
         )
     }

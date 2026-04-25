@@ -85,8 +85,30 @@ final class TaskCaptureService {
 
         try? context.save()
 
-        Task { @MainActor [syncService] in
+        let mutationTaskIDs = mutations.compactMap(\.taskID)
+        Task { @MainActor [syncService, remindersSyncService] in
             await syncService.enqueue(mutations, in: context)
+            // SyncService.enqueue swallows errors and writes the result to TaskRecord.syncState
+            // (.failed when the remote call rejected the batch). Rather than introduce a new
+            // `pendingSyncFailed` flag, treat `.failed` here as the rollback signal: delete
+            // the just-inserted records (and their Reminders mirror) so the user isn't left
+            // with phantom local-only tasks that the rest of the system never sees.
+            let descriptor = FetchDescriptor<TaskRecord>(
+                predicate: #Predicate { task in mutationTaskIDs.contains(task.id) }
+            )
+            let candidates = (try? context.fetch(descriptor)) ?? []
+            let toRollback = candidates.filter { $0.syncState == .failed }
+            guard !toRollback.isEmpty else { return }
+            for task in toRollback {
+                if task.reminderIdentifier != nil {
+                    remindersSyncService.delete(task)
+                }
+                context.delete(task)
+            }
+            try? context.save()
+            AppLogger.shared.log(
+                "TaskCaptureService.capture: rolled back \(toRollback.count) task(s) after sync failure"
+            )
         }
     }
 
@@ -455,6 +477,14 @@ final class TaskCaptureService {
                 appliedNewDueDate = true
             } else {
                 appliedNewDueDate = false
+            }
+            // Surface degraded parses in the log so we can investigate why remote NLP keeps
+            // failing — the user's task still gets saved, just with the local fallback's
+            // (often weaker) date extraction.
+            if parsed.lowConfidence {
+                AppLogger.shared.log(
+                    "TaskCaptureService.queueEnrichment: low-confidence parse for task \(taskID) — remote NLP unavailable"
+                )
             }
             task.parseState = .parsed
             task.updatedAt = .now

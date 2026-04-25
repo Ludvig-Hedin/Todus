@@ -111,9 +111,9 @@ struct GmailOnboardingView: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
             .frame(maxWidth: .infinity)
-            .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: AppTheme.Radius.row, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                RoundedRectangle(cornerRadius: AppTheme.Radius.row, style: .continuous)
                     .stroke(tint.opacity(0.12), lineWidth: 1)
             )
     }

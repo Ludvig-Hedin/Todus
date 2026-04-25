@@ -122,12 +122,12 @@ struct CalendarTaskView: View {
                 .sheet(item: $taskPendingMove) { task in
                     MoveToFolderSheet(task: task)
                         .presentationDragIndicator(.visible)
-                        .presentationBackground(AppTheme.backgroundTop)
+                        .appSheetBackground()
                 }
                 .sheet(item: $selectedTask) { task in
                     TaskDetailSheet(task: task)
                         .presentationDragIndicator(.visible)
-                        .presentationBackground(AppTheme.backgroundTop)
+                        .appSheetBackground()
                 }
             }
         }
@@ -291,9 +291,9 @@ private struct CalendarTaskCard: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
-            .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.card, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                RoundedRectangle(cornerRadius: AppTheme.Radius.card, style: .continuous)
                     .stroke(AppTheme.cardBorder, lineWidth: 1)
             )
         }

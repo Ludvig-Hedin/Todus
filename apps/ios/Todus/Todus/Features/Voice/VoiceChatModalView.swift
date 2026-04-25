@@ -167,7 +167,7 @@ struct VoiceChatModalView: View {
                 if isLive {
                     HStack(spacing: 4) {
                         Circle()
-                            .fill(role == .user ? Color.blue : Color.green)
+                            .fill(role == .user ? Color.primary.opacity(0.85) : Color.green)
                             .frame(width: 6, height: 6)
                         Text(role == .user ? "You" : "AI")
                             .font(.system(size: 11, weight: .medium))
@@ -183,14 +183,14 @@ struct VoiceChatModalView: View {
                     .padding(.vertical, 10)
                     .background(
                         role == .user
-                            ? Color.blue.opacity(0.12)
+                            ? Color.primary.opacity(0.12)
                             : AppTheme.surfacePrimary,
-                        in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        in: RoundedRectangle(cornerRadius: AppTheme.Radius.card, style: .continuous)
                     )
                     .overlay(
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        RoundedRectangle(cornerRadius: AppTheme.Radius.card, style: .continuous)
                             .stroke(
-                                role == .user ? Color.blue.opacity(0.2) : AppTheme.cardBorder,
+                                role == .user ? Color.primary.opacity(0.2) : AppTheme.cardBorder,
                                 lineWidth: 1
                             )
                     )

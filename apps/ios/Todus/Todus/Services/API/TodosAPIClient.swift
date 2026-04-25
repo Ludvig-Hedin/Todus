@@ -245,6 +245,16 @@ struct ActiveSessionRecord: Decodable, Identifiable {
     let createdAt: Date
     let updatedAt: Date
     let isCurrent: Bool?
+
+    /// SF Symbol name appropriate for the session's device type based on the device label.
+    var deviceIcon: String {
+        let d = device.lowercased()
+        if d.contains("ipad") { return "ipad" }
+        if d.contains("iphone") || d.contains("ios") { return "iphone" }
+        if d.contains("mac") { return "desktopcomputer" }
+        if d.contains("android") { return "phone" }
+        return "laptopcomputer"
+    }
 }
 
 struct ActiveSessionsResponse: Decodable {

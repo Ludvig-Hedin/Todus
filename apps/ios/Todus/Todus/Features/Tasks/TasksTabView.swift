@@ -76,6 +76,12 @@ struct TasksTabView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .contentMargins(.bottom, 130, for: .scrollContent)
+                // Pull-to-refresh — re-runs shared folder sync and pulls fresh reminders.
+                // SwiftData's @Query auto-updates from any inserts/edits these triggers,
+                // so there's no explicit local re-fetch needed beyond awaiting these calls.
+                .refreshable {
+                    await reload()
+                }
             }
         }
         .toolbar(.hidden, for: .navigationBar)
@@ -88,6 +94,15 @@ struct TasksTabView: View {
         .sheet(item: $pendingTaskRecord) { task in
             TaskDetailSheet(task: task)
         }
+    }
+
+    /// Refreshes task-related data sources. Triggered by pull-to-refresh on the task list.
+    /// Awaits the slowest call (shared folder sync) so SwiftUI keeps the spinner visible
+    /// while data is in flight. SwiftData @Query observers then update the visible list
+    /// automatically once new records arrive.
+    private func reload() async {
+        await services.captureService.syncSharedFolders(in: modelContext)
+        await services.remindersSyncService.refreshFromReminders(in: modelContext)
     }
 
     /// Picks up a pending task ID set by AI chat card navigation and opens the detail sheet.
@@ -137,16 +152,16 @@ struct TasksTabView: View {
                         services.selectedViewMode == mode
                             ? AppTheme.surfaceSecondary
                             : Color.clear,
-                        in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous)
                     )
                 }
                 .buttonStyle(.plain)
             }
         }
         .padding(3)
-        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.card, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(cornerRadius: AppTheme.Radius.card, style: .continuous)
                 .stroke(AppTheme.cardBorder, lineWidth: 1)
         )
     }
