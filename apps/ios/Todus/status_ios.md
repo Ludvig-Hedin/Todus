@@ -31,6 +31,7 @@
 
 | Feature | Status | Notes |
 |---------|--------|-------|
+| Scroll vs tab bar | ✅ Fixed | Home scroll matches Tasks: `contentMargins(.bottom, 130)` + no `ScrollView.clipped()` so content isn’t cut off at the tab bar |
 | Greeting | ✅ Code written | HomeView.swift |
 | Events section | ✅ Code written | Uses CalendarService |
 | Tasks section | ✅ Code written | SwiftData @Query |
@@ -40,7 +41,7 @@
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Task list | ✅ Ported | From MiniTaskApp |
+| Task list | ✅ Ported | Compact search bar, tighter list spacing, status chip trailing, 2-line titles, 5s delay to “Recently completed”, light-mode row/sheet contrast |
 | Board view | ✅ Ported | Added task signature regrouping so in-place status/folder mutations move cards between columns again |
 | Table view | ✅ Ported | From MiniTaskApp |
 | Calendar view | ✅ Ported | From MiniTaskApp |
@@ -75,14 +76,16 @@
 | Event display | ✅ Ported | EKWrapper adapter |
 | Create/edit events | ✅ Ported | Native EventKit views |
 | CalendarService | ✅ Code written | Shared EKEventStore actor |
+| Permission gate | ✅ Fixed (2026-04-25) | After in-app “Allow Access”, the tab now unlocks without leaving the app (`Notification` + fixed `CalendarPermissionView` logic; tab switch re-checks auth) |
+| Tab header | ✅ Adjusted (2026-04-25) | `CalendarTabView` — removed duplicate calendar icon + “Calendar” label; `AppTopHeader` now shows only the view-mode (Day/…) picker beside avatar and actions |
 
 ## Navigation
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Custom tab bar | ✅ Code written | MainTabView.swift — liquid glass material |
-| FAB button | ✅ Code written | Accent circle + shadow |
-| AI chat button | ✅ Code written | Sparkles icon in tab bar |
+| Main tab bar | ✅ Fixed (2026-04-26) | `MainTabView` now shows only the native iOS `TabView` bar with labeled tabs; the duplicate floating `CustomTabBar` overlay is no longer rendered |
+| FAB button | ✅ Code kept | Floating custom-tab-bar create action remains in code, but is hidden from the live shell |
+| AI chat button | ✅ Code kept | Floating custom-tab-bar AI action remains in code, but is hidden from the live shell |
 | Create sheet | ✅ Code written | Type selector + text input |
 | Settings sheet | ✅ Ported | From MiniTaskApp |
 | Auth → Main routing | ✅ Code written | RootView routes auth/onboarding/main |
@@ -128,6 +131,9 @@
 
 ## Build Notes
 
+- April 26, 2026: `MainTabView` now uses only the standard iOS tab bar at runtime; `CustomTabBar` stays in source but is not rendered, and the tab-bar onboarding/settings surfaces are hidden.
+- April 25, 2026: `MainTabView` — native tab bar unselected icons tinted with `secondaryLabel` (selected uses `label`) so inactive tabs read muted, per [Tab Bar HIG](https://developer.apple.com/design/human-interface-guidelines/tab-bars).
+- April 25, 2026: `TabBarOnboardingView` (step 4) — `ScrollView` to prevent clipping; compact rows; `AppPrimaryButtonStyle` for the primary CTA (fixes dark mode); “Other pages” no longer lists Create/AI; tab preview matches native `MainTabView` (five slots, + center, no legacy burger/AI bar).
 - April 3, 2026: shipped a consolidated iOS UX remediation pass. Native button hit targets were tightened across shared SwiftUI button styles and header controls without changing layout; Home gained explicit loading states, partial-setup guidance, stronger section actions, and a less dominant `More pages` section; Tasks search/sort now behaves consistently across all modes with clearer mode guidance and `By Date` naming; Email now exposes primary mailbox chips, clearer search-state feedback, a short message preview before AI summary/actions in thread detail, and a first-use folder-switch hint; Gmail/Reminders/tab-bar onboarding now shows progress with lighter, more skippable copy; the floating tab bar gets a one-time coachmark overlay aligned with the `More pages` wording; and Create now guides natural-language input more clearly.
 - March 30, 2026: fixed the remaining iOS compile blockers in `CardViews.swift`, `AIChatView.swift`, `VoiceChatViewModel.swift`, and `VoiceInputButton.swift`; verified `xcodebuild -project apps/ios/Todus/Todus.xcodeproj -scheme Todus -destination 'generic/platform=iOS Simulator' build` succeeds.
 - March 30, 2026: added the shared AI profile settings flow (`Context about you` + `Custom instructions`) to iOS, wired the form to backend `userSettings`, and injected the profile into every AI request path.
@@ -145,4 +151,4 @@
 
 ---
 
-## Last Updated: 2026-04-03
+## Last Updated: 2026-04-25

@@ -1,14 +1,10 @@
 import SwiftUI
 import UIKit
 
-/// Root navigation shell.
+/// Root navigation shell backed by the native iOS `TabView`.
 ///
-/// Layout:
-///   Hidden native `TabView` for content/state preservation.
-///   Visible floating `CustomTabBar` sourced from `services.tabBarTabs`.
-///
-/// • The create and AI actions live in the floating bar.
-/// • `services.hideTabBar` hides the floating bar while detail views manage their own bottom chrome.
+/// The legacy floating `CustomTabBar` implementation remains in the codebase,
+/// but it is no longer presented in the live shell.
 struct MainTabView: View {
     @Environment(AppServices.self) private var services
     @Environment(\.scenePhase) private var scenePhase
@@ -31,7 +27,6 @@ struct MainTabView: View {
     @State private var meetingsTabId = UUID()
 
     @State private var sheetTab: AppTab? = nil
-    @State private var showMoreSheet = false
 
     // MARK: - Body
 
@@ -51,20 +46,6 @@ struct MainTabView: View {
         }
         .animation(.easeInOut(duration: 0.3), value: services.networkMonitor.isConnected)
         .animation(.easeInOut(duration: 0.3), value: services.authService.isSessionExpired)
-        .overlay(alignment: .bottom) {
-            if !services.hideTabBar && !showCreateSheet {
-                customTabBar
-                    // Keep the floating bar from jumping when a keyboard appears in the
-                    // underlying tabs, but do not disable keyboard-safe-area handling
-                    // for sheets presented from this shell (such as AIChatView).
-                    .ignoresSafeArea(.keyboard)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 12)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-        }
-        .animation(.easeOut(duration: 0.15), value: services.hideTabBar)
-        .animation(.easeOut(duration: 0.15), value: showCreateSheet)
     }
 
     // MARK: - Tab View
@@ -73,17 +54,17 @@ struct MainTabView: View {
         TabView(selection: $selectedTab) {
             NavigationStack { HomeView() }
                 .id(homeTabId)
-                .tabItem { Image(systemName: selectedTab == .home ? "house.fill" : "house") }
+                .tabItem { Label(AppTab.home.title, systemImage: AppTab.home.inactiveIcon()) }
                 .tag(AppTab.home)
 
             NavigationStack { TasksTabView() }
                 .id(tasksTabId)
-                .tabItem { Image(systemName: "checklist") }
+                .tabItem { Label(AppTab.tasks.title, systemImage: AppTab.tasks.inactiveIcon()) }
                 .tag(AppTab.tasks)
 
             NavigationStack { EmailInboxView() }
                 .id(emailTabId)
-                .tabItem { Image(systemName: selectedTab == .email ? "envelope.fill" : "envelope") }
+                .tabItem { Label(AppTab.email.title, systemImage: AppTab.email.inactiveIcon()) }
                 .tag(AppTab.email)
 
             Group {
@@ -97,16 +78,15 @@ struct MainTabView: View {
                 }
             }
             .id(calendarTabId)
-            .tabItem { Image(systemName: "calendar") }
+            .tabItem { Label(AppTab.calendar.title, systemImage: AppTab.calendar.inactiveIcon()) }
             .tag(AppTab.calendar)
 
             NavigationStack { MeetingsListView() }
                 .id(meetingsTabId)
-                .tabItem { Image(systemName: "video") }
+                .tabItem { Label(AppTab.meetings.title, systemImage: AppTab.meetings.inactiveIcon()) }
                 .tag(AppTab.meetings)
         }
         .tint(Color(UIColor.label))
-        .toolbar(.hidden, for: .tabBar)
         .onChange(of: selectedTab) { old, new in
             guard new != old else { return }
             previousNavigationTab = new
@@ -159,31 +139,10 @@ struct MainTabView: View {
                 .appSheetBackground()
                 .preferredColorScheme(services.appearancePreference.colorScheme)
         }
-        .sheet(isPresented: $showMoreSheet) {
-            MoreSheetView { tab in
-                showMoreSheet = false
-                if services.tabBarTabs.contains(tab) {
-                    selectedTab = tab
-                } else {
-                    services.navigateToSheet = tab
-                }
-            }
-            .presentationDetents([.medium, .large])
-            .presentationDragIndicator(.visible)
-            .appSheetBackground()
-            .preferredColorScheme(services.appearancePreference.colorScheme)
-        }
         .onChange(of: services.navigateTo) { _, newTab in
             guard let tab = newTab else { return }
             selectedTab = tab
             services.navigateTo = nil
-        }
-        .onChange(of: services.tabBarTabs) { _, tabs in
-            guard tabs.contains(selectedTab) || selectedTab == .meetings else { return }
-            if selectedTab == .meetings && tabs.contains(.meetings) { return }
-            if !tabs.contains(selectedTab) {
-                selectedTab = .home
-            }
         }
         .onChange(of: services.showsComposeEmail) { _, isPresented in
             if !isPresented {
@@ -200,12 +159,8 @@ struct MainTabView: View {
         }
         .onChange(of: services.navigateToSheet) { _, tab in
             guard let tab else { return }
-            if tab == .meetings && !services.tabBarTabs.contains(.meetings) {
-                sheetTab = tab
-            } else {
-                selectedTab = tab
-                sheetTab = nil
-            }
+            selectedTab = tab
+            sheetTab = nil
             services.navigateToSheet = nil
         }
         .onAppear {
@@ -224,58 +179,8 @@ struct MainTabView: View {
         }
     }
 
-    // MARK: - Floating Tab Bar
-
-    private var customTabBar: some View {
-        CustomTabBar(
-            selectedTab: $selectedTab,
-            tabs: services.tabBarTabs,
-            onAI: {
-                services.showsAIChat = true
-            },
-            onCreate: {
-                createSheetInitialType = createType(for: selectedTab)
-                withAnimation(.snappy(duration: 0.2)) { showCreateSheet = true }
-            },
-            onMore: {
-                showMoreSheet = true
-            },
-            onReselect: { tab in
-                resetNavigation(for: tab)
-            }
-        )
-    }
-
     private var visibleContentTabs: Set<AppTab> {
         [.home, .tasks, .email, .calendar, .meetings]
-    }
-
-    // MARK: - Helpers
-
-    private func createType(for tab: AppTab) -> CreateItemType {
-        switch tab {
-        case .tasks:    return .task
-        case .calendar: return .event
-        case .email:    return .email
-        default:        return .auto
-        }
-    }
-
-    private func resetNavigation(for tab: AppTab) {
-        switch tab {
-        case .home:
-            homeTabId = UUID()
-        case .tasks:
-            tasksTabId = UUID()
-        case .email:
-            emailTabId = UUID()
-        case .calendar:
-            calendarTabId = UUID()
-        case .meetings:
-            meetingsTabId = UUID()
-        case .create, .ai:
-            break
-        }
     }
 
     // MARK: - Bindings

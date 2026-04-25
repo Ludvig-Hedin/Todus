@@ -87,6 +87,9 @@ final class AppServices {
         static let assistantAutomationPolicy = "TaskApp.assistantAutomationPolicy"
         static let tabBarTabs = "TaskApp.tabBarTabs"
         static let hasConfiguredTabBarPrompt = "TaskApp.hasConfiguredTabBarPrompt"
+        static let hasConfiguredNotificationsPrompt = "TaskApp.hasConfiguredNotificationsPrompt"
+        static let hasConfiguredDefaultMailPrompt = "TaskApp.hasConfiguredDefaultMailPrompt"
+        static let emailNotificationsEnabled = "TaskApp.emailNotificationsEnabled"
     }
 
     let configuration: AppConfiguration
@@ -121,6 +124,8 @@ final class AppServices {
     let meetingsService: MeetingsService
     /// Cached subscription / AI-usage state. Refreshed on app launch and after billing actions.
     let subscriptionService: SubscriptionService
+    /// Wraps drafts.update + mail.send for the AI chat's InlineComposeCard.
+    let draftService: DraftService
     private let defaults: UserDefaults
     private var isLoadingSharedProfile = false
     private var lastSharedProfileLoadAt: Date?
@@ -171,6 +176,17 @@ final class AppServices {
             defaults.set(developerModeEnabled, forKey: Keys.developerModeEnabled)
         }
     }
+
+    /// Whether the signed-in user may see the Developer Mode toggle (allowlisted accounts only).
+    var isDeveloperModeUIAvailable: Bool {
+        TodusDeveloperAccess.isAllowlisted(email: authService.userEmail)
+    }
+
+    /// Developer features: allowlisted email and toggle on.
+    var effectiveDeveloperModeEnabled: Bool {
+        developerModeEnabled && isDeveloperModeUIAvailable
+    }
+
     var preferredStartViewMode: TaskViewMode {
         didSet {
             defaults.set(preferredStartViewMode.rawValue, forKey: Keys.preferredStartViewMode)
@@ -192,13 +208,29 @@ final class AppServices {
         didSet { defaults.set(hasConfiguredGmailPrompt, forKey: Keys.hasConfiguredGmailPrompt) }
     }
 
-    /// Whether the user has completed the tab bar customization onboarding step.
+    /// Legacy onboarding flag for the hidden floating tab-bar customization step.
+    /// Forced to `true` so users never see the retired step again.
     var hasConfiguredTabBarPrompt: Bool {
         didSet { defaults.set(hasConfiguredTabBarPrompt, forKey: Keys.hasConfiguredTabBarPrompt) }
     }
 
-    /// Ordered list of tabs shown in the floating tab bar. Max 4, home is always first.
-    /// Persisted as a JSON-encoded array of raw string values.
+    /// Whether the user has seen the notifications permission onboarding step.
+    var hasConfiguredNotificationsPrompt: Bool {
+        didSet { defaults.set(hasConfiguredNotificationsPrompt, forKey: Keys.hasConfiguredNotificationsPrompt) }
+    }
+
+    /// Whether the user has seen the "set as default mail app" onboarding step.
+    var hasConfiguredDefaultMailPrompt: Bool {
+        didSet { defaults.set(hasConfiguredDefaultMailPrompt, forKey: Keys.hasConfiguredDefaultMailPrompt) }
+    }
+
+    /// Whether to show local notifications for new incoming emails.
+    var emailNotificationsEnabled: Bool {
+        didSet { defaults.set(emailNotificationsEnabled, forKey: Keys.emailNotificationsEnabled) }
+    }
+
+    /// Legacy configuration for the hidden floating tab bar. Max 4, home is always first.
+    /// Persisted so the retired UI can be restored later without losing state.
     var tabBarTabs: [AppTab] {
         didSet {
             let raw = tabBarTabs.map(\.rawValue)
@@ -354,6 +386,7 @@ final class AppServices {
         self.voiceTokenService = VoiceTokenService(authService: authService, backendURL: backendURL)
         self.meetingsService = MeetingsService(apiClient: apiClient)
         self.subscriptionService = SubscriptionService(apiClient: apiClient)
+        self.draftService = DraftService(api: apiClient)
 
         let storedAppearance = defaults.string(forKey: Keys.appearancePreference)
             .flatMap(AppAppearancePreference.init(rawValue:))
@@ -439,7 +472,11 @@ final class AppServices {
         } else {
             self.tabBarTabs = AppTab.defaultNavTabs
         }
-        self.hasConfiguredTabBarPrompt = defaults.bool(forKey: Keys.hasConfiguredTabBarPrompt)
+        self.hasConfiguredTabBarPrompt = true
+        defaults.set(true, forKey: Keys.hasConfiguredTabBarPrompt)
+        self.hasConfiguredNotificationsPrompt = defaults.bool(forKey: Keys.hasConfiguredNotificationsPrompt)
+        self.hasConfiguredDefaultMailPrompt = defaults.bool(forKey: Keys.hasConfiguredDefaultMailPrompt)
+        self.emailNotificationsEnabled = defaults.object(forKey: Keys.emailNotificationsEnabled) as? Bool ?? true
 
         // Now assign to stored properties relying on self.
         self.signatures = loadedSignatures

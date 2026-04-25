@@ -38,9 +38,6 @@ struct SettingsView: View {
                 // Appearance sub-page + small preferences inline
                 preferencesSection
 
-                // Tab bar customization — which pages appear in the floating bar
-                tabBarSection
-
                 // Email preferences — separate from AI to reduce cognitive load
                 emailSection
 
@@ -59,7 +56,7 @@ struct SettingsView: View {
 
                 aboutSection
 
-                if services.developerModeEnabled {
+                if services.effectiveDeveloperModeEnabled {
                     developerSection
                 }
 
@@ -660,38 +657,17 @@ struct SettingsView: View {
                 Label("Manage Folders", systemImage: "folder")
             }
 
-            Toggle(isOn: Binding(
-                get: { services.developerModeEnabled },
-                set: { services.developerModeEnabled = $0 }
-            )) {
-                Label("Developer Mode", systemImage: "wrench.and.screwdriver")
+            if services.isDeveloperModeUIAvailable {
+                Toggle(isOn: Binding(
+                    get: { services.developerModeEnabled },
+                    set: { services.developerModeEnabled = $0 }
+                )) {
+                    Label("Developer Mode", systemImage: "wrench.and.screwdriver")
+                }
+                .tint(.orange)
             }
-            .tint(.orange)
         } header: {
             Text("Preferences")
-        }
-    }
-
-    // MARK: - Tab Bar Customization
-
-    private var tabBarSection: some View {
-        Section {
-            NavigationLink {
-                TabBarCustomizationView()
-            } label: {
-                HStack {
-                    Label("Tab Bar", systemImage: "square.bottomhalf.filled")
-                    Spacer()
-                    // Preview of current tab count
-                    Text("\(services.tabBarTabs.count) tabs")
-                        .font(.system(size: 13))
-                        .foregroundStyle(.secondary)
-                }
-            }
-        } header: {
-            Text("Navigation")
-        } footer: {
-            Text("Choose which pages appear in the floating tab bar (max 4). Pages not shown here are accessible from the Home tab.")
         }
     }
 

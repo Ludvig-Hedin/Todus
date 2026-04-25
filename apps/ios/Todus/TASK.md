@@ -45,6 +45,7 @@
 - [ ] **IOS-034** — Test CreateSheet creates tasks
 - [ ] **IOS-035** — Test AI chat sheet opens from tab bar
 - [ ] **IOS-036** — Add safe area insets for custom tab bar clearance
+- [x] **IOS-080** — Remove runtime floating tab bar and keep only the native iOS tab bar
 
 #### iOS — Email Enhancements
 - [ ] **IOS-047** — Add email section to HomeView (unread count + recent threads)
@@ -154,6 +155,7 @@
 - AppConfiguration.swift now loads from `TodosConfig.plist` first, falls back to `TaskAppConfig.plist` ✅ Fixed
 - Shared AI profile settings now sync through backend `userSettings` and feed web/iOS/macOS prompts with `Context about you` and `Custom instructions`.
 - macOS first-run onboarding now mirrors the iOS setup flow with skippable Gmail, calendar, and launch-page prompts persisted in `MacAppServices`.
+- iOS no longer surfaces the floating custom tab bar or its onboarding/settings entry, but the implementation remains in the codebase for future reuse.
 - The existing AuthSessionStore stores tokens in UserDefaults — new AuthService uses Keychain instead
 - EmailService response DTOs (RawThread, GetThreadResponse) may need adjustment once tested against real backend responses ✅ Fixed — listThreads only returns IDs, now enriching via mail.get per thread (same as web app)
 - Saved AI chat history previously dropped mention IDs and broke follow-up turns after reopening a conversation ✅ Fixed — persisted mention refs in saved messages with backward-compatible decoding

@@ -24,9 +24,11 @@ struct RootView: View {
             } else if !services.hasConfiguredRemindersPrompt {
                 RemindersOnboardingView()
                     .transition(hasAppeared ? .opacity.combined(with: .move(edge: .trailing)) : .opacity)
-            } else if !services.hasConfiguredTabBarPrompt {
-                // Tab bar customization — shown once so users understand what's in/out of the bar
-                TabBarOnboardingView()
+            } else if !services.hasConfiguredNotificationsPrompt {
+                NotificationsOnboardingView()
+                    .transition(hasAppeared ? .opacity.combined(with: .move(edge: .trailing)) : .opacity)
+            } else if !services.hasConfiguredDefaultMailPrompt {
+                DefaultMailOnboardingView()
                     .transition(hasAppeared ? .opacity.combined(with: .move(edge: .trailing)) : .opacity)
             } else {
                 MainTabView()
@@ -35,7 +37,7 @@ struct RootView: View {
         }
         .safeAreaInset(edge: .top, spacing: 0) {
             if let onboardingStep = onboardingStep {
-                let onboardingTotal = 3
+                let onboardingTotal = 4
                 let progressText = String(
                     localized: "\(onboardingStep) of \(onboardingTotal)",
                     comment: "Compact onboarding progress label showing current step and total steps"
@@ -70,7 +72,8 @@ struct RootView: View {
         .animation(hasAppeared ? .snappy(duration: 0.3) : nil, value: services.authService.showsOnboarding)
         .animation(hasAppeared ? .snappy(duration: 0.3) : nil, value: services.hasConfiguredRemindersPrompt)
         .animation(hasAppeared ? .snappy(duration: 0.3) : nil, value: services.hasConfiguredGmailPrompt)
-        .animation(hasAppeared ? .snappy(duration: 0.3) : nil, value: services.hasConfiguredTabBarPrompt)
+        .animation(hasAppeared ? .snappy(duration: 0.3) : nil, value: services.hasConfiguredNotificationsPrompt)
+        .animation(hasAppeared ? .snappy(duration: 0.3) : nil, value: services.hasConfiguredDefaultMailPrompt)
         .animation(hasAppeared ? .snappy(duration: 0.3) : nil, value: services.authService.isAuthenticated)
         .onAppear {
             // Enable transitions only after the first frame renders.
@@ -116,7 +119,8 @@ struct RootView: View {
         guard !services.authService.showsOnboarding else { return nil }
         if !services.hasConfiguredGmailPrompt { return 1 }
         if !services.hasConfiguredRemindersPrompt { return 2 }
-        if !services.hasConfiguredTabBarPrompt { return 3 }
+        if !services.hasConfiguredNotificationsPrompt { return 3 }
+        if !services.hasConfiguredDefaultMailPrompt { return 4 }
         return nil
     }
 }

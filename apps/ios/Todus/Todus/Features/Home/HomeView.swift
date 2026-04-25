@@ -73,17 +73,19 @@ struct HomeView: View {
                         }
 
                         // Pages not pinned to the tab bar — only shown in developer mode
-                        if services.developerModeEnabled {
+                        if services.effectiveDeveloperModeEnabled {
                             moreSection
                         }
-                        Spacer(minLength: 130)
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.horizontal, 16)
                     .padding(.top, 12)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 .scrollDismissesKeyboard(.interactively)
-                .clipped()
+                // Match TasksTabView: let content scroll with bottom inset so rows can move past
+                // the floating tab bar instead of being clipped at a hard horizontal edge.
+                .contentMargins(.bottom, 130, for: .scrollContent)
             }
         }
         .toolbar(.hidden, for: .navigationBar)
@@ -126,11 +128,13 @@ struct HomeView: View {
                     }
             }
             .presentationDragIndicator(Visibility.visible)
+            .appSheetBackground()
             .preferredColorScheme(services.appearancePreference.colorScheme)
         }
         .sheet(item: $selectedCalendarEvent) { event in
             EKEventDetailSheet(eventId: event.id)
                 .presentationDragIndicator(Visibility.visible)
+                .appSheetBackground()
         }
         .sheet(item: $selectedEmailThread) { thread in
             NavigationStack {
@@ -794,7 +798,10 @@ struct HomeView: View {
     /// Keeps the tab bar lean while ensuring every part of the app is reachable from Home.
     @ViewBuilder
     private var moreSection: some View {
-        let extraTabs = AppTab.allCases.filter { !services.tabBarTabs.contains($0) && $0 != .home && $0 != .create && $0 != .ai }
+        let nativeTabs: Set<AppTab> = [.home, .tasks, .email, .calendar, .meetings]
+        let extraTabs = AppTab.allCases.filter {
+            !nativeTabs.contains($0) && $0 != .create && $0 != .ai
+        }
         // Always show this section — Docs is always here even when all tabs are in the bar
         VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
@@ -806,7 +813,7 @@ struct HomeView: View {
                         .font(.system(size: 15, weight: .semibold))
                 }
 
-                Text("Features not pinned to your tab bar")
+                Text("Places outside the main tab bar")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(.secondary)
             }
@@ -1158,4 +1165,3 @@ struct HomeView: View {
         }
     }
 }
-
