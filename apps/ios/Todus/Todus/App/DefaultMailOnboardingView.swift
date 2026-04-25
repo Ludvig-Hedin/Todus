@@ -42,7 +42,7 @@ struct DefaultMailOnboardingView: View {
 
                 VStack(spacing: 12) {
                     onboardingMessage(
-                        text: "We can only open Todus in the Settings app. From there, go back to Settings, open Default Apps → Email, and choose Todus.",
+                        text: "We’ll open Settings to Default Apps when iOS supports it. If you land on Todus instead, go back to Settings, open Apps → Default Apps → Email, and choose Todus.",
                         tint: AppTheme.mutedText
                     )
 
@@ -51,7 +51,7 @@ struct DefaultMailOnboardingView: View {
                     } label: {
                         HStack(spacing: 10) {
                             Image(systemName: "gear")
-                            Text("Open Todus Settings")
+                            Text("Open Default Apps")
                                 .font(.system(size: 15, weight: .semibold))
                         }
                         .frame(maxWidth: .infinity)
@@ -91,10 +91,16 @@ struct DefaultMailOnboardingView: View {
     }
 
     private func openDefaultAppsSettings() {
-        // `App-prefs:` and other private scheme URLs are not in LSApplicationQueriesSchemes,
-        // can require undocumented entitlements, and risk App Review. Users can still open
-        // Settings → Todus from this screen; the copy above explains Default Apps.
-        if let url = URL(string: UIApplication.openSettingsURLString) {
+        // Use Apple's public Default Apps deep link when available. Fall back to the app's
+        // settings page on older OS versions because private Settings URLs are App Review risky.
+        let urlString: String
+        if #available(iOS 18.3, *) {
+            urlString = UIApplication.openDefaultApplicationsSettingsURLString
+        } else {
+            urlString = UIApplication.openSettingsURLString
+        }
+
+        if let url = URL(string: urlString) {
             UIApplication.shared.open(url)
         }
     }
