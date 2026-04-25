@@ -46,6 +46,17 @@ struct MainTabView: View {
         }
         .animation(.easeInOut(duration: 0.3), value: services.networkMonitor.isConnected)
         .animation(.easeInOut(duration: 0.3), value: services.authService.isSessionExpired)
+        .overlay(alignment: .bottomTrailing) {
+            if !services.hideTabBar && !showCreateSheet {
+                aiFAB
+                    .ignoresSafeArea(.keyboard)
+                    .padding(.trailing, 18)
+                    .padding(.bottom, 68)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.easeOut(duration: 0.15), value: services.hideTabBar)
+        .animation(.easeOut(duration: 0.15), value: showCreateSheet)
     }
 
     // MARK: - Tab View
@@ -197,6 +208,34 @@ struct MainTabView: View {
 
     private var visibleContentTabs: Set<AppTab> {
         [.home, .tasks, .email, .calendar]
+    }
+
+    private var aiFAB: some View {
+        Button {
+            services.showsAIChat = true
+        } label: {
+            Image(systemName: "sparkles")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(aiGradient)
+                .frame(width: 58, height: 58)
+                .contentShape(Circle())
+        }
+        .buttonStyle(FABButtonStyle())
+        .fabGlass()
+        .accessibilityLabel("Open AI Assistant")
+    }
+
+    private var aiGradient: LinearGradient {
+        LinearGradient(
+            stops: [
+                .init(color: Color(red: 0, green: 0xAA / 255.0, blue: 0xF5 / 255.0), location: 0.087),
+                .init(color: Color(red: 0xEF / 255.0, green: 0, blue: 0xC2 / 255.0), location: 0.269),
+                .init(color: Color(red: 1, green: 0, blue: 0x38 / 255.0), location: 0.580),
+                .init(color: Color(red: 0xF9 / 255.0, green: 0x9F / 255.0, blue: 0), location: 0.913),
+            ],
+            startPoint: UnitPoint(x: 0.25, y: 0),
+            endPoint: UnitPoint(x: 0.75, y: 1)
+        )
     }
 
     private func createType(for tab: AppTab) -> CreateItemType {

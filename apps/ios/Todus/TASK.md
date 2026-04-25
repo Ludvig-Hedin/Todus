@@ -47,6 +47,7 @@
 - [ ] **IOS-036** — Add safe area insets for custom tab bar clearance
 - [x] **IOS-080** — Remove runtime floating tab bar and keep only the native iOS tab bar
 - [x] **IOS-081** — Restore the native tab bar center `+` action and remove Meetings from visible tabs
+- [x] **IOS-082** — Restore the floating bottom-right AI FAB while keeping the native tab bar
 
 #### iOS — Email Enhancements
 - [ ] **IOS-047** — Add email section to HomeView (unread count + recent threads)
