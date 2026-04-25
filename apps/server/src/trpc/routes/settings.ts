@@ -29,7 +29,6 @@ export const settingsRouter = router({
       const settingsRes = userSettingsSchema.safeParse(result.settings);
       if (!settingsRes.success) {
         ctx.c.executionCtx.waitUntil(db.updateUserSettings(defaultUserSettings));
-        console.log('returning default settings');
         return { settings: defaultUserSettings };
       }
 

@@ -1,6 +1,6 @@
 import { meeting, meetingMedia, meetingTranscript, meetIntegration } from '../../db/schema';
 import { privateProcedure, createRateLimiterMiddleware, router } from '../trpc';
-import { eq, and, desc, gte, lte, inArray, sql, isNull } from 'drizzle-orm';
+import { eq, and, desc, gte, lte, inArray, sql, isNull, count } from 'drizzle-orm';
 import { createRecallBot, cancelBot } from '../../lib/recall';
 import { pruneExpiredMeetingRecordings } from '../../lib/meeting-retention';
 import { isProCustomer } from '../../lib/utils';
@@ -19,6 +19,55 @@ type RecallBotResult = {
   id: string;
   meeting_url_id?: string | null;
 };
+
+/** AI summaries may store action items with `description` — native apps expect `task`. */
+type ActionItemClient = { task: string; owner?: string | null; dueDate?: string | null };
+
+function normalizeActionItemsForClient(raw: unknown): ActionItemClient[] | null {
+  if (raw == null) return null;
+  if (!Array.isArray(raw)) return null;
+  const out: ActionItemClient[] = [];
+  for (const item of raw) {
+    if (item == null || typeof item !== 'object') continue;
+    const o = item as Record<string, unknown>;
+    const task =
+      (typeof o.task === 'string' && o.task) ||
+      (typeof o.description === 'string' && o.description) ||
+      (typeof o.title === 'string' && o.title);
+    if (!task) continue;
+    out.push({
+      task,
+      owner: typeof o.owner === 'string' ? o.owner : o.owner == null ? null : String(o.owner),
+      dueDate: o.dueDate != null && o.dueDate !== undefined ? String(o.dueDate) : null,
+    });
+  }
+  return out.length ? out : null;
+}
+
+/** Apple clients encode nil optionals as JSON `null` — z.optional() only allows undefined. */
+const listMeetingsInputSchema = z.preprocess(
+  (raw) => {
+    if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) return raw;
+    const o = { ...(raw as Record<string, unknown>) };
+    for (const k of ['status', 'search', 'from', 'to', 'limit', 'offset']) {
+      if (o[k] === null) delete o[k];
+    }
+    return o;
+  },
+  z
+    .object({
+      status: z
+        .enum(['scheduled', 'bot_joining', 'recording', 'processing', 'ready', 'failed', 'cancelled'])
+        .optional(),
+      search: z.string().optional(),
+      from: z.string().datetime().optional(),
+      to: z.string().datetime().optional(),
+      limit: z.number().int().min(1).max(100).optional().default(50),
+      offset: z.number().int().min(0).optional().default(0),
+    })
+    .optional()
+    .default({}),
+);
 
 async function claimMeetingForBotScheduling(db: Db, meetingId: string, userId: string) {
   const [claimed] = await db
@@ -226,75 +275,65 @@ export const meetRouter = router({
 
   // ─── Meeting CRUD ──────────────────────────────────────────────────
 
-  listMeetings: privateProcedure
-    .input(
-      z
-        .object({
-          status: z
-            .enum([
-              'scheduled',
-              'bot_joining',
-              'recording',
-              'processing',
-              'ready',
-              'failed',
-              'cancelled',
-            ])
-            .optional(),
-          search: z.string().optional(),
-          from: z.string().datetime().optional(),
-          to: z.string().datetime().optional(),
-          limit: z.number().int().min(1).max(100).optional().default(50),
-          offset: z.number().int().min(0).optional().default(0),
+  listMeetings: privateProcedure.input(listMeetingsInputSchema).query(async ({ ctx, input }) => {
+    const { db, conn } = getDb();
+    try {
+      const [integration] = await db
+        .select({
+          id: meetIntegration.id,
+          autoDeleteDays: meetIntegration.autoDeleteDays,
+          lastPrunedAt: meetIntegration.lastPrunedAt,
         })
-        .optional()
-        .default({}),
-    )
-    .query(async ({ ctx, input }) => {
-      const { db, conn } = getDb();
-      try {
-        const [integration] = await db
-          .select({
-            id: meetIntegration.id,
-            autoDeleteDays: meetIntegration.autoDeleteDays,
-            lastPrunedAt: meetIntegration.lastPrunedAt,
-          })
-          .from(meetIntegration)
-          .where(eq(meetIntegration.userId, ctx.sessionUser.id))
-          .limit(1);
+        .from(meetIntegration)
+        .where(eq(meetIntegration.userId, ctx.sessionUser.id))
+        .limit(1);
 
-        await pruneExpiredMeetingRecordings(db, {
-          integrationId: integration?.id,
-          userId: ctx.sessionUser.id,
-          autoDeleteDays: integration?.autoDeleteDays,
-          lastPrunedAt: integration?.lastPrunedAt,
-        });
+      await pruneExpiredMeetingRecordings(db, {
+        integrationId: integration?.id,
+        userId: ctx.sessionUser.id,
+        autoDeleteDays: integration?.autoDeleteDays,
+        lastPrunedAt: integration?.lastPrunedAt,
+      });
 
-        const conditions = [eq(meeting.userId, ctx.sessionUser.id)];
+      const conditions = [eq(meeting.userId, ctx.sessionUser.id)];
 
-        if (input.status) conditions.push(eq(meeting.status, input.status));
-        if (input.search) {
-          // Escape SQL LIKE wildcards in the user-supplied search string
-          const escaped = input.search.replace(/[%_\\]/g, '\\$&');
-          const pattern = `%${escaped}%`;
-          conditions.push(sql`${meeting.title} LIKE ${pattern} ESCAPE '\\'`);
-        }
-        if (input.from) conditions.push(gte(meeting.startsAt, new Date(input.from)));
-        if (input.to) conditions.push(lte(meeting.startsAt, new Date(input.to)));
-
-        const meetings = await db
-          .select()
-          .from(meeting)
-          .where(and(...conditions))
-          .orderBy(desc(meeting.startsAt))
-          .limit(input.limit)
-          .offset(input.offset);
-
-        return { meetings };
-      } finally {
-        await conn.end();
+      if (input.status) conditions.push(eq(meeting.status, input.status));
+      if (input.search) {
+        // Escape SQL LIKE wildcards in the user-supplied search string
+        const escaped = input.search.replace(/[%_\\]/g, '\\$&');
+        const pattern = `%${escaped}%`;
+        conditions.push(sql`${meeting.title} LIKE ${pattern} ESCAPE '\\'`);
       }
-    }),
+      if (input.from) conditions.push(gte(meeting.startsAt, new Date(input.from)));
+      if (input.to) conditions.push(lte(meeting.startsAt, new Date(input.to)));
+
+      const whereClause = and(...conditions);
+
+      const [countRow] = await db
+        .select({ total: count() })
+        .from(meeting)
+        .where(whereClause);
+
+      const total = Number(countRow?.total ?? 0);
+
+      const rows = await db
+        .select()
+        .from(meeting)
+        .where(whereClause)
+        .orderBy(desc(meeting.startsAt))
+        .limit(input.limit)
+        .offset(input.offset);
+
+      const meetings = rows.map((m) => ({
+        ...m,
+        actionItems: normalizeActionItemsForClient(m.actionItems),
+      }));
+
+      return { meetings, total };
+    } finally {
+      await conn.end();
+    }
+  }),
 
   getMeeting: privateProcedure
     .input(z.object({ meetingId: z.string() }))
@@ -342,7 +381,13 @@ export const meetRouter = router({
             .orderBy(meetingTranscript.startTime),
         ]);
 
-        return { meeting: meetingRow, media, transcripts };
+        // iOS / macOS clients decode a single flat `MeetingDetailResponse` (not nested `meeting`).
+        return {
+          ...meetingRow,
+          actionItems: normalizeActionItemsForClient(meetingRow.actionItems),
+          media,
+          transcript: transcripts,
+        };
       } finally {
         await conn.end();
       }
@@ -509,7 +554,7 @@ export const meetRouter = router({
             throw new Error('Failed to persist scheduled bot');
           }
 
-          return { meeting: updated, botId: result.id };
+          return { success: true, botId: result.id, meeting: updated };
         } catch (dbErr) {
           // Cancel the bot to prevent it from joining without a DB record
           try {
@@ -655,7 +700,11 @@ ${transcriptText.slice(0, 30000)}`; // Cap at ~30k chars to stay within context
           .where(eq(meeting.id, meetingRow.id))
           .returning();
 
-        return { meeting: updated, summary, actionItems };
+        return {
+          meeting: updated,
+          summary,
+          actionItems: normalizeActionItemsForClient(actionItems) ?? [],
+        };
       } finally {
         await conn.end();
       }

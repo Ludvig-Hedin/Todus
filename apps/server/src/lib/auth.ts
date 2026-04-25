@@ -8,17 +8,17 @@ import {
   WelcomeEmail,
 } from './react-emails/email-sequences';
 import { createAuthMiddleware, phoneNumber, jwt, bearer, mcp, emailOTP } from 'better-auth/plugins';
+import { account as accountTable, marketingEmailDelivery } from '../db/schema';
 import { type Account, betterAuth, type BetterAuthOptions } from 'better-auth';
 import { getBrowserTimezone, isValidTimezone } from './timezones';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
-import { getZeroDB } from './server-utils';
 import { getSocialProviders } from './auth-providers';
-import { marketingEmailDelivery } from '../db/schema';
 import { redis, resend, twilio } from './services';
 import { dubAnalytics } from '@dub/better-auth';
 import { defaultUserSettings } from './schemas';
 import { disableBrainFunction } from './brain';
 import { APIError } from 'better-auth/api';
+import { getZeroDB } from './server-utils';
 import { type EProviders } from '../types';
 import { createDriver } from './driver';
 import type { ReactNode } from 'react';
@@ -170,6 +170,119 @@ const scheduleCampaign = async (userInfo: { userId: string; address: string; nam
   }
 };
 
+const parseJwtPayload = (
+  token: string | null | undefined,
+): { email?: string; name?: string; picture?: string } | undefined => {
+  if (!token) return undefined;
+  const parts = token.split('.');
+  if (parts.length < 2) return undefined;
+
+  try {
+    const payload = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const padded = payload.padEnd(Math.ceil(payload.length / 4) * 4, '=');
+    const parsed = JSON.parse(Buffer.from(padded, 'base64').toString('utf8')) as {
+      email?: string;
+      name?: string;
+      picture?: string;
+    };
+    return parsed;
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * Resolves the identity of the mailbox represented by the OAuth account row.
+ *
+ * Important: this must describe the connected provider account, not the Todus
+ * app user. Users can connect multiple Google/Microsoft mailboxes, so reading
+ * `mail0_user.email` here would incorrectly collapse those accounts together.
+ */
+const resolveAccountIdentity = async (
+  account: Account,
+): Promise<{ address: string; name: string; photo: string } | undefined> => {
+  if (account.providerId === 'google') {
+    const idTokenPayload = parseJwtPayload(account.idToken);
+    if (idTokenPayload?.email) {
+      return {
+        address: idTokenPayload.email,
+        name: idTokenPayload.name || 'Unknown',
+        photo: idTokenPayload.picture || '',
+      };
+    }
+
+    if (account.accessToken) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      try {
+        const res = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+          headers: { Authorization: `Bearer ${account.accessToken}` },
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+        if (res.ok) {
+          const data = (await res.json()) as {
+            email?: string;
+            name?: string;
+            picture?: string;
+          };
+          if (data.email) {
+            return {
+              address: data.email,
+              name: data.name || 'Unknown',
+              photo: data.picture || '',
+            };
+          }
+        } else {
+          const body = await res.text().catch(() => '');
+          console.error('[resolveAccountIdentity] Google OIDC userinfo non-OK', {
+            userId: account.userId,
+            status: res.status,
+            body: body.slice(0, 200),
+          });
+        }
+      } catch (error) {
+        clearTimeout(timeoutId);
+        console.error('[resolveAccountIdentity] Google OIDC userinfo fetch failed', {
+          userId: account.userId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    return undefined;
+  }
+
+  if (account.accessToken) {
+    try {
+      const driver = createDriver(account.providerId, {
+        auth: {
+          accessToken: account.accessToken,
+          refreshToken: account.refreshToken ?? '',
+          userId: account.userId,
+          email: '',
+        },
+      });
+      const userInfo = await driver.getUserInfo();
+      if (userInfo.address) {
+        return {
+          address: userInfo.address,
+          name: userInfo.name || 'Unknown',
+          photo: userInfo.photo || '',
+        };
+      }
+    } catch (error) {
+      console.error('[resolveAccountIdentity] driver getUserInfo failed', {
+        userId: account.userId,
+        provider: account.providerId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  return undefined;
+};
+
 const syncConnectionFromAccount = async (
   account: Account,
   options: { scheduleOnboardingCampaign: boolean },
@@ -187,53 +300,107 @@ const syncConnectionFromAccount = async (
   // and aborts the sign-in, leaving the user stuck on api.todus.app instead of
   // being redirected to `callbackURL` (web) or `todus://auth-callback` (native).
   // Connection errors are recoverable — the user can reconnect Gmail from settings.
-  if (!account.accessToken || !account.refreshToken) {
-    console.error('[syncConnectionFromAccount] Missing Access/Refresh Tokens', {
+  if (!account.accessToken) {
+    console.error('[syncConnectionFromAccount] Missing access token', {
       userId: account.userId,
       provider: account.providerId,
-      hasAccess: !!account.accessToken,
-      hasRefresh: !!account.refreshToken,
     });
     return;
   }
 
+  // Refresh tokens: Google only re-issues a refresh_token on initial consent
+  // or when `prompt=consent` forces re-consent. On silent re-auth (e.g. the
+  // user clicking a second OAuth flow for the same Google account) Google can
+  // omit the refresh_token, and Better Auth will persist `null` onto the
+  // account row. We fall back to:
+  //   1. The refresh_token stored on the existing account row (if any).
+  //   2. The refresh_token stored on the existing connection row (if any) —
+  //      still works even if Better Auth cleared the account row.
+  let resolvedRefreshToken: string | null = account.refreshToken ?? null;
+  if (!resolvedRefreshToken) {
+    try {
+      const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
+      try {
+        const [existingAccount] = await db
+          .select({ refreshToken: accountTable.refreshToken })
+          .from(accountTable)
+          .where(eq(accountTable.id, account.id))
+          .limit(1);
+        resolvedRefreshToken = existingAccount?.refreshToken ?? null;
+      } finally {
+        await conn.end();
+      }
+    } catch (error) {
+      console.error('[syncConnectionFromAccount] account refresh-token lookup failed', {
+        userId: account.userId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  const identity = await resolveAccountIdentity(account);
+  if (!identity?.address) {
+    console.error('[syncConnectionFromAccount] Could not resolve user email', {
+      userId: account.userId,
+      provider: account.providerId,
+    });
+    return;
+  }
+
+  // Preserve an existing connection's refresh_token if the current OAuth
+  // round-trip didn't re-issue one. This is the common "user re-authenticated
+  // without re-consent" path — without this, the stored refresh_token would
+  // get wiped out and subsequent API calls would fail with 401.
+  if (!resolvedRefreshToken) {
+    try {
+      const db = await getZeroDB(account.userId);
+      const existing = await db.findManyConnections();
+      const match = existing.find(
+        (c) => c.providerId === account.providerId && c.email === identity.address,
+      );
+      if (match?.refreshToken) {
+        resolvedRefreshToken = match.refreshToken;
+      }
+    } catch (error) {
+      console.error('[syncConnectionFromAccount] existing-connection refresh-token lookup failed', {
+        userId: account.userId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  if (!resolvedRefreshToken) {
+    console.error(
+      '[syncConnectionFromAccount] No refresh token available (neither account nor prior connection)',
+      {
+        userId: account.userId,
+        provider: account.providerId,
+      },
+    );
+    return;
+  }
+
+  // Keep the stored `scope` aligned with what the driver expects to use so
+  // downstream code can assume scope consistency. `getScope()` is constant.
   const driver = createDriver(account.providerId, {
     auth: {
       accessToken: account.accessToken,
-      refreshToken: account.refreshToken,
+      refreshToken: resolvedRefreshToken,
       userId: account.userId,
-      email: '',
+      email: identity.address,
     },
   });
 
-  let userInfo: Awaited<ReturnType<typeof driver.getUserInfo>> | undefined;
-  try {
-    userInfo = await driver.getUserInfo();
-  } catch (error) {
-    console.error('[syncConnectionFromAccount] getUserInfo failed', {
-      userId: account.userId,
-      provider: account.providerId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return;
-  }
-
-  if (!userInfo?.address) {
-    console.error('[syncConnectionFromAccount] Missing email address in user info', {
-      userId: account.userId,
-      provider: account.providerId,
-    });
-    return;
-  }
-
   const updatingInfo = {
-    name: userInfo.name || 'Unknown',
-    picture: userInfo.photo || '',
+    name: identity.name || 'Unknown',
+    picture: identity.photo || '',
     accessToken: account.accessToken,
-    refreshToken: account.refreshToken,
+    refreshToken: resolvedRefreshToken,
     scope: driver.getScope(),
-    expiresAt: new Date(Date.now() + (account.accessTokenExpiresAt?.getTime() || 3600000)),
+    expiresAt: account.accessTokenExpiresAt ?? new Date(Date.now() + 3600000),
   };
+  // `userInfo` kept for the downstream scheduleCampaign call signature.
+  const userInfo = { address: identity.address, name: identity.name, photo: identity.photo };
 
   let result: { id: string } | undefined;
   try {

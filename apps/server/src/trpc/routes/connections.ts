@@ -2,15 +2,85 @@ import { createRateLimiterMiddleware, privateProcedure, publicProcedure, router 
 import { getActiveConnection, getZeroDB } from '../../lib/server-utils';
 import { Ratelimit } from '@upstash/ratelimit';
 import { TRPCError } from '@trpc/server';
+import { createDb } from '../../db';
+import { env } from '../../env';
 import { z } from 'zod';
 
 /** Default color palette for multi-account visual differentiation */
-const CONNECTION_COLORS = ['#007AFF', '#34C759', '#FF9500', '#AF52DE', '#FF3B30', '#5AC8FA', '#A2845E', '#FF2D55'];
+const CONNECTION_COLORS = [
+  '#007AFF',
+  '#34C759',
+  '#FF9500',
+  '#AF52DE',
+  '#FF3B30',
+  '#5AC8FA',
+  '#A2845E',
+  '#FF2D55',
+];
 const deriveConnectionColor = (connection: { id: string; color: string | null }) => {
   if (connection.color) return connection.color;
   const hash = Array.from(connection.id).reduce((total, char) => total + char.charCodeAt(0), 0);
   return CONNECTION_COLORS[hash % CONNECTION_COLORS.length];
 };
+
+type LegacyConnectionRow = {
+  id: string;
+  userId: string;
+  email: string;
+  name: string | null;
+  picture: string | null;
+  accessToken: string | null;
+  refreshToken: string | null;
+  scope: string;
+  providerId: 'google' | 'microsoft';
+  color: string | null;
+  expiresAt: Date;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+const isMissingConnectionColorError = (error: unknown) =>
+  error instanceof Error && error.message.includes('column "color" does not exist');
+
+async function loadConnectionsWithFallback(userId: string): Promise<LegacyConnectionRow[]> {
+  const db = await getZeroDB(userId);
+  try {
+    return await db.findManyConnections();
+  } catch (error) {
+    if (!isMissingConnectionColorError(error)) {
+      throw error;
+    }
+
+    console.warn(
+      '[connections.list] Falling back to legacy connection query because mail0_connection.color is missing',
+    );
+
+    const { conn } = createDb(env.HYPERDRIVE.connectionString);
+    try {
+      return await conn<LegacyConnectionRow[]>`
+        select
+          id,
+          user_id as "userId",
+          email,
+          name,
+          picture,
+          access_token as "accessToken",
+          refresh_token as "refreshToken",
+          scope,
+          provider_id as "providerId",
+          null::text as "color",
+          expires_at as "expiresAt",
+          created_at as "createdAt",
+          updated_at as "updatedAt"
+        from mail0_connection
+        where user_id = ${userId}
+        order by updated_at desc, created_at desc
+      `;
+    } finally {
+      await conn.end();
+    }
+  }
+}
 
 export const connectionsRouter = router({
   list: privateProcedure
@@ -22,8 +92,7 @@ export const connectionsRouter = router({
     )
     .query(async ({ ctx }) => {
       const { sessionUser } = ctx;
-      const db = await getZeroDB(sessionUser.id);
-      const connections = await db.findManyConnections();
+      const connections = await loadConnectionsWithFallback(sessionUser.id);
 
       const disconnectedIds = connections
         .filter((c) => !c.accessToken || !c.refreshToken)

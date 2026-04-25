@@ -12,8 +12,20 @@ import { env } from '../env';
 import type { HonoContext } from '../ctx';
 import { Hono } from 'hono';
 import { z } from 'zod';
+import { serializedFileSchema } from '../lib/schemas';
 
 type ToolsReturnType = Awaited<ReturnType<typeof tools>>;
+
+/** Constant-time string comparison. Prevents timing attacks against secret
+ *  comparisons (e.g. `===` short-circuits on first mismatched character). */
+function timingSafeEqual(a: string | undefined, b: string | undefined): boolean {
+  if (!a || !b || a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return diff === 0;
+}
 
 export const aiRouter = new Hono<HonoContext>();
 
@@ -193,13 +205,169 @@ ${searchText}`;
 // The iOS app sends the same payload format as the old Supabase edge function.
 // ─────────────────────────────────────────────────────────────────────────────
 
+const toolCallSchema = z.object({
+  id: z.string(),
+  type: z.literal('function').optional(),
+  function: z.object({
+    name: z.string(),
+    arguments: z.string(),
+  }),
+});
+
+// Allow assistant messages with tool_calls and tool role messages with tool_call_id.
+// content is optional for assistant-with-tool-calls, string for user/system/tool.
+const chatMessageSchema = z
+  .object({
+    role: z.string(),
+    content: z.union([z.string(), z.null()]).optional(),
+    tool_calls: z.array(toolCallSchema).optional(),
+    tool_call_id: z.string().optional(),
+    name: z.string().optional(),
+  })
+  .passthrough();
+
 const chatRequestSchema = z.object({
-  messages: z.array(z.object({ role: z.string(), content: z.string() })),
+  messages: z.array(chatMessageSchema),
   mentions: z.array(mentionRefSchema).optional(),
   tasks: z.array(z.any()).optional(),
   model: z.string().optional(),
   stream: z.boolean().optional().default(true),
+  /** Base64-encoded files from the client; merged into the last user message for the model */
+  attachments: z.array(serializedFileSchema).optional(),
 });
+
+const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
+const MAX_TOTAL_ATTACHMENT_BYTES = 12 * 1024 * 1024;
+
+type OpenAIContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } };
+
+function isTextLikeMime(mime: string, filename: string): boolean {
+  const m = mime.toLowerCase();
+  if (m.startsWith('text/')) return true;
+  if (
+    m === 'application/json' ||
+    m === 'application/xml' ||
+    m === 'application/javascript' ||
+    m === 'application/x-sh' ||
+    m === 'application/sql' ||
+    m === 'application/yaml' ||
+    m === 'application/x-yaml'
+  ) {
+    return true;
+  }
+  const ext = filename.includes('.') ? (filename.split('.').pop() ?? '').toLowerCase() : '';
+  return [
+    'txt',
+    'md',
+    'markdown',
+    'csv',
+    'log',
+    'json',
+    'xml',
+    'yaml',
+    'yml',
+    'swift',
+    'ts',
+    'tsx',
+    'js',
+    'jsx',
+    'mjs',
+    'cjs',
+    'html',
+    'htm',
+    'css',
+    'scss',
+    'sass',
+    'less',
+    'sql',
+    'sh',
+    'bash',
+    'zsh',
+    'env',
+    'toml',
+    'ini',
+    'cfg',
+    'conf',
+    'properties',
+    'plist',
+    'rss',
+    'svg',
+  ].includes(ext);
+}
+
+/** Merge chat file attachments into the last user message (OpenAI multimodal + text inlining). */
+function mergeAttachmentsIntoLastUserMessage(
+  messages: Record<string, unknown>[],
+  attachments: z.infer<typeof serializedFileSchema>[] | undefined,
+): Record<string, unknown>[] {
+  if (!attachments?.length) return messages;
+
+  let totalBytes = 0;
+  const filtered: { att: z.infer<typeof serializedFileSchema>; buf: Buffer }[] = [];
+  for (const att of attachments) {
+    const buf = Buffer.from(att.base64, 'base64');
+    if (buf.length > MAX_ATTACHMENT_BYTES) continue;
+    if (totalBytes + buf.length > MAX_TOTAL_ATTACHMENT_BYTES) break;
+    totalBytes += buf.length;
+    filtered.push({ att, buf });
+  }
+  if (!filtered.length) return messages;
+
+  const lastUserIdx = messages.map((m) => m.role).lastIndexOf('user');
+  if (lastUserIdx === -1) return messages;
+
+  const userMsg = messages[lastUserIdx];
+  const rawContent = userMsg.content;
+
+  const parts: OpenAIContentPart[] = [];
+  if (typeof rawContent === 'string') {
+    if (rawContent.trim().length) {
+      parts.push({ type: 'text', text: rawContent });
+    }
+  } else if (Array.isArray(rawContent)) {
+    for (const part of rawContent as OpenAIContentPart[]) {
+      parts.push(part);
+    }
+  }
+
+  for (const { att, buf } of filtered) {
+    const mime = (att.type || 'application/octet-stream').toLowerCase();
+
+    if (mime.startsWith('image/')) {
+      parts.push({
+        type: 'image_url',
+        image_url: { url: `data:${mime};base64,${att.base64}` },
+      });
+    } else if (isTextLikeMime(mime, att.name)) {
+      const text = buf.toString('utf8');
+      const capped = text.length > 400_000 ? `${text.slice(0, 400_000)}\n…(truncated)` : text;
+      parts.push({
+        type: 'text',
+        text: `\n\n---\nFile: ${att.name}\n---\n${capped}\n`,
+      });
+    } else {
+      parts.push({
+        type: 'text',
+        text: `\n\n[Attached file: ${att.name} (${mime}, ${buf.length} bytes). This file is not fully inlined; use the user's message and filename for context.]\n`,
+      });
+    }
+  }
+
+  if (parts.length === 0) return messages;
+
+  const hasImage = parts.some((p) => p.type === 'image_url');
+  if (!hasImage && parts.length === 1 && parts[0].type === 'text') {
+    const out = [...messages];
+    out[lastUserIdx] = { ...userMsg, content: parts[0].text };
+    return out;
+  }
+
+  const out = [...messages];
+  out[lastUserIdx] = { ...userMsg, content: parts };
+  return out;
+}
 
 aiRouter.post('/chat', async (c) => {
   const user = c.var.sessionUser;
@@ -243,15 +411,29 @@ aiRouter.post('/chat', async (c) => {
     }
   }
 
-  enrichedMessages = injectMentionContextIntoMessages(enrichedMessages, parsed.data.mentions);
+  // Detect follow-up step: the client appends `tool` role messages (and optionally
+  // an `assistant_with_tool_calls` message) after executing tools, then re-calls
+  // /api/ai/chat to get a natural-language reply. On follow-up steps we MUST skip:
+  //   - Web search   (already injected on step 1; would otherwise burn credits)
+  //   - Mention injection  (already injected on step 1; would otherwise duplicate the block)
+  //   - Attachment merge   (already inlined on step 1; would otherwise re-send images)
+  // Detection: the last message is a `tool` role, OR any message has tool_calls/tool_call_id.
+  const lastMsg = parsed.data.messages[parsed.data.messages.length - 1];
+  const isFollowUpStep =
+    lastMsg?.role === 'tool' ||
+    parsed.data.messages.some((m) => m.role === 'tool' || (m as any).tool_calls);
+
+  if (!isFollowUpStep) {
+    enrichedMessages = injectMentionContextIntoMessages(enrichedMessages as any, parsed.data.mentions);
+  }
 
   // ── Web Search: detect, search, inject sources ──────────────────────────
   // Check if the user's last message would benefit from current web information.
   // If so, call Perplexity sonar and inject results + citation instructions.
   const rawLastUserMsg = parsed.data.messages.filter((m) => m.role === 'user').pop();
   const lastUserMsg = enrichedMessages.filter((m) => m.role === 'user').pop();
-  const searchQuery = rawLastUserMsg?.content;
-  const needsSearch = searchQuery ? shouldSearchWeb(searchQuery) : false;
+  const searchQuery = typeof rawLastUserMsg?.content === 'string' ? rawLastUserMsg.content : '';
+  const needsSearch = !isFollowUpStep && searchQuery ? shouldSearchWeb(searchQuery) : false;
   let searchSources: WebSearchSource[] = [];
 
   if (needsSearch && searchQuery) {
@@ -259,7 +441,7 @@ aiRouter.post('/chat', async (c) => {
       const searchResult = await performWebSearch(searchQuery, env);
       searchSources = searchResult.sources;
       if (searchSources.length > 0) {
-        enrichedMessages = injectSearchContext(enrichedMessages, searchResult.text, searchSources);
+        enrichedMessages = injectSearchContext(enrichedMessages as any, searchResult.text, searchSources);
       }
     } catch (error) {
       // Web search failure must never block the AI flow — proceed without sources
@@ -284,6 +466,15 @@ aiRouter.post('/chat', async (c) => {
     }
   } catch (error) {
     console.warn('[AIProfile] Failed to inject AI profile into /ai/chat for user:', user.id, error);
+  }
+
+  // Skip attachment merge on follow-up steps — they were already inlined on step 1
+  // and re-merging would duplicate images/text inside an already-multimodal user message.
+  if (!isFollowUpStep) {
+    enrichedMessages = mergeAttachmentsIntoLastUserMessage(
+      enrichedMessages as Record<string, unknown>[],
+      parsed.data.attachments,
+    ) as typeof parsed.data.messages;
   }
 
   // Respect the `stream` flag from the request — non-streaming mode is used by
@@ -377,6 +568,38 @@ aiRouter.post('/chat', async (c) => {
             },
           },
         },
+        {
+          type: 'function',
+          function: {
+            name: 'update_calendar_event',
+            description: 'Update an existing calendar event. Use the event identifier from the calendar context.',
+            parameters: {
+              type: 'object',
+              properties: {
+                id: { type: 'string', description: 'Event identifier' },
+                title: { type: 'string' },
+                startDate: { type: 'string', description: 'ISO 8601 start datetime' },
+                endDate: { type: 'string', description: 'ISO 8601 end datetime' },
+                notes: { type: 'string' },
+              },
+              required: ['id'],
+            },
+          },
+        },
+        {
+          type: 'function',
+          function: {
+            name: 'delete_calendar_event',
+            description: 'Delete a calendar event by its identifier',
+            parameters: {
+              type: 'object',
+              properties: {
+                id: { type: 'string', description: 'Event identifier to delete' },
+              },
+              required: ['id'],
+            },
+          },
+        },
         // ── Email ──────────────────────────────────────────────────────────────
         {
           type: 'function',
@@ -421,7 +644,7 @@ aiRouter.post('/chat', async (c) => {
     if (!mem0Key || !userId || !mem0LastUserMsg || assistantContent.length <= 10) return;
 
     await addMemories(mem0Key, userId, [
-      { role: 'user', content: mem0LastUserMsg.content },
+      { role: 'user', content: typeof mem0LastUserMsg.content === 'string' ? mem0LastUserMsg.content : '' },
       { role: 'assistant', content: assistantContent },
     ]);
     await invalidateMemoryCache(userId, env.prompts_storage);
@@ -452,7 +675,9 @@ aiRouter.post('/chat', async (c) => {
   const responseStream = new ReadableStream({
     async start(controller) {
       try {
-        // 1. Write web search custom events before the LLM answer
+        // 1. Write web search custom events before the LLM answer.
+        //    Already gated by needsSearch (which is false on follow-up steps),
+        //    so this block won't fire on round-2+ tool-result replays.
         if (needsSearch && searchQuery) {
           controller.enqueue(
             encoder.encode(`data: ${JSON.stringify({ type: 'search_status', status: 'searching', queries: [searchQuery] })}\n\n`),
@@ -559,6 +784,36 @@ aiRouter.post('/chat', async (c) => {
 // the payload, so all Gemini wire-protocol logic stays in the iOS provider.
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Diagnostic endpoint — checks if Gemini Live is reachable without requiring a WS upgrade.
+// Useful for confirming the API key and BidiGenerateContent endpoint are working.
+aiRouter.get('/voice-ping', async (c) => {
+  const user = c.var.sessionUser;
+  if (!user) return c.json({ ok: false, error: 'Unauthorized' }, 401);
+
+  const apiKey = env.GOOGLE_GENERATIVE_AI_API_KEY;
+  if (!apiKey) return c.json({ ok: false, error: 'GOOGLE_GENERATIVE_AI_API_KEY not set' }, 503);
+
+  // Use https:// — Cloudflare Workers outbound WebSocket requires https/http scheme.
+  const geminiUrl =
+    `https://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${apiKey}`;
+
+  try {
+    const resp = await fetch(geminiUrl, { headers: { Upgrade: 'websocket' } });
+    if (resp.webSocket) {
+      resp.webSocket.accept();
+      resp.webSocket.close(1000, 'ping');
+      return c.json({ ok: true, status: 101 });
+    }
+    const body = await resp.text().catch(() => '');
+    console.error('[voice-ping] Gemini returned non-WS response', { status: resp.status, body });
+    return c.json({ ok: false, status: resp.status, body }, 502);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[voice-ping] fetch error', msg);
+    return c.json({ ok: false, error: msg }, 502);
+  }
+});
+
 aiRouter.get('/voice-ws', async (c) => {
   const user = c.var.sessionUser;
   if (!user) return c.json({ error: 'Unauthorized' }, 401);
@@ -592,9 +847,10 @@ aiRouter.get('/voice-ws', async (c) => {
     }
   });
 
-  // Connect to Gemini Live with the server-side API key (never exposed to clients)
+  // Connect to Gemini Live with the server-side API key (never exposed to clients).
+  // Use https:// scheme — Cloudflare Workers outbound WebSocket requires https/http.
   const geminiUrl =
-    `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${apiKey}`;
+    `https://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${apiKey}`;
 
   try {
     const upstreamResp = await fetch(geminiUrl, {
@@ -602,11 +858,23 @@ aiRouter.get('/voice-ws', async (c) => {
     });
     const upstream = upstreamResp.webSocket;
     if (!upstream) {
-      serverWs.close(1011, 'Failed to connect to voice service');
-      return new Response('Upstream WebSocket connection failed', { status: 502 });
+      const body = await upstreamResp.text().catch(() => '');
+      console.error('[voice-ws] Gemini rejected WS upgrade', {
+        status: upstreamResp.status,
+        body,
+        userId: user.id,
+      });
+      serverWs.close(1011, `Gemini error ${upstreamResp.status}`);
+      return new Response(`Voice service error: Gemini returned ${upstreamResp.status} — ${body}`, { status: 502 });
     }
     upstream.accept();
     upstreamRef = upstream;
+
+    // Set up Gemini→client forwarding BEFORE flushing early messages so we
+    // don't miss any immediate responses (e.g. error on bad model in setup).
+    upstream.addEventListener('message', (event) => {
+      try { serverWs.send(event.data); } catch { /* client already closed */ }
+    });
 
     // Flush any messages that arrived while we were connecting to Gemini
     for (const msg of earlyMessages) {
@@ -615,30 +883,31 @@ aiRouter.get('/voice-ws', async (c) => {
     earlyMessages.length = 0;
     upstreamReady = true;
 
-    // Bidirectional transparent forwarding — proxy does not inspect payloads.
-    // Client→Gemini is handled by the early-buffering handler attached above.
-    upstream.addEventListener('message', (event) => {
-      try { serverWs.send(event.data); } catch { /* client already closed */ }
-    });
-
-    // Propagate close events in both directions
+    // Propagate close events in both directions. Empty catches are intentional:
+    // close() throws if the other side is already closed, which is the common
+    // race during teardown — nothing to do but proceed.
     serverWs.addEventListener('close', (event) => {
-      try { upstream.close(event.code, event.reason || ''); } catch {}
+      try { upstream.close(event.code, event.reason || ''); } catch { /* already closed */ }
     });
     upstream.addEventListener('close', (event) => {
-      try { serverWs.close(event.code, event.reason || ''); } catch {}
+      try { serverWs.close(event.code, event.reason || ''); } catch { /* already closed */ }
     });
 
-    // Handle errors by tearing down the other side
-    serverWs.addEventListener('error', () => {
-      try { upstream.close(1011, 'Client error'); } catch {}
+    // Handle errors by tearing down the other side. Log so we can diagnose;
+    // the close() catch stays empty because by this point teardown is best-effort.
+    serverWs.addEventListener('error', (event) => {
+      console.error('[voice-ws] client error', { userId: user.id, event: String((event as ErrorEvent).message ?? '') });
+      try { upstream.close(1011, 'Client error'); } catch { /* already closed */ }
     });
-    upstream.addEventListener('error', () => {
-      try { serverWs.close(1011, 'Upstream error'); } catch {}
+    upstream.addEventListener('error', (event) => {
+      console.error('[voice-ws] upstream error', { userId: user.id, event: String((event as ErrorEvent).message ?? '') });
+      try { serverWs.close(1011, 'Upstream error'); } catch { /* already closed */ }
     });
-  } catch {
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[voice-ws] Failed to connect to Gemini', { error: msg, userId: user.id });
     serverWs.close(1011, 'Failed to connect to voice service');
-    return new Response('Upstream WebSocket connection failed', { status: 502 });
+    return new Response(`Voice service error: ${msg}`, { status: 502 });
   }
 
   // Return the 101 Switching Protocols response with the client-side WebSocket
@@ -665,12 +934,11 @@ aiRouter.use('/do/*', async (c, next) => {
 });
 
 aiRouter.post('/do/:action', async (c) => {
-  //   if (env.DISABLE_CALLS) return c.json({ success: false, error: 'Not implemented' }, 400);
   let user = c.var.sessionUser;
 
   // Fallback to voice secret + caller ID ONLY if no valid session exists (e.g. Twilio webhook)
   if (!user) {
-    if (env.VOICE_SECRET !== c.req.header('X-Voice-Secret')) {
+    if (!timingSafeEqual(env.VOICE_SECRET, c.req.header('X-Voice-Secret'))) {
       return c.json({ success: false, error: 'Unauthorized' }, 401);
     }
     const caller = c.req.header('X-Caller');
@@ -698,7 +966,6 @@ aiRouter.post('/do/:action', async (c) => {
   try {
     const action = c.req.param('action') as keyof ToolsReturnType;
     const body = await c.req.json();
-    console.log('[DEBUG] action', action, body);
 
     // Get all tools for this connection
     const toolset: ToolsReturnType = await tools(connection.id, action === Tools.InboxRag);
@@ -720,24 +987,18 @@ aiRouter.post('/do/:action', async (c) => {
 });
 
 aiRouter.post('/call', async (c) => {
-  console.log('[DEBUG] Received call request');
-
   if (env.DISABLE_CALLS) {
-    console.log('[DEBUG] Calls are disabled');
     return c.json({ success: false, error: 'Not implemented' }, 400);
   }
 
-  if (env.VOICE_SECRET !== c.req.header('X-Voice-Secret')) {
-    console.log('[DEBUG] Invalid voice secret');
+  if (!timingSafeEqual(env.VOICE_SECRET, c.req.header('X-Voice-Secret'))) {
     return c.json({ success: false, error: 'Unauthorized' }, 401);
   }
 
   if (!c.req.header('X-Caller')) {
-    console.log('[DEBUG] Missing caller header');
     return c.json({ success: false, error: 'Unauthorized' }, 401);
   }
 
-  console.log('[DEBUG] Parsing request body');
   const { success, data } = await z
     .object({
       query: z.string(),
@@ -745,25 +1006,20 @@ aiRouter.post('/call', async (c) => {
     .safeParseAsync(await c.req.json());
 
   if (!success) {
-    console.log('[DEBUG] Invalid request body');
     return c.json({ success: false, error: 'Invalid request' }, 400);
   }
 
-  console.log('[DEBUG] Connecting to database');
   const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
 
-  console.log('[DEBUG] Finding user by phone number:', c.req.header('X-Caller'));
   const user = await db.query.user.findFirst({
     where: (user, { eq, and }) =>
       and(eq(user.phoneNumber, c.req.header('X-Caller')!), eq(user.phoneNumberVerified, true)),
   });
 
   if (!user) {
-    console.log('[DEBUG] User not found or not verified');
     return c.json({ success: false, error: 'Unauthorized' }, 401);
   }
 
-  console.log('[DEBUG] Finding connection for user:', user.id);
   const connection = await db.query.connection.findFirst({
     where: (connection, { eq, or }) =>
       or(eq(connection.id, user.defaultConnectionId!), eq(connection.userId, user.id)),
@@ -772,11 +1028,9 @@ aiRouter.post('/call', async (c) => {
   await conn.end();
 
   if (!connection) {
-    console.log('[DEBUG] No connection found for user');
     return c.json({ success: false, error: 'Unauthorized' }, 401);
   }
 
-  console.log('[DEBUG] Creating toolset for connection:', connection.id);
   const toolset = await tools(connection.id);
   const { text } = await generateText({
     model: resolveModel({ provider: 'auto', modelId: '', ollamaBaseUrl: '', env }),

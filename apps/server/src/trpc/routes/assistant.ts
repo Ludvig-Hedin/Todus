@@ -1,4 +1,3 @@
-import { activeConnectionProcedure, privateProcedure, router } from '../trpc';
 import {
   assistantBriefingSnapshot,
   assistantFeedback,
@@ -9,14 +8,20 @@ import {
   meeting,
   task,
 } from '../../db/schema';
-import { createDb } from '../../db';
-import { getActiveConnection, getThread, getThreadsFromDB, getZeroAgent } from '../../lib/server-utils';
-import { composeEmail } from './ai/compose';
-import { env } from '../../env';
-import { OAuth2Client } from 'google-auth-library';
-import { TRPCError } from '@trpc/server';
+import {
+  getActiveConnection,
+  getThread,
+  getThreadsFromDB,
+  getZeroAgent,
+} from '../../lib/server-utils';
+import { activeConnectionProcedure, privateProcedure, router } from '../trpc';
 import { and, desc, eq, inArray, lte } from 'drizzle-orm';
+import { OAuth2Client } from 'google-auth-library';
 import { stripHtml } from 'string-strip-html';
+import { composeEmail } from './ai/compose';
+import { TRPCError } from '@trpc/server';
+import { createDb } from '../../db';
+import { env } from '../../env';
 import { z } from 'zod';
 
 const assistantLoopTypeSchema = z.enum([
@@ -45,12 +50,7 @@ const assistantPreparedActionTypeSchema = z.enum([
   'follow_up',
   'research',
 ]);
-const assistantPreparedActionStatusSchema = z.enum([
-  'pending',
-  'approved',
-  'applied',
-  'dismissed',
-]);
+const assistantPreparedActionStatusSchema = z.enum(['pending', 'approved', 'applied', 'dismissed']);
 const assistantRiskSchema = z.enum(['low', 'medium', 'high']);
 
 const assistantEvidenceSchema = z.object({
@@ -351,7 +351,10 @@ function extractActionItems(text: string, subject: string, senderName: string) {
     .split(/[\n•\-]+|(?<=[.!?])\s+/)
     .map((line) => line.trim())
     .filter(Boolean)
-    .filter((line) => REPLY_KEYWORDS.test(line) || MEETING_KEYWORDS.test(line) || URGENT_KEYWORDS.test(line));
+    .filter(
+      (line) =>
+        REPLY_KEYWORDS.test(line) || MEETING_KEYWORDS.test(line) || URGENT_KEYWORDS.test(line),
+    );
 
   const cleaned = unique(
     candidates.map((line) =>
@@ -411,7 +414,11 @@ function extractEventSuggestion(subject: string, text: string, baseDate: Date) {
   };
 }
 
-function createResearchQueries(subject: string, senderEmail: string | undefined, latestText: string) {
+function createResearchQueries(
+  subject: string,
+  senderEmail: string | undefined,
+  latestText: string,
+) {
   const queries = [subject].filter(Boolean);
   if (senderEmail) {
     const [, domain] = senderEmail.split('@');
@@ -428,11 +435,13 @@ function normalizeSubject(subject: string) {
 }
 
 function normalizeWorkstreamKey(subject: string) {
-  return normalizeSubject(subject)
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 80) || 'general';
+  return (
+    normalizeSubject(subject)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 80) || 'general'
+  );
 }
 
 function companyFromEmail(email?: string | null) {
@@ -456,7 +465,10 @@ function asEvidenceArray(value: unknown): z.infer<typeof assistantEvidenceSchema
   if (!Array.isArray(value)) return [];
   return value
     .map((entry) => assistantEvidenceSchema.safeParse(entry))
-    .filter((entry): entry is { success: true; data: z.infer<typeof assistantEvidenceSchema> } => entry.success)
+    .filter(
+      (entry): entry is { success: true; data: z.infer<typeof assistantEvidenceSchema> } =>
+        entry.success,
+    )
     .map((entry) => entry.data);
 }
 
@@ -544,14 +556,20 @@ function buildRelationshipSummary(displayName: string, subject: string, unresolv
   return `${displayName || 'This person'} appears in your recent communication about ${normalizeSubject(subject) || 'ongoing work'}.`;
 }
 
-async function findRelatedMeetings(db: DbHandle, userId: string, subject: string, senderEmail?: string) {
+async function findRelatedMeetings(
+  db: DbHandle,
+  userId: string,
+  subject: string,
+  senderEmail?: string,
+) {
   const recentMeetings = await getRecentMeetings(db, userId);
   const normalizedSubject = normalizeSubject(subject).toLowerCase();
   return recentMeetings.filter((item) => {
     const title = item.title.toLowerCase();
     const participantText = JSON.stringify(item.participants ?? []).toLowerCase();
     return (
-      (normalizedSubject && title.includes(normalizedSubject.slice(0, Math.min(normalizedSubject.length, 24)))) ||
+      (normalizedSubject &&
+        title.includes(normalizedSubject.slice(0, Math.min(normalizedSubject.length, 24)))) ||
       (!!senderEmail && participantText.includes(senderEmail.toLowerCase()))
     );
   });
@@ -575,7 +593,12 @@ async function upsertPersonMemory(
   const existing = await db
     .select()
     .from(assistantPersonMemory)
-    .where(and(eq(assistantPersonMemory.userId, input.userId), eq(assistantPersonMemory.email, input.email)))
+    .where(
+      and(
+        eq(assistantPersonMemory.userId, input.userId),
+        eq(assistantPersonMemory.email, input.email),
+      ),
+    )
     .limit(1);
 
   const relationshipSummary = buildRelationshipSummary(
@@ -591,19 +614,37 @@ async function upsertPersonMemory(
     displayName: input.displayName || input.email,
     company: companyFromEmail(input.email),
     relationshipSummary,
-    unresolvedAsks: unique([...(existing[0] ? asStringArray(existing[0].unresolvedAsks) : []), ...input.unresolvedAsks]).slice(0, 8),
-    promises: unique([...(existing[0] ? asStringArray(existing[0].promises) : []), ...input.promises]).slice(0, 8),
+    unresolvedAsks: unique([
+      ...(existing[0] ? asStringArray(existing[0].unresolvedAsks) : []),
+      ...input.unresolvedAsks,
+    ]).slice(0, 8),
+    promises: unique([
+      ...(existing[0] ? asStringArray(existing[0].promises) : []),
+      ...input.promises,
+    ]).slice(0, 8),
     preferredFollowUpCadenceDays: existing[0]?.preferredFollowUpCadenceDays ?? 3,
-    recentThreadIds: unique([...(existing[0] ? asStringArray(existing[0].recentThreadIds) : []), ...input.recentThreadIds]).slice(0, 8),
-    recentMeetingIds: unique([...(existing[0] ? asStringArray(existing[0].recentMeetingIds) : []), ...input.recentMeetingIds]).slice(0, 8),
-    recentTaskIds: unique([...(existing[0] ? asStringArray(existing[0].recentTaskIds) : []), ...input.recentTaskIds]).slice(0, 8),
+    recentThreadIds: unique([
+      ...(existing[0] ? asStringArray(existing[0].recentThreadIds) : []),
+      ...input.recentThreadIds,
+    ]).slice(0, 8),
+    recentMeetingIds: unique([
+      ...(existing[0] ? asStringArray(existing[0].recentMeetingIds) : []),
+      ...input.recentMeetingIds,
+    ]).slice(0, 8),
+    recentTaskIds: unique([
+      ...(existing[0] ? asStringArray(existing[0].recentTaskIds) : []),
+      ...input.recentTaskIds,
+    ]).slice(0, 8),
     lastInteractionAt: input.lastInteractionAt ?? existing[0]?.lastInteractionAt ?? null,
     createdAt: existing[0]?.createdAt ?? new Date(),
     updatedAt: new Date(),
   };
 
   if (existing[0]) {
-    await db.update(assistantPersonMemory).set(values).where(eq(assistantPersonMemory.id, existing[0].id));
+    await db
+      .update(assistantPersonMemory)
+      .set(values)
+      .where(eq(assistantPersonMemory.id, existing[0].id));
   } else {
     await db.insert(assistantPersonMemory).values(values);
   }
@@ -630,7 +671,12 @@ async function upsertWorkstreamMemory(
   const existing = await db
     .select()
     .from(assistantWorkstreamMemory)
-    .where(and(eq(assistantWorkstreamMemory.userId, input.userId), eq(assistantWorkstreamMemory.key, input.key)))
+    .where(
+      and(
+        eq(assistantWorkstreamMemory.userId, input.userId),
+        eq(assistantWorkstreamMemory.key, input.key),
+      ),
+    )
     .limit(1);
 
   const values = {
@@ -640,19 +686,40 @@ async function upsertWorkstreamMemory(
     title: input.title,
     summary: input.summary,
     status: existing[0]?.status ?? 'active',
-    pendingDecisions: unique([...(existing[0] ? asStringArray(existing[0].pendingDecisions) : []), ...input.pendingDecisions]).slice(0, 8),
-    risks: unique([...(existing[0] ? asStringArray(existing[0].risks) : []), ...input.risks]).slice(0, 8),
-    relatedPeople: unique([...(existing[0] ? asStringArray(existing[0].relatedPeople) : []), ...input.relatedPeople]).slice(0, 8),
-    relatedThreadIds: unique([...(existing[0] ? asStringArray(existing[0].relatedThreadIds) : []), ...input.relatedThreadIds]).slice(0, 8),
-    relatedMeetingIds: unique([...(existing[0] ? asStringArray(existing[0].relatedMeetingIds) : []), ...input.relatedMeetingIds]).slice(0, 8),
-    relatedTaskIds: unique([...(existing[0] ? asStringArray(existing[0].relatedTaskIds) : []), ...input.relatedTaskIds]).slice(0, 8),
+    pendingDecisions: unique([
+      ...(existing[0] ? asStringArray(existing[0].pendingDecisions) : []),
+      ...input.pendingDecisions,
+    ]).slice(0, 8),
+    risks: unique([...(existing[0] ? asStringArray(existing[0].risks) : []), ...input.risks]).slice(
+      0,
+      8,
+    ),
+    relatedPeople: unique([
+      ...(existing[0] ? asStringArray(existing[0].relatedPeople) : []),
+      ...input.relatedPeople,
+    ]).slice(0, 8),
+    relatedThreadIds: unique([
+      ...(existing[0] ? asStringArray(existing[0].relatedThreadIds) : []),
+      ...input.relatedThreadIds,
+    ]).slice(0, 8),
+    relatedMeetingIds: unique([
+      ...(existing[0] ? asStringArray(existing[0].relatedMeetingIds) : []),
+      ...input.relatedMeetingIds,
+    ]).slice(0, 8),
+    relatedTaskIds: unique([
+      ...(existing[0] ? asStringArray(existing[0].relatedTaskIds) : []),
+      ...input.relatedTaskIds,
+    ]).slice(0, 8),
     nextMilestone: input.nextMilestone,
     createdAt: existing[0]?.createdAt ?? new Date(),
     updatedAt: new Date(),
   };
 
   if (existing[0]) {
-    await db.update(assistantWorkstreamMemory).set(values).where(eq(assistantWorkstreamMemory.id, existing[0].id));
+    await db
+      .update(assistantWorkstreamMemory)
+      .set(values)
+      .where(eq(assistantWorkstreamMemory.id, existing[0].id));
   } else {
     await db.insert(assistantWorkstreamMemory).values(values);
   }
@@ -752,7 +819,10 @@ async function syncOpenLoops(
     };
 
     if (current) {
-      await db.update(assistantOpenLoop).set(nextValues).where(eq(assistantOpenLoop.id, current.id));
+      await db
+        .update(assistantOpenLoop)
+        .set(nextValues)
+        .where(eq(assistantOpenLoop.id, current.id));
     } else {
       await db.insert(assistantOpenLoop).values(nextValues);
     }
@@ -762,7 +832,9 @@ async function syncOpenLoops(
     const obsolete = await db
       .select()
       .from(assistantOpenLoop)
-      .where(and(eq(assistantOpenLoop.userId, userId), eq(assistantOpenLoop.sourceThreadId, threadId)));
+      .where(
+        and(eq(assistantOpenLoop.userId, userId), eq(assistantOpenLoop.sourceThreadId, threadId)),
+      );
     const currentKeys = new Set(candidates.map((candidate) => candidate.uniqueKey));
     for (const row of obsolete) {
       if (!currentKeys.has(row.uniqueKey) && row.status === 'open') {
@@ -822,7 +894,10 @@ async function syncPreparedActions(
     };
 
     if (current) {
-      await db.update(assistantPreparedAction).set(nextValues).where(eq(assistantPreparedAction.id, current.id));
+      await db
+        .update(assistantPreparedAction)
+        .set(nextValues)
+        .where(eq(assistantPreparedAction.id, current.id));
     } else {
       await db.insert(assistantPreparedAction).values(nextValues);
     }
@@ -833,7 +908,10 @@ async function syncPreparedActions(
       .select()
       .from(assistantPreparedAction)
       .where(
-        and(eq(assistantPreparedAction.userId, userId), eq(assistantPreparedAction.sourceThreadId, threadId)),
+        and(
+          eq(assistantPreparedAction.userId, userId),
+          eq(assistantPreparedAction.sourceThreadId, threadId),
+        ),
       );
     const currentKeys = new Set(candidates.map((candidate) => candidate.uniqueKey));
     for (const row of obsolete) {
@@ -869,7 +947,8 @@ async function buildThreadAnalysis(
   const meetingRequested = MEETING_KEYWORDS.test(`${subject} ${latestText}`);
   const urgent = URGENT_KEYWORDS.test(`${subject} ${latestText}`);
   const automated =
-    AUTOMATED_KEYWORDS.test(`${subject} ${latestText}`) || AUTOMATED_KEYWORDS.test(senderEmail ?? '');
+    AUTOMATED_KEYWORDS.test(`${subject} ${latestText}`) ||
+    AUTOMATED_KEYWORDS.test(senderEmail ?? '');
   const latestFromUser =
     (latest?.sender?.email || '').toLowerCase() === activeConnection.email.toLowerCase();
   const replyNeeded =
@@ -889,7 +968,12 @@ async function buildThreadAnalysis(
           : 0.62;
   const confidence = Math.min(
     0.99,
-    Math.max(0.25, baseConfidence + (relatedTasks.length > 0 ? 0.04 : 0) + (relatedMeetings.length > 0 ? 0.03 : 0)),
+    Math.max(
+      0.25,
+      baseConfidence +
+        (relatedTasks.length > 0 ? 0.04 : 0) +
+        (relatedMeetings.length > 0 ? 0.03 : 0),
+    ),
   );
   const suggestedEvent = extractEventSuggestion(
     subject,
@@ -905,23 +989,24 @@ async function buildThreadAnalysis(
   const workstreamKey = normalizeWorkstreamKey(subject);
   const displayName = latest?.sender?.name || latest?.sender?.email || 'Unknown';
 
-  const peopleContext =
-    senderEmail
-      ? [
-          await upsertPersonMemory(db, {
-            userId,
-            email: senderEmail,
-            displayName,
-            subject,
-            unresolvedAsks: actionItems,
-            promises: waitingOnOther ? [`Waiting for a response on ${normalizeSubject(subject) || 'this thread'}`] : [],
-            recentThreadIds: [threadId],
-            recentMeetingIds: relatedMeetings.map((item) => item.id),
-            recentTaskIds: relatedTasks.map((item) => item.id),
-            lastInteractionAt: latest?.receivedOn ? new Date(latest.receivedOn) : null,
-          }),
-        ]
-      : [];
+  const peopleContext = senderEmail
+    ? [
+        await upsertPersonMemory(db, {
+          userId,
+          email: senderEmail,
+          displayName,
+          subject,
+          unresolvedAsks: actionItems,
+          promises: waitingOnOther
+            ? [`Waiting for a response on ${normalizeSubject(subject) || 'this thread'}`]
+            : [],
+          recentThreadIds: [threadId],
+          recentMeetingIds: relatedMeetings.map((item) => item.id),
+          recentTaskIds: relatedTasks.map((item) => item.id),
+          lastInteractionAt: latest?.receivedOn ? new Date(latest.receivedOn) : null,
+        }),
+      ]
+    : [];
 
   const workstream = await upsertWorkstreamMemory(db, {
     userId,
@@ -934,7 +1019,9 @@ async function buildThreadAnalysis(
     relatedThreadIds: [threadId],
     relatedMeetingIds: relatedMeetings.map((item) => item.id),
     relatedTaskIds: relatedTasks.map((item) => item.id),
-    nextMilestone: suggestedEvent?.startAt ? 'Confirm scheduling details' : actionItems[0] ?? null,
+    nextMilestone: suggestedEvent?.startAt
+      ? 'Confirm scheduling details'
+      : (actionItems[0] ?? null),
   });
 
   const waitingState: WaitingState = replyNeeded
@@ -958,7 +1045,8 @@ async function buildThreadAnalysis(
       : meetingRequested && !relatedMeetings.length
         ? {
             label: 'Schedule follow-up',
-            reason: 'This thread looks like scheduling coordination and is not yet connected to a meeting.',
+            reason:
+              'This thread looks like scheduling coordination and is not yet connected to a meeting.',
           }
         : waitingOnOther
           ? {
@@ -1043,7 +1131,9 @@ async function buildThreadAnalysis(
       type: urgent ? 'deadline_risk' : 'decision_needed',
       queue: 'likely_dropped',
       status: 'open',
-      title: urgent ? `Deadline risk in ${normalizeSubject(subject) || 'thread'}` : `Decision still pending`,
+      title: urgent
+        ? `Deadline risk in ${normalizeSubject(subject) || 'thread'}`
+        : `Decision still pending`,
       summary: urgent
         ? 'The thread contains urgency or timing language and no linked task yet.'
         : 'This thread no longer stands out as unread, but still appears actionable.',
@@ -1115,7 +1205,10 @@ async function buildThreadAnalysis(
       summary: actionItems[0],
       confidence,
       reason: 'Actionable asks were found without a linked task.',
-      preview: actionItems.slice(0, 3).map((item) => `• ${item}`).join('\n'),
+      preview: actionItems
+        .slice(0, 3)
+        .map((item) => `• ${item}`)
+        .join('\n'),
       payload: {
         tasks: actionItems.slice(0, 3).map((item) => ({
           title: item,
@@ -1141,7 +1234,9 @@ async function buildThreadAnalysis(
       summary: suggestedEvent.title,
       confidence,
       reason: 'This thread contains scheduling language and a likely event suggestion.',
-      preview: suggestedEvent.startAt ? `${suggestedEvent.title} · ${suggestedEvent.startAt}` : suggestedEvent.title,
+      preview: suggestedEvent.startAt
+        ? `${suggestedEvent.title} · ${suggestedEvent.startAt}`
+        : suggestedEvent.title,
       payload: suggestedEvent,
       sourceThreadId: threadId,
       sourceMeetingId: relatedMeetings[0]?.id ?? null,
@@ -1194,13 +1289,18 @@ async function buildThreadAnalysis(
   const openLoops = await db
     .select()
     .from(assistantOpenLoop)
-    .where(and(eq(assistantOpenLoop.userId, userId), eq(assistantOpenLoop.sourceThreadId, threadId)))
+    .where(
+      and(eq(assistantOpenLoop.userId, userId), eq(assistantOpenLoop.sourceThreadId, threadId)),
+    )
     .orderBy(desc(assistantOpenLoop.updatedAt));
   const preparedActions = await db
     .select()
     .from(assistantPreparedAction)
     .where(
-      and(eq(assistantPreparedAction.userId, userId), eq(assistantPreparedAction.sourceThreadId, threadId)),
+      and(
+        eq(assistantPreparedAction.userId, userId),
+        eq(assistantPreparedAction.sourceThreadId, threadId),
+      ),
     )
     .orderBy(desc(assistantPreparedAction.updatedAt));
 
@@ -1231,7 +1331,10 @@ async function syncRecentThreads(
   userId: string,
   activeConnection: NonNullable<Awaited<ReturnType<typeof getActiveConnection>>>,
 ) {
-  const threadRefs = await getThreadsFromDB(activeConnection.id, { folder: 'inbox', maxResults: 8 });
+  const threadRefs = await getThreadsFromDB(activeConnection.id, {
+    folder: 'inbox',
+    maxResults: 8,
+  });
   for (const threadRef of threadRefs.threads.slice(0, 6)) {
     try {
       const { result } = await getThread(activeConnection.id, threadRef.id);
@@ -1271,12 +1374,14 @@ async function syncMeetingActions(db: DbHandle, userId: string) {
         .join('\n'),
       payload: {
         meetingId: item.id,
-        tasks: asStringArray(item.actionItems).slice(0, 5).map((entry) => ({
-          title: entry,
-          description: `From meeting: ${item.title}`,
-          priority: 'medium',
-          dueDate: null,
-        })),
+        tasks: asStringArray(item.actionItems)
+          .slice(0, 5)
+          .map((entry) => ({
+            title: entry,
+            description: `From meeting: ${item.title}`,
+            priority: 'medium',
+            dueDate: null,
+          })),
       },
       sourceThreadId: null,
       sourceMeetingId: item.id,
@@ -1365,7 +1470,9 @@ async function generateDraftForThread(
           .filter((email) => email !== activeConnection.email)
           .join(', ') ?? '',
       bcc: '',
-      subject: latest?.subject?.startsWith('Re: ') ? latest.subject : `Re: ${latest?.subject || 'No Subject'}`,
+      subject: latest?.subject?.startsWith('Re: ')
+        ? latest.subject
+        : `Re: ${latest?.subject || 'No Subject'}`,
       message: generatedBody.replace(/\n/g, '<br>'),
       attachments: [],
       id: null,
@@ -1400,7 +1507,12 @@ async function buildChangeFeed(db: DbHandle, userId: string) {
       .where(eq(assistantPreparedAction.userId, userId))
       .orderBy(desc(assistantPreparedAction.updatedAt))
       .limit(4),
-    db.select().from(meeting).where(eq(meeting.userId, userId)).orderBy(desc(meeting.updatedAt)).limit(4),
+    db
+      .select()
+      .from(meeting)
+      .where(eq(meeting.userId, userId))
+      .orderBy(desc(meeting.updatedAt))
+      .limit(4),
   ]);
 
   const changes = [
@@ -1434,44 +1546,129 @@ async function buildChangeFeed(db: DbHandle, userId: string) {
   return changes;
 }
 
+const isMissingAssistantSchemaError = (error: unknown) =>
+  error instanceof Error &&
+  (error.message.includes('relation "mail0_meeting" does not exist') ||
+    error.message.includes('relation "mail0_assistant_open_loop" does not exist') ||
+    error.message.includes('relation "mail0_assistant_prepared_action" does not exist') ||
+    error.message.includes('relation "mail0_assistant_briefing_snapshot" does not exist'));
+
+async function buildFallbackBriefing(db: DbHandle, userId: string) {
+  const now = new Date();
+  const tasks = await db
+    .select()
+    .from(task)
+    .where(and(eq(task.userId, userId), inArray(task.status, ['todo', 'doing'])))
+    .orderBy(desc(task.updatedAt))
+    .limit(8)
+    .catch(() => []);
+
+  const topTask = tasks.sort((a, b) => {
+    if (a.dueDate && b.dueDate) return +new Date(a.dueDate) - +new Date(b.dueDate);
+    if (a.dueDate) return -1;
+    if (b.dueDate) return 1;
+    return +new Date(b.updatedAt) - +new Date(a.updatedAt);
+  })[0];
+
+  return {
+    generatedAt: now.toISOString(),
+    today: {
+      nextEvent: null,
+      topTask: topTask
+        ? {
+            id: topTask.id,
+            title: topTask.title,
+            dueDate: safeDateString(topTask.dueDate),
+            priority: topTask.priority,
+          }
+        : null,
+      urgentReply: null,
+    },
+    topPriorities: topTask
+      ? [
+          {
+            kind: 'task' as const,
+            id: topTask.id,
+            title: topTask.title,
+            summary: topTask.dueDate
+              ? `Due ${new Date(topTask.dueDate).toLocaleString()}`
+              : 'Active task without a due date.',
+          },
+        ]
+      : [],
+    needsYou: [],
+    waitingOn: [],
+    prepared: [],
+    upcomingMeetings: [],
+    changedSinceLastTime: [],
+  };
+}
+
 export const assistantRouter = router({
   getBriefing: privateProcedure.output(assistantBriefingSchema).query(async ({ ctx }) => {
     const activeConnection = await getActiveConnection().catch(() => null);
     const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
     try {
-      if (activeConnection) {
-        await syncRecentThreads(db, ctx.sessionUser.id, activeConnection);
+      try {
+        if (activeConnection) {
+          await syncRecentThreads(db, ctx.sessionUser.id, activeConnection);
+        }
+        await syncMeetingActions(db, ctx.sessionUser.id);
+      } catch (error) {
+        if (isMissingAssistantSchemaError(error)) {
+          console.warn(
+            '[assistant.getBriefing] Returning fallback briefing because assistant/meeting tables are missing',
+          );
+          return await buildFallbackBriefing(db, ctx.sessionUser.id);
+        }
+        throw error;
       }
-      await syncMeetingActions(db, ctx.sessionUser.id);
 
       const now = new Date();
-      const [loops, preparedActions, tasks, meetings, changedSinceLastTime] = await Promise.all([
-        db
-          .select()
-          .from(assistantOpenLoop)
-          .where(eq(assistantOpenLoop.userId, ctx.sessionUser.id))
-          .orderBy(desc(assistantOpenLoop.updatedAt))
-          .limit(20),
-        db
-          .select()
-          .from(assistantPreparedAction)
-          .where(eq(assistantPreparedAction.userId, ctx.sessionUser.id))
-          .orderBy(desc(assistantPreparedAction.updatedAt))
-          .limit(12),
-        db
-          .select()
-          .from(task)
-          .where(and(eq(task.userId, ctx.sessionUser.id), inArray(task.status, ['todo', 'doing'])))
-          .orderBy(desc(task.updatedAt))
-          .limit(8),
-        db
-          .select()
-          .from(meeting)
-          .where(eq(meeting.userId, ctx.sessionUser.id))
-          .orderBy(desc(meeting.startsAt))
-          .limit(8),
-        buildChangeFeed(db, ctx.sessionUser.id),
-      ]);
+      const loadBriefingData = () =>
+        Promise.all([
+          db
+            .select()
+            .from(assistantOpenLoop)
+            .where(eq(assistantOpenLoop.userId, ctx.sessionUser.id))
+            .orderBy(desc(assistantOpenLoop.updatedAt))
+            .limit(20),
+          db
+            .select()
+            .from(assistantPreparedAction)
+            .where(eq(assistantPreparedAction.userId, ctx.sessionUser.id))
+            .orderBy(desc(assistantPreparedAction.updatedAt))
+            .limit(12),
+          db
+            .select()
+            .from(task)
+            .where(
+              and(eq(task.userId, ctx.sessionUser.id), inArray(task.status, ['todo', 'doing'])),
+            )
+            .orderBy(desc(task.updatedAt))
+            .limit(8),
+          db
+            .select()
+            .from(meeting)
+            .where(eq(meeting.userId, ctx.sessionUser.id))
+            .orderBy(desc(meeting.startsAt))
+            .limit(8),
+          buildChangeFeed(db, ctx.sessionUser.id),
+        ] as const);
+
+      let briefingData: Awaited<ReturnType<typeof loadBriefingData>>;
+      try {
+        briefingData = await loadBriefingData();
+      } catch (error) {
+        if (isMissingAssistantSchemaError(error)) {
+          console.warn(
+            '[assistant.getBriefing] Returning fallback briefing because assistant/meeting tables are missing',
+          );
+          return await buildFallbackBriefing(db, ctx.sessionUser.id);
+        }
+        throw error;
+      }
+      const [loops, preparedActions, tasks, meetings, changedSinceLastTime] = briefingData;
 
       const activeLoops = loops.filter((loop) => {
         if (loop.status === 'open') return true;
@@ -1482,13 +1679,12 @@ export const assistantRouter = router({
       const nextEvent = meetings
         .filter((item) => item.startsAt >= now)
         .sort((a, b) => +a.startsAt - +b.startsAt)[0];
-      const topTask = tasks
-        .sort((a, b) => {
-          if (a.dueDate && b.dueDate) return +new Date(a.dueDate) - +new Date(b.dueDate);
-          if (a.dueDate) return -1;
-          if (b.dueDate) return 1;
-          return +new Date(b.updatedAt) - +new Date(a.updatedAt);
-        })[0];
+      const topTask = tasks.sort((a, b) => {
+        if (a.dueDate && b.dueDate) return +new Date(a.dueDate) - +new Date(b.dueDate);
+        if (a.dueDate) return -1;
+        if (b.dueDate) return 1;
+        return +new Date(b.updatedAt) - +new Date(a.updatedAt);
+      })[0];
 
       const topPriorities = [
         ...activeLoops
@@ -1532,23 +1728,25 @@ export const assistantRouter = router({
                 priority: topTask.priority,
               }
             : null,
-          urgentReply:
-            activeLoops
-              .filter((loop) => loop.type === 'needs_reply' || loop.type === 'deadline_risk')
-              .sort((a, b) => b.confidencePct - a.confidencePct)[0]
-              ? toLoopRow(
-                  activeLoops
-                    .filter((loop) => loop.type === 'needs_reply' || loop.type === 'deadline_risk')
-                    .sort((a, b) => b.confidencePct - a.confidencePct)[0]!,
-                )
-              : null,
+          urgentReply: activeLoops
+            .filter((loop) => loop.type === 'needs_reply' || loop.type === 'deadline_risk')
+            .sort((a, b) => b.confidencePct - a.confidencePct)[0]
+            ? toLoopRow(
+                activeLoops
+                  .filter((loop) => loop.type === 'needs_reply' || loop.type === 'deadline_risk')
+                  .sort((a, b) => b.confidencePct - a.confidencePct)[0]!,
+              )
+            : null,
         },
         topPriorities,
         needsYou: activeLoops
           .filter((loop) => loop.queue === 'needs_you' || loop.queue === 'likely_dropped')
           .slice(0, 5)
           .map(toLoopRow),
-        waitingOn: activeLoops.filter((loop) => loop.queue === 'waiting_on').slice(0, 5).map(toLoopRow),
+        waitingOn: activeLoops
+          .filter((loop) => loop.queue === 'waiting_on')
+          .slice(0, 5)
+          .map(toLoopRow),
         prepared: pendingActions.slice(0, 5).map(toPreparedActionRow),
         upcomingMeetings: meetings
           .filter((item) => item.startsAt >= now)
@@ -1643,7 +1841,8 @@ export const assistantRouter = router({
           thread,
         });
 
-        const latestReceivedAt = safeDateString(analysis.latest?.receivedOn) ?? safeDateString(new Date());
+        const latestReceivedAt =
+          safeDateString(analysis.latest?.receivedOn) ?? safeDateString(new Date());
         const changedSinceLastOpen: string[] = [];
         const lastReviewedAt = existingBeforeReview
           .map((item) => item.lastReviewedAt)
@@ -1653,10 +1852,14 @@ export const assistantRouter = router({
           changedSinceLastOpen.push('Someone replied since you last opened this thread.');
         }
         if (analysis.relatedTasks.length > 0) {
-          changedSinceLastOpen.push(`${analysis.relatedTasks.length} related task${analysis.relatedTasks.length > 1 ? 's' : ''} already link to this thread.`);
+          changedSinceLastOpen.push(
+            `${analysis.relatedTasks.length} related task${analysis.relatedTasks.length > 1 ? 's' : ''} already link to this thread.`,
+          );
         }
         if (analysis.relatedMeetings.length > 0) {
-          changedSinceLastOpen.push(`${analysis.relatedMeetings.length} related meeting${analysis.relatedMeetings.length > 1 ? 's' : ''} found in your schedule.`);
+          changedSinceLastOpen.push(
+            `${analysis.relatedMeetings.length} related meeting${analysis.relatedMeetings.length > 1 ? 's' : ''} found in your schedule.`,
+          );
         }
 
         await db
@@ -1688,7 +1891,9 @@ export const assistantRouter = router({
           confidence: analysis.confidence,
           riskLevel: analysis.riskLevel,
           reason: analysis.reason,
-          replyNeeded: analysis.openLoops.some((loop) => loop.type === 'needs_reply' && loop.status === 'open'),
+          replyNeeded: analysis.openLoops.some(
+            (loop) => loop.type === 'needs_reply' && loop.status === 'open',
+          ),
           followUpNeeded: analysis.openLoops.some(
             (loop) =>
               (loop.type === 'meeting_follow_up' || loop.type === 'waiting_on_other') &&
@@ -1718,7 +1923,19 @@ export const assistantRouter = router({
                     })
                     .safeParse(entry),
                 )
-                .filter((result): result is { success: true; data: { title: string; description?: string | null; priority: 'none' | 'low' | 'medium' | 'high'; dueDate?: string | null } } => result.success)
+                .filter(
+                  (
+                    result,
+                  ): result is {
+                    success: true;
+                    data: {
+                      title: string;
+                      description?: string | null;
+                      priority: 'none' | 'low' | 'medium' | 'high';
+                      dueDate?: string | null;
+                    };
+                  } => result.success,
+                )
                 .map((result) => ({
                   title: result.data.title,
                   description: result.data.description ?? null,
@@ -1780,7 +1997,12 @@ export const assistantRouter = router({
         const person = await db
           .select()
           .from(assistantPersonMemory)
-          .where(and(eq(assistantPersonMemory.userId, ctx.sessionUser.id), eq(assistantPersonMemory.email, input.email)))
+          .where(
+            and(
+              eq(assistantPersonMemory.userId, ctx.sessionUser.id),
+              eq(assistantPersonMemory.email, input.email),
+            ),
+          )
           .limit(1);
         if (!person[0]) {
           throw new TRPCError({ code: 'NOT_FOUND', message: 'Person context not found.' });
@@ -1868,7 +2090,9 @@ export const assistantRouter = router({
           .limit(input.limit);
         return {
           actions: rows
-            .filter((row) => (input.status ? row.status === input.status : row.status === 'pending'))
+            .filter((row) =>
+              input.status ? row.status === input.status : row.status === 'pending',
+            )
             .map(toPreparedActionRow),
         };
       } finally {
@@ -1877,7 +2101,9 @@ export const assistantRouter = router({
     }),
 
   generateDraft: activeConnectionProcedure
-    .input(z.object({ threadId: z.string(), openInComposer: z.boolean().optional().default(false) }))
+    .input(
+      z.object({ threadId: z.string(), openInComposer: z.boolean().optional().default(false) }),
+    )
     .output(
       z.object({
         draftId: z.string().nullable(),
@@ -1932,7 +2158,12 @@ export const assistantRouter = router({
         const rows = await db
           .select()
           .from(assistantPreparedAction)
-          .where(and(eq(assistantPreparedAction.userId, ctx.sessionUser.id), eq(assistantPreparedAction.id, input.actionId)))
+          .where(
+            and(
+              eq(assistantPreparedAction.userId, ctx.sessionUser.id),
+              eq(assistantPreparedAction.id, input.actionId),
+            ),
+          )
           .limit(1);
         const action = rows[0];
         if (!action) {
@@ -1946,7 +2177,10 @@ export const assistantRouter = router({
 
         if (action.type === 'draft_reply' || action.type === 'follow_up') {
           if (!action.sourceThreadId) {
-            throw new TRPCError({ code: 'BAD_REQUEST', message: 'This action is missing a source thread.' });
+            throw new TRPCError({
+              code: 'BAD_REQUEST',
+              message: 'This action is missing a source thread.',
+            });
           }
           const result = await generateDraftForThread(
             ctx.activeConnection,
@@ -1956,7 +2190,11 @@ export const assistantRouter = router({
           );
           await db
             .update(assistantPreparedAction)
-            .set({ status: result.created ? 'applied' : 'dismissed', preview: result.preview ?? null, updatedAt: new Date() })
+            .set({
+              status: result.created ? 'applied' : 'dismissed',
+              preview: result.preview ?? null,
+              updatedAt: new Date(),
+            })
             .where(eq(assistantPreparedAction.id, action.id));
           return {
             success: true,
@@ -2079,7 +2317,12 @@ export const assistantRouter = router({
             lastReviewedAt: new Date(),
             updatedAt: new Date(),
           })
-          .where(and(eq(assistantOpenLoop.userId, ctx.sessionUser.id), eq(assistantOpenLoop.id, input.openLoopId)));
+          .where(
+            and(
+              eq(assistantOpenLoop.userId, ctx.sessionUser.id),
+              eq(assistantOpenLoop.id, input.openLoopId),
+            ),
+          );
         return { success: true };
       } finally {
         await conn.end();
@@ -2095,7 +2338,12 @@ export const assistantRouter = router({
         await db
           .update(assistantOpenLoop)
           .set({ status: 'dismissed', lastReviewedAt: new Date(), updatedAt: new Date() })
-          .where(and(eq(assistantOpenLoop.userId, ctx.sessionUser.id), eq(assistantOpenLoop.id, input.openLoopId)));
+          .where(
+            and(
+              eq(assistantOpenLoop.userId, ctx.sessionUser.id),
+              eq(assistantOpenLoop.id, input.openLoopId),
+            ),
+          );
         return { success: true };
       } finally {
         await conn.end();
@@ -2121,7 +2369,12 @@ export const assistantRouter = router({
           await db
             .update(assistantOpenLoop)
             .set({ status: 'done', lastReviewedAt: new Date(), updatedAt: new Date() })
-            .where(and(eq(assistantOpenLoop.userId, ctx.sessionUser.id), eq(assistantOpenLoop.id, input.targetId)));
+            .where(
+              and(
+                eq(assistantOpenLoop.userId, ctx.sessionUser.id),
+                eq(assistantOpenLoop.id, input.targetId),
+              ),
+            );
         }
         return { success: true };
       } finally {

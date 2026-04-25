@@ -57,12 +57,13 @@ async function verifyPassword(password: string, hash: string, salt: string): Pro
   return diff === 0;
 }
 
-/** Generate a 10-char URL-safe slug */
+/** Generate a 16-char URL-safe slug (~96 bits of entropy). The DB has a unique
+ *  constraint on slug, so existing 10-char slugs continue to resolve. */
 function generateSlug(): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(12));
+  const bytes = crypto.getRandomValues(new Uint8Array(18));
   return btoa(String.fromCharCode(...bytes))
     .replace(/[+/=]/g, '')
-    .slice(0, 10);
+    .slice(0, 16);
 }
 
 function isExpired(expiresAt: Date | null): boolean {

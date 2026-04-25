@@ -1,11 +1,15 @@
 import { session, sessionMetadata } from '../../db/schema';
+import { and, desc, eq, gt, inArray } from 'drizzle-orm';
 import { privateProcedure, router } from '../trpc';
 import { createDb } from '../../db';
-import { and, desc, eq, gt, inArray } from 'drizzle-orm';
 import { env } from '../../env';
 import { z } from 'zod';
 
 const getDb = () => createDb(env.HYPERDRIVE.connectionString);
+
+const isMissingSessionMetadataRelationError = (error: unknown) =>
+  error instanceof Error &&
+  error.message.includes('relation "mail0_session_metadata" does not exist');
 
 type CloudflareRequest = Request & {
   cf?: {
@@ -23,6 +27,20 @@ function parseUserAgent(userAgent?: string | null) {
       deviceType: 'Unknown',
       deviceLabel: 'Unknown device',
     };
+  }
+
+  // Detect native Swift/CFNetwork user agents before falling through to
+  // browser heuristics. URLSession on iOS/macOS sends strings like:
+  //   "Todus/3 CFNetwork/1568.100.1 Darwin/24.0.0"   (iOS / macOS app)
+  //   "CFNetwork/1568.100.1 Darwin/24.0.0"            (older builds)
+  // Check for the macOS app bundle name first, then fall back to iOS for
+  // any other CFNetwork UA (iOS devices are far more common).
+  if (/CFNetwork/i.test(userAgent)) {
+    const isMacApp = /Todus-Mac|TodusMac/i.test(userAgent);
+    const osName = isMacApp ? 'macOS' : 'iOS';
+    const deviceType = isMacApp ? 'Desktop' : 'Mobile';
+    const deviceLabel = isMacApp ? 'Todus · macOS' : 'Todus · iOS';
+    return { browserName: 'Todus', osName, deviceType, deviceLabel };
   }
 
   const browsers = [
@@ -131,6 +149,14 @@ async function upsertCurrentSessionMetadata(input: {
           updatedAt: now,
         },
       });
+  } catch (error) {
+    if (isMissingSessionMetadataRelationError(error)) {
+      console.warn(
+        '[sessions.upsertCurrentSessionMetadata] Skipping session metadata upsert because mail0_session_metadata is missing',
+      );
+      return;
+    }
+    throw error;
   } finally {
     await conn.end();
   }
@@ -138,7 +164,13 @@ async function upsertCurrentSessionMetadata(input: {
 
 async function resolveCurrentSessionId(input: {
   userId: string;
-  auth: { api: { getSession: (args: { headers: Headers }) => Promise<{ session?: { id?: string | null } } | null> } };
+  auth: {
+    api: {
+      getSession: (args: {
+        headers: Headers;
+      }) => Promise<{ session?: { id?: string | null } } | null>;
+    };
+  };
   request: Request;
 }) {
   const authSession = await input.auth.api.getSession({ headers: input.request.headers });
@@ -272,6 +304,15 @@ export const sessionsRouter = router({
                 inArray(sessionMetadata.sessionId, sessionIds),
               ),
             )
+            .catch((error) => {
+              if (isMissingSessionMetadataRelationError(error)) {
+                console.warn(
+                  '[sessions.list] Falling back to session rows without metadata because mail0_session_metadata is missing',
+                );
+                return [];
+              }
+              throw error;
+            })
         : [];
 
       const metadataBySessionId = new Map(metadataRows.map((row) => [row.sessionId, row]));
@@ -323,7 +364,7 @@ export const sessionsRouter = router({
       } finally {
         await conn.end();
       }
-  }),
+    }),
 
   revokeAll: privateProcedure.mutation(async ({ ctx }) => {
     const currentSessionId = await resolveCurrentSessionId({
@@ -342,7 +383,8 @@ export const sessionsRouter = router({
       return {
         success: true,
         revokedCount: deletedRows.length,
-        revokedCurrent: !!currentSessionId && deletedRows.some((row) => row.id === currentSessionId),
+        revokedCurrent:
+          !!currentSessionId && deletedRows.some((row) => row.id === currentSessionId),
       };
     } finally {
       await conn.end();

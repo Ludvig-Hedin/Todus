@@ -33,6 +33,7 @@ import { EProviders, type IEmailSendBatch } from './types';
 import { ThinkingMCP } from './lib/sequential-thinking';
 import { serializeSignedCookie } from 'better-call';
 
+import { recallWebhookRouter } from './routes/recall-webhook';
 import { contextStorage } from 'hono/context-storage';
 import { defaultUserSettings } from './lib/schemas';
 import { createLocalJWKSet, jwtVerify } from 'jose';
@@ -48,7 +49,6 @@ import { initTracing } from './lib/tracing';
 import type { HonoContext } from './ctx';
 import { createDb, type DB } from './db';
 import { createAuth } from './lib/auth';
-import { recallWebhookRouter } from './routes/recall-webhook';
 import { aiRouter } from './routes/ai';
 import { appRouter } from './trpc';
 import { cors } from 'hono/cors';
@@ -677,6 +677,12 @@ const api = new Hono<HonoContext>()
                 userId,
               });
             } else {
+              // JWT decoded successfully and identified a userId, but no matching
+              // user row exists. The user was deleted out from under a still-valid
+              // token — terminal. Mark as resolved so Strategies 2/3 don't run and
+              // re-complete this span (which would clobber the `user_not_found`
+              // metadata recorded here). The request continues unauthenticated.
+              resolved = true;
               TraceContext.completeSpan(traceId, tokenSpan.id, {
                 success: false,
                 reason: 'user_not_found',
@@ -866,8 +872,7 @@ const api = new Hono<HonoContext>()
     const sessionIdParam = session.session.id
       ? `&sessionId=${encodeURIComponent(session.session.id)}`
       : '';
-    const deepLink =
-      `${redirectUrl}${separator}token=${encodeURIComponent(jwtToken.token)}&refreshToken=${encodeURIComponent(refreshToken)}${sessionIdParam}`;
+    const deepLink = `${redirectUrl}${separator}token=${encodeURIComponent(jwtToken.token)}&refreshToken=${encodeURIComponent(refreshToken)}${sessionIdParam}`;
 
     // Return an HTML page that triggers the deep link via JavaScript.
     // This is more reliable than a 302 redirect for custom URL schemes on iOS.
@@ -892,40 +897,62 @@ const api = new Hono<HonoContext>()
     // Security: The refresh token is validated through Better Auth's session resolution
     // (cookie-signing + getSession), which checks the session table and extends expiresAt.
     // If the session has been revoked (e.g., "sign out of all devices"), this returns 401.
-    const body = await c.req.json<{ refreshToken?: string }>().catch(() => ({}));
-    const refreshToken = body.refreshToken;
+    const body = await c.req
+      .json<{ refreshToken?: string }>()
+      .catch((): { refreshToken?: string } | null => null);
+    const refreshToken = body?.refreshToken;
 
     if (!refreshToken) {
       return c.json({ error: 'Missing refresh token' }, 400);
     }
 
     try {
-      // The refreshToken from native clients is the signed session token value from the
-      // `set-auth-token` header (already signed by Better Auth's bearer plugin). Pass it
-      // directly as a Bearer token — the bearer plugin verifies the HMAC, then rewrites
-      // the request as a session cookie for Better Auth's session pipeline, which:
-      // 1. Validates the session exists and hasn't expired
-      // 2. Triggers updateAge to extend the session (sliding 90-day window)
-      // 3. Returns the session context needed by getToken() to mint a JWT
       const auth = createAuth();
+      const mintJwtFromHeaders = async (headers: Headers) => {
+        const session = await auth.api.getSession({ headers });
+        if (!session?.user) {
+          return null;
+        }
+
+        const jwtToken = await auth.api.getToken({ headers });
+        if (!jwtToken?.token) return null;
+        // Return both the JWT and the session ID so native apps can track
+        // which session they are currently running in (for "This device" labelling
+        // and the X-Todus-Session-Id request header used by sessions.list).
+        return { token: jwtToken.token, sessionId: session.session?.id ?? null };
+      };
+
+      // Compatibility: native clients can still persist either:
+      // 1. a bearer-plugin token from `set-auth-token`, or
+      // 2. the raw Better Auth session token from `/auth/mobile-token`.
+      // Try the bearer path first, then fall back to rehydrating the raw session
+      // token as a signed cookie so older clients keep refreshing successfully.
       const bearerHeaders = new Headers({
         authorization: `Bearer ${refreshToken}`,
         origin: 'https://todus.app',
       });
+      let result = await mintJwtFromHeaders(bearerHeaders).catch(() => null);
 
-      const session = await auth.api.getSession({ headers: bearerHeaders });
-      if (!session?.user) {
+      if (!result) {
+        const cookiePrefix = env.NODE_ENV === 'development' ? 'better-auth-dev' : 'better-auth';
+        const signedToken = (
+          await serializeSignedCookie('', refreshToken, env.BETTER_AUTH_SECRET)
+        ).replace('=', '');
+
+        const cookieHeaders = new Headers({
+          cookie: `${cookiePrefix}.session_token=${signedToken}`,
+          origin: 'https://todus.app',
+        });
+        result = await mintJwtFromHeaders(cookieHeaders).catch(() => null);
+      }
+
+      if (!result) {
         return c.json({ error: 'Session expired' }, 401);
       }
 
-      // Mint a fresh short-lived JWT using the validated session context
-      const jwtToken = await auth.api.getToken({ headers: bearerHeaders });
-      if (!jwtToken?.token) {
-        return c.json({ error: 'Failed to generate token' }, 500);
-      }
-
       return c.json({
-        token: jwtToken.token,
+        token: result.token,
+        sessionId: result.sessionId,
         expiresIn: 900, // 15 minutes in seconds
       });
     } catch (err) {
@@ -1019,7 +1046,12 @@ const api = new Hono<HonoContext>()
     }
   })
   .use(
+    '/trpc/*',
     trpcServer({
+      // `fetchRequestHandler` strips `endpoint` from the *full* request pathname
+      // (`new URL(req.url).pathname`), e.g. `/api/trpc/meet.listMeetings` → remainder
+      // must be `meet.listMeetings`. With `endpoint: '/trpc'` the remainder became
+      // `trpc/meet...` and every procedure 404’d. The prefix to strip is `/api/trpc`.
       endpoint: '/api/trpc',
       router: appRouter,
       createContext: (_, c) => {
