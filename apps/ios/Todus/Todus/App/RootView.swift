@@ -27,9 +27,6 @@ struct RootView: View {
             } else if !services.hasConfiguredNotificationsPrompt {
                 NotificationsOnboardingView()
                     .transition(hasAppeared ? .opacity.combined(with: .move(edge: .trailing)) : .opacity)
-            } else if !services.hasConfiguredDefaultMailPrompt {
-                DefaultMailOnboardingView()
-                    .transition(hasAppeared ? .opacity.combined(with: .move(edge: .trailing)) : .opacity)
             } else {
                 MainTabView()
                     .transition(hasAppeared ? .opacity : .identity)
@@ -37,7 +34,7 @@ struct RootView: View {
         }
         .safeAreaInset(edge: .top, spacing: 0) {
             if let onboardingStep = onboardingStep {
-                let onboardingTotal = 4
+                let onboardingTotal = 3
                 let progressText = String(
                     localized: "\(onboardingStep) of \(onboardingTotal)",
                     comment: "Compact onboarding progress label showing current step and total steps"
@@ -120,7 +117,6 @@ struct RootView: View {
         if !services.hasConfiguredGmailPrompt { return 1 }
         if !services.hasConfiguredRemindersPrompt { return 2 }
         if !services.hasConfiguredNotificationsPrompt { return 3 }
-        if !services.hasConfiguredDefaultMailPrompt { return 4 }
         return nil
     }
 }

@@ -239,9 +239,6 @@ struct MacRootView: View {
             } else if !services.hasConfiguredNotificationsPrompt {
                 MacNotificationsOnboardingView()
                     .transition(.opacity.combined(with: .move(edge: .trailing)))
-            } else if !services.hasConfiguredDefaultMailPrompt {
-                MacDefaultMailOnboardingView()
-                    .transition(.opacity.combined(with: .move(edge: .trailing)))
             } else {
                 // Authenticated or guest → show main app shell
                 mainAppView
@@ -264,7 +261,7 @@ struct MacRootView: View {
             if let onboardingStep = onboardingStep {
                 HStack {
                     Spacer()
-                    Text("\(onboardingStep) of 6")
+                    Text("\(onboardingStep) of 5")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 10)
@@ -773,7 +770,6 @@ struct MacRootView: View {
         if !services.hasConfiguredRemindersPrompt { return 3 }
         if !services.hasConfiguredStartupViewPrompt { return 4 }
         if !services.hasConfiguredNotificationsPrompt { return 5 }
-        if !services.hasConfiguredDefaultMailPrompt { return 6 }
         return nil
     }
 

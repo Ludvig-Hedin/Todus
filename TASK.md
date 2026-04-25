@@ -4,6 +4,7 @@ Last updated: 2026-04-26
 
 ## Current Native Fix Batch
 
+- `DONE` **Hide default-mail onboarding for now (iOS + macOS, 2026-04):** The default-mail onboarding step is no longer shown in either native onboarding flow, but the views/state stay in the codebase so the step can return once Apple grants `com.apple.developer.mail-client`.
 - `DONE` **iOS default-mail onboarding opens Default Apps (2026-04):** The onboarding CTA now uses Apple’s public `openDefaultApplicationsSettingsURLString` deep link instead of `openSettingsURLString`, so it targets the global Default Apps settings surface instead of Todus’s own Settings page.
 - `PENDING` **Apple mail-client capability enablement (iOS + macOS, 2026-04):** Todus already registers `mailto` on both native targets, but it still will not appear as a selectable default mail app until the Apple Developer app ID / provisioning profiles include `com.apple.developer.mail-client` and the entitlement is added to the signed app targets.
 - `DONE` **iOS tab shell honors tab-bar customization (2026-04):** `MainTabView` now uses the floating `CustomTabBar` backed by `services.tabBarTabs` instead of a hard-coded native tab order, so onboarding/Settings tab choices change the real shell and can pin Meetings into the main bar.
