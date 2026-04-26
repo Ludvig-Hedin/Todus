@@ -1,5 +1,45 @@
 # Project Changelog
 
+## [2026-04-26] Fix — native AI chat stream bootstrap + assistant fallback hardening
+
+- [Fix] **iOS AI chat no longer waits for the provider before the SSE stream opens.** `/api/ai/chat` now returns the SSE response immediately, emits an initial bootstrap event, and only then waits on OpenRouter/Gemini. This prevents native clients from timing out during long tool-planning/model-startup delays that previously ended as `Connection lost — tap to retry.`
+- [Fix] **Provider failures now surface as chat errors instead of a silent dropped stream.** If OpenRouter/Gemini rejects or fails before streaming content, the server emits an `error` SSE event and iOS renders that as an assistant error message.
+- [Fix] **Assistant briefing now degrades on shard-pool saturation.** `assistant.getBriefing` treats shard initialization / Postgres pool-slot exhaustion as a degraded-but-recoverable condition and returns the lightweight fallback briefing instead of bubbling a 500 into Home startup.
+- [Fix] **Native chat streams now tolerate slower first-token latency.** iOS sets an explicit 180-second timeout for `/api/ai/chat` streaming requests, reducing false client-side `NSURLErrorDomain -1001` failures while the backend/tool chain is still working.
+- [Files] `apps/server/src/routes/ai.ts`, `apps/server/src/trpc/routes/assistant.ts`, `apps/ios/Todus/Todus/Services/AI/AIChatService.swift`, `CHANGELOG.md`, `TASK.md`
+
+## [2026-04-26] Fix — iOS HomeView build blockers resolved
+
+- [Fix] **iOS Home no longer fails to compile after the Home dashboard refactor.** `HomeView` now restores the missing briefing hero/feed adapters, the proactive-suggestion loading flag, and the thread-sheet route state referenced by the updated top-level layout.
+- [Architectural] **Home’s refactored top section is bridged back to the existing sections instead of duplicated.** The new hero/checklist/feed composition now maps to the already-implemented setup, assistant-briefing, and proactive-nudge sections so the file builds without introducing a second Home implementation.
+- [Verification] **Native iOS build passed.** `xcodebuild -project apps/ios/Todus/Todus.xcodeproj -scheme Todus -destination 'generic/platform=iOS Simulator' build` succeeded after the patch.
+- [Files] `apps/ios/Todus/Todus/Features/Home/HomeView.swift`, `CHANGELOG.md`, `TASK.md`
+
+## [2026-04-26] Fix — targeted web CodeRabbit follow-up
+
+- [Fix] **Unified inbox infinite queries no longer create duplicate cache entries.** `useThreads()` now calls `trpcClient.mail.listThreadsMulti.query()` directly inside the outer `useInfiniteQuery` instead of nesting `queryClient.fetchQuery(...)`, so the multi-connection feed uses a single query lifecycle and cache entry.
+- [Fix] **Settings navigation titles now follow the app i18n path.** The AI settings item now uses the existing `navigation.settings.ai` key, and billing uses the new `navigation.settings.billing` key instead of hardcoded strings.
+- [Fix] **Attachment card press events no longer allow download param collisions.** Download-specific params are emitted under `downloadParams` so they cannot overwrite top-level event fields like `action`, `name`, or `mimeType`.
+- [Fix] **Compose and AI settings polish:** compose-sheet close fallback now uses React Router state instead of `window.history.length`, and the Ollama URL success toast now only fires after the save mutation succeeds.
+- [Fix] **Rendering, accessibility, and locale cleanup:** `WeeklyAgendaCard` now guards `parseISO()` output with `isValid()`, source rows suppress invalid timestamps, source favicon URLs encode `iconHint`, the full `ModelSelector` labels are programmatically tied to their Radix triggers, `CopyableTextCard` only shows copied state after successful local clipboard writes, the `open_attachment` catalog now uses nullable `previewUrl`, Hungarian danger-zone copy is translated, Hindi `cancel` labels are standardized, the French default-email copy is provider-agnostic, Czech `meetings` navigation labels are translated to `Schůzky`, and Catalan spam-delete confirmation stays in the file’s formal register.
+- [Fix] **Stream handling, session i18n, and compose resilience:** Ollama pull streams now process the final buffered chunk and surface streamed `error` objects, the security sessions page now uses i18n keys instead of hardcoded English, inline draft autosave returns to `saved` after optimistic sync dispatch, draft update payloads are runtime-validated before use, AI chat markdown normalization uses a non-printable sentinel, and failed `append()` calls now restore the composer and pending attachments before showing an error toast.
+- [Files] `apps/web/hooks/use-threads.ts`, `apps/web/config/navigation.ts`, `apps/web/components/ui/model-selector.tsx`, `apps/web/components/generative-ui/components/{AttachmentCard,WeeklyAgendaCard,CopyableTextCard}.tsx`, `apps/web/components/create/ai-sources.tsx`, `apps/web/components/generative-ui/catalog.ts`, `apps/web/app/(routes)/mail/{compose/search}/page.tsx`, `apps/web/app/(routes)/settings/ai/page.tsx`, `apps/web/messages/{en,cs,ca,fr,hi,hu}.json`, `CHANGELOG.md`, `TASK.md`
+
+## [2026-04-26] Fix — billing portal cancellation path + Ollama URL sync
+
+- [Fix] **Web + mail billing settings no longer guess the Pro SKU when canceling.** Paid users now open the hosted billing portal for cancellation and billing management, which works for both monthly and annual Pro without relying on normalized `plan === 'pro'` state.
+- [Fix] **Billing plan copy now matches the current product surface.** The shared web/mail settings pages only advertise the active `free` and `pro` tiers.
+- [Fix] **Saved Ollama endpoints load correctly in settings.** The AI settings URL input now resyncs from async user settings after load, so existing custom `ollamaBaseUrl` values are shown instead of the localhost fallback and are not accidentally overwritten on save.
+- [Files] `apps/web/app/(routes)/settings/billing/page.tsx`, `apps/mail/app/(routes)/settings/billing/page.tsx`, `apps/web/app/(routes)/settings/ai/page.tsx`, `apps/mail/app/(routes)/settings/ai/page.tsx`, `CHANGELOG.md`
+
+## [2026-04-26] Server — folder schema, summary query, generative UI docs
+
+- [Schema] **`task_folder.updated_at`** now uses Drizzle `.$onUpdate(() => new Date())` so ORM-driven updates refresh the timestamp like other tables.
+- [Schema] **`folder_item`** gains composite index `(folder_id, position)` for folder content ordered by position; migration `0053_needy_ben_urich.sql`.
+- [Performance] **`folders.summary`** uses `COUNT(*) … GROUP BY` for per-folder task, chat, and folder-item totals and `ROW_NUMBER() … <= 3` subqueries for recent rows instead of loading all matching rows.
+- [Docs] **Generative UI contract** — `SuggestionsCard` params documented to match `Button.actionParams` (string values only; JSON-stringify structured data).
+- [Files] `apps/server/src/db/schema.ts`, `apps/server/src/db/migrations/0053_needy_ben_urich.sql`, `apps/server/src/trpc/routes/tasks.ts`, `apps/server/src/lib/generative-ui-contract.ts`, `CHANGELOG.md`
+
 ## [2026-04-26] Fix — native live voice chat moves to Gemini 3.1 Flash Live
 
 - [Fix] **iOS + macOS live voice chat now use Google’s current Live API model.** The shared native voice-session defaults no longer point at deprecated `models/gemini-2.0-flash-live-001`; both apps now open sessions with `gemini-3.1-flash-live-preview`, matching Google’s current Live model docs and avoiding the rejected `bidiGenerateContent` setup seen in production.
@@ -114,6 +154,12 @@
 - [Fix] **macOS:** Launch behavior now separates **Open on Launch** from **Resume Last Viewed Page**. `startupView` is honored by default, and last-view restore remains available as an explicit Settings toggle instead of silently overriding the launch page preference.
 - [Fix] **macOS:** Existing preferences now affect real UI. `Compact Sidebar` changes sidebar column width, `Show Unread Badge` controls unread indicators/badges in Mail surfaces, and `Group by Thread` persists and drives the Threads/People inbox mode.
 - [Files] `apps/ios/Todus/Todus/Navigation/MainTabView.swift`, `apps/ios/Todus/Todus/Features/Tasks/CustomTabBar.swift`, `apps/ios/Todus/Todus/Features/Email/EmailInboxView.swift`, `apps/ios/Todus/Todus/Features/Email/EmailThreadView.swift`, `apps/ios/Todus/Todus/Services/Notifications/NotificationService.swift`, `apps/ios/Todus/Todus/App/DefaultMailOnboardingView.swift`, `apps/macos/TodusMac/App/MacAppServices.swift`, `apps/macos/TodusMac/App/MacRootView.swift`, `apps/macos/TodusMac/App/MacSidebarView.swift`, `apps/macos/TodusMac/Views/Email/MacEmailInboxView.swift`, `apps/macos/TodusMac/Views/Settings/MacSettingsView.swift`
+
+## [2026-04-26] Fix — macOS app async launch compile error
+
+- [Fix] **macOS:** `TodusMacApp.initializeApp()` now awaits `Task.yield()`, matching the current Swift concurrency requirement and fixing the Xcode build error `Expression is 'async' but is not marked with 'await'` at app launch initialization.
+- [Architectural] This keeps the existing splash-screen-first startup flow intact while making the deferred `ModelContainer` initialization compile correctly on current toolchains.
+- **Files:** `apps/macos/TodusMac/App/TodusMacApp.swift`, `TASK.md`
 
 ## [2026-04-25] Polish — Subscription UI fixes + voice metering (web + iOS + macOS + server)
 

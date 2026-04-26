@@ -521,166 +521,157 @@ aiRouter.post('/chat', async (c) => {
   // NotificationDigestService (and any other caller that needs a plain JSON response).
   const shouldStream = parsed.data.stream !== false;
 
-  // Proxy the request to OpenRouter
-  const upstreamResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-      'HTTP-Referer': 'https://todus.app',
-      'X-Title': 'Todus AI',
-    },
-    body: JSON.stringify({
-      model,
-      messages: enrichedMessages,
-      stream: shouldStream,
-      // Ask OpenRouter to include token usage in the final SSE chunk so we can
-      // bill the user for actual cost. No-op for non-streaming responses
-      // (which include `usage` on the response object directly).
-      ...(shouldStream ? { stream_options: { include_usage: true } } : {}),
-      // Include tool definitions for task mutations
-      tools: [
-        {
-          type: 'function',
-          function: {
-            name: 'create_task',
-            description: 'Create a new task for the user',
-            parameters: {
-              type: 'object',
-              properties: {
-                title: { type: 'string', description: 'Task title' },
-                dueDate: { type: 'string', description: 'ISO 8601 due date (optional)' },
-                folderName: { type: 'string', description: 'Folder name (optional)' },
-                priority: {
-                  type: 'string',
-                  // 'urgent' excluded — server schema only accepts ['none','low','medium','high']
-                  enum: ['none', 'low', 'medium', 'high'],
-                  description: 'Task priority',
-                },
+  const upstreamRequestBody = {
+    model,
+    messages: enrichedMessages,
+    stream: shouldStream,
+    // Ask OpenRouter to include token usage in the final SSE chunk so we can
+    // bill the user for actual cost. No-op for non-streaming responses
+    // (which include `usage` on the response object directly).
+    ...(shouldStream ? { stream_options: { include_usage: true } } : {}),
+    // Include tool definitions for task mutations
+    tools: [
+      {
+        type: 'function',
+        function: {
+          name: 'create_task',
+          description: 'Create a new task for the user',
+          parameters: {
+            type: 'object',
+            properties: {
+              title: { type: 'string', description: 'Task title' },
+              dueDate: { type: 'string', description: 'ISO 8601 due date (optional)' },
+              folderName: { type: 'string', description: 'Folder name (optional)' },
+              priority: {
+                type: 'string',
+                // 'urgent' excluded — server schema only accepts ['none','low','medium','high']
+                enum: ['none', 'low', 'medium', 'high'],
+                description: 'Task priority',
               },
-              required: ['title'],
             },
+            required: ['title'],
           },
         },
-        {
-          type: 'function',
-          function: {
-            name: 'update_task',
-            description: 'Update an existing task',
-            parameters: {
-              type: 'object',
-              properties: {
-                id: { type: 'string', description: 'Task UUID' },
-                title: { type: 'string' },
-                status: { type: 'string', enum: ['todo', 'doing', 'done'] },
-                priority: { type: 'string', enum: ['none', 'low', 'medium', 'high'] },
-                dueDate: { type: 'string' },
-              },
-              required: ['id'],
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'update_task',
+          description: 'Update an existing task',
+          parameters: {
+            type: 'object',
+            properties: {
+              id: { type: 'string', description: 'Task UUID' },
+              title: { type: 'string' },
+              status: { type: 'string', enum: ['todo', 'doing', 'done'] },
+              priority: { type: 'string', enum: ['none', 'low', 'medium', 'high'] },
+              dueDate: { type: 'string' },
             },
+            required: ['id'],
           },
         },
-        {
-          type: 'function',
-          function: {
-            name: 'delete_task',
-            description: 'Delete a task',
-            parameters: {
-              type: 'object',
-              properties: {
-                id: { type: 'string', description: 'Task UUID to delete' },
-              },
-              required: ['id'],
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'delete_task',
+          description: 'Delete a task',
+          parameters: {
+            type: 'object',
+            properties: {
+              id: { type: 'string', description: 'Task UUID to delete' },
             },
+            required: ['id'],
           },
         },
-        // ── Calendar ──────────────────────────────────────────────────────────
-        {
-          type: 'function',
-          function: {
-            name: 'create_calendar_event',
-            description: 'Create a new calendar event on the user\'s device calendar',
-            parameters: {
-              type: 'object',
-              properties: {
-                title: { type: 'string', description: 'Event title' },
-                startDate: { type: 'string', description: 'ISO 8601 start datetime, e.g. 2025-04-01T09:00:00' },
-                endDate: { type: 'string', description: 'ISO 8601 end datetime (optional, defaults to 1 hour after start)' },
-                notes: { type: 'string', description: 'Optional notes or description for the event' },
-              },
-              required: ['title', 'startDate'],
+      },
+      // ── Calendar ──────────────────────────────────────────────────────────
+      {
+        type: 'function',
+        function: {
+          name: 'create_calendar_event',
+          description: 'Create a new calendar event on the user\'s device calendar',
+          parameters: {
+            type: 'object',
+            properties: {
+              title: { type: 'string', description: 'Event title' },
+              startDate: { type: 'string', description: 'ISO 8601 start datetime, e.g. 2025-04-01T09:00:00' },
+              endDate: { type: 'string', description: 'ISO 8601 end datetime (optional, defaults to 1 hour after start)' },
+              notes: { type: 'string', description: 'Optional notes or description for the event' },
             },
+            required: ['title', 'startDate'],
           },
         },
-        {
-          type: 'function',
-          function: {
-            name: 'update_calendar_event',
-            description: 'Update an existing calendar event. Use the event identifier from the calendar context.',
-            parameters: {
-              type: 'object',
-              properties: {
-                id: { type: 'string', description: 'Event identifier' },
-                title: { type: 'string' },
-                startDate: { type: 'string', description: 'ISO 8601 start datetime' },
-                endDate: { type: 'string', description: 'ISO 8601 end datetime' },
-                notes: { type: 'string' },
-              },
-              required: ['id'],
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'update_calendar_event',
+          description: 'Update an existing calendar event. Use the event identifier from the calendar context.',
+          parameters: {
+            type: 'object',
+            properties: {
+              id: { type: 'string', description: 'Event identifier' },
+              title: { type: 'string' },
+              startDate: { type: 'string', description: 'ISO 8601 start datetime' },
+              endDate: { type: 'string', description: 'ISO 8601 end datetime' },
+              notes: { type: 'string' },
             },
+            required: ['id'],
           },
         },
-        {
-          type: 'function',
-          function: {
-            name: 'delete_calendar_event',
-            description: 'Delete a calendar event by its identifier',
-            parameters: {
-              type: 'object',
-              properties: {
-                id: { type: 'string', description: 'Event identifier to delete' },
-              },
-              required: ['id'],
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'delete_calendar_event',
+          description: 'Delete a calendar event by its identifier',
+          parameters: {
+            type: 'object',
+            properties: {
+              id: { type: 'string', description: 'Event identifier to delete' },
             },
+            required: ['id'],
           },
         },
-        // ── Email ──────────────────────────────────────────────────────────────
-        {
-          type: 'function',
-          function: {
-            name: 'send_email',
-            description: 'Send an email or reply to an existing thread on behalf of the user',
-            parameters: {
-              type: 'object',
-              properties: {
-                to: {
-                  type: 'array',
-                  items: { type: 'string' },
-                  description: 'Array of recipient email addresses',
-                },
-                subject: { type: 'string', description: 'Email subject line' },
-                body: { type: 'string', description: 'Email body in plain text or simple HTML' },
-                threadId: { type: 'string', description: 'Thread ID to reply to (omit for new email)' },
+      },
+      // ── Email ──────────────────────────────────────────────────────────────
+      {
+        type: 'function',
+        function: {
+          name: 'send_email',
+          description: 'Send an email or reply to an existing thread on behalf of the user',
+          parameters: {
+            type: 'object',
+            properties: {
+              to: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'Array of recipient email addresses',
               },
-              required: ['to', 'subject', 'body'],
+              subject: { type: 'string', description: 'Email subject line' },
+              body: { type: 'string', description: 'Email body in plain text or simple HTML' },
+              threadId: { type: 'string', description: 'Thread ID to reply to (omit for new email)' },
             },
+            required: ['to', 'subject', 'body'],
           },
         },
-      ],
-    }),
-  });
+      },
+    ],
+  };
 
-  if (!upstreamResponse.ok || !upstreamResponse.body) {
-    const errorText = await upstreamResponse.text().catch(() => 'Unknown error');
-    return c.json({ error: `AI provider error: ${upstreamResponse.status}`, details: errorText }, 502);
-  }
+  const fetchUpstreamResponse = () =>
+    fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+        'HTTP-Referer': 'https://todus.app',
+        'X-Title': 'Todus AI',
+      },
+      body: JSON.stringify(upstreamRequestBody),
+    });
 
-  // ── Build SSE response stream ────────────────────────────────────────────
-  // We use a custom ReadableStream to:
-  // 1. Write web search custom events (search_status, sources) before the LLM response
-  // 2. Pipe upstream OpenRouter SSE through unchanged
-  // 3. Capture assistant text for Mem0 memory storage (fire-and-forget)
-  const encoder = new TextEncoder();
   const mem0LastUserMsg = parsed.data.messages.filter((m) => m.role === 'user').pop();
   let assistantText = '';
   const userId = user.id;
@@ -695,8 +686,13 @@ aiRouter.post('/chat', async (c) => {
     await preloadMemories(userId, env.prompts_storage, mem0Key);
   };
 
-  // ── Non-streaming path — preserve the same memory + source behaviour ─────
   if (!shouldStream) {
+    const upstreamResponse = await fetchUpstreamResponse();
+    if (!upstreamResponse.ok || !upstreamResponse.body) {
+      const errorText = await upstreamResponse.text().catch(() => 'Unknown error');
+      return c.json({ error: `AI provider error: ${upstreamResponse.status}`, details: errorText }, 502);
+    }
+
     const responseData = (await upstreamResponse.json()) as Record<string, any>;
     const assistantContent =
       typeof responseData?.choices?.[0]?.message?.content === 'string'
@@ -717,9 +713,22 @@ aiRouter.post('/chat', async (c) => {
     });
   }
 
+  // ── Build SSE response stream ────────────────────────────────────────────
+  // We use a custom ReadableStream to:
+  // 1. Open the SSE response immediately so native clients don't time out
+  //    while waiting for the upstream provider to produce headers
+  // 2. Write web search custom events (search_status, sources) before the LLM response
+  // 3. Pipe upstream OpenRouter SSE through unchanged
+  // 4. Capture assistant text for Mem0 memory storage (fire-and-forget)
+  const encoder = new TextEncoder();
+
   const responseStream = new ReadableStream({
     async start(controller) {
       try {
+        // Emit a tiny bootstrap event immediately so the client receives bytes even
+        // if the upstream model spends a long time planning tools before first token.
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'stream_status', status: 'connecting' })}\n\n`));
+
         // 1. Write web search custom events before the LLM answer.
         //    Already gated by needsSearch (which is false on follow-up steps),
         //    so this block won't fire on round-2+ tool-result replays.
@@ -745,6 +754,22 @@ aiRouter.post('/chat', async (c) => {
           controller.enqueue(
             encoder.encode(`data: ${JSON.stringify({ type: 'context_sources', sources: contextSources })}\n\n`),
           );
+        }
+
+        const upstreamResponse = await fetchUpstreamResponse();
+        if (!upstreamResponse.ok || !upstreamResponse.body) {
+          const errorText = await upstreamResponse.text().catch(() => 'Unknown error');
+          controller.enqueue(
+            encoder.encode(
+              `data: ${JSON.stringify({
+                type: 'error',
+                message: `AI provider error (${upstreamResponse.status}).`,
+                details: errorText,
+              })}\n\n`,
+            ),
+          );
+          controller.close();
+          return;
         }
 
         // 2. Pipe upstream OpenRouter SSE through, capturing content for Mem0
@@ -840,7 +865,13 @@ aiRouter.post('/chat', async (c) => {
 
         controller.close();
       } catch (error) {
-        controller.error(error);
+        const message = error instanceof Error ? error.message : 'Unknown stream error';
+        controller.enqueue(
+          encoder.encode(
+            `data: ${JSON.stringify({ type: 'error', message: 'AI stream failed before completion.', details: message })}\n\n`,
+          ),
+        );
+        controller.close();
       }
     },
   });

@@ -12,6 +12,7 @@ import OSLog
 @MainActor
 @Observable
 final class AIChatService {
+    private let streamRequestTimeout: TimeInterval = 180
     var messages: [AIChatMessage] = []
     var isStreaming: Bool = false
     var errorMessage: String?
@@ -99,6 +100,12 @@ final class AIChatService {
         didSet { UserDefaults.standard.set(aiCanSendEmail, forKey: "ai_can_send_email") }
     }
 
+    /// Whether the AI is allowed to perform web searches for the current turn.
+    /// Surfaced as a toggle in the attachment sheet alongside Calendar / Gmail.
+    var aiCanWebSearch: Bool = true {
+        didSet { UserDefaults.standard.set(aiCanWebSearch, forKey: "ai_can_web_search") }
+    }
+
     /// Chronologically ordered list of saved conversations (newest first).
     var savedConversations: [AIChatConversation] = []
     /// Conversations deleted locally but not yet confirmed removed by the backend.
@@ -141,6 +148,9 @@ final class AIChatService {
 
     /// Current page/tab context injected by the view before each send — included in system prompt.
     var currentPageContext: String? = nil
+    
+    var currentThreadId: String? = nil
+    var currentThreadSubject: String? = nil
 
     /// Structured mentions for the current outbound user turn.
     private var currentTurnMentions: [RichInputMentionRef] = []
@@ -184,6 +194,9 @@ final class AIChatService {
         if UserDefaults.standard.object(forKey: "ai_can_send_email") != nil {
             self.aiCanSendEmail = UserDefaults.standard.bool(forKey: "ai_can_send_email")
         }
+        if UserDefaults.standard.object(forKey: "ai_can_web_search") != nil {
+            self.aiCanWebSearch = UserDefaults.standard.bool(forKey: "ai_can_web_search")
+        }
 
         loadPersistedDeletedConversationIDs()
 
@@ -211,8 +224,11 @@ final class AIChatService {
         if chatTitle == nil {
             if !trimmed.isEmpty {
                 chatTitle = String(trimmed.prefix(60))
-            } else if let first = attachmentFileNames.first {
-                chatTitle = String(first.prefix(60))
+            } else if !attachmentFileNames.isEmpty {
+                // For image-only / attachment-only sends, avoid leaking the raw
+                // filename into the conversation title — it's noisy and not
+                // user-meaningful.
+                chatTitle = "New conversation"
             }
         }
 
@@ -865,7 +881,7 @@ final class AIChatService {
 
         requestLoop: while true {
             let url = baseURL.appending(path: "api/ai/chat")
-            var request = URLRequest(url: url)
+            var request = URLRequest(url: url, timeoutInterval: streamRequestTimeout)
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             // Origin required by Better Auth CSRF middleware — without this the bearer plugin
@@ -953,30 +969,39 @@ final class AIChatService {
 
                     guard let data = jsonString.data(using: .utf8) else { continue }
 
-                    if let customEvent = try? JSONDecoder().decode(SSECustomEvent.self, from: data),
-                       !customEvent.type.isEmpty {
-                        handleCustomEvent(customEvent, messageID: assistantMessageID)
-                        continue
-                    }
+                    // Per-token JSON decode runs off main — see `decodeSSELineOffMain`.
+                    // We dispatch only state mutation back here on the main actor.
+                    let outcome = await Task.detached(priority: .userInitiated) {
+                        decodeSSELineOffMain(data)
+                    }.value
 
-                    guard let chunk = try? JSONDecoder().decode(SSEChunk.self, from: data) else { continue }
-                    guard let delta = chunk.choices.first?.delta else { continue }
+                    switch outcome {
+                    case .delta(let text, let toolCalls):
+                        if let text, !text.isEmpty {
+                            result.assistantContent += text
+                            result.producedContent = true
+                            appendToken(text, to: assistantMessageID)
+                        }
+                        // Accumulate streaming tool call fragments by index.
+                        if let toolCalls {
+                            for tc in toolCalls {
+                                let idx = tc.index ?? 0
+                                var acc = toolCallBuffer[idx] ?? AccumulatedToolCall()
+                                if let id = tc.id, !id.isEmpty { acc.id = id }
+                                if let name = tc.function?.name, !name.isEmpty { acc.name = name }
+                                if let args = tc.function?.arguments, !args.isEmpty { acc.arguments += args }
+                                toolCallBuffer[idx] = acc
+                            }
+                        }
 
-                    if let text = delta.content, !text.isEmpty {
-                        result.assistantContent += text
-                        result.producedContent = true
-                        appendToken(text, to: assistantMessageID)
-                    }
-
-                    // Accumulate streaming tool call fragments by index.
-                    if let toolCalls = delta.toolCalls {
-                        for tc in toolCalls {
-                            let idx = tc.index ?? 0
-                            var acc = toolCallBuffer[idx] ?? AccumulatedToolCall()
-                            if let id = tc.id, !id.isEmpty { acc.id = id }
-                            if let name = tc.function?.name, !name.isEmpty { acc.name = name }
-                            if let args = tc.function?.arguments, !args.isEmpty { acc.arguments += args }
-                            toolCallBuffer[idx] = acc
+                    case .unrecognised(let data):
+                        // Custom events (search_status, sources, context_sources, reasoning,
+                        // reasoning_done) are rare — a few per turn — so paying the decode
+                        // cost on main is fine here. They carry `AISource` which we don't
+                        // ferry across actor boundaries.
+                        if let customEvent = try? JSONDecoder().decode(SSECustomEvent.self, from: data),
+                           !customEvent.type.isEmpty {
+                            handleCustomEvent(customEvent, messageID: assistantMessageID)
                         }
                     }
                 }
@@ -1067,6 +1092,40 @@ final class AIChatService {
         )
     }
 
+    /// Builds an `AISource` row for a client-side tool call (`tool:<callId>` ids match server contract).
+    private func makeToolSource(
+        callId: String,
+        kind: AISource.Kind,
+        platform: AISource.Platform,
+        title: String,
+        subtitle: String? = nil,
+        timestamp: Date? = nil,
+        url: String? = nil,
+        entityId: String? = nil,
+        snippet: String? = nil,
+        iconHint: String? = nil
+    ) -> AISource {
+        AISource(
+            id: "tool:\(callId)",
+            kind: kind,
+            platform: platform,
+            title: title,
+            subtitle: subtitle,
+            timestamp: timestamp,
+            url: url,
+            entityId: entityId,
+            snippet: snippet,
+            iconHint: iconHint
+        )
+    }
+
+    /// Appends a tool-derived source to the assistant message if not already present.
+    private func appendToolSource(_ source: AISource, to assistantMessageID: UUID) {
+        guard let idx = messages.firstIndex(where: { $0.id == assistantMessageID }) else { return }
+        if messages[idx].sources.contains(where: { $0.id == source.id }) { return }
+        messages[idx].sources.append(source)
+    }
+
     private func executeSingleToolCall(
         _ call: AccumulatedToolCall,
         assistantMessageID: UUID,
@@ -1090,6 +1149,11 @@ final class AIChatService {
             let dueDate = args.dueDate.flatMap { ISO8601DateFormatter().date(from: $0) }
             captureService.capture(rawComposerText: args.title, overrideDueDate: dueDate, in: modelContext)
             appendMutation(AIChatTaskMutation(action: .create, title: args.title, dueDate: dueDate), to: assistantMessageID)
+            appendToolSource(
+                makeToolSource(callId: call.id, kind: .task, platform: .todus,
+                               title: args.title, subtitle: "Task created", timestamp: dueDate),
+                to: assistantMessageID
+            )
             return encodeToolResult(success: true, message: "Task '\(args.title)' created")
 
         case "update_task":
@@ -1104,6 +1168,12 @@ final class AIChatService {
             }
             applyUpdateTask(taskID: taskID, args: args, modelContext: modelContext)
             appendMutation(AIChatTaskMutation(action: .update, taskID: taskID, title: args.title), to: assistantMessageID)
+            appendToolSource(
+                makeToolSource(callId: call.id, kind: .task, platform: .todus,
+                               title: args.title ?? "Task", subtitle: "Task updated",
+                               entityId: taskID.uuidString),
+                to: assistantMessageID
+            )
             return encodeToolResult(success: true, message: "Task updated")
 
         case "delete_task":
@@ -1134,6 +1204,11 @@ final class AIChatService {
             }
             applyDeleteTask(taskID: taskID, modelContext: modelContext)
             appendMutation(AIChatTaskMutation(action: .delete, taskID: taskID, title: titleForChip), to: assistantMessageID)
+            appendToolSource(
+                makeToolSource(callId: call.id, kind: .task, platform: .todus,
+                               title: titleForChip ?? "Task", subtitle: "Task deleted"),
+                to: assistantMessageID
+            )
             return encodeToolResult(success: true, message: "Task deleted")
 
         case "create_calendar_event":
@@ -1158,6 +1233,11 @@ final class AIChatService {
             do {
                 try await cal.createEvent(title: args.title, startDate: startDate, endDate: endDate)
                 appendMutation(AIChatTaskMutation(action: .create, title: "📅 \(args.title)"), to: assistantMessageID)
+                appendToolSource(
+                    makeToolSource(callId: call.id, kind: .calendarEvent, platform: .googleCalendar,
+                                   title: args.title, subtitle: "Calendar event created", timestamp: startDate),
+                    to: assistantMessageID
+                )
                 return encodeToolResult(success: true, message: "Calendar event '\(args.title)' created")
             } catch {
                 appendToolFailureChip(toolName: call.name, message: "Failed to create event: \(error.localizedDescription)", title: "📅 \(args.title)", to: assistantMessageID)
@@ -1189,6 +1269,12 @@ final class AIChatService {
                     notes: args.notes
                 )
                 appendMutation(AIChatTaskMutation(action: .update, title: "📅 \(args.title ?? "Event")"), to: assistantMessageID)
+                appendToolSource(
+                    makeToolSource(callId: call.id, kind: .calendarEvent, platform: .googleCalendar,
+                                   title: args.title ?? "Event", subtitle: "Calendar event updated",
+                                   timestamp: start, entityId: args.id),
+                    to: assistantMessageID
+                )
                 return encodeToolResult(success: true, message: "Event updated")
             } catch {
                 appendToolFailureChip(toolName: call.name, message: "Failed to update event: \(error.localizedDescription)", title: "📅 \(args.title ?? "Event")", to: assistantMessageID)
@@ -1211,6 +1297,12 @@ final class AIChatService {
             do {
                 try await cal.deleteEvent(identifier: args.id)
                 appendMutation(AIChatTaskMutation(action: .delete, title: "📅 Event removed"), to: assistantMessageID)
+                appendToolSource(
+                    makeToolSource(callId: call.id, kind: .calendarEvent, platform: .googleCalendar,
+                                   title: "Event removed", subtitle: "Calendar event deleted",
+                                   entityId: args.id),
+                    to: assistantMessageID
+                )
                 return encodeToolResult(success: true, message: "Event deleted")
             } catch {
                 appendToolFailureChip(toolName: call.name, message: "Failed to delete event: \(error.localizedDescription)", to: assistantMessageID)
@@ -1239,6 +1331,15 @@ final class AIChatService {
             let sent = await email.sendEmail(draft)
             if sent {
                 appendMutation(AIChatTaskMutation(action: .create, title: "✉️ Sent: \(args.subject)"), to: assistantMessageID)
+                let recipients = args.to.joined(separator: ", ")
+                appendToolSource(
+                    makeToolSource(callId: call.id, kind: .email, platform: .gmail,
+                                   title: args.subject,
+                                   subtitle: recipients.isEmpty ? "Email sent" : "Email sent to \(recipients)",
+                                   timestamp: Date(),
+                                   entityId: args.threadId),
+                    to: assistantMessageID
+                )
                 return encodeToolResult(success: true, message: "Email sent: \(args.subject)")
             } else {
                 appendToolFailureChip(toolName: call.name, message: "Failed to send email", title: "✉️ \(args.subject)", to: assistantMessageID)
@@ -1298,8 +1399,19 @@ final class AIChatService {
 
         case "sources":
             messages[idx].searchState = .complete
-            messages[idx].sources = (event.sources ?? []).map { src in
-                WebSource(url: src.url, title: src.title, snippet: src.snippet)
+            messages[idx].sources = (event.legacyWebSearchSources ?? []).map { sp in
+                AISource(web: WebSource(url: sp.url, title: sp.title, snippet: sp.snippet))
+            }
+
+        case "context_sources":
+            let batch = event.contextAISources ?? []
+            guard !batch.isEmpty else { break }
+            var seen = Set(messages[idx].sources.map(\.id))
+            for s in batch {
+                if !seen.contains(s.id) {
+                    messages[idx].sources.append(s)
+                    seen.insert(s.id)
+                }
             }
 
         case "reasoning":
@@ -1309,6 +1421,9 @@ final class AIChatService {
 
         case "reasoning_done":
             messages[idx].reasoningDurationMs = event.durationMs
+
+        case "error":
+            appendError(event.content ?? "AI request failed before the model replied.", to: messageID)
 
         default:
             break
@@ -1532,13 +1647,18 @@ final class AIChatService {
 
     // MARK: - Message Mutation Helpers
 
-    /// Buffer tokens and flush every 40 ms so the UI re-renders in batches rather
-    /// than on every single SSE event — this removes the jitter from rapid streaming.
+    /// Buffer tokens and flush at ~12 Hz so the UI re-renders in batches rather
+    /// than on every single SSE event. The previous 40 ms cadence (~25 Hz) caused
+    /// each visible MessageBubble to re-evaluate its body 25× per second during a
+    /// reply, which compounded with the regex scan in `parseMessageContent` and
+    /// the `MarkdownView` reparse to register as multi-second main-thread stalls
+    /// in the hang watchdog. 80 ms still feels live (well above the ~10 fps human
+    /// streaming-text comfort floor) but halves the re-render work per second.
     private func appendToken(_ token: String, to messageID: UUID) {
         tokenBuffer += token
         guard !flushScheduled else { return }
         flushScheduled = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.04) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
             guard let self else { return }
             self.flushTokenBuffer(to: messageID)
             self.flushScheduled = false
@@ -2035,18 +2155,47 @@ struct MentionPayload: Encodable {
 // MARK: - Custom SSE Event Decoding (Web Search + Reasoning)
 
 /// Custom event types sent by the backend before/alongside the OpenRouter SSE stream.
-/// These events carry web search status, sources, and reasoning tokens.
+/// These events carry web search status, sources, reasoning tokens, and unified
+/// `context_sources` (see server `ContextSourcesEvent`).
 private struct SSECustomEvent: Decodable {
     let type: String
     let status: String?
     let queries: [String]?
-    let sources: [SSESourcePayload]?
+    /// Legacy `sources` event — web search rows for `[n]` citations (`SSESourcePayload`).
+    let legacyWebSearchSources: [SSESourcePayload]?
+    /// `context_sources` event — same JSON key `sources` but `AISource` objects.
+    let contextAISources: [AISource]?
     let content: String?
     let durationMs: Int?
 
     enum CodingKeys: String, CodingKey {
-        case type, status, queries, sources, content
+        case type, status, queries, content
         case durationMs = "duration_ms"
+        case sources
+        case message
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        type = try c.decode(String.self, forKey: .type)
+        status = try c.decodeIfPresent(String.self, forKey: .status)
+        queries = try c.decodeIfPresent([String].self, forKey: .queries)
+        var resolvedContent = try c.decodeIfPresent(String.self, forKey: .content)
+        durationMs = try c.decodeIfPresent(Int.self, forKey: .durationMs)
+        if type == "context_sources" {
+            legacyWebSearchSources = nil
+            contextAISources = try c.decodeIfPresent([AISource].self, forKey: .sources)
+        } else if type == "error" {
+            legacyWebSearchSources = nil
+            contextAISources = nil
+            if resolvedContent == nil {
+                resolvedContent = try c.decodeIfPresent(String.self, forKey: .message)
+            }
+        } else {
+            legacyWebSearchSources = try c.decodeIfPresent([SSESourcePayload].self, forKey: .sources)
+            contextAISources = nil
+        }
+        content = resolvedContent
     }
 }
 
@@ -2059,15 +2208,15 @@ private struct SSESourcePayload: Decodable {
 
 // MARK: - SSE Chunk Decoding
 
-private struct SSEChunk: Decodable {
+private struct SSEChunk: Decodable, Sendable {
     let choices: [SSEChoice]
 }
 
-private struct SSEChoice: Decodable {
+private struct SSEChoice: Decodable, Sendable {
     let delta: SSEDelta
 }
 
-private struct SSEDelta: Decodable {
+private struct SSEDelta: Decodable, Sendable {
     let content: String?
     let toolCalls: [SSEToolCall]?
 
@@ -2080,15 +2229,38 @@ private struct SSEDelta: Decodable {
 /// A streaming tool_call fragment. All fields are optional because OpenAI/OpenRouter
 /// split a single tool call across multiple deltas: the first chunk has `id`,
 /// `index`, `function.name`; later chunks carry only partial `function.arguments`.
-private struct SSEToolCall: Decodable {
+private struct SSEToolCall: Decodable, Sendable {
     let index: Int?
     let id: String?
     let function: SSEToolFunction?
 }
 
-private struct SSEToolFunction: Decodable {
+private struct SSEToolFunction: Decodable, Sendable {
     let name: String?
     let arguments: String?
+}
+
+/// Outcome of the per-line SSE decode. `.delta` carries the OpenRouter chunk
+/// content (the per-token hot path); `.unrecognised` returns the raw `Data` so
+/// the caller can attempt the rarer `SSECustomEvent` decode on the main actor
+/// (its decoded form contains `AISource`, which we do not pass across actors).
+private enum SSEParseOutcome: Sendable {
+    case delta(content: String?, toolCalls: [SSEToolCall]?)
+    case unrecognised(Data)
+}
+
+/// Decodes a single SSE `data:` payload off the main actor. The for-await loop
+/// in `runStep` runs on the main actor because `AIChatService` is `@MainActor`,
+/// and on a long reply we previously paid two `JSONDecoder().decode(...)` calls
+/// per token on main — large enough to register as 200ms+ stalls in the hang
+/// watchdog. Run as `Task.detached` so the work executes on the cooperative
+/// thread pool, leaving main free for UI work between flushes.
+private func decodeSSELineOffMain(_ data: Data) -> SSEParseOutcome {
+    if let chunk = try? JSONDecoder().decode(SSEChunk.self, from: data),
+       let delta = chunk.choices.first?.delta {
+        return .delta(content: delta.content, toolCalls: delta.toolCalls)
+    }
+    return .unrecognised(data)
 }
 
 // MARK: - Tool Call Argument Models

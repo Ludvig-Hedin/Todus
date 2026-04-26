@@ -1554,12 +1554,21 @@ const isMissingAssistantSchemaError = (error: unknown) =>
     error.message.includes('relation "mail0_assistant_prepared_action" does not exist') ||
     error.message.includes('relation "mail0_assistant_briefing_snapshot" does not exist'));
 
+const isBriefingShardCapacityError = (error: unknown) =>
+  error instanceof Error &&
+  (error.message.includes('Timed out while waiting for an open slot in the pool') ||
+    error.message.includes('Shard initialization failed') ||
+    error.message.includes('Failed to execute operations across shards'));
+
 /// Recognized degraded-schema errors for the briefing endpoint. Either the assistant
 /// tables haven't been migrated yet, OR `mail0_connection.color` is missing (migration
-/// 0047 not yet applied to this environment). Both cause a 500 in the wrapped Effect
-/// pipeline and the multi-shard error message includes the original PostgresError text.
+/// 0047 not yet applied to this environment), OR the non-critical shard fan-out is
+/// temporarily saturated and cannot acquire a Postgres slot. All of these should degrade
+/// to the lightweight fallback briefing instead of taking Home down with a 500.
 const shouldFallBackForBriefing = (error: unknown) =>
-  isMissingAssistantSchemaError(error) || isMissingConnectionColorError(error);
+  isMissingAssistantSchemaError(error) ||
+  isMissingConnectionColorError(error) ||
+  isBriefingShardCapacityError(error);
 
 /// Minimal thread context returned when the assistant DB tables are missing (e.g. on a
 /// fresh deploy that hasn't run migrations yet). Surfaces a usable summary from the
