@@ -546,6 +546,7 @@ final class AppServices {
                 guard let self else { return }
                 await self.syncService.retryUnsyncedTasks(in: context)
                 await self.folderSyncService.retryPending()
+                await self.draftService.flushPending(in: context)
             }
         }
     }

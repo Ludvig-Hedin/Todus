@@ -97,7 +97,7 @@ struct TodosApp: App {
             diskPath: "todus-url-cache"
         )
 
-        let schema = Schema([TaskRecord.self, FolderRecord.self, FolderItemRecord.self])
+        let schema = Schema([TaskRecord.self, FolderRecord.self, FolderItemRecord.self, DraftRecord.self])
 
         // ModelContainer init runs schema migrations and opens the persistent store —
         // both can take multiple seconds on cold launch. Doing it on the MainActor
