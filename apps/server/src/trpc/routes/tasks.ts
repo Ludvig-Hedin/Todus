@@ -424,6 +424,7 @@ export const foldersRouter = router({
       const { db, conn } = getDb();
       try {
         const syncedIds: string[] = [];
+        const now = new Date();
 
         for (const mutation of input.mutations) {
           if (mutation.type === 'upsert') {
@@ -436,18 +437,18 @@ export const foldersRouter = router({
                 color: mutation.color ?? null,
                 icon: mutation.icon ?? null,
                 position: mutation.position ?? 0,
-                createdAt: new Date(),
-                updatedAt: new Date(),
+                createdAt: now,
+                updatedAt: now,
               })
               .onConflictDoUpdate({
                 target: taskFolder.id,
                 set: {
-                  name: mutation.name,
-                  color: mutation.color ?? null,
-                  icon: mutation.icon ?? null,
-                  position: mutation.position ?? 0,
-                  updatedAt: new Date(),
+                  name: sql`EXCLUDED.name`,
+                  color: sql`EXCLUDED.color`,
+                  icon: sql`EXCLUDED.icon`,
+                  position: sql`COALESCE(EXCLUDED.position, task_folder.position)`,
                 },
+                setWhere: eq(taskFolder.userId, ctx.sessionUser.id),
               });
             syncedIds.push(mutation.id);
           } else {
