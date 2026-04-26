@@ -166,7 +166,8 @@
 - Loading a saved chat while another AI response was streaming previously left the newly loaded chat stuck behind the old request state ✅ Fixed — history loads now cancel the active stream and clear transient errors/mentions first
 - Duplicating a chat previously rebuilt messages from plain text only, dropping mentions and reply metadata, and the duplicate was not marked unsaved for autosave ✅ Fixed — duplication now preserves the full in-memory message models and leaves the duplicate as a real editable copy
 - Spec-only assistant replies previously lost their retry/action row because the UI only rendered actions when `message.content` was non-empty ✅ Fixed — assistant actions now remain available when a parsed UI spec is present, and copy is disabled only when there is no text to copy
+- AI chat user bubbles in the native assistant sheet previously reused the generic primary surface and could disappear into the sheet background, especially in dark mode ✅ Fixed — the chat view now uses a dedicated dynamic bubble fill with restrained contrast in both light and dark mode
 
 ---
 
-## Last Updated: 2026-04-03
+## Last Updated: 2026-04-26

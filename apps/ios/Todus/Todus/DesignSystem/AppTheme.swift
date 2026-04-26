@@ -11,9 +11,9 @@ enum AppTheme {
     static let backgroundBottom = Color(UIColor { trait in
         trait.userInterfaceStyle == .dark ? UIColor(white: 0.05, alpha: 1) : UIColor(white: 0.94, alpha: 1)
     })
-    // Sheets sit slightly above the app background in dark mode so they read as a distinct layer.
+    // Sheets use a distinct surface: lighter “paper” in light mode vs gray app chrome; lifted gray in dark.
     static let sheetBackground = Color(UIColor { trait in
-        trait.userInterfaceStyle == .dark ? UIColor(white: 0.09, alpha: 1) : UIColor(white: 0.94, alpha: 1)
+        trait.userInterfaceStyle == .dark ? UIColor(white: 0.10, alpha: 1) : UIColor(white: 0.978, alpha: 1)
     })
     static let surfacePrimary = Color(UIColor { trait in
         // Dark: 0.11 (up from 0.09) — slightly less stark against near-black background
@@ -22,8 +22,29 @@ enum AppTheme {
     static let surfaceSecondary = Color(UIColor { trait in
         trait.userInterfaceStyle == .dark ? UIColor(white: 0.14, alpha: 1) : UIColor(white: 0.96, alpha: 1)
     })
+    /// User chat bubble fill inside the AI sheet.
+    /// Tuned to keep roughly the same perceived separation in both appearances:
+    /// restrained light gray on light mode, restrained dark gray on dark mode.
+    static let chatUserBubbleFill = Color(UIColor { trait in
+        trait.userInterfaceStyle == .dark ? UIColor(white: 0.16, alpha: 1) : UIColor(white: 0.92, alpha: 1)
+    })
+    // MARK: Segmented control (same recipe as macOS `MacTheme.segmentedTrack` / Calendar picker)
+    /// Recessed track behind segments — visible in light and dark mode.
+    static let segmentedTrack = Color(UIColor { trait in
+        trait.userInterfaceStyle == .dark ? UIColor(white: 0.13, alpha: 1) : UIColor(white: 0.88, alpha: 1)
+    })
+    /// Selected tab pill — high contrast on `segmentedTrack`.
+    static let segmentedSelectedPill = Color(UIColor { trait in
+        trait.userInterfaceStyle == .dark ? UIColor(white: 0.22, alpha: 1) : UIColor(white: 1.0, alpha: 1)
+    })
+    /// Inset list rows on sheets — light mode uses a slightly darker fill + stroke so fields read as real cards.
     static let sheetCardFill = Color(UIColor { trait in
-        trait.userInterfaceStyle == .dark ? UIColor(white: 0.13, alpha: 1) : UIColor(white: 0.92, alpha: 1)
+        trait.userInterfaceStyle == .dark ? UIColor(white: 0.13, alpha: 1) : UIColor(white: 0.88, alpha: 1)
+    })
+    static let sheetListRowStroke = Color(UIColor { trait in
+        trait.userInterfaceStyle == .dark
+            ? UIColor.separator.withAlphaComponent(0.22)
+            : UIColor.separator.withAlphaComponent(0.40)
     })
     // Restrained completely minimal accent
     static let accent = Color.primary
@@ -53,7 +74,11 @@ enum AppTheme {
 
     // Row specifics
     static let rowFill = surfacePrimary
-    static let rowStroke = Color(uiColor: .separator).opacity(0.10)
+    static let rowStroke = Color(UIColor { trait in
+        trait.userInterfaceStyle == .dark
+            ? UIColor.separator.withAlphaComponent(0.12)
+            : UIColor.separator.withAlphaComponent(0.24)
+    })
     static let shadowColor = Color.black.opacity(0.06)
 
     // MARK: - Corner radii (aligned with MacTheme — continuous rounded rects app-wide)
@@ -73,6 +98,35 @@ enum AppTheme {
         static let chip: CGFloat = 7
         /// Chat composer / large floating chrome
         static let composer: CGFloat = 24
+    }
+
+    /// Layout metrics for inline `ProgressView` in buttons and rows (prevents spinners from dictating height).
+    enum Metrics {
+        /// Primary pill buttons with ~20pt icons (Gmail, calendar, notifications, etc.).
+        static let buttonInlineSpinner: CGFloat = 20
+        /// Navigation bar and toolbar items (~16pt SF Symbol / bar title).
+        static let toolbarInlineSpinner: CGFloat = 16
+        /// Compact chips and secondary actions with 12–13pt type.
+        static let compactInlineSpinner: CGFloat = 14
+    }
+}
+
+/// Circular progress sized like an inline icon so loading state does not enlarge the button or row.
+struct ButtonInlineProgressView: View {
+    var tint: Color
+    /// Square edge length; prefer `AppTheme.Metrics` presets to match neighboring icons or type.
+    var side: CGFloat
+
+    init(tint: Color = .white, side: CGFloat = AppTheme.Metrics.buttonInlineSpinner) {
+        self.tint = tint
+        self.side = side
+    }
+
+    var body: some View {
+        ProgressView()
+            .controlSize(.mini)
+            .tint(tint)
+            .frame(width: side, height: side)
     }
 }
 
@@ -226,35 +280,138 @@ struct AppTopHeader<CustomTitle: View>: View {
             }
             .buttonStyle(.plain)
 
-            Divider()
-                .frame(height: 20)
-
-            Menu {
-                Button("Settings") {
-                    services.showsSettings = true
-                }
-
+            if hasContextMenuItems {
                 Divider()
+                    .frame(height: 20)
 
-                Button("Refresh Mail") {
-                    Task { await services.emailService.loadThreads(refresh: true) }
+                Menu {
+                    contextMenuContent
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(.primary)
+                        .frame(width: 44, height: 40)
+                        .interactiveHitTarget(expansion: 4)
                 }
-
-                Button("New Email") {
-                    services.showsComposeEmail = true
-                }
-            } label: {
-                Image(systemName: "ellipsis.circle")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(.primary)
-                    .frame(width: 44, height: 40)
-                    .interactiveHitTarget(expansion: 4)
+                .menuStyle(.borderlessButton)
+                .tint(.primary)
+                .buttonStyle(.plain)
             }
-            .menuStyle(.borderlessButton)
-            .tint(.primary)
-            .buttonStyle(.plain)
         }
         .glassActionPill()
+    }
+
+    /// Whether the current tab exposes any contextual actions. When false, the entire
+    /// ellipsis button (and its leading divider) is omitted so the action pill
+    /// shrinks gracefully to just search + notifications.
+    private var hasContextMenuItems: Bool {
+        switch services.currentTab {
+        case .home, .tasks, .email, .calendar:
+            return true
+        case .meetings, .create, .ai:
+            return false
+        }
+    }
+
+    /// Contextual menu items for the active tab.
+    @ViewBuilder
+    private var contextMenuContent: some View {
+        switch services.currentTab {
+        case .home:
+            Button {
+                services.homeRefreshTick &+= 1
+            } label: {
+                Label("Refresh", systemImage: "arrow.clockwise")
+            }
+            Divider()
+            Button {
+                services.requestCreateSheet = .task
+            } label: {
+                Label("New Task", systemImage: "checklist")
+            }
+            Button {
+                services.showsComposeEmail = true
+            } label: {
+                Label("New Email", systemImage: "square.and.pencil")
+            }
+
+        case .tasks:
+            Button {
+                services.tasksSyncRemindersTick &+= 1
+            } label: {
+                Label("Sync with Apple Reminders", systemImage: "arrow.triangle.2.circlepath")
+            }
+            Divider()
+            Button(role: .destructive) {
+                services.tasksClearCompletedTick &+= 1
+            } label: {
+                Label("Clear Completed", systemImage: "trash")
+            }
+            Divider()
+            Button {
+                services.requestCreateSheet = .task
+            } label: {
+                Label("New Task", systemImage: "checklist")
+            }
+
+        case .email:
+            Button {
+                services.emailRefreshTick &+= 1
+            } label: {
+                Label("Refresh Mail", systemImage: "arrow.clockwise")
+            }
+            Button {
+                services.emailMarkAllReadTick &+= 1
+            } label: {
+                Label("Mark All as Read", systemImage: "envelope.open")
+            }
+            Button {
+                services.threadGroupingEnabled.toggle()
+            } label: {
+                Label(
+                    services.threadGroupingEnabled ? "View as People" : "View as Threads",
+                    systemImage: services.threadGroupingEnabled ? "person.2" : "tray.2"
+                )
+            }
+            Divider()
+            Button {
+                services.showsComposeEmail = true
+            } label: {
+                Label("New Email", systemImage: "square.and.pencil")
+            }
+
+        case .calendar:
+            Button {
+                services.calendarGoToTodayTick &+= 1
+            } label: {
+                Label("Go to Today", systemImage: "calendar.circle")
+            }
+            Button {
+                services.calendarRefreshTick &+= 1
+            } label: {
+                Label("Refresh Events", systemImage: "arrow.clockwise")
+            }
+            Menu {
+                ForEach(CalendarViewMode.allCases) { mode in
+                    Button {
+                        services.calendarRequestedViewMode = mode
+                    } label: {
+                        Text(mode.menuLabel(multiDayCount: 3))
+                    }
+                }
+            } label: {
+                Label("View", systemImage: "rectangle.3.group")
+            }
+            Divider()
+            Button {
+                services.requestCreateSheet = .event
+            } label: {
+                Label("New Event", systemImage: "calendar.badge.plus")
+            }
+
+        case .meetings, .create, .ai:
+            EmptyView()
+        }
     }
 }
 
@@ -269,6 +426,30 @@ private extension View {
             self
                 .background(.ultraThinMaterial, in: Capsule())
                 .overlay(Capsule().stroke(AppTheme.cardBorder, lineWidth: 1))
+        }
+    }
+}
+
+// MARK: - Page Header Scrim
+
+extension View {
+    /// Floating page header background — opaque at the top (blending with the status bar),
+    /// fading to clear `scrimHeight` points below the header's top edge.
+    /// Apply to the header overlay VStack; pair with `.safeAreaInset(edge: .top)` on the
+    /// scroll view so content starts where the gradient becomes transparent.
+    func pageHeaderScrim(color: Color = AppTheme.backgroundTop, scrimHeight: CGFloat) -> some View {
+        background(alignment: .top) {
+            LinearGradient(
+                stops: [
+                    .init(color: color, location: 0.0),
+                    .init(color: color, location: 0.72),
+                    .init(color: color.opacity(0), location: 1.0),
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea(edges: .top)
+            .frame(height: max(scrimHeight, 60))
         }
     }
 }
@@ -410,21 +591,21 @@ struct LiquidGlassButtonStyle: ButtonStyle {
     }
 }
 
+/// Background for `List` rows on task edit / form sheets — readable lift in light mode.
+struct SheetListRowBackground: View {
+    var body: some View {
+        RoundedRectangle(cornerRadius: AppTheme.Radius.compact, style: .continuous)
+            .fill(AppTheme.sheetCardFill)
+            .overlay(
+                RoundedRectangle(cornerRadius: AppTheme.Radius.compact, style: .continuous)
+                    .stroke(AppTheme.sheetListRowStroke, lineWidth: 0.5)
+            )
+    }
+}
+
 extension View {
     func glassCard(cornerRadius: CGFloat = AppTheme.Radius.card, fill: Color = AppTheme.surfacePrimary, stroke: Color = AppTheme.cardBorder) -> some View {
         modifier(SurfaceCardModifier(cornerRadius: cornerRadius, fill: fill, stroke: stroke))
-    }
-
-    /// Sets the sheet's presentationBackground to `AppTheme.sheetBackground` with a
-    /// hairline top border so sheets lift slightly above the app background in dark mode.
-    func appSheetBackground() -> some View {
-        self.presentationBackground {
-            ZStack(alignment: .top) {
-                AppTheme.sheetBackground.ignoresSafeArea()
-                Color(UIColor.separator).opacity(0.20)
-                    .frame(height: 0.5)
-            }
-        }
     }
 
     func appIconButton(size: CGFloat = 36) -> some View {

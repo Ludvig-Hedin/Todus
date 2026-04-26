@@ -56,8 +56,9 @@ struct AIChatView: View {
     @State private var suggestionsExpanded = false
     @State private var suggestionSeed = 0   // changing this shuffles the extended pool
 
-    // Attachment state — native confirmationDialog triggers individual system pickers
-    @State private var isPickingAttachment = false
+    // Attachment state — `+` button opens the rich AIAttachmentSheet, which
+    // then triggers individual system pickers via the callbacks below.
+    @State private var isShowingAttachmentSheet = false
     @State private var isShowingPhotoPicker = false
     @State private var isShowingCamera = false
     @State private var isShowingFilePicker = false
@@ -80,6 +81,15 @@ struct AIChatView: View {
     // Set to false when the user manually scrolls back so token streams don't yank
     // them away from what they're reading.
     @State private var userScrolledUp: Bool = false
+
+    // Edit-message undo support — captures messages that were truncated when the
+    // user long-pressed "Edit" on an earlier turn, so they can restore them via
+    // the Undo banner before sending the new draft.
+    @State private var lastTruncatedHistory: [AIChatMessage] = []
+    @State private var showEditUndoBanner: Bool = false
+    /// Tracks the auto-dismiss timer for the undo banner so a second edit doesn't stack a
+    /// stale dismissal that would hide the new banner mid-display.
+    @State private var editUndoBannerDismissTask: Task<Void, Never>? = nil
 
     private var chatService: AIChatService { services.aiChatService }
 
@@ -124,7 +134,32 @@ struct AIChatView: View {
                     conversationView
                         .transition(AnyTransition.opacity)
                 }
+
+                // Undo banner — appears briefly after the user long-presses "Edit"
+                // on a message so they can recover the truncated turns if it was
+                // an accident.
+                if showEditUndoBanner {
+                    HStack(spacing: 12) {
+                        Image(systemName: "arrow.uturn.backward.circle")
+                            .foregroundStyle(.primary)
+                        Text("Restored older messages.")
+                            .font(.system(size: 13))
+                            .foregroundStyle(.primary)
+                        Spacer()
+                        Button("Undo") {
+                            undoEditTruncation()
+                        }
+                        .font(.system(size: 13, weight: .semibold))
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 90)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
             }
+            .animation(.easeInOut(duration: 0.2), value: showEditUndoBanner)
             // Top gradient fade — same height as header buttons, fades content below toolbar
             .safeAreaInset(edge: .top) {
                 LinearGradient(
@@ -239,7 +274,28 @@ struct AIChatView: View {
         } message: { message in
             Text(message)
         }
-        // Attachment pickers — triggered by custom panel (not system confirmationDialog)
+        // Rich attachment sheet — opens from the `+` button in the input bar.
+        // Presents as a translucent material sheet so the system can render
+        // liquid glass on iOS 26+ while older OSes get a thin-material fallback.
+        .sheet(isPresented: $isShowingAttachmentSheet) {
+            AIAttachmentSheet(
+                chatService: chatService,
+                onOpenCamera: { isShowingCamera = true },
+                onOpenPhotoLibrary: { isShowingPhotoPicker = true },
+                onOpenFilePicker: { isShowingFilePicker = true },
+                onAttachImage: { uiImage in
+                    if let filename = AttachmentService.shared.saveImage(uiImage) {
+                        pendingAttachments.append(filename)
+                    }
+                }
+            )
+            .presentationDetents([.medium])
+            .presentationDragIndicator(.visible)
+            .presentationBackground(.thinMaterial)
+            .presentationCornerRadius(28)
+            .preferredColorScheme(services.appearancePreference.colorScheme)
+        }
+        // Attachment pickers — triggered from the AIAttachmentSheet callbacks.
         .photosPicker(isPresented: $isShowingPhotoPicker, selection: $selectedPhotoItem, matching: .images)
         .fileImporter(
             isPresented: $isShowingFilePicker,
@@ -589,11 +645,6 @@ struct AIChatView: View {
 
             Spacer()
         }
-        // Tap outside the attachment source popover: scrim is on *top* of this VStack
-        // and applied *before* `safeAreaInset` so the bottom input + flyout stay interactive.
-        .overlay {
-            if isPickingAttachment { attachmentSourcePickerTapOutsideScrim }
-        }
         // Pin the input section's bottom edge just above the keyboard — identical to
         // conversationView. safeAreaInset updates as the keyboard shows/hides and as
         // the input box grows, so multiline text never pushes the input below the keyboard.
@@ -856,6 +907,7 @@ struct AIChatView: View {
                             onNavigate: { action, params in
                                 handleCardNavigation(action, params: params)
                             },
+                            onCardError: { unhandledCardActionMessage = $0 },
                             onConnect: { service in
                                 if service == "calendar" {
                                     Task { _ = await services.calendarService.requestAccess() }
@@ -879,11 +931,6 @@ struct AIChatView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 16)
                 .padding(.bottom, 120)
-            }
-            // Tap outside the + attachment popover: must overlay the scroll view *before*
-            // `safeAreaInset` so the scrim is not above the input bar / popover.
-            .overlay {
-                if isPickingAttachment { attachmentSourcePickerTapOutsideScrim }
             }
             .scrollDismissesKeyboard(.interactively)
             // Pin input section directly above keyboard — 8 pt gap above keyboard for breathing room
@@ -1047,48 +1094,23 @@ struct AIChatView: View {
     private let chatInputControlSize: CGFloat = 44
 
     private var inputSection: some View {
-        // Main input row — attachment panel floats via overlay at HStack level (above chatInputBox)
+        // Main input row — attachment options now live in the AIAttachmentSheet
+        // presented from the `+` button (see `.sheet(isPresented:)` further down).
         HStack(alignment: .bottom, spacing: 10) {
-            // Circle plus button — toggles custom attachment panel above it.
-            // Rotates 45° when open to visually become an × (close indicator).
             Button {
-                withAnimation(.snappy(duration: 0.15)) { isPickingAttachment.toggle() }
+                isShowingAttachmentSheet = true
             } label: {
                 Image(systemName: "plus")
                     .font(.system(size: 17, weight: .medium))
                     .foregroundStyle(AppTheme.mutedText)
                     .frame(width: chatInputControlSize, height: chatInputControlSize)
-                    .rotationEffect(.degrees(isPickingAttachment ? 45 : 0))
             }
             .buttonStyle(.plain)
             .background(AppTheme.surfacePrimary, in: Circle())
             .overlay(Circle().stroke(AppTheme.strongBorder, lineWidth: 1))
 
-            // Input box — images now live inside the box itself
             chatInputBox
         }
-        // Attachment picker panel at HStack level so it renders above chatInputBox.
-        // Anchored to the bottom-leading corner (the + button area), offset upward.
-        .overlay(alignment: .bottomLeading) {
-            if isPickingAttachment {
-                attachmentPickerPanel
-                    .offset(y: -(chatInputControlSize + 8))
-                    .transition(.scale(scale: 0.85, anchor: .bottomLeading).combined(with: .opacity))
-            }
-        }
-        .animation(.snappy(duration: 0.15), value: isPickingAttachment)
-    }
-
-    /// Dims the message/empty area and closes the + attachment popover on tap. Applied with
-    /// `.overlay` *before* `.safeAreaInset` so the input row and flyout sit above the scrim
-    /// (unlike a `ZStack` layer behind the main content, which never receives hit testing).
-    private var attachmentSourcePickerTapOutsideScrim: some View {
-        Color.black.opacity(0.16)
-            .ignoresSafeArea()
-            .contentShape(Rectangle())
-            .onTapGesture {
-                withAnimation(.snappy(duration: 0.15)) { isPickingAttachment = false }
-            }
     }
 
     private var mentionOptions: [RichInputMentionRef] {
@@ -1389,56 +1411,6 @@ struct AIChatView: View {
         }
     }
 
-    /// Custom attachment picker panel — floats above the + button, anchored bottom-leading.
-    /// Replaces native confirmationDialog (system sheet) for better spatial anchoring.
-    private var attachmentPickerPanel: some View {
-        VStack(spacing: 0) {
-            Button {
-                withAnimation(.snappy(duration: 0.15)) { isPickingAttachment = false }
-                isShowingPhotoPicker = true
-            } label: { attachmentMenuRow(icon: "photo.on.rectangle", label: "Photo Library") }
-            .buttonStyle(.plain)
-
-            Divider().opacity(0.4)
-
-            if UIImagePickerController.isSourceTypeAvailable(.camera) {
-                Button {
-                    withAnimation(.snappy(duration: 0.15)) { isPickingAttachment = false }
-                    isShowingCamera = true
-                } label: { attachmentMenuRow(icon: "camera", label: "Take Photo") }
-                .buttonStyle(.plain)
-
-                Divider().opacity(0.4)
-            }
-
-            Button {
-                withAnimation(.snappy(duration: 0.15)) { isPickingAttachment = false }
-                isShowingFilePicker = true
-            } label: { attachmentMenuRow(icon: "doc.badge.plus", label: "Choose File") }
-            .buttonStyle(.plain)
-        }
-        .frame(width: 210)
-        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.row, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: AppTheme.Radius.row, style: .continuous).stroke(AppTheme.cardBorder, lineWidth: 1))
-        .shadow(color: .black.opacity(0.2), radius: 16, y: 4)
-    }
-
-    private func attachmentMenuRow(icon: String, label: String) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: icon)
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(.primary)
-                .frame(width: 22)
-            Text(label)
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(.primary)
-            Spacer()
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .contentShape(Rectangle())
-    }
-
     // MARK: - Voice Button Gradient
 
     /// Multi-color AI gradient for the live voice button — matches the tab bar sparkles icon.
@@ -1512,10 +1484,41 @@ struct AIChatView: View {
         inputText = message.content
         inputMentions = message.mentions
         pendingAttachments = message.attachmentFileNames
+        // Capture the messages we're about to drop so the user can restore them
+        // via the Undo banner if they tapped Edit by accident.
+        if let idx = chatService.messages.firstIndex(where: { $0.id == message.id }) {
+            lastTruncatedHistory = Array(chatService.messages[idx...])
+        }
         chatService.truncateBefore(messageID: message.id)
+        showEditUndoBanner = !lastTruncatedHistory.isEmpty
+        // Auto-dismiss the undo banner after a few seconds so it doesn't linger.
+        // Cancel any in-flight timer first so consecutive edits don't stack dismissals
+        // that would hide a freshly-shown banner.
+        editUndoBannerDismissTask?.cancel()
+        if showEditUndoBanner {
+            editUndoBannerDismissTask = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 6_000_000_000)
+                if !Task.isCancelled {
+                    showEditUndoBanner = false
+                }
+            }
+        } else {
+            editUndoBannerDismissTask = nil
+        }
         isInputFocused = true
         UserDefaults.standard.set(message.content, forKey: "ai_draft_input")
         UINotificationFeedbackGenerator().notificationOccurred(.success)
+    }
+
+    /// Re-append the messages captured when the user last tapped Edit so they can
+    /// recover from an accidental edit/truncation.
+    private func undoEditTruncation() {
+        guard !lastTruncatedHistory.isEmpty else { return }
+        chatService.messages.append(contentsOf: lastTruncatedHistory)
+        lastTruncatedHistory = []
+        showEditUndoBanner = false
+        editUndoBannerDismissTask?.cancel()
+        editUndoBannerDismissTask = nil
     }
 
     /// Keeps the most recent user message near the top of the scroll view so long assistant replies
@@ -1672,10 +1675,13 @@ struct AIChatView: View {
             }
 
         default:
-            // Surface to the user so they know the tap registered but the action isn't wired up.
+            // Unhandled action — bail silently instead of popping a "not supported"
+            // alert that interrupts the conversation. We still log it for debugging
+            // and trigger a soft haptic so the user knows the tap registered. A
+            // follow-up should detect unsupported actions at render time and dim
+            // the card so it looks non-interactive.
             print("[GenerativeUI] Unhandled action: \(action) params: \(params)")
-            unhandledCardActionMessage =
-                "Tapping \"\(action)\" cards isn't wired up in this build yet. We've recorded it."
+            UISelectionFeedbackGenerator().selectionChanged()
         }
     }
 }
@@ -1692,6 +1698,18 @@ private enum ContentPart {
 
 private func parseMessageContent(_ content: String) -> [ContentPart] {
     guard #available(iOS 16, *) else { return [.text(content)] }
+
+    // Fast path: typical assistant replies contain no card refs at all. A literal
+    // substring check is orders of magnitude cheaper than running two regex
+    // sweeps over the whole buffer and avoids most of the per-flush cost during
+    // streaming. (Swift `Regex<...>` is not Sendable, so caching the patterns at
+    // file scope under strict concurrency would require `nonisolated(unsafe)`;
+    // we instead keep them function-local — they're only constructed on the
+    // rare path where the message actually contains refs.)
+    if !content.contains("[task:") && !content.contains("[event:") {
+        return [.text(content)]
+    }
+
     let taskPattern = /\[task:([0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12})\]/
     let eventPattern = /\[event:([^\]]+)\]/
 
@@ -1740,6 +1758,8 @@ private struct MessageBubble: View {
     var onRetry: () -> Void = {}
     /// Callback for generative UI card actions (e.g. navigate to thread/task/event).
     var onNavigate: ((String, [String: String]) -> Void)?
+    /// Draft/send failures from generative UI — parent surfaces `unhandledCardActionMessage` alert.
+    var onCardError: ((String) -> Void)?
     /// Callback when user taps a connect-service button in the message — "calendar" or "email".
     var onConnect: ((String) -> Void)?
     /// Long-press "Edit" on a user message — parent pre-fills the composer
@@ -1885,7 +1905,7 @@ private struct MessageBubble: View {
                     .padding(.horizontal, 16)
                     .padding(.vertical, 10)
                     .background(
-                        AppTheme.surfacePrimary,
+                        AppTheme.chatUserBubbleFill,
                         in: RoundedRectangle(cornerRadius: AppTheme.Radius.card + 2, style: .continuous)
                     )
             }
@@ -1899,12 +1919,6 @@ private struct MessageBubble: View {
             // Web search status indicator — shown while backend is searching
             if message.searchState == .searching {
                 SearchingIndicator(queries: message.searchQueries)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-            }
-
-            // Source chips — shown after search completes, before/alongside the answer
-            if !message.sources.isEmpty {
-                SourceChipsView(sources: message.sources, onSourceTap: nil)
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
 
@@ -1984,8 +1998,8 @@ private struct MessageBubble: View {
             }
             // Render generative UI spec if present (parsed after streaming completes)
             if let spec = message.uiSpec {
-                ChatUISpecView(spec: spec) { action, params in
-                    handleSpecAction(action, params: params)
+                ChatUISpecView(spec: spec) { action, params, completion in
+                    handleSpecAction(action, params: params, completion: completion)
                 }
                 .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
@@ -1994,34 +2008,95 @@ private struct MessageBubble: View {
 
     /// Handles actions from generative UI card taps. Side-effecting actions (autosave, send,
     /// clipboard, undo) are executed locally; navigation actions are forwarded to the parent.
-    private func handleSpecAction(_ action: String, params: [String: String]) {
+    private func handleSpecAction(
+        _ action: String,
+        params: [String: String],
+        completion: ChatUISpecActionCompletion? = nil,
+        undoDepth: Int = 0
+    ) {
+        let maxUndoDepth = 8
         switch action {
         case "copy_text":
             if let content = params["content"] {
                 UIPasteboard.general.string = content
             }
+            completion?(true, nil)
         case "update_draft":
             guard let draftId = params["draftId"], let payloadStr = params["payload"],
-                  let payload = DraftService.decodePayload(payloadStr) else { return }
-            Task { try? await services.draftService.update(draftId: draftId, payload: payload) }
+                  let payload = DraftService.decodePayload(payloadStr) else {
+                completion?(false, "Invalid draft payload")
+                return
+            }
+            Task { @MainActor in
+                do {
+                    try await services.draftService.update(draftId: draftId, payload: payload)
+                    completion?(true, nil)
+                } catch {
+                    let msg = error.localizedDescription
+                    onCardError?("Draft could not be saved: \(msg)")
+                    completion?(false, msg)
+                }
+            }
         case "send_draft":
             guard let payloadStr = params["payload"],
-                  let payload = DraftService.decodePayload(payloadStr) else { return }
+                  let payload = DraftService.decodePayload(payloadStr) else {
+                completion?(false, "Invalid send payload")
+                return
+            }
             let draftId = params["draftId"]
-            Task { try? await services.draftService.send(draftId: draftId, payload: payload) }
+            Task { @MainActor in
+                do {
+                    try await services.draftService.send(draftId: draftId, payload: payload)
+                    completion?(true, nil)
+                } catch {
+                    let msg = error.localizedDescription
+                    onCardError?("Message could not be sent: \(msg)")
+                    completion?(false, msg)
+                }
+            }
         case "attach_to_draft":
             // Attachment picking belongs to the host composer; surface the intent for now.
             onNavigate?(action, params)
+            completion?(true, nil)
         case "undo":
-            guard let undoAction = params["undoAction"] else { return }
-            var nestedParams: [String: String] = [:]
-            if let nestedRaw = params["undoParams"], let data = nestedRaw.data(using: .utf8),
-               let dict = try? JSONDecoder().decode([String: String].self, from: data) {
-                nestedParams = dict
+            guard undoDepth < maxUndoDepth else {
+                completion?(false, nil)
+                return
             }
-            handleSpecAction(undoAction, params: nestedParams)
+            guard let undoAction = params["undoAction"], !undoAction.isEmpty, undoAction != "undo" else {
+                return
+            }
+            var nestedParams: [String: String] = [:]
+            if let nestedRaw = params["undoParams"] {
+                let trimmed = nestedRaw.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    guard let data = nestedRaw.data(using: .utf8),
+                          let dict = try? JSONDecoder().decode([String: String].self, from: data) else {
+                        return
+                    }
+                    nestedParams = dict
+                }
+            }
+            handleSpecAction(undoAction, params: nestedParams, completion: completion, undoDepth: undoDepth + 1)
+        case "open_attachment":
+            // Open the preview URL in Safari if provided. Real attachment download lives in the
+            // email thread surface; chat-side preview is "good enough" for v1.
+            if let url = params["previewUrl"], let parsed = URL(string: url) {
+                UIApplication.shared.open(parsed)
+            }
+            completion?(true, nil)
+        case "toggle_checklist_item":
+            // Local-only toggle today; persistence model TBD.
+            completion?(true, nil)
+        case "navigate_document":
+            onNavigate?(action, params)
+            completion?(true, nil)
+        case "navigate_day":
+            onNavigate?(action, params)
+            completion?(true, nil)
         default:
             onNavigate?(action, params)
+            completion?(true, nil)
         }
     }
 
@@ -2122,6 +2197,13 @@ private struct MessageBubble: View {
         let canCopy = !copyableText.isEmpty
 
         return HStack(spacing: 4) {
+            if !message.sources.isEmpty {
+                AISourcesButton(sources: message.sources) { source in
+                    handleSourceSelection(source)
+                }
+                .padding(.trailing, 4)
+            }
+
             Button {
                 onRetry()
             } label: {
@@ -2185,6 +2267,25 @@ private struct MessageBubble: View {
         .padding(.leading, 4)
     }
 
+    /// Forward a Sources sheet selection to the parent's navigation handler.
+    /// Web sources open inline in the sheet; everything else (thread, event,
+    /// task, email) navigates via the existing `handleCardNavigation` action
+    /// map — same action names + param keys as the generative-UI cards so we
+    /// get task → Tasks tab, thread/email → Email tab, event → event detail.
+    private func handleSourceSelection(_ source: AISource) {
+        guard let entityId = source.entityId else { return }
+        switch source.kind {
+        case .thread, .email:
+            onNavigate?("navigate_thread", ["threadId": entityId])
+        case .calendarEvent, .meeting:
+            onNavigate?("navigate_event", ["eventId": entityId])
+        case .task:
+            onNavigate?("navigate_task", ["taskId": entityId])
+        default:
+            return
+        }
+    }
+
     // MARK: Long-press menu — copy + edit (user only)
 
     @ViewBuilder
@@ -2239,166 +2340,6 @@ private struct SearchingIndicator: View {
             }
         }
         .padding(.vertical, 4)
-    }
-}
-
-// MARK: - SourceChipsView
-
-/// Horizontally scrollable row of source pills. Tap to expand a detail sheet showing the snippet,
-/// or long-press to open the URL directly in Safari.
-private struct SourceChipsView: View {
-    let sources: [WebSource]
-    /// Optional callback when a source chip is tapped (for external handling). Nil = use built-in sheet.
-    var onSourceTap: ((WebSource) -> Void)?
-
-    @State private var selectedSource: WebSource?
-
-    var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(Array(sources.enumerated()), id: \.element.id) { index, source in
-                    Button {
-                        if let handler = onSourceTap {
-                            handler(source)
-                        } else {
-                            selectedSource = source
-                        }
-                    } label: {
-                        HStack(spacing: 6) {
-                            // Citation number badge
-                            Text("[\(index + 1)]")
-                                .font(.system(size: 10, weight: .bold, design: .monospaced))
-                                .foregroundStyle(AppTheme.mutedText)
-
-                            // Favicon via Google's S2 service
-                            AsyncImage(url: faviconURL(source.url)) { image in
-                                image.resizable()
-                                    .aspectRatio(contentMode: .fit)
-                                    .frame(width: 14, height: 14)
-                                    .clipShape(RoundedRectangle(cornerRadius: 3))
-                            } placeholder: {
-                                Image(systemName: "globe")
-                                    .font(.system(size: 12))
-                                    .foregroundStyle(AppTheme.mutedText)
-                            }
-
-                            Text(source.domain)
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(.primary)
-                                .lineLimit(1)
-                        }
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(AppTheme.surfacePrimary, in: Capsule())
-                        .overlay(Capsule().stroke(AppTheme.cardBorder, lineWidth: 1))
-                    }
-                    .buttonStyle(.plain)
-                    // Long-press opens URL directly in Safari
-                    .contextMenu {
-                        if let url = URL(string: source.url) {
-                            Link("Open in Safari", destination: url)
-                            Button {
-                                UIPasteboard.general.string = source.url
-                            } label: {
-                                Label("Copy URL", systemImage: "doc.on.doc")
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        .sheet(item: $selectedSource) { source in
-            SourceDetailSheet(source: source)
-                .presentationDetents([.medium])
-                .presentationDragIndicator(.visible)
-        }
-    }
-
-    private func faviconURL(_ urlString: String) -> URL? {
-        guard let host = URL(string: urlString)?.host else { return nil }
-        return URL(string: "https://www.google.com/s2/favicons?domain=\(host)&sz=32")
-    }
-}
-
-// MARK: - SourceDetailSheet
-
-/// Expanded source card shown when tapping a source chip.
-/// Shows the full title, domain, snippet, and an "Open" button.
-private struct SourceDetailSheet: View {
-    let source: WebSource
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            VStack(alignment: .leading, spacing: 16) {
-                // Header: favicon + domain
-                HStack(spacing: 10) {
-                    AsyncImage(url: faviconURL(source.url)) { image in
-                        image.resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(width: 24, height: 24)
-                            .clipShape(RoundedRectangle(cornerRadius: 4))
-                    } placeholder: {
-                        Image(systemName: "globe")
-                            .font(.system(size: 18))
-                            .foregroundStyle(AppTheme.mutedText)
-                    }
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(source.title)
-                            .font(.system(size: 16, weight: .semibold))
-                            .lineLimit(2)
-                        Text(source.domain)
-                            .font(.system(size: 13))
-                            .foregroundStyle(AppTheme.mutedText)
-                    }
-                }
-
-                // Snippet
-                if !source.snippet.isEmpty {
-                    Text(source.snippet)
-                        .font(.system(size: 14))
-                        .foregroundStyle(.secondary)
-                        .lineSpacing(3)
-                }
-
-                // Open in Safari button
-                if let url = URL(string: source.url) {
-                    Link(destination: url) {
-                        HStack {
-                            Image(systemName: "safari")
-                            Text("Open in Safari")
-                        }
-                        .font(.system(size: 15, weight: .medium))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous)
-                                .stroke(AppTheme.cardBorder, lineWidth: 1)
-                        )
-                    }
-                }
-
-                Spacer()
-            }
-            .padding(20)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { dismiss() } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 20))
-                            .foregroundStyle(AppTheme.mutedText)
-                    }
-                }
-            }
-        }
-    }
-
-    private func faviconURL(_ urlString: String) -> URL? {
-        guard let host = URL(string: urlString)?.host else { return nil }
-        return URL(string: "https://www.google.com/s2/favicons?domain=\(host)&sz=32")
     }
 }
 

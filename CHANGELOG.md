@@ -1,5 +1,11 @@
 # Project Changelog
 
+## [2026-04-26] Fix — iOS AI chat user bubble contrast
+
+- [Fix] **The user message bubble in the native AI sheet now has clear, restrained separation in both appearances.** User bubbles no longer reuse the generic card fill that was too close to the assistant sheet background; they now use a dedicated dynamic fill tuned to a very light gray in light mode and a very dark gray in dark mode.
+- [User-facing] **User turns are readable at a glance again without looking loud.** The bubble remains subtle, but it now holds the same visual role in dark mode that it already should in light mode.
+- [Files] `apps/ios/Todus/Todus/DesignSystem/AppTheme.swift`, `apps/ios/Todus/Todus/Features/AI/AIChatView.swift`, `CHANGELOG.md`, `apps/ios/Todus/TASK.md`
+
 ## [2026-04-26] Fix — native AI chat stream bootstrap + assistant fallback hardening
 
 - [Fix] **iOS AI chat no longer waits for the provider before the SSE stream opens.** `/api/ai/chat` now returns the SSE response immediately, emits an initial bootstrap event, and only then waits on OpenRouter/Gemini. This prevents native clients from timing out during long tool-planning/model-startup delays that previously ended as `Connection lost — tap to retry.`
