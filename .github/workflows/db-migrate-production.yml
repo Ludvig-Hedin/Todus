@@ -1,0 +1,55 @@
+# Apply Drizzle migrations to the same Postgres instance the API uses in production
+# (direct connection string — the origin behind Cloudflare Hyperdrive, not the Worker binding).
+#
+# Setup (once): GitHub → Settings → Secrets and variables → Actions → New repository secret
+#   Name:  PRODUCTION_DATABASE_URL
+#   Value: postgresql://…  (from Neon / RDS / or Hyperdrive "Origin" in Cloudflare dashboard)
+#          Include ?sslmode=require if your host requires it.
+#
+# Triggers:
+#   • workflow_dispatch — run manually after deploy or when you need to catch up
+#   • push to main that touches server migrations — keeps prod schema in sync with the repo
+
+name: db-migrate-production
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/server/src/db/migrations/**'
+      - 'apps/server/drizzle.config.ts'
+
+concurrency:
+  group: db-migrate-production
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run Drizzle migrations (production)
+        env:
+          DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::error::PRODUCTION_DATABASE_URL is not set. Add it in repo Settings → Secrets → Actions."
+            exit 1
+          fi
+          pnpm run -C apps/server db:migrate

@@ -1,0 +1,1 @@
+CREATE INDEX "folder_item_folder_id_position_idx" ON "mail0_folder_item" USING btree ("folder_id","position");

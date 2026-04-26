@@ -297,8 +297,8 @@ export const GENERATIVE_UI_PROMPT = `
       </component>
 
       <component name="SuggestionsCard">
-        Props: suggestions (array of {label, action, params (object|null)}, required)
-        Use for: a row of follow-up action chips below an answer. Each chip emits the named action when tapped. Use sparingly — at most one SuggestionsCard per response.
+        Props: suggestions (array of {label, action, params (object|null — same contract as Button.actionParams: each value MUST be a plain string; JSON.stringify any nested/structured data)}, required)
+        Use for: a row of follow-up action chips below an answer. Each chip emits the named action when tapped with string-only params, consistent with Button. Use sparingly — at most one SuggestionsCard per response.
       </component>
 
       <component name="ActionConfirmationCard">

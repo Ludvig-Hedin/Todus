@@ -1,8 +1,6 @@
 import { task, taskFolder, folderItem, aiConversation } from '../../db/schema';
-import { eq, and, desc, asc, like, sql, inArray } from 'drizzle-orm';
+import { eq, and, desc, asc, like, sql, inArray, isNotNull, lte } from 'drizzle-orm';
 import { privateProcedure, router } from '../trpc';
-import { getContext } from 'hono/context-storage';
-import type { HonoContext } from '../../ctx';
 import { createDb } from '../../db';
 import { env } from '../../env';
 import { z } from 'zod';
@@ -605,51 +603,169 @@ export const foldersRouter = router({
 
       const folderIds = folders.map((f) => f.id);
 
-      // Run all four counting queries in parallel.
-      const [taskRows, chatRows, polyRows] = await Promise.all([
+      const taskRanked = db
+        .select({
+          folderId: task.folderId,
+          id: task.id,
+          title: task.title,
+          updatedAt: task.updatedAt,
+          rn: sql<number>`row_number() over (partition by ${task.folderId} order by ${task.updatedAt} desc)`.as(
+            'rn',
+          ),
+        })
+        .from(task)
+        .where(
+          and(
+            eq(task.userId, ctx.sessionUser.id),
+            inArray(task.folderId, folderIds),
+            isNotNull(task.folderId),
+          ),
+        )
+        .as('task_ranked');
+
+      const chatRanked = db
+        .select({
+          folderId: aiConversation.folderId,
+          id: aiConversation.id,
+          title: aiConversation.title,
+          updatedAt: aiConversation.updatedAt,
+          rn: sql<number>`row_number() over (partition by ${aiConversation.folderId} order by ${aiConversation.updatedAt} desc)`.as(
+            'rn',
+          ),
+        })
+        .from(aiConversation)
+        .where(
+          and(
+            eq(aiConversation.userId, ctx.sessionUser.id),
+            inArray(aiConversation.folderId, folderIds),
+            isNotNull(aiConversation.folderId),
+          ),
+        )
+        .as('chat_ranked');
+
+      const polyRanked = db
+        .select({
+          folderId: folderItem.folderId,
+          itemType: folderItem.itemType,
+          itemId: folderItem.itemId,
+          metadata: folderItem.metadata,
+          createdAt: folderItem.createdAt,
+          rn: sql<number>`row_number() over (partition by ${folderItem.folderId} order by ${folderItem.createdAt} desc)`.as(
+            'rn',
+          ),
+        })
+        .from(folderItem)
+        .where(
+          and(eq(folderItem.userId, ctx.sessionUser.id), inArray(folderItem.folderId, folderIds)),
+        )
+        .as('poly_ranked');
+
+      const [
+        taskCountRows,
+        chatCountRows,
+        polyCountRows,
+        taskRecentRows,
+        chatRecentRows,
+        polyRecentRows,
+      ] = await Promise.all([
         db
           .select({
             folderId: task.folderId,
-            id: task.id,
-            title: task.title,
-            updatedAt: task.updatedAt,
+            count: sql<number>`count(*)::int`,
           })
           .from(task)
-          .where(and(eq(task.userId, ctx.sessionUser.id), inArray(task.folderId, folderIds)))
-          .orderBy(desc(task.updatedAt)),
+          .where(
+            and(
+              eq(task.userId, ctx.sessionUser.id),
+              inArray(task.folderId, folderIds),
+              isNotNull(task.folderId),
+            ),
+          )
+          .groupBy(task.folderId),
         db
           .select({
             folderId: aiConversation.folderId,
-            id: aiConversation.id,
-            title: aiConversation.title,
-            updatedAt: aiConversation.updatedAt,
+            count: sql<number>`count(*)::int`,
           })
           .from(aiConversation)
           .where(
             and(
               eq(aiConversation.userId, ctx.sessionUser.id),
               inArray(aiConversation.folderId, folderIds),
+              isNotNull(aiConversation.folderId),
             ),
           )
-          .orderBy(desc(aiConversation.updatedAt)),
+          .groupBy(aiConversation.folderId),
         db
-          .select()
+          .select({
+            folderId: folderItem.folderId,
+            itemType: folderItem.itemType,
+            count: sql<number>`count(*)::int`,
+          })
           .from(folderItem)
           .where(
             and(eq(folderItem.userId, ctx.sessionUser.id), inArray(folderItem.folderId, folderIds)),
           )
-          .orderBy(desc(folderItem.createdAt)),
+          .groupBy(folderItem.folderId, folderItem.itemType),
+        db
+          .select({
+            folderId: taskRanked.folderId,
+            id: taskRanked.id,
+            title: taskRanked.title,
+            updatedAt: taskRanked.updatedAt,
+          })
+          .from(taskRanked)
+          .where(lte(taskRanked.rn, 3)),
+        db
+          .select({
+            folderId: chatRanked.folderId,
+            id: chatRanked.id,
+            title: chatRanked.title,
+            updatedAt: chatRanked.updatedAt,
+          })
+          .from(chatRanked)
+          .where(lte(chatRanked.rn, 3)),
+        db
+          .select({
+            folderId: polyRanked.folderId,
+            itemType: polyRanked.itemType,
+            itemId: polyRanked.itemId,
+            metadata: polyRanked.metadata,
+            createdAt: polyRanked.createdAt,
+          })
+          .from(polyRanked)
+          .where(lte(polyRanked.rn, 3)),
       ]);
 
-      // Group everything by folderId.
       const byFolder = new Map<string, { breakdown: TypeBreakdown; items: ContentItem[] }>();
       for (const id of folderIds) byFolder.set(id, { breakdown: emptyBreakdown(), items: [] });
 
-      for (const r of taskRows) {
-        if (!r.folderId) continue;
+      for (const r of taskCountRows) {
+        const fid = r.folderId;
+        if (!fid) continue;
+        const bucket = byFolder.get(fid);
+        if (bucket) bucket.breakdown.tasks = r.count;
+      }
+      for (const r of chatCountRows) {
+        const fid = r.folderId;
+        if (!fid) continue;
+        const bucket = byFolder.get(fid);
+        if (bucket) bucket.breakdown.chats = r.count;
+      }
+      for (const r of polyCountRows) {
         const bucket = byFolder.get(r.folderId);
         if (!bucket) continue;
-        bucket.breakdown.tasks += 1;
+        const t = r.itemType as 'email' | 'event' | 'doc';
+        if (t === 'email') bucket.breakdown.emails += r.count;
+        else if (t === 'event') bucket.breakdown.events += r.count;
+        else if (t === 'doc') bucket.breakdown.docs += r.count;
+      }
+
+      for (const r of taskRecentRows) {
+        const fid = r.folderId;
+        if (!fid) continue;
+        const bucket = byFolder.get(fid);
+        if (!bucket) continue;
         bucket.items.push({
           type: 'task',
           id: r.id,
@@ -657,11 +773,11 @@ export const foldersRouter = router({
           sortAt: r.updatedAt.toISOString(),
         });
       }
-      for (const r of chatRows) {
-        if (!r.folderId) continue;
-        const bucket = byFolder.get(r.folderId);
+      for (const r of chatRecentRows) {
+        const fid = r.folderId;
+        if (!fid) continue;
+        const bucket = byFolder.get(fid);
         if (!bucket) continue;
-        bucket.breakdown.chats += 1;
         bucket.items.push({
           type: 'chat',
           id: r.id,
@@ -669,13 +785,10 @@ export const foldersRouter = router({
           sortAt: r.updatedAt.toISOString(),
         });
       }
-      for (const r of polyRows) {
+      for (const r of polyRecentRows) {
         const bucket = byFolder.get(r.folderId);
         if (!bucket) continue;
         const t = r.itemType as 'email' | 'event' | 'doc';
-        if (t === 'email') bucket.breakdown.emails += 1;
-        else if (t === 'event') bucket.breakdown.events += 1;
-        else if (t === 'doc') bucket.breakdown.docs += 1;
         const meta = (r.metadata ?? {}) as Record<string, unknown>;
         bucket.items.push({
           type: t,

@@ -1,5 +1,5 @@
 import { session, sessionMetadata } from '../../db/schema';
-import { and, desc, eq, gt, inArray } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, ne } from 'drizzle-orm';
 import { privateProcedure, router } from '../trpc';
 import { createDb } from '../../db';
 import { env } from '../../env';
@@ -392,16 +392,20 @@ export const sessionsRouter = router({
     const { db, conn } = getDb();
 
     try {
+      const conditions = [eq(session.userId, ctx.sessionUser.id)];
+      if (currentSessionId) {
+        conditions.push(ne(session.id, currentSessionId));
+      }
+
       const deletedRows = await db
         .delete(session)
-        .where(eq(session.userId, ctx.sessionUser.id))
+        .where(and(...conditions))
         .returning({ id: session.id });
 
       return {
         success: true,
         revokedCount: deletedRows.length,
-        revokedCurrent:
-          !!currentSessionId && deletedRows.some((row) => row.id === currentSessionId),
+        revokedCurrent: false,
       };
     } finally {
       await conn.end();

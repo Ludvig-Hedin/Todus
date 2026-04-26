@@ -737,7 +737,10 @@ export const taskFolder = createTable(
     icon: text('icon'),
     position: integer('position').notNull().default(0),
     createdAt: timestamp('created_at').notNull().defaultNow(),
-    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at')
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
   },
   (t) => [index('task_folder_user_id_idx').on(t.userId)],
 );
@@ -764,6 +767,7 @@ export const folderItem = createTable(
     unique('folder_item_unique').on(t.folderId, t.itemType, t.itemId),
     index('folder_item_user_id_idx').on(t.userId),
     index('folder_item_lookup_idx').on(t.itemType, t.itemId),
+    index('folder_item_folder_id_position_idx').on(t.folderId, t.position),
   ],
 );
 
