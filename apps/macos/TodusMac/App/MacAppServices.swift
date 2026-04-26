@@ -35,12 +35,22 @@ final class MacAppServices {
     let networkMonitor: NetworkMonitor
     let notificationService: MacNotificationService
     let aiChatService: MacAIChatService
+    let voiceTokenService: VoiceTokenService
     let shareConversationService: ShareConversationService
     let groupChatService: GroupChatService
     let meetingsService: MeetingsService
     let connectionsService: ConnectionsService
     let subscriptionService: MacSubscriptionService
     let docsService: MacDocsService
+    /// Wraps drafts.update + mail.send for the AI chat's InlineComposeCard.
+    let draftService: MacDraftService
+    /// Tracks per-model install state for the Local Models settings screen and
+    /// the chat composer's local-runtime routing. Disk scan runs on init.
+    let localModelStateStore: LocalModelStateStore
+    /// Queues task mutations and flushes them via tRPC `tasks.sync`.
+    let taskSyncService: TaskSyncService
+    /// Retained here so `setupNetworkSync()` can reach `mainContext` on reconnect.
+    var modelContainer: ModelContainer?
     private let defaults = UserDefaults.standard
     let remindersSyncService = AppleRemindersSyncService()
     let remindersSyncState = RemindersSyncState()
@@ -209,12 +219,16 @@ final class MacAppServices {
             emailService: email,
             calendarService: calendar
         )
+        self.voiceTokenService = VoiceTokenService(authService: auth, backendURL: backendURL)
         self.shareConversationService = ShareConversationService(apiClient: api)
         self.groupChatService = GroupChatService(apiClient: api)
         self.meetingsService = MeetingsService(apiClient: api)
         self.connectionsService = ConnectionsService(api: api)
         self.subscriptionService = MacSubscriptionService(apiClient: api)
         self.docsService = MacDocsService(apiClient: api)
+        self.draftService = MacDraftService(api: api)
+        self.localModelStateStore = LocalModelStateStore()
+        self.taskSyncService = TaskSyncService(apiClient: api)
         self.aiChatService.contextAboutYou = contextAboutYou
         self.aiChatService.customInstructions = customInstructions
         self.remindersSyncState.isEnabled = self.remindersSyncEnabled
@@ -258,12 +272,6 @@ final class MacAppServices {
             let folders: [RemoteFolder]
         }
 
-        struct RemoteFolder: Decodable {
-            let id: String
-            let name: String
-            let createdAt: Date
-        }
-
         isSyncingSharedFolders = true
         defer { isSyncingSharedFolders = false }
 
@@ -279,15 +287,220 @@ final class MacAppServices {
             guard let uuid = UUID(uuidString: remote.id) else { continue }
             if let local = foldersByID[normalizedID] {
                 local.name = remote.name
+                local.colorHex = remote.color
+                local.iconName = remote.icon
+                local.position = remote.position ?? local.position
                 local.createdAt = remote.createdAt
+                local.updatedAt = remote.updatedAt ?? local.updatedAt
             } else {
-                let folder = FolderRecord(id: uuid, name: remote.name, createdAt: remote.createdAt)
+                let folder = FolderRecord(
+                    id: uuid,
+                    name: remote.name,
+                    colorHex: remote.color,
+                    iconName: remote.icon,
+                    position: remote.position ?? 0,
+                    createdAt: remote.createdAt,
+                    updatedAt: remote.updatedAt ?? remote.createdAt
+                )
                 context.insert(folder)
                 foldersByID[normalizedID] = folder
             }
         }
 
         try context.save()
+    }
+
+    /// Pull the folder summary (counts, breakdowns, recent items) and update the
+    /// local FolderRecord caches so cards render instantly.
+    func fetchFolderSummary(in context: ModelContext) async {
+        guard authService.isAuthenticated else { return }
+        do {
+            let response: MacFolderSummaryResponse = try await apiClient.trpcQuery("folders.summary")
+            let localFolders = try context.fetch(FetchDescriptor<FolderRecord>())
+            let byID = Dictionary(
+                uniqueKeysWithValues: localFolders.map { ($0.id.uuidString.lowercased(), $0) }
+            )
+
+            for remote in response.folders {
+                guard let local = byID[remote.folder.id.lowercased()] else { continue }
+                local.cachedItemCount = remote.itemCount
+                local.setBreakdown(FolderTypeBreakdown(
+                    tasks: remote.breakdown.tasks,
+                    chats: remote.breakdown.chats,
+                    emails: remote.breakdown.emails,
+                    events: remote.breakdown.events,
+                    docs: remote.breakdown.docs
+                ))
+                local.setRecentItems(remote.recentItems.map {
+                    FolderRecentItem(
+                        type: $0.type,
+                        id: $0.id,
+                        title: $0.title,
+                        subtitle: $0.subtitle,
+                        sortAt: $0.sortAt
+                    )
+                })
+            }
+            try? context.save()
+        } catch {
+            // Best-effort — cards keep showing previous cached values.
+        }
+    }
+
+    func createSharedFolder(
+        name: String,
+        colorHex: String?,
+        iconName: String?,
+        in context: ModelContext
+    ) async -> FolderRecord? {
+        let cleaned = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return nil }
+
+        let existing = (try? context.fetch(FetchDescriptor<FolderRecord>())) ?? []
+        let nextPosition = (existing.map { $0.position }.max() ?? -1) + 1
+        let folder = FolderRecord(
+            name: cleaned,
+            colorHex: colorHex,
+            iconName: iconName,
+            position: nextPosition
+        )
+        context.insert(folder)
+        try? context.save()
+
+        struct CreateInput: Encodable {
+            let id: String
+            let name: String
+            let color: String?
+            let icon: String?
+            let position: Int
+        }
+        do {
+            let _: EmptyResponse = try await apiClient.trpcMutation(
+                "folders.create",
+                input: CreateInput(
+                    id: folder.id.uuidString,
+                    name: folder.name,
+                    color: folder.colorHex,
+                    icon: folder.iconName,
+                    position: folder.position
+                )
+            )
+        } catch {
+            // Best-effort — keeps locally; will be re-tried on next sync.
+        }
+        return folder
+    }
+
+    func updateSharedFolder(
+        _ folder: FolderRecord,
+        name: String? = nil,
+        colorHex: String?? = nil,
+        iconName: String?? = nil,
+        position: Int? = nil,
+        in context: ModelContext
+    ) async {
+        if let name { folder.name = name }
+        if case let .some(value) = colorHex { folder.colorHex = value }
+        if case let .some(value) = iconName { folder.iconName = value }
+        if let position { folder.position = position }
+        folder.updatedAt = .now
+        try? context.save()
+
+        struct UpdateInput: Encodable {
+            let id: String
+            let name: String?
+            let color: String?
+            let icon: String?
+            let position: Int?
+        }
+        do {
+            let _: EmptyResponse = try await apiClient.trpcMutation(
+                "folders.update",
+                input: UpdateInput(
+                    id: folder.id.uuidString,
+                    name: folder.name,
+                    color: folder.colorHex,
+                    icon: folder.iconName,
+                    position: folder.position
+                )
+            )
+        } catch {
+            // Best-effort sync only.
+        }
+    }
+
+    func deleteSharedFolder(_ folder: FolderRecord, in context: ModelContext) async {
+        let id = folder.id.uuidString
+        // Unlink tasks
+        let allTasks = (try? context.fetch(FetchDescriptor<TaskRecord>())) ?? []
+        for task in allTasks where task.folder?.id == folder.id {
+            task.folder = nil
+            task.updatedAt = .now
+        }
+        context.delete(folder)
+        try? context.save()
+
+        struct DeleteInput: Encodable { let id: String }
+        do {
+            let _: EmptyResponse = try await apiClient.trpcMutation(
+                "folders.delete",
+                input: DeleteInput(id: id)
+            )
+        } catch {
+            // Best-effort sync only.
+        }
+    }
+
+    func addItemToSharedFolder(
+        kind: FolderItemKind,
+        itemId: String,
+        title: String?,
+        subtitle: String?,
+        folder: FolderRecord,
+        in context: ModelContext
+    ) async {
+        guard kind == .email || kind == .event || kind == .doc else { return }
+
+        let item = FolderItemRecord(
+            folder: folder,
+            itemType: kind.rawValue,
+            itemId: itemId,
+            titleCache: title,
+            subtitleCache: subtitle,
+            position: 0,
+            createdAt: .now
+        )
+        context.insert(item)
+        folder.cachedItemCount += 1
+        folder.updatedAt = .now
+        try? context.save()
+
+        struct Metadata: Encodable {
+            let title: String?
+            let subtitle: String?
+        }
+        struct AddInput: Encodable {
+            let folderId: String
+            let itemType: String
+            let itemId: String
+            let metadata: Metadata?
+        }
+        let metadata: Metadata? = (title != nil || subtitle != nil)
+            ? Metadata(title: title, subtitle: subtitle)
+            : nil
+        do {
+            let _: EmptyResponse = try await apiClient.trpcMutation(
+                "folders.addItem",
+                input: AddInput(
+                    folderId: folder.id.uuidString,
+                    itemType: kind.rawValue,
+                    itemId: itemId,
+                    metadata: metadata
+                )
+            )
+        } catch {
+            // Best-effort sync only.
+        }
     }
 
     func requestRemindersPermissionIfNeeded() async -> Bool {
@@ -324,6 +537,18 @@ final class MacAppServices {
         guard remindersSyncEnabled else { return }
         guard remindersSyncDirection != .toReminders else { return }
         await remindersSyncService.importFromReminders(in: context)
+    }
+
+    /// Wires the network reconnect callback to flush any pending/failed task mutations.
+    /// Call this once after both `MacAppServices` and the `ModelContainer` are ready.
+    func setupNetworkSync() {
+        networkMonitor.onReconnect = { [weak self] in
+            guard let self, let context = self.modelContainer?.mainContext else { return }
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                await self.taskSyncService.retryUnsyncedTasks(in: context)
+            }
+        }
     }
 
     func signOut() {
