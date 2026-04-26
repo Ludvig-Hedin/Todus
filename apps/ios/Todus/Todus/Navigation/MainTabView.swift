@@ -85,7 +85,10 @@ struct MainTabView: View {
 
             Group {
                 if calendarPermissionGranted {
-                    CalendarTabView()
+                    NavigationStack {
+                        CalendarTabView()
+                            .toolbar(.hidden, for: .navigationBar)
+                    }
                 } else {
                     NavigationStack {
                         CalendarPermissionView()
@@ -104,7 +107,7 @@ struct MainTabView: View {
             if new == .create {
                 createSheetInitialType = createType(for: old)
                 selectedTab = old
-                withAnimation(.snappy(duration: 0.2)) { showCreateSheet = true }
+                withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) { showCreateSheet = true }
                 return
             }
 
@@ -118,6 +121,7 @@ struct MainTabView: View {
             if showCreateSheet {
                 CreateSheet(initialType: createSheetInitialType, isPresented: $showCreateSheet)
                     .zIndex(20)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         .sheet(isPresented: settingsBinding) {
@@ -141,11 +145,13 @@ struct MainTabView: View {
             services.composeEmailSeedBody = nil
             services.composeEmailSeedTo = nil
             services.composeEmailSeedSubject = nil
+            services.composeEmailSeedAttachments = []
         }) {
             EmailComposeView(
                 to: services.composeEmailSeedTo,
                 subject: services.composeEmailSeedSubject,
-                body: services.composeEmailSeedBody
+                body: services.composeEmailSeedBody,
+                seededAttachments: services.composeEmailSeedAttachments
             )
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
@@ -172,12 +178,13 @@ struct MainTabView: View {
                 services.composeEmailSeedBody = nil
                 services.composeEmailSeedTo = nil
                 services.composeEmailSeedSubject = nil
+                services.composeEmailSeedAttachments = []
             }
         }
         .onChange(of: services.requestCreateSheet) { _, requested in
             guard let requested else { return }
             createSheetInitialType = requested
-            withAnimation(.snappy(duration: 0.2)) { showCreateSheet = true }
+            withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) { showCreateSheet = true }
             services.requestCreateSheet = nil
         }
         .onChange(of: services.navigateToSheet) { _, tab in
@@ -281,17 +288,17 @@ struct MainTabView: View {
     // MARK: - Offline Banner
 
     private var offlineBanner: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
             Image(systemName: "wifi.slash")
-                .font(.system(size: 12, weight: .semibold))
-            Text("No internet connection")
-                .font(.system(size: 13, weight: .medium))
+                .font(.caption2)
+                .fontWeight(.medium)
+            Text("Offline — changes will sync when reconnected")
+                .font(.caption2)
         }
-        .foregroundStyle(.white)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
-        .background(.red.opacity(0.85), in: Capsule())
-        .padding(.top, 4)
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 7)
+        .background(.ultraThinMaterial)
     }
 
     // MARK: - Session Expired Banner
