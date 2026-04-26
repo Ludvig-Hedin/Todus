@@ -111,7 +111,18 @@ final class DraftService {
     }
 
     /// Retry all pending/failed drafts. Call on reconnect.
+    /// Also resets any "sending" records back to "pendingSend" — these were in-flight when the app last crashed.
     func flushPending(in context: ModelContext) async {
+        // Reset stuck "sending" records so they get retried
+        let stuckDescriptor = FetchDescriptor<DraftRecord>(
+            predicate: #Predicate { $0.syncState == "sending" }
+        )
+        let stuck = (try? context.fetch(stuckDescriptor)) ?? []
+        for draft in stuck {
+            draft.syncState = "pendingSend"
+        }
+        if !stuck.isEmpty { try? context.save() }
+
         let descriptor = FetchDescriptor<DraftRecord>(
             predicate: #Predicate { $0.syncState == "pendingSend" || $0.syncState == "failed" }
         )
