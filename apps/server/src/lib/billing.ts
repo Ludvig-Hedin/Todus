@@ -1,9 +1,9 @@
+import { calculateAICostUsd, usdToCredits } from './ai/model-pricing';
+import { user as userTable } from '../db/schema';
 import { Autumn } from 'autumn-js';
 import { eq } from 'drizzle-orm';
 import { createDb } from '../db';
-import { user as userTable } from '../db/schema';
 import { env } from '../env';
-import { calculateAICostUsd, usdToCredits } from './ai/model-pricing';
 
 export type CachedSubscription = {
   plan: string;
@@ -12,9 +12,11 @@ export type CachedSubscription = {
   aiUsageLimit: number;
   aiUsageResetAt: Date | null;
   aiUsageRemaining: number;
+  aiUsageUnlimited: boolean;
 };
 
 export const PRO_PRODUCT_IDS = ['pro_monthly', 'pro_annual'] as const;
+const UNLIMITED_AI_USAGE_SENTINEL = -1;
 
 const planFromProductIds = (productIds: string[] | undefined): string => {
   if (!productIds || productIds.length === 0) return 'free';
@@ -25,6 +27,29 @@ const planFromProductIds = (productIds: string[] | undefined): string => {
 };
 
 const autumnClient = () => new Autumn({ secretKey: env.AUTUMN_SECRET_KEY });
+
+type AutumnResult<T> = Awaited<ReturnType<Autumn['customers']['get']>> & {
+  data: T | null;
+};
+
+const isAutumnNotFound = (result: {
+  error: { code?: string; message?: string } | null;
+  statusCode?: number;
+}) =>
+  result.statusCode === 404 ||
+  result.error?.code === 'not_found' ||
+  /not found/i.test(result.error?.message ?? '');
+
+const logAutumnFailure = (
+  label: string,
+  result: { error: { code?: string; message?: string } | null; statusCode?: number },
+) => {
+  console.error(`[billing] ${label} failed`, {
+    statusCode: result.statusCode ?? null,
+    code: result.error?.code ?? null,
+    message: result.error?.message ?? null,
+  });
+};
 
 /**
  * Read the user's cached subscription state. If the cache is empty
@@ -54,41 +79,105 @@ export const getCachedSubscription = async (userId: string): Promise<CachedSubsc
       aiUsageLimit: 0,
       aiUsageResetAt: null,
       aiUsageRemaining: 0,
+      aiUsageUnlimited: false,
     };
   }
-  const remaining = Math.max(0, (row.aiUsageLimit ?? 0) - (row.aiUsageUsed ?? 0));
+  const unlimited = (row.aiUsageLimit ?? 0) < 0;
+  const remaining = unlimited ? 0 : Math.max(0, (row.aiUsageLimit ?? 0) - (row.aiUsageUsed ?? 0));
   return {
     plan: row.plan ?? 'free',
     subscriptionStatus: row.subscriptionStatus ?? 'active',
     aiUsageUsed: row.aiUsageUsed ?? 0,
-    aiUsageLimit: row.aiUsageLimit ?? 0,
+    aiUsageLimit: unlimited ? 0 : (row.aiUsageLimit ?? 0),
     aiUsageResetAt: row.aiUsageResetAt ?? null,
     aiUsageRemaining: remaining,
+    aiUsageUnlimited: unlimited,
   };
 };
 
 /**
  * Hydrate the cache from Autumn (called after attach/cancel/webhook events).
- * Returns the new cached state. Failures log and return current cache.
+ * If no Autumn customer exists yet (legacy user from before billing existed,
+ * or Autumn was down during signup) this lazily creates one and attaches the
+ * `free` product so the user immediately gets their default credits. Returns
+ * the new cached state. Failures log and return whatever cache exists.
  */
 export const refreshSubscriptionCache = async (
   userId: string,
+  ensureCustomerData?: { name?: string; email?: string },
 ): Promise<CachedSubscription> => {
   try {
-    const { data: customer } = await autumnClient().customers.get(userId);
-    if (!customer) return getCachedSubscription(userId);
+    const autumn = autumnClient();
+    let customerResult: AutumnResult<
+      Awaited<ReturnType<typeof autumn.customers.get>>['data']
+    > | null = null;
+    try {
+      customerResult = await autumn.customers.get(userId);
+    } catch (error) {
+      console.error('[billing] customers.get failed', error);
+      return getCachedSubscription(userId);
+    }
+    let customer = customerResult.data;
+
+    // Lazy-create the Autumn customer + free plan if missing. Idempotent — Autumn
+    // returns the existing customer on duplicate id. Only do this on a confirmed
+    // not-found result; transient API failures must not mutate billing state.
+    if (!customer) {
+      if (!isAutumnNotFound(customerResult)) {
+        logAutumnFailure('customers.get', customerResult);
+        return getCachedSubscription(userId);
+      }
+
+      try {
+        const createResult = await autumn.customers.create({
+          id: userId,
+          name: ensureCustomerData?.name ?? null,
+          email: ensureCustomerData?.email ?? null,
+        });
+        if (!createResult.data && !isAutumnNotFound(createResult)) {
+          logAutumnFailure('lazy customers.create', createResult);
+        }
+      } catch (error) {
+        console.error('[billing] lazy customers.create failed', error);
+      }
+
+      try {
+        const attachResult = await autumn.attach({ customer_id: userId, product_id: 'free' });
+        if (!attachResult.data && !isAutumnNotFound(attachResult)) {
+          logAutumnFailure('lazy attach free', attachResult);
+        }
+      } catch (error) {
+        console.error('[billing] lazy attach free failed', error);
+      }
+
+      try {
+        customerResult = await autumn.customers.get(userId);
+        customer = customerResult.data;
+      } catch (error) {
+        console.error('[billing] customers.get after lazy create failed', error);
+        return getCachedSubscription(userId);
+      }
+      if (!customer) {
+        if (!isAutumnNotFound(customerResult)) {
+          logAutumnFailure('customers.get after lazy create', customerResult);
+        }
+        return getCachedSubscription(userId);
+      }
+    }
 
     const productIds = (customer.products ?? []).map((p) => p.id).filter(Boolean) as string[];
     const plan = planFromProductIds(productIds);
     const aiUsageFeature = (customer as any).features?.ai_usage;
-    const limit = Number(aiUsageFeature?.included_usage ?? 0);
-    const balance = Number(aiUsageFeature?.balance ?? limit);
-    const used = Math.max(0, limit - balance);
+    // Strict equality: Autumn has historically sent `"true"` / `"false"` strings on some
+    // payloads. `Boolean("false")` is `true`, which would silently grant unlimited AI.
+    const unlimited = aiUsageFeature?.unlimited === true;
+    const limit = unlimited ? 0 : Number(aiUsageFeature?.included_usage ?? 0);
+    const balance = unlimited ? 0 : Number(aiUsageFeature?.balance ?? limit);
+    const used = unlimited ? Number(aiUsageFeature?.usage ?? 0) : Math.max(0, limit - balance);
     const resetAt = aiUsageFeature?.next_reset_at
       ? new Date(Number(aiUsageFeature.next_reset_at))
       : null;
-    const status =
-      (customer.products ?? []).find((p) => p.status)?.status ?? 'active';
+    const status = (customer.products ?? []).find((p) => p.status)?.status ?? 'active';
 
     const { db } = createDb(env.HYPERDRIVE.connectionString);
     await db
@@ -97,7 +186,7 @@ export const refreshSubscriptionCache = async (
         plan,
         subscriptionStatus: status,
         aiUsageUsed: used,
-        aiUsageLimit: limit,
+        aiUsageLimit: unlimited ? UNLIMITED_AI_USAGE_SENTINEL : limit,
         aiUsageResetAt: resetAt,
         updatedAt: new Date(),
       })
@@ -109,7 +198,8 @@ export const refreshSubscriptionCache = async (
       aiUsageUsed: used,
       aiUsageLimit: limit,
       aiUsageResetAt: resetAt,
-      aiUsageRemaining: Math.max(0, limit - used),
+      aiUsageRemaining: unlimited ? 0 : Math.max(0, limit - used),
+      aiUsageUnlimited: unlimited,
     };
   } catch (error) {
     console.error('[billing] refreshSubscriptionCache failed', error);
@@ -122,8 +212,13 @@ export const refreshSubscriptionCache = async (
  * remaining credits. Cached read; ~1ms vs 200ms for an Autumn round-trip.
  */
 export const hasAiCredits = async (userId: string): Promise<boolean> => {
-  const sub = await getCachedSubscription(userId);
-  return sub.aiUsageLimit === 0 || sub.aiUsageRemaining > 0;
+  let sub = await getCachedSubscription(userId);
+  if (sub.aiUsageUnlimited) return true;
+  if (sub.aiUsageLimit === 0) {
+    sub = await refreshSubscriptionCache(userId);
+    if (sub.aiUsageUnlimited) return true;
+  }
+  return sub.aiUsageRemaining > 0;
 };
 
 /**
@@ -140,18 +235,36 @@ export const trackAiUsage = async (params: {
 }): Promise<void> => {
   const { userId, model, inputTokens, outputTokens, idempotencyKey } = params;
   const usd = calculateAICostUsd(model, inputTokens, outputTokens);
-  const credits = usdToCredits(usd);
-  if (credits <= 0) return;
+  await trackCreditsUsed({ userId, credits: usdToCredits(usd), idempotencyKey });
+};
+
+/**
+ * Generic credit-debit helper for AI surfaces that price by something other
+ * than tokens (voice = per-minute, image = per-image, etc.). Caller computes
+ * the credit value; we just push to Autumn + update the cache.
+ */
+export const trackCreditsUsed = async (params: {
+  userId: string;
+  credits: number;
+  idempotencyKey?: string;
+}): Promise<void> => {
+  const { userId, credits, idempotencyKey } = params;
+  if (!credits || credits <= 0) return;
 
   try {
-    await autumnClient().track({
+    const result = await autumnClient().track({
       customer_id: userId,
       feature_id: 'ai_usage',
       value: credits,
       ...(idempotencyKey ? { idempotency_key: idempotencyKey } : {}),
     });
+    if (!result.data) {
+      logAutumnFailure('Autumn track', result);
+      return;
+    }
   } catch (error) {
     console.error('[billing] Autumn track failed', error);
+    return;
   }
 
   try {
@@ -167,4 +280,15 @@ export const trackAiUsage = async (params: {
   } catch (error) {
     console.error('[billing] cache usage update failed', error);
   }
+};
+
+/**
+ * Convert a Gemini Live voice session duration to credits.
+ * Estimate: ~$0.10/minute (audio in/out at Gemini Live Tier 1 typical mix).
+ * Cheap rounding to whole seconds — voice sessions vary too much for
+ * sub-second precision to matter.
+ */
+export const voiceSessionCostCredits = (durationMs: number): number => {
+  const minutes = Math.max(0, durationMs / 60_000);
+  return usdToCredits(minutes * 0.1);
 };

@@ -138,8 +138,8 @@ const scheduleCampaign = async (userInfo: { userId: string; address: string; nam
               from: 'Todus <onboarding@todus.app>',
               to: userInfo.address,
               subject: email.subject,
-              react: email.react,
-              ...(email.delayDays > 0 ? { scheduledAt: scheduledFor } : {}),
+              react: email.react as Parameters<typeof resendService.emails.send>[0]['react'],
+              ...(email.delayDays > 0 ? { scheduledAt: scheduledFor.toISOString() } : {}),
             },
             {
               idempotencyKey: `onboarding:${normalizedEmail}:${email.key}:${sendOnDate}`,
@@ -610,7 +610,14 @@ export const createAuth = () => {
           const connections = await db.findManyConnections();
           const autumn = new Autumn({ secretKey: env.AUTUMN_SECRET_KEY });
           try {
-            await autumn.customers.delete(user.id);
+            const result = await autumn.customers.delete(user.id);
+            if (!result.data && result.statusCode !== 404) {
+              console.error('Failed to delete Autumn customer:', {
+                statusCode: result.statusCode ?? null,
+                code: result.error?.code ?? null,
+                message: result.error?.message ?? null,
+              });
+            }
           } catch (error) {
             console.error('Failed to delete Autumn customer:', error);
             // Continue with deletion process despite Autumn failure
@@ -727,19 +734,33 @@ export const createAuth = () => {
             // independently — a failure here must never block sign-up.
             const autumn = new Autumn({ secretKey: env.AUTUMN_SECRET_KEY });
             try {
-              await autumn.customers.create({
+              const result = await autumn.customers.create({
                 id: newSession.user.id,
                 name: newSession.user.name,
                 email: newSession.user.email,
               });
+              if (!result.data && result.statusCode !== 409) {
+                console.error('[signup] Autumn customers.create failed', {
+                  statusCode: result.statusCode ?? null,
+                  code: result.error?.code ?? null,
+                  message: result.error?.message ?? null,
+                });
+              }
             } catch (error) {
               console.error('[signup] Autumn customers.create failed', error);
             }
             try {
-              await autumn.attach({
+              const result = await autumn.attach({
                 customer_id: newSession.user.id,
                 product_id: 'free',
               });
+              if (!result.data && result.statusCode !== 409) {
+                console.error('[signup] Autumn attach free product failed', {
+                  statusCode: result.statusCode ?? null,
+                  code: result.error?.code ?? null,
+                  message: result.error?.message ?? null,
+                });
+              }
             } catch (error) {
               console.error('[signup] Autumn attach free product failed', error);
             }
@@ -783,6 +804,7 @@ const createAuthConfig = () => {
         toOrigin(env.VITE_PUBLIC_APP_URL),
         toOrigin(env.VITE_PUBLIC_BACKEND_URL),
         'todus://auth-callback',
+        'todus://link-callback',
         // Required for Apple Sign-in ID token validation flows
         'https://appleid.apple.com',
       ].filter(Boolean),

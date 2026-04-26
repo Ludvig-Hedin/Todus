@@ -1168,31 +1168,34 @@ const api = new Hono<HonoContext>()
 
     const { db } = createDb(env.HYPERDRIVE.connectionString);
     const trimmedRefreshToken = refreshToken?.trim();
-    const sessionLookup = db
-      .select({ token: session.token })
-      .from(session)
-      .where(
-        trimmedRefreshToken
-          ? and(
+
+    // Try exact refreshToken match first, then fall back to any active session.
+    // Bearer token already proved identity so the fallback is safe.
+    let [activeSession] = trimmedRefreshToken
+      ? await db
+          .select({ token: session.token })
+          .from(session)
+          .where(
+            and(
               eq(session.userId, sessionUser.id),
               eq(session.token, trimmedRefreshToken),
               gt(session.expiresAt, new Date()),
-            )
-          : and(eq(session.userId, sessionUser.id), gt(session.expiresAt, new Date())),
-      );
-    const [activeSession] = trimmedRefreshToken
-      ? await sessionLookup.limit(1)
-      : await sessionLookup.orderBy(desc(session.updatedAt), desc(session.createdAt)).limit(1);
+            ),
+          )
+          .limit(1)
+      : [];
 
     if (!activeSession?.token) {
-      return c.json(
-        {
-          error: trimmedRefreshToken
-            ? 'Native session expired. Please sign in again before linking Gmail.'
-            : 'No active Better Auth session found for account linking.',
-        },
-        401,
-      );
+      [activeSession] = await db
+        .select({ token: session.token })
+        .from(session)
+        .where(and(eq(session.userId, sessionUser.id), gt(session.expiresAt, new Date())))
+        .orderBy(desc(session.updatedAt), desc(session.createdAt))
+        .limit(1);
+    }
+
+    if (!activeSession?.token) {
+      return c.json({ error: 'No active session found for account linking.' }, 401);
     }
 
     const cookiePrefix = env.NODE_ENV === 'development' ? 'better-auth-dev' : 'better-auth';
@@ -1397,16 +1400,19 @@ const app = new Hono<HonoContext>()
   .get('/health', (c) => c.json({ message: 'Todus Server is Up!' }))
   // One-shot admin endpoint. Production DB lives behind Hyperdrive and the
   // direct connection string isn't available locally for `drizzle-kit migrate`,
-  // so this runs SQL via the same HYPERDRIVE binding the worker uses. Gated by
-  // a single-use token. REMOVE after use.
+  // so this runs SQL via the same HYPERDRIVE binding the worker uses. It is
+  // disabled unless `ADMIN_RUN_MIGRATIONS_TOKEN` is configured as a secret.
   //
   // Modes:
   //   POST /admin/run-migrations           → apply schema fixes
   //   POST /admin/run-migrations?mode=info → describe current DB schema
   .post('/admin/run-migrations', async (c) => {
-    const ONE_SHOT_TOKEN = 'f9864a95de7160e0c2e0b6afb15b53b12c17bfb44e4aa2ea6810fdb473ccf7d2';
+    const oneShotToken = env.ADMIN_RUN_MIGRATIONS_TOKEN?.trim();
+    if (!oneShotToken) {
+      return c.json({ error: 'not_found' }, 404);
+    }
     const auth = c.req.header('Authorization');
-    const expected = `Bearer ${ONE_SHOT_TOKEN}`;
+    const expected = `Bearer ${oneShotToken}`;
     if (!auth || auth !== expected) {
       return c.json({ error: 'unauthorized' }, 401);
     }
@@ -1426,18 +1432,145 @@ const app = new Hono<HonoContext>()
           await conn`SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'mail0_account' ORDER BY ordinal_position`;
         const sessionColumns =
           await conn`SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'mail0_session' ORDER BY ordinal_position`;
+        const docWorkspaceColumns =
+          await conn`SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'mail0_doc_workspace' ORDER BY ordinal_position`;
+        const docColumns =
+          await conn`SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'mail0_doc' ORDER BY ordinal_position`;
+        const taskFolderColumns =
+          await conn`SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'mail0_task_folder' ORDER BY ordinal_position`;
+        const folderItemColumns =
+          await conn`SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'mail0_folder_item' ORDER BY ordinal_position`;
         return c.json({
           ok: true,
           mode: 'info',
-          tables: tables.map((t: { tablename: string }) => t.tablename),
+          tables: tables.map((t) => String((t as Record<string, unknown>).tablename)),
           mail0_user_columns: userColumns,
           mail0_account_columns: accountColumns,
           mail0_session_columns: sessionColumns,
+          mail0_doc_workspace_columns: docWorkspaceColumns,
+          mail0_doc_columns: docColumns,
+          mail0_task_folder_columns: taskFolderColumns,
+          mail0_folder_item_columns: folderItemColumns,
         });
       }
 
-      // 0050 columns on mail0_user — use IF NOT EXISTS for idempotence.
+      // Docs storage from 0044/0051. Keep this idempotent so it can repair
+      // production schemas that are behind the app without failing on reruns.
       const statements: Array<{ label: string; sql: string }> = [
+        {
+          label: '0044: mail0_doc_workspace table',
+          sql: `CREATE TABLE IF NOT EXISTS "mail0_doc_workspace" (
+            "id" text PRIMARY KEY NOT NULL,
+            "user_id" text NOT NULL,
+            "name" text NOT NULL,
+            "emoji" text,
+            "created_at" timestamp DEFAULT now() NOT NULL,
+            "updated_at" timestamp DEFAULT now() NOT NULL
+          )`,
+        },
+        {
+          label: '0044: mail0_doc table',
+          sql: `CREATE TABLE IF NOT EXISTS "mail0_doc" (
+            "id" text PRIMARY KEY NOT NULL,
+            "user_id" text NOT NULL,
+            "workspace_id" text,
+            "parent_id" text,
+            "title" text DEFAULT 'Untitled' NOT NULL,
+            "content" jsonb,
+            "content_text" text,
+            "emoji" text,
+            "order" integer DEFAULT 0 NOT NULL,
+            "is_starred" boolean DEFAULT false NOT NULL,
+            "linked_thread_id" text,
+            "linked_event_id" text,
+            "linked_task_id" text,
+            "created_at" timestamp DEFAULT now() NOT NULL,
+            "updated_at" timestamp DEFAULT now() NOT NULL
+          )`,
+        },
+        {
+          label: '0044: mail0_doc_workspace.user_id FK',
+          sql: `DO $$
+          BEGIN
+            IF NOT EXISTS (
+              SELECT 1 FROM pg_constraint
+              WHERE conname = 'mail0_doc_workspace_user_id_mail0_user_id_fk'
+            ) THEN
+              ALTER TABLE "mail0_doc_workspace"
+              ADD CONSTRAINT "mail0_doc_workspace_user_id_mail0_user_id_fk"
+              FOREIGN KEY ("user_id") REFERENCES "public"."mail0_user"("id")
+              ON DELETE cascade ON UPDATE no action;
+            END IF;
+          END $$`,
+        },
+        {
+          label: '0044: mail0_doc.user_id FK',
+          sql: `DO $$
+          BEGIN
+            IF NOT EXISTS (
+              SELECT 1 FROM pg_constraint WHERE conname = 'mail0_doc_user_id_mail0_user_id_fk'
+            ) THEN
+              ALTER TABLE "mail0_doc"
+              ADD CONSTRAINT "mail0_doc_user_id_mail0_user_id_fk"
+              FOREIGN KEY ("user_id") REFERENCES "public"."mail0_user"("id")
+              ON DELETE cascade ON UPDATE no action;
+            END IF;
+          END $$`,
+        },
+        {
+          label: '0044: mail0_doc.workspace_id FK',
+          sql: `DO $$
+          BEGIN
+            IF NOT EXISTS (
+              SELECT 1 FROM pg_constraint
+              WHERE conname = 'mail0_doc_workspace_id_mail0_doc_workspace_id_fk'
+            ) THEN
+              ALTER TABLE "mail0_doc"
+              ADD CONSTRAINT "mail0_doc_workspace_id_mail0_doc_workspace_id_fk"
+              FOREIGN KEY ("workspace_id") REFERENCES "public"."mail0_doc_workspace"("id")
+              ON DELETE cascade ON UPDATE no action;
+            END IF;
+          END $$`,
+        },
+        {
+          label: '0044: mail0_doc.parent_id FK',
+          sql: `DO $$
+          BEGIN
+            IF NOT EXISTS (
+              SELECT 1 FROM pg_constraint WHERE conname = 'mail0_doc_parent_id_mail0_doc_id_fk'
+            ) THEN
+              ALTER TABLE "mail0_doc"
+              ADD CONSTRAINT "mail0_doc_parent_id_mail0_doc_id_fk"
+              FOREIGN KEY ("parent_id") REFERENCES "public"."mail0_doc"("id")
+              ON DELETE set null ON UPDATE no action;
+            END IF;
+          END $$`,
+        },
+        {
+          label: '0044: doc_user_id_idx',
+          sql: `CREATE INDEX IF NOT EXISTS "doc_user_id_idx" ON "mail0_doc" USING btree ("user_id")`,
+        },
+        {
+          label: '0044: doc_workspace_id_idx',
+          sql: `CREATE INDEX IF NOT EXISTS "doc_workspace_id_idx" ON "mail0_doc" USING btree ("workspace_id")`,
+        },
+        {
+          label: '0044: doc_parent_id_idx',
+          sql: `CREATE INDEX IF NOT EXISTS "doc_parent_id_idx" ON "mail0_doc" USING btree ("parent_id")`,
+        },
+        {
+          label: '0044: doc_updated_at_idx',
+          sql: `CREATE INDEX IF NOT EXISTS "doc_updated_at_idx" ON "mail0_doc" USING btree ("updated_at")`,
+        },
+        {
+          label: '0044: doc_workspace_user_id_idx',
+          sql: `CREATE INDEX IF NOT EXISTS "doc_workspace_user_id_idx" ON "mail0_doc_workspace" USING btree ("user_id")`,
+        },
+        {
+          label: '0051: mail0_doc.is_starred',
+          sql: `ALTER TABLE "mail0_doc" ADD COLUMN IF NOT EXISTS "is_starred" boolean DEFAULT false NOT NULL`,
+        },
+        // 0050 columns on mail0_user — use IF NOT EXISTS for idempotence.
         {
           label: '0050: mail0_user.plan',
           sql: `ALTER TABLE "mail0_user" ADD COLUMN IF NOT EXISTS "plan" text DEFAULT 'free' NOT NULL`,
@@ -1457,6 +1590,85 @@ const app = new Hono<HonoContext>()
         {
           label: '0050: mail0_user.ai_usage_reset_at',
           sql: `ALTER TABLE "mail0_user" ADD COLUMN IF NOT EXISTS "ai_usage_reset_at" timestamp`,
+        },
+        {
+          label: '0052: mail0_task_folder.color',
+          sql: `ALTER TABLE "mail0_task_folder" ADD COLUMN IF NOT EXISTS "color" text`,
+        },
+        {
+          label: '0052: mail0_task_folder.icon',
+          sql: `ALTER TABLE "mail0_task_folder" ADD COLUMN IF NOT EXISTS "icon" text`,
+        },
+        {
+          label: '0052: mail0_task_folder.position',
+          sql: `ALTER TABLE "mail0_task_folder" ADD COLUMN IF NOT EXISTS "position" integer DEFAULT 0 NOT NULL`,
+        },
+        {
+          label: '0052: mail0_task_folder.updated_at',
+          sql: `ALTER TABLE "mail0_task_folder" ADD COLUMN IF NOT EXISTS "updated_at" timestamp DEFAULT now() NOT NULL`,
+        },
+        {
+          label: '0052: mail0_folder_item table',
+          sql: `CREATE TABLE IF NOT EXISTS "mail0_folder_item" (
+            "id" text PRIMARY KEY NOT NULL,
+            "folder_id" text NOT NULL,
+            "user_id" text NOT NULL,
+            "item_type" text NOT NULL,
+            "item_id" text NOT NULL,
+            "metadata" jsonb,
+            "position" integer DEFAULT 0 NOT NULL,
+            "created_at" timestamp DEFAULT now() NOT NULL
+          )`,
+        },
+        {
+          label: '0052: folder_item_unique',
+          sql: `DO $$
+          BEGIN
+            IF NOT EXISTS (
+              SELECT 1 FROM pg_constraint WHERE conname = 'folder_item_unique'
+            ) THEN
+              ALTER TABLE "mail0_folder_item"
+              ADD CONSTRAINT "folder_item_unique" UNIQUE("folder_id", "item_type", "item_id");
+            END IF;
+          END $$`,
+        },
+        {
+          label: '0052: mail0_folder_item.folder_id FK',
+          sql: `DO $$
+          BEGIN
+            IF NOT EXISTS (
+              SELECT 1 FROM pg_constraint
+              WHERE conname = 'mail0_folder_item_folder_id_mail0_task_folder_id_fk'
+            ) THEN
+              ALTER TABLE "mail0_folder_item"
+              ADD CONSTRAINT "mail0_folder_item_folder_id_mail0_task_folder_id_fk"
+              FOREIGN KEY ("folder_id") REFERENCES "public"."mail0_task_folder"("id")
+              ON DELETE cascade ON UPDATE no action;
+            END IF;
+          END $$`,
+        },
+        {
+          label: '0052: mail0_folder_item.user_id FK',
+          sql: `DO $$
+          BEGIN
+            IF NOT EXISTS (
+              SELECT 1 FROM pg_constraint
+              WHERE conname = 'mail0_folder_item_user_id_mail0_user_id_fk'
+            ) THEN
+              ALTER TABLE "mail0_folder_item"
+              ADD CONSTRAINT "mail0_folder_item_user_id_mail0_user_id_fk"
+              FOREIGN KEY ("user_id") REFERENCES "public"."mail0_user"("id")
+              ON DELETE cascade ON UPDATE no action;
+            END IF;
+          END $$`,
+        },
+        {
+          label: '0052: folder_item_user_id_idx',
+          sql: `CREATE INDEX IF NOT EXISTS "folder_item_user_id_idx" ON "mail0_folder_item" USING btree ("user_id")`,
+        },
+        {
+          label: '0052: folder_item_lookup_idx',
+          sql: `CREATE INDEX IF NOT EXISTS "folder_item_lookup_idx" ON "mail0_folder_item" USING btree ("item_type", "item_id")`,
         },
       ];
 
