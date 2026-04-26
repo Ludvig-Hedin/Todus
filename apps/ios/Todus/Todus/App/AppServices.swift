@@ -133,6 +133,8 @@ final class AppServices {
     /// Tracks per-model install state for the Local Models settings screen and
     /// the chat composer's local-runtime routing. Disk scan runs on init.
     let localModelStateStore: LocalModelStateStore
+    /// Offline-capable queue for folder create/update/delete mutations.
+    let folderSyncService: FolderSyncService
     private let defaults: UserDefaults
     private var isLoadingSharedProfile = false
     private var lastSharedProfileLoadAt: Date?
@@ -388,13 +390,17 @@ final class AppServices {
         self.remindersSyncService = AppleRemindersSyncService()
         self.remindersSyncState = RemindersSyncState()
 
+        let folderSyncService = FolderSyncService(apiClient: apiClient)
+        self.folderSyncService = folderSyncService
+
         let captureService = TaskCaptureService(
             parser: RemoteFirstTaskParsingService(configuration: configuration),
             syncService: syncService,
             authStore: authStore,
             remindersSyncService: remindersSyncService,
             remindersSyncState: remindersSyncState,
-            apiClient: apiClient
+            apiClient: apiClient,
+            folderSyncService: folderSyncService
         )
         self.captureService = captureService
         captureService.notificationService = self.notificationService
@@ -539,6 +545,7 @@ final class AppServices {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 await self.syncService.retryUnsyncedTasks(in: context)
+                await self.folderSyncService.retryPending()
             }
         }
     }
