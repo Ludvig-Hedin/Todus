@@ -398,6 +398,77 @@ export const foldersRouter = router({
       }
     }),
 
+  // Batch sync endpoint — iOS sends offline folder mutations (upsert/delete)
+  sync: privateProcedure
+    .input(
+      z.object({
+        mutations: z.array(
+          z.discriminatedUnion('type', [
+            z.object({
+              type: z.literal('upsert'),
+              id: z.string(),
+              name: z.string(),
+              color: z.string().nullable().optional(),
+              icon: z.string().nullable().optional(),
+              position: z.number().optional(),
+            }),
+            z.object({
+              type: z.literal('delete'),
+              id: z.string(),
+            }),
+          ])
+        ),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const { db, conn } = getDb();
+      try {
+        const syncedIds: string[] = [];
+
+        for (const mutation of input.mutations) {
+          if (mutation.type === 'upsert') {
+            await db
+              .insert(taskFolder)
+              .values({
+                id: mutation.id,
+                userId: ctx.sessionUser.id,
+                name: mutation.name,
+                color: mutation.color ?? null,
+                icon: mutation.icon ?? null,
+                position: mutation.position ?? 0,
+                createdAt: new Date(),
+                updatedAt: new Date(),
+              })
+              .onConflictDoUpdate({
+                target: taskFolder.id,
+                set: {
+                  name: mutation.name,
+                  color: mutation.color ?? null,
+                  icon: mutation.icon ?? null,
+                  position: mutation.position ?? 0,
+                  updatedAt: new Date(),
+                },
+              });
+            syncedIds.push(mutation.id);
+          } else {
+            await db
+              .delete(taskFolder)
+              .where(
+                and(
+                  eq(taskFolder.id, mutation.id),
+                  eq(taskFolder.userId, ctx.sessionUser.id)
+                )
+              );
+            syncedIds.push(mutation.id);
+          }
+        }
+
+        return { syncedIds };
+      } finally {
+        await conn.end();
+      }
+    }),
+
   // Add an email/event/doc bookmark to a folder. Tasks and chats use their own
   // folderId column instead — clients call tasks.update / ai.saveConversation.
   addItem: privateProcedure
