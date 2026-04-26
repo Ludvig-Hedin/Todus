@@ -1,17 +1,18 @@
-import { ChatSpecRenderer, extractUISpecFromMessage } from '../generative-ui';
 import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuTrigger,
 } from '../ui/context-menu';
+import { ChatSpecRenderer, extractUISpecFromMessage } from '../generative-ui';
 import { Avatar, AvatarFallback, AvatarImage } from '../ui/avatar';
 import { extractMentionRefsFromDoc } from '@/lib/editor-mentions';
 import { useAIFullScreen, useAISidebar } from '../ui/ai-sidebar';
+import { useRef, useCallback, useEffect, useState } from 'react';
 import { VoiceProvider } from '@/providers/voice-provider';
+import type { Message as AiMessage, Attachment } from 'ai';
 import useComposeEditor from '@/hooks/use-compose-editor';
 import { useConnections } from '@/hooks/use-connections';
-import { useRef, useCallback, useEffect } from 'react';
 import type { useAgentChat } from 'agents/ai-react';
 import { Markdown } from '@react-email/components';
 import { useBilling } from '@/hooks/use-billing';
@@ -20,12 +21,11 @@ import { useThread } from '@/hooks/use-threads';
 import { MailLabels } from '../mail/mail-list';
 import type { MentionRef } from '@zero/shared';
 import { cn, getEmailLogo } from '@/lib/utils';
-import type { Message as AiMessage } from 'ai';
 import { VoiceButton } from '../voice-button';
 import { EditorContent } from '@tiptap/react';
 import { CurvedArrow } from '../icons/icons';
-import { Tools } from '../../types/tools';
 import { Copy, Pencil } from 'lucide-react';
+import { Tools } from '../../types/tools';
 import { Button } from '../ui/button';
 import { format } from 'date-fns-tz';
 import { useQueryState } from 'nuqs';
@@ -304,12 +304,16 @@ const ToolResponse = ({ toolName, result, args }: { toolName: string; result: an
   }
 };
 
+const AI_CHAT_MAX_PENDING_IMAGES = 8;
+const AI_CHAT_MAX_PASTE_IMAGE_BYTES = 5 * 1024 * 1024;
+
 export function AIChat({
   messages,
+  input,
   setInput,
   error,
-  handleSubmit,
   status,
+  append,
   setMessages,
   onMentionsChange,
 }: ReturnType<typeof useAgentChat> & {
@@ -317,6 +321,9 @@ export function AIChat({
 }): React.ReactElement {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const [pendingImages, setPendingImages] = useState<Array<Attachment & { _id: string }>>([]);
+  const pendingImagesRef = useRef(pendingImages);
+  pendingImagesRef.current = pendingImages;
   const { chatMessages, isLoading: isBillingLoading } = useBilling();
   const { data: connectionsData } = useConnections();
   const hasEmailConnection = (connectionsData?.connections?.length ?? 0) > 0;
@@ -338,6 +345,42 @@ export function AIChat({
     }
   }, [status, scrollToBottom]);
 
+  const handlePasteFiles = useCallback((files: File[]) => {
+    const room = Math.max(0, AI_CHAT_MAX_PENDING_IMAGES - pendingImagesRef.current.length);
+    if (room <= 0) return;
+
+    const imageFiles = files.filter((f) => f.type.startsWith('image/'));
+    const toRead = imageFiles.filter((f) => f.size <= AI_CHAT_MAX_PASTE_IMAGE_BYTES).slice(0, room);
+
+    for (const file of toRead) {
+      const reader = new FileReader();
+      const nameKey =
+        file.name && file.name.trim().length > 0
+          ? file.name.trim()
+          : `image-${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`}`;
+      const stableId = `paste-${nameKey}-${file.size}-${file.lastModified}`;
+      reader.onerror = () => {
+        console.error('[ai-chat] FileReader failed for paste', file.name);
+      };
+      reader.onload = () => {
+        setPendingImages((prev) => {
+          if (prev.length >= AI_CHAT_MAX_PENDING_IMAGES) return prev;
+          if (prev.some((p) => p._id === stableId)) return prev;
+          return [
+            ...prev,
+            {
+              _id: stableId,
+              name: file.name?.trim() ? file.name.trim() : nameKey,
+              contentType: file.type,
+              url: reader.result as string,
+            },
+          ];
+        });
+      };
+      reader.readAsDataURL(file);
+    }
+  }, []);
+
   const editor = useComposeEditor({
     surface: 'ai-chat',
     placeholder: 'Ask Todus to do anything...',
@@ -345,6 +388,7 @@ export function AIChat({
       setInput(text);
       onMentionsChange?.(extractMentionRefsFromDoc(content));
     },
+    onPasteFiles: handlePasteFiles,
     onKeydown(event) {
       if (event.key === '0' && event.metaKey) {
         return toggleOpen();
@@ -370,9 +414,28 @@ export function AIChat({
       return;
     }
 
-    handleSubmit(e);
+    const trimmed = input.trim();
+    const attachments = pendingImages.map(({ _id: _, ...att }) => att);
+    if (!trimmed && attachments.length === 0) return;
+
+    // Reset composer + attachment state BEFORE awaiting append() — otherwise any keystrokes
+    // typed during the in-flight network call get cleared once we finally clear the editor.
+    // The editor's onChange (from clearContent) syncs setInput('') for us; an explicit
+    // setInput('') here would also wipe the new keystrokes.
     editor.commands.clearContent(true);
+    setPendingImages([]);
     onMentionsChange?.([]);
+
+    await append(
+      {
+        role: 'user',
+        content: trimmed,
+        ...(attachments.length ? { experimental_attachments: attachments } : {}),
+      },
+      {
+        allowEmptySubmit: attachments.length > 0,
+      },
+    );
     setTimeout(() => {
       scrollToBottom();
     }, 100);
@@ -479,6 +542,19 @@ export function AIChat({
                         />
                       ),
                   )}
+                  {message.role === 'user' &&
+                    (
+                      message as AiMessage & { experimental_attachments?: Attachment[] }
+                    ).experimental_attachments
+                      ?.filter((a) => a.contentType?.startsWith('image/'))
+                      .map((att, i) => (
+                        <img
+                          key={`${att.url ?? att.name ?? 'att'}-${i}`}
+                          src={att.url}
+                          alt={att.name ?? 'image'}
+                          className="ml-auto max-h-48 max-w-xs rounded-lg object-cover"
+                        />
+                      ))}
                   {textParts.length > 0 && (
                     <ContextMenu>
                       <ContextMenuTrigger asChild>
@@ -491,64 +567,64 @@ export function AIChat({
                           )}
                         >
                           {textParts.map((part) => {
-                        if (!part.text) return null;
+                            if (!part.text) return null;
 
-                        // Check for embedded UI specs in assistant messages
-                        if (message.role === 'assistant') {
-                          const { textBefore, spec, textAfter } = extractUISpecFromMessage(
-                            part.text,
-                          );
+                            // Check for embedded UI specs in assistant messages
+                            if (message.role === 'assistant') {
+                              const { textBefore, spec, textAfter } = extractUISpecFromMessage(
+                                part.text,
+                              );
 
-                          if (spec) {
+                              if (spec) {
+                                return (
+                                  <div key={part.text} className="flex flex-col gap-2">
+                                    {textBefore && (
+                                      <Markdown markdownCustomStyles={markdownStyles}>
+                                        {normalizeMarkdown(textBefore)}
+                                      </Markdown>
+                                    )}
+                                    <ChatSpecRenderer spec={spec} className="my-1 w-full" />
+                                    {textAfter && (
+                                      <Markdown markdownCustomStyles={markdownStyles}>
+                                        {normalizeMarkdown(textAfter)}
+                                      </Markdown>
+                                    )}
+                                  </div>
+                                );
+                              }
+                            }
+
                             return (
-                              <div key={part.text} className="flex flex-col gap-2">
-                                {textBefore && (
-                                  <Markdown markdownCustomStyles={markdownStyles}>
-                                    {normalizeMarkdown(textBefore)}
-                                  </Markdown>
-                                )}
-                                <ChatSpecRenderer spec={spec} className="my-1 w-full" />
-                                {textAfter && (
-                                  <Markdown markdownCustomStyles={markdownStyles}>
-                                    {normalizeMarkdown(textAfter)}
-                                  </Markdown>
-                                )}
-                              </div>
+                              <Markdown markdownCustomStyles={markdownStyles} key={part.text}>
+                                {normalizeMarkdown(part.text || ' ')}
+                              </Markdown>
                             );
-                          }
-                        }
+                          })}
 
-                        return (
-                          <Markdown markdownCustomStyles={markdownStyles} key={part.text}>
-                            {normalizeMarkdown(part.text || ' ')}
-                          </Markdown>
-                        );
-                      })}
+                          {/* Connect CTA — shown when AI mentions email not being connected */}
+                          {message.role === 'assistant' &&
+                            !hasEmailConnection &&
+                            textParts.some((p) => {
+                              const text = p.text?.toLowerCase();
+                              if (!text) return false;
 
-                      {/* Connect CTA — shown when AI mentions email not being connected */}
-                      {message.role === 'assistant' &&
-                        !hasEmailConnection &&
-                        textParts.some((p) => {
-                          const text = p.text?.toLowerCase();
-                          if (!text) return false;
+                              const hasEmailToken = /\b(email|mail|inbox|gmail)\b/.test(text);
+                              const hasConnectionToken =
+                                /\b(not connected|connect|connection|connected|found)\b/.test(text);
 
-                          const hasEmailToken = /\b(email|mail|inbox|gmail)\b/.test(text);
-                          const hasConnectionToken =
-                            /\b(not connected|connect|connection|connected|found)\b/.test(text);
-
-                          return (
-                            (hasEmailToken && hasConnectionToken) ||
-                            EMAIL_CONNECTION_PATTERNS.some((pattern) => pattern.test(text))
-                          );
-                        }) && (
-                          <a
-                            href="/settings/connections"
-                            className="mt-1 inline-flex items-center gap-1.5 self-start rounded-lg bg-blue-500/10 px-3 py-1.5 text-xs font-medium text-blue-500 transition-colors hover:bg-blue-500/20"
-                          >
-                            Connect Email Account
-                            <span aria-hidden="true">→</span>
-                          </a>
-                        )}
+                              return (
+                                (hasEmailToken && hasConnectionToken) ||
+                                EMAIL_CONNECTION_PATTERNS.some((pattern) => pattern.test(text))
+                              );
+                            }) && (
+                              <a
+                                href="/settings/connections"
+                                className="mt-1 inline-flex items-center gap-1.5 self-start rounded-lg bg-blue-500/10 px-3 py-1.5 text-xs font-medium text-blue-500 transition-colors hover:bg-blue-500/20"
+                              >
+                                Connect Email Account
+                                <span aria-hidden="true">→</span>
+                              </a>
+                            )}
                         </div>
                       </ContextMenuTrigger>
                       <ContextMenuContent className="w-48">
@@ -625,6 +701,26 @@ export function AIChat({
                 </div>
               </form>
             </div>
+            {pendingImages.length > 0 && (
+              <div className="flex flex-wrap gap-2 px-3 pb-1 pt-2">
+                {pendingImages.map((img) => (
+                  <div key={img._id} className="relative shrink-0">
+                    <img src={img.url} alt={img.name} className="h-16 w-16 rounded object-cover" />
+                    <button
+                      type="button"
+                      title="Remove image"
+                      aria-label={`Remove image ${img.name} (${img._id})`}
+                      onClick={() =>
+                        setPendingImages((prev) => prev.filter((i) => i._id !== img._id))
+                      }
+                      className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-black/70 text-[10px] leading-none text-white"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
             <div className="grid">
               <div className="flex justify-end gap-1">
                 <VoiceProvider>

@@ -10,8 +10,24 @@ import { Button } from '@/components/ui/button';
 import { useNavigate } from 'react-router';
 import { useTRPC } from '@/providers/query-provider';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { TRPCClientError } from '@trpc/client';
 import { authProxy } from '@/lib/auth-proxy';
 import type { Route } from './+types/page';
+
+function mapWorkspaceListError(error: unknown): string {
+  if (error instanceof TRPCClientError) {
+    const code = error.data && typeof error.data === 'object' && 'code' in error.data
+      ? String((error.data as { code?: string }).code)
+      : undefined;
+    if (code === 'UNAUTHORIZED' || code === 'FORBIDDEN') {
+      return 'You need to be signed in to load workspaces.';
+    }
+    if (code === 'PRECONDITION_FAILED' || code === 'NOT_FOUND') {
+      return 'Workspaces are not available yet. Try again in a moment.';
+    }
+  }
+  return 'Unable to load workspaces';
+}
 
 // Auth guard — redirect to login if no session
 export async function clientLoader({ request }: Route.ClientLoaderArgs) {
@@ -25,9 +41,10 @@ export default function DocsPage() {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
 
-  const { data: workspacesData, isLoading, isError } = useQuery(
+  const { data: workspacesData, isLoading, isError, error } = useQuery(
     trpc.docs.workspaces.list.queryOptions(),
   );
+  const listErrorMessage = isError ? mapWorkspaceListError(error) : null;
   const firstWorkspaceId = workspacesData?.workspaces?.[0]?.id;
 
   const createDoc = useMutation({
@@ -83,10 +100,8 @@ export default function DocsPage() {
           )}
 
           {!isLoading && isError && (
-            <div className="flex flex-col items-center gap-3 text-center">
-              <p className="text-sm text-muted-foreground">
-                Couldn&apos;t load your workspaces. Retry and then create a new page.
-              </p>
+            <div className="flex max-w-md flex-col items-center gap-3 text-center">
+              <p className="text-muted-foreground text-sm leading-relaxed">{listErrorMessage}</p>
               <Button
                 variant="outline"
                 onClick={() =>
@@ -99,10 +114,12 @@ export default function DocsPage() {
           )}
 
           {/* Hint */}
-          <p className="text-muted-foreground/60 flex items-center gap-1.5 text-xs">
-            <ArrowRight className="h-3 w-3 -rotate-180" />
-            Or select a page from the sidebar
-          </p>
+          {!isError && (
+            <p className="text-muted-foreground/60 flex items-center gap-1.5 text-xs">
+              <ArrowRight className="h-3 w-3 -rotate-180" />
+              Or select a page from the sidebar
+            </p>
+          )}
         </div>
       </ResizablePanel>
     </ResizablePanelGroup>

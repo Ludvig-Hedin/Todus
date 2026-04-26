@@ -11,20 +11,34 @@
  * - CORS troubleshooting help
  */
 
+import {
+  Bot,
+  Trash2,
+  Download,
+  CircleCheck,
+  CircleAlert,
+  Info,
+  RefreshCw,
+  Loader2,
+} from 'lucide-react';
+import {
+  useOllamaModels,
+  useOllamaStatus,
+  useOllamaPull,
+  useOllamaDelete,
+} from '@/hooks/use-ollama';
+import { formatModelSize, OLLAMA_CORS_HELP } from '@/lib/ollama-utils';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { SettingsCard } from '@/components/settings/settings-card';
 import { ModelSelector } from '@/components/ui/model-selector';
-import { useOllamaModels, useOllamaStatus, useOllamaPull, useOllamaDelete } from '@/hooks/use-ollama';
-import { formatModelSize, OLLAMA_CORS_HELP } from '@/lib/ollama-utils';
-import { useSettings } from '@/hooks/use-settings';
+import type { OllamaPullProgress } from '@/lib/ollama-utils';
+import { useState, useCallback, useEffect } from 'react';
 import { useTRPC } from '@/providers/query-provider';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useState, useCallback } from 'react';
+import { Progress } from '@/components/ui/progress';
+import { useSettings } from '@/hooks/use-settings';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Progress } from '@/components/ui/progress';
-import { Bot, Trash2, Download, CircleCheck, CircleAlert, Info, RefreshCw, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
-import type { OllamaPullProgress } from '@/lib/ollama-utils';
 
 export default function AISettingsPage() {
   const { data: settings } = useSettings();
@@ -35,10 +49,11 @@ export default function AISettingsPage() {
 
   // Ollama status and models — always fetch so we can show status even before switching
   const { data: ollamaOnline, refetch: refetchStatus } = useOllamaStatus(ollamaBaseUrl);
-  const { data: ollamaModels, isLoading: modelsLoading, refetch: refetchModels } = useOllamaModels(
-    ollamaBaseUrl,
-    ollamaOnline === true,
-  );
+  const {
+    data: ollamaModels,
+    isLoading: modelsLoading,
+    refetch: refetchModels,
+  } = useOllamaModels(ollamaBaseUrl, ollamaOnline === true);
 
   // Pull state
   const [pullModelName, setPullModelName] = useState('');
@@ -66,6 +81,10 @@ export default function AISettingsPage() {
 
   const [baseUrlInput, setBaseUrlInput] = useState(ollamaBaseUrl);
 
+  useEffect(() => {
+    setBaseUrlInput(ollamaBaseUrl);
+  }, [ollamaBaseUrl]);
+
   const handleSaveBaseUrl = useCallback(() => {
     saveSettings.mutate({ ollamaBaseUrl: baseUrlInput });
     toast.success('Ollama URL saved');
@@ -82,7 +101,9 @@ export default function AISettingsPage() {
       setPullProgress(null);
       setPullPercent(0);
     } catch (error) {
-      toast.error(`Failed to pull "${pullModelName}": ${error instanceof Error ? error.message : 'Unknown error'}`);
+      toast.error(
+        `Failed to pull "${pullModelName}": ${error instanceof Error ? error.message : 'Unknown error'}`,
+      );
     }
   }, [pullModelName, pullMutation]);
 
@@ -92,7 +113,9 @@ export default function AISettingsPage() {
         await deleteMutation.mutateAsync(name);
         toast.success(`Model "${name}" deleted`);
       } catch (error) {
-        toast.error(`Failed to delete "${name}": ${error instanceof Error ? error.message : 'Unknown error'}`);
+        toast.error(
+          `Failed to delete "${name}": ${error instanceof Error ? error.message : 'Unknown error'}`,
+        );
       }
     },
     [deleteMutation],
@@ -120,12 +143,12 @@ export default function AISettingsPage() {
                 Connected
               </span>
             ) : ollamaOnline === false ? (
-              <span className="flex items-center gap-1.5 text-xs text-destructive">
+              <span className="text-destructive flex items-center gap-1.5 text-xs">
                 <CircleAlert className="h-3.5 w-3.5" />
                 Offline
               </span>
             ) : (
-              <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <span className="text-muted-foreground flex items-center gap-1.5 text-xs">
                 Checking...
               </span>
             )}
@@ -162,7 +185,7 @@ export default function AISettingsPage() {
               Save
             </Button>
           </div>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-muted-foreground text-xs">
             Default: http://localhost:11434. Change this if Ollama runs on a different host or port.
           </p>
         </div>
@@ -171,29 +194,33 @@ export default function AISettingsPage() {
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <h4 className="text-sm font-medium">Installed Models</h4>
-            {modelsLoading && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+            {modelsLoading && (
+              <Loader2 className="text-muted-foreground h-3.5 w-3.5 animate-spin" />
+            )}
           </div>
 
           {ollamaOnline === true && ollamaModels && ollamaModels.length > 0 ? (
-            <div className="rounded-md border border-border/60">
-              <div className="divide-y divide-border/60">
+            <div className="border-border/60 rounded-md border">
+              <div className="divide-border/60 divide-y">
                 {ollamaModels.map((model) => (
                   <div key={model.name} className="flex items-center justify-between px-3 py-2.5">
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <Bot className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    <div className="flex min-w-0 items-center gap-2.5">
+                      <Bot className="text-muted-foreground h-4 w-4 shrink-0" />
                       <div className="min-w-0">
-                        <p className="text-sm font-medium truncate">{model.name}</p>
-                        <p className="text-xs text-muted-foreground">
+                        <p className="truncate text-sm font-medium">{model.name}</p>
+                        <p className="text-muted-foreground text-xs">
                           {formatModelSize(model.size)}
-                          {model.details?.parameter_size && ` \u00B7 ${model.details.parameter_size}`}
-                          {model.details?.quantization_level && ` \u00B7 ${model.details.quantization_level}`}
+                          {model.details?.parameter_size &&
+                            ` \u00B7 ${model.details.parameter_size}`}
+                          {model.details?.quantization_level &&
+                            ` \u00B7 ${model.details.quantization_level}`}
                         </p>
                       </div>
                     </div>
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
+                      className="text-muted-foreground hover:text-destructive h-7 w-7 p-0"
                       onClick={() => handleDeleteModel(model.name)}
                       disabled={deleteMutation.isPending}
                     >
@@ -204,19 +231,20 @@ export default function AISettingsPage() {
               </div>
             </div>
           ) : ollamaOnline === true ? (
-            <div className="rounded-md border border-dashed border-border/60 px-4 py-6 text-center">
-              <Bot className="mx-auto h-8 w-8 text-muted-foreground/50" />
-              <p className="mt-2 text-sm text-muted-foreground">No models installed yet</p>
-              <p className="text-xs text-muted-foreground">Pull a model below to get started</p>
+            <div className="border-border/60 rounded-md border border-dashed px-4 py-6 text-center">
+              <Bot className="text-muted-foreground/50 mx-auto h-8 w-8" />
+              <p className="text-muted-foreground mt-2 text-sm">No models installed yet</p>
+              <p className="text-muted-foreground text-xs">Pull a model below to get started</p>
             </div>
           ) : (
-            <div className="rounded-md border border-dashed border-border/60 px-4 py-6 text-center">
-              <CircleAlert className="mx-auto h-8 w-8 text-muted-foreground/50" />
-              <p className="mt-2 text-sm text-muted-foreground">
+            <div className="border-border/60 rounded-md border border-dashed px-4 py-6 text-center">
+              <CircleAlert className="text-muted-foreground/50 mx-auto h-8 w-8" />
+              <p className="text-muted-foreground mt-2 text-sm">
                 Cannot connect to Ollama at {ollamaBaseUrl}
               </p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Make sure Ollama is running: <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">ollama serve</code>
+              <p className="text-muted-foreground mt-1 text-xs">
+                Make sure Ollama is running:{' '}
+                <code className="bg-muted rounded px-1 py-0.5 font-mono text-xs">ollama serve</code>
               </p>
             </div>
           )}
@@ -256,20 +284,20 @@ export default function AISettingsPage() {
             {pullMutation.isPending && pullProgress && (
               <div className="space-y-1.5">
                 <Progress value={pullPercent} className="h-2" />
-                <p className="text-xs text-muted-foreground">
+                <p className="text-muted-foreground text-xs">
                   {pullProgress.status}
                   {pullPercent > 0 && ` (${pullPercent}%)`}
                 </p>
               </div>
             )}
 
-            <p className="text-xs text-muted-foreground">
+            <p className="text-muted-foreground text-xs">
               Browse available models at{' '}
               <a
                 href="https://ollama.com/library"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="underline hover:text-foreground"
+                className="hover:text-foreground underline"
               >
                 ollama.com/library
               </a>
@@ -279,15 +307,15 @@ export default function AISettingsPage() {
 
         {/* CORS Help — shown when offline */}
         {ollamaOnline === false && (
-          <div className="rounded-md border border-border/60 bg-muted/30 p-3">
+          <div className="border-border/60 bg-muted/30 rounded-md border p-3">
             <div className="flex items-start gap-2">
-              <Info className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+              <Info className="text-muted-foreground mt-0.5 h-4 w-4 shrink-0" />
               <div className="space-y-1.5">
                 <p className="text-sm font-medium">Troubleshooting</p>
-                <p className="text-xs text-muted-foreground">
+                <p className="text-muted-foreground text-xs">
                   If Ollama is running but the connection fails, you may need to configure CORS:
                 </p>
-                <pre className="rounded bg-muted p-2 text-xs font-mono whitespace-pre-wrap">
+                <pre className="bg-muted whitespace-pre-wrap rounded p-2 font-mono text-xs">
                   {OLLAMA_CORS_HELP}
                 </pre>
               </div>

@@ -1,6 +1,7 @@
 import { HotkeyProviderWrapper } from '@/components/providers/hotkey-provider-wrapper';
 import { OnboardingWrapper } from '@/components/onboarding';
 import { ConnectionWrapper } from '@/components/connection/connection-wrapper';
+import { SubscriptionSuccessWatcher } from '@/components/subscription-success-watcher';
 import { AppSidebar } from '@/components/ui/app-sidebar';
 import AISidebar from '@/components/ui/ai-sidebar';
 import AIToggleButton from '@/components/ai-toggle-button';
@@ -18,6 +19,8 @@ export default function MailLayout() {
       {/* AI chat persists across all mail pages — AISidebar self-gates on activeConnection */}
       <AISidebar />
       <AIToggleButton />
+      {/* Detects `?success=true` after Stripe Checkout and refreshes plan cache */}
+      <SubscriptionSuccessWatcher />
     </HotkeyProviderWrapper>
   );
 }

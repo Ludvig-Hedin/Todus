@@ -21,7 +21,7 @@ import { ModelSelector } from '@/components/ui/model-selector';
 import { X, Expand, Plus, Share2, Users, ArrowLeft } from 'lucide-react';
 import { IncomingMessageType } from '../party';
 import { Gauge } from '@/components/ui/gauge';
-import { useParams } from 'react-router';
+import { useNavigate, useParams } from 'react-router';
 import { useAgent } from 'agents/react';
 import { useQueryState } from 'nuqs';
 import { cn } from '@/lib/utils';
@@ -402,6 +402,7 @@ function AISidebar({ className }: AISidebarProps) {
   const { open, setOpen, isFullScreen, setIsFullScreen, toggleViewMode, isSidebar, isPopup } =
     useAISidebar();
   const { isPro, track, refetch: refetchBilling } = useBilling();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   // groupId query param — when set the sidebar shows GroupChatView instead of AIChat
   const [groupId, setGroupId] = useQueryState('groupId');
@@ -495,7 +496,22 @@ function AISidebar({ className }: AISidebarProps) {
         currentFilter: searchValue.value ?? undefined,
         messages: chatState.messages,
       });
-      toast.error('Error, please try again later');
+      const isCreditsExhausted =
+        error.message?.includes('AI_CREDITS_EXHAUSTED') ||
+        error.message?.includes('ai_credits_exhausted');
+      if (isCreditsExhausted) {
+        // Refresh the cached billing state in case the user just upgraded in
+        // another tab — and surface a clear upgrade CTA either way.
+        refetchBilling().catch(() => {});
+        toast.error('You\'re out of AI credits this period.', {
+          action: {
+            label: 'Upgrade',
+            onClick: () => navigate('/settings/billing'),
+          },
+        });
+      } else {
+        toast.error('Error, please try again later');
+      }
     },
     onResponse: (response) => {
       posthog.capture('AI Chat Response', {

@@ -1,15 +1,38 @@
-import { SettingsCard } from '@/components/settings/settings-card';
-import { Button } from '@/components/ui/button';
-import { Progress } from '@/components/ui/progress';
-import { useTRPC } from '@/providers/query-provider';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowUpRight, CreditCard, Loader2, Sparkles, X } from 'lucide-react';
+import { SettingsCard } from '@/components/settings/settings-card';
+import { useTRPC } from '@/providers/query-provider';
+import { Progress } from '@/components/ui/progress';
+import { Button } from '@/components/ui/button';
 import { useNavigate } from 'react-router';
 import { toast } from 'sonner';
 
-const PRO_PRODUCT_IDS = new Set(['pro_monthly', 'pro_annual']);
+const PLAN_INCLUDES: Record<string, string[]> = {
+  free: ['1 email connection', '7.5 credits / month of AI chat', 'Basic AI email assistance'],
+  pro: [
+    'Unlimited email connections',
+    '15 credits / month of AI chat & voice',
+    'Auto-labeling, thread summaries, priority models',
+    'Manage payment method, invoices, and cancel anytime',
+  ],
+};
 
-const formatCredits = (n: number) => (n < 1 ? n.toFixed(2) : n.toFixed(1));
+/** Map Stripe / subscription product ids to keys used in `PLAN_INCLUDES`. */
+function getPlanKey(planId: string): string {
+  if (planId === 'pro' || planId === 'pro_monthly' || planId === 'pro_annual') return 'pro';
+  if (Object.prototype.hasOwnProperty.call(PLAN_INCLUDES, planId)) return planId;
+  return 'free';
+}
+
+const formatCredits = (n: number) => {
+  if (n === 0) return '0';
+  if (n < 1) return n.toFixed(2);
+  if (n < 10) return n.toFixed(1);
+  return Math.round(n).toString();
+};
+
+const formatUsageTotal = (n: number, unlimited: boolean) =>
+  unlimited ? 'Unlimited' : formatCredits(n);
 
 const formatResetDate = (iso: string | null) => {
   if (!iso) return null;
@@ -20,8 +43,6 @@ const formatResetDate = (iso: string | null) => {
 
 const planLabel = (plan: string) => {
   if (plan === 'pro') return 'Pro';
-  if (plan === 'enterprise') return 'Enterprise';
-  if (plan === 'team') return 'Team';
   return 'Free';
 };
 
@@ -30,11 +51,17 @@ export default function BillingSettingsPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
 
-  const statusQuery = useQuery(trpc.subscription.getStatus.queryOptions());
+  const statusQuery = useQuery({
+    ...trpc.subscription.getStatus.queryOptions(),
+    // Cache for 30s — billing state changes rarely; webhook + success-redirect
+    // already invalidate proactively, so we don't need to re-poll constantly.
+    staleTime: 30 * 1000,
+  });
 
   const refresh = useMutation(
     trpc.subscription.refresh.mutationOptions({
-      onSuccess: () => queryClient.invalidateQueries({ queryKey: trpc.subscription.getStatus.queryKey() }),
+      onSuccess: () =>
+        queryClient.invalidateQueries({ queryKey: trpc.subscription.getStatus.queryKey() }),
     }),
   );
 
@@ -48,24 +75,16 @@ export default function BillingSettingsPage() {
     }),
   );
 
-  const cancel = useMutation(
-    trpc.subscription.cancel.mutationOptions({
-      onSuccess: () => {
-        toast.success('Subscription canceled');
-        queryClient.invalidateQueries({ queryKey: trpc.subscription.getStatus.queryKey() });
-      },
-      onError: (error) => toast.error(error.message ?? 'Cancellation failed'),
-    }),
-  );
-
   const status = statusQuery.data;
   const plan = status?.plan ?? 'free';
-  const isPro = PRO_PRODUCT_IDS.has(plan) || plan === 'pro';
+  const planKey = getPlanKey(plan);
+  const isPro = planKey === 'pro';
   const usage = status?.aiUsage;
   const used = usage?.used ?? 0;
   const limit = usage?.limit ?? 0;
   const remaining = usage?.remaining ?? 0;
-  const pct = limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0;
+  const unlimited = usage?.unlimited ?? false;
+  const pct = !unlimited && limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0;
   const resetLabel = formatResetDate(usage?.resetAt ?? null);
 
   return (
@@ -80,24 +99,20 @@ export default function BillingSettingsPage() {
             disabled={refresh.isPending}
             onClick={() => refresh.mutate()}
           >
-            {refresh.isPending ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              'Refresh'
-            )}
+            {refresh.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Refresh'}
           </Button>
         }
       >
         {statusQuery.isLoading ? (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <div className="text-muted-foreground flex items-center gap-2 text-sm">
             <Loader2 className="h-4 w-4 animate-spin" /> Loading plan…
           </div>
         ) : (
-          <div className="flex flex-col gap-4 rounded-lg border border-border/60 p-4">
+          <div className="border-border/60 flex flex-col gap-4 rounded-lg border p-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <CreditCard className="h-4 w-4 text-muted-foreground" />
-                <span className="text-base font-semibold">{planLabel(plan)}</span>
+                <CreditCard className="text-muted-foreground h-4 w-4" />
+                <span className="text-base font-semibold">{planLabel(planKey)}</span>
                 {status?.status && status.status !== 'active' && (
                   <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[11px] font-medium uppercase text-amber-600 dark:text-amber-400">
                     {status.status}
@@ -128,74 +143,94 @@ export default function BillingSettingsPage() {
                     size="sm"
                     variant="ghost"
                     className="text-destructive hover:text-destructive"
-                    disabled={cancel.isPending}
-                    onClick={() => {
-                      if (window.confirm('Cancel your Pro subscription? You will keep access until the end of the billing period.')) {
-                        cancel.mutate({ productId: plan === 'pro' ? 'pro_monthly' : plan });
-                      }
-                    }}
+                    disabled={openPortal.isPending}
+                    onClick={() => openPortal.mutate({})}
                   >
-                    {cancel.isPending ? (
+                    {openPortal.isPending ? (
                       <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
                     ) : (
                       <X className="mr-1.5 h-3.5 w-3.5" />
                     )}
-                    Cancel
+                    Cancel in portal
                   </Button>
                 </div>
               )}
             </div>
+            {(PLAN_INCLUDES[planKey] ?? PLAN_INCLUDES.free) && (
+              <div className="border-border/60 mt-1 border-t pt-3">
+                <div className="text-muted-foreground mb-1.5 text-[11px] font-medium uppercase tracking-wide">
+                  Includes
+                </div>
+                <ul className="space-y-1">
+                  {(PLAN_INCLUDES[planKey] ?? PLAN_INCLUDES.free).map((item) => (
+                    <li key={item} className="text-foreground/80 flex items-start gap-2 text-sm">
+                      <span className="mt-1.5 inline-block h-1 w-1 shrink-0 rounded-full bg-current opacity-60" />
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
         )}
       </SettingsCard>
 
       <SettingsCard
         title="AI usage"
-        description="Each AI message debits credits based on the model and message size. 1 credit ≈ $1 of model cost."
+        description="Every AI chat and voice session uses credits based on the model and length."
+        action={
+          resetLabel ? (
+            <span className="text-muted-foreground text-xs">Resets {resetLabel}</span>
+          ) : null
+        }
       >
         {statusQuery.isLoading ? (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <div className="text-muted-foreground flex items-center gap-2 text-sm">
             <Loader2 className="h-4 w-4 animate-spin" /> Loading usage…
           </div>
-        ) : limit === 0 ? (
-          <div className="rounded-lg border border-dashed border-border/60 p-4 text-sm text-muted-foreground">
-            No AI credits on the {planLabel(plan)} plan.{' '}
-            {!isPro && (
-              <button
-                onClick={() => navigate('/pricing')}
-                className="font-medium text-foreground underline-offset-2 hover:underline"
-              >
-                Upgrade for credits.
-              </button>
-            )}
-          </div>
         ) : (
-          <div className="space-y-3 rounded-lg border border-border/60 p-4">
-            <div className="flex items-baseline justify-between">
-              <div>
-                <span className="text-2xl font-semibold tabular-nums">
-                  {formatCredits(used)}
+          <div className="border-border/60 bg-muted/30 space-y-5 rounded-xl border p-6">
+            {/* Big number — credits remaining */}
+            <div className="flex flex-col items-center gap-1 text-center">
+              <div className="flex items-baseline gap-2 tabular-nums">
+                <span className="text-5xl font-semibold leading-none">
+                  {unlimited ? 'Unlimited' : formatCredits(remaining)}
                 </span>
-                <span className="text-sm text-muted-foreground"> / {formatCredits(limit)} credits used</span>
+                <span className="text-muted-foreground text-base">
+                  {unlimited ? 'AI credits' : `/ ${formatCredits(limit)} credits left`}
+                </span>
               </div>
-              <div className="text-xs text-muted-foreground tabular-nums">
-                {formatCredits(remaining)} remaining
+              <div className="text-muted-foreground text-xs">
+                {unlimited
+                  ? 'Unlimited AI usage on this plan.'
+                  : limit > 0
+                    ? `${Math.max(0, 100 - pct)}% remaining this period`
+                    : 'No credits available on this plan.'}
               </div>
             </div>
-            <Progress value={pct} className="h-2" />
-            {resetLabel && (
-              <div className="text-xs text-muted-foreground">
-                Resets on {resetLabel}
+
+            {/* Big progress bar */}
+            <Progress value={pct} className="h-3" />
+
+            {/* Used + warnings */}
+            <div className="text-muted-foreground flex items-center justify-between text-xs tabular-nums">
+              <span>Used: {formatCredits(used)}</span>
+              <span>Total: {formatUsageTotal(limit, unlimited)}</span>
+            </div>
+
+            {!unlimited && pct >= 80 && pct < 100 && (
+              <div className="rounded border border-amber-500/40 bg-amber-500/10 p-2.5 text-sm text-amber-700 dark:text-amber-300">
+                You've used {pct}% of your AI credits this period.
               </div>
             )}
-            {pct >= 80 && pct < 100 && (
-              <div className="rounded border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-700 dark:text-amber-300">
-                You've used {pct}% of your monthly AI credits.
-              </div>
-            )}
-            {pct >= 100 && (
-              <div className="rounded border border-destructive/50 bg-destructive/10 p-2 text-xs text-destructive">
-                You're out of AI credits for this period. {!isPro && 'Upgrade to keep chatting.'}
+            {!unlimited && pct >= 100 && (
+              <div className="border-destructive/50 bg-destructive/10 text-destructive flex items-center justify-between gap-3 rounded border p-2.5 text-sm">
+                <span>You're out of AI credits for this period.</span>
+                {!isPro && (
+                  <Button size="sm" onClick={() => navigate('/pricing')}>
+                    Upgrade
+                  </Button>
+                )}
               </div>
             )}
           </div>

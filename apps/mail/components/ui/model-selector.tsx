@@ -24,6 +24,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState, useEffect, useCallback } from 'react';
 import { cn } from '@/lib/utils';
 import { Bot, Cloud, CircleAlert } from 'lucide-react';
+import { toast } from 'sonner';
 
 // Curated model lists per cloud provider
 const CLOUD_MODELS: Record<string, { id: string; label: string }[]> = {
@@ -101,6 +102,19 @@ export function ModelSelector({ className, variant = 'compact', onModelChange }:
 
   const handleProviderChange = useCallback(
     (newProvider: string) => {
+      if (newProvider === 'ollama') {
+        const firstOllamaModel = ollamaModels?.[0]?.name;
+        if (!firstOllamaModel) {
+          toast.error('Install an Ollama model before selecting Ollama.');
+          return;
+        }
+        setProvider(newProvider);
+        setModelId(firstOllamaModel);
+        saveSettings.mutate({ aiProvider: newProvider as any, aiModel: firstOllamaModel });
+        onModelChange?.(newProvider, firstOllamaModel);
+        return;
+      }
+
       setProvider(newProvider);
       // Reset model when switching providers (each provider has different models)
       const newModelId = '';
@@ -108,7 +122,7 @@ export function ModelSelector({ className, variant = 'compact', onModelChange }:
       saveSettings.mutate({ aiProvider: newProvider as any, aiModel: newModelId });
       onModelChange?.(newProvider, newModelId);
     },
-    [saveSettings, onModelChange],
+    [ollamaModels, onModelChange, saveSettings],
   );
 
   const handleModelChange = useCallback(
