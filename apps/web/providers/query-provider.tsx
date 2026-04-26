@@ -61,9 +61,12 @@ export const makeQueryClient = (connectionId: string | null) =>
         refetchOnWindowFocus: false,
         queryKeyHashFn: (queryKey) => hashKey([{ connectionId }, ...queryKey]),
         gcTime: 1000 * 60 * 60 * 24, // 24 hours,
+        networkMode: 'offlineFirst', // serve IDB cache immediately, fetch in background
       },
       mutations: {
         onError: (err) => console.error(err.message),
+        networkMode: 'offlineFirst', // pause mutations when offline, auto-retry on reconnect
+        retry: 1,
       },
     },
   });
