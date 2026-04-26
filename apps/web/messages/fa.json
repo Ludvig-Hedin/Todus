@@ -59,7 +59,11 @@
       "confirmDeleteSpamDescription": "آیا مطمئن هستید که می‌خواهید تمام ایمیل‌های هرزنامه را حذف کنید؟ این عمل قابل بازگشت نیست.",
       "confirmDelete": "حذف"
     },
-    "themes": { "dark": "تیره", "light": "روشن", "system": "سیستم" },
+    "themes": {
+      "dark": "تیره",
+      "light": "روشن",
+      "system": "سیستم"
+    },
     "commandPalette": {
       "title": "پالت فرمان",
       "description": "ناوبری سریع و اقدامات برای Todus Email",
@@ -161,8 +165,13 @@
       "attachments": "پیوست‌ها",
       "attachmentCount": [
         {
-          "declarations": ["input count", "local countPlural = count: plural"],
-          "selectors": ["countPlural"],
+          "declarations": [
+            "input count",
+            "local countPlural = count: plural"
+          ],
+          "selectors": [
+            "countPlural"
+          ],
           "match": {
             "countPlural=0": "پیوست",
             "countPlural=one": "پیوست",
@@ -172,8 +181,13 @@
       ],
       "fileCount": [
         {
-          "declarations": ["input count", "local countPlural = count: plural"],
-          "selectors": ["countPlural"],
+          "declarations": [
+            "input count",
+            "local countPlural = count: plural"
+          ],
+          "selectors": [
+            "countPlural"
+          ],
           "match": {
             "countPlural=0": "فایل",
             "countPlural=one": "فایل",
@@ -220,12 +234,12 @@
       "markAsRead": "علامت‌گذاری به‌عنوان خوانده‌شده",
       "addLabel": "افزودن برچسب",
       "muteThread": "بی‌صدا کردن مکالمه",
-      "favourites": "موارد مورد علاقه",
       "disableImages": "پنهان کردن تصاویر",
       "enableImages": "نمایش تصاویر",
       "star": "ستاره‌دار کردن",
       "unstar": "حذف ستاره",
-      "printThread": "چاپ رشته"
+      "printThread": "چاپ رشته",
+      "favorites": "موارد مورد علاقه"
     },
     "notes": {
       "title": "یادداشت‌ها",
@@ -245,8 +259,13 @@
       "search": "جستجوی یادداشت‌ها...",
       "noteCount": [
         {
-          "declarations": ["input count", "local countPlural = count: plural"],
-          "selectors": ["countPlural"],
+          "declarations": [
+            "input count",
+            "local countPlural = count: plural"
+          ],
+          "selectors": [
+            "countPlural"
+          ],
           "match": {
             "countPlural=0": "افزودن یادداشت‌ها",
             "countPlural=one": "# یادداشت",
@@ -308,8 +327,13 @@
     "mail": {
       "replies": [
         {
-          "declarations": ["input count", "local countPlural = count: plural"],
-          "selectors": ["countPlural"],
+          "declarations": [
+            "input count",
+            "local countPlural = count: plural"
+          ],
+          "selectors": [
+            "countPlural"
+          ],
           "match": {
             "countPlural=0": "پاسخ‌ها",
             "countPlural=one": "# پاسخ",
@@ -369,7 +393,9 @@
       "failedToArchive": "بایگانی کردن ناموفق بود",
       "openInNewTab": "باز کردن در زبانه جدید"
     },
-    "units": { "mb": "{amount} مگابایت" },
+    "units": {
+      "mb": "{amount} مگابایت"
+    },
     "labels": {
       "color": "رنگ",
       "labelName": "نام برچسب",
@@ -384,8 +410,8 @@
       "deletingLabel": "در حال حذف برچسب...",
       "editLabel": "ویرایش برچسب",
       "savingLabel": "در حال ذخیره برچسب...",
-      "failedToSavingLabel": "ذخیره برچسب ناموفق بود",
-      "saveLabelSuccess": "برچسب با موفقیت ذخیره شد"
+      "saveLabelSuccess": "برچسب با موفقیت ذخیره شد",
+      "failedToSaveLabel": "ذخیره برچسب ناموفق بود"
     }
   },
   "navigation": {
@@ -415,7 +441,8 @@
       "categories": "نماها",
       "dangerZone": "منطقه خطر",
       "deleteAccount": "حذف حساب کاربری",
-      "privacy": "حریم خصوصی"
+      "privacy": "حریم خصوصی",
+      "meetings": "جلسات"
     }
   },
   "pages": {
@@ -479,7 +506,25 @@
         "loginNotificationsDescription": "از تلاش‌های جدید برای ورود به سیستم مطلع شوید",
         "deleteAccount": "حذف حساب کاربری",
         "loadImagesDefault": "بارگذاری تصاویر به صورت پیش‌فرض",
-        "loadImagesDefaultDescription": "تصاویر به دلایل امنیتی به صورت پیش‌فرض بارگذاری نمی‌شوند."
+        "loadImagesDefaultDescription": "تصاویر به دلایل امنیتی به صورت پیش‌فرض بارگذاری نمی‌شوند.",
+        "sessions": {
+          "loadErrorTitle": "Couldn't load sessions",
+          "loadErrorFallback": "An unexpected error occurred.",
+          "tryAgain": "Try again",
+          "emptyTitle": "No active sessions",
+          "emptyDescription": "New sign-ins will appear here automatically.",
+          "currentDevice": "This device",
+          "lastActiveLabel": "Last active {value}",
+          "lastActiveUnknown": "Last active unknown",
+          "signOut": "Sign out",
+          "signOutCurrentSuccess": "Signed out of this session.",
+          "signOutDeviceSuccess": "Device signed out.",
+          "signOutDeviceError": "Failed to sign out device. Please try again.",
+          "signOutAllSuccess": "Signed out of all devices.",
+          "signOutAllError": "Failed to sign out all devices. Please try again.",
+          "signingOutAll": "Signing out…",
+          "signOutAllOtherDevices": "Sign out all other devices"
+        }
       },
       "appearance": {
         "title": "ظاهر",
@@ -575,6 +620,7 @@
         "deleteAccount": "حذف حساب کاربری",
         "deleting": "در حال حذف...",
         "deleted": "حساب کاربری با موفقیت حذف شد",
+        "cancel": "لغو",
         "error": "حذف حساب کاربری ناموفق بود"
       },
       "privacy": {
@@ -626,9 +672,18 @@
       "imageCompression": {
         "title": "فشرده‌سازی تصویر",
         "description": "کیفیت تصویر برای پیوست‌ها را انتخاب کنید",
-        "low": { "label": "پایین", "description": "کوچک‌ترین حجم فایل، با افت کیفیت قابل توجه" },
-        "medium": { "label": "متوسط", "description": "تعادل بین حجم و کیفیت" },
-        "original": { "label": "اصلی", "description": "بدون فشرده‌سازی، کیفیت اصلی" }
+        "low": {
+          "label": "پایین",
+          "description": "کوچک‌ترین حجم فایل، با افت کیفیت قابل توجه"
+        },
+        "medium": {
+          "label": "متوسط",
+          "description": "تعادل بین حجم و کیفیت"
+        },
+        "original": {
+          "label": "اصلی",
+          "description": "بدون فشرده‌سازی، کیفیت اصلی"
+        }
       }
     }
   },

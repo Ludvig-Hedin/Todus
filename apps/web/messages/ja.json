@@ -59,7 +59,11 @@
       "confirmDeleteSpamDescription": "すべてのスパムメールを削除してもよろしいですか？この操作は元に戻せません。",
       "confirmDelete": "削除"
     },
-    "themes": { "dark": "ダーク", "light": "ライト", "system": "システム" },
+    "themes": {
+      "dark": "ダーク",
+      "light": "ライト",
+      "system": "システム"
+    },
     "commandPalette": {
       "title": "コマンド パレット",
       "description": "Todusのクイックナビゲーションとアクション",
@@ -161,8 +165,13 @@
       "attachments": "添付ファイル",
       "attachmentCount": [
         {
-          "declarations": ["input count", "local countPlural = count: plural"],
-          "selectors": ["countPlural"],
+          "declarations": [
+            "input count",
+            "local countPlural = count: plural"
+          ],
+          "selectors": [
+            "countPlural"
+          ],
           "match": {
             "countPlural=0": "添付ファイル",
             "countPlural=one": "添付ファイル",
@@ -172,8 +181,13 @@
       ],
       "fileCount": [
         {
-          "declarations": ["input count", "local countPlural = count: plural"],
-          "selectors": ["countPlural"],
+          "declarations": [
+            "input count",
+            "local countPlural = count: plural"
+          ],
+          "selectors": [
+            "countPlural"
+          ],
           "match": {
             "countPlural=0": "ファイル",
             "countPlural=one": "ファイル",
@@ -220,12 +234,12 @@
       "markAsRead": "既読にする",
       "addLabel": "ラベルを追加",
       "muteThread": "スレッドをミュート",
-      "favourites": "お気に入り",
       "disableImages": "画像を非表示",
       "enableImages": "画像を表示",
       "star": "スターを付ける",
       "unstar": "スターを外す",
-      "printThread": "スレッドを印刷"
+      "printThread": "スレッドを印刷",
+      "favorites": "お気に入り"
     },
     "notes": {
       "title": "メモ",
@@ -245,8 +259,13 @@
       "search": "メモを検索…",
       "noteCount": [
         {
-          "declarations": ["input count", "local countPlural = count: plural"],
-          "selectors": ["countPlural"],
+          "declarations": [
+            "input count",
+            "local countPlural = count: plural"
+          ],
+          "selectors": [
+            "countPlural"
+          ],
           "match": {
             "countPlural=0": "メモを追加",
             "countPlural=one": "# 件のメモ",
@@ -308,8 +327,13 @@
     "mail": {
       "replies": [
         {
-          "declarations": ["input count", "local countPlural = count: plural"],
-          "selectors": ["countPlural"],
+          "declarations": [
+            "input count",
+            "local countPlural = count: plural"
+          ],
+          "selectors": [
+            "countPlural"
+          ],
           "match": {
             "countPlural=0": "返信",
             "countPlural=one": "# 件の返信",
@@ -369,7 +393,9 @@
       "failedToArchive": "アーカイブに失敗しました",
       "openInNewTab": "新しいタブで開く"
     },
-    "units": { "mb": "{amount} MB" },
+    "units": {
+      "mb": "{amount} MB"
+    },
     "labels": {
       "color": "色",
       "labelName": "ラベル名",
@@ -384,8 +410,8 @@
       "deletingLabel": "ラベルを削除中...",
       "editLabel": "ラベルを編集",
       "savingLabel": "ラベルを保存中...",
-      "failedToSavingLabel": "ラベルの保存に失敗しました",
-      "saveLabelSuccess": "ラベルが正常に保存されました"
+      "saveLabelSuccess": "ラベルが正常に保存されました",
+      "failedToSaveLabel": "ラベルの保存に失敗しました"
     }
   },
   "navigation": {
@@ -415,7 +441,8 @@
       "categories": "表示",
       "dangerZone": "危険ゾーン",
       "deleteAccount": "アカウントを削除",
-      "privacy": "プライバシー"
+      "privacy": "プライバシー",
+      "meetings": "会議"
     }
   },
   "pages": {
@@ -479,7 +506,25 @@
         "loginNotificationsDescription": "新しいログイン試行について通知を受け取ります",
         "deleteAccount": "アカウントを削除",
         "loadImagesDefault": "デフォルトで画像を読み込む",
-        "loadImagesDefaultDescription": "セキュリティ上の理由から、画像はデフォルトでは読み込まれません。"
+        "loadImagesDefaultDescription": "セキュリティ上の理由から、画像はデフォルトでは読み込まれません。",
+        "sessions": {
+          "loadErrorTitle": "Couldn't load sessions",
+          "loadErrorFallback": "An unexpected error occurred.",
+          "tryAgain": "Try again",
+          "emptyTitle": "No active sessions",
+          "emptyDescription": "New sign-ins will appear here automatically.",
+          "currentDevice": "This device",
+          "lastActiveLabel": "Last active {value}",
+          "lastActiveUnknown": "Last active unknown",
+          "signOut": "Sign out",
+          "signOutCurrentSuccess": "Signed out of this session.",
+          "signOutDeviceSuccess": "Device signed out.",
+          "signOutDeviceError": "Failed to sign out device. Please try again.",
+          "signOutAllSuccess": "Signed out of all devices.",
+          "signOutAllError": "Failed to sign out all devices. Please try again.",
+          "signingOutAll": "Signing out…",
+          "signOutAllOtherDevices": "Sign out all other devices"
+        }
       },
       "appearance": {
         "title": "外観",
@@ -575,6 +620,7 @@
         "deleteAccount": "アカウントを削除",
         "deleting": "削除中...",
         "deleted": "アカウントが正常に削除されました",
+        "cancel": "キャンセル",
         "error": "アカウントの削除に失敗しました"
       },
       "privacy": {
@@ -626,9 +672,18 @@
       "imageCompression": {
         "title": "画像圧縮",
         "description": "添付ファイルの画質を選択",
-        "low": { "label": "低", "description": "ファイルサイズ最小、目立つ画質劣化" },
-        "medium": { "label": "中", "description": "サイズと品質のバランス" },
-        "original": { "label": "オリジナル", "description": "圧縮なし、元の品質" }
+        "low": {
+          "label": "低",
+          "description": "ファイルサイズ最小、目立つ画質劣化"
+        },
+        "medium": {
+          "label": "中",
+          "description": "サイズと品質のバランス"
+        },
+        "original": {
+          "label": "オリジナル",
+          "description": "圧縮なし、元の品質"
+        }
       }
     }
   },

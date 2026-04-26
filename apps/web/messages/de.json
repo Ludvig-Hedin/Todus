@@ -59,7 +59,11 @@
       "confirmDeleteSpamDescription": "Sind Sie sicher, dass Sie alle Spam-E-Mails löschen möchten? Diese Aktion kann nicht rückgängig gemacht werden.",
       "confirmDelete": "Löschen"
     },
-    "themes": { "dark": "Dunkel", "light": "Hell", "system": "System" },
+    "themes": {
+      "dark": "Dunkel",
+      "light": "Hell",
+      "system": "System"
+    },
     "commandPalette": {
       "title": "Befehlspalette",
       "description": "Schnellzugriff für Todus",
@@ -161,8 +165,13 @@
       "attachments": "Anhänge",
       "attachmentCount": [
         {
-          "declarations": ["input count", "local countPlural = count: plural"],
-          "selectors": ["countPlural"],
+          "declarations": [
+            "input count",
+            "local countPlural = count: plural"
+          ],
+          "selectors": [
+            "countPlural"
+          ],
           "match": {
             "countPlural=0": "Anhänge",
             "countPlural=one": "Anhang",
@@ -172,8 +181,13 @@
       ],
       "fileCount": [
         {
-          "declarations": ["input count", "local countPlural = count: plural"],
-          "selectors": ["countPlural"],
+          "declarations": [
+            "input count",
+            "local countPlural = count: plural"
+          ],
+          "selectors": [
+            "countPlural"
+          ],
           "match": {
             "countPlural=0": "Dateien",
             "countPlural=one": "Datei",
@@ -220,12 +234,12 @@
       "markAsRead": "Als gelesen markieren",
       "addLabel": "Label hinzufügen",
       "muteThread": "Thread stummschalten",
-      "favourites": "Favoriten",
       "disableImages": "Bilder ausblenden",
       "enableImages": "Bilder anzeigen",
       "star": "Mit Stern markieren",
       "unstar": "Stern entfernen",
-      "printThread": "Thread drucken"
+      "printThread": "Thread drucken",
+      "favorites": "Favoriten"
     },
     "notes": {
       "title": "Notizen",
@@ -245,8 +259,13 @@
       "search": "Notizen durchsuchen...",
       "noteCount": [
         {
-          "declarations": ["input count", "local countPlural = count: plural"],
-          "selectors": ["countPlural"],
+          "declarations": [
+            "input count",
+            "local countPlural = count: plural"
+          ],
+          "selectors": [
+            "countPlural"
+          ],
           "match": {
             "countPlural=0": "Füge Notizen hinzu",
             "countPlural=one": "# Notiz",
@@ -262,7 +281,7 @@
       "noteCopied": "In die Zwischenablage kopiert",
       "noteAdded": "Notiz hinzugefügt",
       "notesReordered": "Notizen umsortiert",
-      "noMatchingNotes": "Keine Notizen mit \"{query} \" gefunden",
+      "noMatchingNotes": "Keine Notizen mit \"{query}\" gefunden",
       "clearSearch": "Suche leeren",
       "pinnedNotes": "Angeheftete Notizen",
       "otherNotes": "Andere Notizen",
@@ -308,8 +327,13 @@
     "mail": {
       "replies": [
         {
-          "declarations": ["input count", "local countPlural = count: plural"],
-          "selectors": ["countPlural"],
+          "declarations": [
+            "input count",
+            "local countPlural = count: plural"
+          ],
+          "selectors": [
+            "countPlural"
+          ],
           "match": {
             "countPlural=0": "Antworten",
             "countPlural=one": "# Antwort",
@@ -369,7 +393,9 @@
       "failedToArchive": "Archivierung fehlgeschlagen",
       "openInNewTab": "In neuem Tab öffnen"
     },
-    "units": { "mb": "{amount} MB" },
+    "units": {
+      "mb": "{amount} MB"
+    },
     "labels": {
       "color": "Farbe",
       "labelName": "Label-Name",
@@ -384,8 +410,8 @@
       "deletingLabel": "Label wird gelöscht...",
       "editLabel": "Label bearbeiten",
       "savingLabel": "Label wird gespeichert...",
-      "failedToSavingLabel": "Label konnte nicht gespeichert werden",
-      "saveLabelSuccess": "Label erfolgreich gespeichert"
+      "saveLabelSuccess": "Label erfolgreich gespeichert",
+      "failedToSaveLabel": "Label konnte nicht gespeichert werden"
     }
   },
   "navigation": {
@@ -415,7 +441,8 @@
       "categories": "Ansichten",
       "dangerZone": "Gefahrenbereich",
       "deleteAccount": "Konto löschen",
-      "privacy": "Datenschutz"
+      "privacy": "Datenschutz",
+      "meetings": "Besprechungen"
     }
   },
   "pages": {
@@ -479,7 +506,25 @@
         "loginNotificationsDescription": "Über neue Anmeldeversuche benachrichtigt werden",
         "deleteAccount": "Benutzerkonto löschen",
         "loadImagesDefault": "Bilder standardmäßig laden",
-        "loadImagesDefaultDescription": "Aus Sicherheitsgründen werden Bilder standardmäßig nicht geladen."
+        "loadImagesDefaultDescription": "Aus Sicherheitsgründen werden Bilder standardmäßig nicht geladen.",
+        "sessions": {
+          "loadErrorTitle": "Couldn't load sessions",
+          "loadErrorFallback": "An unexpected error occurred.",
+          "tryAgain": "Try again",
+          "emptyTitle": "No active sessions",
+          "emptyDescription": "New sign-ins will appear here automatically.",
+          "currentDevice": "This device",
+          "lastActiveLabel": "Last active {value}",
+          "lastActiveUnknown": "Last active unknown",
+          "signOut": "Sign out",
+          "signOutCurrentSuccess": "Signed out of this session.",
+          "signOutDeviceSuccess": "Device signed out.",
+          "signOutDeviceError": "Failed to sign out device. Please try again.",
+          "signOutAllSuccess": "Signed out of all devices.",
+          "signOutAllError": "Failed to sign out all devices. Please try again.",
+          "signingOutAll": "Signing out…",
+          "signOutAllOtherDevices": "Sign out all other devices"
+        }
       },
       "appearance": {
         "title": "Gestaltung",
@@ -575,6 +620,7 @@
         "deleteAccount": "Konto löschen",
         "deleting": "Wird gelöscht...",
         "deleted": "Konto erfolgreich gelöscht",
+        "cancel": "Abbrechen",
         "error": "Konto konnte nicht gelöscht werden"
       },
       "privacy": {
@@ -630,8 +676,14 @@
           "label": "Niedrig",
           "description": "Kleinste Dateigröße, merklicher Qualitätsverlust"
         },
-        "medium": { "label": "Mittel", "description": "Ausgewogene Größe und Qualität" },
-        "original": { "label": "Original", "description": "Keine Komprimierung, Originalqualität" }
+        "medium": {
+          "label": "Mittel",
+          "description": "Ausgewogene Größe und Qualität"
+        },
+        "original": {
+          "label": "Original",
+          "description": "Keine Komprimierung, Originalqualität"
+        }
       }
     }
   },

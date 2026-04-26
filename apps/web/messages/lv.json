@@ -59,7 +59,11 @@
       "confirmDeleteSpamDescription": "Vai tiešām vēlaties dzēst visas mēstules? Šo darbību nevar atsaukt.",
       "confirmDelete": "Dzēst"
     },
-    "themes": { "dark": "Tumšs", "light": "Gaišs", "system": "Sistēma" },
+    "themes": {
+      "dark": "Tumšs",
+      "light": "Gaišs",
+      "system": "Sistēma"
+    },
     "commandPalette": {
       "title": "Komandu palete",
       "description": "Ātrā navigācija un darbības Todus",
@@ -161,8 +165,13 @@
       "attachments": "Pielikumi",
       "attachmentCount": [
         {
-          "declarations": ["input count", "local countPlural = count: plural"],
-          "selectors": ["countPlural"],
+          "declarations": [
+            "input count",
+            "local countPlural = count: plural"
+          ],
+          "selectors": [
+            "countPlural"
+          ],
           "match": {
             "countPlural=0": "pielikumi",
             "countPlural=one": "pielikums",
@@ -172,8 +181,13 @@
       ],
       "fileCount": [
         {
-          "declarations": ["input count", "local countPlural = count: plural"],
-          "selectors": ["countPlural"],
+          "declarations": [
+            "input count",
+            "local countPlural = count: plural"
+          ],
+          "selectors": [
+            "countPlural"
+          ],
           "match": {
             "countPlural=0": "faili",
             "countPlural=one": "fails",
@@ -220,22 +234,22 @@
       "markAsRead": "Atzīmēt kā lasītu",
       "addLabel": "Pievienot iezīmi",
       "muteThread": "Apklusināt pavedienu",
-      "favourites": "Izlase",
       "disableImages": "Slēpt attēlus",
       "enableImages": "Rādīt attēlus",
       "star": "Pievienot zvaigznīti",
       "unstar": "Noņemt zvaigznīti",
-      "printThread": "Drukāt saraksti"
+      "printThread": "Drukāt saraksti",
+      "favorites": "Izlase"
     },
     "notes": {
       "title": "Piezīmes",
       "empty": "Šim e-pastam nav piezīmju",
-      "emptyDescription": "Pievieno piezīmes, lai sekotu līdzi svarīgai informācijai vai turpmākajiem uzdevumiem.",
+      "emptyDescription": "Pievienojiet piezīmes, lai sekotu līdzi svarīgai informācijai vai turpmākajiem uzdevumiem.",
       "addNote": "Pievienot piezīmi",
-      "addYourNote": "Pievieno savu piezīmi šeit...",
+      "addYourNote": "Pievienojiet savu piezīmi šeit...",
       "editNote": "Rediģēt piezīmi",
       "deleteNote": "Izdzēst piezīmi",
-      "deleteConfirm": "Vai tiešām vēlies dzēst šo piezīmi?",
+      "deleteConfirm": "Vai tiešām vēlaties dzēst šo piezīmi?",
       "deleteConfirmDescription": "Šo darbību nevar atsaukt.",
       "cancel": "Atcelt",
       "delete": "Dzēst",
@@ -245,8 +259,13 @@
       "search": "Meklēt piezīmes...",
       "noteCount": [
         {
-          "declarations": ["input count", "local countPlural = count: plural"],
-          "selectors": ["countPlural"],
+          "declarations": [
+            "input count",
+            "local countPlural = count: plural"
+          ],
+          "selectors": [
+            "countPlural"
+          ],
           "match": {
             "countPlural=0": "Pievienot piezīmes",
             "countPlural=one": "# piezīme",
@@ -308,8 +327,13 @@
     "mail": {
       "replies": [
         {
-          "declarations": ["input count", "local countPlural = count: plural"],
-          "selectors": ["countPlural"],
+          "declarations": [
+            "input count",
+            "local countPlural = count: plural"
+          ],
+          "selectors": [
+            "countPlural"
+          ],
           "match": {
             "countPlural=0": "atbildes",
             "countPlural=one": "# atbilde",
@@ -369,7 +393,9 @@
       "failedToArchive": "Neizdevās arhivēt",
       "openInNewTab": "Atvērt jaunā cilnē"
     },
-    "units": { "mb": "{amount} MB" },
+    "units": {
+      "mb": "{amount} MB"
+    },
     "labels": {
       "color": "Krāsa",
       "labelName": "Atzīmes nosaukums",
@@ -384,8 +410,8 @@
       "deletingLabel": "Dzēš atzīmi...",
       "editLabel": "Rediģēt atzīmi",
       "savingLabel": "Saglabā atzīmi...",
-      "failedToSavingLabel": "Neizdevās saglabāt atzīmi",
-      "saveLabelSuccess": "Atzīme veiksmīgi saglabāta"
+      "saveLabelSuccess": "Atzīme veiksmīgi saglabāta",
+      "failedToSaveLabel": "Neizdevās saglabāt atzīmi"
     }
   },
   "navigation": {
@@ -415,7 +441,8 @@
       "categories": "Skati",
       "dangerZone": "Bīstamā zona",
       "deleteAccount": "Dzēst kontu",
-      "privacy": "Privātums"
+      "privacy": "Privātums",
+      "meetings": "Tikšanās"
     }
   },
   "pages": {
@@ -458,7 +485,7 @@
         "title": "E-pasta savienojumi",
         "description": "Savieno savus e-pasta kontus ar Todus.",
         "disconnectTitle": "Atvienot e-pasta kontu",
-        "disconnectDescription": "Vai tiešām vēlies atvienot šo e-pastu?",
+        "disconnectDescription": "Vai tiešām vēlaties atvienot šo e-pastu?",
         "cancel": "Atcelt",
         "remove": "Noņemt",
         "disconnectSuccess": "Konts veiksmīgi atvienots",
@@ -479,7 +506,25 @@
         "loginNotificationsDescription": "Saņemt paziņojumus par jauniem mēģinājumiem pierakstīties",
         "deleteAccount": "Dzēst kontu",
         "loadImagesDefault": "Ielādēt attēlus pēc noklusējuma",
-        "loadImagesDefaultDescription": "Drošības apsvērumu dēļ attēli netiek ielādēti pēc noklusējuma."
+        "loadImagesDefaultDescription": "Drošības apsvērumu dēļ attēli netiek ielādēti pēc noklusējuma.",
+        "sessions": {
+          "loadErrorTitle": "Couldn't load sessions",
+          "loadErrorFallback": "An unexpected error occurred.",
+          "tryAgain": "Try again",
+          "emptyTitle": "No active sessions",
+          "emptyDescription": "New sign-ins will appear here automatically.",
+          "currentDevice": "This device",
+          "lastActiveLabel": "Last active {value}",
+          "lastActiveUnknown": "Last active unknown",
+          "signOut": "Sign out",
+          "signOutCurrentSuccess": "Signed out of this session.",
+          "signOutDeviceSuccess": "Device signed out.",
+          "signOutDeviceError": "Failed to sign out device. Please try again.",
+          "signOutAllSuccess": "Signed out of all devices.",
+          "signOutAllError": "Failed to sign out all devices. Please try again.",
+          "signingOutAll": "Signing out…",
+          "signOutAllOtherDevices": "Sign out all other devices"
+        }
       },
       "appearance": {
         "title": "Izskats",
@@ -575,6 +620,7 @@
         "deleteAccount": "Dzēst kontu",
         "deleting": "Dzēš...",
         "deleted": "Konts veiksmīgi dzēsts",
+        "cancel": "Atcelt",
         "error": "Neizdevās dzēst kontu"
       },
       "privacy": {
@@ -630,8 +676,14 @@
           "label": "Zema",
           "description": "Mazākais faila izmērs, pamanāms kvalitātes zudums"
         },
-        "medium": { "label": "Vidēja", "description": "Līdzsvarots izmērs un kvalitāte" },
-        "original": { "label": "Oriģināls", "description": "Bez saspiešanas, oriģinālā kvalitāte" }
+        "medium": {
+          "label": "Vidēja",
+          "description": "Līdzsvarots izmērs un kvalitāte"
+        },
+        "original": {
+          "label": "Oriģināls",
+          "description": "Bez saspiešanas, oriģinālā kvalitāte"
+        }
       }
     }
   },

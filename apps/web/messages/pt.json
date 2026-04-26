@@ -59,7 +59,11 @@
       "confirmDeleteSpamDescription": "Tem certeza que deseja excluir todos os emails de spam? Esta ação não pode ser desfeita.",
       "confirmDelete": "Excluir"
     },
-    "themes": { "dark": "Escuro", "light": "Claro", "system": "Sistema" },
+    "themes": {
+      "dark": "Escuro",
+      "light": "Claro",
+      "system": "Sistema"
+    },
     "commandPalette": {
       "title": "Paleta de Comandos",
       "description": "Navegação rápida e ações para Todus",
@@ -161,8 +165,13 @@
       "attachments": "Anexos",
       "attachmentCount": [
         {
-          "declarations": ["input count", "local countPlural = count: plural"],
-          "selectors": ["countPlural"],
+          "declarations": [
+            "input count",
+            "local countPlural = count: plural"
+          ],
+          "selectors": [
+            "countPlural"
+          ],
           "match": {
             "countPlural=0": "anexos",
             "countPlural=one": "anexo",
@@ -172,8 +181,13 @@
       ],
       "fileCount": [
         {
-          "declarations": ["input count", "local countPlural = count: plural"],
-          "selectors": ["countPlural"],
+          "declarations": [
+            "input count",
+            "local countPlural = count: plural"
+          ],
+          "selectors": [
+            "countPlural"
+          ],
           "match": {
             "countPlural=0": "arquivos",
             "countPlural=one": "arquivo",
@@ -220,12 +234,12 @@
       "markAsRead": "Marcar como Lido",
       "addLabel": "Adicionar marcador",
       "muteThread": "Silenciar esta conversa",
-      "favourites": "Favoritos",
       "disableImages": "Ocultar Imagens",
       "enableImages": "Mostrar Imagens",
       "star": "Favoritar",
       "unstar": "Remover dos favoritos",
-      "printThread": "Imprimir conversa"
+      "printThread": "Imprimir conversa",
+      "favorites": "Favoritos"
     },
     "notes": {
       "title": "Notas",
@@ -245,8 +259,13 @@
       "search": "Pesquisar notas...",
       "noteCount": [
         {
-          "declarations": ["input count", "local countPlural = count: plural"],
-          "selectors": ["countPlural"],
+          "declarations": [
+            "input count",
+            "local countPlural = count: plural"
+          ],
+          "selectors": [
+            "countPlural"
+          ],
           "match": {
             "countPlural=0": "Adicione notas",
             "countPlural=one": "# nota",
@@ -308,8 +327,13 @@
     "mail": {
       "replies": [
         {
-          "declarations": ["input count", "local countPlural = count: plural"],
-          "selectors": ["countPlural"],
+          "declarations": [
+            "input count",
+            "local countPlural = count: plural"
+          ],
+          "selectors": [
+            "countPlural"
+          ],
           "match": {
             "countPlural=0": "nenhuma resposta",
             "countPlural=one": "# resposta",
@@ -369,7 +393,9 @@
       "failedToArchive": "Falha ao arquivar",
       "openInNewTab": "Abrir em nova aba"
     },
-    "units": { "mb": "{amount} MB" },
+    "units": {
+      "mb": "{amount} MB"
+    },
     "labels": {
       "color": "Cor",
       "labelName": "Nome da etiqueta",
@@ -384,8 +410,8 @@
       "deletingLabel": "Excluindo etiqueta...",
       "editLabel": "Editar etiqueta",
       "savingLabel": "Salvando etiqueta...",
-      "failedToSavingLabel": "Falha ao salvar etiqueta",
-      "saveLabelSuccess": "Etiqueta salva com sucesso"
+      "saveLabelSuccess": "Etiqueta salva com sucesso",
+      "failedToSaveLabel": "Falha ao salvar etiqueta"
     }
   },
   "navigation": {
@@ -415,7 +441,8 @@
       "categories": "Visualizações",
       "dangerZone": "Zona de perigo",
       "deleteAccount": "Excluir conta",
-      "privacy": "Privacidade"
+      "privacy": "Privacidade",
+      "meetings": "Reuniões"
     }
   },
   "pages": {
@@ -479,7 +506,25 @@
         "loginNotificationsDescription": "Seja notificado sobre novas tentativas de login",
         "deleteAccount": "Deletar conta",
         "loadImagesDefault": "Carregar imagens por padrão",
-        "loadImagesDefaultDescription": "As imagens não são carregadas por padrão por motivos de segurança."
+        "loadImagesDefaultDescription": "As imagens não são carregadas por padrão por motivos de segurança.",
+        "sessions": {
+          "loadErrorTitle": "Couldn't load sessions",
+          "loadErrorFallback": "An unexpected error occurred.",
+          "tryAgain": "Try again",
+          "emptyTitle": "No active sessions",
+          "emptyDescription": "New sign-ins will appear here automatically.",
+          "currentDevice": "This device",
+          "lastActiveLabel": "Last active {value}",
+          "lastActiveUnknown": "Last active unknown",
+          "signOut": "Sign out",
+          "signOutCurrentSuccess": "Signed out of this session.",
+          "signOutDeviceSuccess": "Device signed out.",
+          "signOutDeviceError": "Failed to sign out device. Please try again.",
+          "signOutAllSuccess": "Signed out of all devices.",
+          "signOutAllError": "Failed to sign out all devices. Please try again.",
+          "signingOutAll": "Signing out…",
+          "signOutAllOtherDevices": "Sign out all other devices"
+        }
       },
       "appearance": {
         "title": "Aparência",
@@ -575,6 +620,7 @@
         "deleteAccount": "Excluir conta",
         "deleting": "Excluindo...",
         "deleted": "Conta excluída com sucesso",
+        "cancel": "Cancelar",
         "error": "Falha ao excluir conta"
       },
       "privacy": {
@@ -630,8 +676,14 @@
           "label": "Baixa",
           "description": "Tamanho de arquivo menor, perda de qualidade perceptível"
         },
-        "medium": { "label": "Média", "description": "Equilíbrio entre tamanho e qualidade" },
-        "original": { "label": "Original", "description": "Sem compressão, qualidade original" }
+        "medium": {
+          "label": "Média",
+          "description": "Equilíbrio entre tamanho e qualidade"
+        },
+        "original": {
+          "label": "Original",
+          "description": "Sem compressão, qualidade original"
+        }
       }
     }
   },

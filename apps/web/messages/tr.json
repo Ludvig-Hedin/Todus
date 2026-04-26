@@ -59,7 +59,11 @@
       "confirmDeleteSpamDescription": "Tüm spam e-postaları silmek istediğinizden emin misiniz? Bu işlem geri alınamaz.",
       "confirmDelete": "Sil"
     },
-    "themes": { "dark": "Koyu", "light": "Açık", "system": "Sistem" },
+    "themes": {
+      "dark": "Koyu",
+      "light": "Açık",
+      "system": "Sistem"
+    },
     "commandPalette": {
       "title": "Komut Paleti",
       "description": "Todus için hızlı gezinme ve işlemler",
@@ -161,23 +165,33 @@
       "attachments": "Ekler",
       "attachmentCount": [
         {
-          "declarations": ["input count", "local countPlural = count: plural"],
-          "selectors": ["countPlural"],
+          "declarations": [
+            "input count",
+            "local countPlural = count: plural"
+          ],
+          "selectors": [
+            "countPlural"
+          ],
           "match": {
             "countPlural=0": "ekler",
             "countPlural=one": "ek",
-            "countPlural=other": "ekler"
+            "countPlural=other": "ek"
           }
         }
       ],
       "fileCount": [
         {
-          "declarations": ["input count", "local countPlural = count: plural"],
-          "selectors": ["countPlural"],
+          "declarations": [
+            "input count",
+            "local countPlural = count: plural"
+          ],
+          "selectors": [
+            "countPlural"
+          ],
           "match": {
             "countPlural=0": "dosyalar",
             "countPlural=one": "dosya",
-            "countPlural=other": "dosyalar"
+            "countPlural=other": "dosya"
           }
         }
       ],
@@ -220,12 +234,12 @@
       "markAsRead": "Okundu Olarak İşaretle",
       "addLabel": "Etiket ekle",
       "muteThread": "Konuyu sessize al",
-      "favourites": "Favoriler",
       "disableImages": "Görselleri Gizle",
       "enableImages": "Görselleri Göster",
       "star": "Yıldızla",
       "unstar": "Yıldızı kaldır",
-      "printThread": "Yazışmayı yazdır"
+      "printThread": "Yazışmayı yazdır",
+      "favorites": "Favoriler"
     },
     "notes": {
       "title": "Notlar",
@@ -245,8 +259,13 @@
       "search": "Notlarda ara...",
       "noteCount": [
         {
-          "declarations": ["input count", "local countPlural = count: plural"],
-          "selectors": ["countPlural"],
+          "declarations": [
+            "input count",
+            "local countPlural = count: plural"
+          ],
+          "selectors": [
+            "countPlural"
+          ],
           "match": {
             "countPlural=0": "Not ekle",
             "countPlural=one": "# not",
@@ -308,8 +327,13 @@
     "mail": {
       "replies": [
         {
-          "declarations": ["input count", "local countPlural = count: plural"],
-          "selectors": ["countPlural"],
+          "declarations": [
+            "input count",
+            "local countPlural = count: plural"
+          ],
+          "selectors": [
+            "countPlural"
+          ],
           "match": {
             "countPlural=0": "cevaplar",
             "countPlural=one": "# yanıt",
@@ -369,7 +393,9 @@
       "failedToArchive": "Arşivlenemedi",
       "openInNewTab": "Yeni sekmede aç"
     },
-    "units": { "mb": "{amount} MB" },
+    "units": {
+      "mb": "{amount} MB"
+    },
     "labels": {
       "color": "Renk",
       "labelName": "Etiket adı",
@@ -384,8 +410,8 @@
       "deletingLabel": "Etiket siliniyor...",
       "editLabel": "Etiketi düzenle",
       "savingLabel": "Etiket kaydediliyor...",
-      "failedToSavingLabel": "Etiket kaydedilemedi",
-      "saveLabelSuccess": "Etiket başarıyla kaydedildi"
+      "saveLabelSuccess": "Etiket başarıyla kaydedildi",
+      "failedToSaveLabel": "Etiket kaydedilemedi"
     }
   },
   "navigation": {
@@ -415,7 +441,8 @@
       "categories": "Görünümler",
       "dangerZone": "Tehlikeli Bölge",
       "deleteAccount": "Hesabı Sil",
-      "privacy": "Gizlilik"
+      "privacy": "Gizlilik",
+      "meetings": "Toplantılar"
     }
   },
   "pages": {
@@ -479,7 +506,25 @@
         "loginNotificationsDescription": "Yeni giriş denemeleri hakkında bildirim alın",
         "deleteAccount": "Hesabı Sil",
         "loadImagesDefault": "Varsayılan Olarak Görselleri Yükle",
-        "loadImagesDefaultDescription": "Güvenlik nedeniyle görseller varsayılan olarak yüklenmez."
+        "loadImagesDefaultDescription": "Güvenlik nedeniyle görseller varsayılan olarak yüklenmez.",
+        "sessions": {
+          "loadErrorTitle": "Couldn't load sessions",
+          "loadErrorFallback": "An unexpected error occurred.",
+          "tryAgain": "Try again",
+          "emptyTitle": "No active sessions",
+          "emptyDescription": "New sign-ins will appear here automatically.",
+          "currentDevice": "This device",
+          "lastActiveLabel": "Last active {value}",
+          "lastActiveUnknown": "Last active unknown",
+          "signOut": "Sign out",
+          "signOutCurrentSuccess": "Signed out of this session.",
+          "signOutDeviceSuccess": "Device signed out.",
+          "signOutDeviceError": "Failed to sign out device. Please try again.",
+          "signOutAllSuccess": "Signed out of all devices.",
+          "signOutAllError": "Failed to sign out all devices. Please try again.",
+          "signingOutAll": "Signing out…",
+          "signOutAllOtherDevices": "Sign out all other devices"
+        }
       },
       "appearance": {
         "title": "Görünüm",
@@ -575,6 +620,7 @@
         "deleteAccount": "Hesabı Sil",
         "deleting": "Siliniyor...",
         "deleted": "Hesap başarıyla silindi",
+        "cancel": "İptal",
         "error": "Hesap silinemedi"
       },
       "privacy": {
@@ -630,8 +676,14 @@
           "label": "Düşük",
           "description": "En küçük dosya boyutu, fark edilir kalite kaybı"
         },
-        "medium": { "label": "Orta", "description": "Dengeli boyut ve kalite" },
-        "original": { "label": "Orijinal", "description": "Sıkıştırma yok, orijinal kalite" }
+        "medium": {
+          "label": "Orta",
+          "description": "Dengeli boyut ve kalite"
+        },
+        "original": {
+          "label": "Orijinal",
+          "description": "Sıkıştırma yok, orijinal kalite"
+        }
       }
     }
   },

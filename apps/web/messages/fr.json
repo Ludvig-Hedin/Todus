@@ -19,11 +19,11 @@
       "moved": "Déplacé",
       "movedToInbox": "Déplacé vers la boîte de réception",
       "movingToInbox": "Déplacement vers la boîte de réception...",
-      "movedToSpam": "Déplacé vers les indésirables",
-      "movingToSpam": "Déplacement vers les indésirables...",
-      "deletingMail": "Suppression du mail...",
-      "failedToDeleteMail": "Échec de la suppression du mail",
-      "deletedMail": "Mail supprimé",
+      "movedToSpam": "Déplacé vers les pourriels",
+      "movingToSpam": "Déplacement vers les pourriels...",
+      "deletingMail": "Suppression du courriel...",
+      "failedToDeleteMail": "Échec de la suppression du courriel",
+      "deletedMail": "Courriel supprimé",
       "archiving": "Archivage...",
       "archived": "Archivé",
       "failedToMove": "Échec du déplacement du message",
@@ -51,15 +51,19 @@
       "remove": "Supprimer",
       "settings": "Paramètres",
       "exitSelectionModeEsc": "Cliquez ou appuyez sur ÉCHAP pour quitter le mode de sélection",
-      "deleteAllSpam": "Supprimer tous les spams",
-      "deletingAllSpam": "Suppression de tous les spams...",
-      "deletedAllSpam": "Suppression de {count} emails indésirables",
-      "errorDeletingSpam": "Échec de la suppression des emails indésirables",
-      "confirmDeleteSpam": "Supprimer tous les spams",
-      "confirmDeleteSpamDescription": "Êtes-vous sûr de vouloir supprimer tous les emails indésirables ? Cette action est irréversible.",
+      "deleteAllSpam": "Supprimer tous les pourriels",
+      "deletingAllSpam": "Suppression de tous les pourriels...",
+      "deletedAllSpam": "Suppression de {count} courriels pourriels",
+      "errorDeletingSpam": "Échec de la suppression des courriels pourriels",
+      "confirmDeleteSpam": "Supprimer tous les pourriels",
+      "confirmDeleteSpamDescription": "Êtes-vous sûr de vouloir supprimer tous les courriels pourriels ? Cette action est irréversible.",
       "confirmDelete": "Supprimer"
     },
-    "themes": { "dark": "Sombre", "light": "Clair", "system": "Système" },
+    "themes": {
+      "dark": "Sombre",
+      "light": "Clair",
+      "system": "Système"
+    },
     "commandPalette": {
       "title": "Palette de commandes",
       "description": "Navigation rapide et actions pour Todus",
@@ -161,8 +165,13 @@
       "attachments": "Pièces jointes",
       "attachmentCount": [
         {
-          "declarations": ["input count", "local countPlural = count: plural"],
-          "selectors": ["countPlural"],
+          "declarations": [
+            "input count",
+            "local countPlural = count: plural"
+          ],
+          "selectors": [
+            "countPlural"
+          ],
           "match": {
             "countPlural=0": "pièces jointes",
             "countPlural=one": "pièce jointe",
@@ -172,8 +181,13 @@
       ],
       "fileCount": [
         {
-          "declarations": ["input count", "local countPlural = count: plural"],
-          "selectors": ["countPlural"],
+          "declarations": [
+            "input count",
+            "local countPlural = count: plural"
+          ],
+          "selectors": [
+            "countPlural"
+          ],
           "match": {
             "countPlural=0": "fichiers",
             "countPlural=one": "fichier",
@@ -213,19 +227,20 @@
       "archive": "Archiver",
       "reply": "Répondre",
       "moreOptions": "Plus d'options",
-      "moveToSpam": "Déplacer dans les indésirables",
+      "moveToSpam": "Déplacer dans les pourriels",
       "replyAll": "Répondre à tous",
       "forward": "Transférer",
       "markAsUnread": "Marquer comme non lu",
       "markAsRead": "Marquer comme lu",
       "addLabel": "Ajouter une étiquette",
       "muteThread": "Mettre en sourdine",
-      "favourites": "Favoris",
       "disableImages": "Masquer les images",
       "enableImages": "Afficher les images",
       "star": "Marquer d'une étoile",
       "unstar": "Retirer l'étoile",
-      "printThread": "Imprimer la conversation"
+      "printThread": "Imprimer la conversation",
+      "favorites": "Favoris",
+      "markAsSpam": "Marquer comme pourriel"
     },
     "notes": {
       "title": "Notes",
@@ -245,8 +260,13 @@
       "search": "Rechercher des notes...",
       "noteCount": [
         {
-          "declarations": ["input count", "local countPlural = count: plural"],
-          "selectors": ["countPlural"],
+          "declarations": [
+            "input count",
+            "local countPlural = count: plural"
+          ],
+          "selectors": [
+            "countPlural"
+          ],
           "match": {
             "countPlural=0": "Ajoutez des notes",
             "countPlural=one": "# note",
@@ -302,14 +322,19 @@
       "saved": "Paramètres enregistrés",
       "failedToSave": "Échec de la sauvegarde des paramètres",
       "languageChanged": "Langue changée en {locale}",
-      "defaultEmailUpdated": "Adresse e-mail par défaut mise à jour dans Gmail",
-      "failedToUpdateGmailAlias": "Échec de la mise à jour de l'alias par défaut dans les paramètres Gmail"
+      "defaultEmailUpdated": "Adresse courriel par défaut mise à jour",
+      "failedToUpdateGmailAlias": "Échec de la mise à jour de l'alias par défaut dans les paramètres du fournisseur"
     },
     "mail": {
       "replies": [
         {
-          "declarations": ["input count", "local countPlural = count: plural"],
-          "selectors": ["countPlural"],
+          "declarations": [
+            "input count",
+            "local countPlural = count: plural"
+          ],
+          "selectors": [
+            "countPlural"
+          ],
           "match": {
             "countPlural=0": "réponses",
             "countPlural=one": "# réponse",
@@ -326,7 +351,7 @@
       "failedToMarkAsUnread": "Échec de marquer comme non lu",
       "selected": "{count} élément(s) sélectionné(s)",
       "clearSelection": "Effacer la sélection",
-      "moveToSpam": "Déplacer dans les indésirables",
+      "moveToSpam": "Déplacer dans les pourriels",
       "moveToInbox": "Déplacer dans boîte de réception",
       "deleteFromBin": "Supprimer définitivement",
       "unarchive": "Désarchiver",
@@ -350,7 +375,7 @@
       "loadMore": "Charger plus d'éléments",
       "imagesHidden": "Les images sont masquées pour des raisons de sécurité",
       "showImages": "Afficher les images",
-      "noEmails": "Aucun email disponible",
+      "noEmails": "Aucun courriel disponible",
       "noSearchResults": "Aucun résultat trouvé",
       "clearSearch": "Effacer la recherche",
       "markAsImportant": "Marquer comme important",
@@ -369,7 +394,9 @@
       "failedToArchive": "Échec de l'archivage",
       "openInNewTab": "Ouvrir dans un nouvel onglet"
     },
-    "units": { "mb": "{amount} Mo" },
+    "units": {
+      "mb": "{amount} Mo"
+    },
     "labels": {
       "color": "Couleur",
       "labelName": "Nom de l'étiquette",
@@ -384,8 +411,8 @@
       "deletingLabel": "Suppression de l'étiquette...",
       "editLabel": "Modifier l'étiquette",
       "savingLabel": "Enregistrement de l'étiquette...",
-      "failedToSavingLabel": "Échec de l'enregistrement de l'étiquette",
-      "saveLabelSuccess": "Étiquette enregistrée avec succès"
+      "saveLabelSuccess": "Étiquette enregistrée avec succès",
+      "failedToSaveLabel": "Échec de l'enregistrement de l'étiquette"
     }
   },
   "navigation": {
@@ -415,7 +442,8 @@
       "categories": "Vues",
       "dangerZone": "Zone dangereuse",
       "deleteAccount": "Supprimer le compte",
-      "privacy": "Confidentialité"
+      "privacy": "Confidentialité",
+      "meetings": "Réunions"
     }
   },
   "pages": {
@@ -445,14 +473,14 @@
         "zeroSignature": "Signature Todus",
         "zeroSignatureDescription": "Ajouter une signature Todus à vos courriels.",
         "undoSendEnabled": "Annuler l'envoi",
-        "undoSendEnabledDescription": "Permettre d'annuler les emails dans les 30 secondes suivant l'envoi.",
-        "defaultEmailAlias": "Alias e-mail par défaut",
-        "selectDefaultEmail": "Sélectionner l'e-mail par défaut",
-        "defaultEmailDescription": "Cette adresse e-mail sera utilisée comme adresse d'expédition par défaut lors de la rédaction de nouveaux e-mails",
+        "undoSendEnabledDescription": "Permettre d'annuler les courriels dans les 30 secondes suivant l'envoi.",
+        "defaultEmailAlias": "Alias courriel par défaut",
+        "selectDefaultEmail": "Sélectionner l'adresse courriel par défaut",
+        "defaultEmailDescription": "Cette adresse courriel sera utilisée comme adresse d'expédition par défaut lors de la rédaction de nouveaux courriels",
         "autoRead": "Lecture automatique",
-        "autoReadDescription": "Marquer automatiquement les emails comme lus lorsque vous cliquez dessus.",
+        "autoReadDescription": "Marquer automatiquement les courriels comme lus lorsque vous cliquez dessus.",
         "animations": "Animations",
-        "animationsDescription": "Activer les animations fluides lors du passage d'un e-mail à l'autre"
+        "animationsDescription": "Activer les animations fluides lors du passage d'un courriel à l'autre"
       },
       "connections": {
         "title": "Connexions de courriels",
@@ -479,7 +507,25 @@
         "loginNotificationsDescription": "Soyez notifié des nouvelles tentatives de connexion",
         "deleteAccount": "Supprimer le compte",
         "loadImagesDefault": "Charger les images par défaut",
-        "loadImagesDefaultDescription": "Les images ne sont pas chargées par défaut pour des raisons de sécurité."
+        "loadImagesDefaultDescription": "Les images ne sont pas chargées par défaut pour des raisons de sécurité.",
+        "sessions": {
+          "loadErrorTitle": "Couldn't load sessions",
+          "loadErrorFallback": "An unexpected error occurred.",
+          "tryAgain": "Try again",
+          "emptyTitle": "No active sessions",
+          "emptyDescription": "New sign-ins will appear here automatically.",
+          "currentDevice": "This device",
+          "lastActiveLabel": "Last active {value}",
+          "lastActiveUnknown": "Last active unknown",
+          "signOut": "Sign out",
+          "signOutCurrentSuccess": "Signed out of this session.",
+          "signOutDeviceSuccess": "Device signed out.",
+          "signOutDeviceError": "Failed to sign out device. Please try again.",
+          "signOutAllSuccess": "Signed out of all devices.",
+          "signOutAllError": "Failed to sign out all devices. Please try again.",
+          "signingOutAll": "Signing out…",
+          "signOutAllOtherDevices": "Sign out all other devices"
+        }
       },
       "appearance": {
         "title": "Apparence",
@@ -488,17 +534,17 @@
         "inboxType": "Type de boîte de réception"
       },
       "signatures": {
-        "title": "Signatures d'e-mail",
-        "description": "Créez et gérez votre signature d'e-mail qui apparaît au bas de vos messages.",
+        "title": "Signatures de courriel",
+        "description": "Créez et gérez votre signature de courriel qui apparaît au bas de vos messages.",
         "enableSignature": "Activer la signature",
         "enableSignatureDescription": "Ajoutez votre signature à la fin de tous les messages sortants.",
         "includeByDefault": "Inclure par défaut",
-        "includeByDefaultDescription": "Ajouter automatiquement votre signature lors de la rédaction de nouveaux e-mails.",
+        "includeByDefaultDescription": "Ajouter automatiquement votre signature lors de la rédaction de nouveaux courriels.",
         "signatureContent": "Contenu de la signature",
         "signatureContentPlaceholder": "Créez votre signature avec mise en forme, liens et images.",
         "signaturePreview": "Aperçu de la signature",
         "signatureSaved": "Signature enregistrée avec succès",
-        "signaturePreviewDescription": "Voici comment votre signature apparaîtra dans les e-mails.",
+        "signaturePreviewDescription": "Voici comment votre signature apparaîtra dans les courriels.",
         "editorType": "Type d'éditeur",
         "editorTypeDescription": "Choisissez entre texte brut/HTML ou un éditeur de texte enrichi pour votre signature.",
         "plainText": "Texte brut / HTML",
@@ -523,14 +569,14 @@
           "search": "Rechercher",
           "markAsUnread": "Marquer comme non lu",
           "muteThread": "Mettre en sourdine",
-          "printEmail": "Imprimer l'email",
+          "printEmail": "Imprimer le courriel",
           "archiveEmail": "Archiver la conversation",
-          "markAsSpam": "Marquer comme spam",
+          "markAsSpam": "Marquer comme pourriel",
           "moveToFolder": "Déplacer vers un dossier",
           "undoLastAction": "Annuler la dernière action",
-          "viewEmailDetails": "Voir les détails de l'email",
+          "viewEmailDetails": "Voir les détails du courriel",
           "goToDrafts": "Aller aux brouillons",
-          "expandEmailView": "Agrandir la vue de l'email",
+          "expandEmailView": "Agrandir la vue du courriel",
           "helpWithShortcuts": "Aide sur les raccourcis",
           "recordHotkey": "Enregistrer le raccourci",
           "pressKeys": "Appuyez sur les touches",
@@ -547,7 +593,7 @@
           "scrollUp": "Défiler vers le haut dans la liste des messages",
           "goToSettings": "Aller aux paramètres",
           "showImportant": "Afficher les importants",
-          "showAllMail": "Afficher tous les e-mails",
+          "showAllMail": "Afficher tous les courriels",
           "showPersonal": "Afficher les personnels",
           "showUpdates": "Afficher les mises à jour",
           "showPromotions": "Afficher les promotions",
@@ -565,7 +611,7 @@
       },
       "labels": {
         "title": "Étiquettes",
-        "description": "Gérez vos étiquettes pour mieux organiser vos emails."
+        "description": "Gérez vos étiquettes pour mieux organiser vos courriels."
       },
       "dangerZone": {
         "title": "Zone dangereuse",
@@ -575,11 +621,12 @@
         "deleteAccount": "Supprimer le compte",
         "deleting": "Suppression en cours...",
         "deleted": "Compte supprimé avec succès",
+        "cancel": "Annuler",
         "error": "Échec de la suppression du compte"
       },
       "privacy": {
         "title": "Confidentialité",
-        "description": "Gérez vos préférences de confidentialité et de sécurité pour le contenu des emails.",
+        "description": "Gérez vos préférences de confidentialité et de sécurité pour le contenu des courriels.",
         "externalImages": "Afficher les images externes",
         "externalImagesDescription": "Autoriser les courriels à afficher des images provenant de sources externes.",
         "trustedSenders": "Expéditeurs de confiance",
@@ -587,16 +634,16 @@
       }
     },
     "createEmail": {
-      "invalidEmail": "Adresse e-mail invalide",
+      "invalidEmail": "Adresse courriel invalide",
       "body": "Corps",
       "example": "zero@todus.app",
       "attachments": "Pièces jointes",
       "addMore": "Ajouter plus",
       "dropFilesToAttach": "Déposez des fichiers pour les joindre",
       "writeYourMessageHere": "Écrivez votre message ici...",
-      "emailSent": "Email envoyé",
-      "emailSentSuccessfully": "Email envoyé avec succès",
-      "failedToSendEmail": "Échec d'envoi de l'email. Veuillez réessayer.",
+      "emailSent": "Courriel envoyé",
+      "emailSentSuccessfully": "Courriel envoyé avec succès",
+      "failedToSendEmail": "Échec de l'envoi du courriel. Veuillez réessayer.",
       "signature": {
         "title": "Signature",
         "include": "Inclure la signature",
@@ -630,8 +677,14 @@
           "label": "Faible",
           "description": "Taille de fichier minimale, perte de qualité visible"
         },
-        "medium": { "label": "Moyenne", "description": "Équilibre entre taille et qualité" },
-        "original": { "label": "Originale", "description": "Aucune compression, qualité originale" }
+        "medium": {
+          "label": "Moyenne",
+          "description": "Équilibre entre taille et qualité"
+        },
+        "original": {
+          "label": "Originale",
+          "description": "Aucune compression, qualité originale"
+        }
       }
     }
   },

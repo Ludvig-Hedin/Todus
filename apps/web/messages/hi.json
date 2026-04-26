@@ -59,7 +59,11 @@
       "confirmDeleteSpamDescription": "क्या आप वाकई सभी स्पैम ईमेल डिलीट करना चाहते हैं? यह क्रिया वापस नहीं ली जा सकती।",
       "confirmDelete": "डिलीट करें"
     },
-    "themes": { "dark": "काला", "light": "सफ़ेद", "system": "सिस्टम" },
+    "themes": {
+      "dark": "काला",
+      "light": "सफ़ेद",
+      "system": "सिस्टम"
+    },
     "commandPalette": {
       "title": "कमांड पैलेट",
       "description": "मेल-0 के लिए क्विक नेविगेशन और एक्शन्स",
@@ -161,8 +165,13 @@
       "attachments": "अटैचमेंटस",
       "attachmentCount": [
         {
-          "declarations": ["input count", "local countPlural = count: plural"],
-          "selectors": ["countPlural"],
+          "declarations": [
+            "input count",
+            "local countPlural = count: plural"
+          ],
+          "selectors": [
+            "countPlural"
+          ],
           "match": {
             "countPlural=0": "अटैचमेंटस",
             "countPlural=one": "अटैचमेंट",
@@ -172,8 +181,13 @@
       ],
       "fileCount": [
         {
-          "declarations": ["input count", "local countPlural = count: plural"],
-          "selectors": ["countPlural"],
+          "declarations": [
+            "input count",
+            "local countPlural = count: plural"
+          ],
+          "selectors": [
+            "countPlural"
+          ],
           "match": {
             "countPlural=0": "फ़ाइलें",
             "countPlural=one": "फाइल्",
@@ -220,12 +234,12 @@
       "markAsRead": "पठित के रूप में चिह्नित करें",
       "addLabel": "लेबल जोड़ें",
       "muteThread": "थ्रेड म्यूट करें",
-      "favourites": "पसंदीदा",
       "disableImages": "छवियाँ छिपाएँ",
       "enableImages": "छवियाँ दिखाएँ",
       "star": "स्टार करें",
       "unstar": "स्टार हटाएं",
-      "printThread": "थ्रेड प्रिंट करें"
+      "printThread": "थ्रेड प्रिंट करें",
+      "favorites": "पसंदीदा"
     },
     "notes": {
       "title": "नोट्स",
@@ -237,7 +251,7 @@
       "deleteNote": "नोट डिलीट करें",
       "deleteConfirm": "क्या आप वाकई इस नोट को डिलीट करना चाहते हैं?",
       "deleteConfirmDescription": "यह क्रिया वापस नहीं ली जा सकती।",
-      "cancel": "कैंसल करें",
+      "cancel": "रद्द करें",
       "delete": "डिलीट करें",
       "save": "नोट सेव करें",
       "toSave": "सेव करने के लिए",
@@ -245,8 +259,13 @@
       "search": "नोट्स खोजें...",
       "noteCount": [
         {
-          "declarations": ["input count", "local countPlural = count: plural"],
-          "selectors": ["countPlural"],
+          "declarations": [
+            "input count",
+            "local countPlural = count: plural"
+          ],
+          "selectors": [
+            "countPlural"
+          ],
           "match": {
             "countPlural=0": "नोट्स जोड़ें",
             "countPlural=one": "# नोट",
@@ -308,8 +327,13 @@
     "mail": {
       "replies": [
         {
-          "declarations": ["input count", "local countPlural = count: plural"],
-          "selectors": ["countPlural"],
+          "declarations": [
+            "input count",
+            "local countPlural = count: plural"
+          ],
+          "selectors": [
+            "countPlural"
+          ],
           "match": {
             "countPlural=0": "जवाब",
             "countPlural=one": "# जवाब",
@@ -369,7 +393,9 @@
       "failedToArchive": "आर्काइव करने में विफल",
       "openInNewTab": "नए टैब में खोलें"
     },
-    "units": { "mb": "{amount} MB" },
+    "units": {
+      "mb": "{amount} MB"
+    },
     "labels": {
       "color": "रंग",
       "labelName": "लेबल का नाम",
@@ -384,8 +410,8 @@
       "deletingLabel": "लेबल हटा रहे हैं...",
       "editLabel": "लेबल संपादित करें",
       "savingLabel": "लेबल सहेज रहे हैं...",
-      "failedToSavingLabel": "लेबल सहेजने में विफल",
-      "saveLabelSuccess": "लेबल सफलतापूर्वक सहेजा गया"
+      "saveLabelSuccess": "लेबल सफलतापूर्वक सहेजा गया",
+      "failedToSaveLabel": "लेबल सहेजने में विफल"
     }
   },
   "navigation": {
@@ -415,7 +441,8 @@
       "categories": "दृश्य",
       "dangerZone": "खतरे का क्षेत्र",
       "deleteAccount": "अकाउंट डिलीट करें",
-      "privacy": "गोपनीयता"
+      "privacy": "गोपनीयता",
+      "meetings": "बैठकें"
     }
   },
   "pages": {
@@ -459,7 +486,7 @@
         "description": "अपने ईमेल अकाउंट्स को ज़ीरो से कनेक्ट करें।",
         "disconnectTitle": "ईमेल खाता डिस्कनेक्ट करें",
         "disconnectDescription": "क्या आप वाकई इस ईमेल को डिस्कनेक्ट करना चाहते हैं?",
-        "cancel": "कैन्सल करें",
+        "cancel": "रद्द करें",
         "remove": "हटाएँ",
         "disconnectSuccess": "खाता सफलतापूर्वक डिस्कनेक्ट हो गया",
         "disconnectError": "खाता डिस्कनेक्ट करने में विफल",
@@ -479,7 +506,25 @@
         "loginNotificationsDescription": "नए लॉगिन प्रयासों के बारे में सूचित करें",
         "deleteAccount": "अकाउंट डिलीट करें",
         "loadImagesDefault": "डिफ़ॉल्ट रूप से चित्र लोड करें",
-        "loadImagesDefaultDescription": "सुरक्षा कारणों से चित्र डिफ़ॉल्ट रूप से लोड नहीं किए जाते हैं।"
+        "loadImagesDefaultDescription": "सुरक्षा कारणों से चित्र डिफ़ॉल्ट रूप से लोड नहीं किए जाते हैं।",
+        "sessions": {
+          "loadErrorTitle": "Couldn't load sessions",
+          "loadErrorFallback": "An unexpected error occurred.",
+          "tryAgain": "Try again",
+          "emptyTitle": "No active sessions",
+          "emptyDescription": "New sign-ins will appear here automatically.",
+          "currentDevice": "This device",
+          "lastActiveLabel": "Last active {value}",
+          "lastActiveUnknown": "Last active unknown",
+          "signOut": "Sign out",
+          "signOutCurrentSuccess": "Signed out of this session.",
+          "signOutDeviceSuccess": "Device signed out.",
+          "signOutDeviceError": "Failed to sign out device. Please try again.",
+          "signOutAllSuccess": "Signed out of all devices.",
+          "signOutAllError": "Failed to sign out all devices. Please try again.",
+          "signingOutAll": "Signing out…",
+          "signOutAllOtherDevices": "Sign out all other devices"
+        }
       },
       "appearance": {
         "title": "अपियरेंस",
@@ -575,6 +620,7 @@
         "deleteAccount": "अकाउंट डिलीट करें",
         "deleting": "डिलीट हो रहा है...",
         "deleted": "अकाउंट सफलतापूर्वक डिलीट किया गया",
+        "cancel": "रद्द करें",
         "error": "अकाउंट डिलीट करने में विफल"
       },
       "privacy": {
@@ -626,9 +672,18 @@
       "imageCompression": {
         "title": "छवि संपीड़न",
         "description": "अटैचमेंट के लिए छवि गुणवत्ता चुनें",
-        "low": { "label": "निम्न", "description": "सबसे छोटा फ़ाइल आकार, स्पष्ट गुणवत्ता हानि" },
-        "medium": { "label": "मध्यम", "description": "आकार और गुणवत्ता का संतुलन" },
-        "original": { "label": "मूल", "description": "कोई संपीड़न नहीं, मूल गुणवत्ता" }
+        "low": {
+          "label": "निम्न",
+          "description": "सबसे छोटा फ़ाइल आकार, स्पष्ट गुणवत्ता हानि"
+        },
+        "medium": {
+          "label": "मध्यम",
+          "description": "आकार और गुणवत्ता का संतुलन"
+        },
+        "original": {
+          "label": "मूल",
+          "description": "कोई संपीड़न नहीं, मूल गुणवत्ता"
+        }
       }
     }
   },
