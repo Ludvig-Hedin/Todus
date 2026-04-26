@@ -49,6 +49,8 @@ final class MacAppServices {
     let localModelStateStore: LocalModelStateStore
     /// Queues task mutations and flushes them via tRPC `tasks.sync`.
     let taskSyncService: TaskSyncService
+    /// Queues folder create/update/delete mutations and flushes them via tRPC `folders.sync`.
+    let folderSyncService: FolderSyncService
     /// Retained here so `setupNetworkSync()` can reach `mainContext` on reconnect.
     var modelContainer: ModelContainer?
     private let defaults = UserDefaults.standard
@@ -229,6 +231,7 @@ final class MacAppServices {
         self.draftService = MacDraftService(api: api)
         self.localModelStateStore = LocalModelStateStore()
         self.taskSyncService = TaskSyncService(apiClient: api)
+        self.folderSyncService = FolderSyncService(apiClient: api)
         self.aiChatService.contextAboutYou = contextAboutYou
         self.aiChatService.customInstructions = customInstructions
         self.remindersSyncState.isEnabled = self.remindersSyncEnabled
@@ -539,14 +542,17 @@ final class MacAppServices {
         await remindersSyncService.importFromReminders(in: context)
     }
 
-    /// Wires the network reconnect callback to flush any pending/failed task mutations.
-    /// Call this once after both `MacAppServices` and the `ModelContainer` are ready.
+    /// Wires the network reconnect callback to flush any pending/failed task, folder, and
+    /// draft mutations. Call this once after both `MacAppServices` and the `ModelContainer`
+    /// are ready.
     func setupNetworkSync() {
         networkMonitor.onReconnect = { [weak self] in
             guard let self, let context = self.modelContainer?.mainContext else { return }
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 await self.taskSyncService.retryUnsyncedTasks(in: context)
+                await self.folderSyncService.retryPending()
+                await self.draftService.flushPending(in: context)
             }
         }
     }

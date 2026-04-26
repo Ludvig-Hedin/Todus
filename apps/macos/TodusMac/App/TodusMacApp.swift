@@ -171,7 +171,7 @@ struct TodusMacApp: App {
     /// while this runs, eliminating the multi-second blank-window stall on cold launch.
     @MainActor
     private func initializeApp() async {
-        let schema = Schema([TaskRecord.self, FolderRecord.self, FolderItemRecord.self])
+        let schema = Schema([TaskRecord.self, FolderRecord.self, FolderItemRecord.self, DraftRecord.self])
 
         let result: ContainerInitResult = await Task.detached(priority: .userInitiated) {
             do {
