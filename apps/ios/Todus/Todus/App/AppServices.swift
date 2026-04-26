@@ -106,6 +106,10 @@ final class AppServices {
     let networkMonitor: NetworkMonitor
     let notificationService: NotificationService
 
+    /// Set by the app entry point after SwiftData container initialisation.
+    /// Used by reconnect handlers that need a ModelContext without a SwiftUI environment.
+    var modelContainer: ModelContainer?
+
     // Legacy services — kept during migration, will be removed once task sync is fully on new backend
     let authStore: AuthSessionStore
     let syncService: SupabaseSyncService
@@ -126,6 +130,9 @@ final class AppServices {
     let subscriptionService: SubscriptionService
     /// Wraps drafts.update + mail.send for the AI chat's InlineComposeCard.
     let draftService: DraftService
+    /// Tracks per-model install state for the Local Models settings screen and
+    /// the chat composer's local-runtime routing. Disk scan runs on init.
+    let localModelStateStore: LocalModelStateStore
     private let defaults: UserDefaults
     private var isLoadingSharedProfile = false
     private var lastSharedProfileLoadAt: Date?
@@ -155,11 +162,29 @@ final class AppServices {
     var composeEmailSeedBody: String? = nil
     var composeEmailSeedTo: String? = nil
     var composeEmailSeedSubject: String? = nil
+    /// Filenames (already saved by AttachmentService) carried into a fresh
+    /// EmailComposeView. Surfaced as chips so the user keeps a record even
+    /// though the send pipeline does not yet upload binary attachments.
+    var composeEmailSeedAttachments: [String] = []
     var showsAIChat = false
 
     /// Set by detail views (e.g. EmailThreadView) to hide the custom floating tab bar
     /// so their own bottom bar is visible. Reset to false on dismiss.
     var hideTabBar = false
+
+    // MARK: - Header Menu Signals
+    // Tick counters incremented by the AppTopHeader ellipsis menu so each tab's view
+    // can react to a contextual action (refresh, sync, etc.) it owns local state for.
+    var homeRefreshTick: Int = 0
+    var tasksSyncRemindersTick: Int = 0
+    var tasksClearCompletedTick: Int = 0
+    var emailRefreshTick: Int = 0
+    var emailMarkAllReadTick: Int = 0
+    var calendarRefreshTick: Int = 0
+    var calendarGoToTodayTick: Int = 0
+    /// Set by the header to request a calendar view-mode switch from outside CalendarTabView.
+    /// CalendarTabView observes and resets to nil after applying.
+    var calendarRequestedViewMode: CalendarViewMode? = nil
 
     // MARK: - Deep Navigation (from AI chat cards → specific items)
     /// Set by AI chat card taps to navigate to a specific email thread after dismissing the sheet.
@@ -387,6 +412,7 @@ final class AppServices {
         self.meetingsService = MeetingsService(apiClient: apiClient)
         self.subscriptionService = SubscriptionService(apiClient: apiClient)
         self.draftService = DraftService(api: apiClient)
+        self.localModelStateStore = LocalModelStateStore()
 
         let storedAppearance = defaults.string(forKey: Keys.appearancePreference)
             .flatMap(AppAppearancePreference.init(rawValue:))
@@ -505,6 +531,16 @@ final class AppServices {
         emailService.resetForSignOut()
         authService.signOut()
         authStore.signOutToGuest()
+    }
+
+    func setupNetworkSync() {
+        networkMonitor.onReconnect = { [weak self] in
+            guard let self, let context = self.modelContainer?.mainContext else { return }
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                await self.syncService.retryUnsyncedTasks(in: context)
+            }
+        }
     }
 
     func loadSharedAIProfile() async {
