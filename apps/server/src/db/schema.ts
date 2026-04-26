@@ -733,9 +733,38 @@ export const taskFolder = createTable(
       .notNull()
       .references(() => user.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
+    color: text('color'),
+    icon: text('icon'),
+    position: integer('position').notNull().default(0),
     createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
   (t) => [index('task_folder_user_id_idx').on(t.userId)],
+);
+
+// Polymorphic membership: lets folders contain emails, chats, events, and (future) docs.
+// Tasks and AI conversations keep their existing folderId column; this table is additive.
+export const folderItem = createTable(
+  'folder_item',
+  {
+    id: text('id').primaryKey(),
+    folderId: text('folder_id')
+      .notNull()
+      .references(() => taskFolder.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    itemType: text('item_type').$type<'email' | 'event' | 'doc'>().notNull(),
+    itemId: text('item_id').notNull(),
+    metadata: jsonb('metadata'),
+    position: integer('position').notNull().default(0),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    unique('folder_item_unique').on(t.folderId, t.itemType, t.itemId),
+    index('folder_item_user_id_idx').on(t.userId),
+    index('folder_item_lookup_idx').on(t.itemType, t.itemId),
+  ],
 );
 
 export const task = createTable(

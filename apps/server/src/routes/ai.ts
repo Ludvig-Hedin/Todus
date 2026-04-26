@@ -1,6 +1,12 @@
 import { hasAiCredits, trackAiUsage } from '../lib/billing';
 import { getCachedMemories, formatMemoriesForPrompt, addMemories, invalidateMemoryCache, preloadMemories } from '../lib/mem0';
 import { injectMentionContextIntoMessages, mentionRefSchema } from '../lib/mentions';
+import {
+  type AISource,
+  webSourceToAISource,
+  mentionToAISource,
+  memoriesToAISource,
+} from '../lib/ai-sources';
 import { systemPrompt } from '../services/call-service/system-prompt';
 import { getSharedAIProfilePromptForUser } from '../lib/ai-profile';
 import { perplexity } from '@ai-sdk/perplexity';
@@ -403,12 +409,14 @@ aiRouter.post('/chat', async (c) => {
   // full cache miss — preload should have warmed the cache on prior requests.
   const mem0Key = env.MEM0_API_KEY;
   let enrichedMessages = parsed.data.messages;
+  let injectedMemories: string[] = [];
 
   if (mem0Key && user.id) {
     try {
       const memories = await getCachedMemories(user.id, env.prompts_storage, mem0Key);
       const memoryBlock = formatMemoriesForPrompt(memories);
       if (memoryBlock) {
+        injectedMemories = memories;
         // Find the existing system message and append memory, or prepend a new one
         const systemIdx = enrichedMessages.findIndex((m) => m.role === 'system');
         if (systemIdx >= 0) {
@@ -463,6 +471,22 @@ aiRouter.post('/chat', async (c) => {
       // Web search failure must never block the AI flow — proceed without sources
       console.warn('[WebSearch] Perplexity search failed:', error);
     }
+  }
+
+  // ── Context sources: union of every piece of context this turn used ──────
+  // Surfaced to the client via the `context_sources` SSE event so the UI can
+  // render a unified Sources affordance. Tool-call sources are appended
+  // client-side after each tool runs.
+  const contextSources: AISource[] = [];
+  if (!isFollowUpStep && parsed.data.mentions?.length) {
+    for (const m of parsed.data.mentions) {
+      contextSources.push(mentionToAISource(m));
+    }
+  }
+  const memorySource = memoriesToAISource(injectedMemories);
+  if (memorySource) contextSources.push(memorySource);
+  for (const s of searchSources) {
+    contextSources.push(webSourceToAISource(s));
   }
 
   try {
@@ -689,6 +713,7 @@ aiRouter.post('/chat', async (c) => {
     return c.json({
       ...responseData,
       searchSources,
+      contextSources,
     });
   }
 
@@ -710,6 +735,15 @@ aiRouter.post('/chat', async (c) => {
         } else if (needsSearch && searchQuery) {
           controller.enqueue(
             encoder.encode(`data: ${JSON.stringify({ type: 'search_status', status: 'idle', queries: [searchQuery] })}\n\n`),
+          );
+        }
+
+        // Unified context sources (web + mentions + memories). Web sources
+        // are duplicated here on purpose — clients dedupe by `id` and use
+        // the legacy `sources` event only for `[n]` citation numbering.
+        if (contextSources.length > 0) {
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify({ type: 'context_sources', sources: contextSources })}\n\n`),
           );
         }
 
@@ -839,11 +873,15 @@ aiRouter.get('/voice-ping', async (c) => {
   if (!apiKey) return c.json({ ok: false, error: 'GOOGLE_GENERATIVE_AI_API_KEY not set' }, 503);
 
   // Use https:// — Cloudflare Workers outbound WebSocket requires https/http scheme.
+  // Pass the API key via the x-goog-api-key header instead of a query string so it does
+  // not end up in proxy/access logs or echoed back inside upstream error bodies.
   const geminiUrl =
-    `https://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${apiKey}`;
+    'https://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
 
   try {
-    const resp = await fetch(geminiUrl, { headers: { Upgrade: 'websocket' } });
+    const resp = await fetch(geminiUrl, {
+      headers: { Upgrade: 'websocket', 'x-goog-api-key': apiKey },
+    });
     if (resp.webSocket) {
       resp.webSocket.accept();
       resp.webSocket.close(1000, 'ping');
@@ -860,21 +898,128 @@ aiRouter.get('/voice-ping', async (c) => {
 });
 
 aiRouter.get('/voice-ws', async (c) => {
-  const user = c.var.sessionUser;
-  if (!user) return c.json({ error: 'Unauthorized' }, 401);
-
+  // Validate the upgrade header BEFORE creating a WebSocket pair — if the client didn't ask
+  // for a WebSocket, returning 101 with a webSocket would be malformed.
   const upgradeHeader = c.req.header('Upgrade');
   if (!upgradeHeader || upgradeHeader.toLowerCase() !== 'websocket') {
     return c.text('Expected WebSocket upgrade', 426);
   }
 
-  const apiKey = env.GOOGLE_GENERATIVE_AI_API_KEY;
-  if (!apiKey) return c.json({ error: 'Voice not configured' }, 503);
-
-  // Create WebSocket pair: clientWs returns to the iOS app, serverWs stays here
+  // Create the WebSocket pair up-front so all subsequent failure modes (auth, missing key,
+  // credits, Gemini rejecting upstream) can surface to the client as a real WS close
+  // with a descriptive reason. Returning a non-101 HTTP response here makes URLSession
+  // bubble up an opaque -1011 "bad server response" with zero context.
   const pair = new WebSocketPair();
   const [clientWs, serverWs] = Object.values(pair);
   serverWs.accept();
+
+  const wsResponse = new Response(null, {
+    status: 101,
+    webSocket: clientWs,
+  } as ResponseInit & { webSocket: WebSocket });
+
+  // Helper: surface an error to the client over the WS, then close. The client parses
+  // the JSON message in its receive loop and shows a real reason. close() reasons are
+  // capped at 123 bytes by the WS spec.
+  const fail = (closeCode: number, errorTag: string, message: string) => {
+    try {
+      serverWs.send(JSON.stringify({ error: errorTag, message }));
+    } catch {
+      /* client may already have given up */
+    }
+    try {
+      serverWs.close(closeCode, message.slice(0, 120));
+    } catch {
+      /* already closed */
+    }
+    return wsResponse;
+  };
+
+  const user = c.var.sessionUser;
+  if (!user) {
+    return fail(4401, 'unauthenticated', 'Sign in to use voice chat.');
+  }
+
+  const apiKey = env.GOOGLE_GENERATIVE_AI_API_KEY;
+  if (!apiKey) {
+    console.error('[voice-ws] GOOGLE_GENERATIVE_AI_API_KEY is not set on this environment');
+    return fail(
+      4503,
+      'voice_not_configured',
+      'Voice chat is not configured on the server (missing API key).',
+    );
+  }
+
+  // Pre-flight: block voice if user is out of AI credits. Same pattern as text chat.
+  try {
+    const allowed = await hasAiCredits(user.id);
+    if (!allowed) {
+      return fail(
+        4402,
+        'ai_credits_exhausted',
+        'Out of AI credits. Upgrade or wait for the next reset.',
+      );
+    }
+  } catch (error) {
+    console.error('[voice-ws] hasAiCredits check failed (allowing through)', error);
+  }
+
+  // Voice billing: meter only after the user actually sends billable input
+  // (audio/text/media), not from raw socket open time.
+  let sessionStartedAt: number | null = null;
+  let voiceTrackingDone = false;
+  const maybeMarkVoiceSessionStarted = (rawData: string | ArrayBuffer) => {
+    if (sessionStartedAt !== null) return;
+
+    let text: string | null = null;
+    if (typeof rawData === 'string') {
+      text = rawData;
+    } else if (rawData instanceof ArrayBuffer) {
+      text = new TextDecoder().decode(rawData);
+    }
+    if (!text) return;
+
+    try {
+      const parsed = JSON.parse(text) as Record<string, any>;
+      const hasRealtimeAudio =
+        typeof parsed?.realtimeInput?.audio?.data === 'string' &&
+        parsed.realtimeInput.audio.data.length > 0;
+      const hasRealtimeMedia =
+        typeof parsed?.realtimeInput?.media?.data === 'string' &&
+        parsed.realtimeInput.media.data.length > 0;
+      const hasClientText = Array.isArray(parsed?.clientContent?.turns)
+        && parsed.clientContent.turns.some((turn: any) =>
+          Array.isArray(turn?.parts)
+          && turn.parts.some(
+            (part: any) => typeof part?.text === 'string' && part.text.trim().length > 0,
+          ),
+        );
+
+      if (hasRealtimeAudio || hasRealtimeMedia || hasClientText) {
+        sessionStartedAt = Date.now();
+      }
+    } catch {
+      // Ignore non-JSON / partial frames — they are not billable activity markers.
+    }
+  };
+  const trackVoiceUsage = () => {
+    if (voiceTrackingDone) return;
+    voiceTrackingDone = true;
+    if (sessionStartedAt === null) return;
+    const durationMs = Date.now() - sessionStartedAt;
+    if (durationMs < 1000) return; // ignore <1s noise (handshake failures, etc.)
+    c.executionCtx?.waitUntil?.(
+      import('../lib/billing')
+        .then(({ voiceSessionCostCredits, trackCreditsUsed }) => {
+          const credits = voiceSessionCostCredits(durationMs);
+          if (credits <= 0) return;
+          return trackCreditsUsed({ userId: user.id, credits });
+        })
+        .catch((error) => {
+          console.error('[voice-ws] voice billing import/trackCreditsUsed failed', error);
+        }),
+    );
+  };
 
   // Buffer any client messages that arrive while the upstream Gemini connection is
   // being established. Without this, messages sent between serverWs.accept() and
@@ -884,6 +1029,7 @@ aiRouter.get('/voice-ws', async (c) => {
   let upstreamRef: WebSocket | null = null;
 
   serverWs.addEventListener('message', (event) => {
+    maybeMarkVoiceSessionStarted(event.data);
     if (upstreamReady && upstreamRef) {
       try { upstreamRef.send(event.data); } catch { /* upstream already closed */ }
     } else {
@@ -894,72 +1040,92 @@ aiRouter.get('/voice-ws', async (c) => {
 
   // Connect to Gemini Live with the server-side API key (never exposed to clients).
   // Use https:// scheme — Cloudflare Workers outbound WebSocket requires https/http.
+  // Send the API key via the x-goog-api-key header (not a query string) so it never
+  // ends up in CDN/proxy access logs nor in upstream error bodies that get echoed back.
   const geminiUrl =
-    `https://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${apiKey}`;
+    'https://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
 
-  try {
-    const upstreamResp = await fetch(geminiUrl, {
-      headers: { Upgrade: 'websocket' },
-    });
-    const upstream = upstreamResp.webSocket;
-    if (!upstream) {
-      const body = await upstreamResp.text().catch(() => '');
-      console.error('[voice-ws] Gemini rejected WS upgrade', {
-        status: upstreamResp.status,
-        body,
-        userId: user.id,
+  // CRITICAL: do NOT await the upstream fetch before returning the 101 response.
+  // Cloudflare returns this Response to the client to complete the HTTP→WebSocket
+  // upgrade — if we hold it back while waiting on Gemini, the client sits on a
+  // hanging HTTP request and SwiftUI shows a forever-spinner. Instead we return
+  // the 101 immediately, do the upstream connect in the background, and (a)
+  // forward responses once it's ready or (b) fail() the client WS with a real
+  // close reason if it never establishes.
+  const wireUpUpstream = async () => {
+    try {
+      const upstreamResp = await fetch(geminiUrl, {
+        headers: { Upgrade: 'websocket', 'x-goog-api-key': apiKey },
       });
-      serverWs.close(1011, `Gemini error ${upstreamResp.status}`);
-      return new Response(`Voice service error: Gemini returned ${upstreamResp.status} — ${body}`, { status: 502 });
+      const upstream = upstreamResp.webSocket;
+      if (!upstream) {
+        const body = await upstreamResp.text().catch(() => '');
+        console.error('[voice-ws] Gemini rejected WS upgrade', {
+          status: upstreamResp.status,
+          body,
+          userId: user.id,
+        });
+        // Don't echo the upstream body to the client over the WS — Google's error
+        // bodies have historically included echoed request fragments and internal
+        // request IDs. Client gets a generic message; full detail stays in server logs.
+        fail(
+          4502,
+          'voice_upstream_failed',
+          `Voice provider rejected the connection (${upstreamResp.status}).`,
+        );
+        return;
+      }
+      upstream.accept();
+      upstreamRef = upstream;
+
+      // Forward Gemini → client BEFORE flushing buffered client messages so we
+      // don't miss the immediate setupComplete (or an error on bad setup).
+      upstream.addEventListener('message', (event) => {
+        try { serverWs.send(event.data); } catch { /* client already closed */ }
+      });
+
+      // Replay anything the client sent while we were connecting.
+      for (const msg of earlyMessages) {
+        try { upstream.send(msg); } catch { break; }
+      }
+      earlyMessages.length = 0;
+      upstreamReady = true;
+
+      // Propagate close events in both directions. Empty catches are intentional:
+      // close() throws if the other side is already closed.
+      serverWs.addEventListener('close', (event) => {
+        try { upstream.close(event.code, event.reason || ''); } catch { /* already closed */ }
+        trackVoiceUsage();
+      });
+      upstream.addEventListener('close', (event) => {
+        try { serverWs.close(event.code, event.reason || ''); } catch { /* already closed */ }
+        trackVoiceUsage();
+      });
+
+      serverWs.addEventListener('error', (event) => {
+        console.error('[voice-ws] client error', { userId: user.id, event: String((event as ErrorEvent).message ?? '') });
+        try { upstream.close(1011, 'Client error'); } catch { /* already closed */ }
+      });
+      upstream.addEventListener('error', (event) => {
+        console.error('[voice-ws] upstream error', { userId: user.id, event: String((event as ErrorEvent).message ?? '') });
+        try { serverWs.close(1011, 'Upstream error'); } catch { /* already closed */ }
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('[voice-ws] Failed to connect to Gemini', { error: msg, userId: user.id });
+      fail(4502, 'voice_upstream_unreachable', `Failed to reach voice provider: ${msg}`);
     }
-    upstream.accept();
-    upstreamRef = upstream;
+  };
 
-    // Set up Gemini→client forwarding BEFORE flushing early messages so we
-    // don't miss any immediate responses (e.g. error on bad model in setup).
-    upstream.addEventListener('message', (event) => {
-      try { serverWs.send(event.data); } catch { /* client already closed */ }
-    });
+  // Keep the worker alive until the upstream pipeline is wired up; return 101 NOW.
+  // Always start the promise — waitUntil is best-effort, and even if the runtime
+  // doesn't extend the worker lifetime, the WebSocketPair itself keeps it alive
+  // while the client side stays open. Errors inside wireUpUpstream are surfaced
+  // to the client via fail() so they cannot escape unhandled.
+  const upstreamPromise = wireUpUpstream();
+  c.executionCtx?.waitUntil?.(upstreamPromise);
 
-    // Flush any messages that arrived while we were connecting to Gemini
-    for (const msg of earlyMessages) {
-      try { upstream.send(msg); } catch { break; }
-    }
-    earlyMessages.length = 0;
-    upstreamReady = true;
-
-    // Propagate close events in both directions. Empty catches are intentional:
-    // close() throws if the other side is already closed, which is the common
-    // race during teardown — nothing to do but proceed.
-    serverWs.addEventListener('close', (event) => {
-      try { upstream.close(event.code, event.reason || ''); } catch { /* already closed */ }
-    });
-    upstream.addEventListener('close', (event) => {
-      try { serverWs.close(event.code, event.reason || ''); } catch { /* already closed */ }
-    });
-
-    // Handle errors by tearing down the other side. Log so we can diagnose;
-    // the close() catch stays empty because by this point teardown is best-effort.
-    serverWs.addEventListener('error', (event) => {
-      console.error('[voice-ws] client error', { userId: user.id, event: String((event as ErrorEvent).message ?? '') });
-      try { upstream.close(1011, 'Client error'); } catch { /* already closed */ }
-    });
-    upstream.addEventListener('error', (event) => {
-      console.error('[voice-ws] upstream error', { userId: user.id, event: String((event as ErrorEvent).message ?? '') });
-      try { serverWs.close(1011, 'Upstream error'); } catch { /* already closed */ }
-    });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error('[voice-ws] Failed to connect to Gemini', { error: msg, userId: user.id });
-    serverWs.close(1011, 'Failed to connect to voice service');
-    return new Response(`Voice service error: ${msg}`, { status: 502 });
-  }
-
-  // Return the 101 Switching Protocols response with the client-side WebSocket
-  return new Response(null, {
-    status: 101,
-    webSocket: clientWs,
-  } as ResponseInit & { webSocket: WebSocket });
+  return wsResponse;
 });
 
 // Add CORS headers for /do/* routes

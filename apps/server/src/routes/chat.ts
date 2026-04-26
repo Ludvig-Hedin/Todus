@@ -8,32 +8,38 @@ import {
   appendResponseMessages,
 } from 'ai';
 import {
+  connectionToDriver,
+  findLegacyConnectionById,
+  isMissingConnectionColorError,
+} from '../lib/server-utils';
+import {
   getCurrentDateContext,
   GmailSearchAssistantSystemPrompt,
   AiChatPrompt,
 } from '../lib/prompts';
-import { buildAIProfilePrompt } from '../lib/ai-profile';
 import { type Connection, type ConnectionContext, type WSMessage } from 'agents';
 import { EPrompts, type IOutgoingMessage, type ParsedMessage } from '../types';
 import type { IGetThreadResponse, MailManager } from '../lib/driver/types';
+import { resolveModel, resolveModelId } from '../lib/ai-model-resolver';
+import { hasAiCredits, trackAiUsage } from '../lib/billing';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { createSimpleAuth, type SimpleAuth } from '../lib/auth';
-import { connectionToDriver } from '../lib/server-utils';
+import { buildAIProfilePrompt } from '../lib/ai-profile';
 import type { CreateDraftData } from '../lib/schemas';
 import { FOLDERS, parseHeaders } from '../lib/utils';
-import { env, RpcTarget } from 'cloudflare:workers';
+import { RpcTarget } from 'cloudflare:workers';
 import { AIChatAgent } from 'agents/ai-chat-agent';
 import { tools as authTools } from './agent/tools';
 import { processToolCalls } from './agent/utils';
 import type { Message as ChatMessage } from 'ai';
+import { getZeroDB } from '../lib/server-utils';
 import { getPromptName } from '../pipelines';
 import { connection } from '../db/schema';
 import { getPrompt } from '../lib/brain';
-import { resolveModel } from '../lib/ai-model-resolver';
 import { and, eq } from 'drizzle-orm';
 import { McpAgent } from 'agents/mcp';
 import { createDb } from '../db';
-import { getZeroDB } from '../lib/server-utils';
+import { env, type ZeroEnv } from '../env';
 import { z } from 'zod';
 
 const decoder = new TextDecoder();
@@ -307,12 +313,16 @@ const shouldDropTables = env.DROP_AGENT_TABLES === 'true';
 const maxCount = parseInt(env.THREAD_SYNC_MAX_COUNT || '40', 10);
 const shouldLoop = env.THREAD_SYNC_LOOP !== 'false';
 
-export class ZeroAgent extends AIChatAgent<typeof env> {
+export class ZeroAgent extends AIChatAgent<ZeroEnv> {
   private chatMessageAbortControllers: Map<string, AbortController> = new Map();
   private foldersInSync: string[] = [];
   private currentFolder: string | null = 'inbox';
   driver: MailManager | null = null;
-  constructor(ctx: DurableObjectState, env: Env) {
+  /** User who owns the connection this agent serves. Cached after first
+   *  setupAuth() to avoid a DB lookup on every chat turn. Used for billing
+   *  pre-checks and AI usage tracking. */
+  private cachedUserId: string | null = null;
+  constructor(ctx: DurableObjectState, env: ZeroEnv) {
     super(ctx, env);
     if (shouldDropTables) this.dropTables();
     this.sql`
@@ -372,11 +382,54 @@ export class ZeroAgent extends AIChatAgent<typeof env> {
           {},
         );
 
+        // Pre-flight billing check — block when the user has no AI credits
+        // left. Cached read (~1ms). Fails open if the lookup itself errors so
+        // a billing-cache hiccup never takes chat down.
+        const billingUserId = await this.getUserId();
+        if (billingUserId) {
+          try {
+            const allowed = await hasAiCredits(billingUserId);
+            if (!allowed) {
+              throw new Error('AI_CREDITS_EXHAUSTED');
+            }
+          } catch (err) {
+            if (err instanceof Error && err.message === 'AI_CREDITS_EXHAUSTED') throw err;
+            console.error('[ZeroAgent] hasAiCredits failed (allowing through)', err);
+          }
+        }
+
+        const resolvedModelId = resolveModelId({
+          provider: 'auto',
+          modelId: '',
+          ollamaBaseUrl: '',
+          env,
+        });
+
+        const wrappedOnFinish: StreamTextOnFinishCallback<{}> = async (finishEvent) => {
+          try {
+            await onFinish(finishEvent);
+          } finally {
+            const usage = finishEvent.usage;
+            if (billingUserId && usage && (usage.promptTokens || usage.completionTokens)) {
+              this.ctx.waitUntil(
+                trackAiUsage({
+                  userId: billingUserId,
+                  model: resolvedModelId,
+                  inputTokens: usage.promptTokens ?? 0,
+                  outputTokens: usage.completionTokens ?? 0,
+                }).catch((error) => {
+                  console.error('[ZeroAgent] trackAiUsage failed', error);
+                }),
+              );
+            }
+          }
+        };
+
         const result = streamText({
           model: resolveModel({ provider: 'auto', modelId: '', ollamaBaseUrl: '', env }),
           messages: processedMessages,
           tools,
-          onFinish,
+          onFinish: wrappedOnFinish,
           system: await (async () => {
             const basePrompt = await getPrompt(
               getPromptName(connectionId, EPrompts.Chat),
@@ -397,15 +450,56 @@ export class ZeroAgent extends AIChatAgent<typeof env> {
   public async setupAuth(connectionId: string) {
     if (!this.driver) {
       const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
-      const _connection = await db.query.connection.findFirst({
-        where: eq(connection.id, connectionId),
-      });
-      if (_connection) this.driver = connectionToDriver(_connection);
-      this.ctx.waitUntil(conn.end());
+      let _connection: typeof connection.$inferSelect | undefined;
+      try {
+        try {
+          _connection = await db.query.connection.findFirst({
+            where: eq(connection.id, connectionId),
+          });
+        } catch (error) {
+          if (!isMissingConnectionColorError(error)) {
+            throw error;
+          }
+          console.warn(
+            '[ZeroAgent.setupAuth] Falling back to legacy connection query because mail0_connection.color is missing',
+          );
+          _connection = await findLegacyConnectionById(connectionId);
+        }
+        if (_connection) {
+          this.driver = connectionToDriver(_connection);
+          this.cachedUserId = _connection.userId;
+        }
+      } finally {
+        this.ctx.waitUntil(conn.end());
+      }
       this.ctx.waitUntil(this.syncThreads('inbox'));
       this.ctx.waitUntil(this.syncThreads('sent'));
       this.ctx.waitUntil(this.syncThreads('spam'));
       this.ctx.waitUntil(this.syncThreads('archive'));
+    }
+  }
+
+  /** Resolve the owning user id, caching across chat turns. */
+  private async getUserId(): Promise<string | null> {
+    if (this.cachedUserId) return this.cachedUserId;
+    const connectionId = this.name;
+    if (!connectionId) return null;
+    const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
+    try {
+      let row: typeof connection.$inferSelect | undefined;
+      try {
+        row = await db.query.connection.findFirst({ where: eq(connection.id, connectionId) });
+      } catch (error) {
+        if (!isMissingConnectionColorError(error)) throw error;
+        console.warn(
+          '[ZeroAgent.getUserId] Falling back to legacy connection query because mail0_connection.color is missing',
+        );
+        row = await findLegacyConnectionById(connectionId);
+      }
+      this.cachedUserId = row?.userId ?? null;
+      return this.cachedUserId;
+    } finally {
+      this.ctx.waitUntil(conn.end());
     }
   }
 
@@ -454,7 +548,12 @@ export class ZeroAgent extends AIChatAgent<typeof env> {
       try {
         data = JSON.parse(message) as IncomingMessage;
       } catch (error) {
-        console.error('[ChatServer] Failed to parse incoming WebSocket message:', error, 'Message:', message);
+        console.error(
+          '[ChatServer] Failed to parse incoming WebSocket message:',
+          error,
+          'Message:',
+          message,
+        );
         return;
       }
       switch (data.type) {
@@ -718,6 +817,12 @@ export class ZeroAgent extends AIChatAgent<typeof env> {
 
   async buildGmailSearchQuery(query: string) {
     const sharedAIProfilePrompt = await this.getSharedAIProfilePrompt(this.name);
+    const resolvedModelId = resolveModelId({
+      provider: 'auto',
+      modelId: '',
+      ollamaBaseUrl: '',
+      env,
+    });
     const result = await generateText({
       model: resolveModel({ provider: 'auto', modelId: '', ollamaBaseUrl: '', env }),
       system: sharedAIProfilePrompt
@@ -725,6 +830,20 @@ export class ZeroAgent extends AIChatAgent<typeof env> {
         : GmailSearchAssistantSystemPrompt(),
       prompt: query,
     });
+    // Track AI usage for the search-query helper (background AI call — no
+    // pre-check; users shouldn't see search silently fail because their chat
+    // credits are out).
+    const userId = await this.getUserId();
+    if (userId && result.usage) {
+      this.ctx.waitUntil(
+        trackAiUsage({
+          userId,
+          model: resolvedModelId,
+          inputTokens: result.usage.promptTokens ?? 0,
+          outputTokens: result.usage.completionTokens ?? 0,
+        }).catch((error) => console.error('[ZeroAgent] track buildGmailSearchQuery failed', error)),
+      );
+    }
     return result.text;
   }
 
@@ -1194,7 +1313,7 @@ export class ZeroAgent extends AIChatAgent<typeof env> {
   }
 }
 
-export class ZeroMCP extends McpAgent<typeof env, {}, { userId: string }> {
+export class ZeroMCP extends McpAgent<ZeroEnv, {}, { userId: string }> {
   server = new McpServer({
     name: 'zero-mcp',
     version: '1.0.0',
@@ -1203,7 +1322,7 @@ export class ZeroMCP extends McpAgent<typeof env, {}, { userId: string }> {
 
   activeConnectionId: string | undefined;
 
-  constructor(ctx: DurableObjectState, env: Env) {
+  constructor(ctx: DurableObjectState, env: ZeroEnv) {
     super(ctx, env);
   }
 

@@ -79,6 +79,36 @@ export const findLegacyConnection = async (
 ): Promise<LegacyConnectionRow | undefined> =>
   (await selectLegacyConnectionFields(userId, connectionId))[0];
 
+export const findLegacyConnectionById = async (
+  connectionId: string,
+): Promise<LegacyConnectionRow | undefined> => {
+  const { conn } = createDb(env.HYPERDRIVE.connectionString);
+  try {
+    const rows = await conn<LegacyConnectionRow[]>`
+      select
+        id,
+        user_id as "userId",
+        email,
+        name,
+        picture,
+        access_token as "accessToken",
+        refresh_token as "refreshToken",
+        scope,
+        provider_id as "providerId",
+        null::text as "color",
+        expires_at as "expiresAt",
+        created_at as "createdAt",
+        updated_at as "updatedAt"
+      from mail0_connection
+      where id = ${connectionId}
+      limit 1
+    `;
+    return rows[0];
+  } finally {
+    await conn.end();
+  }
+};
+
 // 8GB
 const MAX_SHARD_SIZE = mbToBytes(8192);
 

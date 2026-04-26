@@ -12,16 +12,24 @@
  * - When provider is 'auto', we preserve the existing env-var cascade.
  */
 
-import { createOpenAI } from '@ai-sdk/openai';
 import { anthropic } from '@ai-sdk/anthropic';
+import { createOpenAI } from '@ai-sdk/openai';
+import type { UserSettings } from './schemas';
 import { google } from '@ai-sdk/google';
-import { groq } from '@ai-sdk/groq';
 import type { LanguageModel } from 'ai';
 import type { ZeroEnv } from '../env';
-import type { UserSettings } from './schemas';
+import { groq } from '@ai-sdk/groq';
 
 // Re-export the provider enum values for consumers
-export const AI_PROVIDERS = ['auto', 'openai', 'anthropic', 'google', 'groq', 'openrouter', 'ollama'] as const;
+export const AI_PROVIDERS = [
+  'auto',
+  'openai',
+  'anthropic',
+  'google',
+  'groq',
+  'openrouter',
+  'ollama',
+] as const;
 export type AIProvider = (typeof AI_PROVIDERS)[number];
 
 interface ResolveModelOpts {
@@ -29,6 +37,11 @@ interface ResolveModelOpts {
   modelId: string;
   ollamaBaseUrl: string;
   env: ZeroEnv;
+}
+
+interface ResolvedModelConfig {
+  provider: AIProvider;
+  modelId: string;
 }
 
 /**
@@ -52,30 +65,55 @@ export async function isOllamaReachable(baseUrl: string, timeoutMs = 2000): Prom
  * OpenRouter (if key) → Google (if key) → OpenAI (if USE_OPENAI) → Anthropic
  */
 function resolveAutoModel(env: ZeroEnv): LanguageModel {
+  const { modelId, provider } = resolveAutoModelConfig(env);
+
+  switch (provider) {
+    case 'openrouter': {
+      const openRouterProvider = createOpenAI({
+        baseURL: 'https://openrouter.ai/api/v1',
+        apiKey: env.OPENROUTER_API_SECRET ?? env.OPENROUTER_API_KEY,
+      });
+      return openRouterProvider(modelId);
+    }
+    case 'google':
+      return google(modelId);
+    case 'openai': {
+      const oai = createOpenAI({});
+      return oai(modelId);
+    }
+    default:
+      return anthropic(modelId);
+  }
+}
+
+function resolveAutoModelConfig(env: ZeroEnv): ResolvedModelConfig {
   const openRouterApiKey = env.OPENROUTER_API_SECRET ?? env.OPENROUTER_API_KEY;
 
   if (openRouterApiKey) {
-    const modelId = (env.DEFAULT_MODEL || 'openai/gpt-4o-mini').trim();
-    const openRouterProvider = createOpenAI({
-      baseURL: 'https://openrouter.ai/api/v1',
-      apiKey: openRouterApiKey,
-    });
-    return openRouterProvider(modelId);
+    return {
+      provider: 'openrouter',
+      modelId: (env.DEFAULT_MODEL || 'openai/gpt-4o-mini').trim(),
+    };
   }
 
   if (env.GOOGLE_GENERATIVE_AI_API_KEY) {
-    const modelId = (env.DEFAULT_MODEL || 'gemini-2.5-flash').trim();
-    return google(modelId);
+    return {
+      provider: 'google',
+      modelId: (env.DEFAULT_MODEL || 'gemini-2.5-flash').trim(),
+    };
   }
 
   if (env.USE_OPENAI === 'true') {
-    const modelId = (env.OPENAI_MODEL || 'gpt-4o').trim();
-    const oai = createOpenAI({});
-    return oai(modelId);
+    return {
+      provider: 'openai',
+      modelId: (env.OPENAI_MODEL || 'gpt-4o').trim(),
+    };
   }
 
-  // Fallback: Anthropic
-  return anthropic('claude-3-5-sonnet-latest');
+  return {
+    provider: 'anthropic',
+    modelId: 'claude-3-5-sonnet-latest',
+  };
 }
 
 /**
@@ -98,11 +136,18 @@ function createOllamaModel(baseUrl: string, modelId: string): LanguageModel {
  * This is the single source of truth for model selection across the entire backend.
  * All AI call-sites should use this instead of directly importing provider modules.
  */
-export function resolveModel({ provider, modelId, ollamaBaseUrl, env }: ResolveModelOpts): LanguageModel {
+export function resolveModel({
+  provider,
+  modelId,
+  ollamaBaseUrl,
+  env,
+}: ResolveModelOpts): LanguageModel {
   switch (provider) {
     case 'ollama': {
       if (!modelId) {
-        throw new Error('[AIModel] Ollama provider selected but no model specified. Please select a model in Settings > AI.');
+        throw new Error(
+          '[AIModel] Ollama provider selected but no model specified. Please select a model in Settings > AI.',
+        );
       }
       return createOllamaModel(ollamaBaseUrl, modelId);
     }
@@ -132,7 +177,9 @@ export function resolveModel({ provider, modelId, ollamaBaseUrl, env }: ResolveM
     case 'openrouter': {
       const apiKey = env.OPENROUTER_API_SECRET ?? env.OPENROUTER_API_KEY;
       if (!apiKey) {
-        throw new Error('[AIModel] OpenRouter selected but no API key configured (OPENROUTER_API_KEY).');
+        throw new Error(
+          '[AIModel] OpenRouter selected but no API key configured (OPENROUTER_API_KEY).',
+        );
       }
       const id = (modelId || env.DEFAULT_MODEL || 'openai/gpt-4o-mini').trim();
       const openRouterProvider = createOpenAI({
@@ -149,9 +196,53 @@ export function resolveModel({ provider, modelId, ollamaBaseUrl, env }: ResolveM
 }
 
 /**
+ * Resolve the concrete model identifier used for a request so downstream code
+ * (billing, logging, analytics) stays aligned with the actual model selection.
+ */
+export function resolveModelId({
+  provider,
+  modelId,
+  ollamaBaseUrl,
+  env,
+}: ResolveModelOpts): string {
+  switch (provider) {
+    case 'ollama': {
+      if (!modelId) {
+        throw new Error(
+          '[AIModel] Ollama provider selected but no model specified. Please select a model in Settings > AI.',
+        );
+      }
+      return modelId;
+    }
+    case 'openai':
+      return (modelId || env.OPENAI_MODEL || 'gpt-4o').trim();
+    case 'anthropic':
+      return (modelId || 'claude-3-5-sonnet-latest').trim();
+    case 'google':
+      return (modelId || 'gemini-2.5-flash').trim();
+    case 'groq':
+      return (modelId || 'llama-3.3-70b-versatile').trim();
+    case 'openrouter': {
+      if (!(env.OPENROUTER_API_SECRET ?? env.OPENROUTER_API_KEY)) {
+        throw new Error(
+          '[AIModel] OpenRouter selected but no API key configured (OPENROUTER_API_KEY).',
+        );
+      }
+      return (modelId || env.DEFAULT_MODEL || 'openai/gpt-4o-mini').trim();
+    }
+    case 'auto':
+    default:
+      return resolveAutoModelConfig(env).modelId;
+  }
+}
+
+/**
  * Convenience: resolve a model directly from a UserSettings object.
  */
-export function resolveModelFromSettings(settings: UserSettings | undefined, env: ZeroEnv): LanguageModel {
+export function resolveModelFromSettings(
+  settings: UserSettings | undefined,
+  env: ZeroEnv,
+): LanguageModel {
   const provider = (settings?.aiProvider ?? 'auto') as AIProvider;
   const modelId = settings?.aiModel ?? '';
   const ollamaBaseUrl = settings?.ollamaBaseUrl ?? 'http://localhost:11434';

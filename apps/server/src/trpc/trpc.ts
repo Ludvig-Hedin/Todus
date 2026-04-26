@@ -121,12 +121,13 @@ export const activeConnectionProcedure = privateProcedure.use(async ({ ctx, next
     }
 
     if (connectionSpan) {
+      // NOT_FOUND is handled above; remaining failures are not “missing connection” by definition.
       completeRequestSpan(
         ctx.c,
         connectionSpan.id,
         {
           success: false,
-          reason: 'connection_not_found',
+          reason: 'internal_error',
         },
         err instanceof Error ? err.message : 'Failed to get active connection',
       );

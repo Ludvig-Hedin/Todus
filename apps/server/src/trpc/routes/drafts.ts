@@ -10,6 +10,15 @@ export const draftsRouter = router({
     const { stub: agent } = await getZeroAgent(activeConnection.id);
     return agent.createDraft(input);
   }),
+  // `createDraft` already upserts when `id` is provided (see google.ts:775 and microsoft.ts:737).
+  // We expose `update` as a separate procedure so the AI's `update_draft` action maps to a clear endpoint.
+  update: activeDriverProcedure
+    .input(createDraftData.extend({ id: z.string().min(1, 'id is required') }))
+    .mutation(async ({ input, ctx }) => {
+      const { activeConnection } = ctx;
+      const { stub: agent } = await getZeroAgent(activeConnection.id);
+      return agent.createDraft(input);
+    }),
   get: activeDriverProcedure.input(z.object({ id: z.string() })).query(async ({ input, ctx }) => {
     const { activeConnection } = ctx;
     const { stub: agent } = await getZeroAgent(activeConnection.id);

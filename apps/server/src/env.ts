@@ -35,14 +35,14 @@ export type ZeroEnv = {
   JWT_SECRET: string;
   ELEVENLABS_API_KEY: string;
   DISABLE_CALLS: 'true' | '';
-  DROP_AGENT_TABLES: 'false';
-  THREAD_SYNC_MAX_COUNT: '5' | '20' | '10';
+  DROP_AGENT_TABLES: 'true' | 'false';
+  THREAD_SYNC_MAX_COUNT: string;
   THREAD_SYNC_LOOP: 'false' | 'true';
-  DISABLE_WORKFLOWS: 'true';
-  AUTORAG_ID: '';
-  USE_OPENAI: 'true';
-  CLOUDFLARE_ACCOUNT_ID: '';
-  CLOUDFLARE_API_TOKEN: '';
+  DISABLE_WORKFLOWS: 'true' | 'false';
+  AUTORAG_ID: string;
+  USE_OPENAI: 'true' | 'false';
+  CLOUDFLARE_ACCOUNT_ID: string;
+  CLOUDFLARE_API_TOKEN: string;
   BASE_URL: string;
   VITE_PUBLIC_APP_URL: string;
   DATABASE_URL: string;
@@ -122,6 +122,8 @@ export type ZeroEnv = {
   RECALL_API_BASE_URL: string;
   /** Optional shared secret for verifying Recall.ai webhook signatures */
   RECALL_WEBHOOK_SECRET?: string;
+  /** Optional shared secret that enables the temporary admin migration endpoint. */
+  ADMIN_RUN_MIGRATIONS_TOKEN?: string;
 };
 
 export const env = new Proxy(_env as ZeroEnv, {

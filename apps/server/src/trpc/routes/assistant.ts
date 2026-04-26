@@ -13,6 +13,7 @@ import {
   getThread,
   getThreadsFromDB,
   getZeroAgent,
+  isMissingConnectionColorError,
 } from '../../lib/server-utils';
 import { activeConnectionProcedure, privateProcedure, router } from '../trpc';
 import { and, desc, eq, inArray, lte } from 'drizzle-orm';
@@ -1553,6 +1554,50 @@ const isMissingAssistantSchemaError = (error: unknown) =>
     error.message.includes('relation "mail0_assistant_prepared_action" does not exist') ||
     error.message.includes('relation "mail0_assistant_briefing_snapshot" does not exist'));
 
+/// Recognized degraded-schema errors for the briefing endpoint. Either the assistant
+/// tables haven't been migrated yet, OR `mail0_connection.color` is missing (migration
+/// 0047 not yet applied to this environment). Both cause a 500 in the wrapped Effect
+/// pipeline and the multi-shard error message includes the original PostgresError text.
+const shouldFallBackForBriefing = (error: unknown) =>
+  isMissingAssistantSchemaError(error) || isMissingConnectionColorError(error);
+
+/// Minimal thread context returned when the assistant DB tables are missing (e.g. on a
+/// fresh deploy that hasn't run migrations yet). Surfaces a usable summary from the
+/// thread itself instead of bubbling a 500 to the client.
+function buildFallbackThreadContext(
+  threadId: string,
+  thread: Awaited<ReturnType<typeof getThread>>['result'],
+) {
+  const latest = thread.latest ?? thread.messages[thread.messages.length - 1];
+  return assistantThreadContextSchema.parse({
+    threadId,
+    subject: latest?.subject ?? '',
+    summary: buildFallbackSummary(thread),
+    recommendation: {
+      label: 'No recommendation',
+      reason: 'Assistant tables are not yet provisioned for this environment.',
+    },
+    waitingState: 'unclear' as const,
+    confidence: 0,
+    riskLevel: 'low' as const,
+    reason: 'Assistant context is unavailable until the database schema is migrated.',
+    replyNeeded: false,
+    followUpNeeded: false,
+    meetingRequested: false,
+    existingDraft: false,
+    actionItems: [],
+    researchQueries: [],
+    suggestedTasks: [],
+    suggestedEvent: null,
+    relatedTasks: [],
+    relatedMeetings: [],
+    people: [],
+    openLoops: [],
+    preparedActions: [],
+    changedSinceLastOpen: [],
+  });
+}
+
 async function buildFallbackBriefing(db: DbHandle, userId: string) {
   const now = new Date();
   const tasks = await db
@@ -1615,9 +1660,10 @@ export const assistantRouter = router({
         }
         await syncMeetingActions(db, ctx.sessionUser.id);
       } catch (error) {
-        if (isMissingAssistantSchemaError(error)) {
+        if (shouldFallBackForBriefing(error)) {
           console.warn(
-            '[assistant.getBriefing] Returning fallback briefing because assistant/meeting tables are missing',
+            '[assistant.getBriefing] Returning fallback briefing — degraded schema (missing assistant tables or mail0_connection.color)',
+            error instanceof Error ? error.message : error,
           );
           return await buildFallbackBriefing(db, ctx.sessionUser.id);
         }
@@ -1660,9 +1706,10 @@ export const assistantRouter = router({
       try {
         briefingData = await loadBriefingData();
       } catch (error) {
-        if (isMissingAssistantSchemaError(error)) {
+        if (shouldFallBackForBriefing(error)) {
           console.warn(
-            '[assistant.getBriefing] Returning fallback briefing because assistant/meeting tables are missing',
+            '[assistant.getBriefing] Returning fallback briefing — degraded schema (missing assistant tables or mail0_connection.color)',
+            error instanceof Error ? error.message : error,
           );
           return await buildFallbackBriefing(db, ctx.sessionUser.id);
         }
@@ -1834,21 +1881,43 @@ export const assistantRouter = router({
       const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
       try {
         const { result: thread } = await getThread(ctx.activeConnection.id, input.threadId);
-        const existingBeforeReview = await db
-          .select()
-          .from(assistantOpenLoop)
-          .where(
-            and(
-              eq(assistantOpenLoop.userId, ctx.sessionUser.id),
-              eq(assistantOpenLoop.sourceThreadId, input.threadId),
-            ),
-          );
-        const analysis = await buildThreadAnalysis(db, {
-          userId: ctx.sessionUser.id,
-          activeConnection: ctx.activeConnection,
-          threadId: input.threadId,
-          thread,
-        });
+        let existingBeforeReview: (typeof assistantOpenLoop.$inferSelect)[];
+        try {
+          existingBeforeReview = await db
+            .select()
+            .from(assistantOpenLoop)
+            .where(
+              and(
+                eq(assistantOpenLoop.userId, ctx.sessionUser.id),
+                eq(assistantOpenLoop.sourceThreadId, input.threadId),
+              ),
+            );
+        } catch (error) {
+          if (isMissingAssistantSchemaError(error)) {
+            console.warn(
+              '[assistant.getThreadContext] Returning fallback context because assistant tables are missing',
+            );
+            return buildFallbackThreadContext(input.threadId, thread);
+          }
+          throw error;
+        }
+        let analysis: Awaited<ReturnType<typeof buildThreadAnalysis>>;
+        try {
+          analysis = await buildThreadAnalysis(db, {
+            userId: ctx.sessionUser.id,
+            activeConnection: ctx.activeConnection,
+            threadId: input.threadId,
+            thread,
+          });
+        } catch (error) {
+          if (isMissingAssistantSchemaError(error)) {
+            console.warn(
+              '[assistant.getThreadContext] Returning fallback context because assistant tables are missing',
+            );
+            return buildFallbackThreadContext(input.threadId, thread);
+          }
+          throw error;
+        }
 
         const latestReceivedAt =
           safeDateString(analysis.latest?.receivedOn) ?? safeDateString(new Date());
@@ -1871,15 +1940,20 @@ export const assistantRouter = router({
           );
         }
 
-        await db
-          .update(assistantOpenLoop)
-          .set({ lastReviewedAt: new Date() })
-          .where(
-            and(
-              eq(assistantOpenLoop.userId, ctx.sessionUser.id),
-              eq(assistantOpenLoop.sourceThreadId, input.threadId),
-            ),
-          );
+        try {
+          await db
+            .update(assistantOpenLoop)
+            .set({ lastReviewedAt: new Date() })
+            .where(
+              and(
+                eq(assistantOpenLoop.userId, ctx.sessionUser.id),
+                eq(assistantOpenLoop.sourceThreadId, input.threadId),
+              ),
+            );
+        } catch (error) {
+          if (!isMissingAssistantSchemaError(error)) throw error;
+          // Schema missing — skip the bookkeeping update and fall through to return analysis.
+        }
 
         const openLoopCountByPerson = new Map<string, number>();
         analysis.openLoops.forEach((loop) => {

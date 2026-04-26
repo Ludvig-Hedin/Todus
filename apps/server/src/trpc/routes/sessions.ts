@@ -108,7 +108,24 @@ async function upsertCurrentSessionMetadata(input: {
 
   const request = input.request as CloudflareRequest;
   const userAgent = request.headers.get('user-agent');
-  const parsed = parseUserAgent(userAgent);
+  const platform = request.headers.get('x-todus-platform')?.trim().toLowerCase() ?? '';
+  let parsed = parseUserAgent(userAgent);
+  // Native apps send the same CFNetwork User-Agent on iOS and macOS; prefer explicit platform.
+  if (platform === 'macos') {
+    parsed = {
+      browserName: 'Todus',
+      osName: 'macOS',
+      deviceType: 'Desktop',
+      deviceLabel: 'Todus · macOS',
+    };
+  } else if (platform === 'ios') {
+    parsed = {
+      browserName: 'Todus',
+      osName: 'iOS',
+      deviceType: 'Mobile',
+      deviceLabel: 'Todus · iOS',
+    };
+  }
   const now = new Date();
 
   const cfCountry = request.headers.get('cf-ipcountry');

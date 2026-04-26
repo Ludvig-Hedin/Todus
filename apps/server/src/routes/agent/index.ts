@@ -49,7 +49,13 @@ import type {
   MailManager,
   ThreadSummary,
 } from '../../lib/driver/types';
-import { connectionToDriver, getZeroSocketAgent, reSyncThread } from '../../lib/server-utils';
+import {
+  connectionToDriver,
+  findLegacyConnectionById,
+  getZeroSocketAgent,
+  isMissingConnectionColorError,
+  reSyncThread,
+} from '../../lib/server-utils';
 import { generateWhatUserCaresAbout, type UserTopic } from '../../lib/analyze/interests';
 import { DurableObjectOAuthClientProvider } from 'agents/mcp/do-oauth-client-provider';
 import { AiChatPrompt, GmailSearchAssistantSystemPrompt } from '../../lib/prompts';
@@ -720,14 +726,28 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
     if (this.name === 'general') return;
     if (!this.driver) {
       const { db, conn } = createDb(this.env.HYPERDRIVE.connectionString);
-      const _connection = await db.query.connection.findFirst({
-        where: eq(connection.id, this.name),
-      });
-      if (_connection) {
-        this.driver = connectionToDriver(_connection);
-        this.connection = _connection;
+      let _connection: typeof connection.$inferSelect | undefined;
+      try {
+        try {
+          _connection = await db.query.connection.findFirst({
+            where: eq(connection.id, this.name),
+          });
+        } catch (error) {
+          if (!isMissingConnectionColorError(error)) {
+            throw error;
+          }
+          console.warn(
+            '[setupAuth] Falling back to legacy connection query because mail0_connection.color is missing',
+          );
+          _connection = await findLegacyConnectionById(this.name);
+        }
+        if (_connection) {
+          this.driver = connectionToDriver(_connection);
+          this.connection = _connection;
+        }
+      } finally {
+        this.ctx.waitUntil(conn.end());
       }
-      this.ctx.waitUntil(conn.end());
     }
     if (!this.agent) this.agent = await getZeroSocketAgent(this.name);
   }
