@@ -238,6 +238,7 @@ export const tasksRouter = router({
                   eventId: sql`EXCLUDED.event_id`,
                   updatedAt: now,
                 },
+                setWhere: eq(task.userId, ctx.sessionUser.id),
               });
             syncedIds.push(mutation.id);
           }
