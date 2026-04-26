@@ -609,24 +609,6 @@ struct MacRootView: View {
             }
         }
         .animation(.snappy(duration: 0.25), value: isAssistantPresented && assistantDisplayMode == .full)
-        // Offline banner — shown when the device has no network connectivity
-        .overlay(alignment: .top) {
-            if !services.networkMonitor.isConnected {
-                HStack(spacing: 5) {
-                    Image(systemName: "wifi.slash")
-                        .imageScale(.small)
-                        .fontWeight(.medium)
-                    Text("Offline — changes sync when reconnected")
-                        .font(.footnote)
-                }
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 6)
-                .background(.ultraThinMaterial)
-                .transition(.move(edge: .top).combined(with: .opacity))
-            }
-        }
-        .animation(.snappy(duration: 0.3), value: services.networkMonitor.isConnected)
         .onChange(of: selection) { _, newValue in
             // Persist sidebar selection so the next launch restores the same view.
             selectionStorageKey = newValue.storageKey
@@ -718,6 +700,23 @@ struct MacRootView: View {
                     .transition(.scale(scale: 0.8).combined(with: .opacity))
                 }
             }
+            .overlay(alignment: .top) {
+                if !services.networkMonitor.isConnected {
+                    HStack(spacing: 5) {
+                        Image(systemName: "wifi.slash")
+                            .imageScale(.small)
+                            .fontWeight(.medium)
+                        Text("Offline — changes sync when reconnected")
+                            .font(.footnote)
+                    }
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 6)
+                    .background(.ultraThinMaterial)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                }
+            }
+            .animation(.snappy(duration: 0.3), value: services.networkMonitor.isConnected)
             .animation(.snappy(duration: 0.2), value: isAssistantPresented)
             .navigationTitle(selection.title)
             // Hide the toolbar's own background so the content-area
