@@ -39,9 +39,13 @@ pnpm docker:db:up     # Start PostgreSQL
 pnpm docker:db:down   # Stop PostgreSQL
 pnpm db:push          # Push schema
 pnpm db:generate      # Generate migrations
-pnpm db:migrate       # Apply migrations
+pnpm db:migrate       # Apply migrations (uses `.env` DATABASE_URL)
 pnpm db:studio        # Open Drizzle Studio
 ```
+
+**Production migrations (use CI by default):** The **preferred and safest** way is **GitHub Actions** → **db-migrate-production**, with the repo secret **`PRODUCTION_DATABASE_URL`** set to the same **direct PostgreSQL connection string** as the **Hyperdrive origin** (i.e. the real Postgres host—Neon, RDS, etc.—not the `hyperdrive://` handle Workers use; see `docs/development/README.md` and `HYPERDRIVE` in `apps/server/wrangler.jsonc`).
+
+**Emergency local run only:** Pointing `DATABASE_URL` in your shell at **production** is easy to get wrong and can apply the wrong migration to the wrong cluster. If you must run `pnpm run -C apps/server db:migrate` locally, double-check the URL and env file, use a short-lived credential, and **revoke or rotate** it afterward. Prefer the workflow; reserve local runs for break-glass situations with explicit backup/rollback in place.
 
 ### Development
 ```bash

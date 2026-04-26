@@ -8,21 +8,25 @@ This is a **pnpm + Turborepo** monorepo. The active apps are:
 
 | App | Path | Stack | Purpose |
 |-----|------|-------|---------|
-| Web | `apps/mail` | React Router v7 + Vite + Cloudflare Workers | Main web product |
+| Mail product | `apps/web` | React Router v7 + Vite + Cloudflare Workers | The deployed email client UI (primary — all frontend work goes here) |
+| ~~Mail product (legacy)~~ | `apps/mail` | React Router v7 + Vite + Cloudflare Workers | **READ-ONLY. Do not edit.** Superseded by `apps/web`. |
 | Backend | `apps/server` | Cloudflare Worker (Hono + tRPC + Durable Objects) | Auth, mail APIs, AI workflows |
 | iOS | `apps/ios/Todus` | Native SwiftUI (Xcode) | iPhone app |
-| macOS | `apps/macos` | Native SwiftUI (Xcode, Swift 6) | Desktop shell scaffold with sidebar navigation |
+| macOS | `apps/macos` | Native SwiftUI (Xcode, Swift 6) | Desktop shell with sidebar navigation |
 
 **Do not use** anything under `apps/archived/` — those are reference-only legacy implementations.
+
+> **IMPORTANT — `apps/mail/` is READ-ONLY.**
+> All frontend work now lives in `apps/web/`. Never edit any file under `apps/mail/`. Treat it as an archived reference. If you need to make a frontend change, make it in `apps/web/` instead.
 
 ## Key Commands
 
 ```bash
 # Development
-pnpm go                         # Start Docker DB + web + backend
-pnpm dev                        # Start web + backend dev servers
-pnpm web                        # Alias for web + backend dev servers
-pnpm mail                       # Start the web app only
+pnpm go                         # Start Docker DB + apps/web + backend (full local stack)
+pnpm dev                        # Start apps/web + backend (DB must already be running)
+pnpm web                        # Alias for pnpm dev
+pnpm mail                       # Start apps/mail (mail product) only
 pnpm docker:db:up               # Start PostgreSQL in Docker
 pnpm docker:db:stop             # Stop PostgreSQL
 pnpm docker:db:down             # Remove PostgreSQL container
@@ -43,8 +47,8 @@ pnpm db:studio                  # Drizzle Studio GUI
 
 # Build & Deploy
 pnpm build                      # Build all packages
-pnpm build:frontend             # Build the web app only
-pnpm deploy:frontend            # Deploy web to Cloudflare
+pnpm build:frontend             # Build apps/mail (the deployed mail product)
+pnpm deploy:frontend            # Deploy apps/mail to Cloudflare
 pnpm deploy:backend             # Deploy backend to Cloudflare Workers
 pnpm sentry:sourcemaps          # Upload frontend source maps
 
@@ -61,12 +65,12 @@ pnpm parity:screenshots:capture:android:auto
 pnpm parity:screenshots:capture:macos:auto
 
 # Quality
-pnpm precommit                 # Local pre-commit lint gate
-pnpm lint                      # ESLint
+pnpm precommit                 # Run oxlint --deny-warnings on staged files
+pnpm lint                      # ESLint (turbo)
 pnpm format                    # Prettier write for app code
 pnpm check                     # Format check + lint
 pnpm check:format              # Prettier check
-pnpm test                      # Run tests
+pnpm test                      # Run tests (packages/testing)
 pnpm test:watch                # Watch tests
 pnpm test:coverage             # Coverage run
 pnpm test:ui                   # UI test runner
@@ -74,22 +78,21 @@ pnpm test -- -t "test name"     # Single test
 ```
 
 ### Important Restrictions
-- **NEVER run project-wide lint/format commands** (`pnpm check`, `pnpm lint`, `pnpm format`) — these touch the entire codebase. Only lint/format specific files you changed. Use file-scoped formatting or targeted test commands instead.
+- **NEVER run project-wide lint/format commands** (`pnpm check`, `pnpm lint`, `pnpm format`) — these touch the entire codebase. Only lint/format specific files you changed.
 
 ### Current Workflow Notes
+- `pnpm dev` / `pnpm web` starts the **marketing site** (`apps/web`) + backend. Use `pnpm mail` to develop the mail product UI (`apps/mail`).
 - Prefer `pnpm go` when you need the full local stack; it brings up Docker Postgres before the app processes.
-- Use `pnpm dev` for the web/backend loop when the database is already running.
-- Use `pnpm mail` when only the web frontend needs to move.
 - Use `pnpm ios:simulator` for simulator debugging, but `pnpm ios` is the lighter app-start command.
 - Use `pnpm macos` for the native macOS shell; the old Electron-based flow is obsolete.
-- When adding schema changes, keep the order `db:generate` -> review migration -> `db:migrate` or `db:push` as appropriate.
+- When adding schema changes, keep the order `db:generate` → review migration → `db:migrate` or `db:push` as appropriate.
 - Keep progress docs current: update `CHANGELOG.md`, `TASK.md`, `PLANNING.md`, or `ROADMAP.md` when work changes behavior or architecture.
 
-## Architecture: `apps/mail` (Web Frontend)
+## Architecture: `apps/mail` (Mail Product UI)
 
-- **Framework**: React Router v7 (file-based routes defined in `app/routes.ts`)
+- **Framework**: React Router v7 (routes defined in `app/routes.ts`)
 - **State**: Jotai (atoms) + TanStack Query (server state)
-- **Styling**: Tailwind CSS v4 + shadcn/ui components
+- **Styling**: Tailwind CSS v4 — CSS-first config via `@theme` directive in CSS, not `tailwind.config.js`
 - **Rich text**: Tiptap editor
 - **i18n**: Paraglide JS (`apps/mail/messages/`, compiled to `paraglide/`)
 - **Auth client**: `apps/mail/lib/auth-client.ts` — exports `signIn`, `signUp`, `signOut`, `useSession`
@@ -99,19 +102,26 @@ pnpm test -- -t "test name"     # Single test
 
 Routes are defined in `app/routes.ts`. The main mail UI lives under `/mail/:folder`.
 
+## Architecture: `apps/web` (Marketing Site)
+
+- **Framework**: React Router v7 (same stack as `apps/mail`)
+- **Routes**: Landing (`/`), `/home`, `/about`, `/pricing`, `/terms`, `/privacy`, `/blog/:slug`, `/compare/:competitor`
+- Started by `pnpm dev` / `pnpm web`; **not** deployed by `deploy:frontend` (which targets `apps/mail`)
+
 ## Architecture: `apps/server` (Backend)
 
 - **Runtime**: Cloudflare Worker
 - **HTTP framework**: Hono (`src/main.ts` is the entry point)
 - **API layer**: tRPC router at `src/trpc/index.ts` — composed of per-domain routers in `src/trpc/routes/`
 - **Database**: PostgreSQL via Drizzle ORM + Cloudflare Hyperdrive; schema at `src/db/schema.ts`
-- **Auth**: Better Auth (`src/lib/auth.ts`) — Google OAuth, Apple Sign In, Email OTP, phone number, email/password (with email verification required)
-- **Durable Objects**: `ZeroDriver`, `ZeroAgent`, `ZeroDB`, `ZeroMCP`, `ShardRegistry`, `WorkflowRunner`, `ThreadSyncWorker`
-- **Cloudflare**: KV namespaces, Queues, Workflows for async email sync
+- **Auth**: Better Auth (`src/lib/auth.ts`) — Google OAuth, Apple Sign In, Email OTP, phone number, email/password (with email verification required). Microsoft commented out.
+- **Durable Objects**: `ZeroDriver`, `ZeroAgent`, `ZeroDB`, `ZeroMCP`, `ShardRegistry`, `WorkflowRunner`, `ThreadSyncWorker`, `ThinkingMCP`
+- **Cloudflare Workflows**: `SyncThreadsWorkflow`, `SyncThreadsCoordinatorWorkflow` — async email sync orchestration
+- **Cloudflare**: KV namespaces, Queues, Workflows; all bindings in `wrangler.jsonc`
 - **Deploy**: `pnpm deploy:backend` → Wrangler (`wrangler.jsonc`)
 - **Dev utilities**: `pnpm test:ai`, `pnpm eval`, `pnpm eval:dev`, `pnpm eval:ci`
 
-tRPC routes mirror the `src/trpc/routes/` filenames: `mail`, `ai`, `settings`, `connections`, `labels`, `categories`, `drafts`, `notes`, `tasks`, etc.
+tRPC routers in `src/trpc/routes/`: `assistant`, `ai`, `avatar`, `bimi`, `brain`, `calendar`, `categories`, `connections`, `cookiePreferences`, `drafts`, `folders`, `groups`, `labels`, `logging`, `mail`, `mailAssistant`, `meet`, `mentions`, `notes`, `sessions`, `settings`, `sharing`, `shortcut`, `subscription`, `tasks`, `templates`, `user`, `docs`.
 
 ## Architecture: `apps/ios` (Native iOS)
 
@@ -120,7 +130,7 @@ tRPC routes mirror the `src/trpc/routes/` filenames: `mail`, `ai`, `settings`, `
 - **Project file**: `apps/ios/Todus/Todus.xcodeproj`
 - **Bundle ID**: `com.ludvighedin.todus`
 - **Deep link scheme**: `todus://`
-- **SPM Dependencies**: CalendarKit v1.1.7
+- **SPM Dependencies**: CalendarKit v1.1.7; also `packages/swift-auth` and `packages/swift-widgets` (monorepo SPM packages)
 - **Auth**: Native OAuth flows (Google, Apple) + Email OTP — auth tokens extracted natively, then passed to the backend via Bearer token. **Do not use WKWebView fetch for cross-origin API calls** — use native URLSession instead.
 - **Build commands**: `pnpm ios`, `pnpm ios:simulator`, `pnpm ios:build:preview`, `pnpm ios:build:production`
 
@@ -149,7 +159,13 @@ tRPC routes mirror the `src/trpc/routes/` filenames: `mail`, `ai`, `settings`, `
 | Package | Purpose |
 |---------|---------|
 | `packages/shared` | Types and utilities shared across web + server |
+| `packages/api-client` | HTTP client for tRPC API calls |
 | `packages/ui-native` | Shared React Native UI components |
+| `packages/design-tokens` | Theme and design constants |
+| `packages/macos-doc-editor` | macOS-specific editor component library |
+| `packages/cli` | `nizzy` CLI — workspace sync utilities; runs as `postinstall` |
+| `packages/swift-auth` | SPM package: Swift auth utilities for iOS/macOS |
+| `packages/swift-widgets` | SPM package: Swift widget extensions |
 | `packages/testing` | Vitest test suite |
 | `packages/tsconfig` | Shared TypeScript configs |
 | `packages/eslint-config` | Shared ESLint config |
@@ -165,7 +181,7 @@ tRPC routes mirror the `src/trpc/routes/` filenames: `mail`, `ai`, `settings`, `
 
 ## Environment Variables
 
-Frontend (`apps/mail`): use `VITE_PUBLIC_` prefix.
+Frontend (`apps/mail`, `apps/web`): use `VITE_PUBLIC_` prefix.
 Backend (`apps/server`): defined in `wrangler.jsonc`; type-safe via `src/env.ts`.
 Local dev: use a `.env` file at root (loaded via `dotenv-cli`).
 
