@@ -145,13 +145,15 @@ public final class AuthService: NSObject {
     /// Coalescing gate for concurrent token refreshes. When multiple API calls receive 401
     /// simultaneously, they all call refreshAccessToken(). This ensures only one network
     /// request fires; subsequent callers await the in-flight result.
-    private var activeRefreshTask: Task<Bool, Never>?
+    private var activeRefreshTask: Task<RefreshResult, Never>?
 
     public var bearerTokenPreview: String {
         guard let token = bearerToken, !token.isEmpty else { return "None" }
-        let prefix = token.prefix(6)
-        let suffix = token.suffix(4)
-        return "\(prefix)...\(suffix) (\(token.count))"
+        return "(len=\(token.count))"
+    }
+
+    private func applyNativeClientHeaders(to request: inout URLRequest) {
+        TodusHTTPClient.applyDefaultHeaders(to: &request)
     }
 
     // MARK: - Init
@@ -228,6 +230,7 @@ public final class AuthService: NSObject {
             // Format matches what the RN app sends: { idToken: { token: "..." } }
             let url = backendURL.appending(path: "api/auth/sign-in/social")
             var request = URLRequest(url: url)
+            applyNativeClientHeaders(to: &request)
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             // Origin header required by Better-Auth CSRF check (must match trustedOrigins)
@@ -336,6 +339,7 @@ public final class AuthService: NSObject {
             // Better-Auth's social sign-in is POST-only — returns { url: "https://accounts.google.com/..." }
             let signInURL = backendURL.appending(path: "api/auth/sign-in/social")
             var request = URLRequest(url: signInURL)
+            applyNativeClientHeaders(to: &request)
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.setValue("https://todus.app", forHTTPHeaderField: "Origin")
@@ -473,6 +477,7 @@ public final class AuthService: NSObject {
         // Bearer token so the backend knows which user to link the new account to.
         let linkURL = backendURL.appending(path: "api/auth/native-link-social")
         var request = URLRequest(url: linkURL)
+        applyNativeClientHeaders(to: &request)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("https://todus.app", forHTTPHeaderField: "Origin")
@@ -569,6 +574,7 @@ public final class AuthService: NSObject {
 
         let url = backendURL.appending(path: "api/auth/email-otp/send-verification-otp")
         var request = URLRequest(url: url)
+        applyNativeClientHeaders(to: &request)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         // Origin must match a trustedOrigin with a valid hostname — the CORS middleware
@@ -583,10 +589,10 @@ public final class AuthService: NSObject {
         // type=sign-in stores the OTP under `sign-in-otp-${email}` in Better Auth's verification
         // table, which is the same key /sign-in/email-otp reads from on verify.
         authLog.info("[OTP_SEND] → POST \(url.absoluteString, privacy: .public)")
-        authLog.info("[OTP_SEND] → body email=\(trimmed, privacy: .public) type=sign-in")
+        authLog.info("[OTP_SEND] → body email=\(trimmed, privacy: .private) type=sign-in")
         let reqHeaders = (request.allHTTPHeaderFields ?? [:])
             .map { "\($0.key)=\($0.value)" }.sorted().joined(separator: ", ")
-        authLog.info("[OTP_SEND] → headers \(reqHeaders, privacy: .public)")
+        authLog.debug("[OTP_SEND] → headers \(reqHeaders, privacy: .private)")
 
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
@@ -605,8 +611,10 @@ public final class AuthService: NSObject {
             authLog.info(
                 "[OTP_SEND] ← status=\(http.statusCode, privacy: .public) bodyBytes=\(data.count, privacy: .public)"
             )
-            authLog.info("[OTP_SEND] ← headers \(respHeaders, privacy: .public)")
-            authLog.info("[OTP_SEND] ← body \(bodyStr, privacy: .public)")
+            // Headers may contain Set-Cookie (session token); body may contain account state.
+            // Keep redacted by default; OS log shows these only when stream is unsealed for the dev.
+            authLog.debug("[OTP_SEND] ← headers \(respHeaders, privacy: .private)")
+            authLog.debug("[OTP_SEND] ← body \(bodyStr, privacy: .private)")
 
             if (200..<300).contains(http.statusCode) {
                 authState = .otpPending(email: trimmed)
@@ -650,6 +658,7 @@ public final class AuthService: NSObject {
         // receive a raw session token in a stable JSON response.
         let url = backendURL.appending(path: "api/auth/native-email-otp/verify")
         var request = URLRequest(url: url)
+        applyNativeClientHeaders(to: &request)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         // Origin must match a trustedOrigin with a valid hostname — CORS middleware
@@ -666,11 +675,11 @@ public final class AuthService: NSObject {
         }()
         authLog.info("[OTP_VERIFY] → POST \(url.absoluteString, privacy: .public)")
         authLog.info(
-            "[OTP_VERIFY] → body email=\(email, privacy: .public) otp=\(codeMask, privacy: .public)"
+            "[OTP_VERIFY] → body email=\(email, privacy: .private) otp=\(codeMask, privacy: .private)"
         )
         let reqHeaders = (request.allHTTPHeaderFields ?? [:])
             .map { "\($0.key)=\($0.value)" }.sorted().joined(separator: ", ")
-        authLog.info("[OTP_VERIFY] → headers \(reqHeaders, privacy: .public)")
+        authLog.debug("[OTP_VERIFY] → headers \(reqHeaders, privacy: .private)")
         authLog.info(
             "[OTP_VERIFY] → bodyBytes=\(request.httpBody?.count ?? 0, privacy: .public)"
         )
@@ -702,8 +711,10 @@ public final class AuthService: NSObject {
             authLog.info(
                 "[OTP_VERIFY] ← status=\(http.statusCode, privacy: .public) bodyBytes=\(data.count, privacy: .public)"
             )
-            authLog.info("[OTP_VERIFY] ← headers \(respHeaders, privacy: .public)")
-            authLog.info("[OTP_VERIFY] ← body \(bodyStr, privacy: .public)")
+            // Headers and body can carry the freshly-issued bearer/session token (set-auth-token,
+            // Set-Cookie, JSON body). Never log them as `.public`.
+            authLog.debug("[OTP_VERIFY] ← headers \(respHeaders, privacy: .private)")
+            authLog.debug("[OTP_VERIFY] ← body \(bodyStr, privacy: .private)")
 
             // Check redirect Location for a token (defensive — Better Auth's /sign-in/email-otp
             // returns 200 JSON, not a redirect, but we keep this for older server versions).
@@ -813,6 +824,18 @@ public final class AuthService: NSObject {
         case missingToken
     }
 
+    private enum RefreshResult: Sendable {
+        case refreshed
+        case invalidSession
+        case transientFailure
+        case missingRefreshToken
+
+        var didRefresh: Bool {
+            if case .refreshed = self { return true }
+            return false
+        }
+    }
+
     @discardableResult
     public func restorePersistedSession() async -> SessionRestoreResult {
         guard bearerToken != nil else {
@@ -822,18 +845,24 @@ public final class AuthService: NSObject {
         // Proactively refresh the JWT if it's expired or about to expire.
         // This avoids a wasted round-trip to /auth/me that would fail with 401.
         if isJWTExpiredOrExpiring(bearerToken) {
-            if await refreshAccessToken() {
+            switch await refreshAccessTokenResult() {
+            case .refreshed:
                 debugAuthLog("restorePersistedSession: JWT refreshed successfully")
-            } else if refreshToken == nil {
+            case .missingRefreshToken:
                 // No refresh token (legacy install) — fall through to direct validation
                 debugAuthLog("restorePersistedSession: no refresh token, trying direct validation")
-            } else {
-                // Refresh token is present but refresh failed — session is truly expired
-                authLog.warning("restorePersistedSession: refresh failed, session expired")
+            case .invalidSession:
+                authLog.warning("restorePersistedSession: refresh token rejected, signing out")
                 signOut()
-                isSessionExpired = true
-                lastErrorMessage = "You've been signed out for security. Please sign in again."
+                lastErrorMessage = "Your session has expired. Please sign in again."
                 return .invalid
+            case .transientFailure:
+                // Refresh failed — could be a real 401 OR a network blip on launch
+                // (refreshAccessTokenResult distinguishes them). Keep the persisted
+                // session and retry on the next interactive request.
+                authLog.warning("restorePersistedSession: refresh failed transiently, deferring")
+                authState = .authenticated
+                return .deferred
             }
         }
 
@@ -854,7 +883,8 @@ public final class AuthService: NSObject {
             return .restored
         case .invalidSession:
             // JWT valid but rejected — try refreshing once more before giving up
-            if await refreshAccessToken() {
+            switch await refreshAccessTokenResult() {
+            case .refreshed:
                 debugAuthLog("restorePersistedSession: retrying after refresh")
                 if let freshToken = bearerToken {
                     switch await validateUserProfile(
@@ -872,12 +902,20 @@ public final class AuthService: NSObject {
                         break
                     }
                 }
+                authLog.warning("restorePersistedSession: refreshed token still failed validation, signing out")
+                signOut()
+                lastErrorMessage = "Your session has expired. Please sign in again."
+                return .invalid
+            case .invalidSession, .missingRefreshToken:
+                authLog.warning("restorePersistedSession: token rejected after refresh, signing out")
+                signOut()
+                lastErrorMessage = "Your session has expired. Please sign in again."
+                return .invalid
+            case .transientFailure:
+                authLog.warning("restorePersistedSession: retry refresh failed transiently, deferring")
+                authState = .authenticated
+                return .deferred
             }
-            authLog.warning("restorePersistedSession: token no longer valid")
-            signOut()
-            isSessionExpired = true
-            lastErrorMessage = "You've been signed out for security. Please sign in again."
-            return .invalid
         case .transientFailure(let reason):
             debugAuthLog("restorePersistedSession: deferred due to \(reason)")
             authState = .authenticated
@@ -890,15 +928,19 @@ public final class AuthService: NSObject {
     /// for legacy installs that don't have a refresh token.
     public func attemptSilentRefresh() async -> Bool {
         // Try the access+refresh pattern first
-        if await refreshAccessToken() {
+        switch await refreshAccessTokenResult() {
+        case .refreshed:
             isSessionExpired = false
             return true
+        case .invalidSession, .transientFailure, .missingRefreshToken:
+            break
         }
 
         // Fallback for legacy installs: try /auth/me with the current token
         guard let token = bearerToken else { return false }
         let url = backendURL.appendingPathComponent("api/auth/me")
         var request = URLRequest(url: url)
+        applyNativeClientHeaders(to: &request)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("https://todus.app", forHTTPHeaderField: "Origin")
 
@@ -927,7 +969,18 @@ public final class AuthService: NSObject {
             return token
         }
 
-        if await refreshAccessToken(), let refreshed = bearerToken, !refreshed.isEmpty {
+        switch await refreshAccessTokenResult() {
+        case .refreshed:
+            if let refreshed = bearerToken, !refreshed.isEmpty {
+                return refreshed
+            }
+        case .transientFailure, .missingRefreshToken:
+            break
+        case .invalidSession:
+            return nil
+        }
+
+        if let refreshed = bearerToken, !refreshed.isEmpty, !isJWTExpiredOrExpiring(refreshed) {
             return refreshed
         }
 
@@ -971,22 +1024,27 @@ public final class AuthService: NSObject {
     /// Returns true if a new JWT was obtained, false otherwise.
     @discardableResult
     public func refreshAccessToken() async -> Bool {
+        await refreshAccessTokenResult().didRefresh
+    }
+
+    private func refreshAccessTokenResult() async -> RefreshResult {
         // Coalesce concurrent refresh attempts — only one network request fires at a time.
         // Subsequent callers await the in-flight result instead of firing duplicate requests.
         if let existing = activeRefreshTask {
             return await existing.value
         }
 
-        let task = Task<Bool, Never> { [weak self] in
-            guard let self else { return false }
+        let task = Task<RefreshResult, Never> { [weak self] in
+            guard let self else { return .transientFailure }
 
             guard let rt = self.refreshToken, !rt.isEmpty else {
                 debugAuthLog("refreshAccessToken: no refresh token available")
-                return false
+                return .missingRefreshToken
             }
 
             let url = self.backendURL.appendingPathComponent("api/auth/refresh-native-token")
             var request = URLRequest(url: url)
+            self.applyNativeClientHeaders(to: &request)
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.setValue("https://todus.app", forHTTPHeaderField: "Origin")
@@ -996,7 +1054,7 @@ public final class AuthService: NSObject {
 
             do {
                 let (data, response) = try await URLSession.shared.data(for: request)
-                guard let http = response as? HTTPURLResponse else { return false }
+                guard let http = response as? HTTPURLResponse else { return .transientFailure }
 
                 if (200..<300).contains(http.statusCode),
                    let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -1012,19 +1070,19 @@ public final class AuthService: NSObject {
                         debugAuthLog("refreshAccessToken: captured sessionId \(sid.prefix(8))…")
                     }
                     self.isSessionExpired = false
-                    return true
+                    return .refreshed
                 }
 
                 if http.statusCode == 401 {
                     authLog.warning("refreshAccessToken: refresh token rejected (401)")
-                    return false
+                    return .invalidSession
                 }
 
                 authLog.warning("refreshAccessToken: unexpected response \(http.statusCode)")
-                return false
+                return .transientFailure
             } catch {
                 authLog.warning("refreshAccessToken: network error — \(error.localizedDescription)")
-                return false
+                return .transientFailure
             }
         }
         activeRefreshTask = task
@@ -1073,25 +1131,74 @@ public final class AuthService: NSObject {
     /// properly handles bearer tokens via auth.api.getSession() + JWT fallback.
     /// Stores name and image URL in Keychain so they persist across app launches.
     /// Safe to call multiple times — silently no-ops if not authenticated.
+    ///
+    /// If the JWT is rejected, this attempts one silent refresh before deciding
+    /// whether the session is truly gone. Confirmed-invalid sessions are cleared;
+    /// transient refresh failures are left intact so the next request can retry.
     public func fetchUserProfile() async {
+        // Proactively refresh the JWT if it's expiring. This avoids the common
+        // post-idle race where the first /auth/me call ships an expired token,
+        // gets 401, and tears down the session before the concurrent refresh path
+        // can produce a fresh JWT.
+        if isJWTExpiredOrExpiring(bearerToken), refreshToken != nil {
+            switch await refreshAccessTokenResult() {
+            case .refreshed, .transientFailure, .missingRefreshToken:
+                break
+            case .invalidSession:
+                authLog.warning("fetchUserProfile: refresh token rejected before profile fetch, signing out")
+                signOut()
+                lastErrorMessage = "Your session has expired. Please sign in again."
+                return
+            }
+        }
+
         guard let token = bearerToken else {
             debugAuthLog("fetchUserProfile: no bearer token, skipping")
             return
         }
+
         switch await validateUserProfile(
             token: token,
             fallbackEmail: userEmail,
             attempts: Self.refreshValidationAttempts
         ) {
         case .verified(let profile):
-            applyVerifiedProfile(profile, fallbackEmail: userEmail) // Changed fallbackEmail to userEmail here
+            applyVerifiedProfile(profile, fallbackEmail: userEmail)
             authState = .authenticated
             isSessionExpired = false
         case .invalidSession:
-            authLog.warning("fetchUserProfile: token rejected, signing out")
-            signOut()
-            isSessionExpired = true
-            lastErrorMessage = "Your session has expired. Please sign in again."
+            // JWT was rejected — try refreshing once before giving up. The refresh
+            // token has a 90-day sliding window, so a 401 here usually means the
+            // short-lived JWT expired, not that the session is actually gone.
+            switch await refreshAccessTokenResult() {
+            case .refreshed:
+                guard let freshToken = bearerToken else { return }
+                switch await validateUserProfile(
+                    token: freshToken,
+                    fallbackEmail: userEmail,
+                    attempts: 1
+                ) {
+                case .verified(let profile):
+                    applyVerifiedProfile(profile, fallbackEmail: userEmail)
+                    authState = .authenticated
+                    isSessionExpired = false
+                    return
+                case .invalidSession:
+                    authLog.warning("fetchUserProfile: rejected after refresh, signing out")
+                    signOut()
+                    lastErrorMessage = "Your session has expired. Please sign in again."
+                    return
+                case .transientFailure(let reason):
+                    authLog.warning("fetchUserProfile deferred after refresh: \(reason)")
+                    return
+                }
+            case .invalidSession, .missingRefreshToken:
+                authLog.warning("fetchUserProfile: rejected and refresh unavailable, signing out")
+                signOut()
+                lastErrorMessage = "Your session has expired. Please sign in again."
+            case .transientFailure:
+                authLog.warning("fetchUserProfile: rejected but refresh failed transiently")
+            }
         case .transientFailure(let reason):
             authLog.warning("fetchUserProfile deferred: \(reason)")
         }
@@ -1246,6 +1353,7 @@ public final class AuthService: NSObject {
         let url = backendURL.appendingPathComponent("api/auth/me")
         debugAuthLog("fetchUserProfile: GET \(url.absoluteString) with \(tokenPreview(token))")
         var request = URLRequest(url: url)
+        applyNativeClientHeaders(to: &request)
         request.httpMethod = "GET"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("https://todus.app", forHTTPHeaderField: "Origin")
@@ -1324,9 +1432,9 @@ public final class AuthService: NSObject {
     }
 
     private func tokenPreview(_ token: String) -> String {
-        let prefix = token.prefix(6)
-        let suffix = token.suffix(4)
-        return "\(prefix)...\(suffix) (len=\(token.count))"
+        // Never log token bytes (even prefix/suffix) — JWT signatures are deterministic so
+        // leaking even ~10 chars + length materially weakens the secret.
+        return "(len=\(token.count))"
     }
 
     /// Attempts to extract a Bearer token from the backend response.
