@@ -15,8 +15,36 @@ const mbToBytes = (mb: number) => mb * 1024 * 1024;
 
 export type LegacyConnectionRow = typeof connection.$inferSelect;
 
+const collectErrorMessages = (error: unknown, seen = new Set<unknown>()): string[] => {
+  if (error == null || seen.has(error)) return [];
+  seen.add(error);
+
+  if (typeof error === 'string') {
+    return [error];
+  }
+
+  if (error instanceof Error) {
+    return [
+      error.message,
+      ...collectErrorMessages((error as Error & { cause?: unknown }).cause, seen),
+    ].filter(Boolean);
+  }
+
+  if (typeof error === 'object') {
+    const record = error as Record<string, unknown>;
+    return [
+      typeof record.message === 'string' ? record.message : '',
+      ...collectErrorMessages(record.cause, seen),
+      ...collectErrorMessages(record.error, seen),
+      ...collectErrorMessages(record.originalError, seen),
+    ].filter(Boolean);
+  }
+
+  return [];
+};
+
 export const isMissingConnectionColorError = (error: unknown) =>
-  error instanceof Error && error.message.includes('column "color" does not exist');
+  collectErrorMessages(error).some((message) => message.includes('column "color" does not exist'));
 
 const selectLegacyConnectionFields = async (
   userId: string,
@@ -119,7 +147,7 @@ export const getZeroDB = async (userId: string) => {
 };
 
 class MockExecutionContext implements ExecutionContext {
-  async waitUntil(promise: Promise<any>) {
+  async waitUntil(promise: Promise<unknown>) {
     try {
       await promise;
     } catch (error) {
@@ -127,7 +155,7 @@ class MockExecutionContext implements ExecutionContext {
     }
   }
   passThroughOnException(): void {}
-  props: any;
+  props: unknown;
 }
 
 const getRegistryClient = async (connectionId: string) => {
@@ -701,7 +729,7 @@ export const verifyToken = async (token: string) => {
     throw new Error(`Failed to verify token: ${await response.text()}`);
   }
 
-  const data = (await response.json()) as any;
+  const data = (await response.json()) as unknown;
   return !!data;
 };
 
