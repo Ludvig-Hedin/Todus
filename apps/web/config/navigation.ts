@@ -12,6 +12,8 @@ import {
 import {
   CalendarDays,
   CheckSquare2,
+  Cpu,
+  CreditCard,
   FileText,
   Home,
   MessageSquareIcon,
@@ -220,9 +222,21 @@ export const navigationConfig: Record<string, NavConfig> = {
             shortcut: '?',
           },
           {
-            title: m['navigation.sidebar.meetings'](),
+            title: m['navigation.settings.meetings'](),
             url: '/settings/meetings',
             icon: Video,
+          },
+          {
+            // TODO(i18n): Replace the English fallback once locale catalogs add this key.
+            title: m['navigation.settings.ai'](),
+            url: '/settings/ai',
+            icon: Cpu,
+          },
+          {
+            // TODO(i18n): Replace the English fallback once locale catalogs add this key.
+            title: m['navigation.settings.billing'](),
+            url: '/settings/billing',
+            icon: CreditCard,
           },
           {
             title: m['navigation.settings.deleteAccount'](),

@@ -45,7 +45,7 @@ export default function LabelsPage() {
       {
         loading: m['common.labels.savingLabel'](),
         success: m['common.labels.saveLabelSuccess'](),
-        error: m['common.labels.failedToSavingLabel'](),
+        error: m['common.labels.failedToSaveLabel'](),
       },
     );
   };

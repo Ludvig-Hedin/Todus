@@ -181,6 +181,7 @@ export default function MeetingsPage() {
         <div className="flex gap-0.5">
           {FILTER_OPTIONS.map((opt) => (
             <button
+              type="button"
               key={opt.value}
               className={cn(
                 'rounded-md px-2 py-1 text-[11px] font-medium tracking-tight transition-colors',

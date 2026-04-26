@@ -240,7 +240,7 @@ export function NavUser() {
                           <span>
                             {(activeAccount.name || session.user.name || 'User')
                               .split(' ')
-                              .map((n) => n[0])
+                              .map((n: string) => n[0])
                               .join('')
                               .toUpperCase()
                               .slice(0, 2)}
@@ -424,9 +424,16 @@ export function NavUser() {
                       <ContextMenuTrigger asChild>
                         <Tooltip>
                           <TooltipTrigger asChild>
-                            <div
+                            <button
+                              type="button"
                               onClick={handleToggleVisibility(connection.id)}
-                              className="flex cursor-pointer items-center"
+                              onKeyDown={(event) => {
+                                if (event.key === 'Enter' || event.key === ' ') {
+                                  event.preventDefault();
+                                  handleToggleVisibility(connection.id)();
+                                }
+                              }}
+                              className="flex cursor-pointer items-center border-0 bg-transparent p-0 text-inherit"
                               style={{
                                 opacity: isEnabled ? 1 : 0.35,
                               }}
@@ -461,7 +468,7 @@ export function NavUser() {
                                   />
                                 )}
                               </div>
-                            </div>
+                            </button>
                           </TooltipTrigger>
                           <TooltipContent className="text-muted-foreground text-xs">
                             <div>
@@ -590,7 +597,7 @@ export function NavUser() {
                   sideOffset={8}
                 >
                   <div className="space-y-1">
-                    {billingCustomer?.stripe_id ? (
+                    {isPro || billingCustomer?.stripe_id ? (
                       <DropdownMenuItem onClick={() => openBillingPortal()}>
                         <div className="flex items-center gap-2">
                           <BanknoteIcon size={16} className="opacity-60" />

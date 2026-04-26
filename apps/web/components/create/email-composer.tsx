@@ -253,6 +253,16 @@ export function EmailComposer({
   const subjectInput = watch('subject');
   const attachments = watch('attachments');
   const fromEmail = watch('fromEmail');
+  const fromOptions = useMemo(() => {
+    const connectionOptions =
+      connectionsData?.connections.map((conn) => ({ value: conn.email })) ?? [];
+    const aliasOptions =
+      aliases
+        ?.filter((alias) => !connectionOptions.some((option) => option.value === alias.email))
+        .map((alias) => ({ value: alias.email })) ?? [];
+
+    return [...connectionOptions, ...aliasOptions];
+  }, [aliases, connectionsData?.connections]);
 
   const handleAttachment = async (newFiles: File[]) => {
     if (newFiles && newFiles.length > 0) {
@@ -598,11 +608,14 @@ export function EmailComposer({
       settings?.settings?.defaultEmailAlias ??
       aliases?.find((a) => a.primary)?.email ??
       aliases?.[0]?.email;
+    const currentFromEmail = getValues('fromEmail');
+    const currentIsValid =
+      !currentFromEmail || fromOptions.some((option) => option.value === currentFromEmail);
 
-    if (preferred && getValues('fromEmail') !== preferred) {
+    if ((!currentIsValid || !currentFromEmail) && preferred && currentFromEmail !== preferred) {
       setValue('fromEmail', preferred, { shouldDirty: false });
     }
-  }, [settings?.settings?.defaultEmailAlias, aliases, getValues, setValue]);
+  }, [settings?.settings?.defaultEmailAlias, aliases, fromOptions, getValues, setValue]);
 
   useEffect(() => {
     if (didOverrideSignature) {
@@ -759,7 +772,8 @@ export function EmailComposer({
         ) : null}
 
         {/* From — show picker when multiple aliases OR multiple connections exist */}
-        {(aliases && aliases.length > 1) || (connectionsData && connectionsData.connections.length > 1) ? (
+        {(fromOptions.length > 1 ||
+          (fromEmail ? !fromOptions.some((option) => option.value === fromEmail) : false)) ? (
           <div className="flex items-center gap-2 border-b p-3">
             <p className="text-sm font-medium text-[#8C8C8C]">From:</p>
             <Select

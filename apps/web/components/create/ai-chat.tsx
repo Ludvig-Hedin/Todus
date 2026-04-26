@@ -1,11 +1,18 @@
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from '../ui/context-menu';
 import { ChatSpecRenderer, extractUISpecFromMessage } from '../generative-ui';
 import { Avatar, AvatarFallback, AvatarImage } from '../ui/avatar';
 import { extractMentionRefsFromDoc } from '@/lib/editor-mentions';
 import { useAIFullScreen, useAISidebar } from '../ui/ai-sidebar';
+import { useRef, useCallback, useEffect, useState } from 'react';
 import { VoiceProvider } from '@/providers/voice-provider';
+import type { Message as AiMessage, Attachment } from 'ai';
 import useComposeEditor from '@/hooks/use-compose-editor';
 import { useConnections } from '@/hooks/use-connections';
-import { useRef, useCallback, useEffect } from 'react';
 import type { useAgentChat } from 'agents/ai-react';
 import { Markdown } from '@react-email/components';
 import { useBilling } from '@/hooks/use-billing';
@@ -14,14 +21,15 @@ import { useThread } from '@/hooks/use-threads';
 import { MailLabels } from '../mail/mail-list';
 import type { MentionRef } from '@zero/shared';
 import { cn, getEmailLogo } from '@/lib/utils';
-import type { Message as AiMessage } from 'ai';
 import { VoiceButton } from '../voice-button';
 import { EditorContent } from '@tiptap/react';
 import { CurvedArrow } from '../icons/icons';
+import { Copy, Pencil } from 'lucide-react';
 import { Tools } from '../../types/tools';
 import { Button } from '../ui/button';
 import { format } from 'date-fns-tz';
 import { useQueryState } from 'nuqs';
+import { toast } from 'sonner';
 import './prosemirror.css';
 
 const ThreadPreview = ({ threadId }: { threadId: string }) => {
@@ -222,7 +230,10 @@ const markdownStyles = {
 // Normalize single newlines to double so Markdown sees paragraph breaks.
 // AI responses frequently use single \n which CommonMark collapses to a space,
 // making the entire response render as one unbroken paragraph.
-const normalizeMarkdown = (text: string) => text.replace(/(?<!\n)\n(?!\n)/g, '\n\n');
+const normalizeMarkdown = (text: string) => {
+  const sentinel = '\u0000DN\u0000';
+  return text.replace(/\n\n/g, sentinel).replace(/\n/g, '\n\n').replaceAll(sentinel, '\n\n');
+};
 
 const EMAIL_CONNECTION_PATTERNS = [
   /\bno (email|mail) (account|connection) (connected|found)\b/i,
@@ -293,18 +304,26 @@ const ToolResponse = ({ toolName, result, args }: { toolName: string; result: an
   }
 };
 
+const AI_CHAT_MAX_PENDING_IMAGES = 8;
+const AI_CHAT_MAX_PASTE_IMAGE_BYTES = 5 * 1024 * 1024;
+
 export function AIChat({
   messages,
+  input,
   setInput,
   error,
-  handleSubmit,
   status,
+  append,
+  setMessages,
   onMentionsChange,
 }: ReturnType<typeof useAgentChat> & {
   onMentionsChange?: (mentions: MentionRef[]) => void;
 }): React.ReactElement {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const [pendingImages, setPendingImages] = useState<Array<Attachment & { _id: string }>>([]);
+  const pendingImagesRef = useRef(pendingImages);
+  pendingImagesRef.current = pendingImages;
   const { chatMessages, isLoading: isBillingLoading } = useBilling();
   const { data: connectionsData } = useConnections();
   const hasEmailConnection = (connectionsData?.connections?.length ?? 0) > 0;
@@ -326,6 +345,42 @@ export function AIChat({
     }
   }, [status, scrollToBottom]);
 
+  const handlePasteFiles = useCallback((files: File[]) => {
+    const room = Math.max(0, AI_CHAT_MAX_PENDING_IMAGES - pendingImagesRef.current.length);
+    if (room <= 0) return;
+
+    const imageFiles = files.filter((f) => f.type.startsWith('image/'));
+    const toRead = imageFiles.filter((f) => f.size <= AI_CHAT_MAX_PASTE_IMAGE_BYTES).slice(0, room);
+
+    for (const file of toRead) {
+      const reader = new FileReader();
+      const nameKey =
+        file.name && file.name.trim().length > 0
+          ? file.name.trim()
+          : `image-${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`}`;
+      const stableId = `paste-${nameKey}-${file.size}-${file.lastModified}`;
+      reader.onerror = () => {
+        console.error('[ai-chat] FileReader failed for paste', file.name);
+      };
+      reader.onload = () => {
+        setPendingImages((prev) => {
+          if (prev.length >= AI_CHAT_MAX_PENDING_IMAGES) return prev;
+          if (prev.some((p) => p._id === stableId)) return prev;
+          return [
+            ...prev,
+            {
+              _id: stableId,
+              name: file.name?.trim() ? file.name.trim() : nameKey,
+              contentType: file.type,
+              url: reader.result as string,
+            },
+          ];
+        });
+      };
+      reader.readAsDataURL(file);
+    }
+  }, []);
+
   const editor = useComposeEditor({
     surface: 'ai-chat',
     placeholder: 'Ask Todus to do anything...',
@@ -333,6 +388,7 @@ export function AIChat({
       setInput(text);
       onMentionsChange?.(extractMentionRefsFromDoc(content));
     },
+    onPasteFiles: handlePasteFiles,
     onKeydown(event) {
       if (event.key === '0' && event.metaKey) {
         return toggleOpen();
@@ -358,9 +414,43 @@ export function AIChat({
       return;
     }
 
-    handleSubmit(e);
+    const trimmed = input.trim();
+    const attachments = pendingImages.map((image) => ({
+      name: image.name,
+      contentType: image.contentType,
+      url: image.url,
+    }));
+    const previousPendingImages = pendingImages;
+    if (!trimmed && attachments.length === 0) return;
+
+    // Reset composer + attachment state BEFORE awaiting append() — otherwise any keystrokes
+    // typed during the in-flight network call get cleared once we finally clear the editor.
+    // The editor's onChange (from clearContent) syncs setInput('') for us; an explicit
+    // setInput('') here would also wipe the new keystrokes.
     editor.commands.clearContent(true);
+    setPendingImages([]);
     onMentionsChange?.([]);
+
+    try {
+      await append(
+        {
+          role: 'user',
+          content: trimmed,
+          ...(attachments.length ? { experimental_attachments: attachments } : {}),
+        },
+        {
+          allowEmptySubmit: attachments.length > 0,
+        },
+      );
+    } catch (error) {
+      console.error('[ai-chat] append failed', error);
+      setPendingImages(previousPendingImages);
+      editor.commands.setContent(trimmed);
+      setInput(trimmed);
+      onMentionsChange?.([]);
+      toast.error('Failed to send message. Please try again.');
+      return;
+    }
     setTimeout(() => {
       scrollToBottom();
     }, 100);
@@ -372,6 +462,39 @@ export function AIChat({
     onMentionsChange?.([]);
     editor.commands.focus();
   };
+
+  /// Copy the plain-text payload of a message to the clipboard.
+  /// Falls back silently if the Clipboard API is unavailable (older iOS Safari
+  /// embedded contexts) — toast still fires so the user knows the action registered.
+  const copyMessageText = useCallback(async (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    try {
+      await navigator.clipboard.writeText(trimmed);
+      toast.success('Copied');
+    } catch {
+      const ua =
+        typeof navigator !== 'undefined' ? `${navigator.platform} ${navigator.userAgent}` : '';
+      const isMac = /Mac|iPhone|iPad|iPod/i.test(ua);
+      const shortcut = isMac ? '⌘C' : 'Ctrl+C';
+      toast.error(`Couldn't copy — try selecting and using ${shortcut}`);
+    }
+  }, []);
+
+  /// Right-click / long-press "Edit message" on a user bubble:
+  /// drop the edited turn and every reply after it, pre-fill the composer with
+  /// the old wording, and focus it. User edits and presses enter to re-run.
+  const editUserMessage = useCallback(
+    (index: number, text: string) => {
+      if (status === 'streaming' || status === 'submitted') return;
+      setMessages(messages.slice(0, index));
+      setInput(text);
+      editor.commands.setContent(text);
+      onMentionsChange?.([]);
+      editor.commands.focus('end');
+    },
+    [messages, setMessages, setInput, editor, onMentionsChange, status],
+  );
 
   useEffect(() => {
     if (aiSidebarOpen === 'true') {
@@ -434,75 +557,115 @@ export function AIChat({
                         />
                       ),
                   )}
+                  {message.role === 'user' &&
+                    (
+                      message as AiMessage & { experimental_attachments?: Attachment[] }
+                    ).experimental_attachments
+                      ?.filter((a) => a.contentType?.startsWith('image/'))
+                      .map((att, i) => (
+                        <img
+                          key={`${att.url ?? att.name ?? 'att'}-${i}`}
+                          src={att.url}
+                          alt={att.name ?? 'image'}
+                          className="ml-auto max-h-48 max-w-xs rounded-lg object-cover"
+                        />
+                      ))}
                   {textParts.length > 0 && (
-                    <div
-                      className={cn(
-                        'flex w-fit flex-col gap-2 rounded-lg text-sm',
-                        message.role === 'user'
-                          ? 'overflow-wrap-anywhere text-offsetDark dark:text-subtleWhite ml-auto break-words bg-[#f0f0f0] px-2 py-1 dark:bg-[#252525]'
-                          : 'overflow-wrap-anywhere mr-auto break-words p-2',
-                      )}
-                    >
-                      {textParts.map((part) => {
-                        if (!part.text) return null;
+                    <ContextMenu>
+                      <ContextMenuTrigger asChild>
+                        <div
+                          className={cn(
+                            'flex w-fit flex-col gap-2 rounded-lg text-sm',
+                            message.role === 'user'
+                              ? 'overflow-wrap-anywhere text-offsetDark dark:text-subtleWhite ml-auto break-words bg-[#f0f0f0] px-2 py-1 dark:bg-[#252525]'
+                              : 'overflow-wrap-anywhere mr-auto break-words p-2',
+                          )}
+                        >
+                          {textParts.map((part) => {
+                            if (!part.text) return null;
 
-                        // Check for embedded UI specs in assistant messages
-                        if (message.role === 'assistant') {
-                          const { textBefore, spec, textAfter } = extractUISpecFromMessage(
-                            part.text,
-                          );
+                            // Check for embedded UI specs in assistant messages
+                            if (message.role === 'assistant') {
+                              const { textBefore, spec, textAfter } = extractUISpecFromMessage(
+                                part.text,
+                              );
 
-                          if (spec) {
+                              if (spec) {
+                                return (
+                                  <div key={part.text} className="flex flex-col gap-2">
+                                    {textBefore && (
+                                      <Markdown markdownCustomStyles={markdownStyles}>
+                                        {normalizeMarkdown(textBefore)}
+                                      </Markdown>
+                                    )}
+                                    <ChatSpecRenderer spec={spec} className="my-1 w-full" />
+                                    {textAfter && (
+                                      <Markdown markdownCustomStyles={markdownStyles}>
+                                        {normalizeMarkdown(textAfter)}
+                                      </Markdown>
+                                    )}
+                                  </div>
+                                );
+                              }
+                            }
+
                             return (
-                              <div key={part.text} className="flex flex-col gap-2">
-                                {textBefore && (
-                                  <Markdown markdownCustomStyles={markdownStyles}>
-                                    {normalizeMarkdown(textBefore)}
-                                  </Markdown>
-                                )}
-                                <ChatSpecRenderer spec={spec} className="my-1 w-full" />
-                                {textAfter && (
-                                  <Markdown markdownCustomStyles={markdownStyles}>
-                                    {normalizeMarkdown(textAfter)}
-                                  </Markdown>
-                                )}
-                              </div>
+                              <Markdown markdownCustomStyles={markdownStyles} key={part.text}>
+                                {normalizeMarkdown(part.text || ' ')}
+                              </Markdown>
                             );
-                          }
-                        }
+                          })}
 
-                        return (
-                          <Markdown markdownCustomStyles={markdownStyles} key={part.text}>
-                            {normalizeMarkdown(part.text || ' ')}
-                          </Markdown>
-                        );
-                      })}
+                          {/* Connect CTA — shown when AI mentions email not being connected */}
+                          {message.role === 'assistant' &&
+                            !hasEmailConnection &&
+                            textParts.some((p) => {
+                              const text = p.text?.toLowerCase();
+                              if (!text) return false;
 
-                      {/* Connect CTA — shown when AI mentions email not being connected */}
-                      {message.role === 'assistant' &&
-                        !hasEmailConnection &&
-                        textParts.some((p) => {
-                          const text = p.text?.toLowerCase();
-                          if (!text) return false;
+                              const hasEmailToken = /\b(email|mail|inbox|gmail)\b/.test(text);
+                              const hasConnectionToken =
+                                /\b(not connected|connect|connection|connected|found)\b/.test(text);
 
-                          const hasEmailToken = /\b(email|mail|inbox|gmail)\b/.test(text);
-                          const hasConnectionToken =
-                            /\b(not connected|connect|connection|connected|found)\b/.test(text);
-
-                          return (
-                            (hasEmailToken && hasConnectionToken) ||
-                            EMAIL_CONNECTION_PATTERNS.some((pattern) => pattern.test(text))
-                          );
-                        }) && (
-                          <a
-                            href="/settings/connections"
-                            className="mt-1 inline-flex items-center gap-1.5 self-start rounded-lg bg-blue-500/10 px-3 py-1.5 text-xs font-medium text-blue-500 transition-colors hover:bg-blue-500/20"
+                              return (
+                                (hasEmailToken && hasConnectionToken) ||
+                                EMAIL_CONNECTION_PATTERNS.some((pattern) => pattern.test(text))
+                              );
+                            }) && (
+                              <a
+                                href="/settings/connections"
+                                className="mt-1 inline-flex items-center gap-1.5 self-start rounded-lg bg-blue-500/10 px-3 py-1.5 text-xs font-medium text-blue-500 transition-colors hover:bg-blue-500/20"
+                              >
+                                Connect Email Account
+                                <span aria-hidden="true">→</span>
+                              </a>
+                            )}
+                        </div>
+                      </ContextMenuTrigger>
+                      <ContextMenuContent className="w-48">
+                        <ContextMenuItem
+                          onSelect={() => {
+                            const plain = textParts.map((p) => p.text ?? '').join('\n');
+                            void copyMessageText(plain);
+                          }}
+                        >
+                          <Copy className="mr-2 h-3.5 w-3.5" />
+                          Copy
+                        </ContextMenuItem>
+                        {message.role === 'user' && (
+                          <ContextMenuItem
+                            disabled={status === 'streaming' || status === 'submitted'}
+                            onSelect={() => {
+                              const plain = textParts.map((p) => p.text ?? '').join('\n');
+                              editUserMessage(index, plain);
+                            }}
                           >
-                            Connect Email Account
-                            <span aria-hidden="true">→</span>
-                          </a>
+                            <Pencil className="mr-2 h-3.5 w-3.5" />
+                            Edit message
+                          </ContextMenuItem>
                         )}
-                    </div>
+                      </ContextMenuContent>
+                    </ContextMenu>
                   )}
                 </div>
               );
@@ -553,6 +716,26 @@ export function AIChat({
                 </div>
               </form>
             </div>
+            {pendingImages.length > 0 && (
+              <div className="flex flex-wrap gap-2 px-3 pb-1 pt-2">
+                {pendingImages.map((img) => (
+                  <div key={img._id} className="relative shrink-0">
+                    <img src={img.url} alt={img.name} className="h-16 w-16 rounded object-cover" />
+                    <button
+                      type="button"
+                      title="Remove image"
+                      aria-label={`Remove image ${img.name} (${img._id})`}
+                      onClick={() =>
+                        setPendingImages((prev) => prev.filter((i) => i._id !== img._id))
+                      }
+                      className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-black/70 text-[10px] leading-none text-white"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
             <div className="grid">
               <div className="flex justify-end gap-1">
                 <VoiceProvider>
@@ -573,80 +756,7 @@ export function AIChat({
           </div>
         </div>
 
-        {/* <div className="flex items-center justify-end gap-1">
-        <div className="mt-1 flex items-center justify-end relative z-10">
-          <Select
-
-          >
-            <SelectTrigger className="flex h-6 w-fit cursor-pointer items-center justify-between gap-1 border-0 dark:bg-[#141414] px-2 text-xs hover:bg-[#1E1E1E]">
-              <div className="flex items-center gap-1.5 w-full">
-                <Puzzle className="h-3.5 w-3.5 fill-white dark:fill-[#929292]" />
-              </div>
-
-            </SelectTrigger>
-            <SelectContent className="w-[190px] rounded-md border-0 bg-[#1E1E1E] p-0.5 shadow-md">
-              <SelectItem
-                value="gpt-3.5"
-                className="flex items-center gap-1.5 rounded px-2 py-1 text-xs hover:bg-[#2A2A2A]"
-              >
-                <div className="flex items-center gap-1.5 pl-6">
-                  <img src="/openai.png" alt="OpenAI" className="h-3.5 w-3.5 dark:invert" />
-                  <span className="whitespace-nowrap">GPT 3.5</span>
-                </div>
-              </SelectItem>
-              <SelectItem
-                value="claude-3.5"
-                className="flex items-center gap-1.5 rounded px-2 py-1 text-xs hover:bg-[#2A2A2A]"
-              >
-                <div className="flex items-center gap-1.5 pl-6">
-                  <img src="/claude.png" alt="Claude" className="h-3.5 w-3.5" />
-                  <span className="whitespace-nowrap">Claude 3.5</span>
-                </div>
-              </SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="mt-1 flex items-center justify-end relative z-10">
-          <Select
-            value={selectedModel}
-            onValueChange={(value) => {
-              setSelectedModel(value);
-              onModelChange?.(value);
-            }}
-          >
-            <SelectTrigger className="flex h-6 w-fit cursor-pointer items-center justify-between gap-1 border-0 dark:bg-[#141414] px-2 text-xs hover:bg-[#1E1E1E]">
-              <div className="flex items-center gap-1.5 w-full">
-                {selectedModel === 'gpt-3.5' ? (
-                  <img src="/openai.png" alt="OpenAI" className="h-3.5 w-3.5 dark:invert" />
-                ) : (
-                  <img src="/claude.png" alt="Claude" className="h-3.5 w-3.5" />
-                )}
-              </div>
-
-            </SelectTrigger>
-            <SelectContent className="w-[190px] rounded-md border-0 bg-[#1E1E1E] p-0.5 shadow-md">
-              <SelectItem
-                value="gpt-3.5"
-                className="flex items-center gap-1.5 rounded px-2 py-1 text-xs hover:bg-[#2A2A2A]"
-              >
-                <div className="flex items-center gap-1.5 pl-6">
-                  <img src="/openai.png" alt="OpenAI" className="h-3.5 w-3.5 dark:invert" />
-                  <span className="whitespace-nowrap">GPT 3.5</span>
-                </div>
-              </SelectItem>
-              <SelectItem
-                value="claude-3.5"
-                className="flex items-center gap-1.5 rounded px-2 py-1 text-xs hover:bg-[#2A2A2A]"
-              >
-                <div className="flex items-center gap-1.5 pl-6">
-                  <img src="/claude.png" alt="Claude" className="h-3.5 w-3.5" />
-                  <span className="whitespace-nowrap">Claude 3.5</span>
-                </div>
-              </SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        </div> */}
+        {/* Old model selector removed — now handled by ModelSelector in ai-sidebar.tsx header */}
       </div>
     </div>
   );

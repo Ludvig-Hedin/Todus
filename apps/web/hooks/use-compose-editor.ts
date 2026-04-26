@@ -13,6 +13,7 @@ import { TextSelection } from 'prosemirror-state';
 import { Image } from '@tiptap/extension-image';
 import { Markdown } from 'tiptap-markdown';
 import { isObjectType } from 'remeda';
+import { useRef } from 'react';
 import { cn } from '@/lib/utils';
 
 const CustomModEnter = (onModEnter: KeyboardShortcutCommand) => {
@@ -128,6 +129,7 @@ const useComposeEditor = ({
   surface = 'email-compose',
   onTemplateCommand,
   onSignatureCommand,
+  onPasteFiles,
 }: {
   initialValue?: Record<string, unknown> | string | null;
   isReadOnly?: boolean;
@@ -136,6 +138,7 @@ const useComposeEditor = ({
   onChange?: (content: Record<string, unknown>) => void | Promise<void>;
   onTextChange?: (text: string, content: Record<string, unknown>) => void | Promise<void>;
   onAttachmentsChange?: (attachments: File[]) => void | Promise<void>;
+  onPasteFiles?: (files: File[]) => void;
   onLengthChange?: (length: number) => void | Promise<void>;
   onBlur?: NonNullable<Parameters<typeof useEditor>[0]>['onBlur'];
   onFocus?: NonNullable<Parameters<typeof useEditor>[0]>['onFocus'];
@@ -158,6 +161,9 @@ const useComposeEditor = ({
   onTemplateCommand?: () => void;
   onSignatureCommand?: () => void;
 }) => {
+  const onPasteFilesRef = useRef(onPasteFiles);
+  onPasteFilesRef.current = onPasteFiles;
+
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const searchMentions = async (query: string, kinds?: MentionKind[]) => {
@@ -187,42 +193,36 @@ const useComposeEditor = ({
     FileHandler.configure({
       allowedMimeTypes: ['image/png', 'image/jpeg', 'image/gif', 'image/webp'],
       onDrop: (currentEditor, files, pos) => {
+        if (onPasteFilesRef.current) {
+          onPasteFilesRef.current(files);
+          return;
+        }
         files.forEach((file) => {
           const fileReader = new FileReader();
-
           fileReader.readAsDataURL(file);
           fileReader.onload = () => {
             currentEditor
               .chain()
-              .insertContentAt(pos, {
-                type: 'image',
-                attrs: {
-                  src: fileReader.result,
-                },
-              })
+              .insertContentAt(pos, { type: 'image', attrs: { src: fileReader.result } })
               .focus()
               .run();
           };
         });
       },
-      onPaste: (currentEditor, files, htmlContent) => {
+      onPaste: (currentEditor, files) => {
+        if (onPasteFilesRef.current) {
+          onPasteFilesRef.current(files);
+          return;
+        }
         files.forEach((file) => {
-          if (htmlContent) {
-            console.log(htmlContent); // eslint-disable-line no-console
-            return false;
-          }
-
           const fileReader = new FileReader();
-
           fileReader.readAsDataURL(file);
           fileReader.onload = () => {
             currentEditor
               .chain()
               .insertContentAt(currentEditor.state.selection.anchor, {
                 type: 'image',
-                attrs: {
-                  src: fileReader.result,
-                },
+                attrs: { src: fileReader.result },
               })
               .focus()
               .run();

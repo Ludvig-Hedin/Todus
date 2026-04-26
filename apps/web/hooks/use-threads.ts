@@ -3,7 +3,7 @@ import { useInfiniteQuery, useQuery, useMutation, useQueryClient } from '@tansta
 import type { IGetThreadResponse } from '../../server/src/lib/driver/types';
 import { useConnectionFilter } from '@/providers/connection-filter-provider';
 import { useSearchValue } from '@/hooks/use-search-value';
-import { useTRPC } from '@/providers/query-provider';
+import { useTRPC, useTRPCClient } from '@/providers/query-provider';
 import useSearchLabels from './use-labels-search';
 import { useSession } from '@/lib/auth-client';
 import { useAtom, useAtomValue } from 'jotai';
@@ -23,6 +23,7 @@ export const useThreads = () => {
   const [backgroundQueue] = useAtom(backgroundQueueAtom);
   const isInQueue = useAtomValue(isThreadInBackgroundQueueAtom);
   const trpc = useTRPC();
+  const trpcClient = useTRPCClient();
   const { labels } = useSearchLabels();
   const queryClient = useQueryClient();
   const [selectedThreadId] = useQueryState('threadId');
@@ -54,28 +55,36 @@ export const useThreads = () => {
   );
 
   // Multi-connection mode: use listThreadsMulti endpoint
-  const multiConnectionQuery = useQuery(
-    trpc.mail.listThreadsMulti.queryOptions(
-      {
+  const multiConnectionQuery = useInfiniteQuery({
+    queryKey: [
+      ['mail', 'listThreadsMulti'],
+      { folder, q: searchValue.value, labelIds: labels, connectionIds: enabledIds },
+    ],
+    initialPageParam: {} as Record<string, string>,
+    queryFn: async ({ pageParam }) =>
+      trpcClient.mail.listThreadsMulti.query({
         folder,
         q: searchValue.value,
         labelIds: labels,
         connectionIds: enabledIds,
-      },
-      {
-        staleTime: THREAD_SUMMARY_STALE_TIME_MS,
-        refetchOnMount: false,
-        refetchOnReconnect: true,
-        enabled: isUnifiedView,
-      },
-    ),
-  );
+        cursors: pageParam as Record<string, string>,
+      }),
+    getNextPageParam: (lastPage) =>
+      lastPage.nextCursors && Object.keys(lastPage.nextCursors).length > 0
+        ? lastPage.nextCursors
+        : undefined,
+    staleTime: THREAD_SUMMARY_STALE_TIME_MS,
+    refetchOnMount: false,
+    refetchOnReconnect: true,
+    enabled: isUnifiedView,
+  });
 
   // Unified thread list regardless of mode
   const threads = useMemo(() => {
     if (isUnifiedView) {
       return multiConnectionQuery.data
-        ? multiConnectionQuery.data.threads
+        ? multiConnectionQuery.data.pages
+            .flatMap((page) => page.threads)
             .filter(Boolean)
             .filter((e) => !isInQueue(`thread:${e.id}`))
         : [];
@@ -102,17 +111,24 @@ export const useThreads = () => {
 
   const isEmpty = useMemo(() => threads.length === 0, [threads]);
   const isReachingEnd = isUnifiedView
-    ? isEmpty || !multiConnectionQuery.data?.nextCursors || Object.keys(multiConnectionQuery.data.nextCursors).length === 0
+    ? isEmpty ||
+      !multiConnectionQuery.data?.pages.length ||
+      !multiConnectionQuery.data.pages[multiConnectionQuery.data.pages.length - 1]?.nextCursors ||
+      Object.keys(
+        multiConnectionQuery.data.pages[multiConnectionQuery.data.pages.length - 1]?.nextCursors ??
+          {},
+      ).length === 0
     : isEmpty ||
       (singleConnectionQuery.data &&
         !singleConnectionQuery.data.pages[singleConnectionQuery.data.pages.length - 1]?.nextPageToken);
 
   const loadMore = async () => {
     if (activeQuery.isLoading || activeQuery.isFetching) return;
-    if (!isUnifiedView) {
-      await singleConnectionQuery.fetchNextPage();
+    if (isUnifiedView) {
+      await multiConnectionQuery.fetchNextPage();
+      return;
     }
-    // Multi-connection pagination: re-fetch with updated cursors (handled by next iteration)
+    await singleConnectionQuery.fetchNextPage();
   };
 
   useEffect(() => {

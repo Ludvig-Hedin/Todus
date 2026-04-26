@@ -623,9 +623,22 @@ export default function TasksPage() {
         )}
       </div>
 
-      {/* ── Task Detail Sheet ── */}
-      <Sheet open={!!detailTask} onOpenChange={(open) => !open && setDetailTask(null)}>
-        <SheetContent side="right" className="w-[400px] overflow-y-auto sm:max-w-[400px]">
+      {/* ── Task Detail Side Panel ── */}
+      <Sheet
+        modal={false}
+        open={!!detailTask}
+        onOpenChange={(open) => !open && setDetailTask(null)}
+      >
+        <SheetContent
+          side="right"
+          hideOverlay
+          // Side panel: stays interactive with the rest of the page, no outside-click close,
+          // no scroll lock, no Escape close — closes only via the explicit Close button.
+          onPointerDownOutside={(e) => e.preventDefault()}
+          onInteractOutside={(e) => e.preventDefault()}
+          onEscapeKeyDown={(e) => e.preventDefault()}
+          className="w-[400px] overflow-y-auto sm:max-w-[400px]"
+        >
           {detailTask && (
             <TaskDetailPanel
               task={detailTask}
@@ -1451,13 +1464,21 @@ function TaskDialog({
   isPending: boolean;
 }) {
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>{editingTask ? 'Edit task' : 'New task'}</DialogTitle>
-        </DialogHeader>
+    <Sheet modal={false} open={open} onOpenChange={onOpenChange}>
+      <SheetContent
+        side="right"
+        hideOverlay
+        // Non-modal: page stays interactive while creating/editing a task.
+        onPointerDownOutside={(e) => e.preventDefault()}
+        onInteractOutside={(e) => e.preventDefault()}
+        onEscapeKeyDown={(e) => e.preventDefault()}
+        className="flex w-[420px] flex-col gap-0 overflow-y-auto p-0 sm:max-w-[420px]"
+      >
+        <SheetHeader className="border-b px-6 py-4">
+          <SheetTitle>{editingTask ? 'Edit task' : 'New task'}</SheetTitle>
+        </SheetHeader>
 
-        <div className="flex flex-col gap-4 py-2">
+        <div className="flex flex-1 flex-col gap-4 overflow-y-auto px-6 py-4">
           <Input
             placeholder="Task title"
             value={form.title}
@@ -1572,15 +1593,15 @@ function TaskDialog({
           </div>
         </div>
 
-        <DialogFooter>
+        <div className="flex justify-end gap-2 border-t px-6 py-4">
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
           <Button onClick={onSubmit} disabled={!form.title.trim() || isPending}>
             {editingTask ? 'Save changes' : 'Create task'}
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </div>
+      </SheetContent>
+    </Sheet>
   );
 }

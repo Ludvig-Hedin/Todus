@@ -190,7 +190,7 @@ export default function SearchPage() {
               <Button
                 variant="outline"
                 className="h-auto justify-start gap-3 rounded-xl px-4 py-3 text-left"
-                onClick={() => navigate('/mail/compose')}
+                onClick={() => navigate('/mail/compose', { state: { fromApp: true } })}
               >
                 <Pencil className="text-muted-foreground h-4 w-4 shrink-0" />
                 <span className="text-foreground text-[13px] font-normal">Compose new email…</span>

@@ -1,13 +1,7 @@
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogTitle,
-  DialogTrigger,
-} from '@/components/ui/dialog';
+import { Sheet, SheetContent } from '@/components/ui/sheet';
 import { CreateEmail } from '@/components/create/create-email';
 import { authProxy } from '@/lib/auth-proxy';
-import { useLoaderData } from 'react-router';
+import { useLoaderData, useLocation, useNavigate } from 'react-router';
 import type { Route } from './+types/page';
 
 export async function clientLoader({ request }: Route.ClientLoaderArgs) {
@@ -32,13 +26,36 @@ export async function clientLoader({ request }: Route.ClientLoaderArgs) {
 
 export default function ComposePage() {
   const params = useLoaderData<typeof clientLoader>();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const hasInternalReferrer = location.state?.fromApp === true;
 
+  // Side-panel compose: leaves the rest of the mail layout (sidebar, etc.)
+  // interactive while a draft is in flight. Closing the sheet pops back to
+  // wherever the user came from (or the inbox if they deep-linked).
   return (
-    <Dialog open={true}>
-      <DialogTitle></DialogTitle>
-      <DialogDescription></DialogDescription>
-      <DialogTrigger></DialogTrigger>
-      <DialogContent className="h-screen w-screen max-w-none border-none bg-[#FAFAFA] p-0 shadow-none dark:bg-[#141414]">
+    <Sheet
+      modal={false}
+      open={true}
+      onOpenChange={(open) => {
+        if (!open) {
+          if (hasInternalReferrer) {
+            navigate(-1);
+          } else {
+            void navigate('/mail/inbox');
+          }
+        }
+      }}
+    >
+      <SheetContent
+        side="right"
+        hideOverlay
+        // Lets users keep clicking sidebar / inbox while composing.
+        onPointerDownOutside={(e) => e.preventDefault()}
+        onInteractOutside={(e) => e.preventDefault()}
+        onEscapeKeyDown={(e) => e.preventDefault()}
+        className="flex h-screen w-full max-w-[640px] flex-col border-l bg-[#FAFAFA] p-0 shadow-2xl sm:max-w-[640px] dark:bg-[#141414]"
+      >
         <CreateEmail
           initialTo={params.to || ''}
           initialSubject={params.subject || ''}
@@ -47,7 +64,7 @@ export default function ComposePage() {
           initialBcc={params.bcc || ''}
           draftId={params.draftId || null}
         />
-      </DialogContent>
-    </Dialog>
+      </SheetContent>
+    </Sheet>
   );
 }

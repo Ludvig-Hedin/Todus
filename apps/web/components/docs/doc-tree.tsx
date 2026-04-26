@@ -11,6 +11,7 @@ import { ChevronRight, ChevronDown, FileText, Plus, PenLine } from 'lucide-react
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTRPC } from '@/providers/query-provider';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Button } from '@/components/ui/button';
 import { useEffect, useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
 
@@ -135,7 +136,9 @@ export function DocTree({ selectedDocId, onSelectDoc }: DocTreeProps) {
   const queryClient = useQueryClient();
   const autoCreatedRef = useRef(false);
 
-  const { data, isLoading } = useQuery(trpc.docs.workspaces.list.queryOptions());
+  const { data, isLoading, isError, error, refetch, isRefetching } = useQuery(
+    trpc.docs.workspaces.list.queryOptions(),
+  );
 
   const createWorkspace = useMutation({
     ...trpc.docs.workspaces.create.mutationOptions(),
@@ -148,23 +151,54 @@ export function DocTree({ selectedDocId, onSelectDoc }: DocTreeProps) {
   const quickCreateDoc = useMutation({
     ...trpc.docs.create.mutationOptions(),
     onSuccess: (result) => {
-      void queryClient.invalidateQueries(trpc.docs.list.queryFilter());
+      if (firstWorkspaceId) {
+        void queryClient.invalidateQueries(
+          trpc.docs.list.queryFilter({ workspaceId: firstWorkspaceId }),
+        );
+      }
       onSelectDoc(result.doc.id);
     },
   });
 
   // Auto-create "Personal" workspace on first load.
   // Guarded by a ref so it only fires once even in React StrictMode.
+  // Skip when the list query failed (e.g. PRECONDITION_FAILED — doc tables not migrated).
   useEffect(() => {
-    if (!isLoading && data?.workspaces.length === 0 && !autoCreatedRef.current) {
+    if (isError || isLoading) return;
+    if (data?.workspaces.length === 0 && !autoCreatedRef.current) {
       autoCreatedRef.current = true;
       createWorkspace.mutate({ name: 'Personal' });
     }
-  }, [isLoading, data, createWorkspace]);
+  }, [isError, isLoading, data, createWorkspace]);
 
   const workspaces = data?.workspaces ?? [];
   const firstWorkspaceId = workspaces[0]?.id;
-  const isSettingUp = isLoading || (workspaces.length === 0 && createWorkspace.isPending);
+  const isSettingUp =
+    isLoading || (!isError && workspaces.length === 0 && createWorkspace.isPending);
+  const errorMessage = error instanceof Error ? error.message : 'Couldn’t load Docs.';
+
+  if (isError) {
+    return (
+      <div className="flex h-full flex-col">
+        <div className="flex items-center justify-between border-b px-3 py-2.5">
+          <span className="text-foreground text-[13px] font-semibold">Docs</span>
+        </div>
+        <div className="flex-1 space-y-3 overflow-y-auto p-3">
+          <p className="text-muted-foreground text-[12px] leading-relaxed">{errorMessage}</p>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="w-full"
+            onClick={() => void refetch()}
+            disabled={isRefetching}
+          >
+            {isRefetching ? 'Retrying…' : 'Retry'}
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-full flex-col">

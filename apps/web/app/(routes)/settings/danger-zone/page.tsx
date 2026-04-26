@@ -102,7 +102,15 @@ function DeleteAccountDialog() {
               )}
             />
 
-            <div className="flex justify-end">
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setIsOpen(false)}
+                disabled={isPending}
+              >
+                {m['pages.settings.dangerZone.cancel']()}
+              </Button>
               <Button type="submit" variant="destructive" disabled={isPending}>
                 {isPending
                   ? m['pages.settings.dangerZone.deleting']()

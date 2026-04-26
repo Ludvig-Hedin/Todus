@@ -18,45 +18,32 @@ type Features = {
   chatMessages: FeatureState;
   connections: FeatureState;
   brainActivity: FeatureState;
+  aiUsage: FeatureState;
 };
 
+const emptyFeatureState = (): FeatureState => ({
+  total: 0,
+  remaining: 0,
+  unlimited: false,
+  enabled: false,
+  usage: 0,
+  nextResetAt: null,
+  interval: '',
+  included_usage: 0,
+});
+
 const DEFAULT_FEATURES: Features = {
-  chatMessages: {
-    total: 0,
-    remaining: 0,
-    unlimited: false,
-    enabled: false,
-    usage: 0,
-    nextResetAt: null,
-    interval: '',
-    included_usage: 0,
-  },
-  connections: {
-    total: 0,
-    remaining: 0,
-    unlimited: false,
-    enabled: false,
-    usage: 0,
-    nextResetAt: null,
-    interval: '',
-    included_usage: 0,
-  },
-  brainActivity: {
-    total: 0,
-    remaining: 0,
-    unlimited: false,
-    enabled: false,
-    usage: 0,
-    nextResetAt: null,
-    interval: '',
-    included_usage: 0,
-  },
+  chatMessages: emptyFeatureState(),
+  connections: emptyFeatureState(),
+  brainActivity: emptyFeatureState(),
+  aiUsage: emptyFeatureState(),
 };
 
 const FEATURE_IDS = {
   CHAT: 'chat-messages',
   CONNECTIONS: 'connections',
   BRAIN: 'brain-activity',
+  AI_USAGE: 'ai_usage',
 } as const;
 
 export const useBilling = () => {
@@ -105,6 +92,20 @@ export const useBilling = () => {
     if (customer.features[FEATURE_IDS.BRAIN]) {
       const feature = customer.features[FEATURE_IDS.BRAIN];
       features.brainActivity = {
+        total: feature.included_usage || 0,
+        remaining: feature.balance || 0,
+        unlimited: feature.unlimited ?? false,
+        enabled: (feature.unlimited ?? false) || Number(feature.balance) > 0,
+        usage: feature.usage || 0,
+        nextResetAt: feature.next_reset_at ?? null,
+        interval: feature.interval || '',
+        included_usage: feature.included_usage || 0,
+      };
+    }
+
+    if (customer.features[FEATURE_IDS.AI_USAGE]) {
+      const feature = customer.features[FEATURE_IDS.AI_USAGE];
+      features.aiUsage = {
         total: feature.included_usage || 0,
         remaining: feature.balance || 0,
         unlimited: feature.unlimited ?? false,

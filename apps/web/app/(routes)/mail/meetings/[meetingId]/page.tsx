@@ -31,7 +31,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { authProxy } from '@/lib/auth-proxy';
 import type { Route } from './+types/page';
-import { Link, useParams } from 'react-router';
+import { Link, useNavigate, useParams } from 'react-router';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 
@@ -57,6 +57,7 @@ const STATUS_CONFIG: Record<string, { label: string; dotClass: string }> = {
 
 export default function MeetingDetailPage() {
   const { meetingId } = useParams<{ meetingId: string }>();
+  const navigate = useNavigate();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
 
@@ -114,7 +115,7 @@ export default function MeetingDetailPage() {
         onSuccess: () => {
           queryClient.invalidateQueries({ queryKey: trpc.meet.listMeetings.queryKey() });
           toast.success('Meeting deleted');
-          window.history.back();
+          navigate('/mail/meetings');
         },
         onError: () => toast.error('Failed to delete meeting'),
       },

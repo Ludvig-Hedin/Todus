@@ -22,6 +22,7 @@ import {
   Trash2,
   MoreHorizontal,
   FolderIcon,
+  PanelLeft,
 } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRef, useEffect, useState, useCallback, useMemo, type FormEvent, type ClipboardEvent } from 'react';
@@ -30,6 +31,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { useTRPC } from '@/providers/query-provider';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
+import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet';
 import { useAgentChat } from 'agents/ai-react';
 import { formatDistanceToNow } from 'date-fns';
 import { authProxy } from '@/lib/auth-proxy';
@@ -108,6 +110,8 @@ export default function ChatPage() {
   // Whether the current session has been saved to backend yet
   const [isSaved, setIsSaved] = useState(false);
   const [folderFilter, setFolderFilter] = useState<'all' | 'unfiled' | string>('all');
+  // Mobile drawer for the conversation history sidebar (the desktop aside is hidden below md)
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   // Tracks previous user message count to detect new messages and reset isSaved
   const prevUserMsgCountRef = useRef(0);
 
@@ -261,13 +265,26 @@ export default function ChatPage() {
       );
       setInput('');
     },
-    [append, fileToChatAttachment, input, isLoading, pendingClipboardFiles, setInput],
+    [
+      append,
+      fileToChatAttachment,
+      input,
+      isLoading,
+      pendingClipboardFiles,
+      setInput,
+    ],
   );
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // Close the mobile sidebar drawer whenever the active conversation changes
+  // (user picked a chat or hit "New chat" from the drawer).
+  useEffect(() => {
+    setMobileSidebarOpen(false);
+  }, [conversationId]);
 
   // Reset isSaved when a new user message is sent so each exchange gets persisted once
   useEffect(() => {
@@ -403,183 +420,208 @@ export default function ChatPage() {
     textareaRef.current?.focus();
   };
 
-  return (
-    <div className="bg-background flex h-screen overflow-hidden">
-      {/* ── Conversation History Sidebar ─────────────────────────────────── */}
-      <aside className="bg-sidebar hidden w-56 shrink-0 flex-col border-r md:flex">
-        <div className="border-b px-3 py-3">
-          <div className="flex items-center justify-between">
-            <span className="text-[13px] font-semibold">Chats</span>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7"
-              onClick={handleNewChat}
-              title="New chat"
-            >
-              <Plus className="h-3.5 w-3.5" />
-            </Button>
-          </div>
-          <div className="mt-2 flex flex-wrap gap-1.5">
+  // Sidebar contents are reused for both the desktop aside and the mobile sheet drawer.
+  const sidebarBody = (
+    <>
+      <div className="border-b px-3 py-3">
+        <div className="flex items-center justify-between">
+          <span className="text-[13px] font-semibold">Chats</span>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            onClick={handleNewChat}
+            title="New chat"
+          >
+            <Plus className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          <button
+            type="button"
+            onClick={() => setFolderFilter('all')}
+            className={cn(
+              'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors',
+              folderFilter === 'all'
+                ? 'border-accent/20 bg-accent/10 text-accent-foreground'
+                : 'border-border bg-background text-muted-foreground hover:bg-accent/50',
+            )}
+          >
+            <MessageSquare className="h-3 w-3" />
+            All
+            <span className="text-[10px] opacity-70">{conversationCounts.all}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setFolderFilter('unfiled')}
+            className={cn(
+              'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors',
+              folderFilter === 'unfiled'
+                ? 'border-accent/20 bg-accent/10 text-accent-foreground'
+                : 'border-border bg-background text-muted-foreground hover:bg-accent/50',
+            )}
+          >
+            <FolderIcon className="h-3 w-3" />
+            Unfiled
+            <span className="text-[10px] opacity-70">{conversationCounts.unfiled}</span>
+          </button>
+          {folders.map((folder) => (
             <button
+              key={folder.id}
               type="button"
-              onClick={() => setFolderFilter('all')}
+              onClick={() => setFolderFilter(folder.id)}
               className={cn(
-                'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors',
-                folderFilter === 'all'
-                  ? 'border-accent/20 bg-accent/10 text-accent-foreground'
-                  : 'border-border bg-background text-muted-foreground hover:bg-accent/50',
-              )}
-            >
-              <MessageSquare className="h-3 w-3" />
-              All
-              <span className="text-[10px] opacity-70">{conversationCounts.all}</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setFolderFilter('unfiled')}
-              className={cn(
-                'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors',
-                folderFilter === 'unfiled'
+                'inline-flex max-w-full items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors',
+                folderFilter === folder.id
                   ? 'border-accent/20 bg-accent/10 text-accent-foreground'
                   : 'border-border bg-background text-muted-foreground hover:bg-accent/50',
               )}
             >
               <FolderIcon className="h-3 w-3" />
-              Unfiled
-              <span className="text-[10px] opacity-70">{conversationCounts.unfiled}</span>
+              <span className="truncate">{folder.name}</span>
+              <span className="text-[10px] opacity-70">
+                {conversationCounts.folders.get(folder.id) ?? 0}
+              </span>
             </button>
-            {folders.map((folder) => (
-              <button
-                key={folder.id}
-                type="button"
-                onClick={() => setFolderFilter(folder.id)}
-                className={cn(
-                  'inline-flex max-w-full items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors',
-                  folderFilter === folder.id
-                    ? 'border-accent/20 bg-accent/10 text-accent-foreground'
-                    : 'border-border bg-background text-muted-foreground hover:bg-accent/50',
-                )}
-              >
-                <FolderIcon className="h-3 w-3" />
-                <span className="truncate">{folder.name}</span>
-                <span className="text-[10px] opacity-70">
-                  {conversationCounts.folders.get(folder.id) ?? 0}
-                </span>
-              </button>
-            ))}
-          </div>
+          ))}
         </div>
+      </div>
 
-        <ScrollArea className="flex-1 py-1">
-          {visibleConversations.length === 0 ? (
-            <div className="flex flex-col items-center gap-1 px-4 py-8 text-center">
-              <MessageSquare className="text-muted-foreground/40 h-6 w-6" />
-              <p className="text-muted-foreground text-[12px]">No saved chats yet</p>
-            </div>
-          ) : (
-            visibleConversations.map((convo) => {
-              const isActive = convo.id === conversationId;
-              return (
-                <div
-                  key={convo.id}
-                  role="button"
-                  tabIndex={0}
-                  aria-current={isActive ? 'true' : undefined}
-                  className={cn(
-                    'group relative mx-1 flex cursor-pointer items-start gap-2 rounded-lg px-2.5 py-2 transition-colors',
-                    isActive ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/60',
-                  )}
-                  onClick={() => void handleLoadConversation(convo.id)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      void handleLoadConversation(convo.id);
-                    }
-                  }}
-                >
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-[12px] font-medium leading-snug">{convo.title}</p>
-                    <div className="text-muted-foreground flex items-center gap-1.5 text-[11px]">
-                      <span>
-                        {convo.updatedAt
-                          ? formatDistanceToNow(new Date(convo.updatedAt), { addSuffix: true })
-                          : ''}
-                      </span>
-                      {convo.folderId ? (
-                        <>
-                          <span className="opacity-50">•</span>
-                          <span className="inline-flex items-center gap-1">
-                            <FolderIcon className="h-3 w-3" />
-                            {resolveConversationFolderName(convo.folderId)}
-                          </span>
-                        </>
-                      ) : null}
-                    </div>
-                  </div>
-                  {/* Delete via dropdown — only visible on hover */}
-                  <div className="invisible shrink-0 group-hover:visible">
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-5 w-5 p-0"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <MoreHorizontal className="h-3.5 w-3.5" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="w-32">
-                        <DropdownMenuSub>
-                          <DropdownMenuSubTrigger>
-                            <FolderIcon className="mr-2 h-3.5 w-3.5" />
-                            Move to
-                          </DropdownMenuSubTrigger>
-                          <DropdownMenuSubContent className="w-44">
-                            <DropdownMenuItem
-                              onClick={() => void handleConversationFolderMove(convo.id, null)}
-                            >
-                              <FolderIcon className="mr-2 h-3.5 w-3.5" />
-                              Unfiled
-                            </DropdownMenuItem>
-                            {folders.length > 0 ? <DropdownMenuSeparator /> : null}
-                            {folders.map((folder) => (
-                              <DropdownMenuItem
-                                key={folder.id}
-                                onClick={() =>
-                                  void handleConversationFolderMove(convo.id, folder.id)
-                                }
-                              >
-                                <FolderIcon className="mr-2 h-3.5 w-3.5" />
-                                {folder.name}
-                              </DropdownMenuItem>
-                            ))}
-                          </DropdownMenuSubContent>
-                        </DropdownMenuSub>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                          className="text-destructive focus:text-destructive"
-                          onClick={(e) => handleDeleteConversation(convo.id, e)}
-                        >
-                          <Trash2 className="mr-2 h-3.5 w-3.5" />
-                          Delete
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+      <ScrollArea className="flex-1 py-1">
+        {visibleConversations.length === 0 ? (
+          <div className="flex flex-col items-center gap-1 px-4 py-8 text-center">
+            <MessageSquare className="text-muted-foreground/40 h-6 w-6" />
+            <p className="text-muted-foreground text-[12px]">No saved chats yet</p>
+          </div>
+        ) : (
+          visibleConversations.map((convo) => {
+            const isActive = convo.id === conversationId;
+            return (
+              <div
+                key={convo.id}
+                role="button"
+                tabIndex={0}
+                aria-current={isActive ? 'true' : undefined}
+                className={cn(
+                  'group relative mx-1 flex cursor-pointer items-start gap-2 rounded-lg px-2.5 py-2 transition-colors',
+                  isActive ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/60',
+                )}
+                onClick={() => void handleLoadConversation(convo.id)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    void handleLoadConversation(convo.id);
+                  }
+                }}
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-[12px] font-medium leading-snug">{convo.title}</p>
+                  <div className="text-muted-foreground flex items-center gap-1.5 text-[11px]">
+                    <span>
+                      {convo.updatedAt
+                        ? formatDistanceToNow(new Date(convo.updatedAt), { addSuffix: true })
+                        : ''}
+                    </span>
+                    {convo.folderId ? (
+                      <>
+                        <span className="opacity-50">•</span>
+                        <span className="inline-flex items-center gap-1">
+                          <FolderIcon className="h-3 w-3" />
+                          {resolveConversationFolderName(convo.folderId)}
+                        </span>
+                      </>
+                    ) : null}
                   </div>
                 </div>
-              );
-            })
-          )}
-        </ScrollArea>
+                {/* Delete via dropdown — visible by default on touch, hover-reveal on desktop */}
+                <div className="shrink-0 md:invisible md:group-hover:visible">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-5 w-5 p-0"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <MoreHorizontal className="h-3.5 w-3.5" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-32">
+                      <DropdownMenuSub>
+                        <DropdownMenuSubTrigger>
+                          <FolderIcon className="mr-2 h-3.5 w-3.5" />
+                          Move to
+                        </DropdownMenuSubTrigger>
+                        <DropdownMenuSubContent className="w-44">
+                          <DropdownMenuItem
+                            onClick={() => void handleConversationFolderMove(convo.id, null)}
+                          >
+                            <FolderIcon className="mr-2 h-3.5 w-3.5" />
+                            Unfiled
+                          </DropdownMenuItem>
+                          {folders.length > 0 ? <DropdownMenuSeparator /> : null}
+                          {folders.map((folder) => (
+                            <DropdownMenuItem
+                              key={folder.id}
+                              onClick={() =>
+                                void handleConversationFolderMove(convo.id, folder.id)
+                              }
+                            >
+                              <FolderIcon className="mr-2 h-3.5 w-3.5" />
+                              {folder.name}
+                            </DropdownMenuItem>
+                          ))}
+                        </DropdownMenuSubContent>
+                      </DropdownMenuSub>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        className="text-destructive focus:text-destructive"
+                        onClick={(e) => handleDeleteConversation(convo.id, e)}
+                      >
+                        <Trash2 className="mr-2 h-3.5 w-3.5" />
+                        Delete
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              </div>
+            );
+          })
+        )}
+      </ScrollArea>
+    </>
+  );
+
+  return (
+    <div className="bg-background flex h-screen overflow-hidden">
+      {/* ── Conversation History Sidebar (desktop) ───────────────────────── */}
+      <aside className="bg-sidebar hidden w-56 shrink-0 flex-col border-r md:flex">
+        {sidebarBody}
       </aside>
+
+      {/* ── Conversation History Sidebar (mobile drawer) ─────────────────── */}
+      <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
+        <SheetContent side="left" className="bg-sidebar w-72 p-0 md:hidden">
+          <SheetTitle className="sr-only">Chats</SheetTitle>
+          <div className="flex h-full flex-col">{sidebarBody}</div>
+        </SheetContent>
+      </Sheet>
 
       {/* ── Main Chat Panel ──────────────────────────────────────────────── */}
       <div className="flex min-w-0 flex-1 flex-col">
         {/* Header */}
         <div className="flex items-center justify-between border-b px-6 py-3.5">
           <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="-ml-2 h-8 w-8 md:hidden"
+              onClick={() => setMobileSidebarOpen(true)}
+              title="Show conversations"
+              aria-label="Show conversations"
+            >
+              <PanelLeft className="h-4 w-4" />
+            </Button>
             <h1 className="text-[15px] font-semibold">AI Assistant</h1>
             {conversationFolderId ? (
               <span className="border-border bg-muted/60 text-muted-foreground inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium">

@@ -96,7 +96,7 @@ export default function PricingCard() {
     if (attach) {
       toast.promise(
         attach({
-          productId: isAnnual ? 'pro_annual' : 'pro-example',
+          productId: isAnnual ? 'pro_annual' : 'pro_monthly',
           successUrl: `${window.location.origin}/mail/inbox?success=true`,
         }),
         {

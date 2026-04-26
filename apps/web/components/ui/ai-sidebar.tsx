@@ -3,6 +3,7 @@ import { ArrowsPointingIn, PanelLeftOpen, Phone } from '../icons/icons';
 import { useActiveConnection } from '@/hooks/use-connections';
 import type { MentionRef } from '@zero/shared';
 import { useSearchValue } from '@/hooks/use-search-value';
+import { useSettings } from '@/hooks/use-settings';
 import { useState, useEffect, useCallback } from 'react';
 import useSearchLabels from '@/hooks/use-labels-search';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
@@ -16,10 +17,11 @@ import { Button } from '@/components/ui/button';
 import { useHotkeys } from 'react-hotkeys-hook';
 import { useLabels } from '@/hooks/use-labels';
 import { useAgentChat } from 'agents/ai-react';
+import { ModelSelector } from '@/components/ui/model-selector';
 import { X, Expand, Plus, Share2, Users, ArrowLeft } from 'lucide-react';
 import { IncomingMessageType } from '../party';
 import { Gauge } from '@/components/ui/gauge';
-import { useParams } from 'react-router';
+import { useNavigate, useParams } from 'react-router';
 import { useAgent } from 'agents/react';
 import { useQueryState } from 'nuqs';
 import { cn } from '@/lib/utils';
@@ -62,17 +64,22 @@ function ChatHeader({
   const [shareOpen, setShareOpen] = useState(false);
   return (
     <div className="relative flex items-center justify-between px-2.5 pb-[10px] pt-[13px]">
-      <TooltipProvider delayDuration={0}>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button onClick={onClose} variant="ghost" className="md:h-fit md:px-2">
-              <X className="dark:text-iconDark text-iconLight" />
-              <span className="sr-only">Close chat</span>
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Close chat</TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
+      <div className="flex items-center gap-1">
+        <TooltipProvider delayDuration={0}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button onClick={onClose} variant="ghost" className="md:h-fit md:px-2">
+                <X className="dark:text-iconDark text-iconLight" />
+                <span className="sr-only">Close chat</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Close chat</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+
+        {/* Compact model selector — lets users switch AI provider/model mid-conversation */}
+        <ModelSelector variant="compact" />
+      </div>
 
       <div className="flex items-center gap-2">
         {isFullScreen ? (
@@ -395,6 +402,7 @@ function AISidebar({ className }: AISidebarProps) {
   const { open, setOpen, isFullScreen, setIsFullScreen, toggleViewMode, isSidebar, isPopup } =
     useAISidebar();
   const { isPro, track, refetch: refetchBilling } = useBilling();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   // groupId query param — when set the sidebar shows GroupChatView instead of AIChat
   const [groupId, setGroupId] = useQueryState('groupId');
@@ -452,6 +460,9 @@ function AISidebar({ className }: AISidebarProps) {
     [queryClient, trpc, labels, searchValue.value, setDoState],
   );
 
+  // User's AI provider/model preferences — passed to backend so it uses the right model
+  const { data: userSettings } = useSettings();
+
   const agent = useAgent({
     agent: 'ZeroAgent',
     name: String(activeConnection?.id ?? 'general'),
@@ -471,6 +482,10 @@ function AISidebar({ className }: AISidebarProps) {
       currentFolder: folder ?? undefined,
       currentFilter: searchValue.value ?? undefined,
       mentions: pendingMentions,
+      // Send user's AI preferences so the backend can route to the right model
+      aiProvider: userSettings?.settings?.aiProvider ?? 'auto',
+      aiModel: userSettings?.settings?.aiModel ?? '',
+      ollamaBaseUrl: userSettings?.settings?.ollamaBaseUrl ?? 'http://localhost:11434',
     },
     onError(error) {
       console.error('Error in useChat', error);
@@ -481,7 +496,22 @@ function AISidebar({ className }: AISidebarProps) {
         currentFilter: searchValue.value ?? undefined,
         messages: chatState.messages,
       });
-      toast.error('Error, please try again later');
+      const isCreditsExhausted =
+        error.message?.includes('AI_CREDITS_EXHAUSTED') ||
+        error.message?.includes('ai_credits_exhausted');
+      if (isCreditsExhausted) {
+        // Refresh the cached billing state in case the user just upgraded in
+        // another tab — and surface a clear upgrade CTA either way.
+        refetchBilling().catch(() => {});
+        toast.error('You\'re out of AI credits this period.', {
+          action: {
+            label: 'Upgrade',
+            onClick: () => navigate('/settings/billing'),
+          },
+        });
+      } else {
+        toast.error('Error, please try again later');
+      }
     },
     onResponse: (response) => {
       posthog.capture('AI Chat Response', {

@@ -856,7 +856,7 @@ export function CommandPalette({ children }: { children: React.ReactNode }) {
         {!commandInputValue && threads && Array.isArray(threads) && threads.length > 0 && (
           <>
             <CommandGroup heading="Recent Emails">
-              {(threads as any[]).slice(0, 4).map((thread: any) => (
+              {(threads as any[]).filter(Boolean).slice(0, 4).map((thread: any) => (
                 <CommandItem
                   key={thread.id}
                   onSelect={() =>

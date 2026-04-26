@@ -9,7 +9,6 @@ import {
 import {
   Archive2,
   ExclamationCircle,
-  GroupPeople,
   Mail,
   Star2,
   Trash,
@@ -86,7 +85,6 @@ const Thread = memo(
     const receivedOn = message.latestReceivedOn ?? '';
     const snippet = message.snippet ?? '';
     const hasDraft = message.hasDraft ?? false;
-    const isGroupThread = false;
 
     const optimisticState = useOptimisticThreadState(idToUse ?? '');
 
@@ -342,7 +340,7 @@ const Thread = memo(
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent side={index === 0 ? 'bottom' : 'top'} className="mb-1">
-                    {m['common.actions.Bin']()}
+                    {m['common.actions.bin']()}
                   </TooltipContent>
                 </Tooltip>
               ) : null}
@@ -370,17 +368,6 @@ const Thread = memo(
                       }}
                     >
                       <Check className="h-4 w-4 text-white" />
-                    </div>
-                  </Avatar>
-                ) : isGroupThread ? (
-                  <Avatar
-                    className={cn(
-                      'h-8 w-8 rounded-full',
-                      displayUnread && !isMailSelected && !isFolderSent ? '' : 'border',
-                    )}
-                  >
-                    <div className="bg-secondary flex h-full w-full items-center justify-center rounded-full p-2">
-                      <GroupPeople className="h-4 w-4" />
                     </div>
                   </Avatar>
                 ) : (
@@ -448,11 +435,6 @@ const Thread = memo(
                                 searchValue.highlight,
                               )}
                             </span>
-                            {displayUnread && !isMailSelected && !isFolderSent ? (
-                              <>
-                                <span className="bg-mainBlue ml-0.5 size-1.5 rounded-full" />
-                              </>
-                            ) : null}
                           </div>
                         )}{' '}
                         {/* {!isFolderSent ? (
@@ -499,13 +481,18 @@ const Thread = memo(
                         {snippet || subject}
                       </p>
                     ) : (
-                      <p
-                        className={cn(
-                          'text-muted-foreground mt-1 line-clamp-1 w-[95%] min-w-0 overflow-hidden text-[13px]',
-                        )}
-                      >
-                        {highlightText(subject, searchValue.highlight)}
-                      </p>
+                      <div className="mt-1 flex items-center gap-1.5">
+                        <p
+                          className={cn(
+                            'text-muted-foreground line-clamp-1 min-w-0 overflow-hidden text-[13px]',
+                          )}
+                        >
+                          {highlightText(subject, searchValue.highlight)}
+                        </p>
+                        {displayUnread && !isMailSelected ? (
+                          <span className="bg-mainBlue size-1.5 shrink-0 rounded-full" />
+                        ) : null}
+                      </div>
                     )}
                     {/* <div className="hidden md:flex">
                       {getThreadData.labels ? <MailLabels labels={getThreadData.labels} /> : null}
@@ -671,7 +658,7 @@ const Draft = memo(({ message, index }: { message: { id: string }; index: number
               </Button>
             </TooltipTrigger>
             <TooltipContent side={index === 0 ? 'bottom' : 'top'} className="mb-1">
-              {m['common.actions.Bin']()}
+              {m['common.actions.bin']()}
             </TooltipContent>
           </Tooltip>
         </div>

@@ -96,7 +96,17 @@ export function useOptimisticActions() {
   const updateThreadSummaries = useCallback(
     (threadIds: string[], updater: (thread: ThreadSummary) => ThreadSummary) => {
       queryClient.setQueriesData(
-        { queryKey: [['mail', 'listThreads'], { type: 'infinite' }] },
+        {
+          predicate: (query) => {
+            const [routeKey, queryMeta] = query.queryKey as [unknown, { type?: string }?];
+            return (
+              Array.isArray(routeKey) &&
+              routeKey[0] === 'mail' &&
+              routeKey[1] === 'listThreads' &&
+              queryMeta?.type === 'infinite'
+            );
+          },
+        },
         (data: InfiniteData<ThreadListPage> | undefined) => {
           if (!data) return data;
 
@@ -432,7 +442,7 @@ export function useOptimisticActions() {
           : m['common.actions.removedFromFavorites'](),
       });
     },
-    [addOptimisticAction, applyTagTogglePatch, removeOptimisticAction, setMail, toggleStar],
+    [addOptimisticAction, applyTagTogglePatch, removeOptimisticAction, toggleStar],
   );
 
   function optimisticMoveThreadsTo(
@@ -591,16 +601,16 @@ export function useOptimisticActions() {
       threadIds,
       params: { labelId, add },
       optimisticId,
-        execute: async () => {
-          await modifyLabels({
-            threadId: threadIds,
-            addLabels: add ? [labelId] : [],
-            removeLabels: add ? [] : [labelId],
-          });
-          applyLabelPatch(threadIds, labelId, add);
+      execute: async () => {
+        await modifyLabels({
+          threadId: threadIds,
+          addLabels: add ? [labelId] : [],
+          removeLabels: add ? [] : [labelId],
+        });
+        applyLabelPatch(threadIds, labelId, add);
 
-          if (mail.bulkSelected.length > 0) {
-            setMail({ ...mail, bulkSelected: [] });
+        if (mail.bulkSelected.length > 0) {
+          setMail((prev) => ({ ...prev, bulkSelected: [] }));
         }
       },
       undo: () => {

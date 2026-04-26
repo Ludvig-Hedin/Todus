@@ -49,6 +49,18 @@ const meetingsSettingsSchema = z.object({
 
 type MeetingsSettings = z.infer<typeof meetingsSettingsSchema>;
 
+type MeetingsIntegration = {
+  isEnabled: boolean;
+  autoJoin: boolean;
+  botName: string;
+  joinEarlyMinutes: number;
+  autoGenerateSummary?: boolean | null;
+  summaryLanguage?: string | null;
+  excludeAllDay?: boolean | null;
+  minimumDurationMinutes?: number | null;
+  autoDeleteDays?: number | null;
+};
+
 const SUMMARY_LANGUAGES = [
   { value: 'en', label: 'English' },
   { value: 'es', label: 'Spanish' },
@@ -106,7 +118,7 @@ export default function MeetingsSettingsPage() {
 
   const serverValues = useMemo<MeetingsSettings | null>(() => {
     if (!data?.integration) return null;
-    const i = data.integration;
+    const i = data.integration as MeetingsIntegration;
     return {
       isEnabled: i.isEnabled,
       autoJoin: i.autoJoin,
@@ -128,6 +140,7 @@ export default function MeetingsSettingsPage() {
     setIsSaving(true);
     try {
       await saveSettings(values);
+      form.reset(values);
       toast.success('Settings saved');
     } catch {
       toast.error('Failed to save settings');
