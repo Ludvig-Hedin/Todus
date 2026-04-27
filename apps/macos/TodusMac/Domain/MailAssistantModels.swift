@@ -359,6 +359,8 @@ struct MailAssistantSettingsResponse: Decodable, Sendable {
         let contextAboutYou: String
         let customPrompt: String
         let assistantAutomationPolicy: AssistantAutomationPolicy
+        /// Server-synced calendar visibility prefs. Optional for backward compat.
+        let calendarPreferences: CalendarPreferences?
     }
 
     let settings: Settings

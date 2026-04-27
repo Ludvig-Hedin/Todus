@@ -7,7 +7,17 @@ final class TaskRecord: Identifiable {
     var rawInput: String
     var title: String
     var taskDescription: String
-    var completed: Bool
+    /// Kept in sync with `status` via `status` setter and `didSet` so it cannot drift from `completedAt` / `statusRawValue`.
+    var completed: Bool = false {
+        didSet {
+            if oldValue == completed { return }
+            if completed {
+                if status != .done { status = .done }
+            } else if status == .done {
+                status = .todo
+            }
+        }
+    }
     var statusRawValue: String
     var priorityRawValue: String
     var attachmentNamesRawValue: String
@@ -19,6 +29,8 @@ final class TaskRecord: Identifiable {
     var createdAt: Date
     var updatedAt: Date
     var dueDate: Date?
+    /// Set when the task is marked done; used to keep the row in the main list for a few seconds before the “Recently completed” section. Cleared when uncompleted.
+    var completedAt: Date?
     var parseStateRawValue: String
     var syncStateRawValue: String
     var folder: FolderRecord?
@@ -36,6 +48,7 @@ final class TaskRecord: Identifiable {
         createdAt: Date = .now,
         updatedAt: Date = .now,
         dueDate: Date? = nil,
+        completedAt: Date? = nil,
         folder: FolderRecord? = nil,
         parseState: ParseState = .pending,
         syncState: SyncState = .pendingUpload
@@ -44,14 +57,20 @@ final class TaskRecord: Identifiable {
         self.rawInput = rawInput
         self.title = title
         self.taskDescription = taskDescription
-        self.completed = completed
-        self.statusRawValue = status.rawValue
+        let initialStatus: TaskStatus = {
+            if completed { return .done }
+            if status == .done { return .todo }
+            return status
+        }()
+        self.statusRawValue = initialStatus.rawValue
+        self.completed = initialStatus == .done
         self.priorityRawValue = priority.rawValue
         self.attachmentNamesRawValue = attachmentNames.joined(separator: "\n")
         self.reminderIdentifier = reminderIdentifier
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.dueDate = dueDate
+        self.completedAt = initialStatus == .done ? (completedAt ?? updatedAt) : nil
         self.folder = folder
         self.parseStateRawValue = parseState.rawValue
         self.syncStateRawValue = syncState.rawValue
@@ -60,8 +79,14 @@ final class TaskRecord: Identifiable {
     var status: TaskStatus {
         get { TaskStatus(rawValue: statusRawValue) ?? .todo }
         set {
-            statusRawValue = newValue.rawValue
-            completed = newValue == .done
+            let next = newValue
+            statusRawValue = next.rawValue
+            completed = next == .done
+            if next == .done {
+                if completedAt == nil { completedAt = .now }
+            } else {
+                completedAt = nil
+            }
         }
     }
 
@@ -102,7 +127,7 @@ final class TaskRecord: Identifiable {
             rawInput: rawInput,
             title: title,
             taskDescription: taskDescription,
-            completed: completed,
+            completed: status == .done,
             status: status,
             priority: priority,
             attachmentNames: attachmentNames,

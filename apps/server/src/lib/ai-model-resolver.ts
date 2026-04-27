@@ -32,6 +32,49 @@ export const AI_PROVIDERS = [
 ] as const;
 export type AIProvider = (typeof AI_PROVIDERS)[number];
 
+/**
+ * Providers that run inference on the user's own hardware, never on a paid
+ * upstream API. Requests routed to these providers must be exempt from
+ * `hasAiCredits` pre-flight and from `trackAiUsage` post-stream metering —
+ * billing them would charge users for compute they paid for themselves.
+ *
+ * Note: native iOS/macOS local-model paths bypass the backend entirely, so
+ * this constant is primarily defensive for the apps/web Ollama flow.
+ */
+export const LOCAL_MODEL_PROVIDERS: ReadonlySet<AIProvider> = new Set(['ollama']);
+
+/**
+ * Loose model-id heuristic for the same exemption. Covers cases where the
+ * client sends a known local model id without a `provider` field (older
+ * apps/web builds, custom integrations). Intentionally conservative — only
+ * matches strings that unambiguously identify a local-only model family.
+ */
+export function isLocalModelId(modelId: string | undefined): boolean {
+  if (!modelId) return false;
+  const m = modelId.toLowerCase();
+  // mlx-community HuggingFace repos
+  if (m.startsWith('mlx-community/')) return true;
+  // Ollama canonical tags for the curated catalog (qwen3:1.7b, gemma3:4b, llama3.2:3b, ministral:3b ...)
+  if (/^(qwen3|gemma3|llama3\.2|ministral|phi3):/i.test(modelId)) return true;
+  // Apple Foundation Models
+  if (m === 'apple-foundation' || m === 'apple-intelligence') return true;
+  return false;
+}
+
+/**
+ * One-stop check used by billing call-sites. Returns true when the request
+ * targets on-device inference and must not be billed.
+ */
+export function isLocalInference(opts: {
+  provider?: string;
+  modelId?: string;
+}): boolean {
+  if (opts.provider && LOCAL_MODEL_PROVIDERS.has(opts.provider as AIProvider)) {
+    return true;
+  }
+  return isLocalModelId(opts.modelId);
+}
+
 interface ResolveModelOpts {
   provider: AIProvider;
   modelId: string;

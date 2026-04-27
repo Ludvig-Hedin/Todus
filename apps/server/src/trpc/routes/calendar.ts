@@ -8,6 +8,8 @@
  * Exposed procedures:
  *   calendar.events — list events for a given time window
  *   calendar.calendars — list the user's calendar list (for multi-cal support)
+ *   calendar.eventsMulti — list events across multiple connections in parallel
+ *   calendar.createEvent / updateEvent / deleteEvent — write operations
  */
 import { activeConnectionProcedure, multiConnectionProcedure, router } from '../trpc';
 import { OAuth2Client } from 'google-auth-library';
@@ -63,6 +65,52 @@ async function calendarFetch<T>(
     throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: `Google Calendar API error: ${res.status}` });
   }
 
+  return res.json() as Promise<T>;
+}
+
+/**
+ * Wraps a Google Calendar REST mutation (POST/PATCH/DELETE).
+ * Same auth + 401/403 handling as `calendarFetch`, but takes a method and JSON body.
+ */
+async function calendarFetchJSON<T>(
+  auth: OAuth2Client,
+  path: string,
+  options: {
+    method: 'POST' | 'PATCH' | 'DELETE' | 'PUT';
+    body?: unknown;
+    params?: Record<string, string>;
+  },
+): Promise<T | null> {
+  const { token } = await auth.getAccessToken();
+  if (!token) throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Could not refresh Google token' });
+
+  const url = new URL(`https://www.googleapis.com/calendar/v3${path}`);
+  for (const [k, v] of Object.entries(options.params ?? {})) {
+    url.searchParams.set(k, v);
+  }
+
+  const res = await fetch(url.toString(), {
+    method: options.method,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+  });
+
+  if (!res.ok) {
+    if (res.status === 401) throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Google Calendar access denied' });
+    if (res.status === 403) throw new CalendarScopeMissingError();
+    if (res.status === 404) throw new TRPCError({ code: 'NOT_FOUND', message: 'Calendar event not found' });
+    const errorBody = await res.text().catch(() => '');
+    throw new TRPCError({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: `Google Calendar API error: ${res.status} ${errorBody}`,
+    });
+  }
+
+  // DELETE returns 204 no content
+  if (res.status === 204) return null;
   return res.json() as Promise<T>;
 }
 
@@ -242,10 +290,18 @@ export const calendarRouter = router({
       z.object({
         timeMin: z.string(),
         timeMax: z.string(),
+        /** Default calendar id used when a connection has no per-connection list in `calendarIds` */
         calendarId: z.string().optional().default('primary'),
         maxResults: z.number().min(1).max(250).optional().default(100),
         /** Filter to specific connection IDs (omit for all) */
         connectionIds: z.array(z.string()).optional(),
+        /**
+         * Per-connection list of calendar IDs to fetch from.
+         * Map of `connectionId -> string[]`. Connections not present in the map
+         * fall back to fetching only from `calendarId` (default 'primary').
+         * Pass an empty array to skip a connection entirely.
+         */
+        calendarIds: z.record(z.string(), z.array(z.string())).optional(),
       }),
     )
     .query(async ({ ctx, input }) => {
@@ -261,53 +317,113 @@ export const calendarRouter = router({
         (c) => c.providerId === 'google' && c.refreshToken,
       );
 
-      const results = await Promise.allSettled(
-        googleConnections.map(async (conn) => {
-          const auth = buildAuthClient(conn.refreshToken!);
+      // Build the calendar list to fetch per connection. Default to the input's
+      // `calendarId` (typically 'primary') if no per-connection list given.
+      const buildCalendarList = (connId: string): string[] => {
+        const explicit = input.calendarIds?.[connId];
+        if (explicit !== undefined) return explicit; // may be empty array → skip
+        return [input.calendarId];
+      };
 
-          let data: GCalEventsResponse;
-          try {
-            data = await calendarFetch<GCalEventsResponse>(
-              auth,
-              `/calendars/${encodeURIComponent(input.calendarId)}/events`,
-              {
-                timeMin: input.timeMin,
-                timeMax: input.timeMax,
-                maxResults: String(input.maxResults),
-                singleEvents: 'true',
-                orderBy: 'startTime',
-              },
-            );
-          } catch (err) {
-            if (err instanceof CalendarScopeMissingError) {
-              return { connectionId: conn.id, connectionEmail: conn.email, connectionColor: conn.color, events: [], scopeMissing: true };
-            }
-            throw err;
+      type PerConnResult = {
+        connectionId: string;
+        connectionEmail: string;
+        connectionColor: string | null;
+        events: Array<{
+          id: string;
+          title: string;
+          description: string | null;
+          location: string | null;
+          startTime: string;
+          endTime: string;
+          allDay: boolean;
+          color: string;
+          htmlLink: string | null;
+          organizer: string | null;
+          isOrganizer: boolean;
+          calendarId: string;
+        }>;
+        scopeMissing: boolean;
+      };
+
+      const results = await Promise.allSettled(
+        googleConnections.map(async (conn): Promise<PerConnResult> => {
+          const calendarsToFetch = buildCalendarList(conn.id);
+          if (calendarsToFetch.length === 0) {
+            return {
+              connectionId: conn.id,
+              connectionEmail: conn.email,
+              connectionColor: conn.color,
+              events: [],
+              scopeMissing: false,
+            };
           }
 
-          const events = (data.items ?? [])
-            .filter((e) => e.status !== 'cancelled')
-            .flatMap((e) => {
-              const startTime = e.start.dateTime ?? e.start.date;
-              const endTime = e.end.dateTime ?? e.end.date;
-              if (!startTime || !endTime) return [];
+          const auth = buildAuthClient(conn.refreshToken!);
+          let scopeMissing = false;
+          const allEvents: PerConnResult['events'] = [];
 
-              return [{
-                id: e.id,
-                title: e.summary ?? '(No title)',
-                description: e.description ?? null,
-                location: e.location ?? null,
-                startTime,
-                endTime,
-                allDay: !e.start.dateTime,
-                color: e.colorId ? (GOOGLE_CALENDAR_COLORS[e.colorId] ?? '#5484ed') : '#5484ed',
-                htmlLink: e.htmlLink ?? null,
-                organizer: e.organizer?.displayName ?? e.organizer?.email ?? null,
-                isOrganizer: e.organizer?.self ?? false,
-              }];
-            });
+          // Fetch each calendar sequentially per connection to keep the overall
+          // request budget reasonable. Cross-connection parallelism is preserved
+          // via the outer Promise.allSettled. A failure on one calendar must not
+          // discard events already collected from earlier calendars on the same
+          // connection — record the error and continue.
+          for (const calendarId of calendarsToFetch) {
+            try {
+              const data = await calendarFetch<GCalEventsResponse>(
+                auth,
+                `/calendars/${encodeURIComponent(calendarId)}/events`,
+                {
+                  timeMin: input.timeMin,
+                  timeMax: input.timeMax,
+                  maxResults: String(input.maxResults),
+                  singleEvents: 'true',
+                  orderBy: 'startTime',
+                },
+              );
 
-          return { connectionId: conn.id, connectionEmail: conn.email, connectionColor: conn.color, events, scopeMissing: false };
+              for (const e of data.items ?? []) {
+                if (e.status === 'cancelled') continue;
+                const startTime = e.start.dateTime ?? e.start.date;
+                const endTime = e.end.dateTime ?? e.end.date;
+                if (!startTime || !endTime) continue;
+
+                allEvents.push({
+                  id: e.id,
+                  title: e.summary ?? '(No title)',
+                  description: e.description ?? null,
+                  location: e.location ?? null,
+                  startTime,
+                  endTime,
+                  allDay: !e.start.dateTime,
+                  color: e.colorId ? (GOOGLE_CALENDAR_COLORS[e.colorId] ?? '#5484ed') : '#5484ed',
+                  htmlLink: e.htmlLink ?? null,
+                  organizer: e.organizer?.displayName ?? e.organizer?.email ?? null,
+                  isOrganizer: e.organizer?.self ?? false,
+                  calendarId,
+                });
+              }
+            } catch (err) {
+              if (err instanceof CalendarScopeMissingError) {
+                scopeMissing = true;
+                break; // No point trying other calendars on this connection
+              }
+              // Per-calendar transient failure (e.g. 5xx, 404). Log and keep the
+              // partial results from earlier calendars + continue with the rest.
+              console.error(
+                `[calendar.eventsMulti] connection=${conn.id} calendar=${calendarId} failed:`,
+                err,
+              );
+            }
+          }
+
+          return {
+            connectionId: conn.id,
+            connectionEmail: conn.email,
+            connectionColor: conn.color,
+            events: allEvents,
+            scopeMissing,
+          };
         }),
       );
 
@@ -317,6 +433,7 @@ export const calendarRouter = router({
         startTime: string; endTime: string; allDay: boolean; color: string;
         htmlLink: string | null; organizer: string | null; isOrganizer: boolean;
         connectionId: string; connectionEmail: string; connectionColor: string | null;
+        calendarId: string;
       }> = [];
       const errors: Array<{ connectionId: string; connectionEmail: string; error: string }> = [];
       let anyScopeMissing = false;
@@ -345,5 +462,182 @@ export const calendarRouter = router({
       allEvents.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
 
       return { events: allEvents, errors, scopeMissing: anyScopeMissing };
+    }),
+
+  // ─── Write procedures ──────────────────────────────────────────────────────
+  // All three return `{ scopeMissing: true }` instead of throwing when the
+  // user's token lacks the new full `calendar` scope, so the iOS / macOS
+  // clients can surface a non-blocking "Reconnect to enable editing" banner.
+
+  /** Create an event on a Google calendar. */
+  createEvent: activeConnectionProcedure
+    .input(
+      z.object({
+        calendarId: z.string().default('primary'),
+        summary: z.string(),
+        description: z.string().optional(),
+        location: z.string().optional(),
+        start: z.object({
+          dateTime: z.string().optional(),
+          date: z.string().optional(),
+          timeZone: z.string().optional(),
+        }),
+        end: z.object({
+          dateTime: z.string().optional(),
+          date: z.string().optional(),
+          timeZone: z.string().optional(),
+        }),
+        attendees: z
+          .array(
+            z.object({
+              email: z.string(),
+              displayName: z.string().optional(),
+            }),
+          )
+          .optional(),
+        colorId: z.string().optional(),
+        reminders: z
+          .object({
+            useDefault: z.boolean().optional(),
+            overrides: z
+              .array(
+                z.object({
+                  method: z.enum(['email', 'popup']),
+                  minutes: z.number(),
+                }),
+              )
+              .optional(),
+          })
+          .optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const { activeConnection } = ctx;
+      if (activeConnection.providerId !== 'google') {
+        return { scopeMissing: false, event: null };
+      }
+      if (!activeConnection.refreshToken) {
+        throw new TRPCError({ code: 'UNAUTHORIZED', message: 'No refresh token available' });
+      }
+
+      const auth = buildAuthClient(activeConnection.refreshToken);
+      const { calendarId, ...body } = input;
+
+      try {
+        const created = await calendarFetchJSON<GCalEvent>(
+          auth,
+          `/calendars/${encodeURIComponent(calendarId)}/events`,
+          {
+            method: 'POST',
+            body,
+            params: input.attendees && input.attendees.length > 0 ? { sendUpdates: 'all' } : {},
+          },
+        );
+        return { scopeMissing: false, event: created };
+      } catch (err) {
+        if (err instanceof CalendarScopeMissingError) return { scopeMissing: true, event: null };
+        throw err;
+      }
+    }),
+
+  /** Patch (partial-update) an event. Uses events.patch so unspecified fields are preserved. */
+  updateEvent: activeConnectionProcedure
+    .input(
+      z.object({
+        calendarId: z.string().default('primary'),
+        eventId: z.string(),
+        patch: z.object({
+          summary: z.string().optional(),
+          description: z.string().optional(),
+          location: z.string().optional(),
+          start: z
+            .object({
+              dateTime: z.string().optional(),
+              date: z.string().optional(),
+              timeZone: z.string().optional(),
+            })
+            .optional(),
+          end: z
+            .object({
+              dateTime: z.string().optional(),
+              date: z.string().optional(),
+              timeZone: z.string().optional(),
+            })
+            .optional(),
+          attendees: z
+            .array(
+              z.object({
+                email: z.string(),
+                displayName: z.string().optional(),
+              }),
+            )
+            .optional(),
+          colorId: z.string().optional(),
+        }),
+        sendUpdates: z.enum(['all', 'externalOnly', 'none']).optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const { activeConnection } = ctx;
+      if (activeConnection.providerId !== 'google') {
+        return { scopeMissing: false, event: null };
+      }
+      if (!activeConnection.refreshToken) {
+        throw new TRPCError({ code: 'UNAUTHORIZED', message: 'No refresh token available' });
+      }
+
+      const auth = buildAuthClient(activeConnection.refreshToken);
+
+      try {
+        const updated = await calendarFetchJSON<GCalEvent>(
+          auth,
+          `/calendars/${encodeURIComponent(input.calendarId)}/events/${encodeURIComponent(input.eventId)}`,
+          {
+            method: 'PATCH',
+            body: input.patch,
+            params: input.sendUpdates ? { sendUpdates: input.sendUpdates } : {},
+          },
+        );
+        return { scopeMissing: false, event: updated };
+      } catch (err) {
+        if (err instanceof CalendarScopeMissingError) return { scopeMissing: true, event: null };
+        throw err;
+      }
+    }),
+
+  /** Delete an event from a Google calendar. */
+  deleteEvent: activeConnectionProcedure
+    .input(
+      z.object({
+        calendarId: z.string().default('primary'),
+        eventId: z.string(),
+        sendUpdates: z.enum(['all', 'externalOnly', 'none']).optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const { activeConnection } = ctx;
+      if (activeConnection.providerId !== 'google') {
+        return { scopeMissing: false, success: false };
+      }
+      if (!activeConnection.refreshToken) {
+        throw new TRPCError({ code: 'UNAUTHORIZED', message: 'No refresh token available' });
+      }
+
+      const auth = buildAuthClient(activeConnection.refreshToken);
+
+      try {
+        await calendarFetchJSON<null>(
+          auth,
+          `/calendars/${encodeURIComponent(input.calendarId)}/events/${encodeURIComponent(input.eventId)}`,
+          {
+            method: 'DELETE',
+            params: input.sendUpdates ? { sendUpdates: input.sendUpdates } : {},
+          },
+        );
+        return { scopeMissing: false, success: true };
+      } catch (err) {
+        if (err instanceof CalendarScopeMissingError) return { scopeMissing: true, success: false };
+        throw err;
+      }
     }),
 });

@@ -30,6 +30,8 @@ targets:
           - "MeetingsService.swift"
       - path: ../../packages/swift-auth/Sources/TodusAuth
         group: TodusAuth
+      - path: ../../packages/swift-widgets/Sources/TodusWidgetsShared
+        group: TodusWidgetsShared
     resources:
       - path: TodusMac/Resources/Assets.xcassets
       - path: TodusMac/Resources
@@ -39,6 +41,8 @@ targets:
     dependencies:
       - framework: EventKit.framework
         embed: false
+      - target: TodusMacWidgets
+        embed: true
     settings:
       base:
         PRODUCT_NAME: Todus
@@ -47,6 +51,31 @@ targets:
         CODE_SIGN_ENTITLEMENTS: TodusMac/Resources/TodusMac.entitlements
         ENABLE_PREVIEWS: YES
         MACOSX_DEPLOYMENT_TARGET: "15.0"
+    entitlements:
+      path: TodusMac/Resources/TodusMac.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.ludvighedin.todus
+        com.apple.security.device.audio-input: true
+
+  TodusMacWidgets:
+    type: app-extension
+    platform: macOS
+    sources:
+      - path: ../../packages/swift-widgets/Sources/TodusWidgetsShared
+      - path: ../../packages/swift-widgets/Sources/TodusWidgetsExtension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.ludvighedin.todus.macos.widgets
+        INFOPLIST_FILE: ../../packages/swift-widgets/Sources/TodusWidgetsExtension/Info.plist
+        CODE_SIGN_ENTITLEMENTS: ../../packages/swift-widgets/Sources/TodusWidgetsExtension/TodusMacWidgets.entitlements
+        ENABLE_PREVIEWS: YES
+        MACOSX_DEPLOYMENT_TARGET: "15.0"
+    entitlements:
+      path: ../../packages/swift-widgets/Sources/TodusWidgetsExtension/TodusMacWidgets.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.ludvighedin.todus
 
 schemes:
   TodusMac:

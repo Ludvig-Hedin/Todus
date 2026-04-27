@@ -1,29 +1,100 @@
 import Foundation
 
 /// Unified HTTP client for all backend API calls.
-/// Handles Bearer token auth, TRPC request formatting, and error handling.
+/// Handles Bearer token auth, TRPC request formatting, retry/backoff, and error handling.
 @MainActor
 final class TodosAPIClient {
     private let baseURL: URL
     private let authService: AuthService
     /// Default timeout for API requests — prevents indefinite hangs on bad connectivity.
     private let requestTimeout: TimeInterval = 30
+    /// Max attempts for retryable failures (5xx for queries, transient URLErrors).
+    /// First attempt + up to 2 retries = 3 total. Worst-case added latency ≈ 1.3s.
+    private let maxAttempts = 3
 
     init(baseURL: URL, authService: AuthService) {
         self.baseURL = baseURL
         self.authService = authService
     }
 
+    private func applyClientHeaders(to request: inout URLRequest) {
+        TodusHTTPClient.applyDefaultHeaders(to: &request)
+    }
+
     // MARK: - TRPC Helpers
 
     /// Call a TRPC query (GET-style, but uses POST for input).
     func trpcQuery<T: Decodable>(_ procedure: String, input: Encodable? = nil) async throws -> T {
-        return try await trpcRequest(procedure, input: input, isMutation: false)
+        return try await trpcSingle(procedure, input: input, isMutation: false)
     }
 
     /// Call a TRPC mutation (POST).
     func trpcMutation<T: Decodable>(_ procedure: String, input: Encodable? = nil) async throws -> T {
-        return try await trpcRequest(procedure, input: input, isMutation: true)
+        return try await trpcSingle(procedure, input: input, isMutation: true)
+    }
+
+    /// Batched TRPC query — fans out N calls to the same procedure as a single HTTP request,
+    /// using tRPC's standard `?batch=1` wire format. Returns a per-input result so partial
+    /// failures don't fail the whole batch.
+    ///
+    /// Used to collapse the inbox cold-start enrichment from N round trips into 1.
+    func trpcBatchQuery<Input: Encodable, Output: Decodable>(
+        _ procedure: String,
+        inputs: [Input]
+    ) async throws -> [Result<Output, Error>] {
+        guard !inputs.isEmpty else { return [] }
+
+        // tRPC v11 batch format with superjson:
+        //   POST /api/trpc/proc,proc,...,proc?batch=1
+        //   Body: { "0": { "json": <i0> }, "1": { "json": <i1> }, ... }
+        //   Response: [ { "result": { "data": { "json": <o> } } } | { "error": { "json": { "message": "..." } } }, ... ]
+        let path = "api/trpc/" + Array(repeating: procedure, count: inputs.count).joined(separator: ",")
+        guard var components = URLComponents(url: baseURL.appending(path: path), resolvingAgainstBaseURL: false) else {
+            throw APIError.invalidResponse
+        }
+        components.queryItems = [URLQueryItem(name: "batch", value: "1")]
+        guard let url = components.url else { throw APIError.invalidResponse }
+
+        var bodyDict: [String: Any] = [:]
+        for (i, input) in inputs.enumerated() {
+            let encoded = try JSONEncoder().encode(input)
+            let json = try JSONSerialization.jsonObject(with: encoded)
+            bodyDict[String(i)] = ["json": json]
+        }
+        let bodyData = try JSONSerialization.data(withJSONObject: bodyDict)
+
+        let (data, _) = try await executeURLRequest(isMutation: false) {
+            self.makeRequest(url: url, method: "POST", body: bodyData)
+        }
+
+        guard let array = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            throw APIError.invalidResponse
+        }
+        guard array.count == inputs.count else {
+            throw APIError.invalidResponse
+        }
+
+        var out: [Result<Output, Error>] = []
+        out.reserveCapacity(array.count)
+        for entry in array {
+            if let result = entry["result"] as? [String: Any],
+               let dataObj = result["data"] as? [String: Any],
+               let json = dataObj["json"] {
+                do {
+                    let jsonData = try JSONSerialization.data(withJSONObject: json)
+                    let decoded = try JSONDecoder.apiDecoder.decode(Output.self, from: jsonData)
+                    out.append(.success(decoded))
+                } catch {
+                    out.append(.failure(APIError.decodingError(error)))
+                }
+            } else if let err = entry["error"] as? [String: Any] {
+                let msg = (err["json"] as? [String: Any])?["message"] as? String
+                out.append(.failure(APIError.httpError(statusCode: 200, body: msg)))
+            } else {
+                out.append(.failure(APIError.invalidResponse))
+            }
+        }
+        return out
     }
 
     // MARK: - Generic HTTP
@@ -35,71 +106,11 @@ final class TodosAPIClient {
         body: Encodable? = nil
     ) async throws -> T {
         let url = baseURL.appending(path: path)
-        var request = URLRequest(url: url, timeoutInterval: requestTimeout)
-        request.httpMethod = method
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let bodyData: Data? = try body.map { try JSONEncoder().encode($0) }
+        let isMutation = method.uppercased() != "GET" && method.uppercased() != "HEAD"
 
-        if let token = authService.bearerToken {
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        }
-        if let sessionId = authService.currentSessionId {
-            request.setValue(sessionId, forHTTPHeaderField: "X-Todus-Session-Id")
-        }
-
-        if let body {
-            request.httpBody = try JSONEncoder().encode(body)
-        }
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-
-        guard let http = response as? HTTPURLResponse else {
-            throw APIError.invalidResponse
-        }
-
-        // Capture rotated Bearer token from Better Auth's set-auth-token header
-        authService.captureRotatedToken(from: http)
-
-        if http.statusCode == 401 {
-            // Try silent refresh then retry the request once with the new token
-            let refreshed = await authService.attemptSilentRefresh()
-            if refreshed {
-                return try await retryRequest(path: path, method: method, body: body)
-            }
-            authService.isSessionExpired = true
-            throw APIError.unauthorized
-        }
-
-        guard (200..<300).contains(http.statusCode) else {
-            throw APIError.httpError(statusCode: http.statusCode, body: String(data: data, encoding: .utf8))
-        }
-
-        return try JSONDecoder.apiDecoder.decode(T.self, from: data)
-    }
-
-    /// Retries a raw HTTP request after a successful token refresh — no further refresh attempts.
-    private func retryRequest<T: Decodable>(
-        path: String,
-        method: String,
-        body: Encodable?
-    ) async throws -> T {
-        let url = baseURL.appending(path: path)
-        var request = URLRequest(url: url, timeoutInterval: requestTimeout)
-        request.httpMethod = method
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        if let token = authService.bearerToken {
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        }
-        if let sessionId = authService.currentSessionId {
-            request.setValue(sessionId, forHTTPHeaderField: "X-Todus-Session-Id")
-        }
-        if let body {
-            request.httpBody = try JSONEncoder().encode(body)
-        }
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
-        authService.captureRotatedToken(from: http)
-        guard (200..<300).contains(http.statusCode) else {
-            throw APIError.httpError(statusCode: http.statusCode, body: String(data: data, encoding: .utf8))
+        let (data, _) = try await executeURLRequest(isMutation: isMutation) {
+            self.makeRequest(url: url, method: method, body: bodyData)
         }
         return try JSONDecoder.apiDecoder.decode(T.self, from: data)
     }
@@ -112,8 +123,20 @@ final class TodosAPIClient {
     }
 
     /// Disconnect the user's Gmail connection on the backend.
+    /// Looks up the current connection id first because `connections.delete`
+    /// requires a `connectionId` input.
     func disconnectEmail() async throws {
-        let _: EmptyResponse = try await trpcMutation("connections.delete")
+        struct ListResponse: Decodable {
+            struct Item: Decodable { let id: String }
+            let connections: [Item]
+        }
+        struct DeleteInput: Encodable { let connectionId: String }
+        let list: ListResponse = try await trpcQuery("connections.list")
+        guard let connectionId = list.connections.first?.id else { return }
+        let _: EmptyResponse = try await trpcMutation(
+            "connections.delete",
+            input: DeleteInput(connectionId: connectionId)
+        )
     }
 
     func listSessions() async throws -> ActiveSessionsResponse {
@@ -130,108 +153,148 @@ final class TodosAPIClient {
 
     // MARK: - Private
 
-    private func trpcRequest<T: Decodable>(
+    private func trpcSingle<T: Decodable>(
         _ procedure: String,
         input: Encodable?,
         isMutation: Bool
     ) async throws -> T {
-        // TRPC over HTTP: POST /api/trpc/{procedure}
-        // Body: { "json": <input> } (superjson format)
+        // TRPC over HTTP: POST /api/trpc/{procedure}, body { "json": <input> } (superjson).
         let url = baseURL.appending(path: "api/trpc/\(procedure)")
-        var request = URLRequest(url: url, timeoutInterval: requestTimeout)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
-        if let token = authService.bearerToken {
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        }
-        if let sessionId = authService.currentSessionId {
-            request.setValue(sessionId, forHTTPHeaderField: "X-Todus-Session-Id")
-        }
-
+        let bodyData: Data
         if let input {
-            // Wrap in superjson format: { "json": <value> }
-            let inputData = try JSONEncoder().encode(input)
-            let inputJSON = try JSONSerialization.jsonObject(with: inputData)
-            let wrapped: [String: Any] = ["json": inputJSON]
-            request.httpBody = try JSONSerialization.data(withJSONObject: wrapped)
+            let encoded = try JSONEncoder().encode(input)
+            let json = try JSONSerialization.jsonObject(with: encoded)
+            bodyData = try JSONSerialization.data(withJSONObject: ["json": json])
         } else {
-            request.httpBody = try JSONSerialization.data(withJSONObject: ["json": [:] as [String: Any]])
+            bodyData = try JSONSerialization.data(withJSONObject: ["json": [:] as [String: Any]])
         }
 
-        let (data, response) = try await URLSession.shared.data(for: request)
-
-        guard let http = response as? HTTPURLResponse else {
-            throw APIError.invalidResponse
-        }
-
-        // Capture rotated Bearer token from Better Auth's set-auth-token header
-        authService.captureRotatedToken(from: http)
-
-        if http.statusCode == 401 {
-            // Try silent refresh then retry the TRPC request once with the new token
-            let refreshed = await authService.attemptSilentRefresh()
-            if refreshed {
-                return try await retryTrpcRequest(procedure, input: input)
-            }
-            authService.isSessionExpired = true
-            throw APIError.unauthorized
-        }
-
-        guard (200..<300).contains(http.statusCode) else {
-            throw APIError.httpError(statusCode: http.statusCode, body: String(data: data, encoding: .utf8))
+        let (data, _) = try await executeURLRequest(isMutation: isMutation) {
+            self.makeRequest(url: url, method: "POST", body: bodyData)
         }
 
         // TRPC responses are wrapped: { "result": { "data": { "json": <value> } } }
-        let trpcResponse = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-        if let result = trpcResponse?["result"] as? [String: Any],
+        if let trpcResponse = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let result = trpcResponse["result"] as? [String: Any],
            let dataObj = result["data"] as? [String: Any],
            let json = dataObj["json"] {
             let jsonData = try JSONSerialization.data(withJSONObject: json)
             return try JSONDecoder.apiDecoder.decode(T.self, from: jsonData)
         }
 
-        // Fallback: try decoding the whole response
+        // Fallback: try decoding the whole response (e.g. for endpoints not wrapped in tRPC envelope)
         return try JSONDecoder.apiDecoder.decode(T.self, from: data)
     }
 
-    /// Retries a TRPC request after a successful token refresh — no further refresh attempts.
-    private func retryTrpcRequest<T: Decodable>(
-        _ procedure: String,
-        input: Encodable?
-    ) async throws -> T {
-        let url = baseURL.appending(path: "api/trpc/\(procedure)")
-        var request = URLRequest(url: url, timeoutInterval: requestTimeout)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    /// Builds a URLRequest with current bearer token + session id. Called per-attempt so we
+    /// always pick up the latest token (e.g. after a silent refresh between attempts).
+    private func makeRequest(url: URL, method: String, body: Data?) -> URLRequest {
+        var req = URLRequest(url: url, timeoutInterval: requestTimeout)
+        req.httpMethod = method
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyClientHeaders(to: &req)
         if let token = authService.bearerToken {
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
         if let sessionId = authService.currentSessionId {
-            request.setValue(sessionId, forHTTPHeaderField: "X-Todus-Session-Id")
+            req.setValue(sessionId, forHTTPHeaderField: "X-Todus-Session-Id")
         }
-        if let input {
-            let inputData = try JSONEncoder().encode(input)
-            let inputJSON = try JSONSerialization.jsonObject(with: inputData)
-            let wrapped: [String: Any] = ["json": inputJSON]
-            request.httpBody = try JSONSerialization.data(withJSONObject: wrapped)
-        } else {
-            request.httpBody = try JSONSerialization.data(withJSONObject: ["json": [:] as [String: Any]])
+        req.httpBody = body
+        return req
+    }
+
+    /// Drives request lifecycle: send → 401 silent-refresh-and-retry once → backoff retry on 5xx
+    /// (queries only) and transient URLErrors. The build closure is re-invoked per attempt so a
+    /// rotated bearer token is always picked up.
+    private func executeURLRequest(
+        isMutation: Bool,
+        build: () -> URLRequest
+    ) async throws -> (Data, HTTPURLResponse) {
+        var attempt = 0
+        var didRefresh = false
+
+        while true {
+            attempt += 1
+            let req = build()
+
+            do {
+                let (data, response) = try await URLSession.shared.data(for: req)
+                guard let http = response as? HTTPURLResponse else {
+                    throw APIError.invalidResponse
+                }
+                authService.captureRotatedToken(from: http)
+
+                if http.statusCode == 401 {
+                    if !didRefresh {
+                        didRefresh = true
+                        let refreshed = await authService.attemptSilentRefresh()
+                        if refreshed { continue } // retry with the refreshed token on the next attempt
+                    }
+                    authService.isSessionExpired = true
+                    throw APIError.unauthorized
+                }
+
+                if (500..<600).contains(http.statusCode) {
+                    // Retry queries on 5xx; mutations are not retried automatically because they
+                    // may have already been processed server-side before the failure surfaced.
+                    if !isMutation, attempt < maxAttempts {
+                        try await sleepBackoff(attempt: attempt)
+                        continue
+                    }
+                    throw APIError.httpError(statusCode: http.statusCode, body: String(data: data, encoding: .utf8))
+                }
+
+                guard (200..<300).contains(http.statusCode) else {
+                    throw APIError.httpError(statusCode: http.statusCode, body: String(data: data, encoding: .utf8))
+                }
+
+                return (data, http)
+            } catch let urlError as URLError {
+                let retryable: Bool = {
+                    if attempt >= maxAttempts { return false }
+                    if isMutation {
+                        // Only retry mutations on errors that clearly mean the request didn't reach
+                        // the server — anything mid-flight could have been processed.
+                        switch urlError.code {
+                        case .notConnectedToInternet, .cannotFindHost,
+                             .cannotConnectToHost, .dnsLookupFailed:
+                            return true
+                        default:
+                            return false
+                        }
+                    } else {
+                        // Queries are idempotent; retry on most network errors.
+                        switch urlError.code {
+                        case .notConnectedToInternet, .networkConnectionLost,
+                             .cannotFindHost, .cannotConnectToHost,
+                             .dnsLookupFailed, .timedOut:
+                            return true
+                        default:
+                            return false
+                        }
+                    }
+                }()
+                if retryable {
+                    try await sleepBackoff(attempt: attempt)
+                    continue
+                }
+                throw urlError
+            }
         }
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
-        authService.captureRotatedToken(from: http)
-        guard (200..<300).contains(http.statusCode) else {
-            throw APIError.httpError(statusCode: http.statusCode, body: String(data: data, encoding: .utf8))
+    }
+
+    /// Exponential backoff with jitter: ~100ms, ~300ms, ~900ms.
+    /// Throws `CancellationError` if the parent task is cancelled mid-wait so the
+    /// retry loop exits promptly instead of running another attempt.
+    private func sleepBackoff(attempt: Int) async throws {
+        let baseMillis: UInt64
+        switch attempt {
+        case 1: baseMillis = 100
+        case 2: baseMillis = 300
+        default: baseMillis = 900
         }
-        let trpcResponse = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-        if let result = trpcResponse?["result"] as? [String: Any],
-           let dataObj = result["data"] as? [String: Any],
-           let json = dataObj["json"] {
-            let jsonData = try JSONSerialization.data(withJSONObject: json)
-            return try JSONDecoder.apiDecoder.decode(T.self, from: jsonData)
-        }
-        return try JSONDecoder.apiDecoder.decode(T.self, from: data)
+        let jitter = UInt64.random(in: 0...80)
+        try await Task.sleep(nanoseconds: (baseMillis + jitter) * 1_000_000)
     }
 }
 

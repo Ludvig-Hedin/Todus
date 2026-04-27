@@ -7,9 +7,12 @@ import SwiftUI
 /// swallowed and a single step navigation fires at gesture end. Vertical scroll is unchanged so
 /// nested `ScrollView`s (time grid) keep working.
 enum CalendarTrackpadScroll {
-    fileprivate static let horizontalVsVertical: CGFloat = 1.12
-    fileprivate static let minAccum: CGFloat = 20
-    fileprivate static let minDebounce: TimeInterval = 0.2
+    /// Default: horizontal must slightly beat vertical (Month view: avoids fighting vertical month list).
+    fileprivate static let horizontalDefaultWeight: CGFloat = 1.04
+    /// Day/Week: time grid is vertically scrollable — easier to count as “horizontal” intent.
+    fileprivate static let timeGridHorizontalWeight: CGFloat = 0.82
+    fileprivate static let minAccum: CGFloat = 16
+    fileprivate static let minDebounce: TimeInterval = 0.12
 }
 
 final class CalendarTrackpadScrollCoordinator {
@@ -19,7 +22,14 @@ final class CalendarTrackpadScrollCoordinator {
     var isEnabled: Bool = true
     var lastFired: TimeInterval = 0
     var accum: CGFloat = 0
+    /// `true` for Day/Week: more lenient axis test + **⇧+scroll** maps to time navigation.
+    var isTimeGridViewMode: Bool = false
+    var shiftYAccum: CGFloat = 0
     var monitor: Any?
+
+    var horizontalToVerticalWeight: CGFloat {
+        isTimeGridViewMode ? CalendarTrackpadScroll.timeGridHorizontalWeight : CalendarTrackpadScroll.horizontalDefaultWeight
+    }
 }
 
 extension CalendarTrackpadScrollCoordinator {
@@ -30,7 +40,7 @@ extension CalendarTrackpadScrollCoordinator {
             guard event.type == .scrollWheel, coordinator.isEnabled, coordinator.onHorizontalNavigate != nil else {
                 return event
             }
-            guard let win = event.window, win == NSApp.keyWindow else { return event }
+            guard let win = event.window, win.isKeyWindow else { return event }
             if !coordinator.targetRectInWindow.isNull {
                 if !coordinator.targetRectInWindow.contains(event.locationInWindow) {
                     return event
@@ -38,21 +48,59 @@ extension CalendarTrackpadScrollCoordinator {
             }
             let adx = abs(event.scrollingDeltaX)
             let ady = abs(event.scrollingDeltaY)
-            let horizontalLike = adx * CalendarTrackpadScroll.horizontalVsVertical >= ady
-            guard horizontalLike, adx > 0.05 else {
+            let w = coordinator.horizontalToVerticalWeight
+
+            // Day / Week: Shift + scroll (usually vertical delta) = move in time without scrolling the hour grid.
+            if coordinator.isTimeGridViewMode, event.modifierFlags.contains(.shift) {
+                if adx < 0.01 && ady < 0.01 { return event }
+                if event.phase == .began { coordinator.shiftYAccum = 0 }
+                coordinator.shiftYAccum += event.scrollingDeltaY
+                let sFinger = (event.phase == .ended) && event.momentumPhase.isEmpty
+                let sMoment = event.momentumPhase == .ended
+                let sLegacy = event.phase.isEmpty && !event.hasPreciseScrollingDeltas
+                if sFinger || sMoment {
+                    if abs(coordinator.shiftYAccum) >= CalendarTrackpadScroll.minAccum {
+                        let now = Date.timeIntervalSinceReferenceDate
+                        if now - coordinator.lastFired > CalendarTrackpadScroll.minDebounce {
+                            // Same sign convention as two-finger horizontal
+                            let dir = coordinator.shiftYAccum < 0 ? 1 : -1
+                            coordinator.onHorizontalNavigate?(dir)
+                            coordinator.lastFired = now
+                        }
+                    }
+                    coordinator.shiftYAccum = 0
+                    return nil
+                }
+                if sLegacy, abs(coordinator.shiftYAccum) >= CalendarTrackpadScroll.minAccum {
+                    let now = Date.timeIntervalSinceReferenceDate
+                    if now - coordinator.lastFired > CalendarTrackpadScroll.minDebounce {
+                        let dir = coordinator.shiftYAccum < 0 ? 1 : -1
+                        coordinator.onHorizontalNavigate?(dir)
+                        coordinator.lastFired = now
+                    }
+                    coordinator.shiftYAccum = 0
+                    return nil
+                }
+                // Swallow so the vertical time grid does not also scroll
+                return nil
+            } else {
+                coordinator.shiftYAccum = 0
+            }
+
+            // Two-finger (or any) scroll: if horizontal component wins by view-dependent weight, navigate.
+            let horizontalLike = (adx * w >= ady) && adx > 0.05
+            guard horizontalLike else {
                 if event.phase == .ended || event.momentumPhase == .ended { coordinator.resetAccum() }
                 return event
             }
-            // Horizontal-dominant: accumulate; swallow to avoid other views reacting
             coordinator.accum += event.scrollingDeltaX
-            let fingerEnded = (event.phase == .ended) && event.momentumPhase == .none
+            let fingerEnded = (event.phase == .ended) && event.momentumPhase.isEmpty
             let momentumEnded = event.momentumPhase == .ended
             let legacyNoPhase = event.phase.isEmpty && !event.hasPreciseScrollingDeltas
             if fingerEnded || momentumEnded {
                 if abs(coordinator.accum) >= CalendarTrackpadScroll.minAccum {
                     let now = Date.timeIntervalSinceReferenceDate
                     if now - coordinator.lastFired > CalendarTrackpadScroll.minDebounce {
-                        // Swipe left (negative X) → next
                         let dir = coordinator.accum < 0 ? 1 : -1
                         coordinator.onHorizontalNavigate?(dir)
                         coordinator.lastFired = now
@@ -95,6 +143,8 @@ struct CalendarTrackpadNavigationModifier<Sync: Equatable>: ViewModifier {
     @Binding var targetRectInWindow: CGRect
     /// When this value changes, the scroll handler is re-bound (e.g. ``(viewMode, selectedDate)``).
     let updateWhen: Sync
+    /// Day + Week: easier horizontal two-finger recognition over the vertical hour grid, plus **⇧+scroll** for time.
+    var isTimeGridViewMode: Bool
     @State private var coordinator = CalendarTrackpadScrollCoordinator()
 
     func body(content: Content) -> some View {
@@ -102,6 +152,7 @@ struct CalendarTrackpadNavigationModifier<Sync: Equatable>: ViewModifier {
             .onAppear {
                 coordinator.onHorizontalNavigate = onHorizontalNavigate
                 coordinator.isEnabled = isEnabled
+                coordinator.isTimeGridViewMode = isTimeGridViewMode
                 if !targetRectInWindow.isNull { coordinator.targetRectInWindow = targetRectInWindow }
                 if isEnabled { coordinator.install() }
             }
@@ -117,6 +168,10 @@ struct CalendarTrackpadNavigationModifier<Sync: Equatable>: ViewModifier {
             }
             .onChange(of: updateWhen) { _, _ in
                 coordinator.onHorizontalNavigate = onHorizontalNavigate
+                coordinator.isTimeGridViewMode = isTimeGridViewMode
+            }
+            .onChange(of: isTimeGridViewMode) { _, v in
+                coordinator.isTimeGridViewMode = v
             }
             .onChange(of: targetRectInWindow) { _, r in
                 coordinator.targetRectInWindow = r
@@ -132,12 +187,132 @@ extension View {
         isEnabled: Bool,
         targetRectInWindow: Binding<CGRect>,
         updateWhen: Sync,
+        isTimeGridViewMode: Bool = false,
         onHorizontalNavigate: @escaping (Int) -> Void
     ) -> some View {
         modifier(
             CalendarTrackpadNavigationModifier(
                 isEnabled: isEnabled,
                 onHorizontalNavigate: onHorizontalNavigate,
+                targetRectInWindow: targetRectInWindow,
+                updateWhen: updateWhen,
+                isTimeGridViewMode: isTimeGridViewMode
+            )
+        )
+    }
+}
+
+// MARK: - Pinch (magnify) to change view density: Day → Week → Month → Year
+
+/// Trackpad pinch: spread to zoom in (finer), pinch to zoom out (wider) — like Apple Calendar.
+enum CalendarPinchViewMode {
+    fileprivate static let minTotalMagnification: CGFloat = 0.12
+    fileprivate static let minDebounce: TimeInterval = 0.25
+}
+
+final class CalendarPinchViewModeCoordinator {
+    /// `-1` = zoom in toward Day; `+1` = zoom out toward Year
+    var onViewModeStep: ((Int) -> Void)?
+    var targetRectInWindow: CGRect = .null
+    var isEnabled: Bool = true
+    var accum: CGFloat = 0
+    var lastFired: TimeInterval = 0
+    var monitor: Any?
+}
+
+extension CalendarPinchViewModeCoordinator {
+    func install() {
+        guard monitor == nil else { return }
+        let c = self
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .magnify) { event in
+            guard event.type == .magnify, c.isEnabled, c.onViewModeStep != nil else { return event }
+            guard let win = event.window, win.isKeyWindow else { return event }
+            if !c.targetRectInWindow.isNull, !c.targetRectInWindow.contains(event.locationInWindow) {
+                return event
+            }
+            if event.phase == .cancelled {
+                c.accum = 0
+                return event
+            }
+            if event.phase == .began { c.accum = 0 }
+            c.accum += event.magnification
+            // Trackpad: .began / .changed / .ended. Some devices send a single event with an empty phase.
+            let noPhase = event.phase.isEmpty && event.momentumPhase.isEmpty
+            let phaseEnded = event.phase == .ended || event.phase == .cancelled
+            let momentumEnded = event.momentumPhase == .ended
+            let gestureComplete = noPhase || phaseEnded || momentumEnded
+            if !gestureComplete { return event }
+            guard abs(c.accum) >= CalendarPinchViewMode.minTotalMagnification else {
+                if phaseEnded || momentumEnded || noPhase { c.accum = 0 }
+                return event
+            }
+            let now = Date.timeIntervalSinceReferenceDate
+            guard now - c.lastFired > CalendarPinchViewMode.minDebounce else {
+                c.accum = 0
+                return event
+            }
+            // positive magnification = spread = zoom in = finer granularity = step toward Day (-1)
+            // negative = pinch = zoom out = step toward Year (+1)
+            let step = c.accum > 0 ? -1 : 1
+            c.onViewModeStep?(step)
+            c.lastFired = now
+            c.accum = 0
+            return event
+        }
+    }
+
+    func remove() {
+        if let m = monitor { NSEvent.removeMonitor(m) }
+        monitor = nil
+    }
+}
+
+struct CalendarPinchViewModeModifier<Sync: Equatable>: ViewModifier {
+    let isEnabled: Bool
+    let onViewModeStep: (Int) -> Void
+    @Binding var targetRectInWindow: CGRect
+    let updateWhen: Sync
+    @State private var coordinator = CalendarPinchViewModeCoordinator()
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear {
+                coordinator.onViewModeStep = onViewModeStep
+                coordinator.isEnabled = isEnabled
+                if !targetRectInWindow.isNull { coordinator.targetRectInWindow = targetRectInWindow }
+                if isEnabled { coordinator.install() }
+            }
+            .onDisappear {
+                coordinator.isEnabled = false
+                coordinator.remove()
+            }
+            .onChange(of: isEnabled) { _, e in
+                coordinator.isEnabled = e
+                coordinator.onViewModeStep = onViewModeStep
+                if e, coordinator.monitor == nil { coordinator.install() }
+                if !e { coordinator.remove() }
+            }
+            .onChange(of: updateWhen) { _, _ in
+                coordinator.onViewModeStep = onViewModeStep
+            }
+            .onChange(of: targetRectInWindow) { _, r in
+                coordinator.targetRectInWindow = r
+            }
+    }
+}
+
+extension View {
+    /// Pinch on trackpad: spread → show more time detail (Day), pinch → see more span (Year).
+    func calendarPinchViewMode<Sync: Equatable>(
+        isEnabled: Bool,
+        targetRectInWindow: Binding<CGRect>,
+        updateWhen: Sync,
+        onViewModeStep: @escaping (Int) -> Void
+    ) -> some View {
+        modifier(
+            CalendarPinchViewModeModifier(
+                isEnabled: isEnabled,
+                onViewModeStep: onViewModeStep,
                 targetRectInWindow: targetRectInWindow,
                 updateWhen: updateWhen
             )

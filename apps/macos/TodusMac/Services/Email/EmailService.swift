@@ -31,6 +31,9 @@ final class EmailService {
     private var cachedNextPageTokenByFolder: [String: String] = [:]
     private var lastConnectionCheckAt: Date?
     private let connectionCheckInterval: TimeInterval = 30
+    /// Background task that watches for the forceSync workflow to populate threads after a
+    /// pull-to-refresh. Kept on the service so we can cancel it on sign-out / re-trigger.
+    private var resyncReconciliationTask: Task<Void, Never>?
 
     // MARK: - Init
 
@@ -40,6 +43,8 @@ final class EmailService {
 
     /// Clears all cached email state on sign-out so the next session starts fresh.
     func resetForSignOut() {
+        resyncReconciliationTask?.cancel()
+        resyncReconciliationTask = nil
         threads = []
         nextPageToken = nil
         errorMessage = nil
@@ -82,15 +87,82 @@ final class EmailService {
         }
     }
 
+    /// Polls `mail.listThreads` in the background after a forceSync that returned empty in
+    /// foreground. When threads land, enriches them and updates `threads` in place — the user
+    /// keeps seeing the previous inbox instead of staring at a spinner. Self-cancelling so
+    /// repeated pull-to-refresh attempts don't stack.
+    private func scheduleResyncReconciliation(
+        folder: String,
+        query: String?,
+        input: ListThreadsInput
+    ) {
+        resyncReconciliationTask?.cancel()
+        resyncReconciliationTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            for _ in 0..<12 {
+                if Task.isCancelled { return }
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                if Task.isCancelled { return }
+                do {
+                    let resp: ListThreadsResponse = try await self.api.trpcQuery("mail.listThreads", input: input)
+                    guard !resp.threads.isEmpty else { continue }
+                    let enriched = await self.fetchThreadDetails(ids: resp.threads.map(\.id))
+                    if Task.isCancelled { return }
+                    if !enriched.isEmpty {
+                        if query == nil {
+                            self.cachedThreadsByFolder[folder] = enriched
+                            if let next = resp.nextPageToken {
+                                self.cachedNextPageTokenByFolder[folder] = next
+                            } else {
+                                self.cachedNextPageTokenByFolder.removeValue(forKey: folder)
+                            }
+                        }
+                        if self.currentFolder == folder {
+                            self.threads = enriched
+                            self.nextPageToken = resp.nextPageToken
+                        }
+                    }
+                    return
+                } catch {
+                    continue
+                }
+            }
+        }
+    }
+
+    /// Asks the backend to re-sync threads from Gmail. Best-effort — actual thread population
+    /// happens asynchronously inside a Cloudflare Workflow, so callers should follow up with
+    /// a `mail.listThreads` retry loop.
+    private func triggerServerSync() async {
+        do {
+            let _: EmailEmptyResponse = try await api.trpcMutation("mail.forceSync")
+        } catch {
+            AppLogger.shared.log("[EmailService] triggerServerSync error: \(error)")
+        }
+    }
+
     // MARK: - Inbox
 
     /// Fetches threads for a given folder (default: inbox).
     /// Two-step process: get thread IDs from listThreads, then enrich each with mail.get.
-    func loadThreads(folder: String = "inbox", query: String? = nil, refresh: Bool = false) async {
+    ///
+    /// When `triggerSync` is true, kicks off a server-side Gmail re-sync first via `mail.forceSync`
+    /// so new messages from the provider land in our DB before we list. The backend `listThreads`
+    /// is otherwise a DB read and won't return new mail until something else triggers a sync.
+    func loadThreads(
+        folder: String = "inbox",
+        query: String? = nil,
+        refresh: Bool = false,
+        triggerSync: Bool = false
+    ) async {
         currentFolder = folder
         if refresh { nextPageToken = nil }
         isLoadingThreads = true
         errorMessage = nil
+
+        if triggerSync && query == nil {
+            await triggerServerSync()
+        }
 
         do {
             let input = ListThreadsInput(
@@ -100,7 +172,24 @@ final class EmailService {
                 cursor: refresh ? nil : nextPageToken
             )
             // Step 1: Get thread IDs from backend
-            let response: ListThreadsResponse = try await api.trpcQuery("mail.listThreads", input: input)
+            var response: ListThreadsResponse = try await api.trpcQuery("mail.listThreads", input: input)
+
+            // After a forceSync the workflow is still populating tables. Try a couple of
+            // quick re-reads in foreground for fast-resync cases, then hand off to a
+            // background reconciliation task and stop the spinner so the prior inbox stays
+            // visible without a multi-second wait.
+            if triggerSync && response.threads.isEmpty {
+                for _ in 0..<2 {
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    response = try await api.trpcQuery("mail.listThreads", input: input)
+                    if !response.threads.isEmpty { break }
+                }
+                if response.threads.isEmpty {
+                    scheduleResyncReconciliation(folder: folder, query: query, input: input)
+                    isLoadingThreads = false
+                    return
+                }
+            }
 
             // Step 2: Fetch full details for each thread in parallel
             let threadIds = response.threads.map(\.id)
@@ -108,7 +197,14 @@ final class EmailService {
 
             let mergedThreads: [EmailThread]
             if refresh {
-                mergedThreads = enrichedThreads
+                // Don't blow away a populated inbox when the server returns empty during a
+                // resync window — keep the cached list and let the next refresh pick up the
+                // freshly-synced threads.
+                if enrichedThreads.isEmpty, let cached = cachedThreadsByFolder[folder], !cached.isEmpty {
+                    mergedThreads = cached
+                } else {
+                    mergedThreads = enrichedThreads
+                }
             } else {
                 mergedThreads = (cachedThreadsByFolder[folder] ?? []) + enrichedThreads
             }
@@ -145,9 +241,50 @@ final class EmailService {
         isLoadingThreads = false
     }
 
-    /// Fetches full details for multiple threads in parallel via mail.get.
-    /// Batches requests into groups of 8 to reduce connection contention.
+    /// Fetches full details for multiple threads via a single batched `mail.get` request.
+    /// On batch failure, falls back to per-thread concurrent fetches so a transient failure
+    /// doesn't blank the inbox.
     private func fetchThreadDetails(ids: [String]) async -> [EmailThread] {
+        guard !ids.isEmpty else { return [] }
+
+        do {
+            let inputs = ids.map { GetThreadInput(id: $0) }
+            let results: [Result<GetThreadResponse, Error>] =
+                try await api.trpcBatchQuery("mail.get", inputs: inputs)
+            return assembleThreads(ids: ids, results: results)
+        } catch {
+            AppLogger.shared.log("[EmailService] Batch mail.get failed; falling back to per-thread: \(error)")
+            return await fetchThreadDetailsConcurrent(ids: ids)
+        }
+    }
+
+    private func assembleThreads(ids: [String], results: [Result<GetThreadResponse, Error>]) -> [EmailThread] {
+        var threads: [EmailThread] = []
+        threads.reserveCapacity(ids.count)
+        for (i, result) in results.enumerated() {
+            switch result {
+            case .success(let detail):
+                guard let latest = detail.latest ?? detail.messages.last else { continue }
+                threads.append(EmailThread(
+                    id: ids[i],
+                    subject: latest.subject,
+                    snippet: latest.plainText ?? "",
+                    from: latest.from,
+                    date: latest.date,
+                    unread: detail.hasUnread ?? false,
+                    messageCount: detail.totalReplies ?? detail.messages.count,
+                    labels: detail.labels?.map(\.name) ?? []
+                ))
+            case .failure(let err):
+                AppLogger.shared.log("[EmailService] thread \(ids[i]) failed in batch: \(err)")
+            }
+        }
+        return threads.sorted { $0.date > $1.date }
+    }
+
+    /// Fallback path used when the batch endpoint itself fails. Fans out N concurrent calls
+    /// in groups of 8 to avoid URLSession connection saturation.
+    private func fetchThreadDetailsConcurrent(ids: [String]) async -> [EmailThread] {
         let batchSize = 8
         var allResults = [(Int, EmailThread?)]()
         allResults.reserveCapacity(ids.count)
@@ -172,7 +309,7 @@ final class EmailService {
             allResults.append(contentsOf: batchResults)
         }
 
-        return allResults.sorted { $0.0 < $1.0 }.compactMap(\.1)
+        return allResults.sorted { $0.0 < $1.0 }.compactMap(\.1).sorted { $0.date > $1.date }
     }
 
     /// Fetches a single thread's details and builds an EmailThread summary from the latest message.
@@ -241,6 +378,7 @@ final class EmailService {
                 assistantNudges = nudges
             }
         } catch {
+            if error.isURLCancellation { return }
             AppLogger.shared.log("[EmailService] loadAssistantNudges error: \(error)")
         }
     }
@@ -251,6 +389,7 @@ final class EmailService {
             assistantBriefing = briefing
             return briefing
         } catch {
+            if error.isURLCancellation { return nil }
             AppLogger.shared.log("[EmailService] loadAssistantBriefing error: \(error)")
             return nil
         }
@@ -384,9 +523,11 @@ final class EmailService {
         do {
             let input = SendEmailInput(
                 to: draft.to.map { SendRecipient(email: $0) },
+                cc: draft.cc.isEmpty ? nil : draft.cc.map { SendRecipient(email: $0) },
                 subject: draft.subject,
                 message: draft.body,
-                threadId: draft.replyToThreadId
+                threadId: draft.replyToThreadId,
+                isForward: draft.isForward ? true : nil
             )
             let _: SendResponse = try await api.trpcMutation("mail.send", input: input)
             return true
@@ -511,9 +652,11 @@ private struct SendRecipient: Encodable {
 
 private struct SendEmailInput: Encodable {
     let to: [SendRecipient]
+    let cc: [SendRecipient]?
     let subject: String
     let message: String
     let threadId: String?
+    let isForward: Bool?
 }
 
 private struct AssistantThreadInput: Encodable {

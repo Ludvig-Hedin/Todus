@@ -7,7 +7,13 @@ struct MacTasksView: View {
     @Environment(MacAppServices.self) private var services
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \TaskRecord.createdAt, order: .reverse) private var allTasks: [TaskRecord]
-    @Query(sort: \FolderRecord.createdAt) private var folders: [FolderRecord]
+    @Query(
+        sort: [
+            SortDescriptor(\FolderRecord.position, order: .forward),
+            SortDescriptor(\FolderRecord.createdAt, order: .forward),
+        ]
+    )
+    private var folders: [FolderRecord]
 
     @State private var searchText = ""
     @State private var sortOrder: TaskSortOrder = .newest
@@ -17,6 +23,10 @@ struct MacTasksView: View {
     @State private var visibleTasks: [TaskRecord] = []
     @State private var completedTasks: [TaskRecord] = []
     @State private var isConnectingReminders = false
+    @State private var showRemindersConnected: Bool = false
+    @State private var openingFolder: FolderRecord? = nil
+    @State private var showFolderEditSheet: Bool = false
+    @Namespace private var taskViewModeSegmentNamespace
     var onCreateItem: () -> Void
 
     var body: some View {
@@ -29,11 +39,31 @@ struct MacTasksView: View {
                 toolbar
                     .padding(.bottom, MacTheme.spacing12)
 
-                // Folder strip
-                if !folders.isEmpty {
-                    folderStrip
-                        .padding(.bottom, MacTheme.spacing12)
+                if showRemindersConnected {
+                    HStack(spacing: 8) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.green)
+                        Text("Apple Reminders connected.")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(MacTheme.textPrimary)
+                        Spacer()
+                    }
+                    .padding(.horizontal, MacTheme.spacing12)
+                    .padding(.vertical, MacTheme.spacing8)
+                    .background(Color.green.opacity(0.1), in: RoundedRectangle(cornerRadius: MacTheme.buttonRadius, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: MacTheme.buttonRadius, style: .continuous)
+                            .stroke(Color.green.opacity(0.25), lineWidth: 1)
+                    )
+                    .padding(.bottom, MacTheme.spacing12)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
                 }
+
+                // Folder cards — horizontal scroller above the task list.
+                // Tap a card to open the folder's mixed-type detail sheet.
+                foldersRail
+                    .padding(.bottom, MacTheme.spacing12)
 
                 // Task list
                 if visibleTasks.isEmpty && completedTasks.isEmpty {
@@ -68,11 +98,46 @@ struct MacTasksView: View {
             } catch {
                 AppLogger.shared.log("[MacTasksView] Failed to sync shared folders: \(error)")
             }
+            await services.fetchFolderSummary(in: modelContext)
         }
         .onChange(of: allTasks) { recomputeTasks() }
         .onChange(of: searchText) { recomputeTasks() }
         .onChange(of: sortOrder) { recomputeTasks() }
         .onChange(of: selectedFolderID) { recomputeTasks() }
+        .sheet(item: $openingFolder) { folder in
+            MacFolderDetailView(folder: folder)
+        }
+        .sheet(isPresented: $showFolderEditSheet) {
+            MacFolderEditSheet(mode: .create)
+        }
+    }
+
+    // MARK: - Folder Cards
+
+    /// Horizontal rail of folder cards. Replaces the old capsule pill strip.
+    private var foldersRail: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 12) {
+                ForEach(folders) { folder in
+                    Button {
+                        openingFolder = folder
+                    } label: {
+                        MacFolderCardView(folder: folder, layout: .horizontal)
+                    }
+                    .buttonStyle(.plain)
+                    .contextMenu {
+                        Button("Open") { openingFolder = folder }
+                        Button("Delete", role: .destructive) {
+                            Task { await services.deleteSharedFolder(folder, in: modelContext) }
+                        }
+                    }
+                }
+                MacNewFolderCard(layout: .horizontal) {
+                    showFolderEditSheet = true
+                }
+            }
+            .padding(.vertical, 2)
+        }
     }
 
     // MARK: - Toolbar
@@ -212,85 +277,60 @@ struct MacTasksView: View {
         if granted {
             await services.importFromReminders(in: modelContext)
             services.syncExistingTasksToReminders(in: modelContext)
+            // Show a brief confirmation banner so users know it worked —
+            // the connect button just disappears otherwise, leaving no signal.
+            withAnimation(.snappy(duration: 0.2)) {
+                showRemindersConnected = true
+            }
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(3))
+                withAnimation(.snappy(duration: 0.2)) {
+                    showRemindersConnected = false
+                }
+            }
         } else {
             services.remindersSyncEnabled = false
         }
         isConnectingReminders = false
     }
 
+    /// Same visual system as `CalendarViewModePicker` — strong selected pill on a recessed track.
     private var viewModePicker: some View {
-        HStack(spacing: 1) {
+        HStack(spacing: 2) {
             ForEach(TaskViewMode.allCases) { mode in
+                let isSelected = viewMode == mode
                 Button {
-                    withAnimation(.easeOut(duration: 0.15)) {
+                    withAnimation(.snappy(duration: 0.2)) {
                         viewMode = mode
                     }
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: mode.systemImage)
-                            .font(.system(size: 12, weight: .medium))
+                            .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
                         Text(mode.shortTitle)
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(.system(size: 11, weight: isSelected ? .semibold : .regular))
                     }
-                    .foregroundStyle(viewMode == mode ? MacTheme.textPrimary : MacTheme.mutedText)
-                    .frame(minWidth: 68)
-                    .frame(height: 28)
-                    .background(
-                        viewMode == mode
-                            ? MacTheme.surfaceHover
-                            : Color.clear,
-                        in: Capsule(style: .continuous)
-                    )
+                    .foregroundStyle(isSelected ? MacTheme.textPrimary : MacTheme.mutedText)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .frame(minWidth: 64)
+                    .background {
+                        if isSelected {
+                            Capsule(style: .continuous)
+                                .fill(MacTheme.segmentedSelectedPill)
+                                .shadow(color: .black.opacity(0.15), radius: 2, y: 1)
+                                .matchedGeometryEffect(id: "task-view-mode-pill", in: taskViewModeSegmentNamespace)
+                        }
+                    }
+                    .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)
+                .focusEffectDisabled()
                 .interactiveHitTarget(expansion: 6)
             }
         }
-        .padding(2)
-        .background(MacTheme.surfaceCard, in: Capsule(style: .continuous))
-        .overlay(
-            Capsule(style: .continuous)
-                .stroke(MacTheme.cardBorder, lineWidth: 0.5)
-        )
-    }
-
-    // MARK: - Folder Strip
-
-    private var folderStrip: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: MacTheme.spacing4) {
-                folderPill(name: "All", isSelected: selectedFolderID == nil) {
-                    selectedFolderID = nil
-                }
-
-                ForEach(folders) { folder in
-                    folderPill(name: folder.name, isSelected: selectedFolderID == folder.id) {
-                        selectedFolderID = folder.id
-                    }
-                }
-            }
-        }
-    }
-
-    private func folderPill(name: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(name)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(isSelected ? MacTheme.accent : MacTheme.textSecondary)
-                .padding(.horizontal, MacTheme.spacing12)
-                .padding(.vertical, MacTheme.spacing4)
-                .background(
-                    isSelected ? MacTheme.accent.opacity(0.1) : MacTheme.surfaceCard,
-                    in: Capsule()
-                )
-                .overlay(
-                    Capsule()
-                        .stroke(isSelected ? MacTheme.accent.opacity(0.2) : MacTheme.cardBorder, lineWidth: 0.5)
-                )
-        }
-        .buttonStyle(.plain)
-        .interactiveHitTarget(expansion: 6)
-        .macClickablePointer()
+        .padding(3)
+        .background(MacTheme.segmentedTrack, in: Capsule(style: .continuous))
     }
 
     // MARK: - Task Content

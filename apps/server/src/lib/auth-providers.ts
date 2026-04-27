@@ -146,8 +146,9 @@ export const authProviders = (env: Record<string, string>): ProviderConfig[] => 
         'https://www.googleapis.com/auth/userinfo.profile',
         'https://www.googleapis.com/auth/userinfo.email',
         // Must match GoogleMailManager.getScope() so the stored connection scope
-        // reflects what the user actually granted. Without this, Calendar sync fails.
-        'https://www.googleapis.com/auth/calendar.readonly',
+        // reflects what the user actually granted. Full calendar scope (read+write)
+        // so we can create, update, and delete events on the user's behalf.
+        'https://www.googleapis.com/auth/calendar',
       ],
       clientId: env.GOOGLE_CLIENT_ID,
       clientSecret: env.GOOGLE_CLIENT_SECRET,

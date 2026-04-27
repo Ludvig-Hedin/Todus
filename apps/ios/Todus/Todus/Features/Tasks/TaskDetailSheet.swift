@@ -144,7 +144,7 @@ struct TaskDetailSheet: View {
             TextField("Description", text: $taskDescription, axis: .vertical)
                 .lineLimit(3...8)
         }
-        .listRowBackground(AppTheme.sheetCardFill)
+        .listRowBackground(SheetListRowBackground())
     }
 
     private var progressSection: some View {
@@ -164,7 +164,7 @@ struct TaskDetailSheet: View {
             }
             .pickerStyle(.menu)
         }
-        .listRowBackground(AppTheme.sheetCardFill)
+        .listRowBackground(SheetListRowBackground())
     }
 
     private var scheduleSection: some View {
@@ -176,7 +176,7 @@ struct TaskDetailSheet: View {
                 DatePicker("Due", selection: $dueDate)
             }
         }
-        .listRowBackground(AppTheme.sheetCardFill)
+        .listRowBackground(SheetListRowBackground())
     }
 
     private var organizationSection: some View {
@@ -244,7 +244,7 @@ struct TaskDetailSheet: View {
                     .font(.system(size: 12))
             }
         }
-        .listRowBackground(AppTheme.sheetCardFill)
+        .listRowBackground(SheetListRowBackground())
     }
 
     private var attachmentsSection: some View {
@@ -296,7 +296,7 @@ struct TaskDetailSheet: View {
                 }
             }
         }
-        .listRowBackground(AppTheme.sheetCardFill)
+        .listRowBackground(SheetListRowBackground())
     }
 
     private var trimmedTitle: String {

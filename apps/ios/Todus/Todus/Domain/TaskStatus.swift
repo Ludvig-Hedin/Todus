@@ -23,7 +23,7 @@ enum TaskStatus: String, Codable, CaseIterable, Identifiable, Sendable {
     var tintColor: Color {
         switch self {
         case .todo:
-            return Color(red: 0.55, green: 0.55, blue: 0.60)   // neutral slate
+            return Color(red: 0.44, green: 0.46, blue: 0.52)   // neutral slate (readable on light card fills)
         case .doing:
             return Color(red: 0.40, green: 0.56, blue: 0.85)   // calm blue
         case .done:

@@ -202,6 +202,7 @@ private final class MacNotificationDigestService {
             req.httpMethod = "POST"
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
             req.setValue("https://todus.app", forHTTPHeaderField: "Origin")
+            TodusHTTPClient.applyDefaultHeaders(to: &req)
             if let token = authService?.bearerToken {
                 req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
             }

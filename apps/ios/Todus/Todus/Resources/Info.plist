@@ -29,6 +29,16 @@
 				<string>com.ludvighedin.todus</string>
 			</array>
 		</dict>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>com.ludvighedin.todus.mailto</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>mailto</string>
+			</array>
+		</dict>
 	</array>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
@@ -52,6 +62,8 @@
 	<string>Todus syncs your tasks with Apple Reminders.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Todus saves images from chat to your photo library when you choose Save.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Todus shows recent photos in the assistant attachment sheet so you can quickly attach an image to your message.</string>
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UIColorName</key>

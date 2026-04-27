@@ -425,9 +425,7 @@ struct VoiceInputButton: View {
                         .foregroundStyle(AppTheme.mutedText)
                         .transition(.scale.combined(with: .opacity))
                 case .starting, .transcribing:
-                    ProgressView()
-                        .scaleEffect(0.75)
-                        .tint(AppTheme.mutedText)
+                    ButtonInlineProgressView(tint: AppTheme.mutedText, side: AppTheme.Metrics.toolbarInlineSpinner)
                         .transition(.opacity)
                 case .recording:
                     Image(systemName: "stop.fill")

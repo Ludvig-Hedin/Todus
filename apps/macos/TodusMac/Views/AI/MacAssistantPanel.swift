@@ -6,10 +6,28 @@ import AppKit
 
 // MARK: - Assistant Display Mode
 
-/// Controls how the AI assistant panel is presented — as a floating window or docked side pane.
+/// Controls how the AI assistant panel is presented.
 enum AssistantDisplayMode: String {
-    case floating
-    case sidepane
+    case floating   // Overlay within the main window — draggable, resizable
+    case sidepane   // Docked to the trailing edge of the main window
+    case window     // Detached as a standalone NSWindow
+    case full       // Fills the entire main window (replaces nav)
+}
+
+// MARK: - Floating Panel Geometry
+
+/// Live geometry for the floating panel — owned by `FloatingPanelShell`, shared with
+/// `MacAssistantPanel` for header-drag writes. Uses `@Observable` so only the thin shell
+/// re-renders each frame during drag/resize; `MacAssistantPanel` is not re-rendered per frame.
+@Observable
+final class FloatingPanelGeometry: @unchecked Sendable {
+    var liveSize: CGSize
+    var liveOffset: CGSize
+
+    init(size: CGSize = CGSize(width: 400, height: 560), offset: CGSize = .zero) {
+        liveSize = size
+        liveOffset = offset
+    }
 }
 
 // MARK: - Prompt Template
@@ -22,11 +40,21 @@ private struct PromptTemplate: Identifiable {
     let text: String
 }
 
+// MARK: - WeakRef
+
+/// Sendable weak-reference box so we can capture a @MainActor object inside a
+/// Task.detached / @Sendable closure without Swift 6 data-race errors.
+/// Access `value` only from inside Task { @MainActor in }.
+private final class MacVoiceWeakRef<T: AnyObject>: @unchecked Sendable {
+    weak var value: T?
+    init(_ value: T) { self.value = value }
+}
+
 // MARK: - MacAudioEngineHolder
 
-/// Holds AVAudioEngine + SFSpeechRecognizer in an @unchecked Sendable container
-/// so heavy audio operations (inputNode, prepare, start) can run off the main
-/// actor without Swift 6 Sendable conformance issues.
+/// Holds AVAudioEngine + SFSpeechRecognizer in an @unchecked Sendable container.
+/// All methods are `nonisolated` so heavy audio operations always run off the
+/// main actor regardless of the caller's isolation.
 private final class MacAudioEngineHolder: @unchecked Sendable {
     let speechRecognizer: SFSpeechRecognizer? = SFSpeechRecognizer()
     private var audioEngine: AVAudioEngine?
@@ -35,11 +63,12 @@ private final class MacAudioEngineHolder: @unchecked Sendable {
     private var hasInstalledTap = false
     private let lock = NSLock()
 
-    /// Prepares and starts the audio engine entirely off the main thread.
-    /// AVAudioEngine.inputNode, prepare(), and start() can collectively block
-    /// for several seconds while hardware initializes — running them off-main
-    /// prevents a visible UI freeze.
-    func setupAndStartEngine() async throws {
+    /// Synchronous setup. MUST be called off the main thread — caller is always
+    /// inside a Task.detached. AVAudioEngine.prepare()/start() can block for
+    /// several seconds while hardware initialises.
+    nonisolated func setupAndStartEngine() throws {
+        assert(!Thread.isMainThread, "setupAndStartEngine must NOT run on main")
+
         var engine: AVAudioEngine?
         var request: SFSpeechAudioBufferRecognitionRequest?
         var didInstallTap = false
@@ -58,7 +87,8 @@ private final class MacAudioEngineHolder: @unchecked Sendable {
                 throw NSError(
                     domain: "VoiceInput",
                     code: -1,
-                    userInfo: [NSLocalizedDescriptionKey: "Invalid audio input format"]
+                    userInfo: [NSLocalizedDescriptionKey:
+                        "Invalid audio format. The microphone may be in use by another app."]
                 )
             }
 
@@ -76,12 +106,8 @@ private final class MacAudioEngineHolder: @unchecked Sendable {
                 hasInstalledTap = true
             }
         } catch {
-            if didInstallTap {
-                engine?.inputNode.removeTap(onBus: 0)
-            }
-            if let engine, engine.isRunning {
-                engine.stop()
-            }
+            if didInstallTap { engine?.inputNode.removeTap(onBus: 0) }
+            if let engine, engine.isRunning { engine.stop() }
             request?.endAudio()
             withLock {
                 audioEngine = nil
@@ -93,164 +119,221 @@ private final class MacAudioEngineHolder: @unchecked Sendable {
         }
     }
 
-    func cleanup() {
+    nonisolated func cleanup() {
+        var engineToStop: AVAudioEngine?
+        var hadTap = false
         withLock {
-            recognitionTask?.cancel()
-            recognitionTask = nil
-            stopCaptureLocked()
-            audioEngine = nil
-            recognitionRequest = nil
+            recognitionTask?.cancel(); recognitionTask = nil
+            recognitionRequest?.endAudio()
+            engineToStop = audioEngine; hadTap = hasInstalledTap
+            audioEngine = nil; recognitionRequest = nil; hasInstalledTap = false
+        }
+        Task.detached(priority: .utility) {
+            if hadTap { engineToStop?.inputNode.removeTap(onBus: 0) }
+            engineToStop?.stop()
         }
     }
 
-    func stopCapture() {
+    nonisolated func stopCapture() {
+        var engineToStop: AVAudioEngine?
+        var hadTap = false
         withLock {
-            stopCaptureLocked()
-            audioEngine = nil
-            recognitionRequest = nil
+            recognitionRequest?.endAudio()
+            engineToStop = audioEngine; hadTap = hasInstalledTap
+            audioEngine = nil; recognitionRequest = nil; hasInstalledTap = false
+        }
+        Task.detached(priority: .utility) {
+            if hadTap { engineToStop?.inputNode.removeTap(onBus: 0) }
+            engineToStop?.stop()
         }
     }
 
-    func currentRecognitionRequest() -> SFSpeechAudioBufferRecognitionRequest? {
+    nonisolated func currentRecognitionRequest() -> SFSpeechAudioBufferRecognitionRequest? {
         withLock { recognitionRequest }
     }
 
-    func currentRecognitionTask() -> SFSpeechRecognitionTask? {
-        withLock { recognitionTask }
+    nonisolated func setRecognitionTask(_ task: SFSpeechRecognitionTask?) {
+        withLock { recognitionTask = task }
     }
 
-    func setRecognitionTask(_ task: SFSpeechRecognitionTask?) {
-        withLock {
-            recognitionTask = task
-        }
-    }
-
-    func clearRecognitionTask() {
-        withLock {
-            recognitionTask = nil
-        }
-    }
-
-    private func stopCaptureLocked() {
-        recognitionRequest?.endAudio()
-        guard let engine = audioEngine else { return }
-        if engine.isRunning {
-            engine.stop()
-        }
-        if hasInstalledTap {
-            engine.inputNode.removeTap(onBus: 0)
-            hasInstalledTap = false
-        }
-    }
-
-    private func withLock<T>(_ body: () throws -> T) rethrows -> T {
-        lock.lock()
-        defer { lock.unlock() }
-        return try body()
+    private func withLock<T>(_ body: () -> T) -> T {
+        lock.lock(); defer { lock.unlock() }; return body()
     }
 }
 
 // MARK: - MacVoiceController
 
-/// Speech-to-text controller for macOS. Manages AVAudioEngine + SFSpeechRecognizer lifecycle.
-/// Delegates heavy audio work to MacAudioEngineHolder which runs off the main actor.
+/// Speech-to-text controller for macOS. Mirrors iOS VoiceController structure:
+/// permission checks + audio engine setup run on Task.detached so the main
+/// actor is never blocked. The closure-based SFSpeechRecognizer.requestAuthorization
+/// and AVCaptureDevice.requestAccess APIs can stall the calling thread on first
+/// use — running them via Task { @MainActor in } would freeze the UI because
+/// that still executes on the main actor executor. Only Task.detached truly
+/// leaves the main actor.
 @MainActor
 @Observable
 private final class MacVoiceController {
-    enum RecordingState: Equatable { case idle, recording, transcribing }
+    enum RecordingState: Equatable { case idle, starting, recording, transcribing }
     var recordingState: RecordingState = .idle
 
     private let holder = MacAudioEngineHolder()
     private var latestTranscript = ""
+    private var onFinished: (@MainActor @Sendable (String) -> Void)?
     private var didFinishTranscription = false
+    private var startupWatchdog: Task<Void, Never>?
 
-    /// Request speech + mic permissions, then begin recording.
     func startRecording(onFinished: @escaping @MainActor @Sendable (String) -> Void) {
         guard recordingState == .idle else { return }
         latestTranscript = ""
         didFinishTranscription = false
-        Task {
-            // Request speech authorization
-            let authStatus = await withCheckedContinuation { (cont: CheckedContinuation<SFSpeechRecognizerAuthorizationStatus, Never>) in
-                SFSpeechRecognizer.requestAuthorization { status in
-                    cont.resume(returning: status)
-                }
-            }
-            guard authStatus == .authorized else { return }
+        self.onFinished = onFinished
+        recordingState = .starting
+        armWatchdog()
 
-            // Request microphone access (macOS uses AVCaptureDevice, not AVAudioSession)
-            let micGranted = await AVCaptureDevice.requestAccess(for: .audio)
-            guard micGranted else { return }
+        let holder = self.holder
+        let ref = MacVoiceWeakRef(self)
 
-            await beginAudioSession(onFinished: onFinished)
+        Task.detached(priority: .userInitiated) {
+            await MacVoiceController.setupOnBackground(ref: ref, holder: holder)
         }
     }
 
-    /// Stop recording; transcription finalises asynchronously. 3s timeout fallback.
     func stopRecording(onFinished: @escaping @MainActor @Sendable (String) -> Void) {
         guard recordingState == .recording else { return }
+        self.onFinished = onFinished
         recordingState = .transcribing
         holder.stopCapture()
 
-        let captured = latestTranscript
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
             guard let self, self.recordingState == .transcribing else { return }
-            // Full cleanup — stops engine & releases mic to avoid stale audio state
+            let captured = self.latestTranscript
             self.holder.cleanup()
             self.latestTranscript = ""
             self.recordingState = .idle
-            if !captured.isEmpty { self.finishTranscription(captured, onFinished: onFinished) }
+            if !captured.isEmpty { self.finishTranscription(captured) }
         }
     }
 
-    private func beginAudioSession(onFinished: @escaping @MainActor @Sendable (String) -> Void) async {
-        guard holder.speechRecognizer?.isAvailable == true else { return }
+    /// Tear down any in-flight recording / watchdog. Safe to call from .onDisappear.
+    func tearDown() {
+        cancelWatchdog()
+        if recordingState != .idle {
+            holder.cleanup()
+            latestTranscript = ""
+            recordingState = .idle
+            onFinished = nil
+            didFinishTranscription = false
+        }
+    }
 
+    /// Pure background function. `static` so it cannot accidentally capture any
+    /// MainActor-isolated state. All MainActor updates go through `ref`.
+    private static nonisolated func setupOnBackground(
+        ref: MacVoiceWeakRef<MacVoiceController>,
+        holder: MacAudioEngineHolder
+    ) async {
+        // 1. Speech permission — only call the dialog-triggering API when truly
+        // undetermined; `authorizationStatus()` is a non-blocking lookup.
+        let speechStatus = SFSpeechRecognizer.authorizationStatus()
+        if speechStatus == .notDetermined {
+            let resolved = await withCheckedContinuation {
+                (cont: CheckedContinuation<SFSpeechRecognizerAuthorizationStatus, Never>) in
+                SFSpeechRecognizer.requestAuthorization { cont.resume(returning: $0) }
+            }
+            guard resolved == .authorized else {
+                await MainActor.run { ref.value?.fail() }
+                return
+            }
+        } else if speechStatus != .authorized {
+            await MainActor.run { ref.value?.fail() }
+            return
+        }
+
+        // 2. Mic permission (macOS uses AVCaptureDevice, not AVAudioSession)
+        let micStatus = AVCaptureDevice.authorizationStatus(for: .audio)
+        if micStatus == .notDetermined {
+            let granted = await AVCaptureDevice.requestAccess(for: .audio)
+            guard granted else {
+                await MainActor.run { ref.value?.fail() }
+                return
+            }
+        } else if micStatus != .authorized {
+            await MainActor.run { ref.value?.fail() }
+            return
+        }
+
+        // 3. Recognizer availability
+        guard let recognizer = holder.speechRecognizer, recognizer.isAvailable else {
+            await MainActor.run { ref.value?.fail() }
+            return
+        }
+
+        // 4. Audio engine — synchronous and blocking, run here on the bg task.
         do {
-            // All engine setup runs off-main via the holder to prevent UI freeze.
-            try await holder.setupAndStartEngine()
+            try holder.setupAndStartEngine()
         } catch {
-            holder.cleanup()
+            await MainActor.run { ref.value?.fail() }
             return
         }
 
-        guard let request = holder.currentRecognitionRequest(),
-              let recognizer = holder.speechRecognizer else {
-            holder.cleanup()
+        guard let request = holder.currentRecognitionRequest() else {
+            await MainActor.run { ref.value?.fail() }
             return
         }
 
-        let recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
+        // 5. Recognition task — callback fires on bg, hop to main for state.
+        let task = recognizer.recognitionTask(with: request) { result, error in
             let text = result?.bestTranscription.formattedString ?? ""
             let isFinal = result?.isFinal == true || error != nil
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                if !text.isEmpty { self.latestTranscript = text }
+            Task { @MainActor in
+                guard let ctrl = ref.value else { return }
+                if !text.isEmpty { ctrl.latestTranscript = text }
                 if isFinal {
-                    let finalText = self.latestTranscript
-                    self.latestTranscript = ""
-                    // Full cleanup — stops the audio engine and releases the mic.
-                    // Without this, a dangling engine causes audio session conflicts
-                    // on the next recording attempt, which can freeze the app.
-                    self.holder.cleanup()
-                    self.recordingState = .idle
-                    if !finalText.isEmpty { self.finishTranscription(finalText, onFinished: onFinished) }
+                    let finalText = ctrl.latestTranscript
+                    ctrl.latestTranscript = ""
+                    ctrl.holder.cleanup()
+                    ctrl.recordingState = .idle
+                    if !finalText.isEmpty { ctrl.finishTranscription(finalText) }
                 }
             }
         }
-        holder.setRecognitionTask(recognitionTask)
+        holder.setRecognitionTask(task)
 
-        recordingState = .recording
+        await MainActor.run {
+            guard let ctrl = ref.value else { return }
+            ctrl.recordingState = .recording
+            ctrl.cancelWatchdog()
+        }
     }
 
-    private func finishTranscription(
-        _ text: String,
-        onFinished: @escaping @MainActor @Sendable (String) -> Void
-    ) {
-        guard !didFinishTranscription else { return }
-        guard !text.isEmpty else { return }
+    fileprivate func fail() {
+        holder.cleanup()
+        recordingState = .idle
+        latestTranscript = ""
+        onFinished = nil
+        cancelWatchdog()
+    }
+
+    private func finishTranscription(_ text: String) {
+        guard !didFinishTranscription, !text.isEmpty else { return }
         didFinishTranscription = true
-        onFinished(text)
+        let cb = onFinished
+        onFinished = nil
+        cb?(text)
+    }
+
+    private func armWatchdog() {
+        cancelWatchdog()
+        startupWatchdog = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(10))
+            guard !Task.isCancelled, let self else { return }
+            if self.recordingState == .starting { self.fail() }
+        }
+    }
+
+    private func cancelWatchdog() {
+        startupWatchdog?.cancel()
+        startupWatchdog = nil
     }
 }
 
@@ -274,6 +357,11 @@ struct MacAssistantPanel: View {
 
     @Binding var isPresented: Bool
     @Binding var displayMode: AssistantDisplayMode
+    /// Shared geometry for floating-mode header drag. Owned by `FloatingPanelShell`; reads are
+    /// only in gesture closures so `@Observable` changes don't re-render this view per frame.
+    var geo: FloatingPanelGeometry? = nil
+    /// Called once on header-drag end so the caller can persist the new offset to disk.
+    var onHeaderDragCommit: (() -> Void)? = nil
     /// Current page/section the user is viewing — drives context chip and suggestion pool
     var currentSelection: MacPrimarySelection = .home
 
@@ -294,11 +382,13 @@ struct MacAssistantPanel: View {
     @State private var isShowingFilePicker = false
     @State private var pendingAttachments: [URL] = []
 
-    // Floating mode — position and size (self-managed)
-    @State private var floatingOffset: CGSize = .zero
-    @State private var dragAccumulator: CGSize = .zero
-    @State private var floatingSize: CGSize = CGSize(width: 400, height: 560)
-    @State private var resizeDragStart: CGSize?
+    // Live voice chat sheet
+    @State private var isShowingVoiceChat = false
+
+    /// Remembered offset at the start of a header drag — used to compute absolute position.
+    @State private var headerDragStart: CGSize?
+    @State private var isHeaderTitleHovered = false
+    @State private var isHeaderTitleDragging = false
 
     // Animated thinking text
     @State private var thinkingIndex = 0
@@ -399,6 +489,15 @@ struct MacAssistantPanel: View {
     /// Dark panel background — matches iOS AppTheme.backgroundTop
     private let panelBackground = Color(light: Color(white: 0.98), dark: Color(white: 0.08))
 
+    private var displayModeIcon: String {
+        switch displayMode {
+        case .floating: return "macwindow"
+        case .sidepane: return "sidebar.right"
+        case .window:   return "uiwindow.split.2x1"
+        case .full:     return "arrow.up.left.and.arrow.down.right"
+        }
+    }
+
     /// AI gradient — matches the tab bar sparkles icon exactly (same stops as iOS)
     private var aiGradient: LinearGradient {
         LinearGradient(
@@ -448,49 +547,13 @@ struct MacAssistantPanel: View {
             }
         }
         .background(panelBackground)
-        .clipShape(RoundedRectangle(cornerRadius: displayMode == .floating ? MacTheme.rowRadius : 0, style: .continuous))
+        // Side pane and full-screen are flush to the window edge — no rounding. Floating and window modes round.
+        .clipShape(RoundedRectangle(cornerRadius: (displayMode == .sidepane || displayMode == .full) ? 0 : MacTheme.rowRadius, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: displayMode == .floating ? MacTheme.rowRadius : 0, style: .continuous)
+            // Border only in floating mode; window chrome and other modes provide their own boundary.
+            RoundedRectangle(cornerRadius: (displayMode == .sidepane || displayMode == .full) ? 0 : MacTheme.rowRadius, style: .continuous)
                 .stroke(MacTheme.cardBorder, lineWidth: displayMode == .floating ? 1 : 0)
         )
-        // Resize handle — bottom-right corner (floating mode only)
-        .overlay(alignment: .bottomTrailing) {
-            if displayMode == .floating {
-                Image(systemName: "line.diagonal")
-                    .font(.system(size: 9, weight: .medium))
-                    .foregroundStyle(.tertiary)
-                    .rotationEffect(.degrees(-45))
-                    .frame(width: 14, height: 14)
-                    .padding(6)
-                    .contentShape(Rectangle())
-                    .gesture(
-                        DragGesture()
-                            .onChanged { value in
-                                if resizeDragStart == nil { resizeDragStart = floatingSize }
-                                let start = resizeDragStart ?? floatingSize
-                                floatingSize = CGSize(
-                                    width: max(320, min(700, start.width + value.translation.width)),
-                                    height: max(400, min(900, start.height + value.translation.height))
-                                )
-                            }
-                            .onEnded { _ in resizeDragStart = nil }
-                    )
-                    .onHover { hovering in
-                        if hovering { NSCursor.crosshair.push() } else { NSCursor.pop() }
-                    }
-            }
-        }
-        .shadow(
-            color: displayMode == .floating ? Color.black.opacity(0.2) : .clear,
-            radius: displayMode == .floating ? 24 : 0,
-            x: 0, y: displayMode == .floating ? 10 : 0
-        )
-        // Floating mode: self-managed size and position
-        .frame(
-            width: displayMode == .floating ? floatingSize.width : nil,
-            height: displayMode == .floating ? floatingSize.height : nil
-        )
-        .offset(displayMode == .floating ? floatingOffset : .zero)
         // Cycle thinking text while streaming
         .task(id: chatService.isStreaming) {
             guard chatService.isStreaming else { return }
@@ -591,14 +654,78 @@ struct MacAssistantPanel: View {
             guard case .success(let urls) = result else { return }
             pendingAttachments.append(contentsOf: urls)
         }
+        // Live voice chat — bidirectional Gemini Live session via the backend WS proxy
+        .sheet(isPresented: $isShowingVoiceChat) {
+            MacVoiceChatPanel(
+                chatService: chatService,
+                tokenService: services.voiceTokenService
+            )
+        }
+    }
+
+    /// Gradient for the live-voice waveform button — matches the iOS treatment.
+    private var voiceButtonGradient: LinearGradient {
+        LinearGradient(
+            colors: [
+                Color(red: 0x00 / 255.0, green: 0xAA / 255.0, blue: 0xF5 / 255.0),
+                Color(red: 0xEF / 255.0, green: 0x00 / 255.0, blue: 0xC2 / 255.0),
+                Color(red: 0xFF / 255.0, green: 0x00 / 255.0, blue: 0x38 / 255.0),
+                Color(red: 0xF9 / 255.0, green: 0x9F / 255.0, blue: 0x00 / 255.0),
+            ],
+            startPoint: UnitPoint(x: 0.3, y: 0),
+            endPoint: UnitPoint(x: 0.7, y: 1)
+        )
     }
 
     // MARK: - Header (matches iOS toolbar: history | title | new chat + ... menu)
 
+    @ViewBuilder
+    private var headerTitleView: some View {
+        switch panelContent {
+        case .chat:
+            Text(chatService.chatTitle ?? "AI Assistant")
+        case .groupList:
+            Text("Group Chats")
+        case .groupChat:
+            Text(services.groupChatService.currentGroupDetails?.name ?? "Group")
+        }
+    }
+
+    private var floatingHeaderMoveGesture: some Gesture {
+        DragGesture(minimumDistance: 2)
+            .onChanged { value in
+                guard let geo else { return }
+                if !isHeaderTitleDragging {
+                    isHeaderTitleDragging = true
+                    NSCursor.closedHand.set()
+                }
+                if headerDragStart == nil { headerDragStart = geo.liveOffset }
+                let start = headerDragStart ?? .zero
+                // Write directly to geo — FloatingPanelShell re-renders (cheap), not this view.
+                geo.liveOffset = CGSize(
+                    width: start.width + value.translation.width,
+                    height: start.height + value.translation.height
+                )
+            }
+            .onEnded { _ in
+                headerDragStart = nil
+                isHeaderTitleDragging = false
+                syncHeaderTitleMoveCursor()
+                onHeaderDragCommit?()
+            }
+    }
+
+    private func syncHeaderTitleMoveCursor() {
+        guard displayMode == .floating else { return }
+        if isHeaderTitleHovered {
+            NSCursor.openHand.set()
+        } else {
+            NSCursor.arrow.set()
+        }
+    }
+
     private var panelHeader: some View {
         HStack(spacing: 8) {
-            // Back button (shown when in group list or group chat)
-            // History button (shown in chat mode)
             if panelContent == .chat {
                 Button { showsHistory.toggle() } label: {
                     Image(systemName: "clock.arrow.trianglehead.counterclockwise.rotate.90")
@@ -623,27 +750,32 @@ struct MacAssistantPanel: View {
                 .help("Back to Chat")
             }
 
-            Spacer(minLength: 4)
-
-            // Title — changes based on panel content
-            Group {
-                switch panelContent {
-                case .chat:
-                    Text(chatService.chatTitle ?? "AI Assistant")
-                case .groupList:
-                    Text("Group Chats")
-                case .groupChat:
-                    Text(services.groupChatService.currentGroupDetails?.name ?? "Group")
+            if displayMode == .floating {
+                HStack(spacing: 0) {
+                    Spacer(minLength: 0)
+                    headerTitleView
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.primary.opacity(0.85))
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
                 }
+                .frame(maxWidth: .infinity, minHeight: 32)
+                .contentShape(Rectangle())
+                .onHover { hovering in
+                    isHeaderTitleHovered = hovering
+                    if !isHeaderTitleDragging { syncHeaderTitleMoveCursor() }
+                }
+                .gesture(floatingHeaderMoveGesture)
+            } else {
+                Spacer(minLength: 4)
+                headerTitleView
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.primary.opacity(0.85))
+                    .lineLimit(1)
+                    .frame(maxWidth: 180)
+                Spacer(minLength: 4)
             }
-            .font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(.primary.opacity(0.85))
-            .lineLimit(1)
-            .frame(maxWidth: 180)
 
-            Spacer(minLength: 4)
-
-            // Groups button — toggles the group list (only shown in chat mode)
             if panelContent == .chat {
                 Button {
                     withAnimation(.snappy(duration: 0.2)) { panelContent = .groupList }
@@ -658,7 +790,6 @@ struct MacAssistantPanel: View {
                 .help("Group Chats")
             }
 
-            // New chat button (chat mode only)
             if panelContent == .chat {
                 Button {
                     withAnimation(.snappy(duration: 0.2)) { chatService.clearHistory() }
@@ -673,17 +804,13 @@ struct MacAssistantPanel: View {
                 .help("New Conversation")
             }
 
-            // Ellipsis menu — conversation actions (chat mode only)
             if panelContent == .chat { Menu {
-                // Rename
                 Button {
                     renameText = chatService.chatTitle ?? ""
                     showsRenameAlert = true
                 } label: {
                     Label("Rename", systemImage: "pencil")
                 }
-
-                // Model picker
                 Menu("Model") {
                     ForEach(availableModels, id: \.self) { model in
                         Button {
@@ -698,26 +825,20 @@ struct MacAssistantPanel: View {
                         }
                     }
                 }
-
                 if !chatService.messages.isEmpty {
                     Divider()
-
                     Button {
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString(chatService.conversationAsMarkdown(), forType: .string)
                     } label: {
                         Label("Copy Conversation", systemImage: "doc.on.doc")
                     }
-
-                    // Share — creates a public shareable link (requires saved conversation)
                     if chatService.currentConversationID != nil {
                         Button { showsSharePanel = true } label: {
                             Label("Share Conversation…", systemImage: "square.and.arrow.up")
                         }
                     }
-
                     Divider()
-
                     Button(role: .destructive) {
                         withAnimation(.snappy(duration: 0.2)) { chatService.clearHistory() }
                     } label: {
@@ -733,24 +854,50 @@ struct MacAssistantPanel: View {
             .menuStyle(.borderlessButton)
             .macClickablePointer()
             .frame(width: 26)
-            } // end if panelContent == .chat (ellipsis menu)
+            }
 
-            // Toggle floating / side pane
-            Button {
-                withAnimation(.snappy(duration: 0.25)) {
-                    displayMode = displayMode == .floating ? .sidepane : .floating
+            // Layout picker — Floating / Side panel / Separate window
+            Menu {
+                Button {
+                    withAnimation(.snappy(duration: 0.25)) { displayMode = .floating }
+                } label: {
+                    Label("Floating Panel", systemImage: "macwindow")
                 }
+                .disabled(displayMode == .floating)
+
+                Button {
+                    withAnimation(.snappy(duration: 0.25)) { displayMode = .sidepane }
+                } label: {
+                    Label("Side Panel", systemImage: "sidebar.right")
+                }
+                .disabled(displayMode == .sidepane)
+
+                Button {
+                    displayMode = .window
+                } label: {
+                    Label("Separate Window", systemImage: "uiwindow.split.2x1")
+                }
+                .disabled(displayMode == .window)
+
+                Divider()
+
+                Button {
+                    withAnimation(.snappy(duration: 0.25)) { displayMode = .full }
+                } label: {
+                    Label("Full Screen", systemImage: "arrow.up.left.and.arrow.down.right")
+                }
+                .disabled(displayMode == .full)
             } label: {
-                Image(systemName: displayMode == .floating ? "sidebar.right" : "macwindow")
+                Image(systemName: displayModeIcon)
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.primary.opacity(0.5))
                     .frame(width: 22, height: 22)
             }
-            .buttonStyle(.plain)
+            .menuStyle(.borderlessButton)
             .macClickablePointer()
-            .help(displayMode == .floating ? "Dock to Side" : "Float Window")
+            .frame(width: 26)
+            .help("Panel Layout")
 
-            // Close
             Button {
                 withAnimation(.snappy(duration: 0.2)) { isPresented = false }
             } label: {
@@ -766,19 +913,13 @@ struct MacAssistantPanel: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
         .background(panelBackground.opacity(0.95))
-        // Draggable header in floating mode
-        .gesture(
-            displayMode == .floating
-                ? DragGesture()
-                    .onChanged { value in
-                        floatingOffset = CGSize(
-                            width: dragAccumulator.width + value.translation.width,
-                            height: dragAccumulator.height + value.translation.height
-                        )
-                    }
-                    .onEnded { _ in dragAccumulator = floatingOffset }
-                : nil
-        )
+        .onChange(of: displayMode) { _, newMode in
+            if newMode != .floating {
+                isHeaderTitleHovered = false
+                isHeaderTitleDragging = false
+                NSCursor.arrow.set()
+            }
+        }
     }
 
     // MARK: - Empty State (matches iOS: sparkle icon, heading, suggestions, show more, prompt library)
@@ -958,7 +1099,15 @@ struct MacAssistantPanel: View {
                                 // email: user needs to go to system settings — no in-app action on macOS
                             },
                             onOpenEmailSettings: openInternetAccountsSettings,
-                            onEdit: { edited in editMessage(edited) }
+                            onEdit: { edited in editMessage(edited) },
+                            onSpecAction: { action, params, completion in
+                                handleSpecAction(action, params: params, completion: completion)
+                            },
+                            onUpgrade: {
+                                if let url = URL(string: upgradePricingURL()) {
+                                    NSWorkspace.shared.open(url)
+                                }
+                            }
                         )
                         .id(message.id)
                     }
@@ -1107,6 +1256,17 @@ struct MacAssistantPanel: View {
                 .help("Attach File")
 
                 Spacer()
+
+                // Live voice chat — opens a full bidirectional voice session
+                Button { isShowingVoiceChat = true } label: {
+                    Image(systemName: "waveform")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(voiceButtonGradient)
+                        .frame(width: 26, height: 26)
+                }
+                .buttonStyle(.plain)
+                .macClickablePointer()
+                .help("Live Voice Chat")
 
                 // Voice-to-text mic button
                 MacVoiceInputButton { transcribed in
@@ -1540,12 +1700,108 @@ struct MacAssistantPanel: View {
         }
     }
 
+    private func upgradePricingURL() -> String {
+        let backend = services.apiClient.baseURL.absoluteString
+        if let host = URL(string: backend)?.host, host.hasPrefix("api.") {
+            return "https://\(String(host.dropFirst("api.".count)))/pricing"
+        }
+        return "https://todus.app/pricing"
+    }
+
     private func openInternetAccountsSettings() {
         guard let url = URL(
             string: "x-apple.systempreferences:com.apple.Internet-Accounts-Settings.extension"
         ), NSWorkspace.shared.open(url) else {
             showEmailSettingsFallbackAlert = true
             return
+        }
+    }
+
+    /// Handles generative-UI card actions emitted by ChatUISpecView. Side-effecting actions
+    /// (clipboard, draft autosave/send, undo) execute locally; navigation falls through.
+    /// `completion` is invoked for async actions so the originating card can report success/failure.
+    private func handleSpecAction(
+        _ action: String,
+        params: [String: String],
+        completion: MacChatUISpecActionCompletion? = nil,
+        undoDepth: Int = 0
+    ) {
+        let maxUndoDepth = 8
+        switch action {
+        case "copy_text":
+            if let content = params["content"] {
+                let pb = NSPasteboard.general
+                pb.declareTypes([.string], owner: nil)
+                pb.setString(content, forType: .string)
+            }
+            completion?(true, nil)
+        case "update_draft":
+            guard let draftId = params["draftId"], let payloadStr = params["payload"],
+                  let payload = MacDraftService.decodePayload(payloadStr) else {
+                completion?(false, "Invalid draft payload")
+                return
+            }
+            Task { @MainActor in
+                do {
+                    try await services.draftService.update(draftId: draftId, payload: payload)
+                    completion?(true, nil)
+                } catch {
+                    completion?(false, error.localizedDescription)
+                }
+            }
+        case "send_draft":
+            guard let payloadStr = params["payload"],
+                  let payload = MacDraftService.decodePayload(payloadStr) else {
+                completion?(false, "Invalid send payload")
+                return
+            }
+            let draftId = params["draftId"]
+            Task { @MainActor in
+                do {
+                    try await services.draftService.send(draftId: draftId, payload: payload)
+                    completion?(true, nil)
+                } catch {
+                    completion?(false, error.localizedDescription)
+                }
+            }
+        case "attach_to_draft":
+            // Attachment picking belongs to the host composer — left as a no-op for now.
+            completion?(true, nil)
+        case "undo":
+            guard undoDepth < maxUndoDepth else {
+                completion?(false, nil)
+                return
+            }
+            guard let undoAction = params["undoAction"], !undoAction.isEmpty, undoAction != "undo" else {
+                // Always notify the caller — silently returning leaves the originating UI card
+                // (e.g. the action confirmation) waiting indefinitely for a result.
+                completion?(false, nil)
+                return
+            }
+            var nestedParams: [String: String] = [:]
+            if let nestedRaw = params["undoParams"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !nestedRaw.isEmpty,
+               let data = nestedRaw.data(using: .utf8),
+               let dict = try? JSONDecoder().decode([String: String].self, from: data) {
+                nestedParams = dict
+            }
+            handleSpecAction(undoAction, params: nestedParams, completion: completion, undoDepth: undoDepth + 1)
+        case "navigate_thread", "navigate_task", "navigate_event", "navigate_draft",
+             "navigate_document", "navigate_day":
+            // No deep navigation surface yet on macOS — log so we know when the AI emits these.
+            AppLogger.shared.log("[MacAssistantPanel] navigate action: \(action) \(params)")
+            completion?(true, nil)
+        case "open_attachment":
+            if let url = params["previewUrl"], let parsed = URL(string: url) {
+                NSWorkspace.shared.open(parsed)
+            }
+            completion?(true, nil)
+        case "toggle_checklist_item":
+            // Local-only toggle; persistence model TBD on macOS as well.
+            completion?(true, nil)
+        default:
+            AppLogger.shared.log("[MacAssistantPanel] unknown spec action: \(action) \(params)")
+            completion?(true, nil)
         }
     }
 }
@@ -1573,7 +1829,7 @@ private struct MacVoiceInputButton: View {
                         .font(.system(size: 10, weight: .bold))
                         .foregroundStyle(.red)
                         .transition(.scale.combined(with: .opacity))
-                case .transcribing:
+                case .starting, .transcribing:
                     ProgressView()
                         .scaleEffect(0.55)
                         .tint(MacTheme.mutedText)
@@ -1585,8 +1841,9 @@ private struct MacVoiceInputButton: View {
         }
         .buttonStyle(.plain)
         .macClickablePointer()
-        .disabled(controller.recordingState == .transcribing)
+        .disabled(controller.recordingState == .starting || controller.recordingState == .transcribing)
         .help(controller.recordingState == .idle ? "Voice Input" : "Stop Recording")
+        .onDisappear { controller.tearDown() }
     }
 
     private func handleTap() {
@@ -1595,7 +1852,7 @@ private struct MacVoiceInputButton: View {
             controller.startRecording(onFinished: onTranscribed)
         case .recording:
             controller.stopRecording(onFinished: onTranscribed)
-        case .transcribing:
+        case .starting, .transcribing:
             break
         }
     }
@@ -1641,6 +1898,10 @@ private struct MacMessageBubble: View {
     /// Right-click / long-press "Edit" on a user message — parent pre-fills the composer
     /// and truncates the conversation so the edited turn re-runs on send.
     var onEdit: ((MacChatMessage) -> Void)?
+    /// Generative-UI card action callback (navigate, copy, draft autosave/send, undo, ...).
+    var onSpecAction: MacChatUISpecOnAction?
+    /// Called when the user taps "Upgrade to Pro" after a credits-exhausted error.
+    var onUpgrade: (() -> Void)?
 
     @State private var showActions = false
     @State private var didCopy = false
@@ -1696,21 +1957,10 @@ private struct MacMessageBubble: View {
     private var userBubble: some View {
         VStack(alignment: .trailing, spacing: 6) {
             if !message.attachmentFileNames.isEmpty {
-                HStack(spacing: 4) {
-                    ForEach(message.attachmentFileNames, id: \.self) { name in
-                        let isImage = ["png", "jpg", "jpeg", "heic", "heif", "gif", "webp"]
-                            .contains((name as NSString).pathExtension.lowercased())
-                        HStack(spacing: 4) {
-                            Image(systemName: isImage ? "photo" : "doc")
-                                .font(.system(size: 9, weight: .semibold))
-                            Text(name)
-                                .font(.system(size: 10, weight: .medium))
-                                .lineLimit(1)
-                        }
-                        .foregroundStyle(MacTheme.mutedText)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(MacTheme.surfaceCard, in: Capsule())
+                HStack(alignment: .top, spacing: 6) {
+                    ForEach(Array(message.attachmentFileNames.enumerated()), id: \.offset) { index, name in
+                        let url = index < message.attachmentURLs.count ? message.attachmentURLs[index] : nil
+                        MacSentAttachmentCell(filename: name, url: url)
                     }
                 }
             }
@@ -1756,6 +2006,15 @@ private struct MacMessageBubble: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
+            // Generative UI cards (parsed out of the markdown after streaming completes).
+            if let spec = message.uiSpec {
+                ChatUISpecView(spec: spec) { action, params, completion in
+                    onSpecAction?(action, params, completion)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .transition(.opacity)
+            }
+
             // Connect CTA — when AI mentions a disconnected service
             if !message.isStreaming && !message.content.isEmpty {
                 let lc = message.content.lowercased()
@@ -1780,6 +2039,12 @@ private struct MacMessageBubble: View {
                 if !emailConnected && mentionsEmailConnectionIssue {
                     macConnectBanner(label: "Connect Email", icon: "envelope", color: .orange) {
                         onOpenEmailSettings()
+                    }
+                }
+
+                if let onUpgrade, message.content.hasPrefix("⚠️ You're out of AI credits") {
+                    macConnectBanner(label: "Upgrade to Pro", icon: "arrow.up.circle", color: MacTheme.accent) {
+                        onUpgrade()
                     }
                 }
             }
@@ -1943,6 +2208,11 @@ private struct MacMessageBubble: View {
 
     private var actionRow: some View {
         HStack(spacing: 2) {
+            if !message.contextSources.isEmpty {
+                MacAISourcesButton(sources: message.contextSources)
+                    .padding(.trailing, 6)
+            }
+
             // Retry
             Button { onRetry() } label: {
                 Image(systemName: "arrow.clockwise")
@@ -2339,6 +2609,82 @@ private enum MacPendingAttachmentFormat {
         return base
     }
 }
+
+// MARK: - Sent Attachment Thumbnail (in message bubble)
+
+/// Shows a 56×56 image preview or doc icon for an attachment that has already been sent.
+private struct MacSentAttachmentCell: View {
+    let filename: String
+    let url: URL?
+
+    @State private var preview: NSImage?
+
+    private static let imageExtensions: Set<String> = [
+        "png", "jpg", "jpeg", "heic", "heif", "gif", "webp", "tiff", "tif", "bmp", "ico",
+    ]
+
+    private var isImage: Bool {
+        let ext = (filename as NSString).pathExtension.lowercased()
+        return Self.imageExtensions.contains(ext)
+    }
+
+    private var label: String {
+        let ext = (filename as NSString).pathExtension.uppercased()
+        return isImage ? "Image" : (ext.isEmpty ? "File" : ext)
+    }
+
+    var body: some View {
+        VStack(alignment: .center, spacing: 4) {
+            ZStack {
+                if isImage, let img = preview {
+                    Image(nsImage: img)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 56, height: 56)
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                } else if isImage {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(MacTheme.surfaceCard)
+                        .frame(width: 56, height: 56)
+                        .overlay(
+                            Image(systemName: "photo")
+                                .font(.system(size: 18))
+                                .foregroundStyle(MacTheme.mutedText)
+                        )
+                } else {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(MacTheme.surfaceCard)
+                        .frame(width: 56, height: 56)
+                        .overlay(
+                            Image(systemName: "doc.fill")
+                                .font(.system(size: 20))
+                                .foregroundStyle(MacTheme.mutedText)
+                        )
+                }
+            }
+            Text(label)
+                .font(.system(size: 9, weight: .medium))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .frame(width: 62)
+        .task(id: url?.path ?? filename) {
+            guard isImage, let u = url else { return }
+            // Read the file bytes off the main actor so a large attachment doesn't stall the
+            // chat UI. `Data` is Sendable (NSImage is not), so we hand bytes back to the main
+            // actor and only decode/downsample once we're here.
+            let data = await Task.detached(priority: .utility) { () -> Data? in
+                let didAccess = u.startAccessingSecurityScopedResource()
+                defer { if didAccess { u.stopAccessingSecurityScopedResource() } }
+                return try? Data(contentsOf: u)
+            }.value
+            guard let data, let image = NSImage(data: data) else { return }
+            preview = macDownsampledThumbnail(image, maxPixels: 112)
+        }
+    }
+}
+
+// MARK: - Pending Attachment Chip (composer)
 
 private struct MacPendingAttachmentChip: View {
     let url: URL

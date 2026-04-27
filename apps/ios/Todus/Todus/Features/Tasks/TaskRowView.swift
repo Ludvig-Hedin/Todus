@@ -12,68 +12,55 @@ struct TaskRowView: View {
         Button {
             onOpenDetails()
         } label: {
-            HStack(alignment: .top, spacing: 8) {
-                // Checkbox — isolated tap target
+            HStack(alignment: .center, spacing: 6) {
+                // Checkbox — isolated tap target, vertically centered with the text block
                 Button(action: { toggleCheckbox() }) {
                     Image(systemName: task.completed ? "checkmark.circle.fill" : "circle")
-                        .font(.system(size: 17, weight: .medium))
+                        .font(.system(size: 16, weight: .medium))
                         .foregroundStyle(task.completed ? task.status.tintColor : AppTheme.subtleText)
                 }
                 .buttonStyle(.plain)
-                // Minimum tappable area for accessibility
-                .frame(width: 44, height: 44)
+                .frame(width: 36, height: 40)
                 .contentShape(Rectangle())
 
-                // Content area
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 5) {
-                        Text(task.title)
-                            .font(.system(size: 14, weight: .medium))
-                            .tracking(-0.2)
-                            .lineSpacing(2)
-                            .foregroundStyle(.primary.opacity(task.completed ? 0.45 : 1.0))
-                            .strikethrough(task.completed, color: .primary.opacity(0.2))
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(alignment: .center, spacing: 8) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(alignment: .firstTextBaseline, spacing: 5) {
+                                Text(task.title)
+                                    .font(.system(size: 14, weight: .medium))
+                                    .tracking(-0.2)
+                                    .lineSpacing(2)
+                                    .lineLimit(2)
+                                    .multilineTextAlignment(.leading)
+                                    .foregroundStyle(.primary.opacity(task.completed ? 0.45 : 1.0))
+                                    .strikethrough(task.completed, color: .primary.opacity(0.25))
 
-                        // AI parsing indicator
-                        if task.parseState == .pending {
-                            Image(systemName: "sparkle")
-                                .font(.system(size: 10, weight: .semibold))
-                                .foregroundStyle(Color.primary.opacity(0.6))
-                                .symbolEffect(.pulse.wholeSymbol, options: .repeating)
+                                if task.parseState == .pending {
+                                    Image(systemName: "sparkle")
+                                        .font(.system(size: 10, weight: .semibold))
+                                        .foregroundStyle(Color.primary.opacity(0.6))
+                                        .symbolEffect(.pulse.wholeSymbol, options: .repeating)
+                                }
+                            }
+
+                            if !task.taskDescription.isEmpty && task.taskDescription != task.title {
+                                Text(task.taskDescription)
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundStyle(AppTheme.mutedText.opacity(0.95))
+                                    .lineLimit(1)
+                            }
                         }
-                    }
-
-                    // Description — skip if empty or duplicates title
-                    if !task.taskDescription.isEmpty && task.taskDescription != task.title {
-                        Text(task.taskDescription)
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(AppTheme.mutedText)
-                            .lineLimit(1)
-                    }
-
-                    // Metadata tags
-                    HStack(spacing: 5) {
-                        if let dueDate = task.dueDate {
-                            dueDateTag(dueDate)
-                        }
-
-                        if task.priority != .none {
-                            priorityTag(task.priority)
-                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
 
                         statusTag(status: task.status)
-
-                        if let folder = task.folder, task.dueDate == nil {
-                            tag(title: folder.name, systemImage: "folder")
-                        }
                     }
-                }
 
-                Spacer(minLength: 0)
+                    metaChipsRow
+                }
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 4)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -83,6 +70,29 @@ struct TaskRowView: View {
                 .stroke(AppTheme.rowStroke, lineWidth: 0.5)
         )
         .contentShape(Rectangle())
+        .contextMenu {
+            Button {
+                onOpenDetails()
+            } label: {
+                Label("Edit", systemImage: "pencil")
+            }
+            Button {
+                onMoveRequested()
+            } label: {
+                Label("Move to folder", systemImage: "folder")
+            }
+            Button {
+                toggleCheckbox()
+            } label: {
+                Label(task.completed ? "Mark as incomplete" : "Mark complete", systemImage: "checkmark.circle")
+            }
+            Divider()
+            Button(role: .destructive) {
+                services.captureService.delete(task, in: modelContext)
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
+        }
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
             Button(role: .destructive) {
                 services.captureService.delete(task, in: modelContext)
@@ -104,12 +114,38 @@ struct TaskRowView: View {
                 Label("Move", systemImage: "folder")
             }
             .tint(AppTheme.secondaryAccent)
+
+            Button {
+                onOpenDetails()
+            } label: {
+                Label("Edit", systemImage: "pencil")
+            }
+            .tint(AppTheme.switchTint)
         }
     }
 
-    // MARK: - Status Tag (tinted)
+    // MARK: - Meta row (no status — status is trailing)
 
-    /// Status pill with tinted bg + icon, matching the column accent color
+    @ViewBuilder
+    private var metaChipsRow: some View {
+        let showFolderChip = task.folder != nil && task.dueDate == nil
+        if task.dueDate != nil || task.priority != .none || showFolderChip {
+            HStack(spacing: 5) {
+                if let dueDate = task.dueDate {
+                    dueDateTag(dueDate)
+                }
+                if task.priority != .none {
+                    priorityTag(task.priority)
+                }
+                if let folder = task.folder, task.dueDate == nil {
+                    tag(title: folder.name, systemImage: "folder")
+                }
+            }
+        }
+    }
+
+    // MARK: - Status Tag (tinted, higher contrast in light mode)
+
     private func statusTag(status: TaskStatus) -> some View {
         HStack(spacing: 3) {
             Image(systemName: status.systemImage)
@@ -119,12 +155,12 @@ struct TaskRowView: View {
                 .tracking(-0.1)
         }
         .foregroundStyle(status.tintColor)
-        .padding(.horizontal, 6)
-        .padding(.vertical, 2)
-        .background(status.tintColor.opacity(0.08), in: RoundedRectangle(cornerRadius: AppTheme.Radius.chip, style: .continuous))
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
+        .background(status.tintColor.opacity(0.12), in: RoundedRectangle(cornerRadius: AppTheme.Radius.chip, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: AppTheme.Radius.chip, style: .continuous)
-                .stroke(status.tintColor.opacity(0.10), lineWidth: 0.5)
+                .stroke(status.tintColor.opacity(0.22), lineWidth: 0.5)
         )
     }
 
@@ -138,10 +174,10 @@ struct TaskRowView: View {
             .foregroundStyle(color)
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
-            .background(color.opacity(0.08), in: RoundedRectangle(cornerRadius: AppTheme.Radius.chip, style: .continuous))
+            .background(color.opacity(0.10), in: RoundedRectangle(cornerRadius: AppTheme.Radius.chip, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: AppTheme.Radius.chip, style: .continuous)
-                    .stroke(color.opacity(0.10), lineWidth: 0.5)
+                    .stroke(color.opacity(0.18), lineWidth: 0.5)
             )
     }
 
@@ -159,10 +195,10 @@ struct TaskRowView: View {
         .foregroundStyle(color)
         .padding(.horizontal, 6)
         .padding(.vertical, 2)
-        .background(color.opacity(0.06), in: RoundedRectangle(cornerRadius: AppTheme.Radius.chip, style: .continuous))
+        .background(color.opacity(0.08), in: RoundedRectangle(cornerRadius: AppTheme.Radius.chip, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: AppTheme.Radius.chip, style: .continuous)
-                .stroke(color.opacity(0.08), lineWidth: 0.5)
+                .stroke(color.opacity(0.12), lineWidth: 0.5)
         )
     }
 
@@ -172,13 +208,13 @@ struct TaskRowView: View {
         Label(title, systemImage: systemImage)
             .font(.system(size: 10, weight: .semibold))
             .tracking(-0.1)
-            .foregroundStyle(AppTheme.mutedText.opacity(0.9))
+            .foregroundStyle(Color.secondary.opacity(0.9))
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
-            .background(AppTheme.surfaceSecondary.opacity(0.45), in: RoundedRectangle(cornerRadius: AppTheme.Radius.chip, style: .continuous))
+            .background(AppTheme.surfaceSecondary.opacity(0.55), in: RoundedRectangle(cornerRadius: AppTheme.Radius.chip, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: AppTheme.Radius.chip, style: .continuous)
-                    .stroke(AppTheme.cardBorder.opacity(0.75), lineWidth: 0.5)
+                    .stroke(AppTheme.cardBorder.opacity(0.9), lineWidth: 0.5)
             )
     }
 

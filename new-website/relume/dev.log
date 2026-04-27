@@ -1,0 +1,315 @@
+
+> relume-export@1.0.0 dev
+> vite
+
+[33mThe CJS build of Vite's Node API is deprecated. See https://vite.dev/guide/troubleshooting.html#vite-cjs-node-api-deprecated for more details.[39m
+Port 3000 is in use, trying another one...
+
+  VITE v5.4.21  ready in 212 ms
+
+  ➜  Local:   http://localhost:3001/
+  ➜  Network: use --host to expose
+10:04:38 AM [vite] Internal server error: /Users/ludvighedin/Programming/personal/mail/new-website/relume/download/components/Navbar11.jsx: Expected corresponding JSX closing tag for <button>. (132:12)
+
+  130 |               >
+  131 |               Features
+> 132 |             </a>
+      |             ^
+  133 |             <a
+  134 |               href="#"
+  135 |               className="text-md block py-3 text-left first:pt-7 lg:px-4 lg:py-2 lg:text-base lg:first:pt-2"
+  Plugin: vite:react-babel
+  File: /Users/ludvighedin/Programming/personal/mail/new-website/relume/download/components/Navbar11.jsx:132:12
+  130|                >
+  131|                Features
+  132|              </a>
+     |              ^
+  133|              <a
+  134|                href="#"
+      at constructor (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:365:19)
+      at JSXParserMixin.raise (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:6599:19)
+      at JSXParserMixin.jsxParseElementAt (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:4727:16)
+      at JSXParserMixin.jsxParseElementAt (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:4698:32)
+      at JSXParserMixin.jsxParseElementAt (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:4698:32)
+      at JSXParserMixin.jsxParseElementAt (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:4698:32)
+      at JSXParserMixin.jsxParseElementAt (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:4698:32)
+      at JSXParserMixin.jsxParseElementAt (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:4698:32)
+      at JSXParserMixin.jsxParseElement (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:4749:17)
+      at JSXParserMixin.parseExprAtom (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:4759:19)
+      at JSXParserMixin.parseExprSubscripts (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:11081:23)
+      at JSXParserMixin.parseUpdate (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:11066:21)
+      at JSXParserMixin.parseMaybeUnary (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:11046:23)
+      at JSXParserMixin.parseMaybeUnaryOrPrivate (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:10899:61)
+      at JSXParserMixin.parseExprOps (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:10904:23)
+      at JSXParserMixin.parseMaybeConditional (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:10881:23)
+      at JSXParserMixin.parseMaybeAssign (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:10831:21)
+      at /Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:10800:39
+      at JSXParserMixin.allowInAnd (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:12426:12)
+      at JSXParserMixin.parseMaybeAssignAllowIn (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:10800:17)
+      at JSXParserMixin.parseMaybeAssignAllowInOrVoidPattern (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:12493:17)
+      at JSXParserMixin.parseParenAndDistinguishExpression (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:11675:28)
+      at JSXParserMixin.parseExprAtom (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:11331:23)
+      at JSXParserMixin.parseExprAtom (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:4764:20)
+      at JSXParserMixin.parseExprSubscripts (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:11081:23)
+      at JSXParserMixin.parseUpdate (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:11066:21)
+      at JSXParserMixin.parseMaybeUnary (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:11046:23)
+      at JSXParserMixin.parseMaybeUnaryOrPrivate (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:10899:61)
+      at JSXParserMixin.parseExprOps (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:10904:23)
+      at JSXParserMixin.parseMaybeConditional (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:10881:23)
+      at JSXParserMixin.parseMaybeAssign (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:10831:21)
+      at JSXParserMixin.parseExpressionBase (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:10784:23)
+      at /Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:10780:39
+      at JSXParserMixin.allowInAnd (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:12421:16)
+      at JSXParserMixin.parseExpression (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:10780:17)
+      at JSXParserMixin.parseReturnStatement (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:13142:28)
+      at JSXParserMixin.parseStatementContent (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:12798:21)
+      at JSXParserMixin.parseStatementLike (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:12767:17)
+      at JSXParserMixin.parseStatementListItem (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:12747:17)
+      at JSXParserMixin.parseBlockOrModuleBlockBody (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:13316:61)
+      at JSXParserMixin.parseBlockBody (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:13309:10)
+      at JSXParserMixin.parseBlock (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:13297:10)
+      at JSXParserMixin.parseFunctionBody (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:12100:24)
+      at JSXParserMixin.parseFunctionBodyAndFinish (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:12086:10)
+      at /Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:13445:12
+      at JSXParserMixin.withSmartMixTopicForbiddingContext (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:12403:14)
+      at JSXParserMixin.parseFunction (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:13444:10)
+      at JSXParserMixin.parseFunctionStatement (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:13125:17)
+      at JSXParserMixin.parseStatementContent (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:12791:21)
+      at JSXParserMixin.parseStatementLike (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:12767:17)
+10:04:38 AM [vite] Pre-transform error: /Users/ludvighedin/Programming/personal/mail/new-website/relume/download/components/Navbar11.jsx: Expected corresponding JSX closing tag for <button>. (132:12)
+
+  130 |               >
+  131 |               Features
+> 132 |             </a>
+      |             ^
+  133 |             <a
+  134 |               href="#"
+  135 |               className="text-md block py-3 text-left first:pt-7 lg:px-4 lg:py-2 lg:text-base lg:first:pt-2"
+10:04:38 AM [vite] Pre-transform error: /Users/ludvighedin/Programming/personal/mail/new-website/relume/pricing/components/Navbar11.jsx: Expected corresponding JSX closing tag for <button>. (132:12)
+
+  130 |               >
+  131 |               Features
+> 132 |             </a>
+      |             ^
+  133 |             <a
+  134 |               href="#"
+  135 |               className="text-md block py-3 text-left first:pt-7 lg:px-4 lg:py-2 lg:text-base lg:first:pt-2"
+10:04:39 AM [vite] Pre-transform error: /Users/ludvighedin/Programming/personal/mail/new-website/relume/home/components/Navbar11.jsx: Expected corresponding JSX closing tag for <button>. (132:12)
+
+  130 |               >
+  131 |               Features
+> 132 |             </a>
+      |             ^
+  133 |             <a
+  134 |               href="#"
+  135 |               className="text-md block py-3 text-left first:pt-7 lg:px-4 lg:py-2 lg:text-base lg:first:pt-2"
+10:04:39 AM [vite] Pre-transform error: /Users/ludvighedin/Programming/personal/mail/new-website/relume/legal/components/Navbar11.jsx: Expected corresponding JSX closing tag for <button>. (132:12)
+
+  130 |               >
+  131 |               Features
+> 132 |             </a>
+      |             ^
+  133 |             <a
+  134 |               href="#"
+  135 |               className="text-md block py-3 text-left first:pt-7 lg:px-4 lg:py-2 lg:text-base lg:first:pt-2"
+10:04:39 AM [vite] Internal server error: /Users/ludvighedin/Programming/personal/mail/new-website/relume/pricing/components/Navbar11.jsx: Expected corresponding JSX closing tag for <button>. (132:12)
+
+  130 |               >
+  131 |               Features
+> 132 |             </a>
+      |             ^
+  133 |             <a
+  134 |               href="#"
+  135 |               className="text-md block py-3 text-left first:pt-7 lg:px-4 lg:py-2 lg:text-base lg:first:pt-2"
+  Plugin: vite:react-babel
+  File: /Users/ludvighedin/Programming/personal/mail/new-website/relume/pricing/components/Navbar11.jsx:132:12
+  130|                >
+  131|                Features
+  132|              </a>
+     |              ^
+  133|              <a
+  134|                href="#"
+      at constructor (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:365:19)
+      at JSXParserMixin.raise (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:6599:19)
+      at JSXParserMixin.jsxParseElementAt (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:4727:16)
+      at JSXParserMixin.jsxParseElementAt (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:4698:32)
+      at JSXParserMixin.jsxParseElementAt (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:4698:32)
+      at JSXParserMixin.jsxParseElementAt (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:4698:32)
+      at JSXParserMixin.jsxParseElementAt (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:4698:32)
+      at JSXParserMixin.jsxParseElementAt (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:4698:32)
+      at JSXParserMixin.jsxParseElement (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:4749:17)
+      at JSXParserMixin.parseExprAtom (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:4759:19)
+      at JSXParserMixin.parseExprSubscripts (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:11081:23)
+      at JSXParserMixin.parseUpdate (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:11066:21)
+      at JSXParserMixin.parseMaybeUnary (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:11046:23)
+      at JSXParserMixin.parseMaybeUnaryOrPrivate (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:10899:61)
+      at JSXParserMixin.parseExprOps (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:10904:23)
+      at JSXParserMixin.parseMaybeConditional (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:10881:23)
+      at JSXParserMixin.parseMaybeAssign (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:10831:21)
+      at /Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:10800:39
+      at JSXParserMixin.allowInAnd (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:12426:12)
+      at JSXParserMixin.parseMaybeAssignAllowIn (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:10800:17)
+      at JSXParserMixin.parseMaybeAssignAllowInOrVoidPattern (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:12493:17)
+      at JSXParserMixin.parseParenAndDistinguishExpression (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:11675:28)
+      at JSXParserMixin.parseExprAtom (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:11331:23)
+      at JSXParserMixin.parseExprAtom (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:4764:20)
+      at JSXParserMixin.parseExprSubscripts (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:11081:23)
+      at JSXParserMixin.parseUpdate (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:11066:21)
+      at JSXParserMixin.parseMaybeUnary (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:11046:23)
+      at JSXParserMixin.parseMaybeUnaryOrPrivate (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:10899:61)
+      at JSXParserMixin.parseExprOps (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:10904:23)
+      at JSXParserMixin.parseMaybeConditional (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:10881:23)
+      at JSXParserMixin.parseMaybeAssign (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:10831:21)
+      at JSXParserMixin.parseExpressionBase (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:10784:23)
+      at /Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:10780:39
+      at JSXParserMixin.allowInAnd (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:12421:16)
+      at JSXParserMixin.parseExpression (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:10780:17)
+      at JSXParserMixin.parseReturnStatement (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:13142:28)
+      at JSXParserMixin.parseStatementContent (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:12798:21)
+      at JSXParserMixin.parseStatementLike (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:12767:17)
+      at JSXParserMixin.parseStatementListItem (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:12747:17)
+      at JSXParserMixin.parseBlockOrModuleBlockBody (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:13316:61)
+      at JSXParserMixin.parseBlockBody (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:13309:10)
+      at JSXParserMixin.parseBlock (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:13297:10)
+      at JSXParserMixin.parseFunctionBody (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:12100:24)
+      at JSXParserMixin.parseFunctionBodyAndFinish (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:12086:10)
+      at /Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:13445:12
+      at JSXParserMixin.withSmartMixTopicForbiddingContext (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:12403:14)
+      at JSXParserMixin.parseFunction (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:13444:10)
+      at JSXParserMixin.parseFunctionStatement (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:13125:17)
+      at JSXParserMixin.parseStatementContent (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:12791:21)
+      at JSXParserMixin.parseStatementLike (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:12767:17)
+10:04:39 AM [vite] Internal server error: /Users/ludvighedin/Programming/personal/mail/new-website/relume/home/components/Navbar11.jsx: Expected corresponding JSX closing tag for <button>. (132:12)
+
+  130 |               >
+  131 |               Features
+> 132 |             </a>
+      |             ^
+  133 |             <a
+  134 |               href="#"
+  135 |               className="text-md block py-3 text-left first:pt-7 lg:px-4 lg:py-2 lg:text-base lg:first:pt-2"
+  Plugin: vite:react-babel
+  File: /Users/ludvighedin/Programming/personal/mail/new-website/relume/home/components/Navbar11.jsx:132:12
+  130|                >
+  131|                Features
+  132|              </a>
+     |              ^
+  133|              <a
+  134|                href="#"
+      at constructor (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:365:19)
+      at JSXParserMixin.raise (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:6599:19)
+      at JSXParserMixin.jsxParseElementAt (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:4727:16)
+      at JSXParserMixin.jsxParseElementAt (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:4698:32)
+      at JSXParserMixin.jsxParseElementAt (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:4698:32)
+      at JSXParserMixin.jsxParseElementAt (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:4698:32)
+      at JSXParserMixin.jsxParseElementAt (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:4698:32)
+      at JSXParserMixin.jsxParseElementAt (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:4698:32)
+      at JSXParserMixin.jsxParseElement (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:4749:17)
+      at JSXParserMixin.parseExprAtom (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:4759:19)
+      at JSXParserMixin.parseExprSubscripts (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:11081:23)
+      at JSXParserMixin.parseUpdate (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:11066:21)
+      at JSXParserMixin.parseMaybeUnary (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:11046:23)
+      at JSXParserMixin.parseMaybeUnaryOrPrivate (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:10899:61)
+      at JSXParserMixin.parseExprOps (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:10904:23)
+      at JSXParserMixin.parseMaybeConditional (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:10881:23)
+      at JSXParserMixin.parseMaybeAssign (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:10831:21)
+      at /Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:10800:39
+      at JSXParserMixin.allowInAnd (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:12426:12)
+      at JSXParserMixin.parseMaybeAssignAllowIn (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:10800:17)
+      at JSXParserMixin.parseMaybeAssignAllowInOrVoidPattern (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:12493:17)
+      at JSXParserMixin.parseParenAndDistinguishExpression (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:11675:28)
+      at JSXParserMixin.parseExprAtom (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:11331:23)
+      at JSXParserMixin.parseExprAtom (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:4764:20)
+      at JSXParserMixin.parseExprSubscripts (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:11081:23)
+      at JSXParserMixin.parseUpdate (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:11066:21)
+      at JSXParserMixin.parseMaybeUnary (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:11046:23)
+      at JSXParserMixin.parseMaybeUnaryOrPrivate (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:10899:61)
+      at JSXParserMixin.parseExprOps (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:10904:23)
+      at JSXParserMixin.parseMaybeConditional (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:10881:23)
+      at JSXParserMixin.parseMaybeAssign (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:10831:21)
+      at JSXParserMixin.parseExpressionBase (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:10784:23)
+      at /Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:10780:39
+      at JSXParserMixin.allowInAnd (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:12421:16)
+      at JSXParserMixin.parseExpression (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:10780:17)
+      at JSXParserMixin.parseReturnStatement (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:13142:28)
+      at JSXParserMixin.parseStatementContent (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:12798:21)
+      at JSXParserMixin.parseStatementLike (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:12767:17)
+      at JSXParserMixin.parseStatementListItem (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:12747:17)
+      at JSXParserMixin.parseBlockOrModuleBlockBody (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:13316:61)
+      at JSXParserMixin.parseBlockBody (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:13309:10)
+      at JSXParserMixin.parseBlock (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:13297:10)
+      at JSXParserMixin.parseFunctionBody (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:12100:24)
+      at JSXParserMixin.parseFunctionBodyAndFinish (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:12086:10)
+      at /Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:13445:12
+      at JSXParserMixin.withSmartMixTopicForbiddingContext (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:12403:14)
+      at JSXParserMixin.parseFunction (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:13444:10)
+      at JSXParserMixin.parseFunctionStatement (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:13125:17)
+      at JSXParserMixin.parseStatementContent (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:12791:21)
+      at JSXParserMixin.parseStatementLike (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:12767:17)
+10:04:39 AM [vite] Internal server error: /Users/ludvighedin/Programming/personal/mail/new-website/relume/legal/components/Navbar11.jsx: Expected corresponding JSX closing tag for <button>. (132:12)
+
+  130 |               >
+  131 |               Features
+> 132 |             </a>
+      |             ^
+  133 |             <a
+  134 |               href="#"
+  135 |               className="text-md block py-3 text-left first:pt-7 lg:px-4 lg:py-2 lg:text-base lg:first:pt-2"
+  Plugin: vite:react-babel
+  File: /Users/ludvighedin/Programming/personal/mail/new-website/relume/legal/components/Navbar11.jsx:132:12
+  130|                >
+  131|                Features
+  132|              </a>
+     |              ^
+  133|              <a
+  134|                href="#"
+      at constructor (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:365:19)
+      at JSXParserMixin.raise (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:6599:19)
+      at JSXParserMixin.jsxParseElementAt (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:4727:16)
+      at JSXParserMixin.jsxParseElementAt (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:4698:32)
+      at JSXParserMixin.jsxParseElementAt (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:4698:32)
+      at JSXParserMixin.jsxParseElementAt (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:4698:32)
+      at JSXParserMixin.jsxParseElementAt (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:4698:32)
+      at JSXParserMixin.jsxParseElementAt (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:4698:32)
+      at JSXParserMixin.jsxParseElement (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:4749:17)
+      at JSXParserMixin.parseExprAtom (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:4759:19)
+      at JSXParserMixin.parseExprSubscripts (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:11081:23)
+      at JSXParserMixin.parseUpdate (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:11066:21)
+      at JSXParserMixin.parseMaybeUnary (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:11046:23)
+      at JSXParserMixin.parseMaybeUnaryOrPrivate (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:10899:61)
+      at JSXParserMixin.parseExprOps (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:10904:23)
+      at JSXParserMixin.parseMaybeConditional (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:10881:23)
+      at JSXParserMixin.parseMaybeAssign (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:10831:21)
+      at /Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:10800:39
+      at JSXParserMixin.allowInAnd (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:12426:12)
+      at JSXParserMixin.parseMaybeAssignAllowIn (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:10800:17)
+      at JSXParserMixin.parseMaybeAssignAllowInOrVoidPattern (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:12493:17)
+      at JSXParserMixin.parseParenAndDistinguishExpression (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:11675:28)
+      at JSXParserMixin.parseExprAtom (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:11331:23)
+      at JSXParserMixin.parseExprAtom (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:4764:20)
+      at JSXParserMixin.parseExprSubscripts (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:11081:23)
+      at JSXParserMixin.parseUpdate (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:11066:21)
+      at JSXParserMixin.parseMaybeUnary (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:11046:23)
+      at JSXParserMixin.parseMaybeUnaryOrPrivate (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:10899:61)
+      at JSXParserMixin.parseExprOps (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:10904:23)
+      at JSXParserMixin.parseMaybeConditional (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:10881:23)
+      at JSXParserMixin.parseMaybeAssign (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:10831:21)
+      at JSXParserMixin.parseExpressionBase (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:10784:23)
+      at /Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:10780:39
+      at JSXParserMixin.allowInAnd (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:12421:16)
+      at JSXParserMixin.parseExpression (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:10780:17)
+      at JSXParserMixin.parseReturnStatement (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:13142:28)
+      at JSXParserMixin.parseStatementContent (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:12798:21)
+      at JSXParserMixin.parseStatementLike (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:12767:17)
+      at JSXParserMixin.parseStatementListItem (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:12747:17)
+      at JSXParserMixin.parseBlockOrModuleBlockBody (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:13316:61)
+      at JSXParserMixin.parseBlockBody (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:13309:10)
+      at JSXParserMixin.parseBlock (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:13297:10)
+      at JSXParserMixin.parseFunctionBody (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:12100:24)
+      at JSXParserMixin.parseFunctionBodyAndFinish (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:12086:10)
+      at /Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:13445:12
+      at JSXParserMixin.withSmartMixTopicForbiddingContext (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:12403:14)
+      at JSXParserMixin.parseFunction (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:13444:10)
+      at JSXParserMixin.parseFunctionStatement (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:13125:17)
+      at JSXParserMixin.parseStatementContent (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:12791:21)
+      at JSXParserMixin.parseStatementLike (/Users/ludvighedin/Programming/personal/mail/new-website/relume/node_modules/@babel/parser/lib/index.js:12767:17)

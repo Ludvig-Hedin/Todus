@@ -9,6 +9,7 @@ import { createRateLimiterMiddleware, privateProcedure, publicProcedure, router 
 import { Ratelimit } from '@upstash/ratelimit';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
+import { userSettingsSchema } from '../../lib/schemas';
 
 /** Default color palette for multi-account visual differentiation */
 const CONNECTION_COLORS = [
@@ -97,6 +98,53 @@ export const connectionsRouter = router({
 
       if (shouldClearDefault) {
         await db.updateUser({ defaultConnectionId: null });
+      }
+
+      // Sweep stale calendar visibility prefs / default-calendar entries
+      // tied to this connection so the settings JSON doesn't grow unbounded
+      // and so re-adding the same email doesn't restore a hidden state.
+      // We bypass `mergeUserSettings` here because deletion of map keys is
+      // not expressible as a merge — we need to write the cleaned object verbatim.
+      try {
+        const existing: any = await db.findUserSettings();
+        if (existing?.settings) {
+          const parsed = userSettingsSchema.safeParse(existing.settings);
+          if (parsed.success) {
+            const prev = parsed.data.calendarPreferences;
+            const prefix = `google:${connectionId}:`;
+            const accountKey = `google:${connectionId}`;
+            const filteredHidden = prev.hiddenCalendarIds.filter((id) => !id.startsWith(prefix));
+            const { [accountKey]: _removed, ...remainingDefaults } = prev.defaultCalendarByAccount;
+            const cleanedDefault =
+              prev.defaultCalendarId?.startsWith(prefix) ? undefined : prev.defaultCalendarId;
+
+            const changed =
+              filteredHidden.length !== prev.hiddenCalendarIds.length ||
+              Object.keys(remainingDefaults).length !==
+                Object.keys(prev.defaultCalendarByAccount).length ||
+              cleanedDefault !== prev.defaultCalendarId;
+
+            if (changed) {
+              const next = userSettingsSchema.parse({
+                ...parsed.data,
+                calendarPreferences: {
+                  ...prev,
+                  hiddenCalendarIds: filteredHidden,
+                  defaultCalendarByAccount: remainingDefaults,
+                  defaultCalendarId: cleanedDefault,
+                },
+              });
+              await db.updateUserSettings(next);
+            }
+          }
+        }
+      } catch (error) {
+        // Don't fail the disconnect on settings sweep errors — the connection
+        // is already gone, stale prefs are a soft issue.
+        console.warn('[connections.delete] Failed to sweep calendar prefs', {
+          connectionId,
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
     }),
   getDefault: publicProcedure.query(async ({ ctx }) => {

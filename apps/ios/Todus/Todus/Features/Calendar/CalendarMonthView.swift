@@ -15,12 +15,19 @@ struct CalendarMonthView: View {
     private let rowHeight: CGFloat = 90
     @State private var hasPerformedInitialScroll = false
 
+    /// Cached `start-of-day → sorted events` lookup. Rebuilt only when
+    /// `events` changes (Equatable: titles/times/ids, not just count),
+    /// not on every body re-evaluation triggered by parent state changes
+    /// (pinch scale, header geometry, etc.) during a swap transition.
+    @State private var eventsByDay: [Date: [CalendarEvent]] = [:]
+
     /// Threshold below which we show dots instead of event titles
     private let dotModeThreshold: CGFloat = 60
 
-    /// Months to show before/after the selected month. Large enough to feel
-    /// infinite in practice (±20 years); LazyVStack renders only visible rows.
-    private let monthBuffer = 240
+    /// Months to show before/after the selected month. Was ±240 (~40 years);
+    /// the larger buffer forced SwiftUI to build identity for ~480 LazyVStack
+    /// rows on every body run, contributing to lag during pinch-to-swap.
+    private let monthBuffer = 60
 
     var body: some View {
         VStack(spacing: 0) {
@@ -28,6 +35,27 @@ struct CalendarMonthView: View {
             Divider()
             monthScrollView
         }
+        .onAppear {
+            if eventsByDay.isEmpty && !events.isEmpty {
+                eventsByDay = Self.makeEventsByDay(events)
+            }
+        }
+        .onChange(of: events) {
+            eventsByDay = Self.makeEventsByDay(events)
+        }
+    }
+
+    private static func makeEventsByDay(_ events: [CalendarEvent]) -> [Date: [CalendarEvent]] {
+        let cal = Calendar.current
+        var dict: [Date: [CalendarEvent]] = [:]
+        for event in events {
+            let day = cal.startOfDay(for: event.startDate)
+            dict[day, default: []].append(event)
+        }
+        for key in dict.keys {
+            dict[key]?.sort { $0.startDate < $1.startDate }
+        }
+        return dict
     }
 
     // MARK: - Weekday Header
@@ -52,26 +80,10 @@ struct CalendarMonthView: View {
 
     // MARK: - Infinite Month Scroll
 
-    /// Pre-computed lookup table: start-of-day → sorted events for that day.
-    /// Captured once per body evaluation so LazyVGrid cells do O(1) lookups
-    /// instead of O(n) filter scans during scroll.
-    private var eventsByDay: [Date: [CalendarEvent]] {
-        let cal = Calendar.current
-        var dict: [Date: [CalendarEvent]] = [:]
-        for event in events {
-            let day = cal.startOfDay(for: event.startDate)
-            dict[day, default: []].append(event)
-        }
-        for key in dict.keys {
-            dict[key]?.sort { $0.startDate < $1.startDate }
-        }
-        return dict
-    }
-
     private var monthScrollView: some View {
         let cal = Calendar.current
         let monthOffsets = Array(-monthBuffer...monthBuffer)
-        let byDay = eventsByDay  // computed once; captured by the ForEach closure
+        let byDay = eventsByDay  // captured into the ForEach closure
 
         return ScrollViewReader { proxy in
             ScrollView(.vertical, showsIndicators: true) {

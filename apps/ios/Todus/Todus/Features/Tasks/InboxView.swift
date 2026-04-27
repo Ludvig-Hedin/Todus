@@ -1,12 +1,16 @@
 import SwiftUI
 import SwiftData
 
-struct InboxView: View {
+struct InboxView<Footer: View>: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \TaskRecord.createdAt, order: .reverse) private var allTasks: [TaskRecord]
 
     let captureService: TaskCaptureService
     let selectedFolderID: UUID?
+    /// When true and no folder is selected, only show tasks that are not in any folder
+    /// (a true "Inbox"). Used by the redesigned Tasks tab where folders show as cards
+    /// below the list, so the list itself becomes the orphan-task surface.
+    var restrictToInbox: Bool = false
     @State private var taskPendingMove: TaskRecord?
     @State private var selectedTask: TaskRecord?
     @State private var showsClearCompletedConfirmation = false
@@ -16,18 +20,31 @@ struct InboxView: View {
     /// Sort order selected from the home sort menu
     var sortOrder: TaskSortOrder = .newest
 
+    /// Optional content rendered below the task list, scrolling together as one page.
+    /// Used by the Tasks tab to surface the Folders grid at the bottom.
+    @ViewBuilder var footer: () -> Footer
+
     // Cached derived arrays — recomputed only when inputs change (not on every render).
     // Computing filtered+sorted arrays in computed properties re-ran on every SwiftUI
     // body evaluation, causing unnecessary CPU work during animations and scrolling.
     @State private var visibleTasks: [TaskRecord] = []
     @State private var completedTasks: [TaskRecord] = []
+    /// Sleeps until the next done-task exits the 5s grace window, then recomputes once.
+    /// Replaces a 2 Hz `Timer.publish` that woke the main thread forever and contributed
+    /// to perceived UI hangs.
+    @State private var graceWindowRefreshTask: Task<Void, Never>?
 
     var body: some View {
         ZStack {
-            if visibleTasks.isEmpty && completedTasks.isEmpty {
-                emptyState
-            } else {
-                List {
+            List {
+                if visibleTasks.isEmpty && completedTasks.isEmpty {
+                    Section {
+                        emptyState
+                            .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                    }
+                } else {
                     Section {
                         ForEach(visibleTasks) { task in
                             TaskRowView(task: task) {
@@ -35,7 +52,7 @@ struct InboxView: View {
                             } onOpenDetails: {
                                 selectedTask = task
                             }
-                            .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+                            .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 2, trailing: 0))
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
                         }
@@ -81,13 +98,13 @@ struct InboxView: View {
                                         Label("Delete", systemImage: "trash")
                                     }
                                 }
-                                .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+                                .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 2, trailing: 0))
                                 .listRowBackground(Color.clear)
                                 .listRowSeparator(.hidden)
                             }
                         } header: {
                             HStack {
-                                Text("Completed")
+                                Text("Recently completed")
                                     .font(.system(size: 12, weight: .semibold))
                                     .tracking(-0.1)
                                     .textCase(nil)
@@ -101,16 +118,22 @@ struct InboxView: View {
                                 .font(.system(size: 12, weight: .semibold))
                                 .textCase(nil)
                             }
-                            // Generous top padding matches the visual gap between active and completed sections
-                            .padding(.top, 24)
+                            .padding(.top, 16)
                             .padding(.bottom, 4)
                         }
                     }
                 }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
-                .scrollDismissesKeyboard(.interactively)
+
+                Section {
+                    footer()
+                        .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                }
             }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .scrollDismissesKeyboard(.interactively)
         }
         .contentShape(Rectangle())
         .onTapGesture {
@@ -138,6 +161,7 @@ struct InboxView: View {
         // Previously these were computed properties that re-ran on every body evaluation
         // (including mid-animation frames), wasting CPU and causing scrolling stutter.
         .onAppear { recomputeTasks() }
+        .onDisappear { graceWindowRefreshTask?.cancel() }
         .onChange(of: allTasks) { recomputeTasks() }
         .onChange(of: searchText) { recomputeTasks() }
         .onChange(of: sortOrder) { recomputeTasks() }
@@ -145,6 +169,13 @@ struct InboxView: View {
     }
 
     // MARK: - Helpers
+
+    /// `true` when the task should appear in the main list (incomplete, or done but still inside the 5s window after `completedAt`).
+    private func isInActiveSection(_ task: TaskRecord) -> Bool {
+        if task.status != .done { return true }
+        guard let at = task.completedAt else { return false }
+        return Date() < at.addingTimeInterval(5)
+    }
 
     /// Recomputes the filtered and sorted task arrays and writes them to @State.
     private func recomputeTasks() {
@@ -159,15 +190,45 @@ struct InboxView: View {
                 message: "InboxView.recomputeTasks end visible=\(visibleTasks.count) completed=\(completedTasks.count)"
             )
         }
+        let inFolder = { (task: TaskRecord) in
+            let folderMatches: Bool
+            if let id = selectedFolderID {
+                folderMatches = task.folderID == id
+            } else if restrictToInbox {
+                folderMatches = task.folderID == nil
+            } else {
+                folderMatches = true
+            }
+            return folderMatches && matchesSearch(task)
+        }
         visibleTasks = sorted(allTasks.filter { task in
-            task.status != .done &&
-            (selectedFolderID == nil || task.folderID == selectedFolderID) &&
-            matchesSearch(task)
+            isInActiveSection(task) && inFolder(task)
         })
-        completedTasks = allTasks.filter { task in
-            task.status == .done &&
-            (selectedFolderID == nil || task.folderID == selectedFolderID) &&
-            matchesSearch(task)
+        var done = allTasks.filter { task in
+            task.status == .done && !isInActiveSection(task) && inFolder(task)
+        }
+        done.sort { $0.updatedAt > $1.updatedAt }
+        completedTasks = done
+        scheduleGraceWindowRefresh()
+    }
+
+    /// Schedules a single recompute for when the next done-task exits its 5s
+    /// grace window. Skips entirely when no task is in the window — so the main
+    /// thread is not woken up while the user is just reading their list.
+    private func scheduleGraceWindowRefresh() {
+        graceWindowRefreshTask?.cancel()
+        let now = Date()
+        let nextExit = allTasks.compactMap { task -> Date? in
+            guard task.status == .done, let at = task.completedAt else { return nil }
+            let exit = at.addingTimeInterval(5)
+            return exit > now ? exit : nil
+        }.min()
+        guard let nextExit else { return }
+        let delay = max(0.05, nextExit.timeIntervalSince(now))
+        graceWindowRefreshTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(delay))
+            guard !Task.isCancelled else { return }
+            recomputeTasks()
         }
     }
 
@@ -224,5 +285,25 @@ struct InboxView: View {
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+extension InboxView where Footer == EmptyView {
+    /// Convenience init for callers that don't need a scrolling footer.
+    init(
+        captureService: TaskCaptureService,
+        selectedFolderID: UUID?,
+        restrictToInbox: Bool = false,
+        searchText: String = "",
+        sortOrder: TaskSortOrder = .newest
+    ) {
+        self.init(
+            captureService: captureService,
+            selectedFolderID: selectedFolderID,
+            restrictToInbox: restrictToInbox,
+            searchText: searchText,
+            sortOrder: sortOrder,
+            footer: { EmptyView() }
+        )
     }
 }

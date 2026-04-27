@@ -32,6 +32,9 @@ struct EmailThreadView: View {
     /// Time of the last successful assistant context load (API does not return `generatedAt` per thread).
     @State private var assistantContextLoadedAt: Date?
     @State private var isLoadingAssistant = true
+    /// Separate from `isLoadingAssistant` so retrying from the failure UI keeps the error
+    /// state visible with an inline spinner rather than swapping back to the skeleton loader.
+    @State private var isRetryingAssistant = false
     @State private var assistantDraftSeed: String? = nil
     @State private var showDeleteConfirmation = false
     @State private var assistantNotice: String?
@@ -41,6 +44,12 @@ struct EmailThreadView: View {
     @State private var showLabelEditor = false
     @State private var showReminderOptions = false
     @State private var reminderNotice: String?
+    /// Shown when a destructive thread action fails (delete, etc.).
+    /// Surfacing the error keeps the user on the thread view so they can retry.
+    @State private var actionErrorMessage: String?
+    /// Tracks whether AI summary load attempted but failed (no thread, not loading).
+    /// Used to render a "Summary unavailable" error state with retry.
+    @State private var assistantLoadFailed = false
 
     private var emailService: EmailService { services.emailService }
 
@@ -132,6 +141,14 @@ struct EmailThreadView: View {
         )) {
             Button("OK", role: .cancel) {}
         } message: { Text(reminderNotice ?? "") }
+        // Surface delete/move-to-trash failures inline so the user knows nothing
+        // happened — previously the API failure was silently swallowed and the view dismissed.
+        .alert("Couldn't move to Trash", isPresented: Binding(
+            get: { actionErrorMessage != nil },
+            set: { if !$0 { actionErrorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: { Text(actionErrorMessage ?? "") }
         .confirmationDialog("Set reminder", isPresented: $showReminderOptions, titleVisibility: .visible) {
             Button("In 1 hour") {
                 Task { await scheduleReminder(for: .oneHour) }
@@ -247,7 +264,18 @@ struct EmailThreadView: View {
         )
         .confirmationDialog("Delete this thread?", isPresented: $showDeleteConfirmation, titleVisibility: .visible) {
             Button("Delete", role: .destructive) {
-                Task { await emailService.deleteThreads(ids: [threadId]); dismiss() }
+                Task {
+                    // Only dismiss on success — if the API call fails, keep the user on the
+                    // thread and surface the error so they can retry instead of silently
+                    // dropping back to the inbox.
+                    let success = await emailService.deleteThreads(ids: [threadId])
+                    if success {
+                        dismiss()
+                    } else {
+                        actionErrorMessage = emailService.errorMessage
+                            ?? "Please check your connection and try again."
+                    }
+                }
             }
             Button("Cancel", role: .cancel) {}
         }
@@ -308,7 +336,9 @@ struct EmailThreadView: View {
 
     private func subjectRow(_ detail: EmailThreadDetail) -> some View {
         HStack(alignment: .top, spacing: 12) {
-            Text(detail.messages.first?.subject ?? "(no subject)")
+            // Show an em dash for missing subjects — feels less like an error state
+            // than the parenthetical "(no subject)" placeholder.
+            Text(threadSubjectDisplay(detail))
                 .font(.system(size: 22, weight: .bold))
                 .foregroundStyle(.primary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -340,7 +370,7 @@ struct EmailThreadView: View {
                 .font(.system(size: 15, weight: .bold))
                 .foregroundStyle(.primary)
 
-            if isLoadingAssistant {
+            if isLoadingAssistant && !assistantLoadFailed {
                 VStack(alignment: .leading, spacing: 6) {
                     RoundedRectangle(cornerRadius: 4).fill(AppTheme.surfaceSecondary).frame(height: 13).frame(maxWidth: .infinity)
                     RoundedRectangle(cornerRadius: 4).fill(AppTheme.surfaceSecondary).frame(height: 13).frame(maxWidth: 220)
@@ -406,6 +436,41 @@ struct EmailThreadView: View {
                         }
                     }
                 }
+            } else if assistantLoadFailed {
+                // Summary load attempted and failed — show an explicit error state with a
+                // small retry tap target so the user can recover without leaving the thread.
+                Text("Summary unavailable")
+                    .font(.system(size: 14))
+                    .foregroundStyle(AppTheme.mutedText)
+
+                Button {
+                    Task {
+                        isRetryingAssistant = true
+                        defer { isRetryingAssistant = false }
+                        await refreshAssistant()
+                    }
+                } label: {
+                    HStack(spacing: 5) {
+                        if isRetryingAssistant {
+                            ButtonInlineProgressView(tint: AppTheme.mutedText, side: AppTheme.Metrics.compactInlineSpinner)
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(AppTheme.mutedText)
+                        }
+                        Text(isRetryingAssistant ? "Retrying…" : "Retry")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.primary)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(
+                        RoundedRectangle(cornerRadius: AppTheme.Radius.compact, style: .continuous)
+                            .stroke(AppTheme.rowStroke, lineWidth: 1)
+                    )
+                }
+                .buttonStyle(.plain)
+                .disabled(isRetryingAssistant)
             } else {
                 // No summary yet — show prompt and summarize button
                 Text("Not summarized yet")
@@ -417,9 +482,7 @@ struct EmailThreadView: View {
                 } label: {
                     HStack(spacing: 5) {
                         if isSummarizing {
-                            ProgressView()
-                                .controlSize(.mini)
-                                .tint(AppTheme.mutedText)
+                            ButtonInlineProgressView(tint: AppTheme.mutedText, side: AppTheme.Metrics.compactInlineSpinner)
                         } else {
                             Image(systemName: "sparkles")
                                 .font(.system(size: 12, weight: .semibold))
@@ -668,14 +731,20 @@ struct EmailThreadView: View {
             return n == "STARRED" || n == "\\STARRED"
         }) ?? false
 
-        applyAssistantContext(await assistant)
+        let resolvedAssistant = await assistant
+        applyAssistantContext(resolvedAssistant)
+        // Track failure so the summary card can show a "Summary unavailable" state
+        // rather than the "Not summarized yet" prompt that's reserved for first-load.
+        assistantLoadFailed = resolvedAssistant == nil
         isLoadingAssistant = false
         await markRead
     }
 
     private func refreshAssistant() async {
         isLoadingAssistant = true
-        applyAssistantContext(await emailService.loadAssistant(threadId: threadId))
+        let resolved = await emailService.loadAssistant(threadId: threadId)
+        applyAssistantContext(resolved)
+        assistantLoadFailed = resolved == nil
         isLoadingAssistant = false
     }
 
@@ -722,6 +791,9 @@ struct EmailThreadView: View {
         isSummarizing = true
         do {
             applyAssistantContext(try await emailService.loadAssistantThrowing(threadId: threadId))
+            // A successful explicit summarize clears any prior load-failure state so the
+            // card switches from the error/retry view to the populated summary.
+            assistantLoadFailed = false
         } catch {
             AppLogger.shared.log("[EmailThreadView] Summarize failed: \(error)")
             assistantNotice = "Could not generate summary: \(error.localizedDescription)"
@@ -841,6 +913,16 @@ struct EmailThreadView: View {
         }
         return raw
     }
+
+    /// Returns the display subject for the thread, falling back to an em dash
+    /// when the first message has no subject (or only whitespace).
+    private func threadSubjectDisplay(_ detail: EmailThreadDetail) -> String {
+        let raw = detail.messages.first?.subject ?? ""
+        if raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "—"
+        }
+        return raw
+    }
 }
 
 // MARK: - Label Chip
@@ -939,8 +1021,9 @@ private struct EditLabelsSheet: View {
                     Button {
                         Task { await save() }
                     } label: {
-                        if isSaving { ProgressView().controlSize(.mini) }
-                        else { Text("Save").fontWeight(.semibold) }
+                        if isSaving {
+                            ButtonInlineProgressView(tint: .primary, side: AppTheme.Metrics.toolbarInlineSpinner)
+                        } else { Text("Save").fontWeight(.semibold) }
                     }
                     .disabled(isSaving || selectedIds == initialIds)
                 }
@@ -1280,7 +1363,9 @@ private struct ExpandingEmailHTMLView: View {
 
     var body: some View {
         EmailHTMLView(html: html, height: $height)
-            .frame(height: height)
+            // Clamp the rendered frame as a defense-in-depth — even if measureHeight
+            // somehow writes a huge value, the SwiftUI layout stays sane.
+            .frame(height: max(min(height, 20_000), 1))
     }
 }
 
@@ -1382,15 +1467,25 @@ struct EmailHTMLView: UIViewRepresentable {
         }
 
         private func measureHeight(in webView: WKWebView) {
-            webView.evaluateJavaScript("document.documentElement.scrollHeight") { [weak self] result, _ in
-                guard let self else { return }
+            webView.evaluateJavaScript("document.documentElement.scrollHeight") { [weak self, weak webView] result, error in
+                guard let self, webView != nil, error == nil else { return }
                 let h: CGFloat
                 if let v = result as? CGFloat { h = v }
                 else if let v = result as? Double { h = CGFloat(v) }
                 else if let v = result as? Int { h = CGFloat(v) }
                 else { return }
-                guard h > 0 else { return }
-                DispatchQueue.main.async { self.parent.height = h }
+                // Clamp pathological heights — a 50,000pt scroll view can crash the
+                // hosting List on weak devices and provides no real benefit (users
+                // can't meaningfully scroll a single message that tall inside a thread).
+                let clamped = min(max(h, 0), 20_000)
+                guard clamped > 0, clamped.isFinite else { return }
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    // Avoid no-op writes that still trigger SwiftUI invalidation.
+                    if abs(self.parent.height - clamped) > 0.5 {
+                        self.parent.height = clamped
+                    }
+                }
             }
         }
 

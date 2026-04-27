@@ -22,39 +22,114 @@ private struct AvatarResponse: Decodable {
 
 // MARK: - Avatar Cache
 
-/// In-memory cache for resolved sender avatar URLs.
+/// Persistent avatar URL cache with TTL, last-successful memoization, and disk-backed storage.
 ///
-/// @Observable ensures SwiftUI views re-render automatically when a new cache entry
-/// arrives — the view transitions from initials → real avatar without any manual signaling.
+/// Why persistent: avatar URL resolution is expensive (backend API + favicon HEAD requests).
+/// Without persistence, every cold start re-resolves every sender. With it, we hit zero
+/// network on cold start for senders we've seen before.
+///
+/// Why @Observable: SwiftUI views read `resolvedURLs` directly and re-render automatically
+/// when a new entry arrives — the view transitions from initials → real avatar without any
+/// manual signaling.
 @MainActor
 @Observable
 final class AvatarCache {
     static let shared = AvatarCache()
 
-    // email → ordered list of image URLs to try, best source first
+    /// email → ordered list of image URLs to try, best source first.
+    /// Reading this property triggers a SwiftUI re-render when it changes.
     var resolvedURLs: [String: [URL]] = [:]
 
-    // Tracks in-progress fetches so concurrent rows for the same sender don't double-fetch
+    /// email → URL that successfully rendered last time. Tried first on next render so
+    /// repeat displays skip the failing prefix of the candidate list.
+    private var lastSuccessful: [String: URL] = [:]
+
+    /// email → when this entry was resolved. Used to apply TTL.
+    private var resolvedAt: [String: Date] = [:]
+
+    /// Tracks in-progress fetches so concurrent rows for the same sender don't double-fetch.
     private var inFlight: Set<String> = []
 
-    private init() {}
+    /// Successful resolutions stick around for 30 days. Long enough to survive vacation;
+    /// short enough that brand logo refreshes propagate.
+    private static let successTTL: TimeInterval = 60 * 60 * 24 * 30
 
-    /// Returns cached candidate URLs for an email, or nil if not yet resolved.
-    func candidates(for email: String) -> [URL]? {
-        resolvedURLs[normalizedEmail(email)]
+    /// Empty/failed resolutions are retried after 5 minutes. Without this, a single
+    /// transient backend failure would leave the avatar permanently absent for the session.
+    private static let emptyTTL: TimeInterval = 60 * 5
+
+    /// Cap on disk entries — avoids unbounded growth for users who burn through inbox.
+    private static let maxEntries = 5000
+
+    /// Debounced disk write — coalesces rapid updates (e.g. 50 row appearances on inbox load).
+    private var saveTask: Task<Void, Never>?
+
+    private static let cacheFileURL: URL? = {
+        guard let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else {
+            return nil
+        }
+        return dir.appendingPathComponent("sender-avatar-cache.json")
+    }()
+
+    private init() {
+        loadFromDisk()
     }
 
-    /// Fetches and caches avatar URLs for the given sender if not already resolved.
-    /// Deduplicates concurrent calls for the same email address.
-    func resolveIfNeeded(email: String, name: String, api: TodosAPIClient) async {
-        let normalized = normalizedEmail(email)
-        guard resolvedURLs[normalized] == nil, !inFlight.contains(normalized) else { return }
-        inFlight.insert(normalized)
-        defer { inFlight.remove(normalized) }
+    // MARK: - Public API
 
-        let urls = await fetchCandidateURLs(email: normalized, name: name, api: api)
-        // Even an empty list is stored so we don't retry failed lookups on every render
-        resolvedURLs[normalized] = urls
+    /// Returns candidate URLs for an email, ordered with last-known-good URL first.
+    /// Returns nil if not yet resolved.
+    func candidates(for email: String) -> [URL]? {
+        let key = normalizedEmail(email)
+        guard let urls = resolvedURLs[key] else { return nil }
+        // Surface the last-successful URL first so we don't re-walk failing prefixes.
+        if let preferred = lastSuccessful[key],
+           let idx = urls.firstIndex(of: preferred), idx > 0 {
+            var reordered = urls
+            reordered.remove(at: idx)
+            reordered.insert(preferred, at: 0)
+            return reordered
+        }
+        return urls
+    }
+
+    /// Fetches and caches avatar URLs for the given sender unless a fresh entry exists.
+    /// Deduplicates concurrent calls for the same email.
+    func resolveIfNeeded(email: String, name: String, api: TodosAPIClient) async {
+        let key = normalizedEmail(email)
+        guard !key.isEmpty, !inFlight.contains(key) else { return }
+
+        // Honor TTL — short for empty results so transient failures don't stick.
+        if let when = resolvedAt[key] {
+            let urls = resolvedURLs[key] ?? []
+            let ttl = urls.isEmpty ? Self.emptyTTL : Self.successTTL
+            if Date().timeIntervalSince(when) < ttl {
+                return
+            }
+        }
+
+        inFlight.insert(key)
+        defer { inFlight.remove(key) }
+
+        let urls = await fetchCandidateURLs(email: key, name: name, api: api)
+        resolvedURLs[key] = urls
+        resolvedAt[key] = Date()
+        scheduleSave()
+    }
+
+    /// Records that `url` rendered successfully for `email`. Future renders try this URL
+    /// first, persisted across launches.
+    func recordSuccess(email: String, url: URL) {
+        let key = normalizedEmail(email)
+        guard lastSuccessful[key] != url else { return }
+        lastSuccessful[key] = url
+        scheduleSave()
+    }
+
+    func flushPendingSaves() {
+        saveTask?.cancel()
+        saveTask = nil
+        persistToDisk()
     }
 
     // MARK: - Backend fetch
@@ -66,7 +141,7 @@ final class AvatarCache {
             let input = AvatarInput(email: email, name: name.isEmpty ? nil : name)
             let response: AvatarResponse = try await api.trpcQuery("avatar.getByEmail", input: input)
 
-            // Primary source first (best quality) — skip BIMI SVGs (iOS has no native SVG renderer)
+            // Primary source first (best quality) — skip BIMI SVGs (iOS has no native SVG renderer).
             if let primary = response.primary,
                primary.source != "bimi",
                let urlStr = primary.url,
@@ -75,22 +150,20 @@ final class AvatarCache {
                 urls.append(url)
             }
 
-            // Backend-resolved fallbacks (domain favicon, apple-touch-icon, etc.)
             for urlStr in response.fallbackUrls {
                 if let url = URL(string: urlStr), !urls.contains(url) {
                     urls.append(url)
                 }
             }
         } catch {
-            // Backend failed — fall through to local fallbacks below.
+            // Backend failure → fall through to local fallbacks below. The empty-TTL
+            // ensures we'll retry the backend in 5 minutes rather than waiting for restart.
         }
 
-        // Local deterministic domain-based fallbacks come after backend URLs so higher-quality
-        // backend-resolved images are tried first, but we always have local fallbacks as a safety net.
-        for fallback in localFallbackURLs(email: email) {
-            if !urls.contains(fallback) {
-                urls.append(fallback)
-            }
+        // Local deterministic fallbacks always appended — Google's s2 favicon service has
+        // near-100% coverage for any real domain, so the chain almost always resolves.
+        for fallback in localFallbackURLs(email: email) where !urls.contains(fallback) {
+            urls.append(fallback)
         }
 
         return urls
@@ -100,7 +173,7 @@ final class AvatarCache {
         email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 
-    // Includes root-domain and subdomain variants to improve hit rate on transactional domains.
+    /// Includes root-domain and `www.` variants to improve hit rate on transactional senders.
     private func localFallbackURLs(email: String) -> [URL] {
         guard let domain = domainFromEmail(email), !domain.isEmpty else { return [] }
 
@@ -109,15 +182,13 @@ final class AvatarCache {
             hostCandidates.append(root)
         }
 
-        for host in Array(hostCandidates) {
-            if !host.hasPrefix("www.") {
-                hostCandidates.append("www.\(host)")
-            }
+        for host in Array(hostCandidates) where !host.hasPrefix("www.") {
+            hostCandidates.append("www.\(host)")
         }
 
         var candidates: [URL] = []
-        // Google's favicon service has the best coverage (same source Gmail uses),
-        // so we prioritize it. Then apple-touch-icon (higher-res), then other fallbacks.
+        // Google's favicon service has the best coverage (same source Gmail uses), so we
+        // prioritize it. apple-touch-icon (higher-res) next, then standard fallbacks.
         for host in hostCandidates {
             let rawURLs = [
                 "https://www.google.com/s2/favicons?domain=\(host)&sz=128",
@@ -147,7 +218,7 @@ final class AvatarCache {
         return cleaned.isEmpty ? nil : cleaned
     }
 
-    // Best-effort root domain extraction with common multi-part TLD handling.
+    /// Best-effort root domain extraction with common multi-part TLD handling.
     private func rootDomain(from domain: String) -> String? {
         let parts = domain.split(separator: ".").map(String.init)
         guard parts.count >= 2 else { return nil }
@@ -163,6 +234,71 @@ final class AvatarCache {
         }
 
         return parts.suffix(2).joined(separator: ".")
+    }
+
+    // MARK: - Persistence
+
+    private struct PersistedShape: Codable {
+        let resolvedURLs: [String: [URL]]
+        let lastSuccessful: [String: URL]
+        let resolvedAt: [String: Date]
+    }
+
+    private func loadFromDisk() {
+        guard let url = Self.cacheFileURL,
+              let data = try? Data(contentsOf: url),
+              let decoded = try? JSONDecoder().decode(PersistedShape.self, from: data) else {
+            return
+        }
+
+        // Drop expired entries on load — keeps the in-memory state honest from the start.
+        let now = Date()
+        var validURLs: [String: [URL]] = [:]
+        var validAt: [String: Date] = [:]
+        for (email, when) in decoded.resolvedAt {
+            let urls = decoded.resolvedURLs[email] ?? []
+            let ttl = urls.isEmpty ? Self.emptyTTL : Self.successTTL
+            if now.timeIntervalSince(when) < ttl {
+                validURLs[email] = urls
+                validAt[email] = when
+            }
+        }
+        self.resolvedURLs = validURLs
+        self.resolvedAt = validAt
+        self.lastSuccessful = decoded.lastSuccessful.filter { validURLs[$0.key] != nil }
+    }
+
+    private func scheduleSave() {
+        saveTask?.cancel()
+        saveTask = Task { @MainActor [weak self] in
+            // Coalesce rapid successive writes into a single disk hit.
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled, let self else { return }
+            self.persistToDisk()
+        }
+    }
+
+    private func persistToDisk() {
+        guard let fileURL = Self.cacheFileURL else { return }
+
+        // Trim if over cap — drop oldest by resolvedAt timestamp.
+        if resolvedURLs.count > Self.maxEntries {
+            let sorted = resolvedAt.sorted { $0.value < $1.value }
+            let toDrop = sorted.prefix(resolvedURLs.count - Self.maxEntries)
+            for (key, _) in toDrop {
+                resolvedURLs.removeValue(forKey: key)
+                resolvedAt.removeValue(forKey: key)
+                lastSuccessful.removeValue(forKey: key)
+            }
+        }
+
+        let snapshot = PersistedShape(
+            resolvedURLs: resolvedURLs,
+            lastSuccessful: lastSuccessful,
+            resolvedAt: resolvedAt
+        )
+        guard let data = try? JSONEncoder().encode(snapshot) else { return }
+        try? data.write(to: fileURL, options: [.atomic])
     }
 }
 
@@ -192,15 +328,17 @@ private enum StableAvatarColorIndex {
 /// Displays a sender's avatar with automatic remote resolution and graceful fallbacks.
 ///
 /// Resolution priority:
-///   1. Google People API contact photo (if sender is in user's contacts)
-///   2. Domain brand favicon/icon (e.g. supabase.com → Supabase logo)
-///   3. Additional favicon fallbacks (apple-touch-icon, /favicon.ico, www. variant, etc.)
-///   4. Initials + deterministic color circle
+///   1. Last-known-good URL (memoized per sender across launches)
+///   2. Google People API contact photo (if sender is in user's contacts)
+///   3. Domain brand favicon/icon (e.g. supabase.com → Supabase logo)
+///   4. Additional favicon fallbacks (apple-touch-icon, /favicon.ico, www. variant, DDG)
+///   5. Initials + deterministic color circle
 ///
 /// Sub-domain emails (e.g. auth.supabase.com) are resolved to their root domain by the
 /// backend, so you still get the Supabase logo even for transactional senders.
 ///
-/// Results are stored in AvatarCache for the session lifetime to avoid repeated API calls.
+/// Results are persisted in AvatarCache with TTL — cold starts hit zero network for
+/// previously-seen senders.
 struct SenderAvatarView: View {
     let email: String
     let name: String
@@ -215,36 +353,53 @@ struct SenderAvatarView: View {
 
     var body: some View {
         let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        // Direct property access on @Observable triggers re-render when cache is populated
-        let candidates: [URL] = AvatarCache.shared.resolvedURLs[normalizedEmail] ?? []
+        // Direct property access on @Observable triggers re-render when cache is populated.
+        // Use `candidates(for:)` to apply last-successful reordering.
+        let candidates: [URL] = AvatarCache.shared.candidates(for: normalizedEmail) ?? []
 
+        // Initials always render as the base layer. The actual avatar image fades in on top
+        // when it loads — eliminates the initials-then-avatar pop-in that happens with a
+        // bare AsyncImage swap. The user only ever sees a smooth fade.
         ZStack {
             initialsCircle
 
             if urlIndex < candidates.count {
-                AsyncImage(url: candidates[urlIndex]) { phase in
+                let currentURL = candidates[urlIndex]
+                AsyncImage(url: currentURL, transaction: Transaction(animation: .easeOut(duration: 0.15))) { phase in
                     switch phase {
                     case .success(let image):
-                        // White background ensures transparent logos (e.g. Slack, GitHub)
-                        // are visible and the colored initials circle doesn't bleed through.
-                        Circle()
-                            .fill(Color.white)
-                        image
-                            .resizable()
-                            .scaledToFill()
+                        ZStack {
+                            // White backdrop keeps transparent brand logos legible.
+                            Circle().fill(Color.white)
+                            image
+                                .resizable()
+                                .scaledToFill()
+                        }
+                        .transition(.opacity)
+                        .onAppear {
+                            AvatarCache.shared.recordSuccess(email: normalizedEmail, url: currentURL)
+                        }
                     case .failure:
-                        // Keep initials visible while moving to the next URL.
-                        // Use .onAppear instead of .task to avoid re-running on identity changes
-                        // which could cause infinite loops when the view re-renders.
-                        initialsCircle
-                            .onAppear { urlIndex += 1 }
+                        // Transparent placeholder while we advance to the next candidate.
+                        // Initials remain visible underneath via the ZStack base layer.
+                        Color.clear
+                            .onAppear {
+                                if urlIndex < candidates.count {
+                                    urlIndex += 1
+                                }
+                            }
                     case .empty:
-                        // Still loading — keep initials visible to avoid blank cells.
-                        initialsCircle
+                        // Still loading — initials are already visible underneath, so render
+                        // a transparent placeholder rather than re-stacking initials.
+                        Color.clear
                     @unknown default:
-                        initialsCircle
+                        Color.clear
                     }
                 }
+                // Keying by URL forces SwiftUI to treat each candidate as a fresh AsyncImage,
+                // so the .empty → .success/.failure transition fires cleanly per URL and the
+                // failure-driven .onAppear isn't suppressed by view-identity reuse.
+                .id(currentURL)
             }
         }
         .frame(width: size, height: size)
@@ -257,6 +412,13 @@ struct SenderAvatarView: View {
                 name: name,
                 api: services.apiClient
             )
+        }
+        .onChange(of: candidates.count) { _, newCount in
+            // If candidates arrive (or refresh) after we exhausted the previous list,
+            // restart the waterfall so we don't stay stuck on initials.
+            if urlIndex >= newCount && newCount > 0 {
+                urlIndex = 0
+            }
         }
     }
 

@@ -85,6 +85,7 @@ final class AppServices {
         static let contextAboutYou = "TaskApp.contextAboutYou"
         static let customInstructions = "TaskApp.customInstructions"
         static let assistantAutomationPolicy = "TaskApp.assistantAutomationPolicy"
+        static let calendarPreferences = "TaskApp.calendarPreferences"
         static let tabBarTabs = "TaskApp.tabBarTabs"
         static let hasConfiguredTabBarPrompt = "TaskApp.hasConfiguredTabBarPrompt"
         static let hasConfiguredNotificationsPrompt = "TaskApp.hasConfiguredNotificationsPrompt"
@@ -103,8 +104,17 @@ final class AppServices {
     let calendarService: CalendarService
     /// Multi-account connections service — manages connected email accounts and filter state
     let connectionsService: ConnectionsService
+    /// Backend Google Calendar integration — fetches per-connection calendars and events.
+    let googleCalendarService: GoogleCalendarService
+    /// Aggregator that merges Apple (EventKit) + Google (backend) events with
+    /// per-source visibility from `calendarPreferences`.
+    let unifiedCalendarService: UnifiedCalendarService
     let networkMonitor: NetworkMonitor
     let notificationService: NotificationService
+
+    /// Set by the app entry point after SwiftData container initialisation.
+    /// Used by reconnect handlers that need a ModelContext without a SwiftUI environment.
+    var modelContainer: ModelContainer?
 
     // Legacy services — kept during migration, will be removed once task sync is fully on new backend
     let authStore: AuthSessionStore
@@ -126,6 +136,20 @@ final class AppServices {
     let subscriptionService: SubscriptionService
     /// Wraps drafts.update + mail.send for the AI chat's InlineComposeCard.
     let draftService: DraftService
+    /// Tracks per-model install state for the Local Models settings screen and
+    /// the chat composer's local-runtime routing. Disk scan runs on init.
+    let localModelStateStore: LocalModelStateStore
+    /// Apple Intelligence on-device LLM (iOS 26+). Routed to when the
+    /// selected model has `runtime == .appleFM`.
+    let appleFoundationModelService: AppleFoundationModelService
+    /// MLX-Swift inference (Apple Silicon). Loads quantized weights from the
+    /// HuggingFace cache populated by `modelDownloadService`.
+    let mlxInferenceService: MLXInferenceService
+    /// Orchestrates HuggingFace downloads + deletions for MLX models. Bridges
+    /// progress into `localModelStateStore` for the Settings UI.
+    let modelDownloadService: ModelDownloadService
+    /// Offline-capable queue for folder create/update/delete mutations.
+    let folderSyncService: FolderSyncService
     private let defaults: UserDefaults
     private var isLoadingSharedProfile = false
     private var lastSharedProfileLoadAt: Date?
@@ -155,11 +179,29 @@ final class AppServices {
     var composeEmailSeedBody: String? = nil
     var composeEmailSeedTo: String? = nil
     var composeEmailSeedSubject: String? = nil
+    /// Filenames (already saved by AttachmentService) carried into a fresh
+    /// EmailComposeView. Surfaced as chips so the user keeps a record even
+    /// though the send pipeline does not yet upload binary attachments.
+    var composeEmailSeedAttachments: [String] = []
     var showsAIChat = false
 
     /// Set by detail views (e.g. EmailThreadView) to hide the custom floating tab bar
     /// so their own bottom bar is visible. Reset to false on dismiss.
     var hideTabBar = false
+
+    // MARK: - Header Menu Signals
+    // Tick counters incremented by the AppTopHeader ellipsis menu so each tab's view
+    // can react to a contextual action (refresh, sync, etc.) it owns local state for.
+    var homeRefreshTick: Int = 0
+    var tasksSyncRemindersTick: Int = 0
+    var tasksClearCompletedTick: Int = 0
+    var emailRefreshTick: Int = 0
+    var emailMarkAllReadTick: Int = 0
+    var calendarRefreshTick: Int = 0
+    var calendarGoToTodayTick: Int = 0
+    /// Set by the header to request a calendar view-mode switch from outside CalendarTabView.
+    /// CalendarTabView observes and resets to nil after applying.
+    var calendarRequestedViewMode: CalendarViewMode? = nil
 
     // MARK: - Deep Navigation (from AI chat cards → specific items)
     /// Set by AI chat card taps to navigate to a specific email thread after dismissing the sheet.
@@ -318,6 +360,17 @@ final class AppServices {
         }
     }
 
+    /// Calendar visibility prefs — synced from `settings.get` and persisted
+    /// locally for offline launches. Mutate in-memory and call
+    /// `saveCalendarPreferences()` to push to the server.
+    var calendarPreferences: CalendarPreferences {
+        didSet {
+            if let data = try? JSONEncoder().encode(calendarPreferences) {
+                defaults.set(data, forKey: Keys.calendarPreferences)
+            }
+        }
+    }
+
     /// Whether local notifications are scheduled for task due dates
     var taskRemindersEnabled: Bool {
         didSet {
@@ -352,8 +405,17 @@ final class AppServices {
         let apiClient = TodosAPIClient(baseURL: backendURL, authService: authService)
         self.apiClient = apiClient
         self.emailService = EmailService(api: apiClient)
-        self.calendarService = CalendarService()
-        self.connectionsService = ConnectionsService(api: apiClient)
+        let calendarService = CalendarService()
+        self.calendarService = calendarService
+        let connectionsService = ConnectionsService(api: apiClient)
+        self.connectionsService = connectionsService
+        let googleCalendarService = GoogleCalendarService(api: apiClient)
+        self.googleCalendarService = googleCalendarService
+        self.unifiedCalendarService = UnifiedCalendarService(
+            calendarService: calendarService,
+            googleService: googleCalendarService,
+            connectionsService: connectionsService
+        )
         self.networkMonitor = NetworkMonitor()
         self.notificationService = NotificationService()
 
@@ -363,13 +425,17 @@ final class AppServices {
         self.remindersSyncService = AppleRemindersSyncService()
         self.remindersSyncState = RemindersSyncState()
 
+        let folderSyncService = FolderSyncService(apiClient: apiClient)
+        self.folderSyncService = folderSyncService
+
         let captureService = TaskCaptureService(
             parser: RemoteFirstTaskParsingService(configuration: configuration),
             syncService: syncService,
             authStore: authStore,
             remindersSyncService: remindersSyncService,
             remindersSyncState: remindersSyncState,
-            apiClient: apiClient
+            apiClient: apiClient,
+            folderSyncService: folderSyncService
         )
         self.captureService = captureService
         captureService.notificationService = self.notificationService
@@ -387,6 +453,17 @@ final class AppServices {
         self.meetingsService = MeetingsService(apiClient: apiClient)
         self.subscriptionService = SubscriptionService(apiClient: apiClient)
         self.draftService = DraftService(api: apiClient)
+        self.localModelStateStore = LocalModelStateStore()
+        self.appleFoundationModelService = AppleFoundationModelService()
+        self.mlxInferenceService = MLXInferenceService()
+        self.modelDownloadService = ModelDownloadService(
+            stateStore: self.localModelStateStore,
+            inferenceService: self.mlxInferenceService
+        )
+        // Wire local runtimes into the chat service so it can short-circuit
+        // /api/ai/chat when the selected model is on-device.
+        self.aiChatService.appleFoundationModelService = self.appleFoundationModelService
+        self.aiChatService.mlxInferenceService = self.mlxInferenceService
 
         let storedAppearance = defaults.string(forKey: Keys.appearancePreference)
             .flatMap(AppAppearancePreference.init(rawValue:))
@@ -416,6 +493,12 @@ final class AppServices {
             self.assistantAutomationPolicy = savedPolicy
         } else {
             self.assistantAutomationPolicy = .recommended
+        }
+        if let data = defaults.data(forKey: Keys.calendarPreferences),
+           let saved = try? JSONDecoder().decode(CalendarPreferences.self, from: data) {
+            self.calendarPreferences = saved
+        } else {
+            self.calendarPreferences = .default
         }
         self.taskRemindersEnabled = defaults.object(forKey: Keys.taskRemindersEnabled) as? Bool ?? true
         self.calendarRemindersEnabled = defaults.object(forKey: Keys.calendarRemindersEnabled) as? Bool ?? true
@@ -502,9 +585,23 @@ final class AppServices {
     }
 
     func signOut() {
+        // Clear in-memory sync queues so a reconnect after re-login does not
+        // replay the previous user's offline mutations under the new session.
+        folderSyncService.clearQueue()
         emailService.resetForSignOut()
         authService.signOut()
         authStore.signOutToGuest()
+    }
+
+    func setupNetworkSync() {
+        networkMonitor.onReconnect = { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self, let context = self.modelContainer?.mainContext else { return }
+                await self.syncService.retryUnsyncedTasks(in: context)
+                await self.folderSyncService.retryPending()
+                await self.draftService.flushPending(in: context)
+            }
+        }
     }
 
     func loadSharedAIProfile() async {
@@ -525,6 +622,9 @@ final class AppServices {
             contextAboutYou = response.settings.contextAboutYou
             customInstructions = response.settings.customPrompt
             assistantAutomationPolicy = response.settings.assistantAutomationPolicy
+            if let prefs = response.settings.calendarPreferences {
+                calendarPreferences = prefs
+            }
             lastSharedProfileLoadAt = now
         } catch {
             print("[AppServices] Failed to load shared AI profile: \(error)")
@@ -546,6 +646,52 @@ final class AppServices {
         } catch {
             print("[AppServices] Failed to save shared AI profile: \(error)")
         }
+    }
+
+    /// Push the current `calendarPreferences` to the backend via `settings.save`.
+    /// Optimistic updates: callers can mutate `calendarPreferences` in-place,
+    /// then call this to sync — UI doesn't wait on the server.
+    func saveCalendarPreferences() async {
+        guard authService.isAuthenticated else { return }
+        do {
+            struct Input: Encodable {
+                let calendarPreferences: CalendarPreferences
+            }
+            let _: SharedAIProfileSaveResponse = try await apiClient.trpcMutation(
+                "settings.save",
+                input: Input(calendarPreferences: calendarPreferences)
+            )
+        } catch {
+            print("[AppServices] Failed to save calendar preferences: \(error)")
+        }
+    }
+
+    /// Toggle a calendar's visibility (composite id like `apple:{...}` or `google:{...}:{...}`)
+    /// and push the change to the server.
+    func toggleCalendarVisibility(_ id: String) {
+        var prefs = calendarPreferences
+        var hidden = prefs.hiddenIdSet
+        if hidden.contains(id) {
+            hidden.remove(id)
+        } else {
+            hidden.insert(id)
+        }
+        prefs.hiddenCalendarIds = Array(hidden)
+        calendarPreferences = prefs
+        Task { await saveCalendarPreferences() }
+    }
+
+    /// Set the user's preferred default calendar id for a given account key
+    /// (`apple` or `google:{connectionId}`). Pass nil to clear.
+    func setDefaultCalendar(_ id: String?, forAccountKey accountKey: String) {
+        var prefs = calendarPreferences
+        if let id {
+            prefs.defaultCalendarByAccount[accountKey] = id
+        } else {
+            prefs.defaultCalendarByAccount.removeValue(forKey: accountKey)
+        }
+        calendarPreferences = prefs
+        Task { await saveCalendarPreferences() }
     }
 
     func completeAuthUpgradeIfNeeded(in context: ModelContext) async {

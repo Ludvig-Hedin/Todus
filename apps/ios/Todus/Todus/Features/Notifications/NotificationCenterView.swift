@@ -19,7 +19,7 @@ struct NotificationCenterView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                AppTheme.backgroundTop.ignoresSafeArea()
+                AppTheme.sheetBackground.ignoresSafeArea()
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {

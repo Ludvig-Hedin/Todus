@@ -10,7 +10,7 @@ import {
 import { systemPrompt } from '../services/call-service/system-prompt';
 import { getSharedAIProfilePromptForUser } from '../lib/ai-profile';
 import { perplexity } from '@ai-sdk/perplexity';
-import { resolveModel } from '../lib/ai-model-resolver';
+import { resolveModel, isLocalInference } from '../lib/ai-model-resolver';
 import { tools } from './agent/tools';
 import { generateText } from 'ai';
 import { Tools } from '../types';
@@ -387,22 +387,31 @@ aiRouter.post('/chat', async (c) => {
   const apiKey = env.OPENROUTER_API_SECRET ?? env.OPENROUTER_API_KEY;
   if (!apiKey) return c.json({ error: 'AI not configured' }, 503);
 
-  // Pre-flight: block if the user has exhausted their AI credits.
-  // Cached read (~1ms). Fails open if the lookup itself errors — we never want
-  // a billing-cache hiccup to take chat down.
-  try {
-    const allowed = await hasAiCredits(user.id);
-    if (!allowed) {
-      return c.json(
-        { error: 'ai_credits_exhausted', message: 'Out of AI credits. Upgrade or wait for the next reset.' },
-        402,
-      );
-    }
-  } catch (error) {
-    console.error('[ai/chat] hasAiCredits check failed (allowing through)', error);
-  }
-
   const model = parsed.data.model || env.DEFAULT_MODEL || 'openai/gpt-4.1-mini';
+
+  // On-device requests (Ollama-routed apps/web flows, defensive coverage for any
+  // local model id that leaks through from the native apps) are never billed —
+  // the user is paying for their own compute. Skip both pre-flight and the
+  // post-stream usage track. Local runtimes on iOS/macOS bypass this route
+  // entirely, so this branch is purely defensive.
+  const skipBilling = isLocalInference({ modelId: model });
+
+  if (!skipBilling) {
+    // Pre-flight: block if the user has exhausted their AI credits.
+    // Cached read (~1ms). Fails open if the lookup itself errors — we never want
+    // a billing-cache hiccup to take chat down.
+    try {
+      const allowed = await hasAiCredits(user.id);
+      if (!allowed) {
+        return c.json(
+          { error: 'ai_credits_exhausted', message: 'Out of AI credits. Upgrade or wait for the next reset.' },
+          402,
+        );
+      }
+    } catch (error) {
+      console.error('[ai/chat] hasAiCredits check failed (allowing through)', error);
+    }
+  }
 
   // ── Mem0: Inject cached memories into the message stream ─────────────────
   // Reads from KV cache (<5ms) or in-memory (0ms). Mem0 API is only hit on
@@ -849,8 +858,14 @@ aiRouter.post('/chat', async (c) => {
 
         // 4. Bill the user for actual cost. Fire-and-forget — never block the
         // close. If usage was missing from the stream (some models don't emit
-        // it), we skip — better than charging a guess.
-        if (userId && (usagePromptTokens > 0 || usageCompletionTokens > 0)) {
+        // it), we skip — better than charging a guess. Local-inference
+        // requests (Ollama / on-device curated models) are exempt — see
+        // `isLocalInference` and `skipBilling` above.
+        if (
+          !skipBilling &&
+          userId &&
+          (usagePromptTokens > 0 || usageCompletionTokens > 0)
+        ) {
           c.executionCtx?.waitUntil?.(
             trackAiUsage({
               userId,

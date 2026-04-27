@@ -1,10 +1,11 @@
+import EventKit
 import SwiftUI
 
 /// Shown when the user has denied or not yet granted calendar access.
 /// Visual style matches GmailOnboardingView / EmailConnectView for consistency.
 struct CalendarPermissionView: View {
     @Environment(AppServices.self) private var services
-    @State private var requestedAccess = false
+    @State private var isRequesting = false
 
     var body: some View {
         ZStack {
@@ -27,7 +28,7 @@ struct CalendarPermissionView: View {
 
                 Spacer().frame(height: 12)
 
-                Text("Allow access to your calendar\nto view and create events.")
+                Text(secondaryCopy)
                     .font(.system(size: 15, weight: .regular))
                     .foregroundStyle(AppTheme.mutedText)
                     .multilineTextAlignment(.center)
@@ -35,17 +36,27 @@ struct CalendarPermissionView: View {
 
                 Spacer().frame(height: 40)
 
-                // Show "Allow Access" if not yet determined, "Open Settings" if previously denied
-                if services.calendarService.authorizationStatus() == .notDetermined && !requestedAccess {
+                if services.calendarService.canReadEvents() {
+                    ButtonInlineProgressView(tint: .primary, side: AppTheme.Metrics.buttonInlineSpinner)
+                    Text("Loading calendar…")
+                        .font(.system(size: 15))
+                        .foregroundStyle(AppTheme.mutedText)
+                    Spacer().frame(height: 12)
+                } else if shouldShowAllowAccess {
                     Button {
                         Task {
-                            requestedAccess = true
+                            isRequesting = true
+                            defer { isRequesting = false }
                             _ = await services.calendarService.requestAccess()
                         }
                     } label: {
                         HStack(spacing: 10) {
-                            AppleCalendarIconView(size: 20)
-                            Text("Allow Access")
+                            if isRequesting {
+                                ButtonInlineProgressView()
+                            } else {
+                                AppleCalendarIconView(size: 20)
+                            }
+                            Text(isRequesting ? "Connecting…" : "Allow Access")
                                 .font(.system(size: 15, weight: .semibold))
                         }
                         .frame(maxWidth: .infinity)
@@ -53,9 +64,10 @@ struct CalendarPermissionView: View {
                     }
                     .buttonStyle(AppPrimaryButtonStyle())
                     .padding(.horizontal, 24)
+                    .disabled(isRequesting)
                     .accessibilityHint("Grant calendar access")
                 } else {
-                    // Permission was denied — user must grant in iOS Settings
+                    // Denied, restricted, or (iOS 17+) write-only — need Settings for full read access
                     Button {
                         if let url = URL(string: UIApplication.openSettingsURLString) {
                             UIApplication.shared.open(url)
@@ -85,5 +97,30 @@ struct CalendarPermissionView: View {
             }
             .padding(.vertical, 32)
         }
+    }
+
+    private var shouldShowAllowAccess: Bool {
+        if needsSettingsRoute { return false }
+        return services.calendarService.authorizationStatus() == .notDetermined
+    }
+
+    /// User must use Settings: denied, restricted, or write-only (Todus needs read access).
+    private var needsSettingsRoute: Bool {
+        let s = services.calendarService.authorizationStatus()
+        switch s {
+        case .denied, .restricted: return true
+        default: break
+        }
+        if #available(iOS 17.0, *) {
+            return s == .writeOnly
+        }
+        return false
+    }
+
+    private var secondaryCopy: String {
+        if #available(iOS 17.0, *), services.calendarService.authorizationStatus() == .writeOnly {
+            return "Todus needs full calendar access to show your events. Choose “Full Access” in Settings for this app."
+        }
+        return "Allow access to your calendar\nto view and create events."
     }
 }

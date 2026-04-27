@@ -68,9 +68,7 @@ struct GmailOnboardingView: View {
                         HStack(spacing: 10) {
                             GmailIconView(size: 20)
                             if isConnecting {
-                                ProgressView()
-                                    .tint(.white)
-                                    .scaleEffect(0.85)
+                                ButtonInlineProgressView()
                             }
                             Text(isConnecting ? "Connecting…" : "Connect Gmail")
                                 .font(.system(size: 15, weight: .semibold))

@@ -173,8 +173,24 @@ final class NotificationDigestService {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("https://todus.app", forHTTPHeaderField: "Origin")
+
+        // Apply default headers inline (replaces TodusHTTPClient.applyDefaultHeaders)
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        if request.value(forHTTPHeaderField: "User-Agent") == nil {
+            let appName = Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "Todus"
+            let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+            let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+            let versionSegment = (appVersion?.isEmpty == false ? appVersion! : "unknown")
+            let buildSegment = (build?.isEmpty == false ? " (build \(build!))" : "")
+            request.setValue("\(appName)/\(versionSegment)\(buildSegment) iOS", forHTTPHeaderField: "User-Agent")
+        }
+
         if let token = authService?.bearerToken {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        if let sid = authService?.currentSessionId {
+            request.setValue(sid, forHTTPHeaderField: "X-Todus-Session-Id")
         }
         request.httpBody = body
 

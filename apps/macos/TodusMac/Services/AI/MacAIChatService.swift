@@ -1,7 +1,7 @@
 import Foundation
 import Observation
-import SwiftData
 import OSLog
+import SwiftData
 import UniformTypeIdentifiers
 
 // MARK: - MacAIChatService
@@ -45,6 +45,12 @@ final class MacAIChatService {
     private weak var authService: AuthService?
     private weak var emailService: EmailService?
     private var calendarService: CalendarService?
+    /// Local-runtime services. Wired by `MacAppServices` after construction so
+    /// the chat service can short-circuit /api/ai/chat when the user has an
+    /// on-device model selected. Weak so we never extend their lifetime.
+    weak var appleFoundationModelService: AppleFoundationModelService?
+    weak var mlxInferenceService: MLXInferenceService?
+    weak var ollamaInferenceService: OllamaInferenceService?
     private var streamingTask: Task<Void, Never>?
     private let log = Logger(subsystem: "com.todus.macos", category: "MacAIChatService")
 
@@ -102,7 +108,7 @@ final class MacAIChatService {
 
         isConversationSaved = false
         let displayNames = attachmentURLs.map { $0.lastPathComponent }
-        let userMsg = MacChatMessage(role: .user, content: trimmed, attachmentFileNames: displayNames)
+        let userMsg = MacChatMessage(role: .user, content: trimmed, attachmentFileNames: displayNames, attachmentURLs: attachmentURLs)
         messages.append(userMsg)
         if !attachmentURLs.isEmpty {
             let serialized = Self.buildSerializedAttachments(urls: attachmentURLs)
@@ -164,10 +170,13 @@ final class MacAIChatService {
         messages[idx].isStreaming = true
         messages[idx].taskMutations = []
         messages[idx].sources = []
+        messages[idx].contextSources = []
         messages[idx].searchQueries = []
         messages[idx].searchState = .none
         messages[idx].reasoningContent = ""
         messages[idx].reasoningDurationMs = nil
+        // Old generative-UI cards must not bleed into the regenerated bubble.
+        messages[idx].uiSpec = nil
 
         isStreaming = true
         let requestMessages = Array(messages.prefix(idx))
@@ -290,6 +299,49 @@ final class MacAIChatService {
         allTasks: [TaskRecord],
         modelContext: ModelContext
     ) async {
+        // Local model short-circuit. Mirrors AIChatService — when the user
+        // has selected an on-device model, route the entire turn through the
+        // matching LocalAIService and bypass /api/ai/chat entirely. macOS
+        // adds an extra runtime path (Ollama via the user's local daemon).
+        if let local = LocalModelCatalog.match(modelString: selectedModel) {
+            await streamLocalResponse(
+                assistantMessageID: assistantMessageID,
+                model: local,
+                requestMessages: requestMessages
+            )
+            finaliseStream(messageID: assistantMessageID)
+            return
+        }
+        // Bare Ollama tags (e.g. "llama3.2:3b") used by macOS users who pulled
+        // a model outside the curated catalog. Treat them as Ollama runtime.
+        if selectedModel.contains(":") && ollamaInferenceService != nil {
+            let synthetic = LocalModel(
+                id: selectedModel,
+                displayName: selectedModel,
+                family: .llama,
+                parameters: "",
+                tagline: "",
+                description: "",
+                strengths: [],
+                runtime: .ollama,
+                mlxRepo: nil,
+                ollamaTag: selectedModel,
+                downloadSizeMB: 0,
+                ramRequiredGB: 0,
+                platforms: [.macOS],
+                supportsToolUse: false,
+                goodFor: [.chat],
+                license: ""
+            )
+            await streamLocalResponse(
+                assistantMessageID: assistantMessageID,
+                model: synthetic,
+                requestMessages: requestMessages
+            )
+            finaliseStream(messageID: assistantMessageID)
+            return
+        }
+
         defer { finaliseStream(messageID: assistantMessageID) }
 
         await refreshCalendarSnapshot()
@@ -384,6 +436,7 @@ final class MacAIChatService {
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.setValue("https://todus.app", forHTTPHeaderField: "Origin")
+            TodusHTTPClient.applyDefaultHeaders(to: &request)
             if let token = authService?.bearerToken {
                 request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
             }
@@ -420,6 +473,13 @@ final class MacAIChatService {
                         ), to: assistantMessageID)
                     } else {
                         switch http.statusCode {
+                        case 402:
+                            // Backend returns 402 with body {"error":"ai_credits_exhausted",...}
+                            // when the user has used up their monthly AI credits.
+                            appendError(
+                                "You're out of AI credits this period. Open Settings → Subscription to upgrade or see your reset date.",
+                                to: assistantMessageID
+                            )
                         case 503:
                             appendError("AI service is not configured on the server (missing OPENROUTER_API_KEY).", to: assistantMessageID)
                         case 502:
@@ -690,8 +750,16 @@ final class MacAIChatService {
             }
         case "sources":
             messages[idx].searchState = .complete
-            messages[idx].sources = (event.sources ?? []).map { src in
+            messages[idx].sources = (event.legacyWebSearchSources ?? []).map { src in
                 MacWebSource(url: src.url, title: src.title, snippet: src.snippet)
+            }
+        case "context_sources":
+            let batch = event.contextAISources ?? []
+            guard !batch.isEmpty else { break }
+            var seen = Set(messages[idx].contextSources.map(\.id))
+            for s in batch where !seen.contains(s.id) {
+                messages[idx].contextSources.append(s)
+                seen.insert(s.id)
             }
         case "reasoning":
             if let content = event.content {
@@ -952,6 +1020,78 @@ final class MacAIChatService {
 
         return sections.joined(separator: "\n\n")
     }
+    // MARK: - Local-model streaming
+    //
+    // Picks the appropriate `LocalAIService` for the curated model, builds a
+    // minimal prompt from the existing message history, and pumps tokens
+    // straight into the assistant message. Never touches the network for
+    // any of the three local runtimes (MLX, Apple FM, Ollama).
+    private func streamLocalResponse(
+        assistantMessageID: UUID,
+        model: LocalModel,
+        requestMessages: [MacChatMessage]?
+    ) async {
+        let runtime: LocalAIService? = {
+            switch model.runtime {
+            case .appleFM: return appleFoundationModelService
+            case .mlx:     return mlxInferenceService
+            case .ollama:  return ollamaInferenceService
+            }
+        }()
+        guard let runtime else {
+            errorMessage = "Local runtime for \(model.displayName) is unavailable on this Mac."
+            return
+        }
+
+        let history = requestMessages ?? messages
+        var localMessages: [LocalChatMessage] = []
+        if !customInstructions.trimmingCharacters(in: .whitespaces).isEmpty {
+            localMessages.append(.init(role: .system, content: customInstructions))
+        }
+        if !contextAboutYou.trimmingCharacters(in: .whitespaces).isEmpty {
+            localMessages.append(.init(role: .system, content: "Context about the user:\n\(contextAboutYou)"))
+        }
+        for m in history {
+            switch m.role {
+            case .user:
+                if !m.content.isEmpty { localMessages.append(.init(role: .user, content: m.content)) }
+            case .assistant:
+                if !m.content.isEmpty && m.id != assistantMessageID {
+                    localMessages.append(.init(role: .assistant, content: m.content))
+                }
+            }
+        }
+
+        let request = LocalChatRequest(
+            model: model,
+            messages: localMessages,
+            maxOutputTokens: 1024,
+            temperature: 0.7,
+            enableThinking: false,
+            tools: []
+        )
+
+        do {
+            for try await event in runtime.stream(request) {
+                try Task.checkCancellation()
+                switch event {
+                case .token(let chunk):
+                    if !chunk.isEmpty { appendToken(chunk, to: assistantMessageID) }
+                case .reasoning, .toolCall:
+                    continue
+                case .done:
+                    break
+                }
+            }
+        } catch is CancellationError {
+            // User stopped the stream — keep partial output.
+        } catch let err as LocalAIError {
+            errorMessage = err.errorDescription ?? "On-device generation failed."
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     // MARK: - Token & Message Helpers
 
     private func appendToken(_ token: String, to messageID: UUID) {
@@ -995,6 +1135,9 @@ final class MacAIChatService {
                 tokenBuffer = ""
             }
             messages[idx].isStreaming = false
+            // Extract any embedded ```ui-spec block into a structured spec so the message
+            // bubble can render rich cards instead of raw JSON.
+            messages[idx].parseUISpec()
         }
     }
 
@@ -1258,6 +1401,9 @@ struct MacChatMessage: Identifiable {
     var taskMutations: [MacTaskMutation]
     /// Web search sources cited in this response
     var sources: [MacWebSource]
+    /// Unified context sources (web + mentions + memories + tool-call results),
+    /// surfaced in the Sources button under the assistant message.
+    var contextSources: [MacAISource]
     /// Search queries the backend executed
     var searchQueries: [String]
     /// Current search phase
@@ -1268,6 +1414,14 @@ struct MacChatMessage: Identifiable {
     var reasoningDurationMs: Int?
     /// Display names for files attached to this user message
     var attachmentFileNames: [String]
+    /// Original file-system URLs for attached files — populated at send time so the
+    /// bubble can render image thumbnails. Not persisted; falls back to icon for
+    /// messages loaded from conversation history.
+    var attachmentURLs: [URL]
+    /// Generative UI spec parsed out of `content` after streaming completes.
+    /// When non-nil, the message bubble renders this below the markdown text and the
+    /// raw ```ui-spec block has been stripped from `content`.
+    var uiSpec: ChatUISpec?
 
     init(
         id: UUID = UUID(),
@@ -1276,11 +1430,14 @@ struct MacChatMessage: Identifiable {
         isStreaming: Bool = false,
         taskMutations: [MacTaskMutation] = [],
         sources: [MacWebSource] = [],
+        contextSources: [MacAISource] = [],
         searchQueries: [String] = [],
         searchState: SearchPhase = .none,
         reasoningContent: String = "",
         reasoningDurationMs: Int? = nil,
-        attachmentFileNames: [String] = []
+        attachmentFileNames: [String] = [],
+        attachmentURLs: [URL] = [],
+        uiSpec: ChatUISpec? = nil
     ) {
         self.id = id
         self.role = role
@@ -1288,11 +1445,29 @@ struct MacChatMessage: Identifiable {
         self.isStreaming = isStreaming
         self.taskMutations = taskMutations
         self.sources = sources
+        self.contextSources = contextSources
         self.searchQueries = searchQueries
         self.searchState = searchState
         self.reasoningContent = reasoningContent
         self.reasoningDurationMs = reasoningDurationMs
         self.attachmentFileNames = attachmentFileNames
+        self.attachmentURLs = attachmentURLs
+        self.uiSpec = uiSpec
+    }
+
+    /// Pulls a UI spec out of the message content and stores it on the message.
+    /// Mirrors iOS `AIChatMessage.parseUISpec()`. Idempotent.
+    mutating func parseUISpec() {
+        let result = ChatUISpecParser.parse(content)
+        guard let spec = result.spec else { return }
+        // Reassemble `content` without the spec block so markdown rendering doesn't double-display it.
+        var rebuilt = result.textBefore
+        if !result.textAfter.isEmpty {
+            if !rebuilt.isEmpty { rebuilt += "\n\n" }
+            rebuilt += result.textAfter
+        }
+        content = rebuilt
+        uiSpec = spec
     }
 }
 
@@ -1486,13 +1661,33 @@ private struct MacSSECustomEvent: Decodable {
     let type: String
     let status: String?
     let queries: [String]?
-    let sources: [MacSSESourcePayload]?
+    /// Legacy `sources` event — web search rows (`MacSSESourcePayload`).
+    let legacyWebSearchSources: [MacSSESourcePayload]?
+    /// `context_sources` event — same JSON key but `MacAISource` objects.
+    let contextAISources: [MacAISource]?
     let content: String?
     let durationMs: Int?
 
     enum CodingKeys: String, CodingKey {
-        case type, status, queries, sources, content
+        case type, status, queries, content
         case durationMs = "duration_ms"
+        case sources
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        type = try c.decode(String.self, forKey: .type)
+        status = try c.decodeIfPresent(String.self, forKey: .status)
+        queries = try c.decodeIfPresent([String].self, forKey: .queries)
+        content = try c.decodeIfPresent(String.self, forKey: .content)
+        durationMs = try c.decodeIfPresent(Int.self, forKey: .durationMs)
+        if type == "context_sources" {
+            legacyWebSearchSources = nil
+            contextAISources = try c.decodeIfPresent([MacAISource].self, forKey: .sources)
+        } else {
+            legacyWebSearchSources = try c.decodeIfPresent([MacSSESourcePayload].self, forKey: .sources)
+            contextAISources = nil
+        }
     }
 }
 

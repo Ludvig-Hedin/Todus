@@ -11,12 +11,22 @@ final class TaskCaptureService {
     private let remindersSyncService: AppleRemindersSyncService
     private let remindersSyncState: RemindersSyncState
     private let apiClient: TodosAPIClient
+    /// Offline mutation queue for folder create/update/delete operations.
+    /// Shared with AppServices so all folder mutations flow through one queue.
+    let folderSyncService: FolderSyncService
 
     /// Optional notification service — set after init by AppServices.
     /// Schedules local reminders when tasks have due dates.
     var notificationService: NotificationService?
     /// Whether task reminders are enabled — read from AppServices at schedule time.
     var taskRemindersEnabled: Bool = true
+    /// Number of tasks rolled back during the most recent capture-time sync failure.
+    /// Views observe this to surface a banner; remains 0 until a rollback occurs.
+    /// (Class is `@Observable`, so direct mutations are tracked like `@Published`.)
+    private(set) var lastRollbackCount: Int = 0
+    /// Timestamp of the most recent rollback, paired with `lastRollbackCount` so the UI
+    /// can debounce repeated banner displays.
+    private(set) var lastRollbackAt: Date?
     private var lastSharedFolderSyncAt: Date?
     private(set) var isSyncingSharedFolders = false
     private let sharedFolderSyncInterval: TimeInterval = 60
@@ -27,7 +37,8 @@ final class TaskCaptureService {
         authStore: AuthSessionStore,
         remindersSyncService: AppleRemindersSyncService,
         remindersSyncState: RemindersSyncState,
-        apiClient: TodosAPIClient
+        apiClient: TodosAPIClient,
+        folderSyncService: FolderSyncService
     ) {
         self.parser = parser
         self.syncService = syncService
@@ -35,6 +46,7 @@ final class TaskCaptureService {
         self.remindersSyncService = remindersSyncService
         self.remindersSyncState = remindersSyncState
         self.apiClient = apiClient
+        self.folderSyncService = folderSyncService
     }
 
     /// Captures one or more tasks from raw text, optionally with attachment filenames,
@@ -86,7 +98,7 @@ final class TaskCaptureService {
         try? context.save()
 
         let mutationTaskIDs = mutations.compactMap(\.taskID)
-        Task { @MainActor [syncService, remindersSyncService] in
+        Task { @MainActor [weak self, syncService, remindersSyncService] in
             await syncService.enqueue(mutations, in: context)
             // SyncService.enqueue swallows errors and writes the result to TaskRecord.syncState
             // (.failed when the remote call rejected the batch). Rather than introduce a new
@@ -109,6 +121,11 @@ final class TaskCaptureService {
             AppLogger.shared.log(
                 "TaskCaptureService.capture: rolled back \(toRollback.count) task(s) after sync failure"
             )
+            // Publish to observers (already on the MainActor via the enclosing Task isolation)
+            // so views can surface a banner. We assign even when the value is unchanged so a
+            // second consecutive failure still triggers tracking via `lastRollbackAt`.
+            self?.lastRollbackCount = toRollback.count
+            self?.lastRollbackAt = Date()
         }
     }
 
@@ -154,7 +171,6 @@ final class TaskCaptureService {
 
     func setStatus(_ task: TaskRecord, status: TaskStatus, in context: ModelContext) {
         task.status = status
-        task.completed = status == .done
         task.updatedAt = .now
         task.syncState = .pendingUpload
         persist(task: task, in: context)
@@ -196,7 +212,6 @@ final class TaskCaptureService {
         task.title = cleanedTitle
         task.taskDescription = taskDescription.trimmingCharacters(in: .whitespacesAndNewlines)
         task.status = status
-        task.completed = status == .done
         task.priority = priority
         task.dueDate = dueDate
         task.folder = folder
@@ -257,7 +272,12 @@ final class TaskCaptureService {
         }
     }
 
-    func createFolder(named name: String, in context: ModelContext) -> FolderRecord? {
+    func createFolder(
+        named name: String,
+        colorHex: String? = nil,
+        iconName: String? = nil,
+        in context: ModelContext
+    ) -> FolderRecord? {
         let cleanedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanedName.isEmpty else { return nil }
 
@@ -267,10 +287,26 @@ final class TaskCaptureService {
             return existingFolder
         }
 
-        let folder = FolderRecord(name: cleanedName)
+        let nextPosition = (existing.map { $0.position }.max() ?? -1) + 1
+        let folder = FolderRecord(
+            name: cleanedName,
+            colorHex: colorHex,
+            iconName: iconName,
+            position: nextPosition
+        )
         context.insert(folder)
         try? context.save()
-        Task { await syncFolderCreate(folder) }
+        Task {
+            await folderSyncService.enqueue(
+                .upsert(
+                    id: folder.id.uuidString,
+                    name: folder.name,
+                    color: folder.colorHex,
+                    icon: folder.iconName,
+                    position: folder.position
+                )
+            )
+        }
         return folder
     }
 
@@ -279,8 +315,71 @@ final class TaskCaptureService {
         guard !cleanedName.isEmpty else { return }
 
         folder.name = cleanedName
+        folder.updatedAt = .now
         try? context.save()
-        Task { await syncFolderUpdate(folder) }
+        Task {
+            await folderSyncService.enqueue(
+                .upsert(
+                    id: folder.id.uuidString,
+                    name: folder.name,
+                    color: folder.colorHex,
+                    icon: folder.iconName,
+                    position: folder.position
+                )
+            )
+        }
+    }
+
+    /// Update color and/or icon. Pass nil to clear, or omit to leave unchanged.
+    func updateFolderAppearance(
+        _ folder: FolderRecord,
+        colorHex: String?? = nil,
+        iconName: String?? = nil,
+        in context: ModelContext
+    ) {
+        if case let .some(value) = colorHex { folder.colorHex = value }
+        if case let .some(value) = iconName { folder.iconName = value }
+        folder.updatedAt = .now
+        try? context.save()
+        Task {
+            await folderSyncService.enqueue(
+                .upsert(
+                    id: folder.id.uuidString,
+                    name: folder.name,
+                    color: folder.colorHex,
+                    icon: folder.iconName,
+                    position: folder.position
+                )
+            )
+        }
+    }
+
+    /// Persist a new ordering. Updates the `position` field of each folder
+    /// to match its index in the array, then syncs to the backend.
+    func reorderFolders(_ orderedFolders: [FolderRecord], in context: ModelContext) {
+        for (index, folder) in orderedFolders.enumerated() {
+            if folder.position != index {
+                folder.position = index
+                folder.updatedAt = .now
+            }
+        }
+        try? context.save()
+        // Encode each repositioned folder as an upsert mutation so position changes
+        // are durable across reconnects (the legacy reorder endpoint had no offline queue).
+        let snapshots = orderedFolders.map { f in
+            FolderSyncService.Mutation.upsert(
+                id: f.id.uuidString,
+                name: f.name,
+                color: f.colorHex,
+                icon: f.iconName,
+                position: f.position
+            )
+        }
+        Task {
+            for mutation in snapshots {
+                await folderSyncService.enqueue(mutation)
+            }
+        }
     }
 
     func deleteFolder(_ folder: FolderRecord, in context: ModelContext) {
@@ -297,11 +396,11 @@ final class TaskCaptureService {
         }
         context.delete(folder)
         try? context.save()
-        Task { @MainActor [syncService] in
+        Task { @MainActor [syncService, folderSyncService] in
             if !mutations.isEmpty {
                 await syncService.enqueue(mutations, in: context)
             }
-            await syncFolderDelete(folderId)
+            await folderSyncService.enqueue(.delete(id: folderId))
         }
     }
 
@@ -317,12 +416,6 @@ final class TaskCaptureService {
 
         struct FolderListResponse: Decodable {
             let folders: [RemoteFolder]
-        }
-
-        struct RemoteFolder: Decodable {
-            let id: String
-            let name: String
-            let createdAt: Date
         }
 
         let trace = PerformanceTrace.beginInterval(
@@ -349,9 +442,21 @@ final class TaskCaptureService {
                 guard let uuid = UUID(uuidString: remote.id) else { continue }
                 if let local = foldersByID[remote.id] {
                     local.name = remote.name
+                    local.colorHex = remote.color
+                    local.iconName = remote.icon
+                    local.position = remote.position ?? local.position
                     local.createdAt = remote.createdAt
+                    local.updatedAt = remote.updatedAt ?? local.updatedAt
                 } else {
-                    let folder = FolderRecord(id: uuid, name: remote.name, createdAt: remote.createdAt)
+                    let folder = FolderRecord(
+                        id: uuid,
+                        name: remote.name,
+                        colorHex: remote.color,
+                        iconName: remote.icon,
+                        position: remote.position ?? 0,
+                        createdAt: remote.createdAt,
+                        updatedAt: remote.updatedAt ?? remote.createdAt
+                    )
                     context.insert(folder)
                     foldersByID[remote.id] = folder
                 }
@@ -365,53 +470,6 @@ final class TaskCaptureService {
             }
         } catch {
             // Folder sync is best-effort; local folders remain usable offline.
-        }
-    }
-
-    private func syncFolderCreate(_ folder: FolderRecord) async {
-        struct CreateInput: Encodable {
-            let id: String
-            let name: String
-        }
-
-        do {
-            let _: EmptyResponse = try await apiClient.trpcMutation(
-                "folders.create",
-                input: CreateInput(id: folder.id.uuidString, name: folder.name)
-            )
-        } catch {
-            // Best-effort sync only.
-        }
-    }
-
-    private func syncFolderUpdate(_ folder: FolderRecord) async {
-        struct UpdateInput: Encodable {
-            let id: String
-            let name: String
-        }
-
-        do {
-            let _: EmptyResponse = try await apiClient.trpcMutation(
-                "folders.update",
-                input: UpdateInput(id: folder.id.uuidString, name: folder.name)
-            )
-        } catch {
-            // Best-effort sync only.
-        }
-    }
-
-    private func syncFolderDelete(_ folderID: String) async {
-        struct DeleteInput: Encodable {
-            let id: String
-        }
-
-        do {
-            let _: EmptyResponse = try await apiClient.trpcMutation(
-                "folders.delete",
-                input: DeleteInput(id: folderID)
-            )
-        } catch {
-            // Best-effort sync only.
         }
     }
 
@@ -522,4 +580,280 @@ final class TaskCaptureService {
             dueDate: dueDate
         )
     }
+
+    // MARK: - Folder summary & contents
+
+    /// Fetch the cards-ready summary from the backend and update each FolderRecord's
+    /// cached count / breakdown / recent items so `FolderCardView` renders instantly.
+    func fetchFolderSummary(in context: ModelContext) async {
+        do {
+            let response: FolderSummaryResponse = try await apiClient.trpcQuery("folders.summary")
+            let localFolders = (try? context.fetch(FetchDescriptor<FolderRecord>())) ?? []
+            let byID = Dictionary(uniqueKeysWithValues: localFolders.map { ($0.id.uuidString, $0) })
+
+            for remote in response.folders {
+                guard let local = byID[remote.folder.id] else { continue }
+                local.cachedItemCount = remote.itemCount
+                local.setBreakdown(FolderTypeBreakdown(
+                    tasks: remote.breakdown.tasks,
+                    chats: remote.breakdown.chats,
+                    emails: remote.breakdown.emails,
+                    events: remote.breakdown.events,
+                    docs: remote.breakdown.docs
+                ))
+                local.setRecentItems(remote.recentItems.map {
+                    FolderRecentItem(
+                        type: $0.type,
+                        id: $0.id,
+                        title: $0.title,
+                        subtitle: $0.subtitle,
+                        sortAt: $0.sortAt
+                    )
+                })
+            }
+            try? context.save()
+        } catch {
+            // Best-effort — cards keep showing previous cached values.
+        }
+    }
+
+    /// Fetch the full mixed-type contents for a single folder from the backend.
+    /// Tasks are resolved against local SwiftData so users get the live TaskRecord
+    /// (with completion state, etc.). Chats / emails / events / docs are returned
+    /// as lightweight value types since their full data lives elsewhere.
+    func fetchFolderContents(_ folder: FolderRecord, in context: ModelContext) async -> [FolderContentItem] {
+        struct ContentsInput: Encodable {
+            let folderId: String
+            let limit: Int
+        }
+
+        do {
+            let response: FolderContentsResponse = try await apiClient.trpcQuery(
+                "folders.listContents",
+                input: ContentsInput(folderId: folder.id.uuidString, limit: 200)
+            )
+
+            let allTasks = (try? context.fetch(FetchDescriptor<TaskRecord>())) ?? []
+            let tasksByID = Dictionary(uniqueKeysWithValues: allTasks.map { ($0.id.uuidString, $0) })
+
+            var items: [FolderContentItem] = []
+            for raw in response.items {
+                switch raw.type {
+                case "task":
+                    if let task = tasksByID[raw.id] {
+                        items.append(.task(task))
+                    }
+                case "chat":
+                    items.append(.chat(id: raw.id, title: raw.title, updatedAt: raw.sortAt))
+                case "email":
+                    items.append(.email(
+                        threadId: raw.id,
+                        subject: raw.title,
+                        sender: raw.subtitle,
+                        date: raw.sortAt
+                    ))
+                case "event":
+                    items.append(.event(eventId: raw.id, title: raw.title, start: raw.sortAt))
+                case "doc":
+                    items.append(.doc(docId: raw.id, title: raw.title, updatedAt: raw.sortAt))
+                default:
+                    break
+                }
+            }
+            return items
+        } catch {
+            return []
+        }
+    }
+
+    // MARK: - Folder items (emails / events / docs)
+
+    /// Bookmark an external entity (Gmail thread, calendar event, doc) into a folder.
+    /// Tasks and chats use their own folder column instead.
+    func addItemToFolder(
+        kind: FolderItemKind,
+        itemId: String,
+        title: String?,
+        subtitle: String?,
+        folder: FolderRecord,
+        in context: ModelContext
+    ) {
+        guard kind == .email || kind == .event || kind == .doc else { return }
+
+        let folderID = folder.id
+        let itemType = kind.rawValue
+        let existingItems = (try? context.fetch(FetchDescriptor<FolderItemRecord>())) ?? []
+        let alreadyExists = existingItems.contains {
+            $0.folder?.id == folderID && $0.itemType == itemType && $0.itemId == itemId
+        }
+        guard !alreadyExists else { return }
+
+        // Local mirror for offline browsing.
+        let item = FolderItemRecord(
+            folder: folder,
+            itemType: itemType,
+            itemId: itemId,
+            titleCache: title,
+            subtitleCache: subtitle,
+            position: 0,
+            createdAt: .now
+        )
+        context.insert(item)
+        folder.cachedItemCount += 1
+        folder.updatedAt = .now
+        try? context.save()
+
+        // Optimistic count was bumped above. Roll back on sync failure so the local
+        // mirror doesn't drift from the server over time. fetchFolderSummary still
+        // reconciles eventually, but rolling back keeps the UI honest in the meantime.
+        Task { @MainActor [weak self, folder, title, subtitle] in
+            guard let self else { return }
+            do {
+                try await syncFolderItemAdd(
+                    folderID: folder.id.uuidString,
+                    itemType: itemType,
+                    itemId: itemId,
+                    title: title,
+                    subtitle: subtitle
+                )
+            } catch {
+                folder.cachedItemCount = max(0, folder.cachedItemCount - 1)
+                try? context.save()
+            }
+        }
+    }
+
+    func removeItemFromFolder(
+        kind: FolderItemKind,
+        itemId: String,
+        folder: FolderRecord,
+        in context: ModelContext
+    ) {
+        guard kind == .email || kind == .event || kind == .doc else { return }
+
+        let typeRaw = kind.rawValue
+        let folderID = folder.id
+        let allItems = (try? context.fetch(FetchDescriptor<FolderItemRecord>())) ?? []
+        let matching = allItems.filter {
+            $0.folder?.id == folderID && $0.itemType == typeRaw && $0.itemId == itemId
+        }
+        for item in matching {
+            context.delete(item)
+        }
+        if !matching.isEmpty {
+            folder.cachedItemCount = max(0, folder.cachedItemCount - matching.count)
+            folder.updatedAt = .now
+        }
+        try? context.save()
+
+        Task {
+            await syncFolderItemRemove(
+                folderID: folder.id.uuidString,
+                itemType: typeRaw,
+                itemId: itemId
+            )
+        }
+    }
+
+    private func syncFolderItemAdd(
+        folderID: String,
+        itemType: String,
+        itemId: String,
+        title: String?,
+        subtitle: String?
+    ) async throws {
+        struct Metadata: Encodable {
+            let title: String?
+            let subtitle: String?
+        }
+        struct AddInput: Encodable {
+            let folderId: String
+            let itemType: String
+            let itemId: String
+            let metadata: Metadata?
+        }
+
+        let metadata: Metadata? = (title != nil || subtitle != nil)
+            ? Metadata(title: title, subtitle: subtitle)
+            : nil
+
+        let _: EmptyResponse = try await apiClient.trpcMutation(
+            "folders.addItem",
+            input: AddInput(
+                folderId: folderID,
+                itemType: itemType,
+                itemId: itemId,
+                metadata: metadata
+            )
+        )
+    }
+
+    private func syncFolderItemRemove(folderID: String, itemType: String, itemId: String) async {
+        struct RemoveInput: Encodable {
+            let folderId: String
+            let itemType: String
+            let itemId: String
+        }
+
+        do {
+            let _: EmptyResponse = try await apiClient.trpcMutation(
+                "folders.removeItem",
+                input: RemoveInput(folderId: folderID, itemType: itemType, itemId: itemId)
+            )
+        } catch {
+            // Best-effort sync only.
+        }
+    }
+}
+
+// MARK: - Folder remote DTOs
+
+struct RemoteFolder: Decodable {
+    let id: String
+    let name: String
+    let color: String?
+    let icon: String?
+    let position: Int?
+    let createdAt: Date
+    let updatedAt: Date?
+}
+
+private struct RemoteFolderBreakdown: Decodable {
+    let tasks: Int
+    let chats: Int
+    let emails: Int
+    let events: Int
+    let docs: Int
+}
+
+private struct RemoteFolderRecentItem: Decodable {
+    let type: String
+    let id: String
+    let title: String
+    let subtitle: String?
+    let sortAt: Date
+}
+
+private struct RemoteFolderSummaryEntry: Decodable {
+    let folder: RemoteFolder
+    let itemCount: Int
+    let breakdown: RemoteFolderBreakdown
+    let recentItems: [RemoteFolderRecentItem]
+}
+
+private struct FolderSummaryResponse: Decodable {
+    let folders: [RemoteFolderSummaryEntry]
+}
+
+private struct FolderContentsItem: Decodable {
+    let type: String
+    let id: String
+    let title: String
+    let subtitle: String?
+    let sortAt: Date
+}
+
+private struct FolderContentsResponse: Decodable {
+    let items: [FolderContentsItem]
+    let folder: RemoteFolder
 }

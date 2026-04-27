@@ -1,3 +1,4 @@
+import AppKit
 import Observation
 import SwiftUI
 
@@ -34,6 +35,7 @@ struct MacEmailInboxView: View {
     @State private var isConnectGmailLoading = false
     @State private var listPanelWidth: CGFloat = 300
     @State private var dragStartWidth: CGFloat = 300
+    @State private var isListResizeDragging = false
     private let minPanelWidth: CGFloat = 200
     private let maxPanelWidth: CGFloat = 600
 
@@ -58,17 +60,30 @@ struct MacEmailInboxView: View {
                 .frame(width: 5)
                 .overlay(Divider(), alignment: .center)
                 .onHover { hovering in
-                    if hovering { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+                    guard !isListResizeDragging else { return }
+                    if hovering {
+                        NSCursor.resizeLeftRight.set()
+                    } else {
+                        NSCursor.arrow.set()
+                    }
                 }
                 .gesture(
                     DragGesture(minimumDistance: 1)
                         .onChanged { value in
+                            if !isListResizeDragging {
+                                isListResizeDragging = true
+                                NSCursor.resizeLeftRight.set()
+                            }
                             // translation is always relative to drag start, so adding to
                             // the captured pre-drag width gives the correct absolute value.
                             let newWidth = dragStartWidth + value.translation.width
                             listPanelWidth = min(maxPanelWidth, max(minPanelWidth, newWidth))
                         }
-                        .onEnded { _ in dragStartWidth = listPanelWidth }
+                        .onEnded { _ in
+                            dragStartWidth = listPanelWidth
+                            isListResizeDragging = false
+                            NSCursor.arrow.set()
+                        }
                 )
 
             // RIGHT: thread detail, sender thread list, or placeholder
@@ -98,6 +113,20 @@ struct MacEmailInboxView: View {
             services.emailService.prepareFolder(folder)
             recomputeFiltered()
             await services.emailService.ensureMailboxReady(for: folder)
+        }
+        .task(id: folder) {
+            // Poll for new mail every 60s while this folder is visible. Trigger a server-side
+            // Gmail re-sync so the listThreads response reflects mail received since last load
+            // — without this the backend just re-reads its DB and we never see new messages.
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(60))
+                guard !Task.isCancelled, services.emailService.hasConnection, !services.emailService.isLoadingThreads else { continue }
+                await services.emailService.loadThreads(folder: folder, refresh: true, triggerSync: true)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            guard services.emailService.hasConnection, !services.emailService.isLoadingThreads else { return }
+            Task { await services.emailService.loadThreads(folder: folder, refresh: true, triggerSync: true) }
         }
         .onChange(of: services.emailService.threads) { recomputeFiltered() }
         .onChange(of: searchText) {
@@ -710,7 +739,7 @@ struct MacEmailInboxView: View {
                     .multilineTextAlignment(.center)
             }
             Button("Try Again") {
-                Task { await services.emailService.loadThreads(folder: folder, refresh: true) }
+                Task { await services.emailService.loadThreads(folder: folder, refresh: true, triggerSync: true) }
             }
             .font(.system(size: 12, weight: .medium))
             Spacer()
@@ -737,7 +766,7 @@ struct MacEmailInboxView: View {
 
             if searchText.isEmpty {
                 Button("Refresh") {
-                    Task { await services.emailService.loadThreads(folder: folder, refresh: true) }
+                    Task { await services.emailService.loadThreads(folder: folder, refresh: true, triggerSync: true) }
                 }
                 .font(.system(size: 12, weight: .medium))
             }
@@ -852,25 +881,94 @@ private struct MacAvatarResponse: Decodable {
     }
 }
 
+/// Persistent avatar URL cache with TTL, last-successful memoization, and disk-backed storage.
+///
+/// Why persistent: avatar URL resolution is expensive (backend API + favicon HEAD requests).
+/// Without persistence, every cold start re-resolves every sender. With it, we hit zero
+/// network on cold start for senders we've seen before.
 @MainActor
 @Observable
 final class MacAvatarCache {
     static let shared = MacAvatarCache()
 
+    /// email → ordered list of image URLs to try, best source first.
     var resolvedURLs: [String: [URL]] = [:]
+
+    /// email → URL that successfully rendered last time. Tried first on next render.
+    private var lastSuccessful: [String: URL] = [:]
+
+    /// email → when this entry was resolved. Used to apply TTL.
+    private var resolvedAt: [String: Date] = [:]
+
     private var inFlight: Set<String> = []
 
-    private init() {}
+    /// Successful resolutions stick around for 30 days.
+    private static let successTTL: TimeInterval = 60 * 60 * 24 * 30
+
+    /// Empty/failed resolutions are retried after 5 minutes — without this, a single
+    /// transient backend failure would leave the avatar absent for the whole session.
+    private static let emptyTTL: TimeInterval = 60 * 5
+
+    private static let maxEntries = 5000
+
+    private var saveTask: Task<Void, Never>?
+
+    private static let cacheFileURL: URL? = {
+        guard let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else {
+            return nil
+        }
+        return dir.appendingPathComponent("sender-avatar-cache.json")
+    }()
+
+    private init() {
+        loadFromDisk()
+    }
+
+    // MARK: - Public API
+
+    /// Returns candidate URLs for an email, ordered with last-known-good URL first.
+    func candidates(for email: String) -> [URL]? {
+        let key = normalizedEmail(email)
+        guard let urls = resolvedURLs[key] else { return nil }
+        if let preferred = lastSuccessful[key],
+           let idx = urls.firstIndex(of: preferred), idx > 0 {
+            var reordered = urls
+            reordered.remove(at: idx)
+            reordered.insert(preferred, at: 0)
+            return reordered
+        }
+        return urls
+    }
 
     func resolveIfNeeded(email: String, name: String, api: TodosAPIClient) async {
-        let normalized = normalizedEmail(email)
-        guard resolvedURLs[normalized] == nil, !inFlight.contains(normalized) else { return }
-        inFlight.insert(normalized)
-        defer { inFlight.remove(normalized) }
+        let key = normalizedEmail(email)
+        guard !key.isEmpty, !inFlight.contains(key) else { return }
 
-        let urls = await fetchCandidateURLs(email: normalized, name: name, api: api)
-        resolvedURLs[normalized] = urls
+        if let when = resolvedAt[key] {
+            let urls = resolvedURLs[key] ?? []
+            let ttl = urls.isEmpty ? Self.emptyTTL : Self.successTTL
+            if Date().timeIntervalSince(when) < ttl {
+                return
+            }
+        }
+
+        inFlight.insert(key)
+        defer { inFlight.remove(key) }
+
+        let urls = await fetchCandidateURLs(email: key, name: name, api: api)
+        resolvedURLs[key] = urls
+        resolvedAt[key] = Date()
+        scheduleSave()
     }
+
+    func recordSuccess(email: String, url: URL) {
+        let key = normalizedEmail(email)
+        guard lastSuccessful[key] != url else { return }
+        lastSuccessful[key] = url
+        scheduleSave()
+    }
+
+    // MARK: - Backend fetch
 
     private func fetchCandidateURLs(email: String, name: String, api: TodosAPIClient) async -> [URL] {
         var urls: [URL] = []
@@ -893,7 +991,8 @@ final class MacAvatarCache {
                 }
             }
         } catch {
-            // Fall through to local favicon guesses.
+            // Backend failure → fall through to local favicon guesses. Empty-TTL ensures
+            // we'll retry the backend in 5 minutes rather than waiting for a relaunch.
         }
 
         for fallback in localFallbackURLs(for: email) where !urls.contains(fallback) {
@@ -969,6 +1068,68 @@ final class MacAvatarCache {
 
         return parts.suffix(2).joined(separator: ".")
     }
+
+    // MARK: - Persistence
+
+    private struct PersistedShape: Codable {
+        let resolvedURLs: [String: [URL]]
+        let lastSuccessful: [String: URL]
+        let resolvedAt: [String: Date]
+    }
+
+    private func loadFromDisk() {
+        guard let url = Self.cacheFileURL,
+              let data = try? Data(contentsOf: url),
+              let decoded = try? JSONDecoder().decode(PersistedShape.self, from: data) else {
+            return
+        }
+
+        let now = Date()
+        var validURLs: [String: [URL]] = [:]
+        var validAt: [String: Date] = [:]
+        for (email, when) in decoded.resolvedAt {
+            let urls = decoded.resolvedURLs[email] ?? []
+            let ttl = urls.isEmpty ? Self.emptyTTL : Self.successTTL
+            if now.timeIntervalSince(when) < ttl {
+                validURLs[email] = urls
+                validAt[email] = when
+            }
+        }
+        self.resolvedURLs = validURLs
+        self.resolvedAt = validAt
+        self.lastSuccessful = decoded.lastSuccessful.filter { validURLs[$0.key] != nil }
+    }
+
+    private func scheduleSave() {
+        saveTask?.cancel()
+        saveTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled, let self else { return }
+            self.persistToDisk()
+        }
+    }
+
+    private func persistToDisk() {
+        guard let fileURL = Self.cacheFileURL else { return }
+
+        if resolvedURLs.count > Self.maxEntries {
+            let sorted = resolvedAt.sorted { $0.value < $1.value }
+            let toDrop = sorted.prefix(resolvedURLs.count - Self.maxEntries)
+            for (key, _) in toDrop {
+                resolvedURLs.removeValue(forKey: key)
+                resolvedAt.removeValue(forKey: key)
+                lastSuccessful.removeValue(forKey: key)
+            }
+        }
+
+        let snapshot = PersistedShape(
+            resolvedURLs: resolvedURLs,
+            lastSuccessful: lastSuccessful,
+            resolvedAt: resolvedAt
+        )
+        guard let data = try? JSONEncoder().encode(snapshot) else { return }
+        try? data.write(to: fileURL, options: [.atomic])
+    }
 }
 
 private enum MacStableAvatarColorIndex {
@@ -996,11 +1157,12 @@ struct MacSenderAvatarView: View {
 
     var body: some View {
         let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let candidates = MacAvatarCache.shared.resolvedURLs[normalizedEmail] ?? []
+        let candidates = MacAvatarCache.shared.candidates(for: normalizedEmail) ?? []
 
         Group {
             if urlIndex < candidates.count {
-                AsyncImage(url: candidates[urlIndex]) { phase in
+                let currentURL = candidates[urlIndex]
+                AsyncImage(url: currentURL, transaction: Transaction(animation: nil)) { phase in
                     switch phase {
                     case .success(let image):
                         // White backdrop keeps transparent logos legible; ZStack ensures
@@ -1011,15 +1173,26 @@ struct MacSenderAvatarView: View {
                                 .resizable()
                                 .scaledToFill()
                         }
+                        .onAppear {
+                            MacAvatarCache.shared.recordSuccess(email: normalizedEmail, url: currentURL)
+                        }
                     case .failure:
                         initialsCircle
-                            .onAppear { urlIndex += 1 }
+                            .onAppear {
+                                if urlIndex < candidates.count {
+                                    urlIndex += 1
+                                }
+                            }
                     case .empty:
                         initialsCircle
                     @unknown default:
                         initialsCircle
                     }
                 }
+                // Keying by URL forces SwiftUI to treat each candidate as a fresh AsyncImage,
+                // so the .empty → .success/.failure transition fires cleanly per URL and the
+                // failure-driven .onAppear isn't suppressed by view-identity reuse.
+                .id(currentURL)
             } else {
                 initialsCircle
             }
@@ -1033,6 +1206,13 @@ struct MacSenderAvatarView: View {
                 name: name,
                 api: services.apiClient
             )
+        }
+        .onChange(of: candidates.count) { _, newCount in
+            // If candidates arrive (or refresh) after we exhausted the previous list,
+            // restart the waterfall so we don't stay stuck on initials.
+            if urlIndex >= newCount && newCount > 0 {
+                urlIndex = 0
+            }
         }
     }
 

@@ -11,12 +11,29 @@ struct BillingSettingsView: View {
 
     private var subscription: SubscriptionService { services.subscriptionService }
 
-    private static let creditsFormatter: NumberFormatter = {
-        let f = NumberFormatter()
-        f.minimumFractionDigits = 0
-        f.maximumFractionDigits = 2
-        return f
-    }()
+    private static let planIncludes: [SubscriptionService.Plan: [String]] = [
+        .free: [
+            "1 email connection",
+            "7.5 credits / month of AI chat",
+            "Basic AI email assistance",
+        ],
+        .pro: [
+            "Unlimited email connections",
+            "15 credits / month of AI chat & voice",
+            "Auto-labeling, thread summaries, priority models",
+            "Manage payment & cancel anytime",
+        ],
+        .team: [
+            "Everything in Pro",
+            "Shared inbox + collaboration",
+            "Org-level billing",
+        ],
+        .enterprise: [
+            "Custom limits and SLAs",
+            "SSO + advanced security controls",
+            "Dedicated account support",
+        ],
+    ]
 
     private var resetLabel: String? {
         guard let date = subscription.aiUsageResetAt else { return nil }
@@ -26,13 +43,29 @@ struct BillingSettingsView: View {
         return f.string(from: date)
     }
 
+    /// Tighter than NumberFormatter for our specific case: hide decimals on
+    /// integer-ish values so "10 credits" doesn't render as "10.00".
     private func formatCredits(_ value: Double) -> String {
-        Self.creditsFormatter.string(from: NSNumber(value: value)) ?? String(format: "%.2f", value)
+        if value == 0 { return "0" }
+        if value < 1 { return String(format: "%.2f", value) }
+        if value < 10 { return String(format: "%.1f", value) }
+        return String(Int(value.rounded()))
+    }
+
+    private func formatUsageTotal(_ value: Double, unlimited: Bool) -> String {
+        unlimited ? "Unlimited" : formatCredits(value)
+    }
+
+    private var percentRemaining: Int {
+        guard !subscription.aiUsageUnlimited else { return 100 }
+        guard subscription.aiUsageLimit > 0 else { return 0 }
+        return max(0, 100 - Int((subscription.aiUsagePercent * 100).rounded()))
     }
 
     var body: some View {
         List {
             planSection
+            includesSection
             usageSection
             if let errorMessage {
                 Section {
@@ -98,7 +131,7 @@ struct BillingSettingsView: View {
                         Label("Manage billing", systemImage: "creditcard")
                         Spacer()
                         if isOpeningPortal {
-                            ProgressView().controlSize(.small)
+                            ButtonInlineProgressView(tint: .primary, side: AppTheme.Metrics.toolbarInlineSpinner)
                         } else {
                             Image(systemName: "arrow.up.right")
                                 .foregroundStyle(.secondary)
@@ -114,7 +147,7 @@ struct BillingSettingsView: View {
                         Label("Cancel subscription", systemImage: "xmark.circle")
                         Spacer()
                         if isCanceling {
-                            ProgressView().controlSize(.small)
+                            ButtonInlineProgressView(tint: .primary, side: AppTheme.Metrics.toolbarInlineSpinner)
                         }
                     }
                 }
@@ -135,55 +168,96 @@ struct BillingSettingsView: View {
             Text("Plan")
         } footer: {
             if !subscription.plan.isPaid {
-                Text("Pro unlocks $15 of AI usage per month, unlimited connections, and more.")
+                Text("Pro unlocks 15 credits per month, unlimited connections, priority models, and more.")
             }
+        }
+    }
+
+    private var includesSection: some View {
+        let items = Self.planIncludes[subscription.plan] ?? Self.planIncludes[.free] ?? []
+        return Section {
+            ForEach(items, id: \.self) { item in
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Image(systemName: "checkmark")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(subscription.plan.isPaid ? Color.accentColor : .secondary)
+                    Text(item)
+                        .font(.subheadline)
+                }
+            }
+        } header: {
+            Text("Includes")
         }
     }
 
     private var usageSection: some View {
         Section {
-            if subscription.aiUsageLimit == 0 {
-                Text("No AI credits on the \(subscription.plan.displayName) plan.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            } else {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text("\(formatCredits(subscription.aiUsageUsed))")
-                            .font(.title2.weight(.semibold))
-                            .monospacedDigit()
-                        Text(" / \(formatCredits(subscription.aiUsageLimit)) credits used")
+            VStack(alignment: .center, spacing: 14) {
+                // Big number — credits remaining
+                VStack(spacing: 2) {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(subscription.aiUsageUnlimited ? "Unlimited" : formatCredits(subscription.aiUsageRemaining))
+                            .font(.system(size: 44, weight: .semibold).monospacedDigit())
+                            .foregroundStyle(.primary)
+                        Text(subscription.aiUsageUnlimited
+                             ? "AI credits"
+                             : "of \(formatCredits(subscription.aiUsageLimit))")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
-                        Spacer()
-                        Text("\(formatCredits(subscription.aiUsageRemaining)) left")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
                             .monospacedDigit()
                     }
-                    ProgressView(value: subscription.aiUsagePercent)
-                        .tint(progressTint)
-                    if let resetLabel {
-                        Text("Resets on \(resetLabel)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    if subscription.aiUsagePercent >= 1 {
-                        Text("Out of AI credits this period.")
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                    } else if subscription.aiUsagePercent >= 0.8 {
-                        Text("You've used \(Int(subscription.aiUsagePercent * 100))% of your AI credits.")
-                            .font(.caption)
-                            .foregroundStyle(.orange)
-                    }
+                    Text(subscription.aiUsageUnlimited
+                         ? "Unlimited AI usage on this plan"
+                         : subscription.aiUsageLimit > 0
+                         ? "\(percentRemaining)% remaining this period"
+                         : "No credits on this plan")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
-                .padding(.vertical, 4)
+                .frame(maxWidth: .infinity)
+
+                // Big progress bar
+                ProgressView(value: subscription.aiUsageLimit > 0 ? subscription.aiUsagePercent : 0)
+                    .tint(progressTint)
+                    .scaleEffect(x: 1, y: 1.6, anchor: .center)
+                    .padding(.horizontal, 4)
+
+                HStack {
+                    Text("Used: \(formatCredits(subscription.aiUsageUsed))")
+                        .monospacedDigit()
+                    Spacer()
+                    Text("Total: \(formatUsageTotal(subscription.aiUsageLimit, unlimited: subscription.aiUsageUnlimited))")
+                        .monospacedDigit()
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+                if !subscription.aiUsageUnlimited && subscription.aiUsagePercent >= 1 && subscription.aiUsageLimit > 0 {
+                    Text("Out of AI credits this period.")
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else if !subscription.aiUsageUnlimited && subscription.aiUsagePercent >= 0.8 && subscription.aiUsageLimit > 0 {
+                    Text("You've used \(Int((subscription.aiUsagePercent * 100).rounded()))% of your AI credits.")
+                        .font(.footnote)
+                        .foregroundStyle(.orange)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
+            .padding(.vertical, 8)
         } header: {
-            Text("AI usage")
+            HStack {
+                Text("AI usage")
+                Spacer()
+                if let resetLabel {
+                    Text("Resets \(resetLabel)")
+                        .textCase(.none)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
         } footer: {
-            Text("Each AI message uses credits based on the model and message length. 1 credit ≈ $1 of model cost.")
+            Text("Every AI chat message and voice session debits credits based on the model and length.")
         }
     }
 
@@ -213,14 +287,15 @@ struct BillingSettingsView: View {
 
     private func openUpgradeUrl() {
         errorMessage = nil
+        // The web app lives at todus.app (the api.* subdomain is the backend).
+        // Strip an api. prefix when present, otherwise fall back to the prod root.
         let base = services.configuration.effectiveBackendURL.absoluteString
-        // Marketing pricing page lives on the web app, not the API. Fall back to a
-        // hardcoded prod URL if we only know the API origin.
         let pricingURL: URL? = {
             if let host = URL(string: base)?.host, host.hasPrefix("api.") {
-                return URL(string: "https://\(host.replacingOccurrences(of: "api.", with: "app."))/pricing")
+                let webHost = String(host.dropFirst("api.".count))
+                return URL(string: "https://\(webHost)/pricing")
             }
-            return URL(string: "https://app.todus.app/pricing")
+            return URL(string: "https://todus.app/pricing")
         }()
         if let url = pricingURL {
             openURL(url)

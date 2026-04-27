@@ -1,12 +1,20 @@
 import SwiftUI
 
 /// Navigation bar for the calendar — sits below AppTopHeader.
-/// Shows prev/next arrows, context-aware title, and Today button.
-/// Hidden in Day mode (CalendarKit has its own day navigation).
+/// Shows prev/next arrows, context-aware title, and optional go-to-today control (icon).
+/// Omitted in Day mode (handled in `CalendarTabView`) and Month mode.
 struct CalendarNavBar: View {
     @Binding var selectedDate: Date
     let viewMode: CalendarViewMode
     let multiDayCount: Int
+    /// When false, the go-to-today control is omitted (e.g. already showing today).
+    var showTodayButton: Bool = true
+    /// Day view uses a text label in the separate header row; other modes use a compact icon.
+    var todayUsesIconOnly: Bool = true
+    var onToday: () -> Void
+    /// Optional handler for the leading "Calendars" picker button. Hidden when nil
+    /// (e.g. previews that don't have AppServices).
+    var onCalendars: (() -> Void)? = nil
 
     var body: some View {
         HStack(spacing: 8) {
@@ -23,17 +31,37 @@ struct CalendarNavBar: View {
 
             Spacer()
 
-            // Today button
-            Button {
-                withAnimation(.easeOut(duration: 0.2)) { selectedDate = Date() }
-            } label: {
-                Text("Today")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.primary.opacity(0.75))
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
+            if let onCalendars {
+                Button(action: onCalendars) {
+                    Image(systemName: "list.bullet.indent")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(.primary.opacity(0.75))
+                        .frame(width: 36, height: 32)
+                }
+                .buttonStyle(LiquidGlassButtonStyle(cornerRadius: AppTheme.Radius.row))
+                .accessibilityLabel(String(localized: "Calendars"))
             }
-            .buttonStyle(LiquidGlassButtonStyle(cornerRadius: AppTheme.Radius.row))
+
+            if showTodayButton {
+                Button {
+                    withAnimation(.easeOut(duration: 0.2)) { onToday() }
+                } label: {
+                    if todayUsesIconOnly {
+                        Image(systemName: "calendar.badge.clock")
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundStyle(.primary.opacity(0.75))
+                            .frame(width: 36, height: 32)
+                    } else {
+                        Text(String(localized: "Today"))
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(.primary.opacity(0.75))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                    }
+                }
+                .buttonStyle(LiquidGlassButtonStyle(cornerRadius: AppTheme.Radius.row))
+                .accessibilityLabel(String(localized: "Go to today"))
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 6)

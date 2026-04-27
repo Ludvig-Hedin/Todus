@@ -304,6 +304,317 @@ struct SearchResultCardProps {
     }
 }
 
+// MARK: - List Card Props
+
+struct TaskListCardProps {
+    let title: String?
+    let tasks: [TaskCardProps]
+    let followUp: String?
+    let groupedThreshold: Int
+
+    init?(from props: [String: ChatJSONValue]) {
+        guard let tasksArray = props["tasks"]?.arrayValue else { return nil }
+        self.title = props["title"]?.stringValue
+        self.tasks = tasksArray.compactMap { item in
+            guard let obj = item.objectValue else { return nil }
+            return TaskCardProps(from: obj)
+        }
+        self.followUp = props["followUp"]?.stringValue
+        self.groupedThreshold = props["groupedThreshold"]?.intValue ?? 4
+    }
+}
+
+struct EmailListCardProps {
+    let title: String?
+    let emails: [EmailCardProps]
+    let summary: String?
+
+    init?(from props: [String: ChatJSONValue]) {
+        guard let emailsArray = props["emails"]?.arrayValue else { return nil }
+        self.title = props["title"]?.stringValue
+        self.emails = emailsArray.compactMap { item in
+            guard let obj = item.objectValue else { return nil }
+            return EmailCardProps(from: obj)
+        }
+        self.summary = props["summary"]?.stringValue
+    }
+}
+
+struct CalendarEventListCardProps {
+    let title: String?
+    let events: [CalendarEventCardProps]
+    let summary: String?
+
+    init?(from props: [String: ChatJSONValue]) {
+        guard let eventsArray = props["events"]?.arrayValue else { return nil }
+        self.title = props["title"]?.stringValue
+        self.events = eventsArray.compactMap { item in
+            guard let obj = item.objectValue else { return nil }
+            return CalendarEventCardProps(from: obj)
+        }
+        self.summary = props["summary"]?.stringValue
+    }
+}
+
+struct ContactListCardProps {
+    let title: String?
+    let contacts: [ContactCardProps]
+
+    init?(from props: [String: ChatJSONValue]) {
+        guard let contactsArray = props["contacts"]?.arrayValue else { return nil }
+        self.title = props["title"]?.stringValue
+        self.contacts = contactsArray.compactMap { item in
+            guard let obj = item.objectValue else { return nil }
+            return ContactCardProps(from: obj)
+        }
+    }
+}
+
+// MARK: - Utility Card Props
+
+struct CopyableTextCardProps {
+    let label: String
+    let content: String
+
+    init?(from props: [String: ChatJSONValue]) {
+        guard let label = props["label"]?.stringValue,
+              let content = props["content"]?.stringValue else { return nil }
+        self.label = label
+        self.content = content
+    }
+}
+
+struct InlineComposeCardProps {
+    let draftId: String
+    let to: [(name: String?, email: String)]
+    let cc: [(name: String?, email: String)]
+    let bcc: [(name: String?, email: String)]
+    let subject: String
+    let body: String
+    let attachments: [(name: String, size: Int, mimeType: String)]
+    let status: String?
+
+    init?(from props: [String: ChatJSONValue]) {
+        guard let draftId = props["draftId"]?.stringValue,
+              let subject = props["subject"]?.stringValue,
+              let body = props["body"]?.stringValue else { return nil }
+        self.draftId = draftId
+        self.subject = subject
+        self.body = body
+        self.status = props["status"]?.stringValue
+
+        func parseRecipients(_ key: String) -> [(name: String?, email: String)] {
+            (props[key]?.arrayValue ?? []).compactMap { item in
+                guard let obj = item.objectValue,
+                      let email = obj["email"]?.stringValue else { return nil }
+                return (name: obj["name"]?.stringValue, email: email)
+            }
+        }
+        self.to = parseRecipients("to")
+        self.cc = parseRecipients("cc")
+        self.bcc = parseRecipients("bcc")
+
+        self.attachments = (props["attachments"]?.arrayValue ?? []).compactMap { item in
+            guard let obj = item.objectValue,
+                  let name = obj["name"]?.stringValue,
+                  let mimeType = obj["mimeType"]?.stringValue else { return nil }
+            return (name: name, size: obj["size"]?.intValue ?? 0, mimeType: mimeType)
+        }
+    }
+}
+
+struct SuggestionsCardProps {
+    struct Suggestion {
+        let label: String
+        let action: String
+        let params: [String: String]
+    }
+
+    let suggestions: [Suggestion]
+
+    init?(from props: [String: ChatJSONValue]) {
+        guard let arr = props["suggestions"]?.arrayValue else { return nil }
+        self.suggestions = arr.compactMap { item in
+            guard let obj = item.objectValue,
+                  let label = obj["label"]?.stringValue,
+                  let action = obj["action"]?.stringValue else { return nil }
+            var params: [String: String] = [:]
+            if let paramsObj = obj["params"]?.objectValue {
+                for (key, value) in paramsObj {
+                    if let str = value.stringValue { params[key] = str }
+                }
+            }
+            return Suggestion(label: label, action: action, params: params)
+        }
+    }
+}
+
+struct ActionConfirmationCardProps {
+    let icon: String?
+    let message: String
+    let undoAction: String?
+    let undoParams: [String: String]
+
+    init?(from props: [String: ChatJSONValue]) {
+        guard let message = props["message"]?.stringValue else { return nil }
+        self.icon = props["icon"]?.stringValue
+        self.message = message
+        self.undoAction = props["undoAction"]?.stringValue
+        var params: [String: String] = [:]
+        if let paramsObj = props["undoParams"]?.objectValue {
+            for (key, value) in paramsObj {
+                if let str = value.stringValue { params[key] = str }
+            }
+        }
+        self.undoParams = params
+    }
+}
+
+struct QuoteCardProps {
+    let quote: String
+    let sourceLabel: String?
+    let sourceAction: String?
+    let sourceParams: [String: String]
+
+    init?(from props: [String: ChatJSONValue]) {
+        guard let quote = props["quote"]?.stringValue else { return nil }
+        self.quote = quote
+        self.sourceLabel = props["sourceLabel"]?.stringValue
+        self.sourceAction = props["sourceAction"]?.stringValue
+        var params: [String: String] = [:]
+        if let paramsObj = props["sourceParams"]?.objectValue {
+            for (key, value) in paramsObj {
+                if let str = value.stringValue { params[key] = str }
+            }
+        }
+        self.sourceParams = params
+    }
+}
+
+// MARK: - Round 2 Card Props
+
+struct AttachmentCardProps {
+    let name: String
+    let size: Int
+    let mimeType: String
+    let previewUrl: String?
+    let downloadAction: String?
+    let downloadParams: [String: String]
+
+    init?(from props: [String: ChatJSONValue]) {
+        guard let name = props["name"]?.stringValue,
+              let mimeType = props["mimeType"]?.stringValue else { return nil }
+        self.name = name
+        self.size = props["size"]?.intValue ?? 0
+        self.mimeType = mimeType
+        self.previewUrl = props["previewUrl"]?.stringValue
+        self.downloadAction = props["downloadAction"]?.stringValue
+        var params: [String: String] = [:]
+        if let obj = props["downloadParams"]?.objectValue {
+            for (k, v) in obj { if let s = v.stringValue { params[k] = s } }
+        }
+        self.downloadParams = params
+    }
+}
+
+struct CodeBlockCardProps {
+    let language: String
+    let code: String
+    let filename: String?
+
+    init?(from props: [String: ChatJSONValue]) {
+        guard let code = props["code"]?.stringValue else { return nil }
+        self.language = props["language"]?.stringValue ?? "text"
+        self.code = code
+        self.filename = props["filename"]?.stringValue
+    }
+}
+
+struct ChecklistCardProps {
+    struct Item: Identifiable {
+        let id: String
+        let label: String
+        let done: Bool
+    }
+    let title: String?
+    let items: [Item]
+
+    init?(from props: [String: ChatJSONValue]) {
+        guard let arr = props["items"]?.arrayValue else { return nil }
+        self.title = props["title"]?.stringValue
+        self.items = arr.compactMap { item in
+            guard let obj = item.objectValue,
+                  let id = obj["id"]?.stringValue,
+                  let label = obj["label"]?.stringValue else { return nil }
+            return Item(id: id, label: label, done: obj["done"]?.boolValue ?? false)
+        }
+    }
+}
+
+struct DocumentCardProps {
+    let documentId: String
+    let title: String
+    let snippet: String?
+    let updatedAt: String?
+    let workspaceName: String?
+
+    init?(from props: [String: ChatJSONValue]) {
+        guard let id = props["documentId"]?.stringValue,
+              let title = props["title"]?.stringValue else { return nil }
+        self.documentId = id
+        self.title = title
+        self.snippet = props["snippet"]?.stringValue
+        self.updatedAt = props["updatedAt"]?.stringValue
+        self.workspaceName = props["workspaceName"]?.stringValue
+    }
+}
+
+struct WeeklyAgendaCardProps {
+    struct Day: Identifiable {
+        var id: String { date }
+        let date: String
+        let eventCount: Int
+        let taskCount: Int
+        let label: String?
+    }
+    let weekStart: String
+    let days: [Day]
+
+    init?(from props: [String: ChatJSONValue]) {
+        guard let weekStart = props["weekStart"]?.stringValue,
+              let arr = props["days"]?.arrayValue else { return nil }
+        self.weekStart = weekStart
+        self.days = arr.compactMap { item in
+            guard let obj = item.objectValue,
+                  let date = obj["date"]?.stringValue else { return nil }
+            return Day(
+                date: date,
+                eventCount: obj["eventCount"]?.intValue ?? 0,
+                taskCount: obj["taskCount"]?.intValue ?? 0,
+                label: obj["label"]?.stringValue
+            )
+        }
+    }
+}
+
+struct MetricCardProps {
+    let label: String
+    let value: String
+    let delta: String?
+    let deltaDirection: String?
+    let helpText: String?
+
+    init?(from props: [String: ChatJSONValue]) {
+        guard let label = props["label"]?.stringValue,
+              let value = props["value"]?.stringValue else { return nil }
+        self.label = label
+        self.value = value
+        self.delta = props["delta"]?.stringValue
+        self.deltaDirection = props["deltaDirection"]?.stringValue
+        self.helpText = props["helpText"]?.stringValue
+    }
+}
+
 // MARK: - Spec Parser
 
 /// Extracts a ChatUISpec from a chat message's text content.

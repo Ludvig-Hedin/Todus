@@ -49,7 +49,7 @@ struct EmailAIDraftSheet: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                AppTheme.backgroundTop.ignoresSafeArea()
+                AppTheme.sheetBackground.ignoresSafeArea()
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
@@ -251,8 +251,9 @@ struct EmailAIDraftSheet: View {
         let backendURL = config.effectiveBackendURL
         let appOriginURL = config.effectiveAppURL
         let token = services.authService.bearerToken
+        let sessionId = services.authService.currentSessionId
 
-        streamingTask = Task { [systemPrompt, model, backendURL, appOriginURL, token, trimmed] in
+        streamingTask = Task { [systemPrompt, model, backendURL, appOriginURL, token, sessionId, trimmed] in
             defer { Task { @MainActor in isStreaming = false } }
             await streamDraft(
                 systemPrompt: systemPrompt,
@@ -260,7 +261,8 @@ struct EmailAIDraftSheet: View {
                 model: model,
                 backendURL: backendURL,
                 appOriginURL: appOriginURL,
-                token: token
+                token: token,
+                sessionId: sessionId
             )
         }
     }
@@ -272,7 +274,8 @@ struct EmailAIDraftSheet: View {
         model: String,
         backendURL: URL,
         appOriginURL: URL,
-        token: String?
+        token: String?,
+        sessionId: String?
     ) async {
         let url = backendURL.appending(path: "api/ai/chat")
         var request = URLRequest(url: url)
@@ -281,8 +284,12 @@ struct EmailAIDraftSheet: View {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         // Origin required by Better Auth CSRF middleware — pair with the configured web app URL (dev or prod).
         request.setValue(Self.originHeaderValue(for: appOriginURL), forHTTPHeaderField: "Origin")
+        TodusHTTPClient.applyDefaultHeaders(to: &request)
         if let token {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        if let sessionId {
+            request.setValue(sessionId, forHTTPHeaderField: "X-Todus-Session-Id")
         }
 
         let payload = ChatRequest(

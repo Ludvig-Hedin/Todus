@@ -60,6 +60,9 @@ struct EmailConnectView: View {
                             authService: services.authService
                         )
                         if !didConnect {
+                            // EmailService.connectGmail now classifies errors (cancellation,
+                            // URLError, generic) into specific user-facing strings, so we
+                            // surface its message verbatim instead of overriding it here.
                             errorMessage = services.emailService.errorMessage
                                 ?? services.authService.lastErrorMessage
                                 ?? "Could not link your Gmail account. "
@@ -71,9 +74,7 @@ struct EmailConnectView: View {
                     HStack(spacing: 10) {
                         GmailIconView(size: 20)
                         if isConnecting {
-                            ProgressView()
-                                .tint(.white)
-                                .scaleEffect(0.85)
+                            ButtonInlineProgressView()
                         }
                         Text(isConnecting ? "Connecting…" : "Connect Gmail")
                             .font(.system(size: 15, weight: .semibold))

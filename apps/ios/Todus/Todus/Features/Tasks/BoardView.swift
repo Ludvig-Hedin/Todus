@@ -5,6 +5,7 @@ struct BoardView: View {
     @Query(sort: \TaskRecord.createdAt, order: .reverse) private var allTasks: [TaskRecord]
     let captureService: TaskCaptureService
     let selectedFolderID: UUID?
+    var restrictToInbox: Bool = false
     let searchText: String
     let sortOrder: TaskSortOrder
     @State private var selectedTask: TaskRecord?
@@ -41,6 +42,7 @@ struct BoardView: View {
         .onChange(of: selectedFolderID) { recomputeTasksByStatus() }
         .onChange(of: searchText) { recomputeTasksByStatus() }
         .onChange(of: sortOrder) { recomputeTasksByStatus() }
+        .onChange(of: restrictToInbox) { recomputeTasksByStatus() }
     }
 
     private var boardChangeDigest: [BoardTaskDigest] {
@@ -69,11 +71,15 @@ struct BoardView: View {
         var grouped: [TaskStatus: [TaskRecord]] = [:]
         for status in TaskStatus.allCases { grouped[status] = [] }
         for task in allTasks {
-            guard
-                !task.completed,
-                selectedFolderID == nil || task.folderID == selectedFolderID,
-                matchesSearch(task)
-            else { continue }
+            let folderMatches: Bool
+            if let id = selectedFolderID {
+                folderMatches = task.folderID == id
+            } else if restrictToInbox {
+                folderMatches = task.folderID == nil
+            } else {
+                folderMatches = true
+            }
+            guard !task.completed, folderMatches, matchesSearch(task) else { continue }
 
             grouped[task.status, default: []].append(task)
         }

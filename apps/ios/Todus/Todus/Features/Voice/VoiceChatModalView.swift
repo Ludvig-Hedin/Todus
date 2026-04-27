@@ -27,7 +27,7 @@ struct VoiceChatModalView: View {
     var body: some View {
         ZStack {
             // Full-screen background
-            AppTheme.backgroundTop
+            AppTheme.sheetBackground
                 .ignoresSafeArea()
 
             VStack(spacing: 0) {
@@ -75,13 +75,18 @@ struct VoiceChatModalView: View {
 
             Spacer()
 
-            Text("Live Voice")
-                .font(.system(size: 17, weight: .semibold))
+            VStack(spacing: 2) {
+                Text("Live Voice")
+                    .font(.system(size: 17, weight: .semibold))
+                Text("Gemini 3.1 Flash Live")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(AppTheme.mutedText)
+            }
 
             Spacer()
 
             // Dev mode: show connection state
-            if services.developerModeEnabled {
+            if services.effectiveDeveloperModeEnabled {
                 connectionStatePill
             } else {
                 // Invisible spacer to keep title centered

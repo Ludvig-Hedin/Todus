@@ -16,6 +16,7 @@ struct TodosApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     /// Slug from a todus://share?slug=... deep link — presents SharedConversationView when set
     @State private var sharedConversationSlug: String? = nil
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
@@ -51,6 +52,15 @@ struct TodosApp: App {
                     }
                     .tint(AppTheme.accent)
                     .preferredColorScheme(services.appearancePreference.colorScheme)
+                    .onChange(of: scenePhase) { oldPhase, newPhase in
+                        if newPhase == .background {
+                            AvatarCache.shared.flushPendingSaves()
+                            WidgetUpdateManager.shared.updateWidgets(
+                                context: modelContainer.mainContext,
+                                emailService: services.emailService
+                            )
+                        }
+                    }
             } else {
                 // Lightweight splash — renders instantly while services initialize
                 splashView
@@ -78,37 +88,62 @@ struct TodosApp: App {
             )
         }
 
-        let schema = Schema([TaskRecord.self, FolderRecord.self])
+        // Bump shared URLCache so AsyncImage's downloaded avatar bytes survive memory
+        // pressure and persist across launches. The default 4MB/20MB is too small for
+        // an inbox of senders; this gives ~250MB on disk for image data.
+        URLCache.shared = URLCache(
+            memoryCapacity: 50 * 1024 * 1024,
+            diskCapacity: 250 * 1024 * 1024,
+            diskPath: "todus-url-cache"
+        )
 
-        let container: ModelContainer
-        do {
-            container = try ModelContainer(for: schema)
-        } catch {
-            AppLogger.shared.log(
-                "[TodosApp] ModelContainer default init failed: \(error.localizedDescription) — trying fallback file store"
-            )
-            let fallbackURL = FileManager.default.temporaryDirectory.appendingPathComponent("TodosFallback.store")
-            let fallbackConfiguration = ModelConfiguration(url: fallbackURL, allowsSave: true)
+        let schema = Schema([TaskRecord.self, FolderRecord.self, FolderItemRecord.self, DraftRecord.self])
+
+        // ModelContainer init runs schema migrations and opens the persistent store —
+        // both can take multiple seconds on cold launch. Doing it on the MainActor
+        // froze the splash for the duration of that work. Push the entire create-or-
+        // fallback chain to a detached background task so the splash stays responsive.
+        let result: ContainerInitResult = await Task.detached(priority: .userInitiated) {
             do {
-                container = try ModelContainer(for: schema, configurations: fallbackConfiguration)
+                return .success(try ModelContainer(for: schema))
             } catch {
                 AppLogger.shared.log(
-                    "[TodosApp] ModelContainer fallback file store failed: \(error.localizedDescription) — trying in-memory store"
+                    "[TodosApp] ModelContainer default init failed: \(error.localizedDescription) — trying fallback file store"
                 )
-                let inMemoryConfig = ModelConfiguration(isStoredInMemoryOnly: true)
+                let fileManager = FileManager.default
+                let appSupportDir = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+                    ?? fileManager.temporaryDirectory
+                if !fileManager.fileExists(atPath: appSupportDir.path) {
+                    try? fileManager.createDirectory(at: appSupportDir, withIntermediateDirectories: true)
+                }
+                let fallbackURL = appSupportDir.appendingPathComponent("TodosFallback.store")
+                let fallbackConfiguration = ModelConfiguration(url: fallbackURL, allowsSave: true)
                 do {
-                    container = try ModelContainer(for: schema, configurations: inMemoryConfig)
+                    return .success(try ModelContainer(for: schema, configurations: fallbackConfiguration))
                 } catch {
-                    // Last-ditch fallback failed too. Surface a friendly error view instead
-                    // of `fatalError`'ing — a crash on launch is the worst possible UX and
-                    // means the user can't even reach Settings to clear/reinstall.
                     AppLogger.shared.log(
-                        "[TodosApp] ModelContainer in-memory init failed: \(error.localizedDescription) — rendering error UI"
+                        "[TodosApp] ModelContainer fallback file store failed: \(error.localizedDescription) — trying in-memory store"
                     )
-                    self.modelContainerFailed = true
-                    return
+                    let inMemoryConfig = ModelConfiguration(isStoredInMemoryOnly: true)
+                    do {
+                        return .success(try ModelContainer(for: schema, configurations: inMemoryConfig))
+                    } catch {
+                        AppLogger.shared.log(
+                            "[TodosApp] ModelContainer in-memory init failed: \(error.localizedDescription) — rendering error UI"
+                        )
+                        return .failed
+                    }
                 }
             }
+        }.value
+
+        let container: ModelContainer
+        switch result {
+        case .success(let c):
+            container = c
+        case .failed:
+            self.modelContainerFailed = true
+            return
         }
 
         // Yield to let the run loop process any pending UI work (keeps splash responsive)
@@ -122,6 +157,9 @@ struct TodosApp: App {
         // Wire AppServices into AppDelegate so notification-action failures (which run
         // outside SwiftUI environment) can surface a user-facing error state.
         appDelegate.services = svc
+
+        svc.modelContainer = container
+        svc.setupNetworkSync()
 
         self.modelContainer = container
         self.services = svc
@@ -200,6 +238,13 @@ private func handleMailtoURL(_ url: URL, services: AppServices) {
 private struct SlugWrapper: Identifiable {
     let slug: String
     var id: String { slug }
+}
+
+/// Result of the off-main ModelContainer initialization chain. ModelContainer is
+/// Sendable, so it can cross the actor boundary back to MainActor.
+private enum ContainerInitResult: Sendable {
+    case success(ModelContainer)
+    case failed
 }
 
 /// Text fields copied from `UNNotificationContent` before crossing to the main actor.

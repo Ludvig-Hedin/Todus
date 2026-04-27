@@ -167,7 +167,7 @@ export const refreshSubscriptionCache = async (
 
     const productIds = (customer.products ?? []).map((p) => p.id).filter(Boolean) as string[];
     const plan = planFromProductIds(productIds);
-    const aiUsageFeature = (customer as any).features?.ai_usage;
+    const aiUsageFeature = customer.features?.['ai_usage'];
     // Strict equality: Autumn has historically sent `"true"` / `"false"` strings on some
     // payloads. `Boolean("false")` is `true`, which would silently grant unlimited AI.
     const unlimited = aiUsageFeature?.unlimited === true;
@@ -179,6 +179,13 @@ export const refreshSubscriptionCache = async (
       : null;
     const status = (customer.products ?? []).find((p) => p.status)?.status ?? 'active';
 
+    // If Autumn's free product has no ai_usage feature (or included_usage=0), it means the
+    // product isn't fully configured yet. Apply a default budget so legacy/free users aren't
+    // permanently locked out. Once Autumn returns a real value, that wins on next refresh.
+    const FREE_PLAN_DEFAULT_AI_CREDITS = 1.0;
+    const effectiveLimit =
+      !unlimited && plan === 'free' && limit === 0 ? FREE_PLAN_DEFAULT_AI_CREDITS : limit;
+
     const { db } = createDb(env.HYPERDRIVE.connectionString);
     await db
       .update(userTable)
@@ -186,7 +193,7 @@ export const refreshSubscriptionCache = async (
         plan,
         subscriptionStatus: status,
         aiUsageUsed: used,
-        aiUsageLimit: unlimited ? UNLIMITED_AI_USAGE_SENTINEL : limit,
+        aiUsageLimit: unlimited ? UNLIMITED_AI_USAGE_SENTINEL : effectiveLimit,
         aiUsageResetAt: resetAt,
         updatedAt: new Date(),
       })
@@ -196,9 +203,9 @@ export const refreshSubscriptionCache = async (
       plan,
       subscriptionStatus: status,
       aiUsageUsed: used,
-      aiUsageLimit: limit,
+      aiUsageLimit: effectiveLimit,
       aiUsageResetAt: resetAt,
-      aiUsageRemaining: unlimited ? 0 : Math.max(0, limit - used),
+      aiUsageRemaining: unlimited ? 0 : Math.max(0, effectiveLimit - used),
       aiUsageUnlimited: unlimited,
     };
   } catch (error) {
@@ -209,16 +216,37 @@ export const refreshSubscriptionCache = async (
 
 /**
  * Pre-flight check before an AI call — returns true if the user has any
- * remaining credits. Cached read; ~1ms vs 200ms for an Autumn round-trip.
+ * remaining credits.
+ *
+ * Fast path: serve from local DB cache (~1ms). If the cache shows 0 credits
+ * (either never hydrated or genuinely exhausted), fall back to autumn.check()
+ * which is the authoritative source. Fails open on Autumn errors so a billing
+ * hiccup never blocks the user.
  */
 export const hasAiCredits = async (userId: string): Promise<boolean> => {
-  let sub = await getCachedSubscription(userId);
+  const sub = await getCachedSubscription(userId);
   if (sub.aiUsageUnlimited) return true;
-  if (sub.aiUsageLimit === 0) {
-    sub = await refreshSubscriptionCache(userId);
-    if (sub.aiUsageUnlimited) return true;
+  if (sub.aiUsageRemaining > 0) return true;
+
+  // Cache shows no credits — ask Autumn directly. This handles: first-time users
+  // whose cache was never populated, plan changes that haven't synced yet, and
+  // cases where the cached balance is stale. Autumn lazy-creates the customer
+  // and attaches the free plan if needed.
+  try {
+    const result = await autumnClient().check({
+      customer_id: userId,
+      feature_id: 'ai_usage',
+      customer_data: {},
+    });
+    if (result.data) {
+      return result.data.allowed;
+    }
+    console.error('[billing] hasAiCredits autumn.check returned no data', { userId });
+    return true; // fail open
+  } catch (error) {
+    console.error('[billing] hasAiCredits autumn.check failed (failing open)', error);
+    return true; // fail open — billing hiccup must not block AI
   }
-  return sub.aiUsageRemaining > 0;
 };
 
 /**

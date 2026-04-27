@@ -12,6 +12,7 @@ final class MacDocsService {
     private(set) var isLoading = false
     private(set) var lastError: String?
     private var didAttemptCreatePersonal = false
+    private var didLogDocsUnavailable = false
 
     init(apiClient: TodosAPIClient) {
         self.apiClient = apiClient
@@ -39,10 +40,40 @@ final class MacDocsService {
 
             let docs: DocListResponse = try await client.trpcQuery("docs.list", input: DocsListInput())
             allDocs = docs.docs
+            didLogDocsUnavailable = false
         } catch {
-            lastError = error.localizedDescription
+            if error.isURLCancellation { return }
+            if case let APIError.httpError(statusCode, _) = error, statusCode == 412 {
+                lastError = "Docs aren’t available on this server yet."
+                if !didLogDocsUnavailable {
+                    didLogDocsUnavailable = true
+                    AppLogger.shared.log("[MacDocsService] docs unavailable on server (HTTP 412 — pending Drizzle migrations)")
+                }
+                return
+            }
+            lastError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             AppLogger.shared.log("[MacDocsService] refresh failed: \(error)")
         }
+    }
+
+    /// Creates a page in the first workspace, refreshing (and auto-creating Personal) when needed.
+    func createNewDocument(title: String = "Untitled") async throws -> DocRecordDTO {
+        guard apiClient != nil else {
+            throw URLError(.userAuthenticationRequired)
+        }
+        if workspaces.isEmpty {
+            didAttemptCreatePersonal = false
+            await refresh()
+        }
+        guard let w = workspaces.first else {
+            let hint = lastError ?? "Unable to load workspaces. Please check your connection."
+            throw NSError(
+                domain: "MacDocsService",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: hint]
+            )
+        }
+        return try await createDoc(workspaceId: w.id, parentId: nil, title: title)
     }
 
     func ensurePersonalWorkspaceIfEmpty() async {

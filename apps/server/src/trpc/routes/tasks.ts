@@ -238,6 +238,7 @@ export const tasksRouter = router({
                   eventId: sql`EXCLUDED.event_id`,
                   updatedAt: now,
                 },
+                setWhere: eq(task.userId, ctx.sessionUser.id),
               });
             syncedIds.push(mutation.id);
           }
@@ -393,6 +394,79 @@ export const foldersRouter = router({
           ),
         );
         return { success: true };
+      } finally {
+        await conn.end();
+      }
+    }),
+
+  // Batch sync endpoint — iOS sends offline folder mutations (upsert/delete)
+  sync: privateProcedure
+    .input(
+      z.object({
+        mutations: z.array(
+          z.discriminatedUnion('type', [
+            z.object({
+              type: z.literal('upsert'),
+              id: z.string(),
+              name: z.string(),
+              color: z.string().nullable().optional(),
+              icon: z.string().nullable().optional(),
+              position: z.number().optional(),
+            }),
+            z.object({
+              type: z.literal('delete'),
+              id: z.string(),
+            }),
+          ])
+        ),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const { db, conn } = getDb();
+      try {
+        const syncedIds: string[] = [];
+        const now = new Date();
+
+        for (const mutation of input.mutations) {
+          if (mutation.type === 'upsert') {
+            await db
+              .insert(taskFolder)
+              .values({
+                id: mutation.id,
+                userId: ctx.sessionUser.id,
+                name: mutation.name,
+                color: mutation.color ?? null,
+                icon: mutation.icon ?? null,
+                position: mutation.position ?? 0,
+                createdAt: now,
+                updatedAt: now,
+              })
+              .onConflictDoUpdate({
+                target: taskFolder.id,
+                set: {
+                  name: sql`EXCLUDED.name`,
+                  color: sql`EXCLUDED.color`,
+                  icon: sql`EXCLUDED.icon`,
+                  position: sql`COALESCE(EXCLUDED.position, task_folder.position)`,
+                  updatedAt: now,
+                },
+                setWhere: eq(taskFolder.userId, ctx.sessionUser.id),
+              });
+            syncedIds.push(mutation.id);
+          } else {
+            await db
+              .delete(taskFolder)
+              .where(
+                and(
+                  eq(taskFolder.id, mutation.id),
+                  eq(taskFolder.userId, ctx.sessionUser.id)
+                )
+              );
+            syncedIds.push(mutation.id);
+          }
+        }
+
+        return { syncedIds };
       } finally {
         await conn.end();
       }

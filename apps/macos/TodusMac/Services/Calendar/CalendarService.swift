@@ -49,8 +49,24 @@ actor CalendarService {
     /// Fetch events for a given date range, returned as sendable CalendarEvent structs.
     /// Deduplicates events with the same title on the same day (e.g. holidays from
     /// multiple calendar sources like iCloud + Google both showing "Långfredagen").
-    func events(from startDate: Date, to endDate: Date) -> [CalendarEvent] {
-        let predicate = eventStore.predicateForEvents(withStart: startDate, end: endDate, calendars: nil)
+    /// Pass a non-empty `hiddenCalendarIds` (composite ids `apple:{...}`) to
+    /// exclude specific calendars.
+    func events(
+        from startDate: Date,
+        to endDate: Date,
+        hiddenCalendarIds: Set<String> = []
+    ) -> [CalendarEvent] {
+        let calendars: [EKCalendar]? = {
+            guard !hiddenCalendarIds.isEmpty else { return nil }
+            let prefix = "\(CalendarSourceIDPrefix.apple):"
+            let hiddenAppleIds: Set<String> = Set(hiddenCalendarIds.compactMap { id in
+                id.hasPrefix(prefix) ? String(id.dropFirst(prefix.count)) : nil
+            })
+            if hiddenAppleIds.isEmpty { return nil }
+            return eventStore.calendars(for: .event)
+                .filter { !hiddenAppleIds.contains($0.calendarIdentifier) }
+        }()
+        let predicate = eventStore.predicateForEvents(withStart: startDate, end: endDate, calendars: calendars)
         let all = eventStore.events(matching: predicate).map { $0.toCalendarEvent(folderID: folderID(for: $0.eventIdentifier)) }
 
         // Deduplicate all-day events only: same title on the same day can appear
@@ -63,6 +79,38 @@ actor CalendarService {
             let key = "\(event.title)|\(dayKey.timeIntervalSince1970)"
             return seen.insert(key).inserted
         }
+    }
+
+    /// Enumerate every Apple calendar the user has on the machine.
+    func listAppleSources() -> [CalendarSource] {
+        let defaultId = eventStore.defaultCalendarForNewEvents?.calendarIdentifier
+        return eventStore.calendars(for: .event).map { cal in
+            var source = CalendarSource.from(appleCalendar: cal)
+            if cal.calendarIdentifier == defaultId {
+                source = CalendarSource(
+                    id: source.id,
+                    kind: source.kind,
+                    displayName: source.displayName,
+                    accountEmail: source.accountEmail,
+                    colorRed: source.colorRed,
+                    colorGreen: source.colorGreen,
+                    colorBlue: source.colorBlue,
+                    isWritable: source.isWritable,
+                    isPrimary: true
+                )
+            }
+            return source
+        }
+    }
+
+    /// Per-Apple-calendar source metadata used by `UnifiedCalendarService` for
+    /// dedup against connected Gmail accounts.
+    func appleCalendarSourceMetadata() -> [String: (sourceType: EKSourceType, sourceTitle: String)] {
+        var out: [String: (sourceType: EKSourceType, sourceTitle: String)] = [:]
+        for cal in eventStore.calendars(for: .event) {
+            out[cal.calendarIdentifier] = (cal.source.sourceType, cal.source.title)
+        }
+        return out
     }
 
     /// Fetch today's events (from midnight to midnight).

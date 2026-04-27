@@ -293,7 +293,7 @@ struct AppTopHeader<CustomTitle: View>: View {
                         .frame(width: 44, height: 40)
                         .interactiveHitTarget(expansion: 4)
                 }
-                .menuStyle(.borderlessButton)
+                .menuStyle(.button)
                 .tint(.primary)
                 .buttonStyle(.plain)
             }

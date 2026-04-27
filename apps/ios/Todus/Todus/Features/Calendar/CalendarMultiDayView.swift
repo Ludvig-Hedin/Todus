@@ -193,7 +193,21 @@ private final class MultiDayPageVC: UIHostingController<MultiDayPageView> {
     }
 
     @MainActor required dynamic init?(coder aDecoder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
+        // SwiftUI never instantiates this controller from a storyboard, but
+        // calling super.init(coder:) leaves the generic rootView uninitialized
+        // and crashes the first time it's read. Use the designated rootView
+        // initializer with a placeholder; the parent refreshes it via
+        // `updateUIViewController` on the next render pass.
+        self.startDate = Calendar.current.startOfDay(for: Date())
+        super.init(
+            rootView: MultiDayPageView(
+                startDate: startDate,
+                dayCount: 1,
+                events: [],
+                shared: MultiDayShared(),
+                onEventTap: nil
+            )
+        )
     }
 
     func refresh(

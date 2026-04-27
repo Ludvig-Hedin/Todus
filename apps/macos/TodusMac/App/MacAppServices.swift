@@ -13,6 +13,7 @@ final class MacAppServices {
         static let contextAboutYou = "MacApp.contextAboutYou"
         static let customInstructions = "MacApp.customInstructions"
         static let assistantAutomationPolicy = "MacApp.assistantAutomationPolicy"
+        static let calendarPreferences = "MacApp.calendarPreferences"
         static let startupView = "MacApp.startupView"
         static let restoreLastViewedPage = "MacApp.restoreLastViewedPage"
         static let hasConfiguredGmailPrompt = "MacApp.hasConfiguredGmailPrompt"
@@ -32,15 +33,46 @@ final class MacAppServices {
     let apiClient: TodosAPIClient
     let emailService: EmailService
     let calendarService: CalendarService
+    /// Backend Google Calendar integration — fetches per-connection calendars and events.
+    let googleCalendarService: GoogleCalendarService
+    /// Aggregator that merges Apple (EventKit) + Google (backend) events with
+    /// per-source visibility from `calendarPreferences`.
+    let unifiedCalendarService: UnifiedCalendarService
     let networkMonitor: NetworkMonitor
     let notificationService: MacNotificationService
     let aiChatService: MacAIChatService
+    let voiceTokenService: VoiceTokenService
     let shareConversationService: ShareConversationService
     let groupChatService: GroupChatService
     let meetingsService: MeetingsService
     let connectionsService: ConnectionsService
     let subscriptionService: MacSubscriptionService
     let docsService: MacDocsService
+    /// Wraps drafts.update + mail.send for the AI chat's InlineComposeCard.
+    let draftService: MacDraftService
+    /// Tracks per-model install state for the Local Models settings screen and
+    /// the chat composer's local-runtime routing. Disk scan runs on init.
+    let localModelStateStore: LocalModelStateStore
+    /// Apple Intelligence on-device LLM (macOS 26+). Always present; service
+    /// reports `isReady` based on OS + Apple Intelligence enablement.
+    let appleFoundationModelService: AppleFoundationModelService
+    /// Probes a locally-running Ollama daemon and lists installed tags. The
+    /// "Connected (Ollama)" section in Settings → Local Models reads from
+    /// this; routing for chat goes through `ollamaInferenceService`.
+    let ollamaConnector: OllamaConnector
+    /// Streams chat completions from the user's local Ollama daemon.
+    let ollamaInferenceService: OllamaInferenceService
+    /// MLX-Swift inference (Apple Silicon). Loads quantized weights from the
+    /// HuggingFace cache populated by `modelDownloadService`.
+    let mlxInferenceService: MLXInferenceService
+    /// Orchestrates HuggingFace downloads + deletions for MLX models.
+    let modelDownloadService: ModelDownloadService
+    /// Queues task mutations and flushes them via tRPC `tasks.sync`.
+    let taskSyncService: TaskSyncService
+    /// Queues folder create/update/delete mutations and flushes them via tRPC `folders.sync`.
+    let folderSyncService: FolderSyncService
+    /// Retained here so `setupNetworkSync()` can reach `mainContext` on reconnect.
+    var modelContainer: ModelContainer?
     private let defaults = UserDefaults.standard
     let remindersSyncService = AppleRemindersSyncService()
     let remindersSyncState = RemindersSyncState()
@@ -65,6 +97,16 @@ final class MacAppServices {
         didSet {
             if let data = try? JSONEncoder().encode(assistantAutomationPolicy) {
                 defaults.set(data, forKey: Keys.assistantAutomationPolicy)
+            }
+        }
+    }
+
+    /// Calendar visibility prefs — synced from `settings.get` and persisted
+    /// locally for offline launches. Mirrors the iOS counterpart.
+    var calendarPreferences: CalendarPreferences {
+        didSet {
+            if let data = try? JSONEncoder().encode(calendarPreferences) {
+                defaults.set(data, forKey: Keys.calendarPreferences)
             }
         }
     }
@@ -201,6 +243,12 @@ final class MacAppServices {
         } else {
             self.assistantAutomationPolicy = .recommended
         }
+        if let data = defaults.data(forKey: Keys.calendarPreferences),
+           let saved = try? JSONDecoder().decode(CalendarPreferences.self, from: data) {
+            self.calendarPreferences = saved
+        } else {
+            self.calendarPreferences = .default
+        }
         self.developerModeEnabled = defaults.bool(forKey: Keys.developerModeEnabled)
         self.aiChatService = MacAIChatService(
             backendURL: backendURL,
@@ -209,12 +257,40 @@ final class MacAppServices {
             emailService: email,
             calendarService: calendar
         )
+        self.voiceTokenService = VoiceTokenService(authService: auth, backendURL: backendURL)
         self.shareConversationService = ShareConversationService(apiClient: api)
         self.groupChatService = GroupChatService(apiClient: api)
         self.meetingsService = MeetingsService(apiClient: api)
-        self.connectionsService = ConnectionsService(api: api)
+        let connections = ConnectionsService(api: api)
+        self.connectionsService = connections
+        let googleCalendar = GoogleCalendarService(api: api)
+        self.googleCalendarService = googleCalendar
+        self.unifiedCalendarService = UnifiedCalendarService(
+            calendarService: calendar,
+            googleService: googleCalendar,
+            connectionsService: connections
+        )
         self.subscriptionService = MacSubscriptionService(apiClient: api)
         self.docsService = MacDocsService(apiClient: api)
+        self.draftService = MacDraftService(api: api)
+        self.localModelStateStore = LocalModelStateStore()
+        self.appleFoundationModelService = AppleFoundationModelService()
+        let ollamaConnector = OllamaConnector()
+        self.ollamaConnector = ollamaConnector
+        self.ollamaInferenceService = OllamaInferenceService(connector: ollamaConnector)
+        let mlxService = MLXInferenceService()
+        self.mlxInferenceService = mlxService
+        self.modelDownloadService = ModelDownloadService(
+            stateStore: self.localModelStateStore,
+            inferenceService: mlxService
+        )
+        // Wire local runtimes into the chat service so it can short-circuit
+        // /api/ai/chat when the selected model is on-device.
+        self.aiChatService.appleFoundationModelService = self.appleFoundationModelService
+        self.aiChatService.mlxInferenceService = mlxService
+        self.aiChatService.ollamaInferenceService = self.ollamaInferenceService
+        self.taskSyncService = TaskSyncService(apiClient: api)
+        self.folderSyncService = FolderSyncService(apiClient: api)
         self.aiChatService.contextAboutYou = contextAboutYou
         self.aiChatService.customInstructions = customInstructions
         self.remindersSyncState.isEnabled = self.remindersSyncEnabled
@@ -229,6 +305,9 @@ final class MacAppServices {
             contextAboutYou = response.settings.contextAboutYou
             customInstructions = response.settings.customPrompt
             assistantAutomationPolicy = response.settings.assistantAutomationPolicy
+            if let prefs = response.settings.calendarPreferences {
+                calendarPreferences = prefs
+            }
         } catch {
             AppLogger.shared.log("[MacAppServices] Failed to load shared AI profile: \(error)")
         }
@@ -251,17 +330,49 @@ final class MacAppServices {
         }
     }
 
+    /// Push current `calendarPreferences` to the backend.
+    func saveCalendarPreferences() async {
+        guard authService.isAuthenticated else { return }
+        do {
+            struct Input: Encodable {
+                let calendarPreferences: CalendarPreferences
+            }
+            let _: SharedAIProfileSaveResponse = try await apiClient.trpcMutation(
+                "settings.save",
+                input: Input(calendarPreferences: calendarPreferences)
+            )
+        } catch {
+            AppLogger.shared.log("[MacAppServices] Failed to save calendar preferences: \(error)")
+        }
+    }
+
+    /// Toggle a calendar's visibility (composite id) and push to server.
+    func toggleCalendarVisibility(_ id: String) {
+        var prefs = calendarPreferences
+        var hidden = prefs.hiddenIdSet
+        if hidden.contains(id) { hidden.remove(id) } else { hidden.insert(id) }
+        prefs.hiddenCalendarIds = Array(hidden)
+        calendarPreferences = prefs
+        Task { await saveCalendarPreferences() }
+    }
+
+    /// Set the default calendar for a given account key (`apple` or `google:{connId}`).
+    func setDefaultCalendar(_ id: String?, forAccountKey accountKey: String) {
+        var prefs = calendarPreferences
+        if let id {
+            prefs.defaultCalendarByAccount[accountKey] = id
+        } else {
+            prefs.defaultCalendarByAccount.removeValue(forKey: accountKey)
+        }
+        calendarPreferences = prefs
+        Task { await saveCalendarPreferences() }
+    }
+
     func syncSharedFolders(in context: ModelContext) async throws {
         guard authService.isAuthenticated else { return }
 
         struct FolderListResponse: Decodable {
             let folders: [RemoteFolder]
-        }
-
-        struct RemoteFolder: Decodable {
-            let id: String
-            let name: String
-            let createdAt: Date
         }
 
         isSyncingSharedFolders = true
@@ -279,15 +390,236 @@ final class MacAppServices {
             guard let uuid = UUID(uuidString: remote.id) else { continue }
             if let local = foldersByID[normalizedID] {
                 local.name = remote.name
+                local.colorHex = remote.color
+                local.iconName = remote.icon
+                local.position = remote.position ?? local.position
                 local.createdAt = remote.createdAt
+                local.updatedAt = remote.updatedAt ?? local.updatedAt
             } else {
-                let folder = FolderRecord(id: uuid, name: remote.name, createdAt: remote.createdAt)
+                let folder = FolderRecord(
+                    id: uuid,
+                    name: remote.name,
+                    colorHex: remote.color,
+                    iconName: remote.icon,
+                    position: remote.position ?? 0,
+                    createdAt: remote.createdAt,
+                    updatedAt: remote.updatedAt ?? remote.createdAt
+                )
                 context.insert(folder)
                 foldersByID[normalizedID] = folder
             }
         }
 
         try context.save()
+    }
+
+    /// Pull the folder summary (counts, breakdowns, recent items) and update the
+    /// local FolderRecord caches so cards render instantly.
+    func fetchFolderSummary(in context: ModelContext) async {
+        guard authService.isAuthenticated else { return }
+        do {
+            let response: MacFolderSummaryResponse = try await apiClient.trpcQuery("folders.summary")
+            let localFolders = try context.fetch(FetchDescriptor<FolderRecord>())
+            let byID = Dictionary(
+                uniqueKeysWithValues: localFolders.map { ($0.id.uuidString.lowercased(), $0) }
+            )
+
+            for remote in response.folders {
+                guard let local = byID[remote.folder.id.lowercased()] else { continue }
+                local.cachedItemCount = remote.itemCount
+                local.setBreakdown(FolderTypeBreakdown(
+                    tasks: remote.breakdown.tasks,
+                    chats: remote.breakdown.chats,
+                    emails: remote.breakdown.emails,
+                    events: remote.breakdown.events,
+                    docs: remote.breakdown.docs
+                ))
+                local.setRecentItems(remote.recentItems.map {
+                    FolderRecentItem(
+                        type: $0.type,
+                        id: $0.id,
+                        title: $0.title,
+                        subtitle: $0.subtitle,
+                        sortAt: $0.sortAt
+                    )
+                })
+            }
+            try? context.save()
+        } catch {
+            // Best-effort — cards keep showing previous cached values.
+        }
+    }
+
+    func createSharedFolder(
+        name: String,
+        colorHex: String?,
+        iconName: String?,
+        in context: ModelContext
+    ) async -> FolderRecord? {
+        let cleaned = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return nil }
+
+        let existing = (try? context.fetch(FetchDescriptor<FolderRecord>())) ?? []
+        let nextPosition = (existing.map { $0.position }.max() ?? -1) + 1
+        let folder = FolderRecord(
+            name: cleaned,
+            colorHex: colorHex,
+            iconName: iconName,
+            position: nextPosition
+        )
+        context.insert(folder)
+        try? context.save()
+
+        struct CreateInput: Encodable {
+            let id: String
+            let name: String
+            let color: String?
+            let icon: String?
+            let position: Int
+        }
+        do {
+            let _: EmptyResponse = try await apiClient.trpcMutation(
+                "folders.create",
+                input: CreateInput(
+                    id: folder.id.uuidString,
+                    name: folder.name,
+                    color: folder.colorHex,
+                    icon: folder.iconName,
+                    position: folder.position
+                )
+            )
+        } catch {
+            // API failed (offline or transient error) — enqueue an upsert so the
+            // folders.sync endpoint retries this on the next reconnect.
+            await folderSyncService.enqueue(.upsert(
+                id: folder.id.uuidString,
+                name: folder.name,
+                color: folder.colorHex,
+                icon: folder.iconName,
+                position: folder.position
+            ))
+        }
+        return folder
+    }
+
+    func updateSharedFolder(
+        _ folder: FolderRecord,
+        name: String? = nil,
+        colorHex: String?? = nil,
+        iconName: String?? = nil,
+        position: Int? = nil,
+        in context: ModelContext
+    ) async {
+        if let name { folder.name = name }
+        if case let .some(value) = colorHex { folder.colorHex = value }
+        if case let .some(value) = iconName { folder.iconName = value }
+        if let position { folder.position = position }
+        folder.updatedAt = .now
+        try? context.save()
+
+        struct UpdateInput: Encodable {
+            let id: String
+            let name: String?
+            let color: String?
+            let icon: String?
+            let position: Int?
+        }
+        do {
+            let _: EmptyResponse = try await apiClient.trpcMutation(
+                "folders.update",
+                input: UpdateInput(
+                    id: folder.id.uuidString,
+                    name: folder.name,
+                    color: folder.colorHex,
+                    icon: folder.iconName,
+                    position: folder.position
+                )
+            )
+        } catch {
+            // API failed — enqueue an upsert so folders.sync retries on reconnect.
+            await folderSyncService.enqueue(.upsert(
+                id: folder.id.uuidString,
+                name: folder.name,
+                color: folder.colorHex,
+                icon: folder.iconName,
+                position: folder.position
+            ))
+        }
+    }
+
+    func deleteSharedFolder(_ folder: FolderRecord, in context: ModelContext) async {
+        let id = folder.id.uuidString
+        // Unlink tasks
+        let allTasks = (try? context.fetch(FetchDescriptor<TaskRecord>())) ?? []
+        for task in allTasks where task.folder?.id == folder.id {
+            task.folder = nil
+            task.updatedAt = .now
+        }
+        context.delete(folder)
+        try? context.save()
+
+        struct DeleteInput: Encodable { let id: String }
+        do {
+            let _: EmptyResponse = try await apiClient.trpcMutation(
+                "folders.delete",
+                input: DeleteInput(id: id)
+            )
+        } catch {
+            // API failed — enqueue a delete so folders.sync retries on reconnect.
+            await folderSyncService.enqueue(.delete(id: id))
+        }
+    }
+
+    func addItemToSharedFolder(
+        kind: FolderItemKind,
+        itemId: String,
+        title: String?,
+        subtitle: String?,
+        folder: FolderRecord,
+        in context: ModelContext
+    ) async {
+        guard kind == .email || kind == .event || kind == .doc else { return }
+
+        let item = FolderItemRecord(
+            folder: folder,
+            itemType: kind.rawValue,
+            itemId: itemId,
+            titleCache: title,
+            subtitleCache: subtitle,
+            position: 0,
+            createdAt: .now
+        )
+        context.insert(item)
+        folder.cachedItemCount += 1
+        folder.updatedAt = .now
+        try? context.save()
+
+        struct Metadata: Encodable {
+            let title: String?
+            let subtitle: String?
+        }
+        struct AddInput: Encodable {
+            let folderId: String
+            let itemType: String
+            let itemId: String
+            let metadata: Metadata?
+        }
+        let metadata: Metadata? = (title != nil || subtitle != nil)
+            ? Metadata(title: title, subtitle: subtitle)
+            : nil
+        do {
+            let _: EmptyResponse = try await apiClient.trpcMutation(
+                "folders.addItem",
+                input: AddInput(
+                    folderId: folder.id.uuidString,
+                    itemType: kind.rawValue,
+                    itemId: itemId,
+                    metadata: metadata
+                )
+            )
+        } catch {
+            // Best-effort sync only.
+        }
     }
 
     func requestRemindersPermissionIfNeeded() async -> Bool {
@@ -326,7 +658,26 @@ final class MacAppServices {
         await remindersSyncService.importFromReminders(in: context)
     }
 
+    /// Wires the network reconnect callback to flush any pending/failed task, folder, and
+    /// draft mutations. Call this once after both `MacAppServices` and the `ModelContainer`
+    /// are ready.
+    func setupNetworkSync() {
+        networkMonitor.onReconnect = { [weak self] in
+            guard let self, let context = self.modelContainer?.mainContext else { return }
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                await self.taskSyncService.retryUnsyncedTasks(in: context)
+                await self.folderSyncService.retryPending()
+                await self.draftService.flushPending(in: context)
+            }
+        }
+    }
+
     func signOut() {
+        // Clear in-memory sync queues so a reconnect after re-login does not
+        // replay the previous user's offline mutations under the new session.
+        taskSyncService.clearQueue()
+        folderSyncService.clearQueue()
         emailService.resetForSignOut()
         authService.signOut()
         closeSettingsWindowIfPresent()

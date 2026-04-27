@@ -32,6 +32,56 @@ final class SupabaseSyncService: SyncService {
         await processQueue(in: context)
     }
 
+    /// Re-enqueues every task currently in `.localOnly` or `.failed` state for another upload
+    /// attempt. Intended to be called when network connectivity is restored, so offline tasks
+    /// don't sit forever waiting for the next manual mutation to flush them.
+    ///
+    /// TODO: Wire this to fire on `NetworkMonitor.isConnected` false→true transitions in
+    /// `AppServices`. The infrastructure exists (`apps/ios/Todus/Todus/Services/NetworkMonitor.swift`),
+    /// but observation must be set up at the AppServices level since this service has no
+    /// reference to it.
+    func retryUnsyncedTasks(in context: ModelContext) async {
+        guard client != nil else { return }
+        let descriptor = FetchDescriptor<TaskRecord>()
+        let tasks = (try? context.fetch(descriptor)) ?? []
+        // Include `.pendingUpload` so tasks that were mid-flight when the app
+        // was killed (e.g. background-suspend → kill before the await returned)
+        // get retried. The in-memory queue doesn't survive a kill, so without
+        // this they'd stay stranded in pendingUpload forever — never picked up
+        // by either the queue or this retry pass.
+        let toRetry = tasks.filter {
+            $0.syncState == .localOnly
+                || $0.syncState == .failed
+                || $0.syncState == .pendingUpload
+        }
+        guard !toRetry.isEmpty else { return }
+
+        let mutations = toRetry.map { task in
+            SyncMutation(action: .upsert, task: task.asPayload(), taskID: task.id)
+        }
+        // Capture each task's pre-retry state so we can restore it verbatim if the
+        // optimistic save fails. Without this snapshot, a `.failed` task would be
+        // rolled back to `.localOnly` since the bulk transition to `.pendingUpload`
+        // erases the original state.
+        let originalStates: [(TaskRecord, SyncState)] = toRetry.map { ($0, $0.syncState) }
+        for task in toRetry {
+            task.syncState = .pendingUpload
+        }
+        // If we can't persist the optimistic state transition, don't fire mutations
+        // that would later show as duplicates against tasks the disk still believes
+        // are .localOnly / .failed.
+        do {
+            try context.save()
+        } catch {
+            for (task, original) in originalStates {
+                task.syncState = original
+            }
+            return
+        }
+
+        await enqueue(mutations, in: context)
+    }
+
     func upgradeAnonymousUserIfNeeded(email: String, in context: ModelContext) async {
         guard let client, !email.isEmpty else {
             return

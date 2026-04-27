@@ -23,10 +23,18 @@ struct MarkdownView: View {
         }
         .textSelection(.enabled)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .onChange(of: content, initial: true) { _, new in
-            guard parsedKey != new else { return }
-            blocks = MarkdownParser.parse(new)
-            parsedKey = new
+        // Parse off the main thread. During AI streaming, every appended token
+        // re-fired this on main and re-parsed the entire buffer — long replies
+        // dropped to ~5 fps and felt like UI hangs.
+        .task(id: content) {
+            guard parsedKey != content else { return }
+            let snapshot = content
+            let parsed = await Task.detached(priority: .userInitiated) {
+                MarkdownParser.parse(snapshot)
+            }.value
+            guard !Task.isCancelled else { return }
+            blocks = parsed
+            parsedKey = snapshot
         }
     }
 }
@@ -272,9 +280,17 @@ private struct MarkdownBlockView: View {
 // MARK: - Inline markdown text
 
 /// Renders a line/paragraph with inline markdown (bold, italic, code, links) via AttributedString.
+///
+/// Parsing is done off the main actor via `.task(id: text)` and cached in @State.
+/// Without caching, each SwiftUI layout pass during keyboard animation would synchronously
+/// re-parse every visible message bubble on the main thread — causing 3 multi-second hangs
+/// per keyboard appearance (one per layout pass iOS fires during the keyboard show animation).
 struct InlineMarkdownText: View {
     let text: String
     let font: Font
+
+    @State private var attributed: AttributedString?
+    @State private var parsedKey: String = ""
 
     init(_ text: String, font: Font) {
         self.text = text
@@ -282,20 +298,28 @@ struct InlineMarkdownText: View {
     }
 
     var body: some View {
-        // Prefer parsing inline markdown without relying on unavailable `.inlinesOnly`.
-        // We build options explicitly and fall back gracefully if unavailable.
-        if let attributed = try? AttributedString(
-            markdown: text,
-            options: AttributedString.MarkdownParsingOptions(
-                allowsExtendedAttributes: true,
-                interpretedSyntax: .inlineOnlyPreservingWhitespace
-            )
-        ) {
-            Text(attributed).font(font)
-        } else if let attributed = try? AttributedString(markdown: text) {
-            Text(attributed).font(font)
-        } else {
-            Text(text).font(font)
+        Group {
+            if let attributed {
+                Text(attributed).font(font)
+            } else {
+                Text(text).font(font)
+            }
+        }
+        .task(id: text) {
+            guard parsedKey != text else { return }
+            let snapshot = text
+            let result = await Task.detached(priority: .userInitiated) {
+                (try? AttributedString(
+                    markdown: snapshot,
+                    options: AttributedString.MarkdownParsingOptions(
+                        allowsExtendedAttributes: true,
+                        interpretedSyntax: .inlineOnlyPreservingWhitespace
+                    )
+                )) ?? (try? AttributedString(markdown: snapshot)) ?? AttributedString(snapshot)
+            }.value
+            guard !Task.isCancelled else { return }
+            attributed = result
+            parsedKey = snapshot
         }
     }
 }

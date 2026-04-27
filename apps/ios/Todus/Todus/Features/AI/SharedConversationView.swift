@@ -27,12 +27,11 @@ struct SharedConversationView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                AppTheme.backgroundTop.ignoresSafeArea()
+                AppTheme.sheetBackground.ignoresSafeArea()
 
                 switch phase {
                 case .loading:
-                    ProgressView()
-                        .scaleEffect(1.2)
+                    ButtonInlineProgressView(tint: .primary, side: 28)
 
                 case .passwordRequired:
                     passwordGateView
@@ -91,7 +90,7 @@ struct SharedConversationView: View {
                 } label: {
                     Group {
                         if isUnlocking {
-                            ProgressView().scaleEffect(0.8)
+                            ButtonInlineProgressView(tint: .primary, side: AppTheme.Metrics.buttonInlineSpinner)
                         } else {
                             Text("Unlock")
                                 .font(.system(size: 15, weight: .semibold))

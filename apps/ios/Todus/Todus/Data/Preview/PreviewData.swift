@@ -6,7 +6,8 @@ enum PreviewData {
     static var container: ModelContainer {
         let schema = Schema([
             TaskRecord.self,
-            FolderRecord.self
+            FolderRecord.self,
+            FolderItemRecord.self
         ])
 
         let configuration = ModelConfiguration(isStoredInMemoryOnly: true)

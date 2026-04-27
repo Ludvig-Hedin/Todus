@@ -10,18 +10,21 @@ struct AppIconContainer<Icon: View>: View {
     var background: Color
     let icon: () -> Icon
 
+    private var innerContentSide: CGFloat { size * 0.62 }
+
     var body: some View {
-        ZStack {
+        ZStack(alignment: .center) {
             RoundedRectangle(cornerRadius: size * cornerRadiusFraction, style: .continuous)
                 .fill(background)
                 .frame(width: size, height: size)
                 .shadow(color: .black.opacity(0.1), radius: 1.5, x: 0, y: 0.5)
 
             icon()
-                .frame(width: size * 0.62)
-                .aspectRatio(contentMode: .fit)
+                .frame(width: innerContentSide, height: innerContentSide, alignment: .center)
+                .clipped()
         }
         .frame(width: size, height: size)
+        .clipShape(RoundedRectangle(cornerRadius: size * cornerRadiusFraction, style: .continuous))
     }
 }
 
@@ -112,7 +115,8 @@ struct GmailIconView: View {
 
 // MARK: - Apple Calendar
 
-/// Apple Calendar app icon — white/red calendar with day number.
+/// Matches iOS `AppleCalendarLogo`: `Path(SVG d)` is unreliable, so we use layout-based art
+/// (red strip + “MON” + “12”) so the icon is never an empty `Canvas` on the white tile.
 struct AppleCalendarLogo: View {
     var body: some View {
         GeometryReader { geo in
@@ -133,7 +137,7 @@ struct AppleCalendarLogo: View {
                     }
                     .frame(height: headerH)
                     .clipShape(
-                        .rect(
+                        UnevenRoundedRectangle(
                             topLeadingRadius: w * 0.10,
                             bottomLeadingRadius: 0,
                             bottomTrailingRadius: 0,
@@ -142,11 +146,11 @@ struct AppleCalendarLogo: View {
                         )
                     )
 
-                    Spacer()
+                    Spacer(minLength: 0)
                     Text("12")
                         .font(.system(size: w * 0.46, weight: .thin, design: .rounded))
                         .foregroundStyle(Color(red: 0.12, green: 0.12, blue: 0.12))
-                    Spacer()
+                    Spacer(minLength: 0)
                 }
             }
         }
@@ -156,50 +160,76 @@ struct AppleCalendarLogo: View {
 struct AppleCalendarIconView: View {
     var size: CGFloat = 26
     var body: some View {
-        AppleCalendarLogo()
-            .frame(width: size, height: size)
-            .clipShape(RoundedRectangle(cornerRadius: size * 0.225, style: .continuous))
-            .shadow(color: .black.opacity(0.1), radius: 1.5, x: 0, y: 0.5)
+        AppIconContainer(size: size, background: .white) {
+            AppleCalendarLogo()
+        }
+        .aspectRatio(1, contentMode: .fit)
     }
 }
 
 // MARK: - Apple Reminders
 
-/// Apple Reminders icon — three coloured circle indicators with grey lines.
+/// Reminders light icon — same 1024×1024 geometry as iOS `BrandIcons` / official SVG.
+private struct AppleRemindersIconArtwork {
+    fileprivate static let lineGray = Color(red: 0.82, green: 0.82, blue: 0.84)
+    fileprivate static let blue = Color(red: 0, green: 0.478, blue: 1)
+    fileprivate static let red = Color(red: 1, green: 0.231, blue: 0.188)
+    fileprivate static let orange = Color(red: 1, green: 0.584, blue: 0)
+    fileprivate static let lineY: [CGFloat] = [248, 503, 758]
+    fileprivate static let lineRect = CGRect(x: 375, y: 0, width: 530, height: 17)
+    fileprivate static let lineCorner: CGFloat = 8.5
+    fileprivate static let dotCenters: [(x: CGFloat, y: CGFloat, color: Color)] = [
+        (193, 257, blue),
+        (193, 512, red),
+        (193, 767, orange),
+    ]
+    fileprivate static let outerR: CGFloat = 68
+    fileprivate static let innerR: CGFloat = 59
+}
+
 struct AppleRemindersLogo: View {
     var body: some View {
-        GeometryReader { geo in
-            let w = geo.size.width
-            let h = geo.size.height
-            let dotR = w * 0.12
-            let lineH = dotR * 0.32
-            let rowSpacing = h * 0.11
+        Canvas { context, size in
+            let s = min(size.width, size.height) / 1024
+            let tx = (size.width - 1024 * s) * 0.5
+            let ty = (size.height - 1024 * s) * 0.5
 
-            VStack(spacing: 0) {
-                Spacer()
-                reminderRow(dotColor: .primary, dotRadius: dotR, lineH: lineH, width: w)
-                Spacer().frame(height: rowSpacing)
-                reminderRow(dotColor: .red, dotRadius: dotR, lineH: lineH, width: w)
-                Spacer().frame(height: rowSpacing)
-                reminderRow(dotColor: .orange, dotRadius: dotR, lineH: lineH, width: w)
-                Spacer()
+            func o(_ r: CGRect) -> CGRect {
+                CGRect(
+                    x: tx + r.origin.x * s,
+                    y: ty + r.origin.y * s,
+                    width: r.size.width * s,
+                    height: r.size.height * s
+                )
+            }
+
+            for y in AppleRemindersIconArtwork.lineY {
+                let p = Path(
+                    roundedRect: o(CGRect(x: AppleRemindersIconArtwork.lineRect.minX, y: y, width: AppleRemindersIconArtwork.lineRect.width, height: AppleRemindersIconArtwork.lineRect.height)),
+                    cornerSize: CGSize(width: AppleRemindersIconArtwork.lineCorner * s, height: AppleRemindersIconArtwork.lineCorner * s),
+                    style: .continuous
+                )
+                context.fill(p, with: .color(AppleRemindersIconArtwork.lineGray))
+            }
+
+            for dot in AppleRemindersIconArtwork.dotCenters {
+                let outer = o(CGRect(
+                    x: dot.x - AppleRemindersIconArtwork.outerR,
+                    y: dot.y - AppleRemindersIconArtwork.outerR,
+                    width: AppleRemindersIconArtwork.outerR * 2,
+                    height: AppleRemindersIconArtwork.outerR * 2
+                ))
+                context.fill(Path(ellipseIn: outer), with: .color(dot.color))
+                let inner = o(CGRect(
+                    x: dot.x - AppleRemindersIconArtwork.innerR,
+                    y: dot.y - AppleRemindersIconArtwork.innerR,
+                    width: AppleRemindersIconArtwork.innerR * 2,
+                    height: AppleRemindersIconArtwork.innerR * 2
+                ))
+                context.fill(Path(ellipseIn: inner), with: .color(.white))
             }
         }
-    }
-
-    @ViewBuilder
-    private func reminderRow(dotColor: Color, dotRadius: CGFloat, lineH: CGFloat, width: CGFloat) -> some View {
-        HStack(spacing: width * 0.10) {
-            Circle()
-                .fill(dotColor)
-                .frame(width: dotRadius * 2, height: dotRadius * 2)
-            Capsule()
-                // macOS equivalent of UIColor.systemGray3
-                .fill(Color(nsColor: .systemGray).opacity(0.5))
-                .frame(width: width * 0.50, height: lineH)
-            Spacer()
-        }
-        .padding(.horizontal, width * 0.10)
+        .aspectRatio(1, contentMode: .fit)
     }
 }
 

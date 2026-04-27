@@ -119,6 +119,150 @@ enum MacPrimarySelection: Hashable {
     }
 }
 
+// MARK: - Floating Panel Shell
+
+/// Thin wrapper that owns resize-gesture state and applies `.frame()`/`.offset()`/shadow
+/// to the floating AI panel. Because only this view reads `geo.liveSize`/`geo.liveOffset`,
+/// `MacAssistantPanel` is NOT re-rendered on every drag/resize frame — only layout is updated.
+private struct FloatingPanelShell<Content: View>: View {
+    let geo: FloatingPanelGeometry
+    @Binding var floatingSize: CGSize
+    @Binding var floatingOffset: CGSize
+    var onCommit: (() -> Void)? = nil
+    @ViewBuilder let content: () -> Content
+
+    @State private var resizeDragStart: CGSize?
+
+    private let minW: CGFloat = 320, maxW: CGFloat = 800
+    private let minH: CGFloat = 400, maxH: CGFloat = 900
+    private let edgeHit: CGFloat = 5, cornerHit: CGFloat = 16
+
+    // MARK: Resize gesture helpers
+
+    private enum ResizePart {
+        case top, bottom, leading, trailing
+        case topLeading, topTrailing, bottomLeading, bottomTrailing
+    }
+
+    private func clamp(_ size: CGSize) -> CGSize {
+        CGSize(
+            width:  min(max(size.width,  minW), maxW),
+            height: min(max(size.height, minH), maxH)
+        )
+    }
+
+    private func resizeGesture(_ part: ResizePart) -> some Gesture {
+        DragGesture()
+            .onChanged { v in
+                if resizeDragStart == nil { resizeDragStart = geo.liveSize }
+                let s = resizeDragStart ?? geo.liveSize
+                let t = v.translation
+                let new: CGSize
+                switch part {
+                case .top:           new = CGSize(width: s.width,           height: s.height - t.height)
+                case .bottom:        new = CGSize(width: s.width,           height: s.height + t.height)
+                case .leading:       new = CGSize(width: s.width - t.width, height: s.height)
+                case .trailing:      new = CGSize(width: s.width + t.width, height: s.height)
+                case .topLeading:    new = CGSize(width: s.width - t.width, height: s.height - t.height)
+                case .topTrailing:   new = CGSize(width: s.width + t.width, height: s.height - t.height)
+                case .bottomLeading: new = CGSize(width: s.width - t.width, height: s.height + t.height)
+                case .bottomTrailing:new = CGSize(width: s.width + t.width, height: s.height + t.height)
+                }
+                let clamped = clamp(new)
+                if clamped != geo.liveSize { geo.liveSize = clamped }
+            }
+            .onEnded { _ in
+                floatingSize = geo.liveSize
+                resizeDragStart = nil
+                onCommit?()
+            }
+    }
+
+    private func resizeCursor(_ part: ResizePart, hovering: Bool) {
+        if hovering {
+            switch part {
+            case .top, .bottom:                             NSCursor.resizeUpDown.set()
+            case .leading, .trailing:                       NSCursor.resizeLeftRight.set()
+            case .topLeading, .bottomTrailing:              NSCursor.crosshair.set()
+            case .topTrailing, .bottomLeading:              NSCursor.crosshair.set()
+            }
+        } else {
+            NSCursor.arrow.set()
+        }
+    }
+
+    // MARK: Resize strips
+
+    @ViewBuilder private func edgeStrip(_ part: ResizePart, axis: Axis) -> some View {
+        let isH = axis == .horizontal
+        Color.clear
+            .frame(width: isH ? edgeHit : nil, height: isH ? nil : edgeHit)
+            .frame(maxWidth: isH ? nil : .infinity, maxHeight: isH ? .infinity : nil)
+            .contentShape(Rectangle())
+            .highPriorityGesture(resizeGesture(part))
+            .onHover { resizeCursor(part, hovering: $0) }
+    }
+
+    @ViewBuilder private func cornerView(_ part: ResizePart) -> some View {
+        Color.clear
+            .frame(width: cornerHit, height: cornerHit)
+            .contentShape(Rectangle())
+            .highPriorityGesture(resizeGesture(part))
+            .onHover { resizeCursor(part, hovering: $0) }
+    }
+
+    var body: some View {
+        content()
+            .frame(width: geo.liveSize.width, height: geo.liveSize.height)
+            .shadow(color: .black.opacity(0.18), radius: 20, x: 0, y: 8)
+            // Edge resize strips (corners excluded so they don't overlap)
+            .overlay(alignment: .top) {
+                HStack(spacing: 0) {
+                    Spacer().frame(width: cornerHit)
+                    edgeStrip(.top, axis: .vertical)
+                    Spacer().frame(width: cornerHit)
+                }
+            }
+            .overlay(alignment: .bottom) {
+                HStack(spacing: 0) {
+                    Spacer().frame(width: cornerHit)
+                    edgeStrip(.bottom, axis: .vertical)
+                    Spacer().frame(width: cornerHit)
+                }
+            }
+            .overlay(alignment: .leading) {
+                VStack(spacing: 0) {
+                    Spacer().frame(height: cornerHit)
+                    edgeStrip(.leading, axis: .horizontal)
+                    Spacer().frame(height: cornerHit)
+                }
+            }
+            .overlay(alignment: .trailing) {
+                VStack(spacing: 0) {
+                    Spacer().frame(height: cornerHit)
+                    edgeStrip(.trailing, axis: .horizontal)
+                    Spacer().frame(height: cornerHit)
+                }
+            }
+            .overlay(alignment: .topLeading)    { cornerView(.topLeading) }
+            .overlay(alignment: .topTrailing)   { cornerView(.topTrailing) }
+            .overlay(alignment: .bottomLeading) { cornerView(.bottomLeading) }
+            .overlay(alignment: .bottomTrailing){ cornerView(.bottomTrailing) }
+            .offset(geo.liveOffset)
+            .onAppear {
+                geo.liveSize   = floatingSize
+                geo.liveOffset = floatingOffset
+            }
+            .onChange(of: floatingSize) { _, newSize in
+                guard resizeDragStart == nil, newSize != geo.liveSize else { return }
+                geo.liveSize = newSize
+            }
+            .onChange(of: floatingOffset) { _, newOffset in
+                if geo.liveOffset != newOffset { geo.liveOffset = newOffset }
+            }
+    }
+}
+
 // MARK: - Root View
 
 struct MacRootView: View {
@@ -142,9 +286,12 @@ struct MacRootView: View {
     @AppStorage("mac_compact_sidebar") private var compactSidebar = false
     // Side pane resize — user can drag the divider to adjust width
     @AppStorage("mac_side_pane_width") private var sidePaneWidth: Double = 380
-    /// Live floating geometry — **not** @AppStorage; binding updates every frame during drag/resize. Disk sync on gesture end to avoid jank.
-    @State private var assistantFloatSize: CGSize = CGSize(width: 400, height: 560)
-    @State private var assistantFloatOffset: CGSize = .zero
+    /// Live floating geometry — owned by `FloatingPanelShell`, shared with `MacAssistantPanel`
+    /// for header-drag. Not @AppStorage; disk sync happens only on gesture end.
+    @State private var floatingGeo = FloatingPanelGeometry()
+    /// Committed size/offset — synced to disk; used to initialise `floatingGeo` on appear.
+    @State private var committedFloatSize: CGSize = CGSize(width: 400, height: 560)
+    @State private var committedFloatOffset: CGSize = .zero
     @State private var didLoadAssistantFloatLayout = false
     @State private var selection: MacPrimarySelection = .home
     @State private var sidePaneDragStartWidth: CGFloat?
@@ -161,41 +308,26 @@ struct MacRootView: View {
         )
     }
 
-    private var assistantFloatingSizeBinding: Binding<CGSize> {
-        Binding(
-            get: { assistantFloatSize },
-            set: { assistantFloatSize = $0 }
-        )
-    }
-
-    private var assistantFloatingOffsetBinding: Binding<CGSize> {
-        Binding(
-            get: { assistantFloatOffset },
-            set: { assistantFloatOffset = $0 }
-        )
-    }
-
     private func loadAssistantFloatLayoutIfNeeded() {
         guard !didLoadAssistantFloatLayout else { return }
         didLoadAssistantFloatLayout = true
         let d = UserDefaults.standard
-        let w = d.double(forKey: "mac_assistant_floating_width")
-        let h = d.double(forKey: "mac_assistant_floating_height")
+        let w  = d.double(forKey: "mac_assistant_floating_width")
+        let h  = d.double(forKey: "mac_assistant_floating_height")
         let ox = d.double(forKey: "mac_assistant_floating_offset_x")
         let oy = d.double(forKey: "mac_assistant_floating_offset_y")
-        assistantFloatSize = CGSize(
-            width: w > 0 ? w : 400,
-            height: h > 0 ? h : 560
-        )
-        assistantFloatOffset = CGSize(width: ox, height: oy)
+        committedFloatSize   = CGSize(width: w > 0 ? w : 400, height: h > 0 ? h : 560)
+        committedFloatOffset = CGSize(width: ox, height: oy)
     }
 
     private func syncAssistantFloatLayoutToDisk() {
         let d = UserDefaults.standard
-        d.set(assistantFloatSize.width, forKey: "mac_assistant_floating_width")
-        d.set(assistantFloatSize.height, forKey: "mac_assistant_floating_height")
-        d.set(assistantFloatOffset.width, forKey: "mac_assistant_floating_offset_x")
-        d.set(assistantFloatOffset.height, forKey: "mac_assistant_floating_offset_y")
+        d.set(floatingGeo.liveSize.width,    forKey: "mac_assistant_floating_width")
+        d.set(floatingGeo.liveSize.height,   forKey: "mac_assistant_floating_height")
+        d.set(floatingGeo.liveOffset.width,  forKey: "mac_assistant_floating_offset_x")
+        d.set(floatingGeo.liveOffset.height, forKey: "mac_assistant_floating_offset_y")
+        committedFloatSize   = floatingGeo.liveSize
+        committedFloatOffset = floatingGeo.liveOffset
     }
 
     @State private var isComposePresented = false
@@ -261,7 +393,7 @@ struct MacRootView: View {
             if let onboardingStep = onboardingStep {
                 HStack {
                     Spacer()
-                    Text("\(onboardingStep) of 5")
+                    Text("\(onboardingStep) of \(onboardingTotalSteps)")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 10)
@@ -287,6 +419,7 @@ struct MacRootView: View {
         // mailto: deep link — open compose with pre-filled fields when set by TodusMacApp
         .onChange(of: services.pendingMailto) { _, pending in
             guard let p = pending else { return }
+            guard !isComposePresented else { return }
             let hasField = p.to != nil || p.subject != nil || p.body != nil
             guard hasField else { return }
             composeEmailSeedTo = p.to ?? ""
@@ -421,10 +554,6 @@ struct MacRootView: View {
                             .onChanged { value in
                                 if sidePaneDragStartWidth == nil { sidePaneDragStartWidth = CGFloat(sidePaneWidth) }
                                 let start = sidePaneDragStartWidth ?? CGFloat(sidePaneWidth)
-                                // Negative translation = dragging left = wider panel.
-                                // Clamp to keep the panel usable: never narrower than 280pt
-                                // (assistant chat is unreadable below this) or wider than 600pt
-                                // (would crowd the main content area on smaller windows).
                                 let proposed = start - value.translation.width
                                 sidePaneWidth = Double(max(280, min(600, proposed)))
                             }
@@ -434,9 +563,6 @@ struct MacRootView: View {
                 MacAssistantPanel(
                     isPresented: $isAssistantPresented,
                     displayMode: assistantDisplayModeBinding,
-                    floatingSize: assistantFloatingSizeBinding,
-                    floatingOffset: assistantFloatingOffsetBinding,
-                    onFloatingLayoutCommit: syncAssistantFloatLayoutToDisk,
                     currentSelection: selection
                 )
                 .frame(width: CGFloat(sidePaneWidth))
@@ -446,44 +572,43 @@ struct MacRootView: View {
         .animation(.snappy(duration: 0.25), value: isAssistantPresented && assistantDisplayMode == .sidepane)
         .animation(.snappy(duration: 0.18), value: isCreatePresented)
         .animation(.snappy(duration: 0.18), value: isComposePresented)
-        // Floating mode — overlay panel positioned bottom-right
+        // Floating mode — overlay panel positioned bottom-right, wrapped in FloatingPanelShell
+        // so only the shell re-renders per drag/resize frame (not MacAssistantPanel).
         .overlay(alignment: .bottomTrailing) {
             if isAssistantPresented && assistantDisplayMode == .floating {
-                MacAssistantPanel(
-                    isPresented: $isAssistantPresented,
-                    displayMode: assistantDisplayModeBinding,
-                    floatingSize: assistantFloatingSizeBinding,
-                    floatingOffset: assistantFloatingOffsetBinding,
-                    onFloatingLayoutCommit: syncAssistantFloatLayoutToDisk,
-                    currentSelection: selection
-                )
-                .animation(nil, value: assistantFloatSize)
-                .animation(nil, value: assistantFloatOffset)
+                FloatingPanelShell(
+                    geo: floatingGeo,
+                    floatingSize: $committedFloatSize,
+                    floatingOffset: $committedFloatOffset,
+                    onCommit: syncAssistantFloatLayoutToDisk
+                ) {
+                    MacAssistantPanel(
+                        isPresented: $isAssistantPresented,
+                        displayMode: assistantDisplayModeBinding,
+                        geo: floatingGeo,
+                        onHeaderDragCommit: syncAssistantFloatLayoutToDisk,
+                        currentSelection: selection
+                    )
+                }
                 .padding(.trailing, 20)
                 .padding(.bottom, 20)
                 .transition(.scale(scale: 0.92, anchor: .bottomTrailing).combined(with: .opacity))
             }
         }
         .animation(.snappy(duration: 0.25), value: isAssistantPresented && assistantDisplayMode == .floating)
-        // Offline banner — shown when the device has no network connectivity
-        .overlay(alignment: .top) {
-            if !services.networkMonitor.isConnected {
-                HStack(spacing: 6) {
-                    Image(systemName: "wifi.slash")
-                        .font(.system(size: 11, weight: .semibold))
-                    Text("No internet connection")
-                        .font(.system(size: 12, weight: .medium))
-                }
-                .foregroundStyle(.white)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 7)
-                .background(.red.gradient, in: Capsule())
-                .shadow(color: .black.opacity(0.15), radius: 4, y: 2)
-                .padding(.top, 8)
-                .transition(.move(edge: .top).combined(with: .opacity))
+        // Full-screen mode — panel covers the entire content area
+        .overlay {
+            if isAssistantPresented && assistantDisplayMode == .full {
+                MacAssistantPanel(
+                    isPresented: $isAssistantPresented,
+                    displayMode: assistantDisplayModeBinding,
+                    currentSelection: selection
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .transition(.opacity)
             }
         }
-        .animation(.snappy(duration: 0.3), value: services.networkMonitor.isConnected)
+        .animation(.snappy(duration: 0.25), value: isAssistantPresented && assistantDisplayMode == .full)
         .onChange(of: selection) { _, newValue in
             // Persist sidebar selection so the next launch restores the same view.
             selectionStorageKey = newValue.storageKey
@@ -491,12 +616,25 @@ struct MacRootView: View {
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .background { syncAssistantFloatLayoutToDisk() }
         }
-        .onChange(of: assistantDisplayModeRaw) { _, _ in
-            if isAssistantPresented { syncAssistantFloatLayoutToDisk() }
+        .onChange(of: assistantDisplayModeRaw) { _, newMode in
+            syncAssistantFloatLayoutToDisk()
+            // When switching away from window mode back to floating/sidepane,
+            // re-show the panel in the main window.
+            if newMode != AssistantDisplayMode.window.rawValue && !isAssistantPresented {
+                isAssistantPresented = true
+            }
+            // When switching to window mode, open the detached window.
+            if newMode == AssistantDisplayMode.window.rawValue && isAssistantPresented {
+                openWindow(id: "ai-chat")
+            }
         }
         .onAppear {
             loadAssistantFloatLayoutIfNeeded()
             applyStartupSelectionIfNeeded()
+            // If last session left mode as .window, open the window again.
+            if assistantDisplayMode == .window && isAssistantPresented {
+                openWindow(id: "ai-chat")
+            }
         }
     }
 
@@ -562,6 +700,23 @@ struct MacRootView: View {
                     .transition(.scale(scale: 0.8).combined(with: .opacity))
                 }
             }
+            .overlay(alignment: .top) {
+                if !services.networkMonitor.isConnected {
+                    HStack(spacing: 5) {
+                        Image(systemName: "wifi.slash")
+                            .imageScale(.small)
+                            .fontWeight(.medium)
+                        Text("Offline — changes sync when reconnected")
+                            .font(.footnote)
+                    }
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 6)
+                    .background(.ultraThinMaterial)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                }
+            }
+            .animation(.snappy(duration: 0.3), value: services.networkMonitor.isConnected)
             .animation(.snappy(duration: 0.2), value: isAssistantPresented)
             .navigationTitle(selection.title)
             // Hide the toolbar's own background so the content-area
@@ -772,6 +927,11 @@ struct MacRootView: View {
         if !services.hasConfiguredNotificationsPrompt { return 5 }
         return nil
     }
+
+    /// Total number of onboarding steps shown — keep in sync with the if/else chain
+    /// in `body` and the numbered branches in `onboardingStep`. Currently: Gmail,
+    /// Calendar, Reminders, Startup view, Notifications.
+    private var onboardingTotalSteps: Int { 5 }
 
     private var startupSelection: MacPrimarySelection {
         switch services.startupView {
