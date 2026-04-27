@@ -14,6 +14,9 @@ struct SettingsView: View {
     @State private var showsDisconnectGmail = false
     /// ID of the connection selected for disconnection — used by the confirmation dialog
     @State private var disconnectingConnectionId: String?
+    /// True briefly after a successful disconnect — drives the confirmation alert
+    /// so the user sees feedback for an otherwise silent server-side action (#25).
+    @State private var showDisconnectSuccess: Bool = false
     @State private var isConnectingCalendar = false
     @State private var isConnectingReminders = false
     @State private var isConnectingGmail = false
@@ -25,6 +28,15 @@ struct SettingsView: View {
     @State private var isLoadingSessions = false
     // revokingSessionIDs and isRevokingAllSessions live in SessionsSettingsView now
 
+    // AI permission flags — backed by the same UserDefaults keys read by AIChatService
+    // so toggling these here updates the AI behaviour for the next request (#6).
+    @AppStorage("ai_can_read_tasks") private var aiCanReadTasks: Bool = true
+    @AppStorage("ai_can_write_tasks") private var aiCanWriteTasks: Bool = true
+    @AppStorage("ai_can_read_calendar") private var aiCanReadCalendar: Bool = true
+    @AppStorage("ai_can_write_calendar") private var aiCanWriteCalendar: Bool = true
+    @AppStorage("ai_can_read_email") private var aiCanReadEmail: Bool = true
+    @AppStorage("ai_can_send_email") private var aiCanSendEmail: Bool = true
+
     private var calendarAccessGranted: Bool {
         services.calendarService.canReadEvents()
     }
@@ -34,6 +46,7 @@ struct SettingsView: View {
             List {
                 accountSection
                 connectedServicesSection
+                calendarAccountsSection
 
                 // Appearance sub-page + small preferences inline
                 preferencesSection
@@ -43,6 +56,10 @@ struct SettingsView: View {
 
                 // AI Assistant — dedicated sub-page (contains large TextEditors)
                 aiAssistantNavigationSection
+
+                // Quick AI permission toggles surfaced at the top-level so users
+                // can flip read/write access without diving into the sub-page (#6).
+                aiPermissionsSection
 
                 // Billing & subscription — plan + AI usage credits + manage portal
                 billingNavigationSection
@@ -101,6 +118,17 @@ struct SettingsView: View {
         }
         .task {
             await services.subscriptionService.refresh()
+        }
+        // Connect a new Gmail account (also brings calendars). Triggered by
+        // the "Add Calendar Account" CTA in the picker / Calendar Accounts.
+        .onReceive(NotificationCenter.default.publisher(for: .todusRequestConnectGmail)) { _ in
+            Task { await performConnectGmail() }
+        }
+        // Re-OAuth an existing Gmail connection to lift the calendar scope so
+        // editing works. Wires through the same `performConnectGmail` flow today —
+        // Better Auth's linkSocial dedupes by email and re-prompts with the new scope.
+        .onReceive(NotificationCenter.default.publisher(for: .todusRequestReconnectGmail)) { _ in
+            Task { await performConnectGmail() }
         }
         .confirmationDialog(
             "Are you sure you want to log out?",
@@ -181,6 +209,11 @@ struct SettingsView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("You'll stop receiving emails in Todus. You can reconnect anytime.")
+        }
+        // Success feedback after a Gmail account has been disconnected (#25).
+        // Auto-dismissed by performDisconnectGmail() after a few seconds.
+        .alert("Gmail account disconnected", isPresented: $showDisconnectSuccess) {
+            Button("OK", role: .cancel) {}
         }
     }
 
@@ -292,7 +325,7 @@ struct SettingsView: View {
                     Label("Active Sessions", systemImage: "desktopcomputer.and.arrow.down")
                     Spacer()
                     if isLoadingSessions {
-                        ProgressView().scaleEffect(0.7)
+                        ButtonInlineProgressView(tint: .secondary, side: AppTheme.Metrics.toolbarInlineSpinner)
                     } else if !activeSessions.isEmpty {
                         Text("\(activeSessions.count)")
                             .font(.system(size: 13))
@@ -492,7 +525,7 @@ struct SettingsView: View {
                         }
                         Spacer()
                         if isConnectingGmail {
-                            ProgressView().scaleEffect(0.7)
+                            ButtonInlineProgressView(tint: .primary, side: AppTheme.Metrics.toolbarInlineSpinner)
                         } else {
                             Image(systemName: "plus.circle.fill")
                                 .font(.system(size: 20))
@@ -567,14 +600,19 @@ struct SettingsView: View {
                             isConnectingReminders = true
                             remindersPermissionError = nil
                             Task {
-                                services.remindersSyncEnabled = true
+                                // Only flip the underlying toggle AFTER the system has
+                                // granted permission — otherwise the UI shows
+                                // "Connected" while the system prompt is still pending,
+                                // and snaps back if the user denies (#23).
                                 let granted = await services.requestRemindersPermissionIfNeeded()
                                 if granted {
+                                    services.remindersSyncEnabled = true
                                     await services.importFromReminders(in: modelContext)
                                     services.syncExistingTasksToReminders(in: modelContext)
                                 } else {
-                                    // Permission denied — flip the toggle back and surface
-                                    // an inline error with a shortcut to system settings.
+                                    // Permission denied — keep the toggle in its
+                                    // off state and surface an inline error with a
+                                    // shortcut to system settings.
                                     services.remindersSyncEnabled = false
                                     remindersPermissionError = "Apple Reminders access denied. Enable it in Settings > Privacy > Reminders."
                                 }
@@ -615,6 +653,44 @@ struct SettingsView: View {
         } header: {
             Text("Connected Services")
         }
+    }
+
+    // MARK: - Calendar Accounts
+
+    /// Lists every calendar source the user has — Apple (EventKit) calendars at
+    /// the top, then one collapsible group per Google connection. Per-row toggle
+    /// drives `calendarPreferences.hiddenCalendarIds` via AppServices.
+    private var calendarAccountsSection: some View {
+        Section {
+            NavigationLink {
+                CalendarAccountsView()
+                    .environment(services)
+            } label: {
+                HStack {
+                    Label("Calendar Accounts", systemImage: "calendar.badge.plus")
+                    Spacer()
+                    Text(calendarAccountsSubtitle)
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                }
+            }
+        } header: {
+            Text("Calendars")
+        } footer: {
+            if !services.googleCalendarService.scopeMissingConnectionIds.isEmpty {
+                Text("Reconnect Gmail to enable calendar editing.")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+        }
+    }
+
+    private var calendarAccountsSubtitle: String {
+        let googleCount = services.connectionsService.connections.filter { $0.providerId == "google" }.count
+        if googleCount == 0 {
+            return "Apple"
+        }
+        return googleCount == 1 ? "Apple, 1 Gmail" : "Apple, \(googleCount) Gmail"
     }
 
 
@@ -681,10 +757,56 @@ struct SettingsView: View {
             } label: {
                 Label("AI Assistant", systemImage: "sparkles")
             }
+            NavigationLink {
+                LocalModelsView()
+            } label: {
+                Label("Local Models", systemImage: "cpu")
+            }
         } header: {
             Text("AI Assistant")
         } footer: {
-            Text("Configure what the AI can read, write, and how it responds.")
+            Text("Configure what the AI can read, write, and how it responds. Local models run on this device and don’t use plan credits.")
+        }
+    }
+
+    /// Quick read/write permission toggles for the AI assistant. Backed by the
+    /// same UserDefaults keys AIChatService reads on init, so toggling here
+    /// takes effect on the next request (#6).
+    private var aiPermissionsSection: some View {
+        Section {
+            Toggle(isOn: $aiCanReadTasks) {
+                Label("Read Tasks", systemImage: "checklist")
+            }
+            .tint(AppTheme.switchTint)
+
+            Toggle(isOn: $aiCanWriteTasks) {
+                Label("Create & Edit Tasks", systemImage: "square.and.pencil")
+            }
+            .tint(AppTheme.switchTint)
+
+            Toggle(isOn: $aiCanReadCalendar) {
+                Label("Read Calendar", systemImage: "calendar")
+            }
+            .tint(AppTheme.switchTint)
+
+            Toggle(isOn: $aiCanWriteCalendar) {
+                Label("Create Calendar Events", systemImage: "calendar.badge.plus")
+            }
+            .tint(AppTheme.switchTint)
+
+            Toggle(isOn: $aiCanReadEmail) {
+                Label("Read Email", systemImage: "envelope")
+            }
+            .tint(AppTheme.switchTint)
+
+            Toggle(isOn: $aiCanSendEmail) {
+                Label("Send Email", systemImage: "paperplane")
+            }
+            .tint(AppTheme.switchTint)
+        } header: {
+            Text("AI Permissions")
+        } footer: {
+            Text("Control what the AI can read and write on your behalf. Disabling a permission removes that capability from the assistant's tools.")
         }
     }
 
@@ -933,8 +1055,9 @@ struct SettingsView: View {
         services.authService.hasSeenOnboarding = false
         services.signOut()
 
-        // Wipe all local SwiftData records (tasks + folders)
+        // Wipe all local SwiftData records (tasks + folders + folder items)
         try? modelContext.delete(model: TaskRecord.self)
+        try? modelContext.delete(model: FolderItemRecord.self)
         try? modelContext.delete(model: FolderRecord.self)
         try? modelContext.save()
 
@@ -966,16 +1089,28 @@ struct SettingsView: View {
         let connectionId = disconnectingConnectionId
         defer { disconnectingConnectionId = nil }
 
+        var didSucceed = false
         do {
             if let connectionId {
                 try await services.connectionsService.deleteConnection(connectionId: connectionId)
             } else {
                 try await services.apiClient.disconnectEmail()
             }
+            didSucceed = true
         } catch {
             AppLogger.shared.log("Disconnect email failed: \(error.localizedDescription)")
         }
         await services.emailService.checkConnection()
+
+        // Show a brief confirmation so the user knows the disconnect succeeded.
+        // Auto-dismiss after a few seconds so it doesn't block subsequent edits.
+        if didSucceed {
+            showDisconnectSuccess = true
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 2_500_000_000)
+                showDisconnectSuccess = false
+            }
+        }
     }
 
 }
@@ -998,7 +1133,7 @@ struct SessionsSettingsView: View {
         List {
             if isLoadingSessions {
                 HStack(spacing: 8) {
-                    ProgressView().scaleEffect(0.8)
+                    ButtonInlineProgressView(tint: .secondary, side: AppTheme.Metrics.toolbarInlineSpinner)
                     Text("Loading sessions…")
                         .font(.system(size: 14))
                         .foregroundStyle(.secondary)
@@ -1052,7 +1187,7 @@ struct SessionsSettingsView: View {
                                         Task { await revokeSession(session.id) }
                                     } label: {
                                         if revokingSessionIDs.contains(session.id) {
-                                            ProgressView().scaleEffect(0.7)
+                                            ButtonInlineProgressView(tint: .primary, side: AppTheme.Metrics.compactInlineSpinner)
                                         } else {
                                             Text("Log out")
                                                 .font(.system(size: 13, weight: .medium))
@@ -1087,7 +1222,9 @@ struct SessionsSettingsView: View {
                             Task { await revokeAllSessions() }
                         } label: {
                             HStack {
-                                if isRevokingAllSessions { ProgressView().scaleEffect(0.8) }
+                                if isRevokingAllSessions {
+                                    ButtonInlineProgressView(tint: .primary, side: AppTheme.Metrics.toolbarInlineSpinner)
+                                }
                                 Text(isRevokingAllSessions ? "Signing out…" : "Log out all other devices")
                             }
                         }

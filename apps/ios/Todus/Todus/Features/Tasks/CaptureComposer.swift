@@ -446,7 +446,7 @@ struct PasteHandlingTextInput: UIViewRepresentable {
 
         // Preserve the existing auto-focus behavior unless the parent explicitly controls focus.
         if isFocused ?? true {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                 view.becomeFirstResponder()
             }
         }
@@ -674,7 +674,9 @@ final class PasteInterceptingTextView: UITextView {
     override var intrinsicContentSize: CGSize {
         // Keep the empty composer compact; the placeholder should behave like a
         // single-line input instead of inheriting a tall measured height.
-        if textColor == UIColor.placeholderText || (text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true) {
+        // Use a strict isEmpty check (not trimmed) so pressing Return on an
+        // otherwise-empty field — text becomes "\n" — still grows the view.
+        if textColor == UIColor.placeholderText || (text?.isEmpty ?? true) {
             let lineHeight = font?.lineHeight ?? 20
             let verticalInsets = textContainerInset.top + textContainerInset.bottom
             let height = ceil(lineHeight + verticalInsets)

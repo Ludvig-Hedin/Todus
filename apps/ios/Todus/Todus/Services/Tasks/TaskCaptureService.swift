@@ -703,16 +703,23 @@ final class TaskCaptureService {
         folder.updatedAt = .now
         try? context.save()
 
-        // best-effort sync — the optimistic cachedItemCount update is not rolled back on failure
-        Task { [weak self, folder, title, subtitle] in
+        // Optimistic count was bumped above. Roll back on sync failure so the local
+        // mirror doesn't drift from the server over time. fetchFolderSummary still
+        // reconciles eventually, but rolling back keeps the UI honest in the meantime.
+        Task { @MainActor [weak self, folder, title, subtitle] in
             guard let self else { return }
-            await syncFolderItemAdd(
-                folderID: folder.id.uuidString,
-                itemType: itemType,
-                itemId: itemId,
-                title: title,
-                subtitle: subtitle
-            )
+            do {
+                try await syncFolderItemAdd(
+                    folderID: folder.id.uuidString,
+                    itemType: itemType,
+                    itemId: itemId,
+                    title: title,
+                    subtitle: subtitle
+                )
+            } catch {
+                folder.cachedItemCount = max(0, folder.cachedItemCount - 1)
+                try? context.save()
+            }
         }
     }
 
@@ -754,7 +761,7 @@ final class TaskCaptureService {
         itemId: String,
         title: String?,
         subtitle: String?
-    ) async {
+    ) async throws {
         struct Metadata: Encodable {
             let title: String?
             let subtitle: String?
@@ -770,19 +777,15 @@ final class TaskCaptureService {
             ? Metadata(title: title, subtitle: subtitle)
             : nil
 
-        do {
-            let _: EmptyResponse = try await apiClient.trpcMutation(
-                "folders.addItem",
-                input: AddInput(
-                    folderId: folderID,
-                    itemType: itemType,
-                    itemId: itemId,
-                    metadata: metadata
-                )
+        let _: EmptyResponse = try await apiClient.trpcMutation(
+            "folders.addItem",
+            input: AddInput(
+                folderId: folderID,
+                itemType: itemType,
+                itemId: itemId,
+                metadata: metadata
             )
-        } catch {
-            // Best-effort sync only.
-        }
+        )
     }
 
     private func syncFolderItemRemove(folderID: String, itemType: String, itemId: String) async {

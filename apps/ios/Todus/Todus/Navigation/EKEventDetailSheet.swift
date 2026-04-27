@@ -5,8 +5,11 @@ import EventKitUI
 /// UIKit bridge — wraps EKEventViewController in a SwiftUI sheet.
 /// Presented via .sheet(item: $selectedCalendarEvent) in HomeView.
 ///
-/// `EKEventStore()` can block briefly on first XPC. Loading on the main actor
-/// keeps Swift 6 isolation valid for `EKEventStore` (it is not `Sendable`).
+/// `EKEventStore()` is a synchronous XPC call to the calendardd daemon that can
+/// block the calling thread for up to 9 seconds ("Fence Hang"). It MUST be
+/// created off the main thread; we do that via `Task.detached` and ferry the
+/// result back to the main actor inside `EKStoreHolder` (`@unchecked Sendable`
+/// since EKEventStore is not Sendable but is safe to hand off once created).
 struct EKEventDetailSheet: UIViewControllerRepresentable {
     let eventId: String
     @Environment(\.dismiss) private var dismiss
@@ -21,13 +24,18 @@ struct EKEventDetailSheet: UIViewControllerRepresentable {
         let nav = UINavigationController(rootViewController: eventVC)
         context.coordinator.eventVC = eventVC
 
-        // Async hop so the navigation controller returns immediately; event
-        // populates on the next main run-loop turn.
+        // Create the store off main (XPC fence) and assign on main once ready —
+        // the navigation controller returns immediately and the event populates
+        // a short time later. Without the detach, the sheet presentation freezes
+        // the UI for several seconds on first calendar XPC.
         let coordinator = context.coordinator
+        let id = eventId
         Task { @MainActor in
-            let store = EKEventStore()
-            coordinator.store = store
-            if let ekEvent = store.event(withIdentifier: eventId) {
+            let holder = await Task.detached(priority: .userInitiated) {
+                EKStoreHolder()
+            }.value
+            coordinator.store = holder.store
+            if let ekEvent = holder.store.event(withIdentifier: id) {
                 eventVC.event = ekEvent
             }
         }
@@ -55,4 +63,11 @@ struct EKEventDetailSheet: UIViewControllerRepresentable {
             }
         }
     }
+}
+
+/// Carries an `EKEventStore` across the actor boundary from a detached task back
+/// to the main actor. EKEventStore is not Sendable but is safe to hand off once
+/// constructed; `@unchecked Sendable` documents that we've checked this.
+private final class EKStoreHolder: @unchecked Sendable {
+    let store = EKEventStore()
 }

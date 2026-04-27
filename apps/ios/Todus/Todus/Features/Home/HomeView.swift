@@ -8,12 +8,22 @@ struct HomeView: View {
     @Environment(AppServices.self) private var services
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.modelContext) private var modelContext
-    @Query(sort: \FolderRecord.createdAt) private var folders: [FolderRecord]
+    @Query(
+        sort: [
+            SortDescriptor(\FolderRecord.position, order: .forward),
+            SortDescriptor(\FolderRecord.createdAt, order: .forward),
+        ]
+    )
+    private var folders: [FolderRecord]
 
     // Tasks due today — SwiftData live query (excludes completed tasks)
     @Query(filter: #Predicate<TaskRecord> { task in
         !task.completed
     }, sort: \TaskRecord.createdAt, order: .reverse) private var allTasks: [TaskRecord]
+
+    // Unfiltered count — used to drive the "Create your first task" setup prompt so
+    // a user who has only completed tasks isn't told they haven't created any yet.
+    @Query private var allTasksIncludingCompleted: [TaskRecord]
 
     @State private var todaysEvents: [CalendarEvent] = []
     @State private var isLoadingEvents = false
@@ -27,69 +37,83 @@ struct HomeView: View {
     @State private var selectedTask: TaskRecord? = nil
     @State private var selectedCalendarEvent: CalendarEvent? = nil
     @State private var selectedEmailThread: EmailThread? = nil
-    @State private var proactiveSuggestionThread: HomeProactiveThreadRoute? = nil
-    @State private var isLoadingProactiveNudges = false
+    /// Sheet for opening a thread by id — used by hero priority callout and briefing rows
+    /// where we don't have the full EmailThread payload, only the id.
+    @State private var briefingThreadRoute: HomeThreadIdRoute? = nil
     @State private var showDocsSheet = false
 
     /// Most recent foreground refresh — used to gate the scenePhase listener so we don't
     /// double-refresh when the app comes back to foreground rapidly (e.g. after dismissing
     /// a system permission prompt or share sheet).
     @State private var lastRefresh: Date = .distantPast
+    @State private var selectedFolder: FolderRecord? = nil
+    @State private var showFolderEditSheet: Bool = false
     private let foregroundRefreshThrottle: TimeInterval = 5
 
+    @State private var headerHeight: CGFloat = 60
+    private let scrimTail: CGFloat = 32
+
     var body: some View {
-        ZStack {
+        ZStack(alignment: .top) {
             AppTheme.backgroundTop.ignoresSafeArea()
 
+            ScrollView(.vertical) {
+                VStack(alignment: .leading, spacing: 18) {
+                    briefingHero
+
+                    if showSetupChecklist {
+                        setupChecklist
+                    }
+
+                    if showBriefingFeed {
+                        briefingFeedSection
+                    }
+
+                    eventsSection
+                    tasksSection
+                    emailSection
+
+                    foldersSection
+
+                    // Pages not pinned to the tab bar — only shown in developer mode
+                    if services.effectiveDeveloperModeEnabled {
+                        moreSection
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .scrollDismissesKeyboard(.interactively)
+            .contentMargins(.bottom, 32, for: .scrollContent)
+            .safeAreaInset(edge: .top) {
+                Color.clear.frame(height: headerHeight + scrimTail)
+            }
+
+            // Floating header — content scrolls under it; scrim gradient fades below.
             VStack(spacing: 0) {
-                // Header pinned outside the scroll for consistent position
                 AppTopHeader(title: "Home")
                     .padding(.horizontal, 16)
                     .padding(.top, 4)
-
-                ScrollView(.vertical) {
-                    VStack(alignment: .leading, spacing: 24) {
-                        greetingSection
-
-                        if showProactiveAssistantOnHome {
-                            proactiveAssistantSection
-                        }
-
-                        if services.assistantAutomationPolicy.briefingEnabled
-                            && services.assistantAutomationPolicy.showHomeBriefing {
-                            assistantBriefingSection
-                        }
-
-                        if todaysEvents.isEmpty && tasksDueToday.isEmpty && !services.emailService.hasConnection {
-                            getStartedSection
-                        } else {
-                            if showSetupCard {
-                                setupCard
-                            }
-
-                            eventsSection
-                            tasksSection
-                            emailSection
-                        }
-
-                        // Pages not pinned to the tab bar — only shown in developer mode
-                        if services.effectiveDeveloperModeEnabled {
-                            moreSection
-                        }
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.horizontal, 16)
-                    .padding(.top, 12)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                .scrollDismissesKeyboard(.interactively)
-                // Keep the last cards clear of the native tab bar without reserving the old
-                // floating custom-bar height.
-                .contentMargins(.bottom, 32, for: .scrollContent)
+                    .padding(.bottom, 4)
             }
+            .onGeometryChange(for: CGFloat.self) { proxy in
+                proxy.size.height
+            } action: { height in
+                headerHeight = height
+            }
+            .pageHeaderScrim(scrimHeight: headerHeight + scrimTail)
         }
         .toolbar(.hidden, for: .navigationBar)
         .task {
+            // EmailService restores `hasConnection` from UserDefaults in init. If it's
+            // already resolved (true on prior launch), trust that for the first paint
+            // so the email section doesn't briefly show "Checking your inbox" before
+            // the async checkConnection() call lands.
+            if services.emailService.hasResolvedConnection {
+                hasLoadedEmailState = true
+            }
             await loadHomeData()
             lastRefresh = Date()
         }
@@ -143,85 +167,41 @@ struct HomeView: View {
             .presentationDragIndicator(Visibility.visible)
             .appSheetBackground()
         }
-        .sheet(item: $proactiveSuggestionThread) { route in
+        .sheet(item: $briefingThreadRoute) { route in
             NavigationStack {
                 EmailThreadView(threadId: route.id)
             }
             .presentationDragIndicator(Visibility.visible)
             .appSheetBackground()
         }
+        .sheet(item: $selectedFolder) { folder in
+            NavigationStack {
+                FolderDetailView(folder: folder)
+            }
+            .presentationDragIndicator(Visibility.visible)
+            .appSheetBackground()
+        }
+        .sheet(isPresented: $showFolderEditSheet) {
+            FolderEditSheet(mode: .create)
+                .appSheetBackground()
+        }
+        // Header ellipsis menu — Refresh
+        .onChange(of: services.homeRefreshTick) { _, _ in
+            Task {
+                await services.remindersSyncService.refreshFromReminders(in: modelContext)
+                await loadHomeData()
+                lastRefresh = Date()
+            }
+        }
     }
 
-    /// Sheet route for opening a thread from AI suggestion cards.
-    private struct HomeProactiveThreadRoute: Identifiable {
+    /// Sheet route for opening a thread by id when we don't have the full EmailThread payload
+    /// (briefing rows + hero priority callout).
+    private struct HomeThreadIdRoute: Identifiable {
         let id: String
     }
 
-    // MARK: - Greeting
-
-    private var greetingSection: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(greeting)
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(.secondary)
-            Text(Date.now, format: .dateTime.weekday(.wide).month(.wide).day())
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    private var needsEmailSetup: Bool {
-        hasLoadedEmailState && !services.emailService.hasConnection
-    }
-
-    private var needsCalendarSetup: Bool {
-        !services.calendarService.canReadEvents()
-    }
-
-    private var showSetupCard: Bool {
-        !(todaysEvents.isEmpty && tasksDueToday.isEmpty && !services.emailService.hasConnection)
-            && (needsEmailSetup || needsCalendarSetup)
-    }
-
-    private var setupCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Finish setup")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(.primary)
-
-            Text("Connect the remaining sources so Home can show your full day at a glance.")
-                .font(.system(size: 13))
-                .foregroundStyle(.secondary)
-
-            VStack(spacing: 8) {
-                if needsEmailSetup {
-                    setupRow(
-                        icon: "envelope.fill",
-                        title: "Connect Gmail",
-                        subtitle: "Bring your inbox into Home and Email",
-                        actionTitle: "Open Email",
-                        action: { services.navigateTo = .email }
-                    )
-                }
-
-                if needsCalendarSetup {
-                    setupRow(
-                        icon: "calendar",
-                        title: "Enable Calendar Access",
-                        subtitle: "Show today's events alongside your tasks",
-                        actionTitle: "Open Calendar",
-                        action: { services.navigateTo = .calendar }
-                    )
-                }
-            }
-        }
-        .padding(16)
-        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.row, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: AppTheme.Radius.row, style: .continuous)
-                .stroke(AppTheme.cardBorder, lineWidth: 1)
-        )
-    }
+    // MARK: - Time-aware briefing hero
 
     private var greeting: String {
         let hour = Calendar.current.component(.hour, from: Date())
@@ -245,79 +225,317 @@ struct HomeView: View {
         services.emailService.isLoadingThreads && !services.emailService.threads.isEmpty
     }
 
-    private var showProactiveAssistantOnHome: Bool {
-        services.authService.isAuthenticated
-            && services.emailService.hasConnection
-            && services.assistantAutomationPolicy.assistantThreadActionsVisible
-            && services.assistantAutomationPolicy.briefingEnabled
+    /// Time-aware one-line summary derived from today's counts. Falls back to a friendly
+    /// "all clear" line when there's nothing to surface.
+    private var summaryLine: String {
+        let hour = Calendar.current.component(.hour, from: Date())
+        let eventCount = todaysEvents.count
+        let taskCount = tasksDueToday.count
+        let replyCount = services.emailService.assistantBriefing?.needsYou.count ?? 0
+
+        var parts: [String] = []
+        if eventCount > 0 {
+            parts.append("\(eventCount) event\(eventCount == 1 ? "" : "s")")
+        }
+        if taskCount > 0 {
+            parts.append("\(taskCount) task\(taskCount == 1 ? "" : "s") due")
+        }
+        if replyCount > 0 {
+            parts.append("\(replyCount) repl\(replyCount == 1 ? "y" : "ies") waiting")
+        }
+
+        if parts.isEmpty {
+            switch hour {
+            case 5..<12: return "Your day looks clear."
+            case 12..<17: return "Nothing on your plate right now."
+            default: return "You're all caught up."
+            }
+        }
+
+        let prefix: String
+        switch hour {
+        case 5..<12: prefix = "Today you have"
+        case 12..<17: prefix = "Still on your plate:"
+        default: prefix = "Outstanding for today:"
+        }
+        return "\(prefix) \(parts.joined(separator: ", "))."
     }
 
-    private var proactiveNudgeCards: [MailAssistantNudge] {
-        services.emailService.assistantNudges.filter { $0.count > 0 }
+    /// Single highest-priority item to surface in the hero, picked in this order:
+    /// urgent reply → top task → next event. Returns nil if briefing hasn't loaded.
+    private var topPriority: HomeTopPriority? {
+        guard let briefing = services.emailService.assistantBriefing else { return nil }
+        if let urgent = briefing.today.urgentReply {
+            return HomeTopPriority(
+                kind: .reply,
+                title: urgent.title,
+                detail: urgent.summary,
+                threadId: urgent.threadId
+            )
+        }
+        if let topTask = briefing.today.topTask {
+            return HomeTopPriority(
+                kind: .task,
+                title: topTask.title,
+                detail: topTask.dueDate ?? "Top task",
+                threadId: nil
+            )
+        }
+        if let nextEvent = briefing.today.nextEvent {
+            return HomeTopPriority(
+                kind: .event,
+                title: nextEvent.title,
+                detail: nextEvent.startsAt,
+                threadId: nil
+            )
+        }
+        return nil
     }
 
-    private var proactiveAssistantSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: "sparkles")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [
-                                Color(red: 0, green: 0xAA / 255, blue: 0xF5 / 255),
-                                Color(red: 0xEF / 255, green: 0, blue: 0xC2 / 255),
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .accessibilityHidden(true)
+    private struct HomeTopPriority {
+        enum Kind {
+            case reply, task, event
+            var icon: String {
+                switch self {
+                case .reply: return "arrowshape.turn.up.left.fill"
+                case .task: return "checkmark.circle.fill"
+                case .event: return "calendar"
+                }
+            }
+            var label: String {
+                switch self {
+                case .reply: return "Urgent reply"
+                case .task: return "Top task"
+                case .event: return "Next event"
+                }
+            }
+        }
+        let kind: Kind
+        let title: String
+        let detail: String
+        let threadId: String?
+    }
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Suggestions for you")
-                        .font(.system(size: 16, weight: .semibold))
+    private struct HomeStatChip: Identifiable {
+        let id: String
+        let icon: String
+        let label: String
+        let action: () -> Void
+    }
+
+    private var heroStatChips: [HomeStatChip] {
+        var chips: [HomeStatChip] = []
+        if !tasksDueToday.isEmpty {
+            chips.append(HomeStatChip(
+                id: "tasks",
+                icon: "checkmark.circle",
+                label: "\(tasksDueToday.count) task\(tasksDueToday.count == 1 ? "" : "s")",
+                action: { services.navigateTo = .tasks }
+            ))
+        }
+        let needsYouCount = services.emailService.assistantBriefing?.needsYou.count ?? 0
+        if needsYouCount > 0 {
+            chips.append(HomeStatChip(
+                id: "needs-reply",
+                icon: "arrowshape.turn.up.left",
+                label: "\(needsYouCount) repl\(needsYouCount == 1 ? "y" : "ies")",
+                action: { services.navigateTo = .email }
+            ))
+        }
+        return chips
+    }
+
+    private var briefingHero: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Text(greeting)
+                        .font(.system(size: 22, weight: .bold))
                         .foregroundStyle(.primary)
-                    Text("From your inbox — tap a card to open the thread.")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(AppTheme.mutedText)
-                        .fixedSize(horizontal: false, vertical: true)
+                    if isAssistantBriefingRefreshing {
+                        InlineRefreshBadge()
+                    }
                 }
-
-                Spacer(minLength: 12)
-
-                if isLoadingProactiveNudges {
-                    ProgressView()
-                        .padding(.trailing, 4)
-                }
-
-                Button("Mail") {
-                    services.navigateTo = .email
-                }
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Color.accentColor)
+                Text(Date.now, format: .dateTime.weekday(.wide).month(.wide).day())
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.secondary)
             }
 
-            if isLoadingProactiveNudges && proactiveNudgeCards.isEmpty {
-                loadingState(message: "Checking your inbox…")
-            } else if !isLoadingProactiveNudges && proactiveNudgeCards.isEmpty {
-                Text("You’re caught up on what we’re tracking. New replies and drafts will surface here.")
-                    .font(.system(size: 13))
-                    .foregroundStyle(AppTheme.mutedText)
-                    .padding(12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(AppTheme.surfaceSecondary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.compact, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: AppTheme.Radius.compact, style: .continuous)
-                            .stroke(AppTheme.cardBorder, lineWidth: 1)
-                    )
-            } else {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 10) {
-                        ForEach(Array(proactiveNudgeCards.prefix(6))) { nudge in
-                            proactiveNudgeCard(nudge)
+            Text(summaryLine)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let priority = topPriority {
+                topPriorityRow(priority)
+            }
+
+            if !todaysEvents.isEmpty {
+                VStack(spacing: 6) {
+                    ForEach(todaysEvents.prefix(3)) { event in
+                        Button {
+                            selectedCalendarEvent = event
+                        } label: {
+                            HStack(spacing: 10) {
+                                Circle()
+                                    .fill(Color(hue: Double(event.calendarColor % 360) / 360.0, saturation: 0.6, brightness: 0.8))
+                                    .frame(width: 7, height: 7)
+                                Text(event.title)
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundStyle(.primary)
+                                    .lineLimit(1)
+                                Spacer(minLength: 4)
+                                if event.isAllDay {
+                                    Text("All day")
+                                        .font(.system(size: 12))
+                                        .foregroundStyle(.secondary)
+                                } else {
+                                    Text(event.startDate, format: .dateTime.hour().minute())
+                                        .font(.system(size: 12))
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 7)
+                            .background(AppTheme.surfaceSecondary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.inline, style: .continuous))
+                            .contentShape(Rectangle())
                         }
+                        .buttonStyle(.plain)
                     }
-                    .padding(.vertical, 2)
+                }
+            }
+
+            if !heroStatChips.isEmpty {
+                HStack(spacing: 8) {
+                    ForEach(heroStatChips) { chip in
+                        Button(action: chip.action) {
+                            HStack(spacing: 6) {
+                                Image(systemName: chip.icon)
+                                    .font(.system(size: 11, weight: .semibold))
+                                Text(chip.label)
+                                    .font(.system(size: 12, weight: .semibold))
+                            }
+                            .foregroundStyle(.primary)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(AppTheme.surfaceSecondary, in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.row, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppTheme.Radius.row, style: .continuous)
+                .stroke(AppTheme.cardBorder, lineWidth: 1)
+        )
+    }
+
+    private func topPriorityRow(_ priority: HomeTopPriority) -> some View {
+        Button {
+            switch priority.kind {
+            case .reply:
+                if let id = priority.threadId {
+                    briefingThreadRoute = HomeThreadIdRoute(id: id)
+                } else {
+                    services.navigateTo = .email
+                }
+            case .task:
+                services.navigateTo = .tasks
+            case .event:
+                services.navigateTo = .calendar
+            }
+        } label: {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: priority.kind.icon)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(AppTheme.accent)
+                    .frame(width: 28, height: 28)
+                    .background(AppTheme.surfaceSecondary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.inline, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(priority.kind.label)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(AppTheme.mutedText)
+                        .textCase(.uppercase)
+                    Text(priority.title)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.primary)
+                        .multilineTextAlignment(.leading)
+                        .lineLimit(2)
+                    if !priority.detail.isEmpty {
+                        Text(priority.detail)
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+
+                Spacer(minLength: 8)
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(AppTheme.mutedText)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(AppTheme.surfaceSecondary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Smart progressive setup checklist
+
+    private var needsTaskSetup: Bool {
+        allTasksIncludingCompleted.isEmpty
+    }
+
+    private var needsEmailSetup: Bool {
+        hasLoadedEmailState && !services.emailService.hasConnection
+    }
+
+    private var needsCalendarSetup: Bool {
+        !services.calendarService.canReadEvents()
+    }
+
+    private var showSetupChecklist: Bool {
+        needsTaskSetup || needsEmailSetup || needsCalendarSetup
+    }
+
+    private var setupChecklist: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Finish setting up")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.primary)
+
+            VStack(spacing: 8) {
+                if needsTaskSetup {
+                    setupChecklistRow(
+                        icon: "checkmark.circle",
+                        title: "Create your first task",
+                        subtitle: "Tap + or open the Tasks tab",
+                        action: { services.requestCreateSheet = .task }
+                    )
+                }
+                if needsEmailSetup {
+                    setupChecklistRow(
+                        icon: "envelope.fill",
+                        title: "Connect Gmail",
+                        subtitle: "Bring your inbox into Home and Email",
+                        action: { services.navigateTo = .email }
+                    )
+                }
+                if needsCalendarSetup {
+                    setupChecklistRow(
+                        icon: "calendar",
+                        title: "Enable calendar access",
+                        subtitle: "See today's events alongside your tasks",
+                        action: { services.navigateTo = .calendar }
+                    )
                 }
             }
         }
@@ -325,75 +543,182 @@ struct HomeView: View {
         .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.row, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: AppTheme.Radius.row, style: .continuous)
-                .stroke(
-                    LinearGradient(
-                        colors: [Color.accentColor.opacity(0.45), Color.accentColor.opacity(0.08)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: 1
-                )
+                .stroke(AppTheme.cardBorder, lineWidth: 1)
         )
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("AI suggestions from your mail")
     }
 
-    private func proactiveNudgeCard(_ nudge: MailAssistantNudge) -> some View {
+    private func setupChecklistRow(
+        icon: String,
+        title: String,
+        subtitle: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: icon)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(AppTheme.accent)
+                    .frame(width: 28, height: 28)
+                    .background(AppTheme.surfaceSecondary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.inline, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.primary)
+                    Text(subtitle)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(AppTheme.mutedText)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Consolidated briefing feed
+
+    private struct BriefingFeedItem: Identifiable {
+        enum Category {
+            case reply, waiting, draft
+            var label: String {
+                switch self {
+                case .reply: return "Reply"
+                case .waiting: return "Waiting"
+                case .draft: return "Draft"
+                }
+            }
+        }
+        let id: String
+        let category: Category
+        let title: String
+        let summary: String
+        let threadId: String?
+    }
+
+    private var briefingFeedItems: [BriefingFeedItem] {
+        guard let briefing = services.emailService.assistantBriefing else { return [] }
+        var items: [BriefingFeedItem] = []
+        for loop in briefing.needsYou {
+            items.append(BriefingFeedItem(
+                id: "needs-\(loop.id)",
+                category: .reply,
+                title: loop.title,
+                summary: loop.summary,
+                threadId: loop.threadId
+            ))
+        }
+        for loop in briefing.waitingOn {
+            items.append(BriefingFeedItem(
+                id: "waiting-\(loop.id)",
+                category: .waiting,
+                title: loop.title,
+                summary: loop.summary,
+                threadId: loop.threadId
+            ))
+        }
+        for action in briefing.prepared {
+            items.append(BriefingFeedItem(
+                id: "prepared-\(action.id)",
+                category: .draft,
+                title: action.title,
+                summary: action.summary,
+                threadId: action.threadId
+            ))
+        }
+        return items
+    }
+
+    private var showBriefingFeed: Bool {
+        guard services.assistantAutomationPolicy.briefingEnabled,
+              services.assistantAutomationPolicy.showHomeBriefing else {
+            return false
+        }
+        if !briefingFeedItems.isEmpty { return true }
+        // Show loading skeleton on cold launch with no cache.
+        if isLoadingAssistantBriefing && services.emailService.assistantBriefing == nil {
+            return true
+        }
+        return false
+    }
+
+    private var briefingFeedSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 6) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(AppTheme.mutedText)
+                Text("Assistant Briefing")
+                    .font(.system(size: 15, weight: .semibold))
+                Spacer()
+                if briefingFeedItems.count > 6 {
+                    Button("View all") {
+                        services.navigateTo = .email
+                    }
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(AppTheme.accent)
+                }
+            }
+
+            if isLoadingAssistantBriefing && services.emailService.assistantBriefing == nil {
+                loadingState(message: "Preparing your briefing")
+            } else {
+                VStack(spacing: 8) {
+                    ForEach(briefingFeedItems.prefix(6)) { item in
+                        briefingFeedRow(item)
+                    }
+                }
+            }
+        }
+    }
+
+    private func briefingFeedRow(_ item: BriefingFeedItem) -> some View {
         Button {
-            if let id = nudge.threadIds.first {
-                proactiveSuggestionThread = HomeProactiveThreadRoute(id: id)
+            if let id = item.threadId {
+                briefingThreadRoute = HomeThreadIdRoute(id: id)
             } else {
                 services.navigateTo = .email
             }
         } label: {
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: iconForAssistantNudge(nudge.type))
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(Color.accentColor)
-                    .frame(width: 24)
+            HStack(alignment: .top, spacing: 12) {
+                Text(item.category.label)
+                    .font(.system(size: 10, weight: .bold))
+                    .textCase(.uppercase)
+                    .foregroundStyle(AppTheme.mutedText)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(AppTheme.surfaceSecondary, in: Capsule())
 
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text(nudge.title)
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.primary)
-                            .multilineTextAlignment(.leading)
-                            .lineLimit(2)
-                        Spacer(minLength: 4)
-                        Text("\(nudge.count)")
-                            .font(.system(size: 10, weight: .bold, design: .rounded))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(item.title)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    if !item.summary.isEmpty {
+                        Text(item.summary)
+                            .font(.system(size: 12))
                             .foregroundStyle(.secondary)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(AppTheme.surfaceSecondary, in: Capsule())
+                            .lineLimit(1)
                     }
-                    Text(nudge.description)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(3)
-                        .multilineTextAlignment(.leading)
-                        .fixedSize(horizontal: false, vertical: true)
                 }
+
+                Spacer()
             }
             .padding(12)
-            .frame(width: 268, alignment: .leading)
-            .background(AppTheme.surfaceSecondary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.compact, style: .continuous))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: AppTheme.Radius.compact, style: .continuous)
+                RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous)
                     .stroke(AppTheme.cardBorder, lineWidth: 1)
             )
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(nudge.threadIds.isEmpty)
-    }
-
-    private func iconForAssistantNudge(_ type: AssistantNudgeType) -> String {
-        switch type {
-        case .replyNeeded: return "arrowshape.turn.up.left.fill"
-        case .meetingRequest: return "calendar.badge.clock"
-        case .followUp: return "clock.arrow.circlepath"
-        case .draftReady: return "doc.text.fill"
-        }
     }
 
     // MARK: - Events Section
@@ -506,151 +831,6 @@ struct HomeView: View {
         }
     }
 
-    private var assistantBriefingSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 6) {
-                Image(systemName: "sparkles")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(AppTheme.mutedText)
-                Text("Assistant Briefing")
-                    .font(.system(size: 15, weight: .semibold))
-                if isAssistantBriefingRefreshing {
-                    InlineRefreshBadge()
-                }
-            }
-
-            if isLoadingAssistantBriefing && services.emailService.assistantBriefing == nil {
-                loadingState(message: "Preparing your briefing")
-            } else if let briefing = services.emailService.assistantBriefing {
-                VStack(spacing: 10) {
-                    assistantPriorityStrip(briefing)
-                    assistantQueueSection(
-                        title: "Needs You",
-                        items: briefing.needsYou.map { ($0.title, $0.summary, $0.threadId) },
-                        emptyMessage: "No reply or decision blockers right now."
-                    )
-                    assistantQueueSection(
-                        title: "Waiting On",
-                        items: briefing.waitingOn.map { ($0.title, $0.summary, $0.threadId) },
-                        emptyMessage: "Nothing currently tracked as waiting on someone else."
-                    )
-                    assistantQueueSection(
-                        title: "Prepared",
-                        items: briefing.prepared.map { ($0.title, $0.summary, $0.threadId) },
-                        emptyMessage: "No prepared drafts or actions waiting for approval."
-                    )
-                }
-            }
-        }
-    }
-
-    private func assistantPriorityStrip(_ briefing: AssistantBriefing) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                if let urgentReply = briefing.today.urgentReply {
-                    assistantMiniCard(
-                        title: "Urgent reply",
-                        detail: urgentReply.title,
-                        action: { services.navigateTo = .email }
-                    )
-                }
-                if let topTask = briefing.today.topTask {
-                    assistantMiniCard(
-                        title: "Top task",
-                        detail: topTask.title,
-                        action: { services.navigateTo = .tasks }
-                    )
-                }
-                if let nextEvent = briefing.today.nextEvent {
-                    assistantMiniCard(
-                        title: "Next event",
-                        detail: nextEvent.title,
-                        action: { services.navigateTo = .calendar }
-                    )
-                }
-            }
-            .padding(.horizontal, 1)
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    private func assistantMiniCard(title: String, detail: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(AppTheme.mutedText)
-                    .textCase(.uppercase)
-                Text(detail)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.primary)
-                    .lineLimit(2)
-            }
-            .padding(12)
-            .frame(width: 180, alignment: .leading)
-            .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous)
-                    .stroke(AppTheme.cardBorder, lineWidth: 1)
-            )
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func assistantQueueSection(
-        title: String,
-        items: [(title: String, summary: String, threadId: String?)],
-        emptyMessage: String
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(title)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(AppTheme.mutedText)
-                    .textCase(.uppercase)
-                Spacer()
-                Text("\(items.count)")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(AppTheme.mutedText)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
-                    .background(AppTheme.surfaceSecondary, in: Capsule())
-            }
-
-            if items.isEmpty {
-                emptyState(message: emptyMessage, onTap: {})
-                    .allowsHitTesting(false)
-            } else {
-                VStack(spacing: 8) {
-                    ForEach(Array(items.prefix(3).enumerated()), id: \.offset) { _, item in
-                        Button {
-                            services.navigateTo = .email
-                        } label: {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(item.title)
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundStyle(.primary)
-                                    .lineLimit(1)
-                                Text(item.summary)
-                                    .font(.system(size: 12))
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(2)
-                            }
-                            .padding(12)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous)
-                                    .stroke(AppTheme.cardBorder, lineWidth: 1)
-                            )
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
-        }
-    }
-
     // MARK: - Tasks Section
 
     private func recomputeTasksDueToday() {
@@ -712,7 +892,7 @@ struct HomeView: View {
             sectionHeader(
                 title: "Recent Emails",
                 icon: "envelope.fill",
-                count: services.emailService.threads.prefix(3).count,
+                count: services.emailService.threads.count,
                 actionTitle: "Open",
                 isUpdating: isEmailRefreshing,
                 onOpen: { services.navigateTo = .email },
@@ -744,9 +924,9 @@ struct HomeView: View {
                     onTap: { services.navigateTo = .email }
                 )
             } else {
-                // Show up to 3 recent threads from the already-loaded email service data
+                // Show 2 recent threads — the briefing already surfaces priority items.
                 VStack(spacing: 8) {
-                    ForEach(Array(services.emailService.threads.prefix(3))) { thread in
+                    ForEach(Array(services.emailService.threads.prefix(2))) { thread in
                         Button {
                             selectedEmailThread = thread
                         } label: {
@@ -788,6 +968,71 @@ struct HomeView: View {
                         .buttonStyle(.plain)
                     }
                 }
+            }
+        }
+    }
+
+    // MARK: - Folders Section
+
+    /// Horizontal scroller of folder cards. Always visible — surfaces folders as a
+    /// first-class home concept rather than burying them behind the Tasks tab.
+    private var foldersSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionHeader(
+                title: "Folders",
+                icon: "folder.fill",
+                count: folders.count,
+                actionTitle: "Manage",
+                isUpdating: false,
+                onOpen: { services.navigateTo = .tasks },
+                onAdd: { showFolderEditSheet = true }
+            )
+
+            if folders.isEmpty {
+                Button {
+                    showFolderEditSheet = true
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "folder.badge.plus")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(AppTheme.subtleText)
+                        Text("Create your first folder to group emails, tasks, chats, and events.")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(AppTheme.subtleText)
+                            .multilineTextAlignment(.leading)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(14)
+                    .background(
+                        RoundedRectangle(cornerRadius: AppTheme.Radius.row, style: .continuous)
+                            .fill(AppTheme.surfacePrimary)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: AppTheme.Radius.row, style: .continuous)
+                            .strokeBorder(AppTheme.cardBorder, lineWidth: 1)
+                    )
+                }
+                .buttonStyle(.plain)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 12) {
+                        ForEach(folders) { folder in
+                            Button {
+                                selectedFolder = folder
+                            } label: {
+                                FolderCardView(folder: folder, layout: .horizontal)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        NewFolderCard(layout: .horizontal) {
+                            showFolderEditSheet = true
+                        }
+                    }
+                }
+                // Bleed the scroller to the screen edge so cards feel pinned to the rail.
+                .padding(.horizontal, -16)
+                .scrollClipDisabled(true)
+                .safeAreaPadding(.horizontal, 16)
             }
         }
     }
@@ -903,72 +1148,6 @@ struct HomeView: View {
                 .stroke(AppTheme.cardBorder, lineWidth: 1)
         )
         .contentShape(Rectangle())
-    }
-
-    // MARK: - Get Started (composite empty state)
-
-    /// Shown when ALL sections are empty — replaces three separate empty states
-    /// with a single onboarding card that guides the user to set up their services.
-    private var getStartedSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Get started")
-                .font(.system(size: 18, weight: .bold))
-
-            VStack(spacing: 10) {
-                getStartedRow(
-                    icon: "checkmark.circle",
-                    title: "Create your first task",
-                    subtitle: "Tap + or go to the Tasks tab",
-                    action: { services.navigateTo = .tasks }
-                )
-                getStartedRow(
-                    icon: "envelope.fill",
-                    title: "Connect Gmail",
-                    subtitle: "See your inbox right here",
-                    action: { services.navigateTo = .email }
-                )
-                getStartedRow(
-                    icon: "calendar",
-                    title: "Check your calendar",
-                    subtitle: "View today's events",
-                    action: { services.navigateTo = .calendar }
-                )
-            }
-        }
-    }
-
-    private func getStartedRow(icon: String, title: String, subtitle: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 14) {
-                Image(systemName: icon)
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundStyle(.primary)
-                    .frame(width: 32)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(.primary)
-                    Text(subtitle)
-                        .font(.system(size: 13))
-                        .foregroundStyle(.secondary)
-                }
-
-                Spacer()
-
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(AppTheme.mutedText)
-            }
-            .padding(14)
-            .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous)
-                    .stroke(AppTheme.cardBorder, lineWidth: 1)
-            )
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
     }
 
     // MARK: - Helpers
@@ -1087,37 +1266,6 @@ struct HomeView: View {
         )
     }
 
-    private func setupRow(
-        icon: String,
-        title: String,
-        subtitle: String,
-        actionTitle: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: icon)
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(AppTheme.accent)
-                .frame(width: 28, height: 28)
-                .background(AppTheme.surfaceSecondary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.inline, style: .continuous))
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.primary)
-                Text(subtitle)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-            }
-
-            Spacer()
-
-            Button(actionTitle, action: action)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(AppTheme.accent)
-        }
-    }
-
     private func loadTodaysEvents() async {
         let trace = PerformanceTrace.beginInterval(
             PerformanceTrace.loadTodayEvents,
@@ -1147,14 +1295,14 @@ struct HomeView: View {
         }
 
         await loadTodaysEvents()
+        await services.captureService.syncSharedFolders(in: modelContext)
+        await services.captureService.fetchFolderSummary(in: modelContext)
 
         if services.authService.isAuthenticated,
            services.emailService.hasConnection,
            services.assistantAutomationPolicy.assistantThreadActionsVisible,
            services.assistantAutomationPolicy.briefingEnabled {
-            isLoadingProactiveNudges = true
             await services.emailService.loadAssistantNudges()
-            isLoadingProactiveNudges = false
         }
 
         if services.assistantAutomationPolicy.briefingEnabled

@@ -8,6 +8,7 @@ struct TaskTableView: View {
     @Query(sort: \TaskRecord.createdAt, order: .reverse) private var allTasks: [TaskRecord]
     let captureService: TaskCaptureService
     let selectedFolderID: UUID?
+    var restrictToInbox: Bool = false
     let searchText: String
     let sortOrder: TaskSortOrder
     @State private var selectedTask: TaskRecord?
@@ -32,9 +33,15 @@ struct TaskTableView: View {
             )
         }
         visibleTasks = allTasks.filter { task in
-            !task.completed &&
-            (selectedFolderID == nil || task.folderID == selectedFolderID) &&
-            matchesSearch(task)
+            let folderMatches: Bool
+            if let id = selectedFolderID {
+                folderMatches = task.folderID == id
+            } else if restrictToInbox {
+                folderMatches = task.folderID == nil
+            } else {
+                folderMatches = true
+            }
+            return !task.completed && folderMatches && matchesSearch(task)
         }
         visibleTasks = sortTasks(visibleTasks)
     }
@@ -176,6 +183,7 @@ struct TaskTableView: View {
         .onChange(of: selectedFolderID) { recomputeVisibleTasks() }
         .onChange(of: searchText) { recomputeVisibleTasks() }
         .onChange(of: sortOrder) { recomputeVisibleTasks() }
+        .onChange(of: restrictToInbox) { recomputeVisibleTasks() }
     }
 
     // MARK: - Header Row

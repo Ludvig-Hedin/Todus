@@ -7,8 +7,9 @@ import Observation
 @Observable
 final class NetworkMonitor: @unchecked Sendable {
     private(set) var isConnected: Bool = true
-    /// Called on the main queue whenever connectivity transitions from offline → online.
-    var onReconnect: (() -> Void)?
+    /// Called on the main actor whenever connectivity transitions from offline → online.
+    /// Must be set from the main actor.
+    @MainActor var onReconnect: (() -> Void)?
 
     private let monitor = NWPathMonitor()
     private let queue = DispatchQueue(label: "NetworkMonitor")
@@ -17,7 +18,7 @@ final class NetworkMonitor: @unchecked Sendable {
     init() {
         monitor.pathUpdateHandler = { [weak self] path in
             let connected = path.status == .satisfied
-            DispatchQueue.main.async { [weak self] in
+            Task { @MainActor [weak self] in
                 guard let self else { return }
                 let previously = self.wasConnected
                 self.isConnected = connected

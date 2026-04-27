@@ -1,6 +1,5 @@
 import SwiftUI
 import SwiftData
-import PhotosUI
 
 /// Email compose sheet — supports new email and reply.
 struct EmailComposeView: View {
@@ -11,14 +10,17 @@ struct EmailComposeView: View {
     @State private var draft: EmailDraft
     @State private var bodyMentions: [RichInputMentionRef] = []
     @State private var eventMentions: [RichInputMentionRef] = []
+    /// Attachment filenames carried over from CreateSheet. Surfaced in the
+    /// compose UI as chips. The send pipeline does not yet upload binary
+    /// attachments, but keeping them visible avoids silent data loss and lets
+    /// the user reference them in the body.
+    @State private var seededAttachmentNames: [String] = []
+    @State private var pendingAttachmentRemovals: Set<String> = []
     @State private var showSendError = false
-    @State private var showPhotoLoadError = false
     /// Controls visibility of CC/BCC fields — toggled by the chevron in the To row
     @State private var showCcBcc = false
     /// Controls the AI draft assistant sheet
     @State private var showAIDraft = false
-    /// Selected photo item from the formatting toolbar image picker
-    @State private var selectedPhoto: PhotosPickerItem?
     /// Debounce task for draft autosave — re-armed on every field change.
     @State private var autosaveTask: Task<Void, Never>?
     /// Stable identifier for this compose draft. Replies key off the thread/message,
@@ -65,8 +67,8 @@ struct EmailComposeView: View {
         _draftStorageKey = State(initialValue: "reply.\(threadId)")
     }
 
-    /// Create compose with pre-filled to, subject, and/or body (from CreateSheet)
-    init(to: String? = nil, subject: String? = nil, body: String? = nil) {
+    /// Create compose with pre-filled to, subject, body, and/or attachments (from CreateSheet)
+    init(to: String? = nil, subject: String? = nil, body: String? = nil, seededAttachments: [String] = []) {
         var d = EmailDraft()
         if let to, !to.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             d.to = [to.trimmingCharacters(in: .whitespacesAndNewlines)]
@@ -74,6 +76,7 @@ struct EmailComposeView: View {
         if let subject { d.subject = subject }
         if let body { d.body = body }
         _draft = State(initialValue: d)
+        _seededAttachmentNames = State(initialValue: seededAttachments)
         // New emails get a stable per-instance UUID. The autosave is restored on appear,
         // so opening a fresh composer always starts blank unless a previous unsent draft
         // exists under the special "new" key (see Self.newComposeStorageKey).
@@ -87,12 +90,20 @@ struct EmailComposeView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                AppTheme.backgroundTop.ignoresSafeArea()
+                AppTheme.sheetBackground.ignoresSafeArea()
 
                 ScrollView {
                     VStack(spacing: 0) {
-                        // From field — shows the active sending account; picker when multiple accounts exist
-                        fromRow
+                        // From field — shows the active sending account; picker when multiple accounts exist.
+                        // Wrapped with the offline notice so we don't bust the ViewBuilder child limit.
+                        Group {
+                            // Inline offline notice — the system-level offline banner is hidden
+                            // behind sheets, so without this the user sees no signal that Send is disabled.
+                            if !services.networkMonitor.isConnected {
+                                offlineNotice
+                            }
+                            fromRow
+                        }
 
                         Divider().foregroundStyle(AppTheme.divider)
 
@@ -118,6 +129,13 @@ struct EmailComposeView: View {
                         formattingToolbar
 
                         Divider().foregroundStyle(AppTheme.divider)
+
+                        // Seeded attachments from CreateSheet — chip row so files
+                        // captured in the universal create modal stay visible.
+                        if !seededAttachmentNames.isEmpty {
+                            attachmentChipsRow
+                            Divider().foregroundStyle(AppTheme.divider)
+                        }
 
                         // Body — tappable across the full minHeight area, text anchored to top-left
                         bodyArea
@@ -145,6 +163,7 @@ struct EmailComposeView: View {
                         Task {
                             let success = await emailService.sendEmail(draft)
                             if success {
+                                deletePendingAttachments()
                                 // Clear the autosaved draft once it's safely on the wire
                                 clearAutosavedDraft()
                                 dismiss()
@@ -154,14 +173,15 @@ struct EmailComposeView: View {
                         }
                     } label: {
                         if emailService.isSending {
-                            ProgressView()
-                                .tint(.primary)
+                            ButtonInlineProgressView(tint: .primary, side: AppTheme.Metrics.toolbarInlineSpinner)
                         } else {
                             Image(systemName: "paperplane.fill")
                                 .font(.system(size: 16, weight: .semibold))
                         }
                     }
-                    .disabled(!canSend || emailService.isSending)
+                    // Disable Send while offline — the global offline banner is hidden
+                    // behind this sheet, so we have to surface the state inline too.
+                    .disabled(!canSend || emailService.isSending || !services.networkMonitor.isConnected)
                 }
             }
             // Alert shown when email send fails — gives the user feedback instead of silently failing
@@ -169,11 +189,6 @@ struct EmailComposeView: View {
                 Button("OK", role: .cancel) {}
             } message: {
                 Text(emailService.errorMessage ?? "Please check your connection and try again.")
-            }
-            .alert("Could not add image", isPresented: $showPhotoLoadError) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text("The image could not be loaded. Try choosing another photo.")
             }
             .navigationTitle(draft.replyToThreadId != nil ? "Reply" : "New Email")
             .navigationBarTitleDisplayMode(.inline)
@@ -226,42 +241,6 @@ struct EmailComposeView: View {
             .onChange(of: draft.bcc) { scheduleAutosave() }
             .onChange(of: draft.subject) { scheduleAutosave() }
             .onChange(of: draft.body) { scheduleAutosave() }
-            .onChange(of: selectedPhoto) { _, newItem in
-                guard let newItem else { return }
-                Task {
-                    do {
-                        guard let data = try await newItem.loadTransferable(type: Data.self) else {
-                            await MainActor.run {
-                                showPhotoLoadError = true
-                                selectedPhoto = nil
-                            }
-                            AppLogger.shared.log("[EmailCompose] PhotosPicker returned no image data")
-                            return
-                        }
-                        guard let image = UIImage(data: data) else {
-                            await MainActor.run {
-                                showPhotoLoadError = true
-                                selectedPhoto = nil
-                            }
-                            AppLogger.shared.log("[EmailCompose] PhotosPicker image decode failed (nil UIImage)")
-                            return
-                        }
-                        // Insert image placeholder tag into body; the email service currently
-                        // sends plain text so this serves as a visual cue only for now.
-                        let tag = "\n[image: \(image.size.width.rounded())×\(image.size.height.rounded())]\n"
-                        await MainActor.run {
-                            draft.body += tag
-                            selectedPhoto = nil
-                        }
-                    } catch {
-                        await MainActor.run {
-                            showPhotoLoadError = true
-                            selectedPhoto = nil
-                        }
-                        AppLogger.shared.log("[EmailCompose] PhotosPicker loadTransferable failed: \(error.localizedDescription)")
-                    }
-                }
-            }
         }
     }
 
@@ -269,6 +248,8 @@ struct EmailComposeView: View {
 
     /// Horizontal row of format buttons — appends markdown syntax to the body.
     /// Positioned between Subject and the body area so it's always accessible.
+    /// Buttons are disabled when the body field is not focused — they only act on body
+    /// content, so showing them as enabled while another field is focused is misleading.
     private var formattingToolbar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 2) {
@@ -302,20 +283,29 @@ struct EmailComposeView: View {
                 formatButton(icon: "minus", label: "Divider") {
                     insertLinePrefix("---")
                 }
-                formatDivider()
-                PhotosPicker(selection: $selectedPhoto, matching: .images) {
-                    Image(systemName: "photo")
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(AppTheme.mutedText)
-                        .frame(width: 36, height: 32)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Add image")
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
         }
         .background(AppTheme.sheetBackground)
+        .disabled(focusedField != .body)
+        .opacity(focusedField == .body ? 1.0 : 0.4)
+    }
+
+    /// Inline note shown above the From row when the device has no connection.
+    /// Mirrors the global offline banner that's hidden behind this sheet.
+    private var offlineNotice: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "wifi.slash")
+                .font(.system(size: 12, weight: .semibold))
+            Text("You're offline — message will not send.")
+                .font(.system(size: 13, weight: .medium))
+            Spacer(minLength: 0)
+        }
+        .foregroundStyle(AppTheme.subtleText)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(AppTheme.surfaceSecondary)
     }
 
     private func formatButton(icon: String, label: String, action: @escaping () -> Void) -> some View {
@@ -522,6 +512,42 @@ struct EmailComposeView: View {
         .padding(.vertical, 12)
     }
 
+    /// Horizontal scroll of seeded attachment chips. Tapping the X removes
+    /// the chip from the draft immediately, but defers file deletion until send succeeds.
+    private var attachmentChipsRow: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(seededAttachmentNames, id: \.self) { filename in
+                    HStack(spacing: 6) {
+                        Image(systemName: AttachmentService.shared.isImageFile(filename) ? "photo" : "doc")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(AppTheme.mutedText)
+                        Text(filename)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .frame(maxWidth: 160)
+                        Button {
+                            seededAttachmentNames.removeAll { $0 == filename }
+                            pendingAttachmentRemovals.insert(filename)
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 13))
+                                .foregroundStyle(AppTheme.mutedText)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(AppTheme.surfaceSecondary, in: Capsule())
+                }
+            }
+            .padding(.horizontal, 16)
+        }
+        .padding(.vertical, 8)
+    }
+
     /// Body area — the full minHeight region is tappable to focus the text input.
     /// Content is anchored top-left via ZStack alignment rather than defaulting to center.
     private var bodyArea: some View {
@@ -689,6 +715,13 @@ struct EmailComposeView: View {
     /// send and when the draft becomes fully empty.
     private func clearAutosavedDraft() {
         UserDefaults.standard.removeObject(forKey: autosaveKey)
+    }
+
+    private func deletePendingAttachments() {
+        for filename in pendingAttachmentRemovals {
+            AttachmentService.shared.delete(filename: filename)
+        }
+        pendingAttachmentRemovals.removeAll()
     }
 
     private var autosaveKey: String {

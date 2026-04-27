@@ -99,7 +99,7 @@ struct MeetingDetailView: View {
                         Task { await scheduleBot() }
                     } label: {
                         if isSchedulingBot {
-                            ProgressView().controlSize(.small)
+                            ButtonInlineProgressView(tint: .primary, side: AppTheme.Metrics.toolbarInlineSpinner)
                         } else {
                             Label("Record Meeting", systemImage: "mic")
                         }
@@ -232,7 +232,7 @@ struct MeetingDetailView: View {
                         Task { await generateSummary() }
                     } label: {
                         if isGeneratingSummary {
-                            ProgressView().controlSize(.small)
+                            ButtonInlineProgressView()
                         } else {
                             Text("Generate")
                                 .font(.subheadline.weight(.medium))
@@ -352,7 +352,7 @@ struct MeetingDetailView: View {
 
                     if isAskingQuestion {
                         HStack {
-                            ProgressView().controlSize(.mini)
+                            ButtonInlineProgressView(tint: .secondary, side: AppTheme.Metrics.compactInlineSpinner)
                             Spacer()
                         }
                     }

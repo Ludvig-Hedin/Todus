@@ -5,8 +5,7 @@ struct InlineRefreshBadge: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            ProgressView()
-                .controlSize(.small)
+            ButtonInlineProgressView(tint: .secondary, side: AppTheme.Metrics.compactInlineSpinner)
 
             Text(label)
                 .font(.caption2.weight(.semibold))

@@ -147,8 +147,7 @@ struct AuthView: View {
                     // Match the spinner pattern used by socialButtons so the user gets
                     // visual feedback while sendEmailOTP awaits the network round-trip
                     if authService.isLoading {
-                        ProgressView()
-                            .tint(.white)
+                        ButtonInlineProgressView()
                     }
                 }
             }
@@ -278,8 +277,7 @@ struct AuthView: View {
         }
         .overlay {
             if authService.isLoading {
-                ProgressView()
-                    .tint(.primary)
+                ButtonInlineProgressView(tint: .primary, side: AppTheme.Metrics.buttonInlineSpinner)
             }
         }
     }
@@ -338,8 +336,7 @@ struct AuthView: View {
         .opacity(authService.isLoading ? 0.6 : 1)
         .overlay {
             if authService.isLoading {
-                ProgressView()
-                    .tint(.primary)
+                ButtonInlineProgressView(tint: .primary, side: AppTheme.Metrics.buttonInlineSpinner)
             }
         }
     }

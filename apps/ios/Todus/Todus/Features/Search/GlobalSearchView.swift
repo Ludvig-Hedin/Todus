@@ -79,7 +79,7 @@ struct GlobalSearchView: View {
                     resultsList
                 }
             }
-            .background(AppTheme.backgroundTop.ignoresSafeArea())
+            .background(AppTheme.sheetBackground.ignoresSafeArea())
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {

@@ -43,7 +43,7 @@ enum VoiceSessionEvent: Sendable {
 /// Configuration passed to a VoiceProvider on connect.
 /// Provider-agnostic — each implementation maps these fields to its wire format.
 struct VoiceSessionConfig {
-    /// Model identifier (e.g. "models/gemini-3.1-flash-live-preview").
+    /// Model identifier (e.g. "gemini-live-2.5-flash-native-audio").
     let model: String
     /// System instruction injected at session start.
     let systemInstruction: String
@@ -59,7 +59,7 @@ struct VoiceSessionConfig {
 
     /// Convenience initializer with Gemini Live defaults.
     static func geminiDefault(
-        model: String = "models/gemini-2.0-flash-live-001",
+        model: String = VoiceModelCatalog.gemini25FlashLiveModel,
         systemInstruction: String,
         tools: [[String: Any]]? = nil,
         voiceName: String = "Puck"
@@ -70,13 +70,23 @@ struct VoiceSessionConfig {
             tools: tools,
             voiceName: voiceName,
             inputSampleRate: 16000,
-            responseModalities: ["AUDIO", "TEXT"]
+            // Gemini Live only supports ONE response modality per session — sending both
+            // "AUDIO" and "TEXT" causes INVALID_ARGUMENT. Pick AUDIO; we still get the
+            // text version of what the model said via `outputAudioTranscription`.
+            responseModalities: ["AUDIO"]
         )
     }
 }
 
 // Sendable conformance — tools contain only JSON-safe primitives.
 extension VoiceSessionConfig: @unchecked Sendable {}
+
+// MARK: - VoiceModelCatalog
+
+enum VoiceModelCatalog {
+    static let gemini25FlashLiveModel = "gemini-live-2.5-flash-native-audio"
+    static let gemini25FlashLiveDisplayName = "Gemini 2.5 Flash native audio"
+}
 
 // MARK: - VoiceProvider Protocol
 

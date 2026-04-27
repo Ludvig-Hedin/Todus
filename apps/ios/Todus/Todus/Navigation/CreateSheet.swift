@@ -46,8 +46,6 @@ struct CreateSheet: View {
     // so we manually push the composer above the keyboard.
     @StateObject private var keyboard = KeyboardObserver()
 
-    private let attachButtonSize: CGFloat = 40
-
     var body: some View {
         ZStack(alignment: .bottom) {
             // Progressive blur scrim — fully transparent at the top, building to a
@@ -64,7 +62,20 @@ struct CreateSheet: View {
                         .transition(.opacity.combined(with: .move(edge: .bottom)))
                 }
 
-                inputArea
+                // Attachment picker panel — floats above the input box and is
+                // anchored to the bottom-leading where the in-toolbar attach
+                // button lives.
+                if isPickingAttachment {
+                    HStack(spacing: 0) {
+                        attachmentPanel
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.leading, 4)
+                    .transition(.scale(scale: 0.9, anchor: .bottomLeading).combined(with: .opacity))
+                }
+
+                mainInputBox
+
                 typePill
             }
             .padding(.horizontal, 12)
@@ -72,8 +83,7 @@ struct CreateSheet: View {
             // max() avoids a conditional branch so SwiftUI doesn't create a
             // redundant layout pass when the keyboard height flickers to 0.
             .padding(.bottom, max(keyboard.height + 8, 86))
-            .animation(.easeOut(duration: 0.25), value: keyboard.height)
-            .transition(.move(edge: .bottom).combined(with: .opacity))
+            .animation(.spring(response: 0.38, dampingFraction: 0.82), value: keyboard.height)
         }
         // Ignore both container and keyboard safe areas at the bottom so the
         // ZStack extends to the physical screen edge. The keyboard.height
@@ -161,64 +171,77 @@ struct CreateSheet: View {
 
     // MARK: - Scrim
 
-    /// Progressive blur: a blurred material layered with a dark tint, masked by a
-    /// bottom-up gradient so the top of the screen stays clear and content fades
-    /// into a soft blur as it approaches the modal.
+    /// Progressive blur: stacked materials with cascading gradient masks so blur
+    /// intensity ramps up smoothly from clear at the top to a heavy, opaque
+    /// frost behind the composer. Three layers — light → medium → heavy — each
+    /// kicking in further down the screen — produce a true gradient blur rather
+    /// than a single flat blur with a fade.
     private var progressiveBlurScrim: some View {
         ZStack {
+            // Layer 1 — gentle haze starting around mid-screen
             Rectangle()
                 .fill(.ultraThinMaterial)
-            Color.black.opacity(0.28)
-        }
-        .mask(
+                .mask(
+                    LinearGradient(
+                        stops: [
+                            .init(color: .clear,               location: 0.00),
+                            .init(color: .clear,               location: 0.30),
+                            .init(color: .black.opacity(0.6),  location: 0.55),
+                            .init(color: .black,               location: 0.80),
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+
+            // Layer 2 — stronger blur taking over in the lower half
+            Rectangle()
+                .fill(.thinMaterial)
+                .mask(
+                    LinearGradient(
+                        stops: [
+                            .init(color: .clear,               location: 0.00),
+                            .init(color: .clear,               location: 0.50),
+                            .init(color: .black.opacity(0.7),  location: 0.75),
+                            .init(color: .black,               location: 0.90),
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+
+            // Layer 3 — heavy frost concentrated behind the composer
+            Rectangle()
+                .fill(.ultraThickMaterial)
+                .mask(
+                    LinearGradient(
+                        stops: [
+                            .init(color: .clear,               location: 0.00),
+                            .init(color: .clear,               location: 0.65),
+                            .init(color: .black.opacity(0.8),  location: 0.85),
+                            .init(color: .black,               location: 0.95),
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+
+            // Dim wash — heavier than before so foreground content really sits.
             LinearGradient(
                 stops: [
-                    .init(color: .clear,               location: 0.00),
-                    .init(color: .black.opacity(0.25), location: 0.40),
-                    .init(color: .black.opacity(0.75), location: 0.70),
-                    .init(color: .black,               location: 0.92),
+                    .init(color: .black.opacity(0.00), location: 0.00),
+                    .init(color: .black.opacity(0.10), location: 0.40),
+                    .init(color: .black.opacity(0.30), location: 0.70),
+                    .init(color: .black.opacity(0.45), location: 1.00),
                 ],
                 startPoint: .top,
                 endPoint: .bottom
             )
-        )
+        }
         .allowsHitTesting(true)
     }
 
-    // MARK: - Input Area
-
-    /// The main input region: attachment "+" button + input box with toolbar.
-    /// Attachment picker panel floats above the "+" button when active.
-    private var inputArea: some View {
-        ZStack(alignment: .bottomLeading) {
-            HStack(alignment: .bottom, spacing: 8) {
-                // Attachment trigger — circle button (hidden for email; full compose handles attachments)
-                if selectedType != .email {
-                    Button {
-                        withAnimation(.snappy(duration: 0.15)) { isPickingAttachment.toggle() }
-                    } label: {
-                        Image(systemName: "plus")
-                            .font(.system(size: 16, weight: .medium))
-                            .foregroundStyle(AppTheme.mutedText)
-                            .frame(width: attachButtonSize, height: attachButtonSize)
-                    }
-                    .buttonStyle(.plain)
-                    .background(AppTheme.surfacePrimary, in: Circle())
-                    .overlay(Circle().stroke(AppTheme.strongBorder, lineWidth: 1))
-                }
-
-                // Main input box
-                mainInputBox
-            }
-
-            // Attachment picker panel — floats above the "+" button
-            if isPickingAttachment {
-                attachmentPanel
-                    .padding(.bottom, attachButtonSize + 8)
-                    .transition(.scale(scale: 0.85, anchor: .bottomLeading).combined(with: .opacity))
-            }
-        }
-    }
+    // MARK: - Input Box
 
     private var mainInputBox: some View {
         VStack(spacing: 0) {
@@ -255,8 +278,8 @@ struct CreateSheet: View {
                 onPasteImage: handlePastedImage
             )
             .frame(maxHeight: 120)
-            .padding(.top, (pendingAttachments.isEmpty && selectedType != .email) ? 10 : 6)
-            .padding(.bottom, selectedType == .event ? 2 : 4)
+            .padding(.top, (pendingAttachments.isEmpty && selectedType != .email) ? 14 : 10)
+            .padding(.bottom, 2)
             .padding(.horizontal, 14)
             .onChange(of: text) { _, value in
                 handleTextChange(value)
@@ -270,6 +293,9 @@ struct CreateSheet: View {
             // Toolbar: folder | date | spacer | voice | send
             toolbarRow
         }
+        // Collapse to content height. Has to live before .background so the
+        // background/border resize with the box rather than locking it open.
+        .fixedSize(horizontal: false, vertical: true)
         .background(
             AppTheme.surfacePrimary,
             in: RoundedRectangle(cornerRadius: AppTheme.Radius.composer, style: .continuous)
@@ -346,6 +372,23 @@ struct CreateSheet: View {
 
     private var toolbarRow: some View {
         HStack(spacing: 4) {
+            // Attachment trigger — leftmost on every mode so attachments are
+            // discoverable for tasks, events, and emails alike.
+            Button {
+                withAnimation(.snappy(duration: 0.15)) { isPickingAttachment.toggle() }
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(isPickingAttachment ? AppTheme.accentBlue : AppTheme.mutedText)
+                    .frame(width: 28, height: 28)
+                    .background(
+                        isPickingAttachment ? AppTheme.accentBlue.opacity(0.14) : Color.clear,
+                        in: Circle()
+                    )
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(isPickingAttachment ? "Close attachment picker" : "Add attachment")
+
             // Folder selector — shown for task, auto, event
             if showsFolderPicker {
                 Menu {
@@ -468,8 +511,9 @@ struct CreateSheet: View {
             .opacity(sendDisabled ? 0.4 : 1)
             .animation(.easeOut(duration: 0.12), value: sendDisabled)
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 6)
+        .padding(.top, 2)
+        .padding(.bottom, 6)
     }
 
     // MARK: - Type Selector Pill
@@ -725,7 +769,7 @@ struct CreateSheet: View {
     // MARK: - Actions
 
     private func close() {
-        withAnimation(.snappy(duration: 0.2)) {
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.88)) {
             isPresented = false
         }
     }
@@ -752,6 +796,7 @@ struct CreateSheet: View {
                     ? nil : recipientText.trimmingCharacters(in: .whitespacesAndNewlines)
                 services.composeEmailSeedSubject = subjectText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                     ? nil : subjectText.trimmingCharacters(in: .whitespacesAndNewlines)
+                services.composeEmailSeedAttachments = attachments
                 services.showsComposeEmail = true
             case .auto:
                 createTask(input, attachments: attachments)
@@ -785,12 +830,15 @@ struct CreateSheet: View {
             return
         }
 
+        let trimmedLocation = locationText.trimmingCharacters(in: .whitespacesAndNewlines)
         do {
             try await services.calendarService.createEvent(
                 title: input,
                 startDate: startDate,
                 endDate: endDate,
-                folderID: selectedFolder?.id
+                folderID: selectedFolder?.id,
+                location: trimmedLocation.isEmpty ? nil : trimmedLocation,
+                attachmentFilenames: attachments
             )
         } catch {
             createTask(input, attachments: attachments)

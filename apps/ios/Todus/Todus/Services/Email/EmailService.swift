@@ -15,11 +15,20 @@ final class EmailService {
 
     var threads: [EmailThread] = []
     var isLoadingThreads = false
+    /// True while a background reconciliation poll is running after a forceSync that
+    /// returned empty. The inbox keeps showing the prior threads while this is true,
+    /// and the "Updating" badge stays visible so the user knows fresh mail is still on its way.
+    var isReconciling = false
     var isLoadingThread = false
     var isSending = false
-    // Default false — EmailInboxView calls checkConnection() on appear to verify
+    // Initialized from the persisted last-known value below — we treat the persisted bit
+    // as authoritative until a fresh `checkConnection` resolves, so the inbox doesn't
+    // briefly show "Connect Gmail" on cold start for an already-connected user.
     var hasConnection = false
     var isCheckingConnection = false
+    /// True once `checkConnection` has produced a result this launch. Treated as already-resolved
+    /// when we have a persisted positive connection state from the previous launch — the prior
+    /// answer is overwhelmingly stable and gives us a clean first paint.
     var hasResolvedConnection = false
     var errorMessage: String?
     var nextPageToken: String?
@@ -27,6 +36,19 @@ final class EmailService {
     var assistantBriefing: AssistantBriefing?
     private var lastConnectionCheckAt: Date?
     private let connectionCheckInterval: TimeInterval = 30
+    private static let hasConnectionDefaultsKey = "email_has_connection_v1"
+    /// Background task that watches for the forceSync workflow to populate threads after a
+    /// pull-to-refresh. Kept on the service so we can cancel it on sign-out / re-trigger.
+    private var resyncReconciliationTask: Task<Void, Never>?
+    /// Tracks the most recent in-flight `loadThreads` call so a new pull-to-refresh can
+    /// cancel a stuck previous call (e.g. one waiting on a hung mail.forceSync). Without
+    /// this, repeat pulls during a hang pile up concurrent network tasks.
+    private var inflightLoadThreadsTask: Task<Void, Never>?
+    /// Monotonically increases on every `loadThreads` invocation. Each call captures the
+    /// generation and only flips shared state (`isLoadingThreads`, `errorMessage`) on its
+    /// way out if it's still the latest. Prevents an older cancelled call's `defer` from
+    /// clobbering state set by a newer call already in flight.
+    private var loadGeneration: UInt64 = 0
 
     // MARK: - Cache keys
 
@@ -34,27 +56,91 @@ final class EmailService {
     /// Only inbox is cached — other folders are small/infrequent enough to skip.
     private static let cacheDataKey      = "email_inbox_threads_v1"
     private static let cacheTimestampKey = "email_inbox_threads_v1_ts"
-    /// Stale-after duration: refresh from network after 1 hour, but still show cached data
-    private static let cacheMaxAge: TimeInterval = 3600
+    /// Stale-after duration: refresh from network after 5 minutes, but still show cached data instantly
+    private static let cacheMaxAge: TimeInterval = 300
 
     // MARK: - Init
 
     init(api: TodosAPIClient) {
         self.api = api
+        // Trust the prior session's verdict for the very first paint. The background
+        // `checkConnection` call still runs and corrects the state if it changed, but
+        // we avoid flashing "Connect Gmail" for users who are already linked.
+        if UserDefaults.standard.bool(forKey: Self.hasConnectionDefaultsKey) {
+            self.hasConnection = true
+            self.hasResolvedConnection = true
+        }
+        // Restore assistant briefing + nudges from disk so Home renders real content
+        // on cold launch instead of flashing skeletons or "you're caught up" placeholders.
+        if let cachedBriefing = AssistantPersistedCache.loadBriefing() {
+            self.assistantBriefing = cachedBriefing
+        }
+        if let cachedNudges = AssistantPersistedCache.loadNudges() {
+            self.assistantNudges = cachedNudges
+        }
     }
 
     // MARK: - Inbox
 
     /// Fetches threads for a given folder (default: inbox).
     /// Two-step process: get thread IDs from listThreads, then enrich each with mail.get.
-    func loadThreads(folder: String = "inbox", query: String? = nil, refresh: Bool = false) async {
+    ///
+    /// When `triggerSync` is true, kicks off a server-side Gmail re-sync first via `mail.forceSync`
+    /// so new messages from the provider land in our DB before we list. Use this for explicit
+    /// user-driven refreshes (pull-to-refresh, scene foreground) — the backend `listThreads` is
+    /// otherwise a DB read and won't return new mail until something else triggers a sync.
+    ///
+    /// Repeat invocations cancel the previous in-flight call so a stuck refresh (e.g. backend
+    /// workflow hanging) can't trap newer pulls behind it. The actual work runs in a tracked
+    /// child Task; the public function awaits it so `.refreshable { … }` callers still see the
+    /// pull-to-refresh spinner stay until the load completes.
+    func loadThreads(
+        folder: String = "inbox",
+        query: String? = nil,
+        refresh: Bool = false,
+        triggerSync: Bool = false
+    ) async {
+        // Skip duplicate loads only for non-refresh, non-search calls (pagination /
+        // initial-load races). Explicit user refreshes always start a new run that
+        // cancels the previous one below.
         if isLoadingThreads && !refresh && query == nil {
             return
         }
 
+        // Cancel any prior in-flight call so its hung network awaits unblock and its
+        // results don't race ours. The cancelled task's `defer` is generation-gated, so
+        // it won't clobber the state we're about to set.
+        inflightLoadThreadsTask?.cancel()
+
+        let task: Task<Void, Never> = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.performLoadThreads(
+                folder: folder,
+                query: query,
+                refresh: refresh,
+                triggerSync: triggerSync
+            )
+        }
+        inflightLoadThreadsTask = task
+        await task.value
+        // Only clear if we're still the most recent — a newer call may have replaced us.
+        if inflightLoadThreadsTask == task {
+            inflightLoadThreadsTask = nil
+        }
+    }
+
+    /// Actual load implementation. Always-balanced state via `defer`, generation-gated so a
+    /// stale cancelled run can't unset state belonging to a newer run, and wall-clock-bounded
+    /// network calls so a hung backend workflow can't trap the spinner indefinitely.
+    private func performLoadThreads(
+        folder: String,
+        query: String?,
+        refresh: Bool,
+        triggerSync: Bool
+    ) async {
         let trace = PerformanceTrace.beginInterval(
             PerformanceTrace.loadThreads,
-            message: "EmailService.loadThreads begin folder=\(folder) refresh=\(refresh)"
+            message: "EmailService.loadThreads begin folder=\(folder) refresh=\(refresh) triggerSync=\(triggerSync)"
         )
         defer {
             PerformanceTrace.endInterval(
@@ -64,41 +150,123 @@ final class EmailService {
             )
         }
 
+        loadGeneration &+= 1
+        let myGen = loadGeneration
+
         if refresh { nextPageToken = nil }
         isLoadingThreads = true
         errorMessage = nil
 
+        // Always-balanced state: no matter how we exit (return, throw, cancellation), this
+        // fires. Gen-gated so an older cancelled run doesn't clobber a newer run's spinner.
+        defer {
+            if loadGeneration == myGen {
+                isLoadingThreads = false
+            }
+        }
+
         do {
+            // Server-side re-sync first when the caller asked for fresh provider data.
+            // forceSync drops local thread tables and kicks off an async workflow that
+            // re-fetches from Gmail — see apps/server/src/lib/server-utils.ts. The workflow
+            // runs async, so we poll listThreads below with a small retry budget so the
+            // just-emptied tables have time to refill before we declare the inbox empty.
+            //
+            // Capped at 8 seconds wall-clock — the call is best-effort (we follow up with
+            // listThreads either way) and a hung mutation must never trap the UI.
+            if triggerSync && query == nil {
+                try? await withTimeout(seconds: 8) { [api] in
+                    do {
+                        let _: EmailEmptyResponse = try await api.trpcMutation("mail.forceSync")
+                    } catch {
+                        AppLogger.shared.log("[EmailService] triggerServerSync error: \(error)")
+                    }
+                }
+            }
+
+            try Task.checkCancellation()
+
             let input = ListThreadsInput(
                 folder: folder,
                 q: query,
                 maxResults: 30,
                 cursor: refresh ? nil : nextPageToken
             )
-            // Step 1: Get thread IDs from backend
-            let response: ListThreadsResponse = try await api.trpcQuery("mail.listThreads", input: input)
+            // Step 1: Get thread IDs from backend (15 s budget — three internal retries
+            // with backoff at the API client layer fit comfortably under that).
+            var response: ListThreadsResponse = try await withTimeout(seconds: 15) { [api] in
+                try await api.trpcQuery("mail.listThreads", input: input)
+            }
 
-            // Step 2: Fetch full details for each thread in parallel
+            // After a forceSync the workflow is still populating tables. Try a couple of
+            // quick re-reads in foreground for fast-resync cases, then hand off to a
+            // background reconciliation task and stop the spinner so the prior inbox stays
+            // visible without a multi-second wait.
+            if triggerSync && response.threads.isEmpty {
+                for _ in 0..<2 {
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    try Task.checkCancellation()
+                    response = try await withTimeout(seconds: 10) { [api] in
+                        try await api.trpcQuery("mail.listThreads", input: input)
+                    }
+                    if !response.threads.isEmpty { break }
+                }
+                if response.threads.isEmpty {
+                    scheduleResyncReconciliation(folder: folder, query: query, input: input)
+                    return
+                }
+            }
+
+            try Task.checkCancellation()
+
+            // Step 2: Fetch full details for each thread in parallel (20 s ceiling — batched
+            // mail.get for 30 threads is normally well under 5 s but we leave headroom for
+            // the per-thread fallback path).
             let threadIds = response.threads.map(\.id)
-            let enrichedThreads = await fetchThreadDetails(ids: threadIds)
+            let enrichedThreads = try await withTimeout(seconds: 20) { [weak self] in
+                guard let self else { return [] as [EmailThread] }
+                return await self.fetchThreadDetails(ids: threadIds)
+            }
 
             if refresh {
-                threads = enrichedThreads
+                if !enrichedThreads.isEmpty {
+                    threads = enrichedThreads
+                } else if threads.isEmpty {
+                    // No prior list to preserve and the fresh fetch came back empty —
+                    // surface the failure so the user gets a retry CTA instead of a
+                    // silently empty inbox.
+                    errorMessage = "Couldn't load emails. Pull to refresh to try again."
+                } else {
+                    // We have a prior list; the user pulled and got nothing new, but
+                    // their existing inbox is still valid. Tell them so they don't think
+                    // the refresh did nothing.
+                    errorMessage = "Couldn't fetch new mail. Pull to refresh to try again."
+                }
                 // Cache the first page of inbox results so the next launch shows content
                 // immediately (no skeleton) while the background refresh completes.
-                if folder == "inbox" && query == nil {
+                if folder == "inbox" && query == nil && !enrichedThreads.isEmpty {
                     saveCachedThreads(enrichedThreads)
                 }
             } else {
                 threads.append(contentsOf: enrichedThreads)
             }
+            // Pre-warm avatar cache for the threads we just received so rows render with
+            // the real avatar on first paint instead of flashing initials → avatar.
+            prewarmAvatars(for: enrichedThreads)
             nextPageToken = response.nextPageToken
             if query == nil {
                 await loadAssistantNudges(folder: folder)
             }
+        } catch is CancellationError {
+            // Superseded by a newer load — keep quiet, the newer run owns the UI now.
         } catch APIError.unauthorized {
             // Auth failure — stop trying to load until the user re-authenticates
             hasConnection = false
+        } catch EmailServiceError.timeout {
+            // Treat timeout the same as a transient network error: surface a recovery
+            // CTA without blowing away whatever cached threads we already had on screen.
+            errorMessage = "Refreshing took too long. Pull to refresh to try again."
+            AppLogger.shared.log("[EmailService] loadThreads timed out")
         } catch {
             if let urlError = error as? URLError {
                 errorMessage = "No internet connection."
@@ -108,8 +276,98 @@ final class EmailService {
                 AppLogger.shared.log("[EmailService] loadThreads error: \(error)")
             }
         }
+    }
 
-        isLoadingThreads = false
+    /// Polls `mail.listThreads` in the background after a forceSync that returned empty in
+    /// foreground. When threads land, enriches them and updates `threads` in place — the user
+    /// keeps seeing the previous inbox instead of staring at a spinner. Self-cancelling so
+    /// repeated pull-to-refresh attempts don't stack.
+    ///
+    /// Drives `isReconciling` so the inline "Updating" badge stays visible while we wait for
+    /// the workflow, and surfaces an `errorMessage` if the budget exhausts without success —
+    /// silent failure here was the cause of "pulled to refresh, only old emails appeared".
+    private func scheduleResyncReconciliation(
+        folder: String,
+        query: String?,
+        input: ListThreadsInput
+    ) {
+        resyncReconciliationTask?.cancel()
+        isReconciling = true
+        resyncReconciliationTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.isReconciling = false }
+
+            // Up to ~12s of additional waiting for the Gmail re-sync workflow to populate.
+            for _ in 0..<12 {
+                if Task.isCancelled { return }
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                if Task.isCancelled { return }
+                do {
+                    let resp: ListThreadsResponse = try await self.withTimeout(seconds: 8) { [api = self.api] in
+                        try await api.trpcQuery("mail.listThreads", input: input)
+                    }
+                    guard !resp.threads.isEmpty else { continue }
+                    let enriched = try await self.withTimeout(seconds: 15) { [weak self] in
+                        guard let self else { return [] as [EmailThread] }
+                        return await self.fetchThreadDetails(ids: resp.threads.map(\.id))
+                    }
+                    if Task.isCancelled { return }
+                    if !enriched.isEmpty {
+                        self.threads = enriched
+                        self.nextPageToken = resp.nextPageToken
+                        if folder == "inbox" && query == nil {
+                            self.saveCachedThreads(enriched)
+                        }
+                        self.prewarmAvatars(for: enriched)
+                    }
+                    return
+                } catch is CancellationError {
+                    return
+                } catch {
+                    // Network blip or per-attempt timeout — keep trying within budget.
+                    continue
+                }
+            }
+            // Budget exhausted without ever seeing fresh threads. Don't leave the user
+            // wondering why their pull didn't surface anything new.
+            if !Task.isCancelled {
+                self.errorMessage = "Couldn't fetch new mail. Pull to refresh to try again."
+                AppLogger.shared.log("[EmailService] resyncReconciliation budget exhausted folder=\(folder)")
+            }
+        }
+    }
+
+    // MARK: - Internal Helpers
+
+    /// Errors specific to EmailService's internal orchestration.
+    private enum EmailServiceError: Error {
+        /// `withTimeout` budget elapsed before `operation` produced a result.
+        case timeout
+    }
+
+    /// Race `operation` against a wall-clock timer. If `operation` doesn't complete within
+    /// `seconds`, it's cancelled and `EmailServiceError.timeout` is thrown. Used to bound
+    /// network calls so a backend that holds a connection open (e.g. a slow Gmail re-sync
+    /// workflow) can never trap the UI past a known ceiling.
+    private func withTimeout<T: Sendable>(
+        seconds: TimeInterval,
+        _ operation: @escaping @Sendable () async throws -> T
+    ) async throws -> T {
+        try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask {
+                try await operation()
+            }
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                throw EmailServiceError.timeout
+            }
+            // Whichever task wins, cancel the other before returning.
+            defer { group.cancelAll() }
+            guard let first = try await group.next() else {
+                throw EmailServiceError.timeout
+            }
+            return first
+        }
     }
 
     func ensureInitialInboxLoaded() async {
@@ -132,6 +390,8 @@ final class EmailService {
         // so having cached threads bypasses the skeleton entirely.
         if threads.isEmpty {
             threads = loadCachedThreads() ?? []
+            // Pre-warm avatar cache for cached threads too — same first-paint reasoning.
+            if !threads.isEmpty { prewarmAvatars(for: threads) }
         }
 
         if threads.isEmpty {
@@ -146,8 +406,13 @@ final class EmailService {
     }
 
     func resetForSignOut() {
+        resyncReconciliationTask?.cancel()
+        resyncReconciliationTask = nil
+        inflightLoadThreadsTask?.cancel()
+        inflightLoadThreadsTask = nil
         threads = []
         isLoadingThreads = false
+        isReconciling = false
         isLoadingThread = false
         isSending = false
         hasConnection = false
@@ -160,18 +425,60 @@ final class EmailService {
         // Clear disk cache so the next user session starts clean
         UserDefaults.standard.removeObject(forKey: Self.cacheDataKey)
         UserDefaults.standard.removeObject(forKey: Self.cacheTimestampKey)
+        UserDefaults.standard.removeObject(forKey: Self.hasConnectionDefaultsKey)
+        AssistantPersistedCache.clearAll()
     }
 
-    /// Fetches full details for multiple threads in parallel via mail.get.
-    /// Returns EmailThread summary objects built from each thread's latest message.
-    /// Batches requests into groups of 8 to reduce connection contention and memory pressure.
-    /// Previously all 30 requests fired simultaneously, causing URLSession connection saturation.
+    /// Fetches full details for multiple threads via a single batched `mail.get` request.
+    /// On batch failure (network, server error), falls back to the per-thread concurrent path
+    /// so a transient failure doesn't blank the inbox.
     private func fetchThreadDetails(ids: [String]) async -> [EmailThread] {
+        guard !ids.isEmpty else { return [] }
+
+        do {
+            let inputs = ids.map { GetThreadInput(id: $0) }
+            let results: [Result<GetThreadResponse, Error>] =
+                try await api.trpcBatchQuery("mail.get", inputs: inputs)
+            return assembleThreads(ids: ids, results: results)
+        } catch {
+            AppLogger.shared.log("[EmailService] Batch mail.get failed; falling back to per-thread: \(error)")
+            return await fetchThreadDetailsConcurrent(ids: ids)
+        }
+    }
+
+    /// Builds `EmailThread` summaries from batch results, preserving order via the input index.
+    /// Per-thread failures are logged and dropped; the rest of the inbox still renders.
+    private func assembleThreads(ids: [String], results: [Result<GetThreadResponse, Error>]) -> [EmailThread] {
+        var threads: [EmailThread] = []
+        threads.reserveCapacity(ids.count)
+        for (i, result) in results.enumerated() {
+            switch result {
+            case .success(let detail):
+                guard let latest = detail.latest ?? detail.messages.last else { continue }
+                threads.append(EmailThread(
+                    id: ids[i],
+                    subject: latest.subject,
+                    snippet: latest.plainText ?? "",
+                    from: latest.from,
+                    date: latest.date,
+                    unread: detail.hasUnread ?? false,
+                    messageCount: detail.totalReplies ?? detail.messages.count,
+                    labels: detail.labels?.map(\.name) ?? []
+                ))
+            case .failure(let err):
+                AppLogger.shared.log("[EmailService] thread \(ids[i]) failed in batch: \(err)")
+            }
+        }
+        return threads.sorted { $0.date > $1.date }
+    }
+
+    /// Fallback path used when the batch endpoint itself fails. Fans out N concurrent calls
+    /// in groups of 8 to avoid URLSession connection saturation.
+    private func fetchThreadDetailsConcurrent(ids: [String]) async -> [EmailThread] {
         let batchSize = 8
         var allResults = [(Int, EmailThread?)]()
         allResults.reserveCapacity(ids.count)
 
-        // Process in batches to avoid overwhelming URLSession with 30+ concurrent requests
         for batchStart in stride(from: 0, to: ids.count, by: batchSize) {
             let batchEnd = min(batchStart + batchSize, ids.count)
             let batchIds = Array(ids[batchStart..<batchEnd])
@@ -192,7 +499,7 @@ final class EmailService {
             allResults.append(contentsOf: batchResults)
         }
 
-        return allResults.sorted { $0.0 < $1.0 }.compactMap(\.1)
+        return allResults.sorted { $0.0 < $1.0 }.compactMap(\.1).sorted { $0.date > $1.date }
     }
 
     /// Fetches a single thread's details and builds an EmailThread summary from the latest message.
@@ -260,7 +567,9 @@ final class EmailService {
                 "assistant.listOpenLoops",
                 input: AssistantOpenLoopsInput(limit: 20)
             )
-            assistantNudges = Self.buildNudges(from: response.loops)
+            let nudges = Self.buildNudges(from: response.loops)
+            assistantNudges = nudges
+            AssistantPersistedCache.saveNudges(nudges)
         } catch {
             AppLogger.shared.log("[EmailService] loadAssistantNudges error: \(error)")
         }
@@ -270,6 +579,7 @@ final class EmailService {
         do {
             let briefing: AssistantBriefing = try await api.trpcQuery("assistant.getBriefing")
             assistantBriefing = briefing
+            AssistantPersistedCache.saveBriefing(briefing)
             return briefing
         } catch {
             AppLogger.shared.log("[EmailService] loadAssistantBriefing error: \(error)")
@@ -314,6 +624,39 @@ final class EmailService {
         } catch {
             AppLogger.shared.log("[EmailService] generateAssistantDraft error: \(error)")
             return nil
+        }
+    }
+
+    // MARK: - Avatar Prewarm
+
+    /// Resolves avatar URLs for the given threads in the background so the inbox renders
+    /// with real avatars on first paint. AvatarCache deduplicates concurrent fetches and
+    /// honors TTL, so this is cheap to call repeatedly.
+    private func prewarmAvatars(for threads: [EmailThread]) {
+        guard !threads.isEmpty else { return }
+        // De-dupe by sender — multiple threads from the same person should fire one fetch.
+        var seen = Set<String>()
+        let unique: [(email: String, name: String)] = threads.compactMap { t in
+            let key = t.from.email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard !key.isEmpty, !seen.contains(key) else { return nil }
+            seen.insert(key)
+            return (key, t.from.name)
+        }
+        let api = self.api
+        Task { @MainActor in
+            // Fan out so we're not bottlenecked on a serial chain — AvatarCache
+            // dedupes concurrent calls per-sender internally.
+            await withTaskGroup(of: Void.self) { group in
+                for sender in unique {
+                    group.addTask {
+                        await AvatarCache.shared.resolveIfNeeded(
+                            email: sender.email,
+                            name: sender.name,
+                            api: api
+                        )
+                    }
+                }
+            }
         }
     }
 
@@ -375,8 +718,14 @@ final class EmailService {
             let response: ConnectionsResponse = try await api.trpcQuery("connections.list")
             hasConnection = !response.connections.isEmpty
             lastConnectionCheckAt = now
+            UserDefaults.standard.set(hasConnection, forKey: Self.hasConnectionDefaultsKey)
         } catch {
-            hasConnection = false
+            // Network failure during a re-check shouldn't flip a previously-connected user
+            // back to the connect screen — that's the most common failure mode and produces
+            // a jarring flash. Only mark disconnected if we never resolved before.
+            if !hasResolvedConnection {
+                hasConnection = false
+            }
         }
     }
 
@@ -399,19 +748,33 @@ final class EmailService {
                 }
             }
         } catch {
-            errorMessage = authService.lastErrorMessage
-                ?? "Could not open Google sign-in. Please try again."
+            // Surface specific user-facing messages so the connect screen can
+            // distinguish "user backed out" from "no network" from "something else".
+            errorMessage = friendlyGmailConnectMessage(for: error, authService: authService)
             return false
         }
 
-        var attempt = 0
-        let maxAttempts = 6
-        while attempt < maxAttempts {
-            await checkConnection(force: true)
-            if hasConnection { break }
-            attempt += 1
-            if attempt < maxAttempts {
-                try? await Task.sleep(nanoseconds: 500_000_000)
+        // Poll until a connection exists. The backend hook that creates the connection row
+        // runs fire-and-forget after Better Auth processes the OAuth callback, so the row
+        // may not appear immediately.
+        //
+        // Multi-account path: if the user already had a connection, hasConnection is already
+        // true and we don't need to poll — but we do sleep briefly so the new row has time
+        // to land before the caller calls loadConnections().
+        if hasConnection {
+            // User already had at least one connection — give the hook ~1.5 s to write the
+            // new row before performConnectGmail calls connectionsService.loadConnections().
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+        } else {
+            var attempt = 0
+            let maxAttempts = 12  // 12 × 500ms = 6 seconds max
+            while attempt < maxAttempts {
+                await checkConnection(force: true)
+                if hasConnection { break }
+                attempt += 1
+                if attempt < maxAttempts {
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                }
             }
         }
 
@@ -423,6 +786,28 @@ final class EmailService {
         errorMessage =
             "Could not link your Gmail account. Make sure you granted access to Gmail and try again."
         return false
+    }
+
+    /// Maps a Gmail-connect error to a friendly, specific message:
+    /// - User cancelled the OAuth flow → tell them they didn't grant access.
+    /// - Network/URLError → tell them the connection failed.
+    /// - Anything else → fall back to the generic "could not link" copy.
+    private func friendlyGmailConnectMessage(for error: any Error, authService: AuthService) -> String {
+        // User dismissed the sheet or cancelled inside Google's flow.
+        if let authError = error as? AuthService.AuthError, case .cancelled = authError {
+            return "You didn't grant access. Try again to continue."
+        }
+        let nsError = error as NSError
+        if nsError.domain == "com.apple.AuthenticationServices.WebAuthenticationSession",
+           nsError.code == 1 /* canceledLogin */ {
+            return "You didn't grant access. Try again to continue."
+        }
+        if let urlError = error as? URLError {
+            AppLogger.shared.log("[EmailService] connectGmail URL error: \(urlError.code)")
+            return "Couldn't reach Gmail. Check your connection."
+        }
+        return authService.lastErrorMessage
+            ?? "Could not open Google sign-in. Please try again."
     }
 
     // MARK: - Actions
@@ -504,15 +889,20 @@ final class EmailService {
         }
     }
 
-    func deleteThreads(ids: [String]) async {
+    /// Deletes (moves to Trash) one or more threads. Returns whether the API call succeeded
+    /// — callers like EmailThreadView use the result to decide whether to dismiss.
+    @discardableResult
+    func deleteThreads(ids: [String]) async -> Bool {
         let priorThreads = threads
         threads.removeAll { ids.contains($0.id) }
         do {
             let _: EmailEmptyResponse = try await api.trpcMutation("mail.bulkDelete", input: IdsInput(ids: ids))
+            return true
         } catch {
             threads = priorThreads
             errorMessage = "Could not delete. Please try again."
             AppLogger.shared.log("[EmailService] deleteThreads error: \(error)")
+            return false
         }
     }
 
@@ -528,6 +918,57 @@ final class EmailService {
             AppLogger.shared.log("[EmailService] toggleStar error: \(error)")
         }
     }
+
+    // MARK: - Labels
+
+    /// Fetches every label the user has — used by the Edit Labels sheet.
+    func listLabels() async throws -> [EmailLabel] {
+        try await api.trpcQuery("labels.list") as [EmailLabel]
+    }
+
+    /// Adds and/or removes Gmail labels on one or more threads. Used by the Edit
+    /// Labels sheet and the "Report spam" action.
+    @discardableResult
+    func modifyLabels(threadIds: [String], add: [String] = [], remove: [String] = []) async -> Bool {
+        guard !add.isEmpty || !remove.isEmpty else { return true }
+        let ids = threadIds.filter { !$0.isEmpty }
+        guard !ids.isEmpty else { return true }
+        do {
+            let _: SuccessResponse = try await api.trpcMutation(
+                "mail.modifyLabels",
+                input: ModifyLabelsInput(threadId: ids, addLabels: add, removeLabels: remove)
+            )
+            return true
+        } catch {
+            errorMessage = "Could not update labels."
+            AppLogger.shared.log("[EmailService] modifyLabels error: \(error)")
+            return false
+        }
+    }
+
+    @discardableResult
+    func modifyLabels(threadId: String, add: [String] = [], remove: [String] = []) async -> Bool {
+        await modifyLabels(threadIds: [threadId], add: add, remove: remove)
+    }
+
+    /// Adds the SPAM label and removes INBOX so Gmail moves threads out of
+    /// the user's view, then prunes local inbox state only after a single batch
+    /// API call succeeds.
+    func markAsSpam(ids: [String]) async {
+        guard !ids.isEmpty else { return }
+        let success = await modifyLabels(threadIds: ids, add: ["SPAM"], remove: ["INBOX"])
+        if success {
+            threads.removeAll { ids.contains($0.id) }
+        } else {
+            errorMessage = "Could not report spam. Please try again."
+        }
+    }
+}
+
+struct EmailLabel: Decodable, Identifiable, Hashable {
+    let id: String
+    let name: String
+    let type: String
 }
 
 private extension EmailService {
@@ -574,6 +1015,12 @@ private struct GetThreadInput: Encodable {
 
 private struct IdsInput: Encodable {
     let ids: [String]
+}
+
+private struct ModifyLabelsInput: Encodable {
+    let threadId: [String]
+    let addLabels: [String]
+    let removeLabels: [String]
 }
 
 private struct SendRecipient: Encodable {
@@ -683,3 +1130,4 @@ private struct SuccessResponse: Decodable {
 
 /// Accepts any JSON response without requiring specific fields
 private struct EmailEmptyResponse: Decodable {}
+

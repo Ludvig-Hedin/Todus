@@ -105,9 +105,11 @@ final class VoiceChatViewModel {
             // 4. Start consuming events from provider
             startEventConsumer()
 
-            // 5. Start microphone capture — if this fails internally (sets state to .failed),
-            //    clean up the provider connection so we don't leak a WebSocket
-            startAudioCapture()
+            // 5. Start microphone capture — must be `await` because audio setup (especially
+            //    AVAudioSession.setActive on iOS) regularly blocks for 1–5s and was causing
+            //    main-thread stalls long enough for iOS's watchdog to terminate the app.
+            //    The implementation runs the heavy work on a background queue.
+            await startAudioCapture()
             if case .failed = connectionState {
                 eventConsumerTask?.cancel()
                 eventConsumerTask = nil
@@ -265,11 +267,15 @@ final class VoiceChatViewModel {
         toolCallStatus = "Running \(displayName)..."
 
         Task {
+            var showingFailure = false
             defer {
                 activeToolCallCount -= 1
                 if activeToolCallCount <= 0 {
                     activeToolCallCount = 0
-                    toolCallStatus = nil
+                    // Don't clear a freshly set failure banner — the 4-second auto-clear handles it.
+                    if !showingFailure {
+                        toolCallStatus = nil
+                    }
                 }
             }
 
@@ -298,99 +304,162 @@ final class VoiceChatViewModel {
                 try await provider.sendToolResponse(id: id, name: name, result: result)
             } catch {
                 print("[VoiceChatVM] Failed to send tool response for \(name)(\(id)): \(error)")
+                // Surface the failure to the user briefly — otherwise tool errors
+                // disappear silently and the assistant looks unresponsive.
+                let failureMessage = "Tool failed: \(error.localizedDescription)"
+                showingFailure = true
+                await MainActor.run {
+                    self.toolCallStatus = failureMessage
+                }
+                // Auto-clear after 4 seconds so the banner doesn't linger.
+                Task { @MainActor [weak self] in
+                    try? await Task.sleep(nanoseconds: 4_000_000_000)
+                    if self?.toolCallStatus == failureMessage {
+                        self?.toolCallStatus = nil
+                    }
+                }
             }
         }
     }
 
     // MARK: - Audio Capture
 
-    private func startAudioCapture() {
-        do {
-            let session = AVAudioSession.sharedInstance()
-            // .playAndRecord allows simultaneous capture + playback (unlike .record used in VoiceInputButton)
-            try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetoothHFP])
-            try session.setActive(true, options: .notifyOthersOnDeactivation)
-        } catch {
-            connectionState = .failed("Audio session setup failed: \(error.localizedDescription)")
-            return
-        }
+    /// Result of off-main audio setup — has to be a single value type so we can hand
+    /// it through CheckedContinuation without crossing actors with non-Sendable refs.
+    private enum AudioCaptureSetup {
+        case success(AVAudioEngine)
+        case failed(String)
+    }
 
-        let engine = AVAudioEngine()
-        let inputNode = engine.inputNode
-        let inputFormat = inputNode.outputFormat(forBus: 0)
-
-        // Target format: PCM16 mono @ 16kHz (Gemini requirement)
-        guard let targetFormat = AVAudioFormat(
-            commonFormat: .pcmFormatInt16,
-            sampleRate: 16000,
-            channels: 1,
-            interleaved: true
-        ) else {
-            connectionState = .failed("Failed to create target audio format")
-            return
-        }
-
-        // Install converter if sample rate / format differs
-        guard let converter = AVAudioConverter(from: inputFormat, to: targetFormat) else {
-            connectionState = .failed("Cannot create audio format converter")
-            return
-        }
-
-        inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, _ in
-            guard let self else { return }
-            // Read thread-safe flag instead of main-actor-isolated isMicMuted (avoids data race)
-            self.micMutedLock.lock()
-            let muted = self._micMutedAtomic
-            self.micMutedLock.unlock()
-            guard !muted else { return }
-
-            // Convert to PCM16 16kHz
-            let frameCount = AVAudioFrameCount(
-                Double(buffer.frameLength) * 16000.0 / inputFormat.sampleRate
-            )
-            guard frameCount > 0,
-                  let convertedBuffer = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: frameCount)
-            else { return }
-
-            var error: NSError?
-            // The input block must supply data exactly once; returning .noDataNow on subsequent
-            // calls prevents the converter from re-reading the same buffer in a loop.
-            // Uses a reference-type flag so the @Sendable closure captures a let, not a var.
-            // @unchecked Sendable is safe: convert(to:error:inputBlock:) calls the block synchronously.
-            let suppliedInput = _MutableBoolRef()
-            converter.convert(to: convertedBuffer, error: &error) { _, outStatus in
-                if suppliedInput.value {
-                    outStatus.pointee = .noDataNow
-                    return nil
+    private func startAudioCapture() async {
+        // Hop OFF the main actor for the entire setup chain. AVAudioSession.setActive
+        // and AVAudioEngine.start() routinely block for seconds — long enough that
+        // iOS's main-thread watchdog terminates the app (the user saw 5.8s stalls
+        // followed by the app closing). Tap callback already runs on its own audio
+        // thread; only the synchronous setup needed offloading.
+        let result: AudioCaptureSetup = await withCheckedContinuation { cont in
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                guard let self else {
+                    cont.resume(returning: .failed("Voice session was cancelled"))
+                    return
                 }
-                suppliedInput.value = true
-                outStatus.pointee = .haveData
-                return buffer
-            }
 
-            if error == nil, convertedBuffer.frameLength > 0 {
-                // Extract raw PCM bytes and append to buffer
-                let byteCount = Int(convertedBuffer.frameLength) * MemoryLayout<Int16>.size
-                if let channelData = convertedBuffer.int16ChannelData?[0] {
-                    let data = Data(bytes: channelData, count: byteCount)
-                    self.pcmBufferLock.lock()
-                    self.pcmBuffer.append(data)
-                    self.pcmBufferLock.unlock()
+                // 1. Audio session — slowest step, especially with Bluetooth in range.
+                do {
+                    let session = AVAudioSession.sharedInstance()
+                    try session.setCategory(
+                        .playAndRecord,
+                        mode: .voiceChat,
+                        options: [.defaultToSpeaker, .allowBluetoothHFP]
+                    )
+                    try session.setActive(true, options: .notifyOthersOnDeactivation)
+                } catch {
+                    cont.resume(returning: .failed(
+                        "Audio session setup failed: \(error.localizedDescription)"
+                    ))
+                    return
                 }
+
+                // 2. Build the audio graph.
+                let engine = AVAudioEngine()
+                let inputNode = engine.inputNode
+                let inputFormat = inputNode.outputFormat(forBus: 0)
+
+                guard inputFormat.sampleRate > 0 else {
+                    cont.resume(returning: .failed("No microphone input is available"))
+                    return
+                }
+
+                guard let targetFormat = AVAudioFormat(
+                    commonFormat: .pcmFormatInt16,
+                    sampleRate: 16000,
+                    channels: 1,
+                    interleaved: true
+                ) else {
+                    cont.resume(returning: .failed("Failed to create target audio format"))
+                    return
+                }
+
+                guard let converter = AVAudioConverter(from: inputFormat, to: targetFormat) else {
+                    cont.resume(returning: .failed("Cannot create audio format converter"))
+                    return
+                }
+
+                inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, _ in
+                    guard let self else { return }
+                    self.micMutedLock.lock()
+                    let muted = self._micMutedAtomic
+                    self.micMutedLock.unlock()
+                    guard !muted else { return }
+
+                    let frameCount = AVAudioFrameCount(
+                        Double(buffer.frameLength) * 16000.0 / inputFormat.sampleRate
+                    )
+                    guard frameCount > 0,
+                          let convertedBuffer = AVAudioPCMBuffer(
+                              pcmFormat: targetFormat,
+                              frameCapacity: frameCount
+                          )
+                    else { return }
+
+                    var error: NSError?
+                    let suppliedInput = _MutableBoolRef()
+                    converter.convert(to: convertedBuffer, error: &error) { _, outStatus in
+                        if suppliedInput.value {
+                            outStatus.pointee = .noDataNow
+                            return nil
+                        }
+                        suppliedInput.value = true
+                        outStatus.pointee = .haveData
+                        return buffer
+                    }
+
+                    if error == nil, convertedBuffer.frameLength > 0 {
+                        let byteCount = Int(convertedBuffer.frameLength) * MemoryLayout<Int16>.size
+                        if let channelData = convertedBuffer.int16ChannelData?[0] {
+                            let data = Data(bytes: channelData, count: byteCount)
+                            self.pcmBufferLock.lock()
+                            self.pcmBuffer.append(data)
+                            self.pcmBufferLock.unlock()
+                        }
+                    }
+                }
+
+                // 3. Start the engine — also slow on cold start.
+                do {
+                    engine.prepare()
+                    try engine.start()
+                } catch {
+                    inputNode.removeTap(onBus: 0)
+                    cont.resume(returning: .failed(
+                        "Audio engine start failed: \(error.localizedDescription)"
+                    ))
+                    return
+                }
+
+                cont.resume(returning: .success(engine))
             }
         }
 
-        do {
-            engine.prepare()
-            try engine.start()
+        // Back on the main actor — only state-mutating work happens here.
+        switch result {
+        case .success(let engine):
+            guard connectionState == .connecting || connectionState == .connected else {
+                DispatchQueue.global(qos: .userInitiated).async {
+                    engine.stop()
+                    engine.inputNode.removeTap(onBus: 0)
+                    try? AVAudioSession.sharedInstance().setActive(
+                        false,
+                        options: .notifyOthersOnDeactivation
+                    )
+                }
+                return
+            }
             captureEngine = engine
-        } catch {
-            connectionState = .failed("Audio engine start failed: \(error.localizedDescription)")
-            return
+            startAudioSendTimer()
+        case .failed(let message):
+            connectionState = .failed(message)
         }
-
-        // Send buffered audio every 100ms
-        startAudioSendTimer()
     }
 
     private func startAudioSendTimer() {
@@ -422,16 +491,23 @@ final class VoiceChatViewModel {
         audioSendTimer?.cancel()
         audioSendTimer = nil
 
-        captureEngine?.stop()
-        captureEngine?.inputNode.removeTap(onBus: 0)
+        let engineToStop = captureEngine
         captureEngine = nil
 
         pcmBufferLock.lock()
         pcmBuffer = Data()
         pcmBufferLock.unlock()
 
-        // Deactivate audio session so other apps can use audio
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        // engine.stop(), removeTap, and setActive(false) can all block for hundreds of
+        // ms — fire them off-main so dismissing the modal stays responsive.
+        DispatchQueue.global(qos: .userInitiated).async {
+            engineToStop?.stop()
+            engineToStop?.inputNode.removeTap(onBus: 0)
+            try? AVAudioSession.sharedInstance().setActive(
+                false,
+                options: .notifyOthersOnDeactivation
+            )
+        }
     }
 }
 

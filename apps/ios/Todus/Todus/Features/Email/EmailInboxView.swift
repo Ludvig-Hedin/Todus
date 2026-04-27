@@ -97,6 +97,7 @@ private struct SenderGroup: Identifiable {
 /// Email inbox — thread list with folder switching, search, pull-to-refresh, and swipe actions.
 struct EmailInboxView: View {
     @Environment(AppServices.self) private var services
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var searchText = ""
     @State private var selectedThreadId: String?
@@ -123,8 +124,13 @@ struct EmailInboxView: View {
     /// Last visible thread ID, captured so we can restore scroll position after switching
     /// between People view and Threads view (or returning from a thread detail).
     @State private var lastVisibleId: String?
+    @Environment(\.modelContext) private var modelContext
+    @State private var threadAwaitingFolderPick: EmailThread?
     /// Tracks the search field focus so we can show a blur button when active.
     @FocusState private var searchFieldFocused: Bool
+
+    @State private var emailHeaderHeight: CGFloat = 120
+    private let emailScrimTail: CGFloat = 32
 
     // Deterministic skeleton widths — computed once to avoid visual jitter from CGFloat.random in view body
     private static let skeletonNameWidths: [CGFloat]    = [120, 140, 130, 155, 125, 145]
@@ -134,24 +140,38 @@ struct EmailInboxView: View {
     private var connectionsService: ConnectionsService { services.connectionsService }
     private var primaryFolders: [EmailFolder] { EmailFolder.allCases.filter(\.isPrimary) }
     private var secondaryFolders: [EmailFolder] { EmailFolder.allCases.filter { !$0.isPrimary } }
+    /// True while a refresh is happening on top of an already-populated inbox — drives the
+    /// inline "Updating" badge in the header. Includes the background reconciliation task
+    /// (the post-forceSync poll) so the user sees a live indicator while we're still waiting
+    /// for the server to surface fresh threads, instead of an empty stretch followed by a
+    /// surprise update.
     private var isBackgroundRefreshing: Bool {
-        emailService.isLoadingThreads && !emailService.threads.isEmpty
+        (emailService.isLoadingThreads || emailService.isReconciling)
+            && !emailService.threads.isEmpty
     }
 
     var body: some View {
         ZStack {
             AppTheme.backgroundTop.ignoresSafeArea()
 
-            if emailService.isCheckingConnection && !emailService.hasResolvedConnection && !connectionCheckTimedOut {
-                loadingState
-                    .task {
-                        // If the connection check hangs for more than 10s, flip into a recoverable
-                        // state so the user isn't stuck staring at a skeleton forever.
-                        try? await Task.sleep(for: .seconds(10))
-                        if emailService.isCheckingConnection && !emailService.hasResolvedConnection {
-                            connectionCheckTimedOut = true
+            // Until the connection check resolves, never show the Connect Gmail screen — even
+            // a single frame of "Connect Gmail" while we're actually connected is jarring.
+            // We also keep the loading state if we already have cached threads so the inbox
+            // doesn't visually empty out while a background re-check runs.
+            if !emailService.hasResolvedConnection && !connectionCheckTimedOut {
+                if !emailService.threads.isEmpty {
+                    threadList
+                } else {
+                    loadingState
+                        .task {
+                            // If the connection check hangs for more than 10s, flip into a recoverable
+                            // state so the user isn't stuck staring at a skeleton forever.
+                            try? await Task.sleep(for: .seconds(10))
+                            if !emailService.hasResolvedConnection {
+                                connectionCheckTimedOut = true
+                            }
                         }
-                    }
+                }
             } else if connectionCheckTimedOut && !emailService.hasResolvedConnection {
                 connectionTimeoutState
             } else if !emailService.hasConnection {
@@ -162,6 +182,7 @@ struct EmailInboxView: View {
                     EmailConnectView()
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
+                .transition(.opacity)
             } else if emailService.isLoadingThreads && emailService.threads.isEmpty {
                 // First load — show skeleton rather than empty state to avoid flicker
                 loadingState
@@ -174,6 +195,8 @@ struct EmailInboxView: View {
                 threadList
             }
         }
+        .animation(.easeInOut(duration: 0.18), value: emailService.hasResolvedConnection)
+        .animation(.easeInOut(duration: 0.18), value: emailService.hasConnection)
         .toolbar(.hidden, for: .navigationBar)
         .task {
             // Initial load — use ensureInitialInboxLoaded for inbox (avoids double-fetch
@@ -188,6 +211,30 @@ struct EmailInboxView: View {
             // Load connections for multi-account filter chips
             await connectionsService.loadConnections()
         }
+        .task {
+            // Poll for new mail every 60s while the inbox is visible. Trigger a server-side
+            // Gmail re-sync so the listThreads response reflects mail received since last load
+            // — without this the backend just re-reads its DB and we never see new messages.
+            // Skip a tick if a refresh or reconciliation is already running so we don't pile
+            // up concurrent loads.
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(60))
+                guard !Task.isCancelled,
+                      emailService.hasConnection,
+                      !emailService.isLoadingThreads,
+                      !emailService.isReconciling
+                else { continue }
+                await emailService.loadThreads(folder: selectedFolder.rawValue, refresh: true, triggerSync: true)
+            }
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            guard newPhase == .active,
+                  emailService.hasConnection,
+                  !emailService.isLoadingThreads,
+                  !emailService.isReconciling
+            else { return }
+            Task { await emailService.loadThreads(folder: selectedFolder.rawValue, refresh: true, triggerSync: true) }
+        }
         .onChange(of: selectedFolder) { _, newFolder in
             // Clear search and cancel any pending debounce task.
             // Setting searchText="" here would normally trigger onChange(of: searchText),
@@ -198,6 +245,19 @@ struct EmailInboxView: View {
         }
         .navigationDestination(item: $selectedThreadId) { threadId in
             EmailThreadView(threadId: threadId)
+        }
+        .sheet(item: $threadAwaitingFolderPick) { thread in
+            FolderPickerSheet(title: "Add Email") { folder in
+                services.captureService.addItemToFolder(
+                    kind: .email,
+                    itemId: thread.id,
+                    title: thread.subject,
+                    subtitle: thread.from.name.isEmpty ? thread.from.email : thread.from.name,
+                    folder: folder,
+                    in: modelContext
+                )
+            }
+            .appSheetBackground()
         }
         .onAppear {
             syncViewModeFromPreference()
@@ -222,7 +282,23 @@ struct EmailInboxView: View {
         .onChange(of: services.pendingEmailThreadId) { _, _ in
             consumePendingThreadNavigation()
         }
-        .onChange(of: searchText) {
+        // Header ellipsis menu actions
+        .onChange(of: services.emailRefreshTick) { _, _ in
+            Task {
+                await emailService.loadThreads(
+                    folder: selectedFolder.rawValue,
+                    query: searchText.isEmpty ? nil : searchText,
+                    refresh: true,
+                    triggerSync: searchText.isEmpty
+                )
+            }
+        }
+        .onChange(of: services.emailMarkAllReadTick) { _, _ in
+            let unreadIds = filteredThreads.filter(\.unread).map(\.id)
+            guard !unreadIds.isEmpty else { return }
+            Task { await emailService.markAsRead(ids: unreadIds) }
+        }
+        .onChange(of: searchText) { oldValue, newValue in
             // Instant local filtering for immediate visual feedback
             recomputeFilteredThreads()
             // Debounced server search — waits 500ms after last keystroke so we don't
@@ -231,6 +307,27 @@ struct EmailInboxView: View {
             // so a stale slow response can't overwrite a newer fast one.
             searchDebounceTask?.cancel()
             searchTask?.cancel()
+            // When the user clears the search field, `emailService.threads` is still
+            // populated with the *search* result set (the previous server search call
+            // overwrote it). Re-running the local filter would just leave those few
+            // results visible. Re-fetch the unfiltered inbox so the user sees their
+            // full inbox again instead of being stuck in search-results state.
+            if newValue.isEmpty {
+                if !oldValue.isEmpty {
+                    Task {
+                        await emailService.loadThreads(
+                            folder: selectedFolder.rawValue,
+                            refresh: true
+                        )
+                    }
+                }
+                return
+            }
+            // Skip server search if we only changed case/whitespace — the local
+            // filter already covered that.
+            let normalizedNew = newValue.trimmingCharacters(in: .whitespaces).lowercased()
+            let normalizedOld = oldValue.trimmingCharacters(in: .whitespaces).lowercased()
+            guard normalizedNew != normalizedOld else { return }
             searchDebounceTask = Task {
                 try? await Task.sleep(for: .milliseconds(500))
                 guard !Task.isCancelled else { return }
@@ -251,39 +348,50 @@ struct EmailInboxView: View {
     // MARK: - Thread List
 
     private var threadList: some View {
-        VStack(spacing: 0) {
-            inboxHeader
-                .padding(.horizontal, 16)
-                .padding(.top, 4)
-                .padding(.bottom, 4)
+        ZStack(alignment: .top) {
+            // Scrollable content fills full screen; inset below the pinned header overlay.
+            Group {
+                if viewMode == .people {
+                    peopleListView
+                } else {
+                    threadListContent
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .safeAreaInset(edge: .top) {
+                Color.clear.frame(height: emailHeaderHeight + emailScrimTail)
+            }
 
-            folderAndSearchRow
-                .padding(.horizontal, 16)
-                .padding(.top, 8)
-                .padding(.bottom, 8)
-
-            // Multi-account filter chips — shown only when the user has 2+ connections.
-            if connectionsService.hasMultipleConnections {
-                connectionFilterChips
+            // Pinned header overlay with transparent scrim — content scrolls under it.
+            VStack(spacing: 0) {
+                inboxHeader
                     .padding(.horizontal, 16)
-                    .padding(.bottom, 6)
-            }
+                    .padding(.top, 4)
+                    .padding(.bottom, 4)
 
-            if !searchText.isEmpty {
-                searchFeedbackRow
+                folderAndSearchRow
                     .padding(.horizontal, 16)
-                    .padding(.bottom, 6)
-            }
+                    .padding(.top, 8)
+                    .padding(.bottom, 8)
 
-            Divider().foregroundStyle(AppTheme.divider)
+                if connectionsService.hasMultipleConnections {
+                    connectionFilterChips
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 6)
+                }
 
-            if viewMode == .people {
-                // People view — senders grouped, tap to see their threads
-                peopleListView
-            } else {
-                // Thread list — assistant nudges live inside here so they scroll away
-                threadListContent
+                if !searchText.isEmpty {
+                    searchFeedbackRow
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 6)
+                }
             }
+            .onGeometryChange(for: CGFloat.self) { proxy in
+                proxy.size.height
+            } action: { height in
+                emailHeaderHeight = height
+            }
+            .pageHeaderScrim(scrimHeight: emailHeaderHeight + emailScrimTail)
         }
     }
 
@@ -376,7 +484,8 @@ struct EmailInboxView: View {
                 await emailService.loadThreads(
                     folder: selectedFolder.rawValue,
                     query: searchText.isEmpty ? nil : searchText,
-                    refresh: true
+                    refresh: true,
+                    triggerSync: searchText.isEmpty
                 )
             }
             .contentMargins(.bottom, 130, for: .scrollContent)
@@ -466,6 +575,13 @@ struct EmailInboxView: View {
             .onTapGesture {
                 lastVisibleId = thread.id
                 selectedThreadId = thread.id
+            }
+            .contextMenu {
+                Button {
+                    threadAwaitingFolderPick = thread
+                } label: {
+                    Label("Add to folder…", systemImage: "folder.badge.plus")
+                }
             }
 
         if services.swipeGesturesEnabled {
@@ -621,7 +737,8 @@ struct EmailInboxView: View {
             await emailService.loadThreads(
                 folder: selectedFolder.rawValue,
                 query: searchText.isEmpty ? nil : searchText,
-                refresh: true
+                refresh: true,
+                triggerSync: searchText.isEmpty
             )
         }
         .contentMargins(.bottom, 130, for: .scrollContent)
@@ -853,7 +970,6 @@ struct EmailInboxView: View {
                 Button {
                     if !searchText.isEmpty {
                         searchText = ""
-                        Task { await emailService.loadThreads(folder: selectedFolder.rawValue, refresh: true) }
                     }
                     searchFieldFocused = false
                 } label: {
@@ -1002,7 +1118,7 @@ struct EmailInboxView: View {
                         .font(.system(size: 14))
                         .foregroundStyle(AppTheme.subtleText)
                     Button {
-                        Task { await emailService.loadThreads(folder: selectedFolder.rawValue, refresh: true) }
+                        Task { await emailService.loadThreads(folder: selectedFolder.rawValue, refresh: true, triggerSync: true) }
                     } label: {
                         Text("Refresh")
                             .font(.system(size: 14, weight: .semibold))
@@ -1048,7 +1164,7 @@ struct EmailInboxView: View {
                         .padding(.horizontal, 32)
                 }
                 Button {
-                    Task { await emailService.loadThreads(folder: selectedFolder.rawValue, refresh: true) }
+                    Task { await emailService.loadThreads(folder: selectedFolder.rawValue, refresh: true, triggerSync: true) }
                 } label: {
                     Text("Try Again")
                         .font(.system(size: 14, weight: .semibold))
@@ -1142,6 +1258,7 @@ struct SenderThreadsView: View {
 
     @Environment(AppServices.self) private var services
     @State private var selectedThreadId: String?
+    @State private var pendingDeleteThread: EmailThread?
 
     private var emailService: EmailService { services.emailService }
 
@@ -1176,6 +1293,24 @@ struct SenderThreadsView: View {
         .background(AppTheme.backgroundTop)
         .navigationTitle(senderName)
         .navigationBarTitleDisplayMode(.inline)
+        .confirmationDialog(
+            "Delete this conversation?",
+            isPresented: Binding(
+                get: { pendingDeleteThread != nil },
+                set: { if !$0 { pendingDeleteThread = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: pendingDeleteThread
+        ) { thread in
+            Button("Delete", role: .destructive) {
+                let id = thread.id
+                pendingDeleteThread = nil
+                Task { await emailService.deleteThreads(ids: [id]) }
+            }
+            Button("Cancel", role: .cancel) { pendingDeleteThread = nil }
+        } message: { thread in
+            Text("\"\(thread.subject)\" will be moved to Trash.")
+        }
         .navigationDestination(item: $selectedThreadId) { threadId in
             EmailThreadView(threadId: threadId)
         }
@@ -1201,7 +1336,7 @@ struct SenderThreadsView: View {
                     .tint(.orange)
 
                     Button(role: .destructive) {
-                        Task { await emailService.deleteThreads(ids: [thread.id]) }
+                        pendingDeleteThread = thread
                     } label: {
                         Label("Delete", systemImage: "trash")
                     }

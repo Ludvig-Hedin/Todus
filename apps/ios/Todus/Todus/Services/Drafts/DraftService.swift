@@ -6,6 +6,11 @@ import SwiftData
 @MainActor
 final class DraftService {
     private let api: TodosAPIClient
+    /// Set while `flushPending` is processing. Re-entrant calls (rapid network
+    /// flapping triggering multiple onReconnect events) bail out early so we
+    /// don't reset in-flight `"sending"` rows back to `"pendingSend"` and
+    /// fire a second `mail.send` for the same draft.
+    private var isFlushing = false
 
     init(api: TodosAPIClient) {
         self.api = api
@@ -83,8 +88,13 @@ final class DraftService {
     /// Saves the draft locally and attempts to send. If send fails (offline or error),
     /// the draft remains with syncState "pendingSend" for later retry.
     func saveAndSend(_ draft: DraftRecord, in context: ModelContext) async {
-        context.insert(draft)
-        try? context.save()
+        // Only insert when the draft isn't already managed by the context — flushPending
+        // re-runs this against drafts fetched from disk, where another insert can produce
+        // duplicate rows or undefined SwiftData behavior.
+        if draft.modelContext == nil {
+            context.insert(draft)
+            try? context.save()
+        }
 
         draft.syncState = "sending"
         try? context.save()
@@ -113,6 +123,14 @@ final class DraftService {
     /// Retry all pending/failed drafts. Call on reconnect.
     /// Also resets any "sending" records back to "pendingSend" — these were in-flight when the app last crashed.
     func flushPending(in context: ModelContext) async {
+        // Re-entrant guard. Without this, a rapid offline→online→offline→online
+        // bounce could fire two concurrent flushes: the second would reset a
+        // draft currently mid-flight in the first ("sending" → "pendingSend")
+        // and re-send the same email. See the related fix in MacDraftService.
+        guard !isFlushing else { return }
+        isFlushing = true
+        defer { isFlushing = false }
+
         // Reset stuck "sending" records so they get retried
         let stuckDescriptor = FetchDescriptor<DraftRecord>(
             predicate: #Predicate { $0.syncState == "sending" }
@@ -145,7 +163,19 @@ final class DraftService {
     private func recipientHeader(_ r: Recipient) -> String? {
         let email = r.email.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !email.isEmpty else { return nil }
+        // Reject characters that could break RFC 5322 framing or inject extra
+        // recipients (e.g. "victim@x.com>, <attacker@y.com").
+        let illegal: Set<Character> = ["<", ">", ",", ";", ":", "\"", "\r", "\n", "\t"]
+        guard !email.contains(where: { illegal.contains($0) }) else { return nil }
         if let rawName = r.name?.trimmingCharacters(in: .whitespacesAndNewlines), !rawName.isEmpty {
+            // Names go inside a quoted-string, but \r / \n still terminate the
+            // To: header line and let an attacker inject an extra Bcc:. Drop the
+            // display name when the input contains any control character — the
+            // address itself is still delivered, just without a "Display Name <…>" wrapper.
+            let nameInjectionChars: Set<Character> = ["\r", "\n", "\0"]
+            guard !rawName.contains(where: { nameInjectionChars.contains($0) }) else {
+                return email
+            }
             let escaped = rawName
                 .replacingOccurrences(of: "\\", with: "\\\\")
                 .replacingOccurrences(of: "\"", with: "\\\"")

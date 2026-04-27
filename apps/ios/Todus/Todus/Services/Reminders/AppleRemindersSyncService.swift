@@ -142,6 +142,18 @@ final class AppleRemindersSyncService {
     // Single shared actor instance — its serial queue serializes all EKEventStore I/O.
     private let storage = RemindersStorageActor()
 
+    /// Current sync direction. Owned at the AppServices layer (in `RemindersSyncState`);
+    /// kept mirrored here so consumers that already hold this service can read
+    /// `isOneWaySync` without reaching back into AppServices. AppServices is responsible
+    /// for keeping this in sync with `RemindersSyncState.direction`.
+    var syncDirection: RemindersSyncDirection = .twoWay
+
+    /// `true` when the user has set sync to pull-only (Reminders → Todus). When this is true,
+    /// upserts/deletes from Todus → Reminders are intentionally suppressed by the callers
+    /// in `TaskCaptureService.syncReminder` / `deleteReminder`. UIs read this to display a
+    /// "one-way sync" label so users aren't surprised when local edits don't propagate.
+    var isOneWaySync: Bool { syncDirection == .fromReminders }
+
     func authorizationState() -> AuthorizationState {
         // authorizationStatus is a class method and doesn't block — safe to call on main.
         switch EKEventStore.authorizationStatus(for: .reminder) {
@@ -217,8 +229,14 @@ final class AppleRemindersSyncService {
             guard let task = try? context.fetch(descriptor).first else { return }
             // If the previously-tracked reminder was missing, our save() created a fresh
             // one; either way we now point at a live identifier.
+            let identifierChanged = task.reminderIdentifier != result.identifier
             task.reminderIdentifier = result.identifier
-            task.syncState = .pendingUpload
+            // Only mark pendingUpload when the identifier actually changed so the backend
+            // learns the new link. Resetting it unconditionally was re-queuing every task
+            // for a redundant backend sync after each reminder save.
+            if identifierChanged {
+                task.syncState = .pendingUpload
+            }
             if result.existingNotFound {
                 AppLogger.shared.log(
                     "AppleRemindersSyncService.upsert: previous reminder missing, recreated as \(result.identifier)"
@@ -267,9 +285,21 @@ final class AppleRemindersSyncService {
         let existingTasks = (try? context.fetch(descriptor)) ?? []
         let trackedIdentifiers = Set(existingTasks.compactMap(\.reminderIdentifier))
 
-        var didInsert = false
+        // Guard against the race where a Todus-created task's upsert() async Task hasn't yet
+        // written reminderIdentifier back to the TaskRecord. The reminder already exists in
+        // Apple Reminders but reminderIdentifier is still nil, so trackedIdentifiers misses it
+        // and importFromReminders would create a duplicate. Skip any reminder whose title
+        // matches a local task that is pending upload and has no reminder link yet.
+        let pendingTitles = Set(
+            existingTasks
+                .filter { $0.reminderIdentifier == nil && $0.syncState == .pendingUpload }
+                .map { $0.title }
+        )
+
+        var insertedCount = 0
         for reminder in reminders {
             guard !trackedIdentifiers.contains(reminder.identifier) else { continue }
+            guard !pendingTitles.contains(reminder.title) else { continue }
             guard !reminder.title.isEmpty else { continue }
 
             // Mark as `parsed` (title already set — no AI enrichment needed) and
@@ -289,12 +319,12 @@ final class AppleRemindersSyncService {
                 syncState: .synced
             )
             context.insert(task)
-            didInsert = true
+            insertedCount += 1
         }
 
-        if didInsert {
+        if insertedCount > 0 {
             try? context.save()
-            AppLogger.shared.log("importFromReminders: inserted \(reminders.count) reminder(s) as tasks")
+            AppLogger.shared.log("importFromReminders: inserted \(insertedCount) reminder(s) as tasks")
         }
     }
 }

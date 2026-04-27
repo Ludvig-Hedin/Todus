@@ -15,142 +15,142 @@ struct TabBarOnboardingView: View {
     /// Tracks which tab is being dragged (for the drag-to-reorder animation).
     @State private var draggingTab: AppTab? = nil
 
-    /// All tabs that aren't in selectedTabs yet.
+    /// Tabs the user can add (excludes create/ai — not shown as “pages”; matches native `TabView` + AI FAB).
     private var availableTabs: [AppTab] {
-        AppTab.allCases.filter { !selectedTabs.contains($0) }
+        AppTab.allCases.filter { tab in
+            !selectedTabs.contains(tab) && tab != .create && tab != .ai
+        }
     }
 
     var body: some View {
         ZStack {
             AppTheme.backgroundTop.ignoresSafeArea()
 
-            VStack(spacing: 0) {
-                // ── Header ──────────────────────────────────────────────
-                VStack(spacing: 10) {
-                    Text("Pick your main pages")
-                        .font(.system(size: 30, weight: .bold))
-                        .multilineTextAlignment(.center)
-                        .padding(.top, 56)
+            ScrollView {
+                VStack(alignment: .center, spacing: 0) {
+                    // ── Header ──────────────────────────────────────────────
+                    VStack(spacing: 6) {
+                        Text("Pick your main pages")
+                            .font(.system(size: 22, weight: .bold))
+                            .multilineTextAlignment(.center)
 
-                    Text("Choose the pages you want close by first. You can change this later in Settings.")
-                        .font(.system(size: 15))
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .lineSpacing(3)
-                }
-                .padding(.horizontal, 28)
-
-                Spacer(minLength: 28)
-
-                // ── Tab list ─────────────────────────────────────────────
-                VStack(spacing: 0) {
-                    // Active tabs — ordered, draggable
-                    if !selectedTabs.isEmpty {
-                        VStack(spacing: 0) {
-                            HStack {
-                                Text("Main pages")
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .foregroundStyle(.secondary)
-                                    .textCase(.uppercase)
-                                    .tracking(0.4)
-                                Spacer()
-                                // Live counter — turns blue at 4 (limit reached)
-                                Text("\(selectedTabs.count) / 4")
-                                    .font(.system(size: 12, weight: .bold))
-                                    .foregroundStyle(selectedTabs.count >= 4 ? .primary : .secondary)
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 3)
-                                    .background(
-                                        Capsule()
-                                            .fill((selectedTabs.count >= 4 ? Color.primary : Color.secondary).opacity(0.1))
-                                    )
-                                    .animation(.snappy(duration: 0.2), value: selectedTabs.count)
-                            }
-                            .padding(.horizontal, 24)
-                            .padding(.bottom, 10)
-
-                            ForEach(selectedTabs) { tab in
-                                activeRow(tab)
-                            }
-                        }
+                        Text("Choose the pages you want close by first. You can change this later in Settings.")
+                            .font(.system(size: 13))
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .lineSpacing(2)
                     }
+                    .padding(.top, 8)
+                    .padding(.horizontal, 20)
 
-                    // Available tabs — not in bar yet
-                    if !availableTabs.isEmpty {
-                        VStack(spacing: 0) {
-                            HStack {
-                                Text("Other pages")
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .foregroundStyle(.secondary)
-                                    .textCase(.uppercase)
-                                    .tracking(0.4)
-                                Spacer()
-                                if selectedTabs.count >= 4 {
-                                    Text("Remove one to add more")
-                                        .font(.system(size: 11))
+                    // ── Tab list ─────────────────────────────────────────────
+                    VStack(spacing: 0) {
+                        if !selectedTabs.isEmpty {
+                            VStack(spacing: 0) {
+                                HStack {
+                                    Text("Main pages")
+                                        .font(.system(size: 11, weight: .semibold))
                                         .foregroundStyle(.secondary)
+                                        .textCase(.uppercase)
+                                        .tracking(0.35)
+                                    Spacer()
+                                    Text("\(selectedTabs.count) / 4")
+                                        .font(.system(size: 11, weight: .bold))
+                                        .foregroundStyle(selectedTabs.count >= 4 ? .primary : .secondary)
+                                        .padding(.horizontal, 7)
+                                        .padding(.vertical, 2)
+                                        .background(
+                                            Capsule()
+                                                .fill((selectedTabs.count >= 4 ? Color.primary : Color.secondary).opacity(0.1))
+                                        )
+                                        .animation(.snappy(duration: 0.2), value: selectedTabs.count)
+                                }
+                                .padding(.horizontal, 4)
+                                .padding(.top, 16)
+                                .padding(.bottom, 6)
+
+                                ForEach(selectedTabs) { tab in
+                                    activeRow(tab)
                                 }
                             }
-                            .padding(.horizontal, 24)
-                            .padding(.top, 20)
-                            .padding(.bottom, 10)
+                        }
 
-                            ForEach(availableTabs) { tab in
-                                inactiveRow(tab)
+                        if !availableTabs.isEmpty {
+                            VStack(spacing: 0) {
+                                HStack {
+                                    Text("Other pages")
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundStyle(.secondary)
+                                        .textCase(.uppercase)
+                                        .tracking(0.35)
+                                    Spacer()
+                                    if selectedTabs.count >= 4 {
+                                        Text("Remove one to add more")
+                                            .font(.system(size: 10))
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                .padding(.horizontal, 4)
+                                .padding(.top, 12)
+                                .padding(.bottom, 6)
+
+                                ForEach(availableTabs) { tab in
+                                    inactiveRow(tab)
+                                }
                             }
                         }
                     }
-                }
-                .padding(.horizontal, 24)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 4)
 
-                Spacer(minLength: 28)
+                    // ── Live tab bar preview (native order: tab₁ · tab₂ · + · tab₃ · tab₄) ──
+                    VStack(spacing: 6) {
+                        Text("Preview")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            .textCase(.uppercase)
+                            .tracking(0.35)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 4)
 
-                // ── Live tab bar preview ──────────────────────────────────
-                VStack(spacing: 10) {
-                    Text("Preview")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .textCase(.uppercase)
-                        .tracking(0.4)
+                        tabBarPreview
+                            .transition(.opacity.combined(with: .scale(scale: 0.98)))
+                            .animation(.snappy(duration: 0.25), value: selectedTabs.map(\.rawValue))
 
-                    tabBarPreview
-                        .transition(.opacity.combined(with: .scale(scale: 0.97)))
-                        .animation(.snappy(duration: 0.25), value: selectedTabs.map(\.rawValue))
-
-                    Text("Home stays pinned so the app always has a clear starting point.")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                }
-                .padding(.horizontal, 24)
-
-                Spacer(minLength: 28)
-
-                // ── CTA ───────────────────────────────────────────────────
-                VStack(spacing: 12) {
-                    Button { commit() } label: {
-                        Text("Use this setup")
-                            .font(.system(size: 17, weight: .semibold))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 16)
+                        Text("Bottom bar matches the app: Home, two tabs, +, then the rest. AI is the floating sparkles button above, not a tab.")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.primary)
+                    .padding(.top, 14)
+                    .padding(.horizontal, 16)
 
-                    Button("Skip for now") {
-                        services.hasConfiguredTabBarPrompt = true
-                    }
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .padding(.vertical, 8)
+                    // ── CTA ───────────────────────────────────────────────────
+                    VStack(spacing: 8) {
+                        Button { commit() } label: {
+                            Text("Use this setup")
+                                .font(.system(size: 16, weight: .semibold))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 13)
+                        }
+                        .buttonStyle(AppPrimaryButtonStyle())
 
-                    Text("Choose a simple setup now. You can reorder or swap pages anytime later.")
-                        .font(.system(size: 12, weight: .medium))
+                        Button("Skip for now") {
+                            services.hasConfiguredTabBarPrompt = true
+                        }
+                        .font(.system(size: 14, weight: .medium))
                         .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
+                        .padding(.vertical, 4)
+
+                        Text("Choose a simple setup now. You can reorder or swap pages anytime later.")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding(.top, 16)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 28)
                 }
-                .padding(.horizontal, 24)
-                .padding(.bottom, 48)
             }
         }
         .onAppear { selectedTabs = services.tabBarTabs }
@@ -161,28 +161,29 @@ struct TabBarOnboardingView: View {
     // ─────────────────────────────────────────────────────────────────────────
 
     private func activeRow(_ tab: AppTab) -> some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 8) {
             // Drag handle — visible cue that this row can be reordered
             Image(systemName: "line.3.horizontal")
-                .font(.system(size: 13, weight: .medium))
+                .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.tertiary)
-                .frame(width: 20)
+                .frame(width: 16)
 
             // Icon
             Image(systemName: tab.activeIcon)
-                .font(.system(size: 15, weight: .medium))
+                .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(.primary)
-                .frame(width: 32, height: 32)
-                .background(Color.primary.opacity(0.1), in: RoundedRectangle(cornerRadius: AppTheme.Radius.inline, style: .continuous))
+                .frame(width: 28, height: 28)
+                .background(Color.primary.opacity(0.1), in: RoundedRectangle(cornerRadius: AppTheme.Radius.compact, style: .continuous))
 
             // Label
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: 0) {
                 Text(tab.title)
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(.primary)
                 Text(tab.description)
-                    .font(.system(size: 12))
+                    .font(.system(size: 11))
                     .foregroundStyle(.secondary)
+                    .lineLimit(2)
             }
 
             Spacer()
@@ -190,7 +191,7 @@ struct TabBarOnboardingView: View {
             // Remove — locked for required tabs (home)
             if tab.isRequired {
                 Image(systemName: "lock.fill")
-                    .font(.system(size: 12))
+                    .font(.system(size: 11))
                     .foregroundStyle(.tertiary)
             } else {
                 let canRemove = selectedTabs.count > 2
@@ -201,7 +202,7 @@ struct TabBarOnboardingView: View {
                     }
                 } label: {
                     Image(systemName: "minus.circle.fill")
-                        .font(.system(size: 20))
+                        .font(.system(size: 18))
                         .foregroundStyle(.red.opacity(canRemove ? 0.75 : 0.3))
                 }
                 .buttonStyle(.plain)
@@ -209,14 +210,14 @@ struct TabBarOnboardingView: View {
                 .accessibilityLabel(canRemove ? "Remove \(tab.title) from tab bar" : "Keep at least two tabs in the tab bar")
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.row, style: .continuous))
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.compact, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: AppTheme.Radius.row, style: .continuous)
+            RoundedRectangle(cornerRadius: AppTheme.Radius.compact, style: .continuous)
                 .stroke(Color.primary.opacity(0.2), lineWidth: 1)
         )
-        .padding(.bottom, 6)
+        .padding(.bottom, 4)
         // Drag-to-reorder: long press then drag vertically
         .onDrag {
             draggingTab = tab
@@ -236,24 +237,25 @@ struct TabBarOnboardingView: View {
     private func inactiveRow(_ tab: AppTab) -> some View {
         let atMax = selectedTabs.count >= 4
 
-        return HStack(spacing: 12) {
+        return HStack(spacing: 8) {
             // Spacer to align with drag handle column
-            Spacer().frame(width: 20)
+            Spacer().frame(width: 16)
 
             // Icon — muted when at limit
             Image(systemName: tab.inactiveIcon())
-                .font(.system(size: 15, weight: .medium))
+                .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(atMax ? .tertiary : .secondary)
-                .frame(width: 32, height: 32)
-                .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: AppTheme.Radius.inline, style: .continuous))
+                .frame(width: 28, height: 28)
+                .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: AppTheme.Radius.compact, style: .continuous))
 
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: 0) {
                 Text(tab.title)
-                    .font(.system(size: 15, weight: .medium))
+                    .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(atMax ? .secondary : .primary)
                 Text(tab.description)
-                    .font(.system(size: 12))
+                    .font(.system(size: 11))
                     .foregroundStyle(.tertiary)
+                    .lineLimit(2)
             }
 
             Spacer()
@@ -266,20 +268,20 @@ struct TabBarOnboardingView: View {
                 }
             } label: {
                 Image(systemName: "plus.circle.fill")
-                    .font(.system(size: 20))
+                    .font(.system(size: 18))
                     .foregroundStyle(atMax ? Color.secondary.opacity(0.35) : Color.primary)
             }
             .buttonStyle(.plain)
             .disabled(atMax)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .background(AppTheme.surfacePrimary.opacity(0.5), in: RoundedRectangle(cornerRadius: AppTheme.Radius.row, style: .continuous))
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(AppTheme.surfacePrimary.opacity(0.5), in: RoundedRectangle(cornerRadius: AppTheme.Radius.compact, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: AppTheme.Radius.row, style: .continuous)
+            RoundedRectangle(cornerRadius: AppTheme.Radius.compact, style: .continuous)
                 .stroke(AppTheme.cardBorder, lineWidth: 1)
         )
-        .padding(.bottom, 6)
+        .padding(.bottom, 4)
         .opacity(atMax ? 0.6 : 1)
         .animation(.easeInOut(duration: 0.15), value: atMax)
     }
@@ -288,103 +290,65 @@ struct TabBarOnboardingView: View {
     // MARK: - Tab Bar Preview
     // ─────────────────────────────────────────────────────────────────────────
 
-    /// Renders a scaled-down but faithful replica of the actual CustomTabBar glass pill,
-    /// so the user sees exactly what they'll get — icons in order.
-    /// Mirrors the real CustomTabBar layout:
-    /// Left pill = burger + nav tabs (+ ghost slots) | Right pill = AI + create
+    /// Order matches `MainTabView`’s `TabView`: `tab[0] · tab[1] · + · tab[2] · tab[3]`.
+    /// (AI is a floating action button, not a tab; no custom burger bar.)
     private var tabBarPreview: some View {
-        HStack(spacing: 8) {
-            // Nav tabs pill — burger first, then user tabs, then ghost slots
-            HStack(spacing: 0) {
-                // Burger button (always present, always first)
-                Image(systemName: "line.3.horizontal")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Color(UIColor.secondaryLabel))
-                    .frame(width: 38, height: 38)
-
-                // Thin separator
-                Rectangle()
-                    .fill(Color(UIColor.separator).opacity(0.25))
-                    .frame(width: 1, height: 18)
-
-                ForEach(selectedTabs) { tab in
-                    previewTabIcon(tab)
-                }
-                // Ghost slots: max 4 configurable tabs
-                ForEach(0..<max(0, 4 - selectedTabs.count), id: \.self) { _ in
-                    previewGhostSlot
-                }
+        HStack(spacing: 0) {
+            ForEach(0..<5, id: \.self) { i in
+                nativePreviewTabSlot(index: i)
             }
-            .padding(3)
-            .background(.ultraThinMaterial, in: Capsule())
-            .shadow(color: .black.opacity(0.06), radius: 10, x: 0, y: 3)
-
-            // Action pill — AI + create (no ellipsis)
-            HStack(spacing: 0) {
-                previewActionIcon("sparkles", gradient: true)
-                previewActionIcon("plus", gradient: false)
-            }
-            .padding(3)
-            .background(.ultraThinMaterial, in: Capsule())
-            .shadow(color: .black.opacity(0.06), radius: 10, x: 0, y: 3)
         }
-        .scaleEffect(0.85, anchor: .bottom)
-        .frame(height: 54)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 4)
+        .padding(.horizontal, 2)
+        .background {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(.ultraThinMaterial)
+        }
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(Color(UIColor.separator).opacity(0.22), lineWidth: 0.5)
+        )
+    }
+
+    private func tabInPreviewBar(at index: Int) -> AppTab? {
+        switch index {
+        case 0: return selectedTabs.indices.contains(0) ? selectedTabs[0] : nil
+        case 1: return selectedTabs.indices.contains(1) ? selectedTabs[1] : nil
+        case 2: return .create
+        case 3: return selectedTabs.indices.contains(2) ? selectedTabs[2] : nil
+        case 4: return selectedTabs.indices.contains(3) ? selectedTabs[3] : nil
+        default: return nil
+        }
     }
 
     @ViewBuilder
-    private func previewTabIcon(_ tab: AppTab) -> some View {
-        // First tab (home) shown as active to make the indicator visible
-        let isFirst = selectedTabs.first == tab
-        Image(systemName: isFirst ? tab.activeIcon : tab.inactiveIcon())
-            .font(.system(size: 15, weight: .semibold))
-            .foregroundStyle(isFirst ? Color(red: 0, green: 0x81/255.0, blue: 1) : Color(UIColor.secondaryLabel))
-            .frame(width: 52, height: 40)
-            .background {
-                if isFirst {
-                    Color(UIColor { t in
-                        t.userInterfaceStyle == .dark
-                            ? UIColor(white: 0.12, alpha: 1)
-                            : UIColor(white: 0.94, alpha: 1)
-                    })
-                    .clipShape(Capsule())
-                }
-            }
-    }
+    private func nativePreviewTabSlot(index: Int) -> some View {
+        let secondary = Color(UIColor.secondaryLabel)
+        let accent = Color(UIColor.systemBlue)
 
-    /// Empty slot shown when fewer than 4 tabs selected — dashed outline hint
-    private var previewGhostSlot: some View {
-        RoundedRectangle(cornerRadius: AppTheme.Radius.inline, style: .continuous)
-            .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [4]))
-            .foregroundStyle(.secondary.opacity(0.2))
-            .frame(width: 52, height: 40)
-    }
-
-    private func previewActionIcon(_ icon: String, gradient: Bool) -> some View {
-        let size: CGFloat = icon == "ellipsis" ? 36 : 44
-        return Group {
-            if gradient {
-                Image(systemName: icon)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(
-                        LinearGradient(
-                            stops: [
-                                .init(color: Color(red: 0, green: 0xAA/255.0, blue: 0xF5/255.0), location: 0.087),
-                                .init(color: Color(red: 0xEF/255.0, green: 0, blue: 0xC2/255.0), location: 0.269),
-                                .init(color: Color(red: 1, green: 0, blue: 0x38/255.0), location: 0.580),
-                                .init(color: Color(red: 0xF9/255.0, green: 0x9F/255.0, blue: 0), location: 0.913),
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: size, height: 40)
+        if let tab = tabInPreviewBar(at: index) {
+            let isSelected = (index == 0) && (tab == .home)
+            if tab == .create {
+                Image(systemName: "plus.circle.fill")
+                    .font(.system(size: 19, weight: .semibold))
+                    .foregroundStyle(secondary)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 32)
             } else {
-                Image(systemName: icon)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Color(UIColor.secondaryLabel))
-                    .frame(width: size, height: 40)
+                Image(systemName: isSelected ? tab.activeIcon : tab.inactiveIcon())
+                    .font(.system(size: 15, weight: isSelected ? .semibold : .regular))
+                    .foregroundStyle(isSelected ? accent : secondary)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 32)
             }
+        } else {
+            RoundedRectangle(cornerRadius: 3, style: .continuous)
+                .strokeBorder(style: StrokeStyle(lineWidth: 0.5, dash: [3, 2]))
+                .foregroundStyle(secondary.opacity(0.2))
+                .frame(maxWidth: .infinity)
+                .frame(height: 20)
+                .padding(.vertical, 6)
         }
     }
 

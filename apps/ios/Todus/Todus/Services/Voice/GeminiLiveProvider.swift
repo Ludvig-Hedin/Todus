@@ -6,12 +6,13 @@ import Foundation
 /// WebSocket API (`BidiGenerateContent`).
 ///
 /// Wire protocol:
-/// 1. Client sends a `config` setup message (model, system instruction, tools).
+/// 1. Client sends a `setup` message (model, system instruction, tools).
 /// 2. Server responds with `setupComplete`.
 /// 3. Client sends `realtimeInput.audio` with base64 PCM16 @ 16kHz.
-/// 4. Server sends `serverContent` with modelTurn parts (text / audio) and transcriptions.
-/// 5. Tool calls arrive as `toolCall`, client responds with `toolResponse`.
-/// 6. `turnComplete` signals the model finished its current response.
+/// 4. Client may also send `realtimeInput.text` for mid-session text input.
+/// 5. Server sends `serverContent` with modelTurn parts (text / audio) and transcriptions.
+/// 6. Tool calls arrive as `toolCall`, client responds with `toolResponse`.
+/// 7. `turnComplete` signals the model finished its current response.
 final class GeminiLiveProvider: VoiceProvider, @unchecked Sendable {
 
     // MARK: - VoiceProvider conformance
@@ -26,9 +27,46 @@ final class GeminiLiveProvider: VoiceProvider, @unchecked Sendable {
     /// Stored so we can invalidate it in disconnect() to avoid URLSession leaks.
     private var webSocketSession: URLSession?
     private var receiveTask: Task<Void, Never>?
+    /// Fires if Gemini doesn't reply with `setupComplete` within the timeout, so the UI
+    /// doesn't sit on a spinner forever when the upstream silently drops the setup.
+    private var setupTimeoutTask: Task<Void, Never>?
     private var eventContinuation: AsyncStream<VoiceSessionEvent>.Continuation?
     /// Mutable: recreated on each connect() so the provider isn't single-use.
     private var eventStream: AsyncStream<VoiceSessionEvent>
+    /// Last server-sent error message (from the proxy's error JSON, or a Gemini error
+    /// envelope). Used so that when the WebSocket then closes, the surfaced reason is
+    /// descriptive instead of a generic NSURLError -1011.
+    /// Guarded by `stateLock` — touched from receive loop, timeout task, and connect().
+    private var _lastServerError: String?
+    /// Marked true once we've emitted .connected. Lets us suppress the setup timeout.
+    /// Guarded by `stateLock`.
+    private var _didReachSetupComplete = false
+
+    /// Protects `_lastServerError` and `_didReachSetupComplete` from concurrent access
+    /// across the receive loop, timeout task, and connect() / cleanup paths.
+    private let stateLock = NSLock()
+
+    private var lastServerError: String? {
+        get { stateLock.lock(); defer { stateLock.unlock() }; return _lastServerError }
+        set { stateLock.lock(); defer { stateLock.unlock() }; _lastServerError = newValue }
+    }
+
+    private var didReachSetupComplete: Bool {
+        get { stateLock.lock(); defer { stateLock.unlock() }; return _didReachSetupComplete }
+        set { stateLock.lock(); defer { stateLock.unlock() }; _didReachSetupComplete = newValue }
+    }
+
+    /// Atomically claim the "setup didn't complete in time" path so the timeout task
+    /// and the receive loop can't both win and emit conflicting events. Returns true
+    /// if the caller now owns the failure path; false if setupComplete already landed.
+    private func claimSetupTimeout() -> Bool {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        guard !_didReachSetupComplete else { return false }
+        // Mark as "complete" so a late setupComplete from the receive loop is a no-op.
+        _didReachSetupComplete = true
+        return true
+    }
 
     /// Serial queue for WebSocket sends to avoid interleaved writes.
     private let sendQueue = DispatchQueue(label: "com.todus.geminiLive.send", qos: .userInitiated)
@@ -46,6 +84,8 @@ final class GeminiLiveProvider: VoiceProvider, @unchecked Sendable {
         var continuation: AsyncStream<VoiceSessionEvent>.Continuation?
         self.eventStream = AsyncStream { continuation = $0 }
         self.eventContinuation = continuation
+        didReachSetupComplete = false
+        lastServerError = nil
 
         yield(.connectionStateChanged(.connecting))
 
@@ -71,6 +111,27 @@ final class GeminiLiveProvider: VoiceProvider, @unchecked Sendable {
             cleanupConnection()
             throw error
         }
+
+        // If Gemini doesn't reply with setupComplete within 15s, the session is hung —
+        // surface a real error so the UI doesn't sit on a spinner forever. Most causes:
+        // bad model name, malformed setup payload, or a silent upstream drop.
+        scheduleSetupTimeout()
+    }
+
+    private func scheduleSetupTimeout() {
+        setupTimeoutTask?.cancel()
+        setupTimeoutTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 15 * 1_000_000_000)
+            guard let self, !Task.isCancelled else { return }
+            // Atomic claim so a setupComplete arriving in the receive loop right now
+            // can't slip past and cause both .connected and .failed to fire.
+            guard self.claimSetupTimeout() else { return }
+            let reason = self.lastServerError
+                ?? "Voice session did not start (no response from voice provider after 15s)."
+            self.yield(.error(reason))
+            self.yield(.connectionStateChanged(.failed(reason)))
+            self.cleanupConnection()
+        }
     }
 
     // MARK: - Disconnect
@@ -85,6 +146,8 @@ final class GeminiLiveProvider: VoiceProvider, @unchecked Sendable {
     /// Shared cleanup: cancels receive loop, closes WebSocket, invalidates URLSession.
     /// Does NOT finish the event continuation (disconnect does that separately).
     private func cleanupConnection() {
+        setupTimeoutTask?.cancel()
+        setupTimeoutTask = nil
         receiveTask?.cancel()
         receiveTask = nil
         webSocketTask?.cancel(with: .normalClosure, reason: nil)
@@ -114,11 +177,8 @@ final class GeminiLiveProvider: VoiceProvider, @unchecked Sendable {
     func sendText(_ text: String) async throws {
         guard webSocketTask != nil else { throw VoiceProviderError.notConnected }
         let message: [String: Any] = [
-            "clientContent": [
-                "turns": [
-                    ["role": "user", "parts": [["text": text]]]
-                ],
-                "turnComplete": true
+            "realtimeInput": [
+                "text": text
             ]
         ]
         try await sendJSON(message)
@@ -161,7 +221,10 @@ final class GeminiLiveProvider: VoiceProvider, @unchecked Sendable {
     // MARK: - Setup Message
 
     private func buildSetupMessage(config: VoiceSessionConfig) -> [String: Any] {
-        var generationConfig: [String: Any] = [
+        // Per the BidiGenerateContent proto: GenerationConfig holds responseModalities and
+        // speechConfig; inputAudioTranscription / outputAudioTranscription are SIBLINGS of
+        // generationConfig inside setup (not nested under it).
+        let generationConfig: [String: Any] = [
             "responseModalities": config.responseModalities,
             "speechConfig": [
                 "voiceConfig": [
@@ -171,24 +234,28 @@ final class GeminiLiveProvider: VoiceProvider, @unchecked Sendable {
                 ]
             ]
         ]
-        // Request transcriptions for both input and output so we get text alongside audio
-        generationConfig["inputAudioTranscription"] = [String: Any]()
-        generationConfig["outputAudioTranscription"] = [String: Any]()
 
-        var setupConfig: [String: Any] = [
+        var setupBody: [String: Any] = [
             "model": config.model,
             "generationConfig": generationConfig,
             "systemInstruction": [
                 "parts": [["text": config.systemInstruction]]
-            ]
+            ],
+            // Empty objects = "enabled with defaults" per the spec.
+            "inputAudioTranscription": [String: Any](),
+            "outputAudioTranscription": [String: Any](),
         ]
 
         // Add tool declarations if provided
         if let tools = config.tools, !tools.isEmpty {
-            setupConfig["tools"] = [["functionDeclarations": tools]]
+            setupBody["tools"] = [["functionDeclarations": tools]]
         }
 
-        return ["config": setupConfig]
+        // CRITICAL: the wire-level wrapper is `setup`, not `config`. The previous version
+        // sent `{"config": {...}}` — Gemini's oneof discriminator silently treated the
+        // message as empty, the session held open waiting for a real setup, and the client
+        // sat on a spinner forever with no error to surface.
+        return ["setup": setupBody]
     }
 
     // MARK: - Receive Loop
@@ -213,17 +280,57 @@ final class GeminiLiveProvider: VoiceProvider, @unchecked Sendable {
                     }
                 } catch {
                     if !Task.isCancelled {
-                        // Clean up the dead WebSocket so send methods fail fast
+                        // Prefer a server-sent error message (from the proxy's error JSON) over
+                        // the generic URLError. The backend sends `{ "error": "...", "message": "..." }`
+                        // immediately before closing the socket on auth/credit/upstream failures,
+                        // which gives the user a real reason instead of "bad server response".
+                        let task = self.webSocketTask
+                        // Capture close info from URLSession before nilling out the task.
+                        let closeCode = task?.closeCode ?? .invalid
+                        let closeReason = task?.closeReason
+                            .flatMap { String(data: $0, encoding: .utf8) }
+                            .flatMap { $0.isEmpty ? nil : $0 }
+
                         self.webSocketTask?.cancel(with: .abnormalClosure, reason: nil)
                         self.webSocketTask = nil
                         self.webSocketSession?.invalidateAndCancel()
                         self.webSocketSession = nil
-                        self.yield(.error("WebSocket receive error: \(error.localizedDescription)"))
-                        self.yield(.connectionStateChanged(.failed(error.localizedDescription)))
+
+                        let surfaced = self.lastServerError
+                            ?? closeReason
+                            ?? Self.describeCloseCode(closeCode)
+                            ?? error.localizedDescription
+                        self.lastServerError = nil
+                        self.yield(.error(surfaced))
+                        self.yield(.connectionStateChanged(.failed(surfaced)))
                     }
                     break
                 }
             }
+        }
+    }
+
+    /// Maps URLSessionWebSocketTask.CloseCode to a human-readable hint for cases where
+    /// the server didn't supply a reason. .invalid is returned when the handshake never
+    /// produced a close frame at all (the typical "bad server response" path).
+    private static func describeCloseCode(_ code: URLSessionWebSocketTask.CloseCode) -> String? {
+        switch code {
+        case .invalid:
+            return "Could not reach the voice server. Check your connection and try again."
+        case .normalClosure, .goingAway:
+            return nil
+        case .protocolError:
+            return "Voice connection protocol error."
+        case .unsupportedData:
+            return "Voice server sent unsupported data."
+        case .policyViolation:
+            return "Voice connection rejected by server policy."
+        case .messageTooBig:
+            return "Voice message too large."
+        case .internalServerError:
+            return "Voice server error. Please try again."
+        default:
+            return "Voice connection closed (code \(code.rawValue))."
         }
     }
 
@@ -234,8 +341,49 @@ final class GeminiLiveProvider: VoiceProvider, @unchecked Sendable {
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return }
 
+        // Proxy error envelope — backend sends `{ "error": "<tag>", "message": "<reason>" }`
+        // immediately before closing on auth/credit/upstream failures. Surface it
+        // immediately instead of waiting for a later close event because some network
+        // failure paths never deliver a useful close reason back to URLSession.
+        if let _ = json["error"] as? String {
+            let message = (json["message"] as? String) ?? "Voice service error"
+            lastServerError = message
+            yield(.error(message))
+            yield(.connectionStateChanged(.failed(message)))
+            cleanupConnection()
+            return
+        }
+
+        // Gemini-format error envelope: `{ "error": { "code": N, "message": "...", "status": "..." } }`.
+        // Surfaced directly because Gemini may close the socket cleanly afterwards with no extra info.
+        if let errorObj = json["error"] as? [String: Any] {
+            let msg = (errorObj["message"] as? String)
+                ?? (errorObj["status"] as? String)
+                ?? "Voice provider error"
+            let code = errorObj["code"]
+            let composed = code != nil ? "\(msg) (\(code!))" : msg
+            lastServerError = composed
+            yield(.error(composed))
+            yield(.connectionStateChanged(.failed(composed)))
+            cleanupConnection()
+            return
+        }
+
         // setupComplete — session is ready
         if json["setupComplete"] != nil {
+            // Atomically claim the success path. If the timeout task already won
+            // (e.g. setupComplete arrived just past the 15s mark while the timeout
+            // was emitting .failed), drop this event so we don't follow .failed
+            // with a misleading .connected.
+            stateLock.lock()
+            let alreadyResolved = _didReachSetupComplete
+            if !alreadyResolved {
+                _didReachSetupComplete = true
+            }
+            stateLock.unlock()
+            guard !alreadyResolved else { return }
+            setupTimeoutTask?.cancel()
+            setupTimeoutTask = nil
             yield(.connectionStateChanged(.connected))
             return
         }

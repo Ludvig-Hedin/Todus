@@ -6,23 +6,30 @@ struct MeetingsListView: View {
 
     @State private var searchText = ""
     @State private var searchDebounceTask: Task<Void, Never>? = nil
+    @State private var headerHeight: CGFloat = 60
+    private let scrimTail: CGFloat = 32
 
     var body: some View {
-        // Use same layout pattern as HomeView / EmailInboxView:
-        // AppTopHeader pinned at top, list content below. Hides system nav bar
-        // so title appears in the same position as every other tab.
-        ZStack {
-            AppTheme.backgroundTop.ignoresSafeArea()
+        ZStack(alignment: .top) {
+            AppTheme.sheetBackground.ignoresSafeArea()
+
+            listContent
+                .safeAreaInset(edge: .top) {
+                    Color.clear.frame(height: headerHeight + scrimTail)
+                }
 
             VStack(spacing: 0) {
-                // Pinned header — matches the same AppTopHeader pattern used on
-                // Home, Email, and Tasks so the title sits at the same vertical position.
                 AppTopHeader(title: "Meetings")
                     .padding(.horizontal, 16)
                     .padding(.top, 4)
-
-                listContent
+                    .padding(.bottom, 4)
             }
+            .onGeometryChange(for: CGFloat.self) { proxy in
+                proxy.size.height
+            } action: { height in
+                headerHeight = height
+            }
+            .pageHeaderScrim(color: AppTheme.sheetBackground, scrimHeight: headerHeight + scrimTail)
         }
         .toolbar(.hidden, for: .navigationBar)
         .navigationDestination(for: String.self) { meetingId in
