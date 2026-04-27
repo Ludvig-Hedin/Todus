@@ -542,6 +542,7 @@ final class EmailService {
             let response: GetThreadResponse = try await api.trpcQuery("mail.get", input: input)
             return response
         } catch {
+            AppLogger.shared.log("[EmailService] loadThread(\(id)) failed: \(error)")
             errorMessage = "Failed to load thread."
             return nil
         }
