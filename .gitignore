@@ -95,3 +95,5 @@ packages/swift-auth/.build/
 .gstack/
 .pi/
 CLAUDE_TEMP_INPUT.md
+.playwright-mcp/
+screenshot*.png
