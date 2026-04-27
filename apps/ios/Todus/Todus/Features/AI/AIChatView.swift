@@ -142,7 +142,7 @@ struct AIChatView: View {
                     HStack(spacing: 12) {
                         Image(systemName: "arrow.uturn.backward.circle")
                             .foregroundStyle(.primary)
-                        Text("Restored older messages.")
+                        Text("Older messages removed. Undo to restore.")
                             .font(.system(size: 13))
                             .foregroundStyle(.primary)
                         Spacer()
@@ -2064,6 +2064,7 @@ private struct MessageBubble: View {
                 return
             }
             guard let undoAction = params["undoAction"], !undoAction.isEmpty, undoAction != "undo" else {
+                completion?(false, nil)
                 return
             }
             var nestedParams: [String: String] = [:]
@@ -2072,6 +2073,7 @@ private struct MessageBubble: View {
                 if !trimmed.isEmpty {
                     guard let data = nestedRaw.data(using: .utf8),
                           let dict = try? JSONDecoder().decode([String: String].self, from: data) else {
+                        completion?(false, nil)
                         return
                     }
                     nestedParams = dict

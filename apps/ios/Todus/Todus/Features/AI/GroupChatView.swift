@@ -192,7 +192,7 @@ struct CreateGroupSheet: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     if isCreating {
-                        ProgressView().scaleEffect(0.8)
+                        ButtonInlineProgressView(tint: .primary, side: AppTheme.Metrics.toolbarInlineSpinner)
                     } else {
                         Button("Create") { Task { await create() } }
                             .font(.system(size: 15, weight: .semibold))
@@ -240,7 +240,7 @@ struct GroupChatView: View {
     var body: some View {
         NavigationStack {
             ZStack(alignment: .bottom) {
-                AppTheme.backgroundTop.ignoresSafeArea()
+                AppTheme.sheetBackground.ignoresSafeArea()
 
                 VStack(spacing: 0) {
                     // Member avatars row
@@ -304,7 +304,7 @@ struct GroupChatView: View {
                             .font(.system(size: 10, weight: .semibold))
                             .foregroundStyle(.secondary)
                     }
-                    .overlay(Circle().stroke(AppTheme.backgroundTop, lineWidth: 2))
+                    .overlay(Circle().stroke(AppTheme.sheetBackground, lineWidth: 2))
                 }
             }
             .padding(.horizontal, 16)
@@ -461,7 +461,7 @@ private struct MemberAvatarView: View {
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.primary)
         }
-        .overlay(Circle().stroke(AppTheme.backgroundTop, lineWidth: 2))
+        .overlay(Circle().stroke(AppTheme.sheetBackground, lineWidth: 2))
     }
 }
 

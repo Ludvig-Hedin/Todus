@@ -1,13 +1,19 @@
 import SwiftUI
 
+/// Optional completion for async spec actions (draft save/send). Success + optional error message.
+typealias ChatUISpecActionCompletion = (Bool, String?) -> Void
+
+/// Action name, string params map, and optional completion for operations that report back (e.g. drafts).
+typealias ChatUISpecOnAction = (String, [String: String], ChatUISpecActionCompletion?) -> Void
+
 // MARK: - Top-Level Renderer
 
 /// Renders a ChatUISpec by recursively resolving element IDs to SwiftUI views.
 /// Unknown component types render as empty views with a debug warning.
 struct ChatUISpecView: View {
     let spec: ChatUISpec
-    /// Callback when user taps a card — passes the action name and parameters.
-    var onAction: ((String, [String: String]) -> Void)? = nil
+    /// Callback when user taps a card — passes the action name, parameters, and optional async completion.
+    var onAction: ChatUISpecOnAction? = nil
 
     var body: some View {
         renderElement(id: spec.root)
@@ -41,6 +47,40 @@ struct ChatUISpecView: View {
             return AnyView(ContactCardView(props: element.props))
         case "SearchResultCard":
             return AnyView(SearchResultCardView(props: element.props))
+
+        // List + utility cards
+        case "TaskListCard":
+            return AnyView(TaskListCardView(props: element.props, onAction: onAction))
+        case "EmailListCard":
+            return AnyView(EmailListCardView(props: element.props, onAction: onAction))
+        case "CalendarEventListCard":
+            return AnyView(CalendarEventListCardView(props: element.props, onAction: onAction))
+        case "ContactListCard":
+            return AnyView(ContactListCardView(props: element.props))
+        case "CopyableTextCard":
+            return AnyView(CopyableTextCardView(props: element.props, onAction: onAction))
+        case "InlineComposeCard":
+            return AnyView(InlineComposeCardView(props: element.props, onAction: onAction))
+        case "SuggestionsCard":
+            return AnyView(SuggestionsCardView(props: element.props, onAction: onAction))
+        case "ActionConfirmationCard":
+            return AnyView(ActionConfirmationCardView(props: element.props, onAction: onAction))
+        case "QuoteCard":
+            return AnyView(QuoteCardView(props: element.props, onAction: onAction))
+
+        // Round 2 cards
+        case "AttachmentCard":
+            return AnyView(AttachmentCardView(props: element.props, onAction: onAction))
+        case "CodeBlockCard":
+            return AnyView(CodeBlockCardView(props: element.props, onAction: onAction))
+        case "ChecklistCard":
+            return AnyView(ChecklistCardView(props: element.props, onAction: onAction))
+        case "DocumentCard":
+            return AnyView(DocumentCardView(props: element.props, onAction: onAction))
+        case "WeeklyAgendaCard":
+            return AnyView(WeeklyAgendaCardView(props: element.props, onAction: onAction))
+        case "MetricCard":
+            return AnyView(MetricCardView(props: element.props))
 
         // Layout components
         case "Stack":
@@ -196,7 +236,7 @@ struct TextElementView: View {
 
 struct ButtonElementView: View {
     let props: [String: ChatJSONValue]
-    var onAction: ((String, [String: String]) -> Void)?
+    var onAction: ChatUISpecOnAction?
 
     var body: some View {
         Button(action: handleTap) {
@@ -221,7 +261,7 @@ struct ButtonElementView: View {
                 }
             }
         }
-        onAction?(action, params)
+        onAction?(action, params, nil)
     }
 }
 

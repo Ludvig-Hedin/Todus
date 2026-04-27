@@ -130,6 +130,12 @@ final class AIChatService {
     private var calendarService: CalendarService?
     /// Email service for reading threads and sending emails
     private weak var emailService: EmailService?
+    /// Local-runtime services. Wired by AppServices after construction so the
+    /// chat service can short-circuit to on-device inference when the user
+    /// has a local model selected. Weak so the chat service never holds them
+    /// alive past app teardown.
+    weak var appleFoundationModelService: AppleFoundationModelService?
+    weak var mlxInferenceService: MLXInferenceService?
     private var streamingTask: Task<Void, Never>?
     private let log = Logger(subsystem: "com.todus.ios", category: "AIChatService")
 
@@ -761,6 +767,21 @@ final class AIChatService {
         allTasks: [TaskRecord],
         modelContext: ModelContext
     ) async {
+        // ── Local model short-circuit ────────────────────────────────────
+        // When the user has selected an on-device model, route the entire
+        // turn through the matching `LocalAIService`. We never call
+        // /api/ai/chat for local models — that's what makes the
+        // "no plan credits" guarantee architectural rather than a flag.
+        if let local = LocalModelCatalog.match(modelString: selectedModel) {
+            await streamLocalResponse(
+                assistantMessageID: assistantMessageID,
+                model: local,
+                requestMessages: requestMessages
+            )
+            finaliseStream(messageID: assistantMessageID)
+            return
+        }
+
         defer { finaliseStream(messageID: assistantMessageID) }
 
         // Pre-fetch calendar events async so buildPayload stays sync
@@ -923,6 +944,25 @@ final class AIChatService {
                         ), to: assistantMessageID)
                     } else {
                         switch http.statusCode {
+                        case 402:
+                            // Read the JSON body to surface the server's error message (e.g. "Out of AI credits").
+                            // `lines.first(where:)` would smuggle a non-Sendable closure across an
+                            // actor boundary under Swift 6 strict concurrency; iterate instead.
+                            var serverMessage: String? = nil
+                            do {
+                                for try await line in asyncBytes.lines {
+                                    if line.isEmpty { continue }
+                                    if let data = line.data(using: .utf8),
+                                       let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                                       let msg = json["message"] as? String {
+                                        serverMessage = msg
+                                    }
+                                    break
+                                }
+                            } catch {
+                                // Best-effort body read; fall through to default copy.
+                            }
+                            appendError(serverMessage ?? "Out of AI credits. Upgrade or wait for the next reset.", to: assistantMessageID)
                         case 429:
                             // Parse Retry-After per RFC 7231: integer seconds or HTTP-date.
                             var retrySeconds: Int? = nil
@@ -1234,7 +1274,7 @@ final class AIChatService {
                 try await cal.createEvent(title: args.title, startDate: startDate, endDate: endDate)
                 appendMutation(AIChatTaskMutation(action: .create, title: "📅 \(args.title)"), to: assistantMessageID)
                 appendToolSource(
-                    makeToolSource(callId: call.id, kind: .calendarEvent, platform: .googleCalendar,
+                    makeToolSource(callId: call.id, kind: .calendarEvent, platform: .appleCalendar,
                                    title: args.title, subtitle: "Calendar event created", timestamp: startDate),
                     to: assistantMessageID
                 )
@@ -1270,7 +1310,7 @@ final class AIChatService {
                 )
                 appendMutation(AIChatTaskMutation(action: .update, title: "📅 \(args.title ?? "Event")"), to: assistantMessageID)
                 appendToolSource(
-                    makeToolSource(callId: call.id, kind: .calendarEvent, platform: .googleCalendar,
+                    makeToolSource(callId: call.id, kind: .calendarEvent, platform: .appleCalendar,
                                    title: args.title ?? "Event", subtitle: "Calendar event updated",
                                    timestamp: start, entityId: args.id),
                     to: assistantMessageID
@@ -1298,7 +1338,7 @@ final class AIChatService {
                 try await cal.deleteEvent(identifier: args.id)
                 appendMutation(AIChatTaskMutation(action: .delete, title: "📅 Event removed"), to: assistantMessageID)
                 appendToolSource(
-                    makeToolSource(callId: call.id, kind: .calendarEvent, platform: .googleCalendar,
+                    makeToolSource(callId: call.id, kind: .calendarEvent, platform: .appleCalendar,
                                    title: "Event removed", subtitle: "Calendar event deleted",
                                    entityId: args.id),
                     to: assistantMessageID
@@ -1654,6 +1694,98 @@ final class AIChatService {
     /// the `MarkdownView` reparse to register as multi-second main-thread stalls
     /// in the hang watchdog. 80 ms still feels live (well above the ~10 fps human
     /// streaming-text comfort floor) but halves the re-render work per second.
+    // MARK: - Local-model streaming
+    //
+    // Picks the appropriate `LocalAIService` for the curated model, builds a
+    // minimal prompt from the existing message history, and pumps tokens
+    // straight into the assistant message. Never opens a network connection.
+    //
+    // Tool-calling for local runs: not yet wired. Models with
+    // `supportsToolUse == false` simply produce text. Models that do support
+    // it would need a JSON-detection pass mirroring the cloud path; out of
+    // scope for v1 (see plan §"Out of scope for v1"). The chat service falls
+    // back to "free-form text only" when running local.
+    private func streamLocalResponse(
+        assistantMessageID: UUID,
+        model: LocalModel,
+        requestMessages: [AIChatMessage]?
+    ) async {
+        let runtime: LocalAIService? = {
+            switch model.runtime {
+            case .appleFM: return appleFoundationModelService
+            case .mlx:     return mlxInferenceService
+            case .ollama:
+                // iOS apps don't ship an Ollama runtime — only macOS. If a
+                // user somehow ends up here, surface a clear error.
+                return nil
+            }
+        }()
+        guard let runtime else {
+            errorMessage = "Local runtime for \(model.displayName) is unavailable on this device."
+            streamFailed = true
+            return
+        }
+
+        // Build a flat message list from the existing chat history. We strip
+        // attachments / tool-call structures since most local models don't
+        // grok them; this is the v1 trade-off.
+        let history = requestMessages ?? messages
+        var localMessages: [LocalChatMessage] = []
+        if !customInstructions.trimmingCharacters(in: .whitespaces).isEmpty {
+            localMessages.append(.init(role: .system, content: customInstructions))
+        }
+        if !contextAboutYou.trimmingCharacters(in: .whitespaces).isEmpty {
+            localMessages.append(.init(role: .system, content: "Context about the user:\n\(contextAboutYou)"))
+        }
+        for m in history {
+            switch m.role {
+            case .user:
+                if !m.content.isEmpty { localMessages.append(.init(role: .user, content: m.content)) }
+            case .assistant:
+                // Skip the placeholder we just appended (empty content), but
+                // include earlier completed assistant turns for context.
+                if !m.content.isEmpty && m.id != assistantMessageID {
+                    localMessages.append(.init(role: .assistant, content: m.content))
+                }
+            }
+        }
+
+        let request = LocalChatRequest(
+            model: model,
+            messages: localMessages,
+            maxOutputTokens: 1024,
+            temperature: 0.7,
+            enableThinking: false,
+            tools: []
+        )
+
+        do {
+            for try await event in runtime.stream(request) {
+                try Task.checkCancellation()
+                switch event {
+                case .token(let chunk):
+                    if !chunk.isEmpty { appendToken(chunk, to: assistantMessageID) }
+                case .reasoning:
+                    // Local reasoning surfacing is wired in Phase 7 polish.
+                    continue
+                case .toolCall:
+                    // Reserved for a future local tool-calling path. Ignore.
+                    continue
+                case .done:
+                    break
+                }
+            }
+        } catch is CancellationError {
+            // User stopped the stream — leave whatever tokens we already wrote.
+        } catch let err as LocalAIError {
+            errorMessage = err.errorDescription ?? "On-device generation failed."
+            streamFailed = true
+        } catch {
+            errorMessage = error.localizedDescription
+            streamFailed = true
+        }
+    }
+
     private func appendToken(_ token: String, to messageID: UUID) {
         tokenBuffer += token
         guard !flushScheduled else { return }

@@ -78,7 +78,7 @@ struct ShareConversationSheet: View {
                         }
                         ToolbarItem(placement: .topBarTrailing) {
                             if isLoading {
-                                ProgressView().scaleEffect(0.8)
+                                ButtonInlineProgressView(tint: .primary, side: AppTheme.Metrics.toolbarInlineSpinner)
                             } else {
                                 Button("Create") { Task { await createLink() } }
                                     .font(.system(size: 15, weight: .semibold))
