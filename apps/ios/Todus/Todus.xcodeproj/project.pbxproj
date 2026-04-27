@@ -16,6 +16,7 @@
 		0DD27FD07846B19C5470685D /* GeminiLiveProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3422CECD506994C3DF4DD70 /* GeminiLiveProvider.swift */; };
 		0E48F8B62008F482F8EDD153 /* SheetPresentationChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = 688289DD0C896249DB323DBC /* SheetPresentationChrome.swift */; };
 		0FA4CFDBB3C217296F3F4DC2 /* TodusDeveloperAccess.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C8F6C510E8A8C8F9B33D718 /* TodusDeveloperAccess.swift */; };
+		104AC355FC2E8C4F2CCD5A60 /* AppleFoundationModelService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 097F579C39BAE574E9CB4CA5 /* AppleFoundationModelService.swift */; };
 		1297608BC3E595EA444D3DFF /* CalendarListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6A115A03D9213245841E51B /* CalendarListView.swift */; };
 		134B0FE254E1BA030882CEF4 /* ConnectionsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 247D7199EFB95D9C70015EAD /* ConnectionsService.swift */; };
 		136D6034802C294222BCF791 /* BrandIcons.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B6043E7BECE88EF6B7E8317 /* BrandIcons.swift */; };
@@ -62,7 +63,6 @@
 		500E37FF40AC0535D15E4907 /* CalendarWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB983A0400E9A34CE847FFD1 /* CalendarWidget.swift */; };
 		50FD15200400E3C2422A7CD3 /* TodosConfig.plist in Resources */ = {isa = PBXBuildFile; fileRef = B394ED3BDD65D9F4BC5A2D88 /* TodosConfig.plist */; };
 		527E334A7969883C7845E9A2 /* EKEventDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 754A36AB54312A80F894B98E /* EKEventDetailSheet.swift */; };
-		5340996D32FD58031E7777CB /* LocalModelStateStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB217B10C4E4736952A07FF3 /* LocalModelStateStore.swift */; };
 		5416A1B05BD0808FCE042CAA /* EKWrapper.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF94ED853D64D9B8760E1476 /* EKWrapper.swift */; };
 		562F6B6238B6FD2095E557A4 /* EmailConnectView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A91B7B733819603C35DEDA5 /* EmailConnectView.swift */; };
 		56A6C7F8E4C2E5877894EC16 /* AppleSignInDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 044CB7D988EE526D230F0C77 /* AppleSignInDelegate.swift */; };
@@ -72,6 +72,7 @@
 		62B7AF22C16D289F5DD7A168 /* TaskRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA4DC21FEF1420D4009595C4 /* TaskRowView.swift */; };
 		62C8FF4A57AD22A6AE28C9A1 /* TodosApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = D837D4D5B5A51B1720E6FD22 /* TodosApp.swift */; };
 		6344933A085BDE548D4D38BF /* TodosAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E9B87404CFFB558F706EFD2 /* TodosAPIClient.swift */; };
+		64CC04D07D3DB0EC6A8433C6 /* MLXInferenceService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8254641244E8367F4C6842BD /* MLXInferenceService.swift */; };
 		65C2E70539C3A4BC78838C4F /* ChatUISpec.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4E63434C6EBCA9F4070FB0C /* ChatUISpec.swift */; };
 		6630F6813CD04AF8F49743FA /* NotificationDigestService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 357AD85445D3C5CC3F0D2D1C /* NotificationDigestService.swift */; };
 		6643B37C1F3EAFBB576DB08E /* VoiceInputButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 668D6B7F097C9BB3D96136E5 /* VoiceInputButton.swift */; };
@@ -123,6 +124,11 @@
 		A6E9B62AC1C83552670FCB1E /* FolderCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A31BA965028343930CF8A370 /* FolderCardView.swift */; };
 		A8D528FD40C7B964963240B7 /* DefaultMailOnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA794E39E2C751F9A8F6465F /* DefaultMailOnboardingView.swift */; };
 		A9808B58AD3DD159FAF540F2 /* EmailTimelineProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64ECCF6640E1D2AA1DB665CC /* EmailTimelineProvider.swift */; };
+		AA01000000000000000C4101 /* CalendarSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB01000000000000000C4101 /* CalendarSource.swift */; };
+		AA01000000000000000C4102 /* GoogleCalendarService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB01000000000000000C4102 /* GoogleCalendarService.swift */; };
+		AA01000000000000000C4103 /* UnifiedCalendarService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB01000000000000000C4103 /* UnifiedCalendarService.swift */; };
+		AA01000000000000000C4104 /* CalendarSourcePickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB01000000000000000C4104 /* CalendarSourcePickerView.swift */; };
+		AA01000000000000000C4105 /* CalendarAccountsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB01000000000000000C4105 /* CalendarAccountsView.swift */; };
 		AE8BA4B8B838954EB147F762 /* AttachmentPreviewSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77DE2D3ABFF83A58D175D679 /* AttachmentPreviewSheet.swift */; };
 		B1156B67F0C50A276F4EE2DD /* AuthSessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 238C9C52C404130BE9D83559 /* AuthSessionStore.swift */; };
 		B3055DDD0BC5E21E1A5507D7 /* ChatUISpecView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76A558F735657405593AD572 /* ChatUISpecView.swift */; };
@@ -145,8 +151,8 @@
 		CAAA695227BAA5056E32C64E /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = EAE3C90EB2A513351F25A3A3 /* PrivacyInfo.xcprivacy */; };
 		CD6B2A1E118675316352C3D8 /* CalendarTaskView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F31979A402813DED359D8485 /* CalendarTaskView.swift */; };
 		CEC1EE936CD184343A4C0207 /* FolderManagementView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B77A687624786BA51D8426 /* FolderManagementView.swift */; };
+		D1116D736592C843D5A1973F /* ModelDownloadService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C37182C8144F12C3EFA3C3EA /* ModelDownloadService.swift */; };
 		D33A41FFAF3989BDC3BFB614 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = E11E94E3C1D6413A49C1D46F /* Assets.xcassets */; };
-		D39FA420D39CEA024307BC4E /* LocalModelStateStore 2.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0291744784FC8D49EB55C9C7 /* LocalModelStateStore 2.swift */; };
 		D5A51C9ECF92BA1D19A2634A /* AppLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = B638C89190B1EF14C896D308 /* AppLogger.swift */; };
 		D62C0FBE5347A0A048E098A1 /* EmailWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 811CFA910433ECD957BC37BD /* EmailWidget.swift */; };
 		D7D04E0746F32DCC16548E84 /* AppServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CF0758DFD583BED9A96112A /* AppServices.swift */; };
@@ -219,7 +225,6 @@
 		01AED5101C5C6CCE90399E2A /* RemindersSyncState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemindersSyncState.swift; sourceTree = "<group>"; };
 		023EB3076003B59B99BF73B8 /* CalendarYearView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarYearView.swift; sourceTree = "<group>"; };
 		0290541DD1C35CF9D68C47A3 /* CalendarViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarViewController.swift; sourceTree = "<group>"; };
-		0291744784FC8D49EB55C9C7 /* LocalModelStateStore 2.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LocalModelStateStore 2.swift"; sourceTree = "<group>"; };
 		02FCC08F5CB47A7DA98D8DE0 /* ModelRecommender.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelRecommender.swift; sourceTree = "<group>"; };
 		0382F63DAC80FCC285BA63B7 /* GroupChatService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupChatService.swift; sourceTree = "<group>"; };
 		044CB7D988EE526D230F0C77 /* AppleSignInDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleSignInDelegate.swift; sourceTree = "<group>"; };
@@ -228,6 +233,7 @@
 		067944A3F576D12B7E595B80 /* TodusWidgetsBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodusWidgetsBundle.swift; sourceTree = "<group>"; };
 		08FC91D2429419EB9CF5CB47 /* CalendarTimelineProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarTimelineProvider.swift; sourceTree = "<group>"; };
 		0934538127F1DC3C85B53BCC /* EmptyGmailOnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmptyGmailOnboardingView.swift; sourceTree = "<group>"; };
+		097F579C39BAE574E9CB4CA5 /* AppleFoundationModelService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AppleFoundationModelService.swift; sourceTree = "<group>"; };
 		0AB515CB0BDFF39DC9196B77 /* RemoteFirstTaskParsingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteFirstTaskParsingService.swift; sourceTree = "<group>"; };
 		0C0EF37FC791938CC81236A8 /* Todus.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Todus.entitlements; sourceTree = "<group>"; };
 		10CC2402867BD6EBF51D54E2 /* WidgetUpdateManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetUpdateManager.swift; sourceTree = "<group>"; };
@@ -304,6 +310,7 @@
 		7E4879ABD476FC38AC89F610 /* FolderItemRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderItemRecord.swift; sourceTree = "<group>"; };
 		7ED9B5FEADD2CD0E19882F17 /* SyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncService.swift; sourceTree = "<group>"; };
 		811CFA910433ECD957BC37BD /* EmailWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailWidget.swift; sourceTree = "<group>"; };
+		8254641244E8367F4C6842BD /* MLXInferenceService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MLXInferenceService.swift; sourceTree = "<group>"; };
 		84DD6EFBB2FA08B17733DB28 /* Todus.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Todus.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		863E87074833BECB3516200D /* WidgetDataStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetDataStore.swift; sourceTree = "<group>"; };
 		8676684B8BB9B8082DCC6757 /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
@@ -336,6 +343,11 @@
 		B92B8CB5B738BC442B24472D /* DailyOverviewTimelineProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DailyOverviewTimelineProvider.swift; sourceTree = "<group>"; };
 		B95BC8718C6E7995803A51DF /* LocalModelStateStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalModelStateStore.swift; sourceTree = "<group>"; };
 		BAFCADA3030BB983664623A6 /* EmailInboxView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailInboxView.swift; sourceTree = "<group>"; };
+		BB01000000000000000C4101 /* CalendarSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarSource.swift; sourceTree = "<group>"; };
+		BB01000000000000000C4102 /* GoogleCalendarService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleCalendarService.swift; sourceTree = "<group>"; };
+		BB01000000000000000C4103 /* UnifiedCalendarService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedCalendarService.swift; sourceTree = "<group>"; };
+		BB01000000000000000C4104 /* CalendarSourcePickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarSourcePickerView.swift; sourceTree = "<group>"; };
+		BB01000000000000000C4105 /* CalendarAccountsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarAccountsView.swift; sourceTree = "<group>"; };
 		BBD1AD1A9679CB8FCE4E2023 /* BoardColumnView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoardColumnView.swift; sourceTree = "<group>"; };
 		BC6519DCE3CDBB82FA7E2A3E /* BillingSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BillingSettingsView.swift; sourceTree = "<group>"; };
 		BD8EE4DD8577C25BB1F10847 /* CalendarViewMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarViewMode.swift; sourceTree = "<group>"; };
@@ -343,6 +355,7 @@
 		BF94ED853D64D9B8760E1476 /* EKWrapper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EKWrapper.swift; sourceTree = "<group>"; };
 		C1EA5D92655F2C4BDE92703C /* DraftRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DraftRecord.swift; sourceTree = "<group>"; };
 		C2F8BD79A09257CB57E4D829 /* AddToFolderSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddToFolderSheet.swift; sourceTree = "<group>"; };
+		C37182C8144F12C3EFA3C3EA /* ModelDownloadService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ModelDownloadService.swift; sourceTree = "<group>"; };
 		C393C0082291CAB42009E8EB /* CalendarContainerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarContainerView.swift; sourceTree = "<group>"; };
 		C6A115A03D9213245841E51B /* CalendarListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarListView.swift; sourceTree = "<group>"; };
 		C7FE5B6B04C5E27C1C0835AB /* EmailRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailRowView.swift; sourceTree = "<group>"; };
@@ -372,7 +385,7 @@
 		E9928F7C7A1D9CBE08AC6CAE /* AppTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppTab.swift; sourceTree = "<group>"; };
 		E9A0A9C59C8274A248E7F19B /* AppTaskPriority.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppTaskPriority.swift; sourceTree = "<group>"; };
 		EAC7068210DB4410C9FF1C8F /* TodusWidgets.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = TodusWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
-		EAE3C90EB2A513351F25A3A3 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		EAE3C90EB2A513351F25A3A3 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		EB708F3F048C9204300002A9 /* DraftService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DraftService.swift; sourceTree = "<group>"; };
 		EBA6AD9D7CE05EA129C074AB /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
 		EBCA38E7393423564198E593 /* MeetingsListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingsListView.swift; sourceTree = "<group>"; };
@@ -412,7 +425,6 @@
 				5CF0758DFD583BED9A96112A /* AppServices.swift */,
 				DA794E39E2C751F9A8F6465F /* DefaultMailOnboardingView.swift */,
 				A586F2155CC929EDE579601A /* GmailOnboardingView.swift */,
-				0291744784FC8D49EB55C9C7 /* LocalModelStateStore 2.swift */,
 				CB217B10C4E4736952A07FF3 /* LocalModelStateStore.swift */,
 				437E7022BAA2CA13EB5CA993 /* NotificationsOnboardingView.swift */,
 				734026A8312EA48B3C903595 /* RemindersSyncDirection.swift */,
@@ -484,6 +496,9 @@
 			isa = PBXGroup;
 			children = (
 				549B28FA3AA486FC8CEB08D7 /* CalendarService.swift */,
+				BB01000000000000000C4101 /* CalendarSource.swift */,
+				BB01000000000000000C4102 /* GoogleCalendarService.swift */,
+				BB01000000000000000C4103 /* UnifiedCalendarService.swift */,
 			);
 			path = Calendar;
 			sourceTree = "<group>";
@@ -515,6 +530,7 @@
 				EDE7B4598BA9FEF06E0D223D /* CalendarMultiDayView.swift */,
 				49C482CA4F882EB760626B95 /* CalendarNavBar.swift */,
 				FEB2C3612DD12C99BBA87EE1 /* CalendarPermissionView.swift */,
+				BB01000000000000000C4104 /* CalendarSourcePickerView.swift */,
 				941FC825317F217EE9CA1190 /* CalendarTabView.swift */,
 				F4A78D3CE02A125808E6D30C /* CalendarTimeGridView.swift */,
 				0290541DD1C35CF9D68C47A3 /* CalendarViewController.swift */,
@@ -677,6 +693,7 @@
 			isa = PBXGroup;
 			children = (
 				BC6519DCE3CDBB82FA7E2A3E /* BillingSettingsView.swift */,
+				BB01000000000000000C4105 /* CalendarAccountsView.swift */,
 				0934538127F1DC3C85B53BCC /* EmptyGmailOnboardingView.swift */,
 				CDC66D75A3DD40D7645797BB /* LocalModelsView.swift */,
 				E4791FC2084FC456FD0D1D87 /* RemindersSetupView.swift */,
@@ -964,6 +981,9 @@
 			children = (
 				44050E6E5556047EBE28DE01 /* LocalAIService.swift */,
 				B95BC8718C6E7995803A51DF /* LocalModelStateStore.swift */,
+				097F579C39BAE574E9CB4CA5 /* AppleFoundationModelService.swift */,
+				8254641244E8367F4C6842BD /* MLXInferenceService.swift */,
+				C37182C8144F12C3EFA3C3EA /* ModelDownloadService.swift */,
 			);
 			path = Local;
 			sourceTree = "<group>";
@@ -1022,8 +1042,6 @@
 			dependencies = (
 			);
 			name = TodusWidgets;
-			packageProductDependencies = (
-			);
 			productName = TodusWidgets;
 			productReference = EAC7068210DB4410C9FF1C8F /* TodusWidgets.appex */;
 			productType = "com.apple.product-type.app-extension";
@@ -1040,8 +1058,6 @@
 				1990F3B4E63DB29E1F6081E3 /* PBXTargetDependency */,
 			);
 			name = TodusTests;
-			packageProductDependencies = (
-			);
 			productName = TodusTests;
 			productReference = 2CD0E823D3DD875171A957BE /* TodusTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
@@ -1102,6 +1118,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				005C1BE658F77F64EB044435 /* XCRemoteSwiftPackageReference "CalendarKit" */,
+				5419089E2F9F4DB900D0140E /* XCRemoteSwiftPackageReference "mlx-swift-examples" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = CEBCA60C5AEA2468F57BF306 /* Products */;
@@ -1198,6 +1215,10 @@
 				B31F816ABD54750406B53476 /* CalendarNavBar.swift in Sources */,
 				7B6FDE0B53A76FB92AE76069 /* CalendarPermissionView.swift in Sources */,
 				F2C325B98C33724D0B1E1B46 /* CalendarService.swift in Sources */,
+				AA01000000000000000C4101 /* CalendarSource.swift in Sources */,
+				AA01000000000000000C4102 /* GoogleCalendarService.swift in Sources */,
+				AA01000000000000000C4103 /* UnifiedCalendarService.swift in Sources */,
+				AA01000000000000000C4104 /* CalendarSourcePickerView.swift in Sources */,
 				27FA36E4CE710580FA9CA16C /* CalendarTabView.swift in Sources */,
 				CD6B2A1E118675316352C3D8 /* CalendarTaskView.swift in Sources */,
 				425D9DB1573B2EF8C077564E /* CalendarTimeGridView.swift in Sources */,
@@ -1250,8 +1271,6 @@
 				49D6172D421E90FFD97E60EE /* KeychainHelper.swift in Sources */,
 				7420F27396777191355BF60D /* LocalAIService.swift in Sources */,
 				9A50459B60A590CFF417A9AF /* LocalModelCatalog.swift in Sources */,
-				D39FA420D39CEA024307BC4E /* LocalModelStateStore 2.swift in Sources */,
-				5340996D32FD58031E7777CB /* LocalModelStateStore.swift in Sources */,
 				7E5DAE938357D9384C1035C5 /* LocalModelStateStore.swift in Sources */,
 				9AAAEA56AADC3A05DE6C9447 /* LocalModelsView.swift in Sources */,
 				C32B025058810AD5974C0372 /* LocalTaskParsingService.swift in Sources */,
@@ -1280,6 +1299,7 @@
 				912C6F60B1F01235B46B6F46 /* RootView.swift in Sources */,
 				45A6702CEEF806C7A8B0F9AF /* SenderAvatarView.swift in Sources */,
 				DD7AF0C7CBDA1864A52C917B /* SettingsView.swift in Sources */,
+				AA01000000000000000C4105 /* CalendarAccountsView.swift in Sources */,
 				C8AAB8F0D64A69AA06D6EECA /* ShareConversationService.swift in Sources */,
 				EED0AAAB2D28D6A867EF13F7 /* ShareConversationSheet.swift in Sources */,
 				C79BE0576FBADC5EA49C22DF /* SharedConversationView.swift in Sources */,
@@ -1316,6 +1336,9 @@
 				8D3A089B8CED0796909632F7 /* WidgetDataStore.swift in Sources */,
 				96B9FC11260B00A36B35FBD0 /* WidgetSnapshotStore.swift in Sources */,
 				E099E9FDD6A48CC0C240A281 /* WidgetUpdateManager.swift in Sources */,
+				104AC355FC2E8C4F2CCD5A60 /* AppleFoundationModelService.swift in Sources */,
+				64CC04D07D3DB0EC6A8433C6 /* MLXInferenceService.swift in Sources */,
+				D1116D736592C843D5A1973F /* ModelDownloadService.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1616,6 +1639,14 @@
 			requirement = {
 				kind = exactVersion;
 				version = 1.1.7;
+			};
+		};
+		5419089E2F9F4DB900D0140E /* XCRemoteSwiftPackageReference "mlx-swift-examples" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/ml-explore/mlx-swift-examples";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.29.1;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */

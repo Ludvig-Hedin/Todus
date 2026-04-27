@@ -92,3 +92,6 @@ packages/swift-auth/.build/
 # Expo prebuild artifacts (the active iOS app is apps/ios/Todus)
 /ios/
 /.expo/
+.gstack/
+.pi/
+CLAUDE_TEMP_INPUT.md

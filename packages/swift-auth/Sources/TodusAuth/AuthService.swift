@@ -529,8 +529,11 @@ public final class AuthService: NSObject {
             throw AuthError.networkError
         }
 
-        // Step 2: Open the OAuth URL in ASWebAuthenticationSession
-        let _ = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<URL, Error>) in
+        // Step 2: Open the OAuth URL in ASWebAuthenticationSession.
+        // Use an ephemeral session so Google shows the full account picker — otherwise
+        // it auto-selects the account already logged in via Safari cookies, making it
+        // impossible to link a different Gmail address.
+        let callbackURL = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<URL, Error>) in
             let completionHandler: @Sendable (URL?, (any Error)?) -> Void = { url, error in
                 if let error {
                     continuation.resume(throwing: error)
@@ -546,12 +549,34 @@ public final class AuthService: NSObject {
                 callbackURLScheme: "todus",
                 completionHandler: completionHandler
             )
-            webSession.prefersEphemeralWebBrowserSession = false
+            // Ephemeral: no shared Safari cookies → Google always shows the account picker
+            // so the user can choose which Gmail to link (not just the one already signed in).
+            webSession.prefersEphemeralWebBrowserSession = true
             webSession.presentationContextProvider = self
             self.webAuthSession = webSession
             if !webSession.start() {
                 continuation.resume(throwing: AuthError.failedToStartWebAuthentication)
             }
+        }
+
+        // Check whether Better Auth returned an error in the callback URL.
+        // On failure (e.g. account_already_linked_to_different_user), Better Auth redirects
+        // to todus://link-callback?error=<code> instead of todus://link-callback.
+        if let components = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false),
+           let errorCode = components.queryItems?.first(where: { $0.name == "error" })?.value,
+           !errorCode.isEmpty {
+            authLog.error("Link social: callback contained error code '\(errorCode)'")
+            let message: String
+            switch errorCode {
+            case "account_already_linked_to_different_user":
+                message = "This Google account is already linked to a different Todus account."
+            case "unable_to_link_account":
+                message = "Unable to link this account. Please try a different one."
+            default:
+                message = "Account linking failed (\(errorCode)). Please try again."
+            }
+            lastErrorMessage = message
+            throw AuthError.networkError
         }
 
         debugAuthLog("Link account callback received — new connection should be available")

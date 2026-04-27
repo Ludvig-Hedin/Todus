@@ -33,6 +33,8 @@ targets:
           - "Services/Auth/AuthService.swift"
       - path: ../../../packages/swift-auth/Sources/TodusAuth
         group: TodusAuth
+      - path: ../../../packages/swift-widgets/Sources/TodusWidgetsShared
+        group: TodusWidgetsShared
     resources:
       - path: Todus/Resources/Assets.xcassets
       - path: Todus/Resources/Info.plist
@@ -49,11 +51,34 @@ targets:
         ENABLE_PREVIEWS: YES
     dependencies:
       - package: CalendarKit
+      - target: TodusWidgets
+        embed: true
     entitlements:
       path: Todus/Resources/Todus.entitlements
       properties:
         com.apple.developer.applesignin:
           - Default
+        com.apple.security.application-groups:
+          - group.com.ludvighedin.todus
+
+  TodusWidgets:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: ../../../packages/swift-widgets/Sources/TodusWidgetsShared
+      - path: ../../../packages/swift-widgets/Sources/TodusWidgetsExtension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.ludvighedin.todus.widgets
+        INFOPLIST_FILE: ../../../packages/swift-widgets/Sources/TodusWidgetsExtension/Info.plist
+        CODE_SIGN_ENTITLEMENTS: ../../../packages/swift-widgets/Sources/TodusWidgetsExtension/TodusWidgets.entitlements
+        ENABLE_PREVIEWS: YES
+        GENERATE_INFOPLIST_FILE: NO
+    entitlements:
+      path: ../../../packages/swift-widgets/Sources/TodusWidgetsExtension/TodusWidgets.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.ludvighedin.todus
 
   TodusTests:
     type: bundle.unit-test

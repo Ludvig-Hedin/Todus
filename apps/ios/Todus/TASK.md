@@ -2,6 +2,14 @@
 
 ## Current Tasks
 
+### ✅ Recently Completed
+- [x] **IOS-083** — Apply iOS CodeRabbit review fixes across folders/tasks/AI/widgets/voice/api and remove tracked user-specific Xcode state
+  - Fixed stale `restrictToInbox` refreshes in board/table views
+  - Prevented duplicate folder item inserts in pickers + service layer
+  - Added destructive delete confirmations for folder management surfaces
+  - Corrected the native Gemini Live model identifier to `gemini-live-2.5-flash-native-audio`
+  - Hardened widget/day-boundary logic, attachment cleanup timing, avatar-cache flushing, AI undo completion, and voice startup disconnect handling
+
 ### 🔴 Blocked
 - [ ] **IOS-001** — Create Xcode project in Xcode IDE, set bundle ID `com.ludvighedin.todus`, team `XDBG7P4V96`
   - *Requires:* Manual Xcode work
