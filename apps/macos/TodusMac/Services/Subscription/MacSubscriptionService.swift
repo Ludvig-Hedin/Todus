@@ -41,15 +41,17 @@ final class MacSubscriptionService {
     private(set) var aiUsageUsed: Double = 0
     private(set) var aiUsageLimit: Double = 0
     private(set) var aiUsageRemaining: Double = 0
+    private(set) var aiUsageUnlimited: Bool = false
     private(set) var aiUsageResetAt: Date?
     private(set) var isLoading: Bool = false
     private(set) var lastError: String?
 
     var hasAiCredits: Bool {
-        aiUsageLimit == 0 ? false : aiUsageRemaining > 0
+        aiUsageUnlimited || (aiUsageLimit > 0 && aiUsageRemaining > 0)
     }
 
     var aiUsagePercent: Double {
+        guard !aiUsageUnlimited else { return 0 }
         guard aiUsageLimit > 0 else { return 0 }
         return min(1, aiUsageUsed / aiUsageLimit)
     }
@@ -103,6 +105,7 @@ final class MacSubscriptionService {
         self.aiUsageUsed = response.aiUsage.used
         self.aiUsageLimit = response.aiUsage.limit
         self.aiUsageRemaining = response.aiUsage.remaining
+        self.aiUsageUnlimited = response.aiUsage.unlimited
         self.aiUsageResetAt = response.aiUsage.resetAt.flatMap { ISO8601DateFormatter().date(from: $0) }
     }
 }
@@ -119,6 +122,7 @@ private struct AiUsageInfo: Decodable {
     let used: Double
     let limit: Double
     let remaining: Double
+    let unlimited: Bool
     let resetAt: String?
 }
 

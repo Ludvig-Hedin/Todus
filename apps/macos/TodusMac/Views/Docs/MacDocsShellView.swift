@@ -6,6 +6,8 @@ struct MacDocsShellView: View {
     @State private var selectedDocId: String?
     @State private var isGrid = true
     @State private var searchText = ""
+    @State private var createError: String?
+    @State private var isCreatingDocument = false
 
     var body: some View {
         Group {
@@ -17,13 +19,17 @@ struct MacDocsShellView: View {
                 HSplitView {
                     MacDocsSidebarView(
                         selectedDocId: $selectedDocId,
-                        searchText: $searchText
+                        searchText: $searchText,
+                        isCreatingDocument: isCreatingDocument,
+                        onNewDocument: { Task { await newDocumentTapped() } }
                     )
                     .frame(minWidth: 200, idealWidth: 240, maxWidth: 300)
                     MacDocsAllPane(
                         selectedDocId: $selectedDocId,
                         isGrid: $isGrid,
-                        searchText: $searchText
+                        searchText: $searchText,
+                        isCreatingDocument: isCreatingDocument,
+                        onNewDocument: { Task { await newDocumentTapped() } }
                     )
                 }
             }
@@ -32,6 +38,27 @@ struct MacDocsShellView: View {
         .background(MacTheme.contentBackground)
         .task {
             await services.docsService.refresh()
+        }
+        .alert("Couldn’t create page", isPresented: Binding(
+            get: { createError != nil },
+            set: { if !$0 { createError = nil } }
+        )) {
+            Button("OK", role: .cancel) { createError = nil }
+        } message: {
+            Text(createError ?? "")
+        }
+    }
+
+    @MainActor
+    private func newDocumentTapped() async {
+        guard !isCreatingDocument else { return }
+        isCreatingDocument = true
+        defer { isCreatingDocument = false }
+        do {
+            let d = try await services.docsService.createNewDocument()
+            selectedDocId = d.id
+        } catch {
+            createError = error.localizedDescription
         }
     }
 }
@@ -43,6 +70,8 @@ struct MacDocsAllPane: View {
     @Binding var selectedDocId: String?
     @Binding var isGrid: Bool
     @Binding var searchText: String
+    var isCreatingDocument: Bool
+    var onNewDocument: () -> Void
 
     private var docs: [DocRecordDTO] {
         let s = services.docsService
@@ -64,6 +93,13 @@ struct MacDocsAllPane: View {
                 Text("All docs")
                     .font(.system(size: 16, weight: .semibold))
                 Spacer()
+                Button(action: onNewDocument) {
+                    Label("New document", systemImage: "square.and.pencil")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .disabled(isCreatingDocument)
+                .help("Create a new page")
                 Button { isGrid = true } label: { Image(systemName: "square.grid.2x2") }
                     .buttonStyle(.borderless)
                     .foregroundStyle(isGrid ? MacTheme.accent : MacTheme.mutedText)
@@ -78,6 +114,8 @@ struct MacDocsAllPane: View {
             .padding(.vertical, MacTheme.spacing12)
             if services.docsService.isLoading {
                 ProgressView().padding(24)
+            } else if let err = services.docsService.lastError, docs.isEmpty {
+                docsLoadErrorState(message: err)
             } else if docs.isEmpty {
                 emptyState
             } else if isGrid {
@@ -88,13 +126,38 @@ struct MacDocsAllPane: View {
         }
     }
 
-    private var emptyState: some View {
-        VStack(spacing: 12) {
-            Text("No pages yet")
-                .font(.system(size: 16, weight: .medium))
-            Text("Create a page from the sidebar.")
+    private func docsLoadErrorState(message: String) -> some View {
+        VStack(spacing: 16) {
+            Text("Couldn’t load docs")
+                .font(.system(size: 16, weight: .semibold))
+            Text(message)
                 .font(.system(size: 12))
+                .multilineTextAlignment(.center)
                 .foregroundStyle(MacTheme.mutedText)
+                .frame(maxWidth: 420)
+            Button("Retry") {
+                Task { await services.docsService.refresh() }
+            }
+            .controlSize(.large)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 16) {
+            Text("No pages yet")
+                .font(.system(size: 16, weight: .semibold))
+            Text("Start with a new document, or add one from the Docs sidebar when your workspace is ready.")
+                .font(.system(size: 12))
+                .multilineTextAlignment(.center)
+                .foregroundStyle(MacTheme.mutedText)
+                .frame(maxWidth: 360)
+            Button(action: onNewDocument) {
+                Label("New document", systemImage: "plus.circle.fill")
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .disabled(isCreatingDocument)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -171,13 +234,23 @@ struct MacDocsSidebarView: View {
     @Environment(MacAppServices.self) private var services
     @Binding var selectedDocId: String?
     @Binding var searchText: String
+    var isCreatingDocument: Bool
+    var onNewDocument: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
+            HStack(alignment: .center) {
                 Text("My space")
                     .font(.system(size: 12, weight: .semibold))
                 Spacer()
+                Button(action: onNewDocument) {
+                    Label("New", systemImage: "plus")
+                }
+                .labelStyle(.iconOnly)
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .disabled(isCreatingDocument)
+                .help("Create a new document")
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)

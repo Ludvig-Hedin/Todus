@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 // MARK: - Meetings Hub (Split List + Detail)
 
@@ -9,6 +10,8 @@ struct MacMeetingsView: View {
     @State private var searchText = ""
     @State private var statusFilter: String? = nil
     @State private var rotationAngle = 0.0
+    /// Watchdog that force-resets `isSyncing` if a sync hangs (e.g. silent network failure).
+    @State private var syncTimeoutTask: Task<Void, Never>? = nil
 
     private func updateSyncRotation(isSyncing: Bool) {
         if isSyncing {
@@ -19,6 +22,19 @@ struct MacMeetingsView: View {
         } else {
             withAnimation(.easeOut(duration: 0.2)) {
                 rotationAngle = 0
+            }
+        }
+    }
+
+    /// Schedule a 30s timeout that force-resets the spinner if `isSyncing` is still true.
+    /// Guards against a stuck spinner when the underlying sync swallows an error.
+    private func scheduleSyncTimeout() {
+        syncTimeoutTask?.cancel()
+        syncTimeoutTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(30))
+            guard !Task.isCancelled else { return }
+            if services.meetingsService.isSyncing {
+                services.meetingsService.isSyncing = false
             }
         }
     }
@@ -47,6 +63,18 @@ struct MacMeetingsView: View {
         }
         .onChange(of: services.meetingsService.isSyncing) { _, isSyncing in
             updateSyncRotation(isSyncing: isSyncing)
+            // If the service flips to not-syncing on its own, cancel the watchdog.
+            if !isSyncing { syncTimeoutTask?.cancel() }
+        }
+        // Refresh the meetings list whenever the window regains focus, so users
+        // see new entries that were captured while Todus was in the background.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task {
+                await services.meetingsService.loadMeetings(
+                    status: statusFilter,
+                    search: searchText.isEmpty ? nil : searchText
+                )
+            }
         }
     }
 
@@ -63,6 +91,7 @@ struct MacMeetingsView: View {
                 Spacer()
 
                 Button {
+                    scheduleSyncTimeout()
                     Task { await services.meetingsService.syncFromCalendar() }
                 } label: {
                     Image(systemName: services.meetingsService.isSyncing ? "arrow.triangle.2.circlepath" : "arrow.clockwise")

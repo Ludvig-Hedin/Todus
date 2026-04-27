@@ -109,7 +109,7 @@ struct MacGmailOnboardingView: View {
                                 .tint(.white)
                                 .scaleEffect(0.85)
                         }
-                        Text(isConnecting ? "Connecting…" : "Connect Gmail")
+                        Text(isConnecting ? "Connecting…" : (errorMessage != nil ? "Try again" : "Connect Gmail"))
                     }
                 }
                 .buttonStyle(MacOnboardingPrimaryButtonStyle())
@@ -231,21 +231,31 @@ struct MacCalendarOnboardingView: View {
                     tint: permissionMessage == nil ? MacTheme.textSecondary : .red
                 )
 
-                Button {
-                    Task { await requestAccess() }
-                } label: {
-                    HStack(spacing: 8) {
-                        AppleCalendarIconView(size: 20)
-                        if isRequestingAccess {
-                            ProgressView()
-                                .tint(.white)
-                                .scaleEffect(0.85)
-                        }
-                        Text(isRequestingAccess ? "Requesting…" : "Enable Calendar Access")
+                if permissionMessage != nil {
+                    // Permission was denied — surface a primary Continue so users aren't trapped.
+                    Button {
+                        services.hasConfiguredCalendarPrompt = true
+                    } label: {
+                        Text("Continue")
                     }
+                    .buttonStyle(MacOnboardingPrimaryButtonStyle())
+                } else {
+                    Button {
+                        Task { await requestAccess() }
+                    } label: {
+                        HStack(spacing: 8) {
+                            AppleCalendarIconView(size: 20)
+                            if isRequestingAccess {
+                                ProgressView()
+                                    .tint(.white)
+                                    .scaleEffect(0.85)
+                            }
+                            Text(isRequestingAccess ? "Requesting…" : "Enable Calendar Access")
+                        }
+                    }
+                    .buttonStyle(MacOnboardingPrimaryButtonStyle())
+                    .disabled(isRequestingAccess)
                 }
-                .buttonStyle(MacOnboardingPrimaryButtonStyle())
-                .disabled(isRequestingAccess)
 
                 Button("Skip, set this up later in Settings") {
                     services.hasConfiguredCalendarPrompt = true
@@ -376,17 +386,200 @@ struct MacStartupOnboardingView: View {
     }
 }
 
-private func onboardingMessage(text: String, tint: Color) -> some View {
-    Text(text)
-        .font(.system(size: 12, weight: .medium))
-        .foregroundStyle(tint)
-        .multilineTextAlignment(.center)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .frame(maxWidth: .infinity)
-        .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous))
+struct MacNotificationsOnboardingView: View {
+    @Environment(MacAppServices.self) private var services
+    @State private var isRequesting = false
+    @State private var requestResult: Bool? = nil
+
+    var body: some View {
+        MacOnboardingShell(
+            step: 5,
+            title: "Stay on top of it all",
+            subtitle: "Get notified about new emails, tasks due today, AI replies, and reminders — without having to keep the app open.",
+            icon: AnyView(
+                Image(systemName: "bell.badge.fill")
+                    .font(.system(size: 40, weight: .medium))
+                    .foregroundStyle(MacTheme.accent)
+            )
+        ) {
+            VStack(spacing: 12) {
+                notificationFeatureRows
+
+                Spacer().frame(height: 4)
+
+                if let result = requestResult {
+                    onboardingMessage(
+                        text: result
+                            ? "Notifications are on. Adjust them anytime in Settings."
+                            : "Notifications are off. Enable them later in System Settings → Notifications.",
+                        tint: result ? .green : MacTheme.textSecondary
+                    )
+
+                    Button {
+                        services.hasConfiguredNotificationsPrompt = true
+                    } label: {
+                        Text("Continue")
+                    }
+                    .buttonStyle(MacOnboardingPrimaryButtonStyle())
+                } else {
+                    onboardingMessage(
+                        text: "We only ask once. You can turn each type on or off later in Settings.",
+                        tint: MacTheme.textSecondary
+                    )
+
+                    Button {
+                        Task { await requestPermission() }
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "bell.fill")
+                            if isRequesting {
+                                ProgressView()
+                                    .tint(.white)
+                                    .scaleEffect(0.85)
+                            }
+                            Text(isRequesting ? "Requesting…" : "Enable Notifications")
+                        }
+                    }
+                    .buttonStyle(MacOnboardingPrimaryButtonStyle())
+                    .disabled(isRequesting)
+
+                    Button("Skip, decide later") {
+                        services.hasConfiguredNotificationsPrompt = true
+                    }
+                    .buttonStyle(MacOnboardingSecondaryButtonStyle())
+                }
+            }
+        }
+    }
+
+    private var notificationFeatureRows: some View {
+        VStack(spacing: 0) {
+            macNotificationRow(icon: "envelope.fill", title: "New emails", subtitle: "Incoming messages from connected accounts")
+            Divider().padding(.leading, 48)
+            macNotificationRow(icon: "checkmark.square.fill", title: "Task reminders", subtitle: "1 hour before a task is due and a daily digest")
+            Divider().padding(.leading, 48)
+            macNotificationRow(icon: "sparkles", title: "AI responses", subtitle: "When Todus AI replies while you're away")
+            Divider().padding(.leading, 48)
+            macNotificationRow(icon: "calendar", title: "Calendar events", subtitle: "Reminders for upcoming meetings and events")
+        }
+        .background(MacTheme.surfaceCard, in: RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous)
-                .stroke(tint.opacity(0.12), lineWidth: 1)
+                .stroke(MacTheme.cardBorder, lineWidth: 1)
         )
+    }
+
+    private func macNotificationRow(icon: String, title: String, subtitle: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(MacTheme.accent)
+                .frame(width: 26, height: 26)
+                .background(MacTheme.accent.opacity(0.1), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(MacTheme.textPrimary)
+                Text(subtitle)
+                    .font(.system(size: 11))
+                    .foregroundStyle(MacTheme.textSecondary)
+            }
+
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+    }
+
+    private func requestPermission() async {
+        isRequesting = true
+        requestResult = await services.notificationService.requestPermission()
+        isRequesting = false
+    }
+}
+
+struct MacDefaultMailOnboardingView: View {
+    @Environment(MacAppServices.self) private var services
+
+    var body: some View {
+        MacOnboardingShell(
+            step: 6,
+            title: "Make Todus your mail app",
+            subtitle: "Clicking any email link — in Safari, Finder, or anywhere on your Mac — will open it here instead of Apple Mail.",
+            icon: AnyView(
+                ZStack {
+                    Circle()
+                        .fill(MacTheme.accent.opacity(0.1))
+                        .frame(width: 88, height: 88)
+                    Image(systemName: "envelope.fill")
+                        .font(.system(size: 36, weight: .medium))
+                        .foregroundStyle(MacTheme.accent)
+                }
+            )
+        ) {
+            VStack(spacing: 12) {
+                onboardingMessage(
+                    text: "Open System Settings → General → Default Apps and choose Todus for Email.",
+                    tint: MacTheme.textSecondary
+                )
+
+                Button {
+                    openSystemSettings()
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "gear")
+                        Text("Open System Settings")
+                    }
+                }
+                .buttonStyle(MacOnboardingPrimaryButtonStyle())
+
+                Button("Done, I've set it") {
+                    services.hasConfiguredDefaultMailPrompt = true
+                }
+                .buttonStyle(MacOnboardingSecondaryButtonStyle())
+
+                Button("Skip, keep my current app") {
+                    services.hasConfiguredDefaultMailPrompt = true
+                }
+                .buttonStyle(MacOnboardingSecondaryButtonStyle())
+            }
+        }
+    }
+
+    private func openSystemSettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.General-Settings") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+}
+
+private func onboardingMessage(text: String, tint: Color) -> some View {
+    // Status-aware icon — color alone isn't enough of a signal for green/red states.
+    // Falls through to no icon for the neutral secondary tint.
+    let systemImage: String? = {
+        if tint == .green { return "checkmark.circle.fill" }
+        if tint == .red { return "exclamationmark.triangle.fill" }
+        return nil
+    }()
+    return HStack(alignment: .top, spacing: 8) {
+        if let systemImage {
+            Image(systemName: systemImage)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(tint)
+        }
+        Text(text)
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(tint)
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: .infinity)
+    }
+    .padding(.horizontal, 14)
+    .padding(.vertical, 12)
+    .frame(maxWidth: .infinity)
+    .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous))
+    .overlay(
+        RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous)
+            .stroke(tint.opacity(0.12), lineWidth: 1)
+    )
 }

@@ -69,6 +69,13 @@ enum MacTheme {
     /// Empty state / onboarding card background
     static let emptyStateSurface = Color(light: Color(white: 0.93), dark: Color(white: 0.10))
 
+    // MARK: - Segmented control (Calendar-style glass track + selected pill)
+
+    /// Outer track — matches `CalendarViewModePicker` in `MacCalendarView`.
+    static let segmentedTrack = Color(light: Color(white: 0.88), dark: Color(white: 0.13))
+    /// Selected segment fill — strong contrast on the track in light and dark mode.
+    static let segmentedSelectedPill = Color(light: Color.white, dark: Color(white: 0.22))
+
     // MARK: - Accent Color Palette
 
     /// Available accent color keys — used by the settings accent picker.
@@ -121,6 +128,17 @@ enum MacTheme {
                                             dark: Color(red: 0.95, green: 0.30, blue: 0.28))
     /// All-day bar background — slightly elevated surface
     static let calendarAllDayBg = Color(light: Color(white: 0.965), dark: Color(white: 0.115))
+    /// Time-label column in the day/week grid — same as `contentBackground` so it matches the main calendar surface (labels are painted in this strip in `hourGridLayer` behind the clear foreground spacer)
+    static let calendarGutterBackground = contentBackground
+    /// Hairline between day columns — keep in sync with layout math in `calendarDayColumnWidth`
+    static let calendarColumnSeparatorWidth: CGFloat = 0.5
+
+    /// Returns each day column’s width so header, all-day row, and time grid share the same geometry (avoids `ScrollView` / flexible-width drift).
+    static func calendarDayColumnWidth(totalWidth: CGFloat, columnCount: Int) -> CGFloat {
+        guard columnCount > 0 else { return 0 }
+        let seps = CGFloat(max(0, columnCount - 1)) * calendarColumnSeparatorWidth
+        return (totalWidth - calendarGutterWidth - seps) / CGFloat(columnCount)
+    }
 
     /// Hour label font — Apple Calendar uses small, light-weight labels
     static func calendarHourFont() -> Font {

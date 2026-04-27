@@ -153,4 +153,6 @@ struct EmailDraft {
     var body: String = ""
     var replyToThreadId: String?
     var replyToMessageId: String?
+    /// Passed through to `mail.send` for forward threading semantics.
+    var isForward: Bool = false
 }

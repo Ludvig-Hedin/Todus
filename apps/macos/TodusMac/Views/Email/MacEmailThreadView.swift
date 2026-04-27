@@ -19,6 +19,13 @@ struct MacEmailThreadView: View {
     /// Per-message WebView content heights, populated after each HTML page finishes loading.
     @State private var webViewHeights: [String: CGFloat] = [:]
     @State private var showCompose = false
+    @State private var composeMode: ThreadComposeMode = .reply
+
+    private enum ThreadComposeMode: Hashable {
+        case reply
+        case replyAll
+        case forward
+    }
     @State private var assistantThread: AssistantThreadContext? = nil
     @State private var isLoadingAssistant = true
     @State private var assistantDraftSeed = ""
@@ -87,10 +94,22 @@ struct MacEmailThreadView: View {
             }
         }
         .task { await loadThread() }
-        .sheet(isPresented: $showCompose, onDismiss: { assistantDraftSeed = "" }) {
+        .sheet(isPresented: $showCompose, onDismiss: {
+            assistantDraftSeed = ""
+            composeMode = .reply
+        }) {
             if let lastMessage = detail?.messages.last {
-                MacEmailComposeView(replyTo: lastMessage, threadId: threadId, body: assistantDraftSeed)
-                    .frame(minWidth: 520, minHeight: 380)
+                Group {
+                    switch composeMode {
+                    case .reply:
+                        MacEmailComposeView(replyTo: lastMessage, threadId: threadId, body: assistantDraftSeed)
+                    case .replyAll:
+                        MacEmailComposeView(replyAllTo: lastMessage, threadId: threadId, body: assistantDraftSeed)
+                    case .forward:
+                        MacEmailComposeView(forwarding: lastMessage)
+                    }
+                }
+                .frame(minWidth: 520, minHeight: 380)
             }
         }
         .alert("Mail Assistant", isPresented: Binding(
@@ -274,24 +293,32 @@ struct MacEmailThreadView: View {
     private var replyBar: some View {
         VStack(spacing: 0) {
             Divider().opacity(0.3)
-            HStack {
-                Spacer()
-                Button {
-                    showCompose = true
-                } label: {
-                    HStack(spacing: MacTheme.spacing6) {
-                        Image(systemName: "arrowshape.turn.up.left")
-                            .font(.system(size: 12, weight: .medium))
-                        Text("Reply")
-                            .font(.system(size: 13, weight: .medium))
+            HStack(spacing: MacTheme.spacing8) {
+                ForEach(
+                    [
+                        ("arrowshape.turn.up.left", "Reply", ThreadComposeMode.reply),
+                        ("arrowshape.turn.up.left.2", "Reply all", ThreadComposeMode.replyAll),
+                        ("arrowshape.turn.up.right", "Forward", ThreadComposeMode.forward),
+                    ],
+                    id: \.1
+                ) { icon, label, mode in
+                    Button {
+                        composeMode = mode
+                        showCompose = true
+                    } label: {
+                        HStack(spacing: MacTheme.spacing6) {
+                            Image(systemName: icon)
+                                .font(.system(size: 12, weight: .medium))
+                            Text(label)
+                                .font(.system(size: 13, weight: .medium))
+                        }
+                        .foregroundStyle(MacTheme.accent)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, MacTheme.spacing8)
+                        .background(MacTheme.accent.opacity(0.08), in: Capsule(style: .continuous))
                     }
-                    .foregroundStyle(MacTheme.accent)
-                    .padding(.horizontal, MacTheme.spacing16)
-                    .padding(.vertical, MacTheme.spacing8)
-                    .background(MacTheme.accent.opacity(0.08), in: Capsule(style: .continuous))
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
-                Spacer()
             }
             .padding(MacTheme.spacing12)
         }
@@ -306,11 +333,14 @@ struct MacEmailThreadView: View {
         async let threadDetail = services.emailService.loadThread(id: threadId)
         async let assistant = services.emailService.loadAssistant(threadId: threadId)
 
+        // Show the email body as soon as the thread arrives, even if the assistant
+        // call is still pending. Previously we waited for both, doubling the perceived
+        // load time when the assistant call was the slower of the two.
         detail = await threadDetail
-        assistantThread = await assistant
-
         if detail == nil { errorMessage = "Could not load thread." }
         isLoading = false
+
+        assistantThread = await assistant
         isLoadingAssistant = false
 
         Task { await services.emailService.markAsRead(ids: [threadId]) }
@@ -724,6 +754,8 @@ struct EmailHTMLView: NSViewRepresentable {
             webView.evaluateJavaScript("document.documentElement.scrollHeight") { result, _ in
                 if let h = result as? CGFloat { self.onHeightUpdate?(h) }
                 else if let h = result as? Int { self.onHeightUpdate?(CGFloat(h)) }
+                else if let h = result as? Double { self.onHeightUpdate?(CGFloat(h)) }
+                else if let n = result as? NSNumber { self.onHeightUpdate?(CGFloat(truncating: n)) }
             }
         }
 

@@ -6,6 +6,10 @@ import SwiftData
 @MainActor
 final class MacDraftService {
     private let api: TodosAPIClient
+    /// Set while `flushPending` is processing. Prevents a second concurrent
+    /// flush (e.g. from a rapid network reconnect) from resetting in-flight
+    /// `"sending"` rows back to `"pendingSend"` and re-sending them.
+    private var isFlushing = false
 
     init(api: TodosAPIClient) {
         self.api = api
@@ -99,8 +103,13 @@ final class MacDraftService {
     /// Persists `draft` locally, attempts to send it, then deletes the record on success.
     /// On failure the record remains with `syncState == "failed"` so `flushPending` can retry.
     func saveAndSend(_ draft: DraftRecord, in context: ModelContext) async {
-        context.insert(draft)
-        try? context.save()
+        // `flushPending` re-runs this against drafts already managed by the
+        // context — a second insert produces a duplicate row or undefined
+        // SwiftData behavior. Mirror the iOS DraftService guard.
+        if draft.modelContext == nil {
+            context.insert(draft)
+            try? context.save()
+        }
         draft.syncState = "sending"
         try? context.save()
         do {
@@ -132,6 +141,13 @@ final class MacDraftService {
     /// Re-attempts all pending or failed draft records. Call on network reconnect.
     /// Also resets any "sending" records back to "pendingSend" — these were in-flight when the app last crashed.
     func flushPending(in context: ModelContext) async {
+        // Re-entrant guard. Two concurrent flushes (e.g. from a rapid reconnect
+        // bounce) could otherwise reset a draft mid-flight in the first call
+        // back to "pendingSend" and trigger a second `mail.send` for it.
+        guard !isFlushing else { return }
+        isFlushing = true
+        defer { isFlushing = false }
+
         // Reset stuck "sending" records so they get retried
         let stuckDescriptor = FetchDescriptor<DraftRecord>(
             predicate: #Predicate { $0.syncState == "sending" }

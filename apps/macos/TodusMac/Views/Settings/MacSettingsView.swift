@@ -19,6 +19,7 @@ struct MacSettingsView: View {
     @Environment(MacAppServices.self) private var services
 
     @State private var showsLogoutConfirmation = false
+    @State private var showsLocalModels = false
     @State private var showsDeleteConfirmation = false
     @State private var showsDeleteAlert = false
     @State private var deleteConfirmText = ""
@@ -96,6 +97,7 @@ struct MacSettingsView: View {
                     }
                     generalSection
                     connectedServicesSection
+                    calendarAccountsSection
                     appearanceSection
                     emailPreferencesSection
                     aiAssistantSection
@@ -124,6 +126,12 @@ struct MacSettingsView: View {
         }
         .task {
             await services.subscriptionService.refresh()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .todusRequestConnectGmail)) { _ in
+            Task { await services.emailService.connectGmail(authService: services.authService) }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .todusRequestReconnectGmail)) { _ in
+            Task { await services.emailService.connectGmail(authService: services.authService) }
         }
         .confirmationDialog(
             "Enable low-risk auto-send?",
@@ -687,6 +695,17 @@ struct MacSettingsView: View {
         }
     }
 
+    // MARK: - Calendar Accounts
+
+    private var calendarAccountsSection: some View {
+        settingsGroup(title: "Calendars") {
+            settingsCard {
+                MacCalendarAccountsList()
+                    .environment(services)
+            }
+        }
+    }
+
     // MARK: - Appearance
 
     private var appearanceSection: some View {
@@ -1126,7 +1145,34 @@ struct MacSettingsView: View {
                     .pickerStyle(.menu)
                     .frame(minWidth: 120)
                 }
+
+                cardDivider
+
+                // Local models — opens the on-device catalog. Local models run
+                // on this Mac and never use plan credits.
+                rowContainer {
+                    Image(systemName: "cpu")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(MacTheme.mutedText)
+                        .frame(width: 18)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Local Models")
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(MacTheme.textPrimary)
+                        Text("Download and manage on-device models. No plan credits used.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(MacTheme.textSecondary)
+                    }
+                    Spacer()
+                    Button("Manage") { showsLocalModels = true }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                }
             }
+        }
+        .sheet(isPresented: $showsLocalModels) {
+            NavigationStack { MacLocalModelsView() }
+                .frame(minWidth: 600, minHeight: 600)
         }
     }
 
@@ -1480,8 +1526,13 @@ struct MacSettingsView: View {
         return String(Int(value.rounded()))
     }
 
+    private func formatUsageTotal(_ value: Double, unlimited: Bool) -> String {
+        unlimited ? "Unlimited" : formatCredits(value)
+    }
+
     private var billingPercentRemaining: Int {
         let sub = services.subscriptionService
+        guard !sub.aiUsageUnlimited else { return 100 }
         guard sub.aiUsageLimit > 0 else { return 0 }
         return max(0, 100 - Int((sub.aiUsagePercent * 100).rounded()))
     }
@@ -1564,15 +1615,19 @@ struct MacSettingsView: View {
                     HStack(alignment: .lastTextBaseline) {
                         VStack(alignment: .leading, spacing: 1) {
                             HStack(alignment: .firstTextBaseline, spacing: 5) {
-                                Text(formatCredits(sub.aiUsageRemaining))
+                                Text(sub.aiUsageUnlimited ? "Unlimited" : formatCredits(sub.aiUsageRemaining))
                                     .font(.system(size: 28, weight: .semibold).monospacedDigit())
                                     .foregroundStyle(MacTheme.textPrimary)
-                                Text("/ \(formatCredits(sub.aiUsageLimit)) left")
+                                Text(sub.aiUsageUnlimited
+                                     ? "AI credits"
+                                     : "of \(formatCredits(sub.aiUsageLimit))")
                                     .font(.system(size: 11))
                                     .foregroundStyle(MacTheme.textSecondary)
                                     .monospacedDigit()
                             }
-                            Text(sub.aiUsageLimit > 0
+                            Text(sub.aiUsageUnlimited
+                                 ? "Unlimited AI usage on this plan"
+                                 : sub.aiUsageLimit > 0
                                  ? "\(billingPercentRemaining)% remaining this period"
                                  : "No credits on this plan")
                                 .font(.system(size: 10.5))
@@ -1594,17 +1649,34 @@ struct MacSettingsView: View {
                         Text("Used: \(formatCredits(sub.aiUsageUsed))")
                             .monospacedDigit()
                         Spacer()
-                        Text("Total: \(formatCredits(sub.aiUsageLimit))")
+                        Text("Total: \(formatUsageTotal(sub.aiUsageLimit, unlimited: sub.aiUsageUnlimited))")
                             .monospacedDigit()
                     }
                     .font(.system(size: 10.5))
                     .foregroundStyle(MacTheme.textSecondary)
 
-                    if sub.aiUsagePercent >= 1 && sub.aiUsageLimit > 0 {
-                        Text("Out of AI credits this period.\(sub.plan.isPaid ? "" : " Upgrade to keep chatting.")")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.red.opacity(0.85))
-                    } else if sub.aiUsagePercent >= 0.8 && sub.aiUsageLimit > 0 {
+                    if !sub.aiUsageUnlimited && sub.aiUsagePercent >= 1 && sub.aiUsageLimit > 0 {
+                        HStack(spacing: 10) {
+                            Text("Out of AI credits this period.")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.red.opacity(0.85))
+                            if !sub.plan.isPaid {
+                                Button {
+                                    openURL(upgradePricingURL())
+                                } label: {
+                                    HStack(spacing: 3) {
+                                        Image(systemName: "arrow.up.circle.fill")
+                                            .font(.system(size: 10, weight: .semibold))
+                                        Text("Upgrade to Pro")
+                                            .font(.system(size: 11, weight: .semibold))
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                                .foregroundStyle(MacTheme.accent)
+                                .macClickablePointer()
+                            }
+                        }
+                    } else if !sub.aiUsageUnlimited && sub.aiUsagePercent >= 0.8 && sub.aiUsageLimit > 0 {
                         Text("You've used \(Int(sub.aiUsagePercent * 100))% of your AI credits.")
                             .font(.system(size: 11))
                             .foregroundStyle(.orange)
@@ -1731,6 +1803,7 @@ struct MacSettingsView: View {
         deleteConfirmText = ""
         services.signOut()
         try? modelContext.delete(model: TaskRecord.self)
+        try? modelContext.delete(model: FolderItemRecord.self)
         try? modelContext.delete(model: FolderRecord.self)
         try? modelContext.save()
         dismiss()

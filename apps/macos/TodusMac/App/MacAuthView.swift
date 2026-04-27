@@ -200,26 +200,6 @@ struct MacAuthView: View {
                 .disabled(authService.isLoading)
             }
 
-            // Open email app — uses mailto: which opens default macOS mail client
-            Button {
-                if let url = URL(string: "mailto:") {
-                    NSWorkspace.shared.open(url)
-                }
-            } label: {
-                Text("Open your email app")
-                    .font(.system(size: 14, weight: .semibold))
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 40)
-                    .background(.background, in: Capsule())
-                    .overlay(
-                        Capsule()
-                            .stroke(.separator, lineWidth: 1)
-                    )
-            }
-            .buttonStyle(.plain)
-            .focusEffectDisabled()
-            .pointerStyle(.link)
-
             Text("You can go back and skip sign-in to use tasks only. Email can be connected later in Settings.")
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.secondary)

@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 // MARK: - MacGroupChatView
 
@@ -31,6 +32,14 @@ struct MacGroupChatView: View {
         }
         .onDisappear {
             groupService.stopPolling()
+        }
+        // Pause polling when the window loses focus, resume when it returns.
+        // Cuts background battery/network use on a chat that the user isn't watching.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
+            groupService.stopPolling()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            groupService.startPolling(groupId: groupId)
         }
         .navigationTitle(group?.name ?? "Group")
         .toolbar { toolbarContent }

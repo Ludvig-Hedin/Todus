@@ -123,6 +123,7 @@ final class MeetingsService {
             meetings = response.meetings
             loadError = nil
         } catch {
+            if error.isURLCancellation { return }
             logger.error("Failed to load meetings: \(String(describing: error), privacy: .public)")
             loadError = error.localizedDescription
         }
