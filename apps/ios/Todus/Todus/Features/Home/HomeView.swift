@@ -25,13 +25,10 @@ struct HomeView: View {
     // a user who has only completed tasks isn't told they haven't created any yet.
     @Query private var allTasksIncludingCompleted: [TaskRecord]
 
-    @State private var todaysEvents: [CalendarEvent] = []
+    @State private var upcomingEvents: [CalendarEvent] = []
     @State private var isLoadingEvents = false
     @State private var hasLoadedEmailState = false
     @State private var isLoadingAssistantBriefing = false
-
-    // Cached tasks due today — recomputed only when allTasks changes.
-    @State private var tasksDueToday: [TaskRecord] = []
 
     // Sheet state
     @State private var selectedTask: TaskRecord? = nil
@@ -117,8 +114,6 @@ struct HomeView: View {
             await loadHomeData()
             lastRefresh = Date()
         }
-        .onAppear { recomputeTasksDueToday() }
-        .onChange(of: allTasks) { recomputeTasksDueToday() }
         // Refresh on foreground so events/inbox/assistant data don't go stale while the
         // app is backgrounded. Throttled to skip if the last refresh was within 5s — this
         // avoids a double-fetch when scenePhase fires .active immediately after our `.task`
@@ -218,7 +213,7 @@ struct HomeView: View {
     }
 
     private var isEventsRefreshing: Bool {
-        isLoadingEvents && !todaysEvents.isEmpty
+        isLoadingEvents && !upcomingEvents.isEmpty
     }
 
     private var isEmailRefreshing: Bool {
@@ -229,8 +224,9 @@ struct HomeView: View {
     /// "all clear" line when there's nothing to surface.
     private var summaryLine: String {
         let hour = Calendar.current.component(.hour, from: Date())
-        let eventCount = todaysEvents.count
-        let taskCount = tasksDueToday.count
+        let cal = Calendar.current
+        let eventCount = upcomingEvents.filter { cal.isDateInToday($0.startDate) }.count
+        let taskCount = allTasks.filter { !$0.completed && $0.dueDate.map { cal.isDateInToday($0) } == true }.count
         let replyCount = services.emailService.assistantBriefing?.needsYou.count ?? 0
 
         var parts: [String] = []
@@ -323,13 +319,61 @@ struct HomeView: View {
         let action: () -> Void
     }
 
+    private struct EventDayGroup: Identifiable {
+        let id: Date
+        let label: String
+        let events: [CalendarEvent]
+    }
+
+    private struct TaskDayGroup: Identifiable {
+        let id: Date
+        let label: String
+        let tasks: [TaskRecord]
+    }
+
+    private func dayLabel(for date: Date) -> String {
+        let cal = Calendar.current
+        if cal.isDateInToday(date) { return "Today" }
+        if cal.isDateInTomorrow(date) { return "Tomorrow" }
+        let diff = cal.dateComponents([.day], from: cal.startOfDay(for: Date()), to: cal.startOfDay(for: date)).day ?? 0
+        if diff < 7 {
+            return date.formatted(.dateTime.weekday(.wide))
+        }
+        return date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())
+    }
+
+    private var groupedUpcomingEvents: [EventDayGroup] {
+        let cal = Calendar.current
+        let byDay = Dictionary(grouping: upcomingEvents) { cal.startOfDay(for: $0.startDate) }
+        return byDay.keys.sorted().map { day in
+            EventDayGroup(id: day, label: dayLabel(for: day), events: byDay[day]!.sorted { $0.startDate < $1.startDate })
+        }
+    }
+
+    private var groupedUpcomingTasks: [TaskDayGroup] {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        guard let cutoff = cal.date(byAdding: .day, value: 7, to: today) else { return [] }
+        let upcoming = allTasks.filter { task in
+            guard !task.completed, let due = task.dueDate else { return false }
+            return due >= today && due < cutoff
+        }
+        let byDay = Dictionary(grouping: upcoming) { task in
+            cal.startOfDay(for: task.dueDate!)
+        }
+        return byDay.keys.sorted().map { day in
+            TaskDayGroup(id: day, label: dayLabel(for: day), tasks: byDay[day]!)
+        }
+    }
+
     private var heroStatChips: [HomeStatChip] {
         var chips: [HomeStatChip] = []
-        if !tasksDueToday.isEmpty {
+        let upcomingTaskCount = groupedUpcomingTasks.reduce(0) { $0 + $1.tasks.count }
+        if upcomingTaskCount > 0 {
             chips.append(HomeStatChip(
                 id: "tasks",
                 icon: "checkmark.circle",
-                label: "\(tasksDueToday.count) task\(tasksDueToday.count == 1 ? "" : "s")",
+                label: "\(upcomingTaskCount) task\(upcomingTaskCount == 1 ? "" : "s")",
                 action: { services.navigateTo = .tasks }
             ))
         }
@@ -370,9 +414,9 @@ struct HomeView: View {
                 topPriorityRow(priority)
             }
 
-            if !todaysEvents.isEmpty {
+            if !upcomingEvents.isEmpty {
                 VStack(spacing: 6) {
-                    ForEach(todaysEvents.prefix(3)) { event in
+                    ForEach(Array(upcomingEvents.prefix(3))) { event in
                         Button {
                             selectedCalendarEvent = event
                         } label: {
@@ -385,15 +429,10 @@ struct HomeView: View {
                                     .foregroundStyle(.primary)
                                     .lineLimit(1)
                                 Spacer(minLength: 4)
-                                if event.isAllDay {
-                                    Text("All day")
-                                        .font(.system(size: 12))
-                                        .foregroundStyle(.secondary)
-                                } else {
-                                    Text(event.startDate, format: .dateTime.hour().minute())
-                                        .font(.system(size: 12))
-                                        .foregroundStyle(.secondary)
-                                }
+                                let timeStr = event.isAllDay ? "All day" : event.startDate.formatted(.dateTime.hour().minute())
+                                Text("\(dayLabel(for: event.startDate)) · \(timeStr)")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(.secondary)
                             }
                             .padding(.horizontal, 10)
                             .padding(.vertical, 7)
@@ -725,36 +764,40 @@ struct HomeView: View {
 
     private var eventsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            // "+" navigates to calendar tab where events are created natively
             sectionHeader(
-                title: "Today's Events",
+                title: "Upcoming Events",
                 icon: "calendar",
-                count: todaysEvents.count,
+                count: upcomingEvents.count,
                 actionTitle: "Open",
                 isUpdating: isEventsRefreshing,
                 onOpen: { services.navigateTo = .calendar },
                 onAdd: { services.requestCreateSheet = .event }
             )
 
-            if isLoadingEvents && todaysEvents.isEmpty {
-                loadingState(message: "Loading today's events")
-            } else if todaysEvents.isEmpty {
-                // If we don't have calendar permission, the empty state can't tell the
-                // difference between "no events" and "we literally can't see your events".
-                // Surface that distinction so the user can act, instead of staring at a
-                // perpetually empty card.
-                if !services.calendarService.canReadEvents() {
-                    permissionEmptyState(
-                        message: "Enable calendar access in Settings to see today's events",
-                        actionTitle: "Open Settings"
-                    )
-                } else {
-                    emptyState(message: "No events today", onTap: { services.navigateTo = .calendar })
-                }
+            if isLoadingEvents && upcomingEvents.isEmpty {
+                loadingState(message: "Loading upcoming events")
+            } else if !services.calendarService.canReadEvents() {
+                permissionEmptyState(
+                    message: "Enable calendar access in Settings to see upcoming events",
+                    actionTitle: "Open Settings"
+                )
+            } else if upcomingEvents.isEmpty {
+                emptyState(message: "No upcoming events", onTap: { services.navigateTo = .calendar })
             } else {
-                VStack(spacing: 8) {
-                    ForEach(todaysEvents.prefix(5)) { event in
-                        eventRow(event)
+                VStack(alignment: .leading, spacing: 16) {
+                    ForEach(groupedUpcomingEvents) { group in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(group.label)
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                                .textCase(.uppercase)
+                                .padding(.leading, 2)
+                            VStack(spacing: 6) {
+                                ForEach(group.events) { event in
+                                    eventRow(event)
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -833,16 +876,6 @@ struct HomeView: View {
 
     // MARK: - Tasks Section
 
-    private func recomputeTasksDueToday() {
-        let calendar = Calendar.current
-        let today = calendar.startOfDay(for: Date())
-        guard let tomorrow = calendar.date(byAdding: .day, value: 1, to: today) else { return }
-        tasksDueToday = allTasks.filter { task in
-            guard let dueDate = task.dueDate else { return false }
-            return dueDate >= today && dueDate < tomorrow
-        }
-    }
-
     private func folderName(for folderID: UUID?) -> String? {
         guard let folderID else { return nil }
         return folders.first(where: { $0.id == folderID })?.name
@@ -851,34 +884,44 @@ struct HomeView: View {
     private func moveEvent(_ event: CalendarEvent, to folderID: UUID?) {
         Task {
             await services.calendarService.setFolderID(folderID, for: event.id)
-            await loadTodaysEvents()
+            await loadUpcomingEvents()
         }
     }
 
     private var tasksSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // "+" navigates to the tasks tab where the capture composer lives
+        let totalCount = groupedUpcomingTasks.reduce(0) { $0 + $1.tasks.count }
+        return VStack(alignment: .leading, spacing: 12) {
             sectionHeader(
-                title: "Due Today",
+                title: "Upcoming Tasks",
                 icon: "checklist",
-                count: tasksDueToday.count,
+                count: totalCount,
                 actionTitle: "View all",
                 isUpdating: false,
                 onOpen: { services.navigateTo = .tasks },
                 onAdd: { services.requestCreateSheet = .task }
             )
 
-            if tasksDueToday.isEmpty {
-                emptyState(message: "No tasks due today", onTap: { services.navigateTo = .tasks })
+            if groupedUpcomingTasks.isEmpty {
+                emptyState(message: "No upcoming tasks", onTap: { services.navigateTo = .tasks })
             } else {
-                VStack(spacing: 8) {
-                    ForEach(tasksDueToday.prefix(5)) { task in
-                        // Tapping opens the full task detail sheet
-                        TaskRowView(
-                            task: task,
-                            onMoveRequested: {},
-                            onOpenDetails: { selectedTask = task }
-                        )
+                VStack(alignment: .leading, spacing: 16) {
+                    ForEach(groupedUpcomingTasks) { group in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(group.label)
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                                .textCase(.uppercase)
+                                .padding(.leading, 2)
+                            VStack(spacing: 6) {
+                                ForEach(group.tasks) { task in
+                                    TaskRowView(
+                                        task: task,
+                                        onMoveRequested: {},
+                                        onOpenDetails: { selectedTask = task }
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -1266,10 +1309,10 @@ struct HomeView: View {
         )
     }
 
-    private func loadTodaysEvents() async {
+    private func loadUpcomingEvents() async {
         let trace = PerformanceTrace.beginInterval(
             PerformanceTrace.loadTodayEvents,
-            message: "HomeView.loadTodaysEvents begin"
+            message: "HomeView.loadUpcomingEvents begin"
         )
         isLoadingEvents = true
         defer {
@@ -1277,11 +1320,11 @@ struct HomeView: View {
             PerformanceTrace.endInterval(
                 PerformanceTrace.loadTodayEvents,
                 trace,
-                message: "HomeView.loadTodaysEvents end count=\(todaysEvents.count)"
+                message: "HomeView.loadUpcomingEvents end count=\(upcomingEvents.count)"
             )
         }
         if services.calendarService.canReadEvents() {
-            todaysEvents = await services.calendarService.todaysEvents()
+            upcomingEvents = await services.calendarService.upcomingEvents(days: 7)
                 .sorted { $0.startDate < $1.startDate }
         }
     }
@@ -1294,7 +1337,7 @@ struct HomeView: View {
             await services.emailService.ensureInitialInboxLoaded()
         }
 
-        await loadTodaysEvents()
+        await loadUpcomingEvents()
         await services.captureService.syncSharedFolders(in: modelContext)
         await services.captureService.fetchFolderSummary(in: modelContext)
 

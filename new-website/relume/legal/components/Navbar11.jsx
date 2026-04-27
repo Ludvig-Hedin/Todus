@@ -128,28 +128,6 @@ export function Navbar11() {
                 className="flex w-full items-center justify-between gap-2 py-2 text-left text-sm tracking-tight lg:flex-none lg:justify-start lg:px-4 lg:py-2"
                 onClick={useActive.openOnMobileDropdownMenu}
               >
-              Features
-            </a>
-            <a
-              href="#"
-              className="text-md block py-3 text-left first:pt-7 lg:px-4 lg:py-2 lg:text-base lg:first:pt-2"
-            >
-              Pricing
-            </a>
-            <a
-              href="#"
-              className="text-md block py-3 text-left first:pt-7 lg:px-4 lg:py-2 lg:text-base lg:first:pt-2"
-            >
-              Blog
-            </a>
-            <div
-              onMouseEnter={useActive.openOnDesktopDropdownMenu}
-              onMouseLeave={useActive.closeOnDesktopDropdownMenu}
-            >
-              <button
-                className="text-md flex w-full items-center justify-between gap-2 py-3 text-left lg:flex-none lg:justify-start lg:px-4 lg:py-2 lg:text-base"
-                onClick={useActive.openOnMobileDropdownMenu}
-              >
                 <span>More</span>
                 <AnimatePresence>
                   <motion.div
@@ -192,10 +170,8 @@ export function Navbar11() {
                       className="grid auto-cols-fr grid-cols-[max-content_1fr] items-start gap-x-3 py-2 lg:py-1"
                     >
                       <div className="flex flex-col items-start justify-center">
-                        <p className="text-sm font-semibold tracking-tight">
-                          Legal
-                        </p>
-                        <p className="hidden text-xs tracking-tight text-text-alternative md:block">
+                        <p className="text-sm font-semibold tracking-tight">Legal</p>
+                        <p className="text-text-alternative hidden text-xs tracking-tight md:block">
                           Terms of service and privacy
                         </p>
                       </div>
@@ -205,10 +181,8 @@ export function Navbar11() {
                       className="grid auto-cols-fr grid-cols-[max-content_1fr] items-start gap-x-3 py-2 lg:py-1"
                     >
                       <div className="flex flex-col items-start justify-center">
-                        <p className="text-sm font-semibold tracking-tight">
-                          Download
-                        </p>
-                        <p className="hidden text-xs tracking-tight text-text-alternative md:block">
+                        <p className="text-sm font-semibold tracking-tight">Download</p>
+                        <p className="text-text-alternative hidden text-xs tracking-tight md:block">
                           Get Todus on your device
                         </p>
                       </div>
@@ -218,10 +192,8 @@ export function Navbar11() {
                       className="grid auto-cols-fr grid-cols-[max-content_1fr] items-start gap-x-3 py-2 lg:py-1"
                     >
                       <div className="flex flex-col items-start justify-center">
-                        <p className="text-sm font-semibold tracking-tight">
-                          Contact
-                        </p>
-                        <p className="hidden text-xs tracking-tight text-text-alternative md:block">
+                        <p className="text-sm font-semibold tracking-tight">Contact</p>
+                        <p className="text-text-alternative hidden text-xs tracking-tight md:block">
                           Reach out to our team
                         </p>
                       </div>
@@ -231,66 +203,10 @@ export function Navbar11() {
                       className="grid auto-cols-fr grid-cols-[max-content_1fr] items-start gap-x-3 py-2 lg:py-1"
                     >
                       <div className="flex flex-col items-start justify-center">
-                        <p className="text-sm font-semibold tracking-tight">
-                          Home
-                        </p>
-                        <p className="hidden text-xs tracking-tight text-text-alternative md:block">
+                        <p className="text-sm font-semibold tracking-tight">Home</p>
+                        <p className="text-text-alternative hidden text-xs tracking-tight md:block">
                           Back to the main page
                         </p>
-                      </div>
-                    </a>
-                  </div>
-                      <div className="flex flex-col items-start justify-center">
-                        <p className="text-md font-semibold lg:text-base">Legal</p>
-                        <p className="hidden text-sm md:block">Terms of service and privacy</p>
-                      </div>
-                    </a>
-                    <a
-                      href="#"
-                      className="grid auto-cols-fr grid-cols-[max-content_1fr] items-start gap-x-3 py-2 lg:py-1"
-                    >
-                      <div>
-                        <img
-                          className="size-6"
-                          src="https://d22po4pjz3o32e.cloudfront.net/relume-icon.svg"
-                          alt="Icon 2"
-                        />
-                      </div>
-                      <div className="flex flex-col items-start justify-center">
-                        <p className="text-md font-semibold lg:text-base">Download</p>
-                        <p className="hidden text-sm md:block">Get Todus on your device</p>
-                      </div>
-                    </a>
-                    <a
-                      href="#"
-                      className="grid auto-cols-fr grid-cols-[max-content_1fr] items-start gap-x-3 py-2 lg:py-1"
-                    >
-                      <div>
-                        <img
-                          className="size-6"
-                          src="https://d22po4pjz3o32e.cloudfront.net/relume-icon.svg"
-                          alt="Icon 3"
-                        />
-                      </div>
-                      <div className="flex flex-col items-start justify-center">
-                        <p className="text-md font-semibold lg:text-base">Contact</p>
-                        <p className="hidden text-sm md:block">Reach out to our team</p>
-                      </div>
-                    </a>
-                    <a
-                      href="#"
-                      className="grid auto-cols-fr grid-cols-[max-content_1fr] items-start gap-x-3 py-2 lg:py-1"
-                    >
-                      <div>
-                        <img
-                          className="size-6"
-                          src="https://d22po4pjz3o32e.cloudfront.net/relume-icon.svg"
-                          alt="Icon 4"
-                        />
-                      </div>
-                      <div className="flex flex-col items-start justify-center">
-                        <p className="text-md font-semibold lg:text-base">Home</p>
-                        <p className="hidden text-sm md:block">Back to the main page</p>
                       </div>
                     </a>
                   </div>

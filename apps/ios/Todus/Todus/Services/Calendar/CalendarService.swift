@@ -152,6 +152,14 @@ actor CalendarService {
         return out
     }
 
+    /// Fetch upcoming events starting from today's midnight for `days` calendar days.
+    func upcomingEvents(days: Int = 7) -> [CalendarEvent] {
+        let calendar = Calendar.current
+        let start = calendar.startOfDay(for: Date())
+        let end = calendar.date(byAdding: .day, value: days, to: start) ?? start
+        return events(from: start, to: end)
+    }
+
     /// Fetch today's events (from midnight to midnight).
     /// All-day timezone correctness: `Calendar.current.startOfDay(for:)` returns local-time
     /// midnight in the user's current timezone, and `byAdding: .day, value: 1` does proper
