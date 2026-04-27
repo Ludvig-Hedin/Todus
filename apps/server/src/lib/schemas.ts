@@ -67,6 +67,31 @@ export const assistantDefaultExcludedSendersPlaceholder = [
   'calendar-notification@',
 ].join('\n');
 
+/**
+ * Per-user calendar visibility prefs synced across iOS/macOS/web.
+ *
+ * `hiddenCalendarIds` uses composite IDs:
+ *   - Apple: `apple:{EKCalendar.calendarIdentifier}`
+ *   - Google: `google:{connectionId}:{googleCalendarId}`
+ *
+ * Account keys for `defaultCalendarByAccount` are `apple` or `google:{connectionId}`.
+ */
+export const calendarPreferencesSchema = z.object({
+  hiddenCalendarIds: z.array(z.string()).default([]),
+  defaultCalendarId: z.string().optional(),
+  defaultCalendarByAccount: z.record(z.string(), z.string()).default({}),
+  /** When true, hide Apple-side mirrors of calendars also covered by a Google connection. */
+  preferGoogleOverAppleDuplicates: z.boolean().default(true),
+});
+
+export type CalendarPreferences = z.infer<typeof calendarPreferencesSchema>;
+
+export const defaultCalendarPreferences: CalendarPreferences = {
+  hiddenCalendarIds: [],
+  defaultCalendarByAccount: {},
+  preferGoogleOverAppleDuplicates: true,
+};
+
 export const serializedFileSchema = z.object({
   name: z.string(),
   type: z.string(),
@@ -183,6 +208,7 @@ export const userSettingsSchema = z.object({
   autoRead: z.boolean().default(true),
   animations: z.boolean().default(false),
   assistantAutomationPolicy: assistantAutomationPolicySchema.default(defaultAssistantAutomationPolicy),
+  calendarPreferences: calendarPreferencesSchema.default(defaultCalendarPreferences),
   // AI provider & model selection — allows users to choose their preferred LLM provider
   // and optionally use a local Ollama instance for privacy / cost / offline use.
   aiProvider: z
@@ -213,6 +239,7 @@ export const defaultUserSettings: UserSettings = {
   imageCompression: 'medium',
   animations: false,
   assistantAutomationPolicy: defaultAssistantAutomationPolicy,
+  calendarPreferences: defaultCalendarPreferences,
   aiProvider: 'auto',
   aiModel: '',
   ollamaBaseUrl: 'http://localhost:11434',
@@ -244,6 +271,15 @@ export const mergeUserSettings = (
         ...defaultAssistantAutomationPolicy.autoSendQuietHours,
         ...(current?.assistantAutomationPolicy?.autoSendQuietHours ?? {}),
         ...(incoming.assistantAutomationPolicy?.autoSendQuietHours ?? {}),
+      },
+    },
+    calendarPreferences: {
+      ...defaultCalendarPreferences,
+      ...(current?.calendarPreferences ?? {}),
+      ...(incoming.calendarPreferences ?? {}),
+      defaultCalendarByAccount: {
+        ...(current?.calendarPreferences?.defaultCalendarByAccount ?? {}),
+        ...(incoming.calendarPreferences?.defaultCalendarByAccount ?? {}),
       },
     },
   });
