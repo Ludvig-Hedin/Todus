@@ -59,6 +59,12 @@ final class FolderSyncService {
         await processQueue()
     }
 
+    /// Discards any queued mutations that have not yet been sent.
+    /// Call on sign-out to prevent a reconnect from replaying the previous user's edits.
+    func clearQueue() {
+        queue.removeAll()
+    }
+
     // MARK: - Private
 
     private func processQueue() async {
@@ -66,10 +72,14 @@ final class FolderSyncService {
         isProcessing = true
         defer { isProcessing = false }
 
-        let batch = queue
-        queue.removeAll()
+        // Drain. A mutation enqueued while a batch is in flight would otherwise
+        // sit until the next reconnect, so a user editing folders rapidly on a
+        // healthy network would see a stale folder until they triggered another
+        // event. Mirrors the iOS FolderSyncService loop.
+        while !queue.isEmpty {
+            let batch = queue
+            queue.removeAll()
 
-        do {
             let payloads = batch.map { mutation -> FolderMutationPayload in
                 switch mutation {
                 case .upsert(let id, let name, let color, let icon, let position):
@@ -93,13 +103,17 @@ final class FolderSyncService {
                 }
             }
 
-            let _: FolderSyncResponse = try await apiClient.trpcMutation(
-                "folders.sync",
-                input: FolderSyncRequest(mutations: payloads)
-            )
-        } catch {
-            // Network / server error — requeue the batch so retryPending() can replay it.
-            queue.insert(contentsOf: batch, at: 0)
+            do {
+                let _: FolderSyncResponse = try await apiClient.trpcMutation(
+                    "folders.sync",
+                    input: FolderSyncRequest(mutations: payloads)
+                )
+            } catch {
+                // Network / server error — requeue the batch so retryPending() can replay it.
+                queue.insert(contentsOf: batch, at: 0)
+                // Stop draining on failure to avoid a hot retry loop against a down server.
+                break
+            }
         }
     }
 }

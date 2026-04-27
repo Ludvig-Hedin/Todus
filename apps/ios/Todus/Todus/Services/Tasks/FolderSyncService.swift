@@ -59,17 +59,22 @@ final class FolderSyncService {
         await processQueue()
     }
 
+    /// Discards any queued mutations that have not yet been sent.
+    /// Call on sign-out to prevent a reconnect from replaying the previous user's edits.
+    func clearQueue() {
+        queue.removeAll()
+    }
+
     // MARK: - Private
 
     private func processQueue() async {
         guard !isProcessing, !queue.isEmpty else { return }
         isProcessing = true
-        defer { isProcessing = false }
 
-        let batch = queue
-        queue.removeAll()
+        while !queue.isEmpty {
+            let batch = queue
+            queue.removeAll()
 
-        do {
             let payloads = batch.map { mutation -> FolderMutationPayload in
                 switch mutation {
                 case .upsert(let id, let name, let color, let icon, let position):
@@ -93,13 +98,30 @@ final class FolderSyncService {
                 }
             }
 
-            let _: FolderSyncResponse = try await apiClient.trpcMutation(
-                "folders.sync",
-                input: FolderSyncRequest(mutations: payloads)
-            )
-        } catch {
-            // Network / server error — requeue the batch so retryPending() can replay it.
-            queue.insert(contentsOf: batch, at: 0)
+            do {
+                let response: FolderSyncResponse = try await apiClient.trpcMutation(
+                    "folders.sync",
+                    input: FolderSyncRequest(mutations: payloads)
+                )
+                // Server may indicate partial success; requeue any mutations whose ids
+                // were not acknowledged so retryPending() can replay them.
+                let synced = Set(response.syncedIds)
+                let unacked = zip(batch, payloads).compactMap { mutation, payload in
+                    synced.contains(payload.id) ? nil : mutation
+                }
+                if !unacked.isEmpty {
+                    queue.insert(contentsOf: unacked, at: 0)
+                    // Stop the loop on partial failure so retryPending can drive the
+                    // next attempt — avoids hot-looping if the server keeps rejecting.
+                    break
+                }
+            } catch {
+                // Network / server error — requeue the batch so retryPending() can replay it.
+                queue.insert(contentsOf: batch, at: 0)
+                break
+            }
         }
+
+        isProcessing = false
     }
 }

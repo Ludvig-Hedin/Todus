@@ -13,6 +13,7 @@ final class MacAppServices {
         static let contextAboutYou = "MacApp.contextAboutYou"
         static let customInstructions = "MacApp.customInstructions"
         static let assistantAutomationPolicy = "MacApp.assistantAutomationPolicy"
+        static let calendarPreferences = "MacApp.calendarPreferences"
         static let startupView = "MacApp.startupView"
         static let restoreLastViewedPage = "MacApp.restoreLastViewedPage"
         static let hasConfiguredGmailPrompt = "MacApp.hasConfiguredGmailPrompt"
@@ -32,6 +33,11 @@ final class MacAppServices {
     let apiClient: TodosAPIClient
     let emailService: EmailService
     let calendarService: CalendarService
+    /// Backend Google Calendar integration — fetches per-connection calendars and events.
+    let googleCalendarService: GoogleCalendarService
+    /// Aggregator that merges Apple (EventKit) + Google (backend) events with
+    /// per-source visibility from `calendarPreferences`.
+    let unifiedCalendarService: UnifiedCalendarService
     let networkMonitor: NetworkMonitor
     let notificationService: MacNotificationService
     let aiChatService: MacAIChatService
@@ -47,6 +53,20 @@ final class MacAppServices {
     /// Tracks per-model install state for the Local Models settings screen and
     /// the chat composer's local-runtime routing. Disk scan runs on init.
     let localModelStateStore: LocalModelStateStore
+    /// Apple Intelligence on-device LLM (macOS 26+). Always present; service
+    /// reports `isReady` based on OS + Apple Intelligence enablement.
+    let appleFoundationModelService: AppleFoundationModelService
+    /// Probes a locally-running Ollama daemon and lists installed tags. The
+    /// "Connected (Ollama)" section in Settings → Local Models reads from
+    /// this; routing for chat goes through `ollamaInferenceService`.
+    let ollamaConnector: OllamaConnector
+    /// Streams chat completions from the user's local Ollama daemon.
+    let ollamaInferenceService: OllamaInferenceService
+    /// MLX-Swift inference (Apple Silicon). Loads quantized weights from the
+    /// HuggingFace cache populated by `modelDownloadService`.
+    let mlxInferenceService: MLXInferenceService
+    /// Orchestrates HuggingFace downloads + deletions for MLX models.
+    let modelDownloadService: ModelDownloadService
     /// Queues task mutations and flushes them via tRPC `tasks.sync`.
     let taskSyncService: TaskSyncService
     /// Queues folder create/update/delete mutations and flushes them via tRPC `folders.sync`.
@@ -77,6 +97,16 @@ final class MacAppServices {
         didSet {
             if let data = try? JSONEncoder().encode(assistantAutomationPolicy) {
                 defaults.set(data, forKey: Keys.assistantAutomationPolicy)
+            }
+        }
+    }
+
+    /// Calendar visibility prefs — synced from `settings.get` and persisted
+    /// locally for offline launches. Mirrors the iOS counterpart.
+    var calendarPreferences: CalendarPreferences {
+        didSet {
+            if let data = try? JSONEncoder().encode(calendarPreferences) {
+                defaults.set(data, forKey: Keys.calendarPreferences)
             }
         }
     }
@@ -213,6 +243,12 @@ final class MacAppServices {
         } else {
             self.assistantAutomationPolicy = .recommended
         }
+        if let data = defaults.data(forKey: Keys.calendarPreferences),
+           let saved = try? JSONDecoder().decode(CalendarPreferences.self, from: data) {
+            self.calendarPreferences = saved
+        } else {
+            self.calendarPreferences = .default
+        }
         self.developerModeEnabled = defaults.bool(forKey: Keys.developerModeEnabled)
         self.aiChatService = MacAIChatService(
             backendURL: backendURL,
@@ -225,11 +261,34 @@ final class MacAppServices {
         self.shareConversationService = ShareConversationService(apiClient: api)
         self.groupChatService = GroupChatService(apiClient: api)
         self.meetingsService = MeetingsService(apiClient: api)
-        self.connectionsService = ConnectionsService(api: api)
+        let connections = ConnectionsService(api: api)
+        self.connectionsService = connections
+        let googleCalendar = GoogleCalendarService(api: api)
+        self.googleCalendarService = googleCalendar
+        self.unifiedCalendarService = UnifiedCalendarService(
+            calendarService: calendar,
+            googleService: googleCalendar,
+            connectionsService: connections
+        )
         self.subscriptionService = MacSubscriptionService(apiClient: api)
         self.docsService = MacDocsService(apiClient: api)
         self.draftService = MacDraftService(api: api)
         self.localModelStateStore = LocalModelStateStore()
+        self.appleFoundationModelService = AppleFoundationModelService()
+        let ollamaConnector = OllamaConnector()
+        self.ollamaConnector = ollamaConnector
+        self.ollamaInferenceService = OllamaInferenceService(connector: ollamaConnector)
+        let mlxService = MLXInferenceService()
+        self.mlxInferenceService = mlxService
+        self.modelDownloadService = ModelDownloadService(
+            stateStore: self.localModelStateStore,
+            inferenceService: mlxService
+        )
+        // Wire local runtimes into the chat service so it can short-circuit
+        // /api/ai/chat when the selected model is on-device.
+        self.aiChatService.appleFoundationModelService = self.appleFoundationModelService
+        self.aiChatService.mlxInferenceService = mlxService
+        self.aiChatService.ollamaInferenceService = self.ollamaInferenceService
         self.taskSyncService = TaskSyncService(apiClient: api)
         self.folderSyncService = FolderSyncService(apiClient: api)
         self.aiChatService.contextAboutYou = contextAboutYou
@@ -246,6 +305,9 @@ final class MacAppServices {
             contextAboutYou = response.settings.contextAboutYou
             customInstructions = response.settings.customPrompt
             assistantAutomationPolicy = response.settings.assistantAutomationPolicy
+            if let prefs = response.settings.calendarPreferences {
+                calendarPreferences = prefs
+            }
         } catch {
             AppLogger.shared.log("[MacAppServices] Failed to load shared AI profile: \(error)")
         }
@@ -266,6 +328,44 @@ final class MacAppServices {
         } catch {
             AppLogger.shared.log("[MacAppServices] Failed to save shared AI profile: \(error)")
         }
+    }
+
+    /// Push current `calendarPreferences` to the backend.
+    func saveCalendarPreferences() async {
+        guard authService.isAuthenticated else { return }
+        do {
+            struct Input: Encodable {
+                let calendarPreferences: CalendarPreferences
+            }
+            let _: SharedAIProfileSaveResponse = try await apiClient.trpcMutation(
+                "settings.save",
+                input: Input(calendarPreferences: calendarPreferences)
+            )
+        } catch {
+            AppLogger.shared.log("[MacAppServices] Failed to save calendar preferences: \(error)")
+        }
+    }
+
+    /// Toggle a calendar's visibility (composite id) and push to server.
+    func toggleCalendarVisibility(_ id: String) {
+        var prefs = calendarPreferences
+        var hidden = prefs.hiddenIdSet
+        if hidden.contains(id) { hidden.remove(id) } else { hidden.insert(id) }
+        prefs.hiddenCalendarIds = Array(hidden)
+        calendarPreferences = prefs
+        Task { await saveCalendarPreferences() }
+    }
+
+    /// Set the default calendar for a given account key (`apple` or `google:{connId}`).
+    func setDefaultCalendar(_ id: String?, forAccountKey accountKey: String) {
+        var prefs = calendarPreferences
+        if let id {
+            prefs.defaultCalendarByAccount[accountKey] = id
+        } else {
+            prefs.defaultCalendarByAccount.removeValue(forKey: accountKey)
+        }
+        calendarPreferences = prefs
+        Task { await saveCalendarPreferences() }
     }
 
     func syncSharedFolders(in context: ModelContext) async throws {
@@ -389,7 +489,15 @@ final class MacAppServices {
                 )
             )
         } catch {
-            // Best-effort — keeps locally; will be re-tried on next sync.
+            // API failed (offline or transient error) — enqueue an upsert so the
+            // folders.sync endpoint retries this on the next reconnect.
+            await folderSyncService.enqueue(.upsert(
+                id: folder.id.uuidString,
+                name: folder.name,
+                color: folder.colorHex,
+                icon: folder.iconName,
+                position: folder.position
+            ))
         }
         return folder
     }
@@ -428,7 +536,14 @@ final class MacAppServices {
                 )
             )
         } catch {
-            // Best-effort sync only.
+            // API failed — enqueue an upsert so folders.sync retries on reconnect.
+            await folderSyncService.enqueue(.upsert(
+                id: folder.id.uuidString,
+                name: folder.name,
+                color: folder.colorHex,
+                icon: folder.iconName,
+                position: folder.position
+            ))
         }
     }
 
@@ -450,7 +565,8 @@ final class MacAppServices {
                 input: DeleteInput(id: id)
             )
         } catch {
-            // Best-effort sync only.
+            // API failed — enqueue a delete so folders.sync retries on reconnect.
+            await folderSyncService.enqueue(.delete(id: id))
         }
     }
 
@@ -558,6 +674,10 @@ final class MacAppServices {
     }
 
     func signOut() {
+        // Clear in-memory sync queues so a reconnect after re-login does not
+        // replay the previous user's offline mutations under the new session.
+        taskSyncService.clearQueue()
+        folderSyncService.clearQueue()
         emailService.resetForSignOut()
         authService.signOut()
         closeSettingsWindowIfPresent()

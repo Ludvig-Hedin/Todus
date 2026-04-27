@@ -7,28 +7,40 @@ import SwiftData
 @MainActor
 final class TaskSyncService {
 
-    private struct TaskMutationPayload: Encodable {
-        let type: String
-        let id: String
+    // The server expects { type, id, payload?: { title, status, ... } }.
+    // `payload` is omitted for delete mutations.
+    private struct TaskPayload: Encodable {
         let title: String?
         let description: String?
         let status: String?
         let priority: String?
         let folderId: String?
-        let dueDate: Date?
+        let dueDate: String?  // ISO 8601 — server uses z.string().datetime()
+    }
+
+    private struct TaskMutation: Encodable {
+        let type: String
+        let id: String
+        let payload: TaskPayload?
     }
 
     private struct SyncInput: Encodable {
-        let mutations: [TaskMutationPayload]
+        let mutations: [TaskMutation]
     }
 
     private struct SyncOutput: Decodable {
         let syncedIds: [String]
     }
 
-    private var queue: [TaskMutationPayload] = []
+    private var queue: [TaskMutation] = []
     private var isProcessing = false
     private let apiClient: TodosAPIClient
+
+    private static let iso8601: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
 
     init(apiClient: TodosAPIClient) {
         self.apiClient = apiClient
@@ -40,33 +52,26 @@ final class TaskSyncService {
     func enqueueUpsert(_ task: TaskRecord, in context: ModelContext) async {
         task.syncStateRawValue = SyncState.pendingUpload.rawValue
         try? context.save()
-        let payload = TaskMutationPayload(
+        let mutation = TaskMutation(
             type: "upsert",
             id: task.id.uuidString,
-            title: task.title,
-            description: task.taskDescription,
-            status: task.statusRawValue,
-            priority: task.priorityRawValue,
-            folderId: task.folder?.id.uuidString,
-            dueDate: task.dueDate
+            payload: TaskPayload(
+                title: task.title,
+                description: task.taskDescription,
+                status: task.statusRawValue,
+                priority: task.priorityRawValue,
+                folderId: task.folder?.id.uuidString,
+                dueDate: task.dueDate.map { Self.iso8601.string(from: $0) }
+            )
         )
-        queue.append(payload)
+        queue.append(mutation)
         await processQueue(in: context)
     }
 
     /// Enqueues a delete mutation for the given task ID and flushes the queue.
     func enqueueDelete(taskID: UUID, in context: ModelContext) async {
-        let payload = TaskMutationPayload(
-            type: "delete",
-            id: taskID.uuidString,
-            title: nil,
-            description: nil,
-            status: nil,
-            priority: nil,
-            folderId: nil,
-            dueDate: nil
-        )
-        queue.append(payload)
+        let mutation = TaskMutation(type: "delete", id: taskID.uuidString, payload: nil)
+        queue.append(mutation)
         await processQueue(in: context)
     }
 
@@ -80,20 +85,28 @@ final class TaskSyncService {
         )
         let tasks = (try? context.fetch(descriptor)) ?? []
         guard !tasks.isEmpty else { return }
-        let payloads = tasks.map { task in
-            TaskMutationPayload(
+        let mutations = tasks.map { task in
+            TaskMutation(
                 type: "upsert",
                 id: task.id.uuidString,
-                title: task.title,
-                description: task.taskDescription,
-                status: task.statusRawValue,
-                priority: task.priorityRawValue,
-                folderId: task.folder?.id.uuidString,
-                dueDate: task.dueDate
+                payload: TaskPayload(
+                    title: task.title,
+                    description: task.taskDescription,
+                    status: task.statusRawValue,
+                    priority: task.priorityRawValue,
+                    folderId: task.folder?.id.uuidString,
+                    dueDate: task.dueDate.map { Self.iso8601.string(from: $0) }
+                )
             )
         }
-        queue.append(contentsOf: payloads)
+        queue.append(contentsOf: mutations)
         await processQueue(in: context)
+    }
+
+    /// Discards any queued mutations that have not yet been sent.
+    /// Call on sign-out to prevent a reconnect from replaying the previous user's edits.
+    func clearQueue() {
+        queue.removeAll()
     }
 
     // MARK: - Private
@@ -103,33 +116,38 @@ final class TaskSyncService {
         isProcessing = true
         defer { isProcessing = false }
 
-        let batch = queue
-        queue.removeAll()
+        // Drain the queue. New mutations enqueued while a batch is in flight
+        // would otherwise sit until the next enqueue or reconnect.
+        while !queue.isEmpty {
+            let batch = queue
+            queue.removeAll()
 
-        do {
-            let output: SyncOutput = try await apiClient.trpcMutation(
-                "tasks.sync",
-                input: SyncInput(mutations: batch)
-            )
-            for idStr in output.syncedIds {
-                guard let uuid = UUID(uuidString: idStr) else { continue }
-                let desc = FetchDescriptor<TaskRecord>(predicate: #Predicate { $0.id == uuid })
-                if let task = try? context.fetch(desc).first {
-                    task.syncStateRawValue = SyncState.synced.rawValue
+            do {
+                let output: SyncOutput = try await apiClient.trpcMutation(
+                    "tasks.sync",
+                    input: SyncInput(mutations: batch)
+                )
+                for idStr in output.syncedIds {
+                    guard let uuid = UUID(uuidString: idStr) else { continue }
+                    let desc = FetchDescriptor<TaskRecord>(predicate: #Predicate { $0.id == uuid })
+                    if let task = try? context.fetch(desc).first {
+                        task.syncStateRawValue = SyncState.synced.rawValue
+                    }
                 }
-            }
-            try? context.save()
-        } catch {
-            // Re-queue the batch so it will be retried on the next call or reconnect.
-            queue.insert(contentsOf: batch, at: 0)
-            for payload in batch {
-                guard let uuid = UUID(uuidString: payload.id) else { continue }
-                let desc = FetchDescriptor<TaskRecord>(predicate: #Predicate { $0.id == uuid })
-                if let task = try? context.fetch(desc).first {
-                    task.syncStateRawValue = SyncState.failed.rawValue
+                try? context.save()
+            } catch {
+                // Re-queue the batch so it will be retried on the next call or reconnect.
+                queue.insert(contentsOf: batch, at: 0)
+                for mutation in batch {
+                    guard let uuid = UUID(uuidString: mutation.id) else { continue }
+                    let desc = FetchDescriptor<TaskRecord>(predicate: #Predicate { $0.id == uuid })
+                    if let task = try? context.fetch(desc).first {
+                        task.syncStateRawValue = SyncState.failed.rawValue
+                    }
                 }
+                try? context.save()
+                break
             }
-            try? context.save()
         }
     }
 }

@@ -448,6 +448,7 @@ export const foldersRouter = router({
                   color: sql`EXCLUDED.color`,
                   icon: sql`EXCLUDED.icon`,
                   position: sql`COALESCE(EXCLUDED.position, task_folder.position)`,
+                  updatedAt: now,
                 },
                 setWhere: eq(taskFolder.userId, ctx.sessionUser.id),
               });
