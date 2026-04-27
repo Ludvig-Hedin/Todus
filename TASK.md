@@ -2,6 +2,10 @@
 
 Last updated: 2026-04-26
 
+## Current Offline-First Batch
+
+- `DONE` **Offline-first support across iOS, macOS, and web (2026-04):** Tasks, folders, and email drafts are composable while offline on iOS and macOS via SwiftData-backed mutation queues (`FolderSyncService`, `TaskSyncService`, `DraftRecord`/`DraftService`) that flush on reconnect via `NetworkMonitor.onReconnect`. Web mutations now pause instead of fail with `networkMode: 'offlineFirst'` on TanStack Query. Offline indicator shown on all three platforms. Backend adds `folders.sync` batch endpoint; `tasks.sync` IDOR hardened with `setWhere` userId guard.
+
 ## Current Native Fix Batch
 
 - `DONE` **Review follow-up: duplicate iOS assistant cache file + invalid Ollama persistence + session logout semantics (2026-04):** removed `AssistantPersistedCache 2.swift` from the iOS project, prevented shared web/mail model selectors from saving `aiProvider='ollama'` without an installed model, and changed `sessions.revokeAll` to exclude the current session so "Sign out all other devices" matches the UI label.
