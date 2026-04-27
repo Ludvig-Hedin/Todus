@@ -21,6 +21,22 @@ struct CalendarTabView: View {
     @State private var calendarHeaderHeight: CGFloat = 90
     @AppStorage("calendarMultiDayCount") private var multiDayCount: Int = 3
     @State private var eventSaveError: Error?
+    @State private var showEventSaveError: Bool = false
+    /// Start-of-day shown in CalendarKit (Day mode); drives “go to today” visibility.
+    @State private var dayViewDisplayedDay: Date = Calendar.current.startOfDay(for: Date())
+    /// Bumped to tell `CalendarContainerView` to call `move(to: Date())`.
+    @State private var dayGoToTodayTick: Int = 0
+    /// True while EKEventViewController is on top inside the day view's nav stack.
+    /// Hides the SwiftUI AppTopHeader overlay and the outer tab bar so the event
+    /// detail looks like Apple's Calendar.
+    @State private var isShowingEventDetail: Bool = false
+    /// Presents the multi-calendar source picker (visibility toggles).
+    @State private var showCalendarPicker: Bool = false
+    /// Banner state for "Reconnect Gmail to enable calendar editing" — set when
+    /// any backend calendar call returns `scopeMissing: true`. Cleared once the
+    /// user reconnects (`connections.list` no longer flags the account) or
+    /// dismisses the banner.
+    @State private var showScopeMissingBanner: Bool = false
 
     /// In-flight event-load task. Cancelled and replaced on every reload so
     /// rapid date/mode changes don't race; whichever task finishes last
@@ -49,6 +65,51 @@ struct CalendarTabView: View {
                 viewMode = newValue
             }
         )
+    }
+
+    /// True when the visible calendar scope already includes “today” (nav bar today is hidden), except year view.
+    private var calendarAnchoredOnToday: Bool {
+        let cal = Calendar.current
+        let now = Date()
+        switch viewMode {
+        case .year:
+            return false
+        case .day:
+            return cal.isDate(dayViewDisplayedDay, inSameDayAs: now)
+        case .multiDay:
+            let start = cal.startOfDay(for: selectedDate)
+            guard let lastDay = cal.date(byAdding: .day, value: multiDayCount - 1, to: start) else { return false }
+            let todayStart = cal.startOfDay(for: now)
+            let endStart = cal.startOfDay(for: lastDay)
+            return todayStart >= start && todayStart <= endStart
+        case .list:
+            return cal.isDate(selectedDate, equalTo: now, toGranularity: .month)
+        case .month:
+            return false
+        }
+    }
+
+    /// Whether to show the go-to-today control (year view always shows it).
+    private var showGoToTodayControl: Bool {
+        switch viewMode {
+        case .month:
+            return false
+        case .year:
+            return true
+        default:
+            return !calendarAnchoredOnToday
+        }
+    }
+
+    private func goToToday() {
+        switch viewMode {
+        case .day:
+            dayGoToTodayTick += 1
+        default:
+            withAnimation(.easeOut(duration: 0.2)) {
+                selectedDate = Date()
+            }
+        }
     }
 
     // MARK: - Pinch gesture
@@ -113,8 +174,13 @@ struct CalendarTabView: View {
             contentView
                 .scaleEffect(contentScale)
 
-            headerOverlay
+            if !isShowingEventDetail {
+                headerOverlay
+                    .transition(.opacity)
+            }
         }
+        .toolbar(isShowingEventDetail ? .hidden : .automatic, for: .tabBar)
+        .animation(.easeInOut(duration: 0.2), value: isShowingEventDetail)
         .highPriorityGesture(pinchModeGesture)
         .onAppear {
             // Route the initial load through the same task slot used by all
@@ -139,6 +205,73 @@ struct CalendarTabView: View {
             loadTask?.cancel()
             loadTask = nil
         }
+        // Header ellipsis menu actions
+        .onChange(of: services.calendarGoToTodayTick) { _, _ in
+            goToToday()
+        }
+        .onChange(of: services.calendarRefreshTick) { _, _ in
+            scheduleLoadEvents()
+        }
+        .onChange(of: services.calendarRequestedViewMode) { _, requested in
+            guard let requested else { return }
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                previousViewMode = viewMode
+                viewMode = requested
+            }
+            services.calendarRequestedViewMode = nil
+        }
+        // Re-fetch events when the user toggles a calendar's visibility.
+        .onChange(of: services.calendarPreferences) { _, _ in
+            scheduleLoadEvents()
+        }
+        .sheet(isPresented: $showCalendarPicker) {
+            CalendarSourcePickerView(
+                isSheet: true,
+                onAddAccount: {
+                    services.showsSettings = true
+                }
+            )
+            .environment(services)
+        }
+        // Surface a non-blocking banner when Google Calendar returns scopeMissing.
+        .onReceive(NotificationCenter.default.publisher(for: .todusCalendarScopeMissing)) { _ in
+            showScopeMissingBanner = true
+        }
+        .overlay(alignment: .top) {
+            if showScopeMissingBanner {
+                HStack(spacing: 10) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    Text("Reconnect Gmail to enable calendar editing.")
+                        .font(.subheadline)
+                    Spacer(minLength: 8)
+                    Button("Reconnect") {
+                        services.showsSettings = true
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    Button {
+                        showScopeMissingBanner = false
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 12, weight: .semibold))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(Color.orange.opacity(0.3), lineWidth: 1)
+                )
+                .padding(.horizontal, 12)
+                .padding(.top, 8)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: showScopeMissingBanner)
     }
 
     /// Cancel any in-flight load and start a fresh one. Prevents stale results
@@ -162,18 +295,49 @@ struct CalendarTabView: View {
             .padding(.top, 4)
             .padding(.bottom, 4)
 
+            if viewMode == .day && showGoToTodayControl {
+                HStack {
+                    Spacer()
+                    Button(action: goToToday) {
+                        Text(String(localized: "Today"))
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(.primary.opacity(0.75))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                    }
+                    .buttonStyle(LiquidGlassButtonStyle(cornerRadius: AppTheme.Radius.row))
+                    .accessibilityLabel(String(localized: "Go to today"))
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 4)
+            }
+
             if viewMode != .day && viewMode != .month {
                 CalendarNavBar(
                     selectedDate: $selectedDate,
                     viewMode: viewMode,
-                    multiDayCount: multiDayCount
+                    multiDayCount: multiDayCount,
+                    showTodayButton: showGoToTodayControl,
+                    todayUsesIconOnly: true,
+                    onToday: goToToday,
+                    onCalendars: { showCalendarPicker = true }
                 )
             }
         }
-        .background(
-            Color(UIColor.systemBackground)
-                .ignoresSafeArea(edges: .top)
-        )
+        .background(alignment: .top) {
+            // Grass-green header with a soft fade into the calendar content below.
+            LinearGradient(
+                stops: [
+                    .init(color: Color(red: 0.22, green: 0.58, blue: 0.20).opacity(0.88), location: 0.0),
+                    .init(color: Color(red: 0.22, green: 0.58, blue: 0.20).opacity(0.70), location: 0.60),
+                    .init(color: Color(red: 0.22, green: 0.58, blue: 0.20).opacity(0.0), location: 1.0),
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea(edges: .top)
+            .frame(height: calendarHeaderHeight + 60)
+        }
         .onGeometryChange(for: CGFloat.self) { proxy in
             proxy.size.height
         } action: { height in
@@ -187,16 +351,21 @@ struct CalendarTabView: View {
     private var contentView: some View {
         switch viewMode {
         case .day:
-            CalendarContainerView(topInset: calendarHeaderHeight, onSaveError: { error in
+            CalendarContainerView(
+                topInset: calendarHeaderHeight,
+                displayedDay: $dayViewDisplayedDay,
+                goToTodayTick: $dayGoToTodayTick,
+                isShowingEventDetail: $isShowingEventDetail,
+                onSaveError: { error in
                 eventSaveError = error
-            })
+                showEventSaveError = true
+                },
+                preferredDefaultAppleCalendarId: services.calendarPreferences.defaultId(forAccountKey: CalendarSourceIDPrefix.apple)
+            )
             .ignoresSafeArea(.container, edges: .bottom)
             .transition(viewTransition)
-            .alert("Could not save event", isPresented: Binding(
-                get: { eventSaveError != nil },
-                set: { if !$0 { eventSaveError = nil } }
-            )) {
-                Button("OK", role: .cancel) { eventSaveError = nil }
+            .alert(String(localized: "Could not save event"), isPresented: $showEventSaveError) {
+                Button(String(localized: "OK"), role: .cancel) { }
             } message: {
                 Text(eventSaveError?.localizedDescription ?? "")
             }
@@ -231,6 +400,7 @@ struct CalendarTabView: View {
 
         case .list:
             CalendarListView(
+                selectedDate: $selectedDate,
                 events: events,
                 onEventTap: { event in presentEvent(event) },
                 onLoadMore: { await loadMoreListEvents() }
@@ -311,10 +481,14 @@ struct CalendarTabView: View {
             end = cal.date(byAdding: .month, value: 3, to: dayStart) ?? dayStart
         }
 
-        let fetched = await services.calendarService.events(from: start, to: end)
+        let unified = await services.unifiedCalendarService.events(
+            from: start,
+            to: end,
+            preferences: services.calendarPreferences
+        )
         // Drop the result if a newer reload superseded us mid-fetch.
         guard !Task.isCancelled else { return }
-        events = fetched
+        events = unified.map { $0.legacyCalendarEvent }
         isLoading = false
     }
 
@@ -324,8 +498,12 @@ struct CalendarTabView: View {
         let cal = Calendar.current
         let start = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: lastEventDate)) ?? lastEventDate
         let end = cal.date(byAdding: .month, value: 3, to: start) ?? start
-        let moreEvents = await services.calendarService.events(from: start, to: end)
-        events.append(contentsOf: moreEvents)
+        let moreUnified = await services.unifiedCalendarService.events(
+            from: start,
+            to: end,
+            preferences: services.calendarPreferences
+        )
+        events.append(contentsOf: moreUnified.map { $0.legacyCalendarEvent })
     }
 
     // MARK: - Event Presentation

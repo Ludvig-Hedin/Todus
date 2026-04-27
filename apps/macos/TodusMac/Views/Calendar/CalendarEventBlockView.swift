@@ -57,13 +57,6 @@ struct CalendarEventBlockView: View {
             } label: {
                 Label("Open in Calendar", systemImage: "arrow.up.forward.app")
             }
-            Divider()
-            Button(role: .destructive) {
-                // TODO: wire calendar event deletion once the calendar service exposes it.
-            } label: {
-                Label("Delete Event", systemImage: "trash")
-            }
-            .disabled(true)
         }
     }
 

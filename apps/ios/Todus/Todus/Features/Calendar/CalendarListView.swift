@@ -4,41 +4,88 @@ import SwiftUI
 /// Grouped by day with sticky headers showing date + week number.
 /// Matches Apple Calendar iPhone list view style.
 struct CalendarListView: View {
+    @Environment(\.modelContext) private var modelContext
+    @Environment(AppServices.self) private var services
+
+    @Binding var selectedDate: Date
     let events: [CalendarEvent]
     var onEventTap: ((CalendarEvent) -> Void)? = nil
     var onLoadMore: (() async -> Void)? = nil
     @State private var isLoadingMore = false
+    @State private var eventAwaitingFolderPick: CalendarEvent?
 
     var body: some View {
         let groupedDays = groupedEventDays
+        let cal = Calendar.current
 
         if groupedDays.isEmpty {
             emptyState
         } else {
-            ScrollView(.vertical, showsIndicators: true) {
-                LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
-                    ForEach(groupedDays) { dayGroup in
-                        Section {
-                            ForEach(dayGroup.events) { event in
-                                eventRow(event)
+            ScrollViewReader { proxy in
+                ScrollView(.vertical, showsIndicators: true) {
+                    LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
+                        ForEach(groupedDays) { dayGroup in
+                            Section {
+                                ForEach(dayGroup.events) { event in
+                                    eventRow(event)
+                                }
+                            } header: {
+                                dayHeader(dayGroup.date)
                             }
-                        } header: {
-                            dayHeader(dayGroup.date)
+                            .id(dayGroup.date)
+                        }
+
+                        // Load more trigger
+                        if onLoadMore != nil {
+                            Color.clear
+                                .frame(height: 1)
+                                .task {
+                                    guard !isLoadingMore else { return }
+                                    isLoadingMore = true
+                                    defer { isLoadingMore = false }
+                                    await onLoadMore?()
+                                }
                         }
                     }
-
-                    // Load more trigger
-                    if onLoadMore != nil {
-                        Color.clear
-                            .frame(height: 1)
-                            .task {
-                                guard !isLoadingMore else { return }
-                                isLoadingMore = true
-                                defer { isLoadingMore = false }
-                                await onLoadMore?()
-                            }
-                    }
                 }
+                .onChange(of: selectedDate) { _, newValue in
+                    scrollListToDayIfPresent(proxy: proxy, cal: cal, groupedDays: groupedEventDays, day: newValue)
+                }
+                .onChange(of: events) { _, _ in
+                    scrollListToDayIfPresent(proxy: proxy, cal: cal, groupedDays: groupedEventDays, day: selectedDate)
+                }
+                .sheet(item: $eventAwaitingFolderPick) { event in
+                    FolderPickerSheet(title: "Add Event") { folder in
+                        services.captureService.addItemToFolder(
+                            kind: .event,
+                            itemId: event.id,
+                            title: event.title,
+                            subtitle: event.startDate.formatted(date: .abbreviated, time: .shortened),
+                            folder: folder,
+                            in: modelContext
+                        )
+                        eventAwaitingFolderPick = nil
+                    }
+                    .appSheetBackground()
+                }
+            }
+        }
+    }
+
+    private func scrollListToDayIfPresent(
+        proxy: ScrollViewProxy,
+        cal: Calendar,
+        groupedDays: [EventDayGroup],
+        day: Date
+    ) {
+        let target = cal.startOfDay(for: day)
+        guard let matched = groupedDays.first(where: { cal.isDate($0.date, inSameDayAs: target) }) else {
+            return
+        }
+        let scrollId = matched.date
+        DispatchQueue.main.async {
+            withAnimation(.easeOut(duration: 0.2)) {
+                proxy.scrollTo(scrollId, anchor: .top)
             }
         }
     }
@@ -106,6 +153,13 @@ struct CalendarListView: View {
             .padding(.vertical, 10)
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            Button {
+                eventAwaitingFolderPick = event
+            } label: {
+                Label("Add to folder…", systemImage: "folder.badge.plus")
+            }
+        }
 
         Divider()
             .padding(.leading, 34)

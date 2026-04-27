@@ -1,9 +1,15 @@
 import EventKit
 import Foundation
 
+extension Notification.Name {
+    /// Posted after `requestAccess()` completes so UI (e.g. `MainTabView`) can re-check
+    /// `EKEventStore.authorizationStatus` while the app stays in the foreground.
+    static let todusCalendarAuthorizationDidChange = Notification.Name("TodusCalendarAuthorizationDidChange")
+}
+
 /// Lightweight sendable representation of a calendar event.
 /// Used to safely cross actor boundaries from CalendarService to @MainActor views.
-struct CalendarEvent: Identifiable, Sendable {
+struct CalendarEvent: Identifiable, Sendable, Equatable {
     let id: String
     let title: String
     let startDate: Date
@@ -35,15 +41,20 @@ actor CalendarService {
 
     /// Request full access to calendar events. Returns true if authorized.
     func requestAccess() async -> Bool {
+        let granted: Bool
         if #available(iOS 17.0, *) {
-            return (try? await eventStore.requestFullAccessToEvents()) ?? false
+            granted = (try? await eventStore.requestFullAccessToEvents()) ?? false
         } else {
-            return await withCheckedContinuation { continuation in
+            granted = await withCheckedContinuation { continuation in
                 eventStore.requestAccess(to: .event) { granted, _ in
                     continuation.resume(returning: granted)
                 }
             }
         }
+        await MainActor.run {
+            NotificationCenter.default.post(name: .todusCalendarAuthorizationDidChange, object: nil)
+        }
+        return granted
     }
 
     /// Current authorization status for calendar events.
@@ -72,7 +83,14 @@ actor CalendarService {
     }
 
     /// Fetch events for a given date range, returned as sendable CalendarEvent structs.
-    func events(from startDate: Date, to endDate: Date) -> [CalendarEvent] {
+    /// Pass a non-empty `hiddenCalendarIds` to exclude specific Apple calendars
+    /// (composite ids of the form `apple:{EKCalendar.calendarIdentifier}`).
+    /// An empty set fetches across all calendars (the legacy behavior).
+    func events(
+        from startDate: Date,
+        to endDate: Date,
+        hiddenCalendarIds: Set<String> = []
+    ) -> [CalendarEvent] {
         let trace = PerformanceTrace.beginInterval(
             PerformanceTrace.calendarEventsFetch,
             message: "CalendarService.events begin"
@@ -85,8 +103,53 @@ actor CalendarService {
             )
         }
         scheduleFolderMapPruneIfNeeded()
-        let predicate = eventStore.predicateForEvents(withStart: startDate, end: endDate, calendars: nil)
+        let calendars: [EKCalendar]? = {
+            guard !hiddenCalendarIds.isEmpty else { return nil }
+            let prefix = "\(CalendarSourceIDPrefix.apple):"
+            let hiddenAppleIds: Set<String> = Set(hiddenCalendarIds.compactMap { id in
+                id.hasPrefix(prefix) ? String(id.dropFirst(prefix.count)) : nil
+            })
+            if hiddenAppleIds.isEmpty { return nil }
+            return eventStore.calendars(for: .event)
+                .filter { !hiddenAppleIds.contains($0.calendarIdentifier) }
+        }()
+        let predicate = eventStore.predicateForEvents(withStart: startDate, end: endDate, calendars: calendars)
         return eventStore.events(matching: predicate).map { $0.toCalendarEvent(folderID: folderID(for: $0.eventIdentifier)) }
+    }
+
+    /// Enumerate every Apple calendar the user has on the device, mapped to
+    /// our unified `CalendarSource` model. Drives the "Calendars" picker UI
+    /// and the Settings → Calendar Accounts list. Cheap (in-memory EventKit lookup).
+    func listAppleSources() -> [CalendarSource] {
+        let defaultId = eventStore.defaultCalendarForNewEvents?.calendarIdentifier
+        return eventStore.calendars(for: .event).map { cal in
+            var source = CalendarSource.from(appleCalendar: cal)
+            if cal.calendarIdentifier == defaultId {
+                source = CalendarSource(
+                    id: source.id,
+                    kind: source.kind,
+                    displayName: source.displayName,
+                    accountEmail: source.accountEmail,
+                    colorRed: source.colorRed,
+                    colorGreen: source.colorGreen,
+                    colorBlue: source.colorBlue,
+                    isWritable: source.isWritable,
+                    isPrimary: true
+                )
+            }
+            return source
+        }
+    }
+
+    /// The `EKSource.title` (e.g. "iCloud", "Gmail") + `EKSource.sourceType` for
+    /// each Apple calendar. Used by `UnifiedCalendarService` to dedupe Apple
+    /// calendars whose underlying account is also a Todus Google connection.
+    func appleCalendarSourceMetadata() -> [String: (sourceType: EKSourceType, sourceTitle: String)] {
+        var out: [String: (sourceType: EKSourceType, sourceTitle: String)] = [:]
+        for cal in eventStore.calendars(for: .event) {
+            out[cal.calendarIdentifier] = (cal.source.sourceType, cal.source.title)
+        }
+        return out
     }
 
     /// Fetch today's events (from midnight to midnight).
@@ -114,17 +177,54 @@ actor CalendarService {
     }
 
     /// Create a new event with the given title and optional dates.
-    func createEvent(title: String, startDate: Date, endDate: Date? = nil, folderID: UUID? = nil) throws {
+    /// `attachmentFilenames` are written to the event's notes since EKEvent
+    /// has no first-class attachment storage — the underlying files remain
+    /// in AttachmentService for any future use.
+    /// `targetCalendarId` is the EKCalendar.calendarIdentifier to save into;
+    /// `nil` falls back to the user's default calendar for new events.
+    func createEvent(
+        title: String,
+        startDate: Date,
+        endDate: Date? = nil,
+        folderID: UUID? = nil,
+        location: String? = nil,
+        attachmentFilenames: [String] = [],
+        targetCalendarId: String? = nil
+    ) throws {
         let event = EKEvent(eventStore: eventStore)
         event.title = title
         event.startDate = startDate
         event.endDate = endDate ?? startDate.addingTimeInterval(3600)
-        event.calendar = eventStore.defaultCalendarForNewEvents
+        event.calendar = resolveCalendar(forTargetId: targetCalendarId)
+        if let location, !location.isEmpty {
+            event.location = location
+        }
+        if !attachmentFilenames.isEmpty {
+            let listing = attachmentFilenames.map { "• \($0)" }.joined(separator: "\n")
+            event.notes = "Attachments:\n\(listing)"
+        }
         try eventStore.save(event, span: .thisEvent)
         invalidateTodayCache()
         if let folderID, let identifier = event.eventIdentifier {
             setFolderID(folderID, for: identifier)
         }
+    }
+
+    /// Resolve a target Apple calendar, falling back to the user's default for
+    /// new events when the requested identifier isn't found / isn't writable.
+    private func resolveCalendar(forTargetId targetId: String?) -> EKCalendar? {
+        let defaultCal = eventStore.defaultCalendarForNewEvents
+        guard let targetId, !targetId.isEmpty else { return defaultCal }
+        // Strip the `apple:` prefix if a composite id was passed in.
+        let stripped: String = {
+            let prefix = "\(CalendarSourceIDPrefix.apple):"
+            return targetId.hasPrefix(prefix) ? String(targetId.dropFirst(prefix.count)) : targetId
+        }()
+        if let cal = eventStore.calendars(for: .event).first(where: { $0.calendarIdentifier == stripped }),
+           cal.allowsContentModifications {
+            return cal
+        }
+        return defaultCal
     }
 
     /// Fetch the underlying EKEvent by identifier — used by SwiftUI views to present EKEventViewController.

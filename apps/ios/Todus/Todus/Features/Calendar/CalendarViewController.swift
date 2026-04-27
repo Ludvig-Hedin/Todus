@@ -20,6 +20,15 @@ final class CalendarViewController: DayViewController {
     /// Called on the main thread whenever an EventKit save fails (e.g. permission denied,
     /// locked calendar). Callers can observe this to show error UI.
     var onSaveError: ((Error) -> Void)?
+    /// User-preferred Apple calendar identifier for new events. When set and
+    /// matches a writable calendar in the store, new events default to it
+    /// instead of `defaultCalendarForNewEvents`. Set from `CalendarTabView`
+    /// based on `calendarPreferences.defaultCalendarByAccount["apple"]`.
+    var preferredDefaultAppleCalendarId: String?
+
+    /// Fired when the user swipes the day strip or the visible day otherwise changes.
+    /// Date is normalized to start-of-day in the current calendar.
+    var onDisplayedDateChanged: ((Date) -> Void)?
 
     /// Cached events keyed by the start-of-day Date. `eventsForDate(_:)` returns cached
     /// data instantly (no main-thread XPC) and triggers a background fetch on cache miss.
@@ -173,6 +182,9 @@ final class CalendarViewController: DayViewController {
         eventController.event = ekEvent
         eventController.allowsCalendarPreview = true
         eventController.allowsEditing = true
+        // Slide the outer tab bar off while the event detail is on top — matches
+        // Apple Calendar where the event page is full-bleed.
+        eventController.hidesBottomBarWhenPushed = true
         navigationController?.pushViewController(eventController,
                                                  animated: true)
     }
@@ -188,7 +200,7 @@ final class CalendarViewController: DayViewController {
     private func createNewEvent(at date: Date) -> EKWrapper? {
         guard let store = eventStore else { return nil }
         let newEKEvent = EKEvent(eventStore: store)
-        newEKEvent.calendar = store.defaultCalendarForNewEvents
+        newEKEvent.calendar = resolveDefaultCalendar(in: store)
 
         var components = DateComponents()
         components.hour = 1
@@ -201,6 +213,22 @@ final class CalendarViewController: DayViewController {
         let newEKWrapper = EKWrapper(eventKitEvent: newEKEvent)
         newEKWrapper.editedEvent = newEKWrapper
         return newEKWrapper
+    }
+
+    /// Resolve the user's preferred Apple calendar for new events.
+    /// Strips any `apple:` prefix from the composite id; falls back to
+    /// `defaultCalendarForNewEvents` if the preferred calendar isn't writable.
+    private func resolveDefaultCalendar(in store: EKEventStore) -> EKCalendar? {
+        guard let preferred = preferredDefaultAppleCalendarId, !preferred.isEmpty else {
+            return store.defaultCalendarForNewEvents
+        }
+        let prefix = "apple:"
+        let stripped = preferred.hasPrefix(prefix) ? String(preferred.dropFirst(prefix.count)) : preferred
+        if let cal = store.calendars(for: .event).first(where: { $0.calendarIdentifier == stripped }),
+           cal.allowsContentModifications {
+            return cal
+        }
+        return store.defaultCalendarForNewEvents
     }
 
     override func dayViewDidLongPressEventView(_ eventView: EventView) {
@@ -250,6 +278,12 @@ final class CalendarViewController: DayViewController {
 
     override func dayViewDidBeginDragging(dayView: DayView) {
         endEventEditing()
+    }
+
+    override func dayView(dayView: DayView, didMoveTo date: Date) {
+        super.dayView(dayView: dayView, didMoveTo: date)
+        let day = Calendar.current.startOfDay(for: date)
+        onDisplayedDateChanged?(day)
     }
 
 }

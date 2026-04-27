@@ -1,5 +1,17 @@
 import SwiftUI
 
+// MARK: - Week view width (header / all-day / grid alignment)
+
+/// Emitted from the week-mode time grid’s `ScrollView` so `MacCalendarView` can
+/// compute `calendarDayColumnWidth` from the **same** width the grid actually
+/// gets (avoids a few points of drift from `GeometryReader` vs scroll viewport).
+struct WeekTimeGridViewportWidthKey: PreferenceKey {
+    static var defaultValue: CGFloat { 0 }
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
 /// A reusable 24-hour time grid with positioned event blocks.
 /// Modeled after Apple Calendar's day/week grid:
 /// - Left gutter with "HH:00" hour labels in light weight
@@ -8,6 +20,8 @@ import SwiftUI
 /// - Red current-time indicator with time label badge
 struct CalendarTimeGridView: View {
     let columns: [CalendarTimeGridColumn]
+    /// When set (e.g. week view), every column uses this width so the grid lines up with a measured header. `nil` = flexible (day view).
+    var dayColumnWidth: CGFloat? = nil
     /// Highlight today's column with a subtle accent wash
     var highlightToday: Bool = true
     /// Callback when an event block is tapped
@@ -31,58 +45,25 @@ struct CalendarTimeGridView: View {
 
                     // Event columns — to the right of the gutter
                     HStack(spacing: 0) {
-                        // Gutter spacer — matches the label column width
+                        // Spacer only — must stay clear so `hourGridLayer` (behind) stays visible: labels + gutter fill live in that layer.
                         Color.clear
                             .frame(width: MacTheme.calendarGutterWidth)
+                            .allowsHitTesting(false)
 
                         // One column per date
                         ForEach(Array(columns.enumerated()), id: \.offset) { index, column in
-                            ZStack(alignment: .topLeading) {
-                                // Subtle today highlight — near-invisible wash, no color tint
-                                if highlightToday && Calendar.current.isDateInToday(column.date) {
-                                    Rectangle()
-                                        .fill(Color.primary.opacity(0.015))
-                                }
-
-                                // Tappable background for creating new events — converts tap y-position
-                                // to an hour on this column's day and fires onGridTap callback
-                                if onGridTap != nil {
-                                    Color.clear
-                                        .contentShape(Rectangle())
-                                        .onTapGesture { location in
-                                            let minutesSinceMidnight = location.y / (MacTheme.calendarHourHeight / 60)
-                                            // Snap to nearest 30-minute slot
-                                            let snappedMinutes = (Int(minutesSinceMidnight) / 30) * 30
-                                            let hour = snappedMinutes / 60
-                                            let minute = snappedMinutes % 60
-                                            let cal = Calendar.current
-                                            let dayStart = cal.startOfDay(for: column.date)
-                                            if let tappedDate = cal.date(bySettingHour: hour, minute: minute, second: 0, of: dayStart) {
-                                                onGridTap?(tappedDate)
-                                            }
-                                        }
-                                }
-
-                                // Positioned event blocks
-                                eventBlocksLayer(for: column)
-
-                                // Now indicator — only in today's column
-                                if Calendar.current.isDateInToday(column.date) {
-                                    nowIndicator
-                                }
-                            }
-                            .frame(maxWidth: .infinity)
-
+                            columnCell(for: column)
                             // Vertical column separator (not after last column)
                             if index < columns.count - 1 {
                                 Rectangle()
                                     .fill(MacTheme.calendarGridLine)
-                                    .frame(width: 0.5)
+                                    .frame(width: MacTheme.calendarColumnSeparatorWidth)
                             }
                         }
                     }
                     .frame(height: totalHeight)
                 }
+                .frame(maxWidth: .infinity, alignment: .topLeading)
                 .frame(height: totalHeight)
                 // Invisible scroll anchor at ~7 AM
                 .overlay(alignment: .topLeading) {
@@ -90,6 +71,18 @@ struct CalendarTimeGridView: View {
                         .frame(width: 1, height: 1)
                         .offset(y: 7 * MacTheme.calendarHourHeight - 20)
                         .id("scroll-anchor-7am")
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .background {
+                if dayColumnWidth != nil {
+                    GeometryReader { proxy in
+                        Color.clear
+                            .preference(
+                                key: WeekTimeGridViewportWidthKey.self,
+                                value: proxy.size.width
+                            )
+                    }
                 }
             }
             .onAppear {
@@ -101,30 +94,68 @@ struct CalendarTimeGridView: View {
         }
     }
 
+    // MARK: - Column Cell
+
+    @ViewBuilder
+    private func columnCell(for column: CalendarTimeGridColumn) -> some View {
+        let cell = ZStack(alignment: .topLeading) {
+            if highlightToday && Calendar.current.isDateInToday(column.date) {
+                Rectangle()
+                    .fill(Color.primary.opacity(0.015))
+            }
+            if onGridTap != nil {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture { location in
+                        let minutesSinceMidnight = location.y / (MacTheme.calendarHourHeight / 60)
+                        let snappedMinutes = (Int(minutesSinceMidnight) / 30) * 30
+                        let cappedMinutes = min(max(0, snappedMinutes), 1439)
+                        let hour = cappedMinutes / 60
+                        let minute = cappedMinutes % 60
+                        let cal = Calendar.current
+                        let dayStart = cal.startOfDay(for: column.date)
+                        if let tappedDate = cal.date(bySettingHour: hour, minute: minute, second: 0, of: dayStart) {
+                            onGridTap?(tappedDate)
+                        }
+                    }
+            }
+            eventBlocksLayer(for: column)
+            if Calendar.current.isDateInToday(column.date) {
+                nowIndicator
+            }
+        }
+        if let w = dayColumnWidth {
+            cell.frame(width: w)
+        } else {
+            cell.frame(maxWidth: .infinity)
+        }
+    }
+
     // MARK: - Hour Grid
 
-    /// Apple Calendar-style hour grid: light-weight "HH:00" labels in a gutter,
-    /// hairline horizontal separators spanning the full width.
+    /// Hairlines only to the right of the time-stamp column; gutter has background, no horizontal rules through labels.
     private var hourGridLayer: some View {
         VStack(spacing: 0) {
             ForEach(0..<24, id: \.self) { hour in
-                ZStack(alignment: .topLeading) {
-                    // Hairline separator at the top of each hour row
+                HStack(spacing: 0) {
+                    ZStack(alignment: .topTrailing) {
+                        MacTheme.calendarGutterBackground
+                        if hour > 0 {
+                            Text(MacTheme.hourLabel(hour))
+                                .font(MacTheme.calendarHourFont())
+                                .foregroundStyle(MacTheme.mutedText)
+                                .padding(.trailing, 6)
+                                .offset(y: -6)
+                        }
+                    }
+                    .frame(width: MacTheme.calendarGutterWidth, alignment: .topTrailing)
                     VStack(spacing: 0) {
                         Rectangle()
                             .fill(MacTheme.calendarGridLine)
-                            .frame(height: 0.5)
+                            .frame(height: MacTheme.calendarColumnSeparatorWidth)
                         Spacer(minLength: 0)
                     }
-
-                    // Hour label — right-aligned in gutter, vertically centered on the line
-                    if hour > 0 {
-                        Text(MacTheme.hourLabel(hour))
-                            .font(MacTheme.calendarHourFont())
-                            .foregroundStyle(MacTheme.mutedText)
-                            .frame(width: MacTheme.calendarGutterWidth - 10, alignment: .trailing)
-                            .offset(y: -6)
-                    }
+                    .frame(maxWidth: .infinity)
                 }
                 .frame(height: MacTheme.calendarHourHeight)
             }

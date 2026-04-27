@@ -12,20 +12,33 @@ struct CalendarYearView: View {
     @Binding var viewMode: CalendarViewMode
     let events: [CalendarEvent]
 
-    /// ±100 years of scroll — effectively infinite for everyday use.
-    /// LazyVStack renders only visible year sections.
-    private let yearBuffer = 100
+    /// ±20 years of scroll. Was ±100; the larger buffer forced SwiftUI to
+    /// build identity for 201 year sections × 12 mini-months on every body
+    /// re-evaluation, which contributed to lag during pinch-to-swap.
+    private let yearBuffer = 20
+
+    /// Compound key for the (year, month) → days-with-events lookup so cells
+    /// can do O(1) checks instead of scanning all events per cell.
+    private struct YearMonthKey: Hashable {
+        let year: Int
+        let month: Int
+    }
 
     var body: some View {
         let cal = Calendar.current
         let currentYear = cal.component(.year, from: selectedDate)
         let yearRange = (currentYear - yearBuffer)...(currentYear + yearBuffer)
+        // Build the (year,month) → Set<day> index ONCE per body evaluation.
+        // Previously each mini-month cell scanned every event, which was
+        // O(visible-cells × events) on the main thread during the swap-in
+        // transition.
+        let eventDaysByMonth = Self.makeEventDaysIndex(events: events, cal: cal)
 
         ScrollViewReader { proxy in
             ScrollView(.vertical, showsIndicators: true) {
                 LazyVStack(spacing: 28) {
                     ForEach(Array(yearRange), id: \.self) { year in
-                        yearSection(year: year)
+                        yearSection(year: year, eventDaysByMonth: eventDaysByMonth)
                             .id("year-\(year)")
                     }
                 }
@@ -35,12 +48,34 @@ struct CalendarYearView: View {
             .onAppear {
                 proxy.scrollTo("year-\(currentYear)", anchor: .top)
             }
+            .onChange(of: selectedDate) { _, newDate in
+                let y = cal.component(.year, from: newDate)
+                withAnimation(.easeOut(duration: 0.2)) {
+                    proxy.scrollTo("year-\(y)", anchor: .top)
+                }
+            }
         }
+    }
+
+    private static func makeEventDaysIndex(
+        events: [CalendarEvent],
+        cal: Calendar
+    ) -> [YearMonthKey: Set<Int>] {
+        var dict: [YearMonthKey: Set<Int>] = [:]
+        for event in events {
+            let comps = cal.dateComponents([.year, .month, .day], from: event.startDate)
+            guard let y = comps.year, let m = comps.month, let d = comps.day else { continue }
+            dict[YearMonthKey(year: y, month: m), default: []].insert(d)
+        }
+        return dict
     }
 
     // MARK: - Year Section
 
-    private func yearSection(year: Int) -> some View {
+    private func yearSection(
+        year: Int,
+        eventDaysByMonth: [YearMonthKey: Set<Int>]
+    ) -> some View {
         let cal = Calendar.current
         let currentYear = cal.component(.year, from: Date())
         let isCurrentYear = year == currentYear
@@ -57,7 +92,11 @@ struct CalendarYearView: View {
                 spacing: 12
             ) {
                 ForEach(1...12, id: \.self) { month in
-                    miniMonthCell(year: year, month: month)
+                    miniMonthCell(
+                        year: year,
+                        month: month,
+                        eventDays: eventDaysByMonth[YearMonthKey(year: year, month: month)] ?? []
+                    )
                 }
             }
         }
@@ -65,7 +104,7 @@ struct CalendarYearView: View {
 
     // MARK: - Mini Month Cell
 
-    private func miniMonthCell(year: Int, month: Int) -> some View {
+    private func miniMonthCell(year: Int, month: Int, eventDays: Set<Int>) -> some View {
         let cal = Calendar.current
         let today = Date()
         let todayComps = cal.dateComponents([.year, .month, .day], from: today)
@@ -90,17 +129,6 @@ struct CalendarYearView: View {
         let symbols = cal.veryShortWeekdaySymbols
         let offset = cal.firstWeekday - 1
         let rotated = Array(symbols[offset...]) + Array(symbols[..<offset])
-
-        let eventDates: Set<Int> = {
-            var days = Set<Int>()
-            for event in events {
-                let ec = cal.dateComponents([.year, .month, .day], from: event.startDate)
-                if ec.year == year && ec.month == month, let d = ec.day {
-                    days.insert(d)
-                }
-            }
-            return days
-        }()
 
         // Always fill to 42 cells (6 rows × 7 cols) so every card in a row
         // has the same intrinsic height.
@@ -133,7 +161,7 @@ struct CalendarYearView: View {
 
                     ForEach(Array(daysInMonth), id: \.self) { day in
                         let isToday = year == todayComps.year && month == todayComps.month && day == todayComps.day
-                        let hasEvent = eventDates.contains(day)
+                        let hasEvent = eventDays.contains(day)
 
                         VStack(spacing: 0) {
                             Text("\(day)")
