@@ -439,16 +439,55 @@ function buildTextSearchConditions(searchText: string) {
   );
 }
 
+type ThreadPageCursor = {
+  latestReceivedOn: string;
+  id: string;
+};
+
+function parseThreadPageCursor(pageToken: string): ThreadPageCursor {
+  try {
+    const parsed = JSON.parse(pageToken);
+    if (
+      parsed &&
+      typeof parsed === 'object' &&
+      typeof parsed.latestReceivedOn === 'string' &&
+      typeof parsed.id === 'string'
+    ) {
+      return parsed;
+    }
+  } catch {
+    // Legacy timestamp-only cursors fall through below.
+  }
+
+  return {
+    latestReceivedOn: pageToken,
+    id: '',
+  };
+}
+
+function encodeThreadPageCursor(thread: Pick<Thread, 'latestReceivedOn' | 'id'>): string | null {
+  if (!thread.latestReceivedOn) return null;
+  return JSON.stringify({
+    latestReceivedOn: thread.latestReceivedOn,
+    id: String(thread.id),
+  } satisfies ThreadPageCursor);
+}
+
 // Helper function to build pagination conditions
 function buildPaginationConditions(pageToken: string) {
-  return lt(threads.latestReceivedOn, pageToken);
+  const cursor = parseThreadPageCursor(pageToken);
+  return or(
+    lt(threads.latestReceivedOn, cursor.latestReceivedOn),
+    and(eq(threads.latestReceivedOn, cursor.latestReceivedOn), lt(threads.id, cursor.id)),
+  );
 }
 
 // Helper function to calculate pagination result
 function calculatePaginationResult(results: Thread[], maxResults: number) {
   const hasNextPage = results.length > maxResults;
   const threadResults = hasNextPage ? results.slice(0, maxResults) : results;
-  const nextPageToken = hasNextPage ? results[maxResults].latestReceivedOn : null;
+  const boundaryThread = hasNextPage ? threadResults[threadResults.length - 1] : null;
+  const nextPageToken = boundaryThread ? encodeThreadPageCursor(boundaryThread) : null;
 
   return { threads: threadResults, nextPageToken };
 }
@@ -489,7 +528,7 @@ export async function findThreadsWithPagination(
     .select(threadSelect)
     .from(threads)
     .where(whereClause)
-    .orderBy(desc(threads.latestReceivedOn))
+    .orderBy(desc(threads.latestReceivedOn), desc(threads.id))
     .limit(maxResults + 1);
 
   return calculatePaginationResult(results, maxResults);
@@ -501,7 +540,7 @@ export async function findThreadsByFolder(db: DB, folderLabel: string): Promise<
     .from(threads)
     .innerJoin(threadLabels, eq(threads.id, threadLabels.threadId))
     .where(eq(threadLabels.labelId, folderLabel))
-    .orderBy(desc(threads.latestReceivedOn));
+    .orderBy(desc(threads.latestReceivedOn), desc(threads.id));
 
   return results;
 }
@@ -527,14 +566,10 @@ export async function findThreadsByFolderWithPagination(
     .from(threads)
     .innerJoin(threadLabels, eq(threads.id, threadLabels.threadId))
     .where(and(...conditions))
-    .orderBy(desc(threads.latestReceivedOn))
+    .orderBy(desc(threads.latestReceivedOn), desc(threads.id))
     .limit(maxResults + 1);
 
-  const hasNextPage = results.length > maxResults;
-  const threadResults = hasNextPage ? results.slice(0, maxResults) : results;
-  const nextPageToken = hasNextPage ? results[maxResults - 1].latestReceivedOn : null;
-
-  return { threads: threadResults, nextPageToken };
+  return calculatePaginationResult(results, maxResults);
 }
 
 export interface SenderEntry {
@@ -595,10 +630,7 @@ export async function listSendersForFolder(
       const entry = map.get(key)!;
       entry.threadCount += 1;
       // Keep the most recent date/subject
-      if (
-        row.latestReceivedOn &&
-        (!entry.latestDate || row.latestReceivedOn > entry.latestDate)
-      ) {
+      if (row.latestReceivedOn && (!entry.latestDate || row.latestReceivedOn > entry.latestDate)) {
         entry.latestDate = row.latestReceivedOn;
         entry.latestSubject = row.latestSubject ?? null;
       }

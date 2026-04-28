@@ -144,6 +144,7 @@
 		BEB1616D7909C805CA215798 /* AssistantPersistedCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC63EF09C6F5636C98B35CA7 /* AssistantPersistedCache.swift */; };
 		C087D04C332C1B028C68F9FC /* CalendarMonthView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13FF5B8CFF49EB6E5EC0F937 /* CalendarMonthView.swift */; };
 		C32B025058810AD5974C0372 /* LocalTaskParsingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72BB3E8572A4CE573A688B15 /* LocalTaskParsingService.swift */; };
+		A1B2C3D4E5F6A7B8C9D0E1F2 /* CompoundIntentParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6A7B8C9D0E1F2A3 /* CompoundIntentParser.swift */; };
 		C70E2AF1D5E2398A13E26BF3 /* CustomTabBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = D45F0B239339BB59836C5491 /* CustomTabBar.swift */; };
 		C79BE0576FBADC5EA49C22DF /* SharedConversationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CFFC08543E134FFE5770062 /* SharedConversationView.swift */; };
 		C8AAB8F0D64A69AA06D6EECA /* ShareConversationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4E31131E884E6469A56C0B4 /* ShareConversationService.swift */; };
@@ -301,6 +302,7 @@
 		6D2A0F6355F3AD950310D73D /* TaskParsingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskParsingService.swift; sourceTree = "<group>"; };
 		6D4F6F5B369E9F8603154EE9 /* AppleRemindersSyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleRemindersSyncService.swift; sourceTree = "<group>"; };
 		72BB3E8572A4CE573A688B15 /* LocalTaskParsingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalTaskParsingService.swift; sourceTree = "<group>"; };
+		B2C3D4E5F6A7B8C9D0E1F2A3 /* CompoundIntentParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompoundIntentParser.swift; sourceTree = "<group>"; };
 		734026A8312EA48B3C903595 /* RemindersSyncDirection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemindersSyncDirection.swift; sourceTree = "<group>"; };
 		74998F446A103B901131C35A /* TaskViewMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskViewMode.swift; sourceTree = "<group>"; };
 		754A36AB54312A80F894B98E /* EKEventDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EKEventDetailSheet.swift; sourceTree = "<group>"; };
@@ -464,6 +466,7 @@
 		2677D5400E6C4990C253FD91 /* Parsing */ = {
 			isa = PBXGroup;
 			children = (
+				B2C3D4E5F6A7B8C9D0E1F2A3 /* CompoundIntentParser.swift */,
 				72BB3E8572A4CE573A688B15 /* LocalTaskParsingService.swift */,
 				0AB515CB0BDFF39DC9196B77 /* RemoteFirstTaskParsingService.swift */,
 				6D2A0F6355F3AD950310D73D /* TaskParsingService.swift */,
@@ -1273,6 +1276,7 @@
 				9A50459B60A590CFF417A9AF /* LocalModelCatalog.swift in Sources */,
 				7E5DAE938357D9384C1035C5 /* LocalModelStateStore.swift in Sources */,
 				9AAAEA56AADC3A05DE6C9447 /* LocalModelsView.swift in Sources */,
+				A1B2C3D4E5F6A7B8C9D0E1F2 /* CompoundIntentParser.swift in Sources */,
 				C32B025058810AD5974C0372 /* LocalTaskParsingService.swift in Sources */,
 				9DB2CC11D926BEB747574B63 /* MailAssistantModels.swift in Sources */,
 				77E5F10CA3F5A67A7F781ADF /* MainTabView.swift in Sources */,
@@ -1466,6 +1470,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -1500,6 +1505,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",

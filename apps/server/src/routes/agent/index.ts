@@ -43,19 +43,6 @@ import {
   type ISnoozeBatch,
   type ParsedMessage,
 } from '../../types';
-import type {
-  IGetThreadResponse,
-  IGetThreadsResponse,
-  MailManager,
-  ThreadSummary,
-} from '../../lib/driver/types';
-import {
-  connectionToDriver,
-  findLegacyConnectionById,
-  getZeroSocketAgent,
-  isMissingConnectionColorError,
-  reSyncThread,
-} from '../../lib/server-utils';
 import { generateWhatUserCaresAbout, type UserTopic } from '../../lib/analyze/interests';
 import { DurableObjectOAuthClientProvider } from 'agents/mcp/do-oauth-client-provider';
 import { AiChatPrompt, GmailSearchAssistantSystemPrompt } from '../../lib/prompts';
@@ -69,15 +56,37 @@ import { ToolOrchestrator } from './orchestrator';
 import { eq, desc, isNotNull } from 'drizzle-orm';
 import migrations from './db/drizzle/migrations';
 import { getPromptName } from '../../pipelines';
-// anthropic import removed — model resolution now handled by ai-model-resolver.ts
-import { google } from '@ai-sdk/google';
 import { connection } from '../../db/schema';
 import type { WSMessage } from 'partyserver';
 import { tools as authTools } from './tools';
 import { processToolCalls } from './utils';
-import { getCachedMemories, formatMemoriesForPrompt, addMemories, invalidateMemoryCache, preloadMemories } from '../../lib/mem0';
+import { createDb } from '../../db';
+import type { Message } from 'ai';
+import { create } from './db';
+// anthropic import removed — model resolution now handled by ai-model-resolver.ts
+import { google } from '@ai-sdk/google';
+import {
+  connectionToDriver,
+  findLegacyConnectionById,
+  getZeroSocketAgent,
+  isMissingConnectionColorError,
+  reSyncThread,
+} from '../../lib/server-utils';
+import {
+  getCachedMemories,
+  formatMemoriesForPrompt,
+  addMemories,
+  invalidateMemoryCache,
+  preloadMemories,
+} from '../../lib/mem0';
 import { injectMentionContextIntoMessages } from '../../lib/mentions';
 import type { MentionRef } from '@zero/shared';
+import type {
+  IGetThreadResponse,
+  IGetThreadsResponse,
+  MailManager,
+  ThreadSummary,
+} from '../../lib/driver/types';
 import { type ZeroEnv } from '../../env';
 import { type Connection } from 'agents';
 import { resolveModel, type AIProvider } from '../../lib/ai-model-resolver';
@@ -85,9 +94,6 @@ import * as schema from './db/schema';
 import { threads } from './db/schema';
 import { Effect, pipe } from 'effect';
 // groq import removed — model resolution now handled by ai-model-resolver.ts
-import { createDb } from '../../db';
-import type { Message } from 'ai';
-import { create } from './db';
 import { getSharedAIProfilePromptForUser } from '../../lib/ai-profile';
 
 const decoder = new TextDecoder();
@@ -1233,62 +1239,43 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
       console.log('[queryThreads] params:', { labelIds, folder, q, pageToken, maxResults });
 
       // Import the new database functions
-      const {
-        findThreadsWithPagination,
-        findThreadsByFolderWithPagination,
-        findThreadsByFolder,
-        findThreadsWithAnyLabels,
-        findThreadsWithTextSearch,
-        list,
-      } = await import('./db');
+      const { findThreadsWithPagination, findThreadsByFolderWithPagination } = await import('./db');
 
       // Case 1: All threads (no filters)
-      if (!folder && labelIds.length === 0 && !q && !pageToken) {
+      if (!folder && labelIds.length === 0 && !q) {
         console.log('[queryThreads] Case: all threads');
-        const threads = await list(this.db);
-        return threads;
+        return await findThreadsWithPagination(this.db, { pageToken, maxResults });
       }
 
       // Case 2: Folder only
       if (folder && labelIds.length === 0 && !q) {
         const folderLabel = folder.toUpperCase();
         console.log('[queryThreads] Case: folder only', { folderLabel });
-
-        if (pageToken) {
-          const result = await findThreadsByFolderWithPagination(this.db, folderLabel, {
-            pageToken,
-            maxResults,
-          });
-          return result.threads;
-        } else {
-          const threads = await findThreadsByFolder(this.db, folderLabel);
-          return threads.slice(0, maxResults);
-        }
+        return await findThreadsByFolderWithPagination(this.db, folderLabel, {
+          pageToken,
+          maxResults,
+        });
       }
 
       // Case 3: Single label only
       if (labelIds.length === 1 && !folder && !q) {
         const labelId = labelIds[0];
         console.log('[queryThreads] Case: single label only', { labelId });
-
-        if (pageToken) {
-          const result = await findThreadsWithPagination(this.db, {
-            labelIds: [labelId],
-            pageToken,
-            maxResults,
-          });
-          return result.threads;
-        } else {
-          const threads = await findThreadsWithAnyLabels(this.db, [labelId]);
-          return threads.slice(0, maxResults);
-        }
+        return await findThreadsWithPagination(this.db, {
+          labelIds: [labelId],
+          pageToken,
+          maxResults,
+        });
       }
 
       // Case 4: Text search only
       if (q && !folder && labelIds.length === 0) {
         console.log('[queryThreads] Case: text search only', { q });
-        const threads = await findThreadsWithTextSearch(this.db, q);
-        return threads.slice(0, maxResults);
+        return await findThreadsWithPagination(this.db, {
+          searchText: q,
+          pageToken,
+          maxResults,
+        });
       }
 
       // Case 5: Complex filtering (folder + labels + search + pagination)
@@ -1312,7 +1299,7 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
         requireAllLabels: true, // Require all labels to be present
       });
 
-      return result.threads;
+      return result;
     });
   }
 
@@ -1334,17 +1321,17 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
       this.queryThreads(normalizedParams),
       Effect.flatMap((result) =>
         Effect.promise(async () => {
-          if (!result?.length) {
+          if (!result.threads.length) {
             return {
               threads: [],
-              nextPageToken: '',
+              nextPageToken: null,
             } satisfies IGetThreadsResponse;
           }
 
-          const threadIds = result.map((row) => String(row.id));
+          const threadIds = result.threads.map((row) => String(row.id));
           const labelMap = await getLabelsForThreadIds(this.db, threadIds);
 
-          const threads: ThreadSummary[] = result.map((row) => {
+          const threads: ThreadSummary[] = result.threads.map((row) => {
             const labels = labelMap.get(String(row.id)) ?? [];
             const labelIds = labels.map((label) => label.id);
 
@@ -1364,14 +1351,9 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
             };
           });
 
-          const nextPageToken =
-            threads.length === maxResults && result.length > 0
-              ? String(result[result.length - 1].latestReceivedOn)
-              : null;
-
           return {
             threads,
-            nextPageToken,
+            nextPageToken: result.nextPageToken,
           } satisfies IGetThreadsResponse;
         }),
       ),
@@ -1880,8 +1862,9 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
         if (this.env.MEM0_API_KEY && userId) {
           try {
             // Prefer preloaded in-memory cache (0ms)
-            const memories = this.memoriesCache?.data
-              ?? await getCachedMemories(userId, this.env.prompts_storage, this.env.MEM0_API_KEY);
+            const memories =
+              this.memoriesCache?.data ??
+              (await getCachedMemories(userId, this.env.prompts_storage, this.env.MEM0_API_KEY));
             memoryBlock = formatMemoriesForPrompt(memories);
           } catch (error) {
             console.warn('[Mem0] Failed to get memories for AI system prompt:', error);
@@ -1889,9 +1872,7 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
         }
 
         // Extract the latest user message for post-response memory storage
-        const lastUserMessage = [...processedMessages]
-          .reverse()
-          .find((m) => m.role === 'user');
+        const lastUserMessage = [...processedMessages].reverse().find((m) => m.role === 'user');
 
         // Wrap onFinish to add Mem0 storage after AI response completes
         const wrappedOnFinish: StreamTextOnFinishCallback<{}> = async (result) => {
@@ -1899,12 +1880,18 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
           await onFinish(result);
 
           // ── Mem0: Store conversation in background after response ───────
-          if (this.env.MEM0_API_KEY && userId && lastUserMessage && result.response?.messages?.length) {
+          if (
+            this.env.MEM0_API_KEY &&
+            userId &&
+            lastUserMessage &&
+            result.response?.messages?.length
+          ) {
             const assistantText = result.text;
             if (assistantText && assistantText.length > 10) {
-              const userContent = typeof lastUserMessage.content === 'string'
-                ? lastUserMessage.content
-                : JSON.stringify(lastUserMessage.content);
+              const userContent =
+                typeof lastUserMessage.content === 'string'
+                  ? lastUserMessage.content
+                  : JSON.stringify(lastUserMessage.content);
 
               this.ctx.waitUntil(
                 (async () => {
@@ -1915,7 +1902,11 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
                     ]);
                     // Refresh cache so next message has fresh memories
                     await invalidateMemoryCache(userId, this.env.prompts_storage);
-                    const fresh = await preloadMemories(userId, this.env.prompts_storage, this.env.MEM0_API_KEY);
+                    const fresh = await preloadMemories(
+                      userId,
+                      this.env.prompts_storage,
+                      this.env.MEM0_API_KEY,
+                    );
                     this.memoriesCache = { data: fresh, fetchedAt: Date.now(), userId };
                   } catch (error) {
                     console.warn('[Mem0] Post-response memory storage failed:', error);
@@ -1926,11 +1917,15 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
           }
         };
 
-        const baseSystemPrompt = await getPrompt(getPromptName(connectionId, EPrompts.Chat), AiChatPrompt(), {
-          currentThreadId,
-          currentFolder,
-          currentFilter,
-        });
+        const baseSystemPrompt = await getPrompt(
+          getPromptName(connectionId, EPrompts.Chat),
+          AiChatPrompt(),
+          {
+            currentThreadId,
+            currentFolder,
+            currentFilter,
+          },
+        );
 
         // Prepend memory block to system prompt if available
         const systemPromptWithMemory = memoryBlock
@@ -2010,7 +2005,12 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
       try {
         data = JSON.parse(message) as IncomingMessage;
       } catch (error) {
-        console.error('[AgentServer] Failed to parse incoming WebSocket message:', error, 'Message:', message);
+        console.error(
+          '[AgentServer] Failed to parse incoming WebSocket message:',
+          error,
+          'Message:',
+          message,
+        );
         return;
       }
       switch (data.type) {

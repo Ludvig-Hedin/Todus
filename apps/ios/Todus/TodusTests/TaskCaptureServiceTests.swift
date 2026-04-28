@@ -1,5 +1,5 @@
 import XCTest
-@testable import MiniTaskApp
+@testable import Todus
 
 final class TaskCaptureServiceTests: XCTestCase {
     func testSplitInputLinesCreatesOnlyNonEmptyEntries() {

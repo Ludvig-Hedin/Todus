@@ -1,5 +1,5 @@
 import XCTest
-@testable import MiniTaskApp
+@testable import Todus
 
 final class LocalTaskParsingServiceTests: XCTestCase {
     func testSwedishTomorrowParsing() {
@@ -56,5 +56,83 @@ final class LocalTaskParsingServiceTests: XCTestCase {
 
         XCTAssertEqual(result.title, "Fix iOS 18 bug")
         XCTAssertNil(result.dueDate)
+    }
+
+    func testBareTailNumberWithoutDateKeywordDoesNotBecomeTime() {
+        let result = LocalTaskParsingService.parseImmediate(
+            rawText: "buy milk 5",
+            now: .now,
+            locale: Locale(identifier: "en_US"),
+            timeZone: .current
+        )
+
+        XCTAssertEqual(result.title, "buy milk 5")
+        XCTAssertNil(result.dueDate)
+    }
+
+    func testRelativeDateKeepsFirstMarker() throws {
+        let timeZone = TimeZone(identifier: "Europe/Stockholm")!
+        let locale = Locale(identifier: "sv_SE")
+        let calendar = Calendar(identifier: .gregorian)
+        let now = calendar.date(from: DateComponents(year: 2026, month: 3, day: 23, hour: 9))!
+
+        let result = LocalTaskParsingService.parseImmediate(
+            rawText: "påminn mig imorgon idag 18",
+            now: now,
+            locale: locale,
+            timeZone: timeZone
+        )
+
+        let dueDate = try XCTUnwrap(result.dueDate)
+        let dueComponents = calendar.dateComponents(in: timeZone, from: dueDate)
+        XCTAssertEqual(dueComponents.day, 24)
+        XCTAssertEqual(dueComponents.hour, 18)
+    }
+
+    func testCompoundBeforeReferenceWinsForIFoervaeg() throws {
+        let timeZone = TimeZone(identifier: "Europe/Stockholm")!
+        let locale = Locale(identifier: "sv_SE")
+        let calendar = Calendar(identifier: .gregorian)
+        let now = calendar.date(from: DateComponents(year: 2026, month: 3, day: 23, hour: 9))!
+
+        let intents = CompoundIntentParser.parse(
+            text: "träffa Johan imorgon 13 och maila honom i förväg",
+            now: now,
+            locale: locale,
+            timeZone: timeZone
+        )
+
+        XCTAssertEqual(intents.count, 2)
+        let emailDate = try XCTUnwrap(intents.last?.date)
+        let emailComponents = calendar.dateComponents(in: timeZone, from: emailDate)
+        XCTAssertEqual(emailComponents.day, 24)
+        XCTAssertEqual(emailComponents.hour, 12)
+        XCTAssertEqual(emailComponents.minute, 45)
+        XCTAssertEqual(intents.last?.title, "maila honom")
+    }
+
+    func testOrdinaryAndTitleDoesNotSplitIntoMultipleIntents() {
+        let intents = CompoundIntentParser.parse(
+            text: "Lunch with Sarah and Tom tomorrow",
+            now: .now,
+            locale: Locale(identifier: "en_US"),
+            timeZone: .current
+        )
+
+        XCTAssertEqual(intents.count, 1)
+        XCTAssertEqual(intents.first?.type, .event)
+        XCTAssertEqual(intents.first?.title, "Lunch with Sarah and Tom")
+    }
+
+    func testCompoundEmailSegmentStillSplitsWhenSecondClauseStartsWithVerb() {
+        let intents = CompoundIntentParser.parse(
+            text: "träffa Johan imorgon 13 och maila honom presentationen innan",
+            now: .now,
+            locale: Locale(identifier: "sv_SE"),
+            timeZone: .current
+        )
+
+        XCTAssertEqual(intents.count, 2)
+        XCTAssertEqual(intents.last?.type, .email)
     }
 }

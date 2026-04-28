@@ -553,20 +553,62 @@ export const getThreadsFromDB = async (
           }),
         ),
       (shardResults) => {
-        // Combine all threads from all shards
-        const allThreads = shardResults.flatMap((result) => result.threads);
+        const encodeCompositePageToken = (thread: {
+          id: string;
+          latestReceivedOn: string | null | undefined;
+        }) => {
+          if (!thread.latestReceivedOn) return null;
+          return JSON.stringify({
+            latestReceivedOn: thread.latestReceivedOn,
+            id: thread.id,
+          });
+        };
 
-        // Sort by some criteria if needed (assuming threads have a sortable field)
-        // allThreads.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+        // Combine and globally sort by `latestReceivedOn` DESC so the page the user sees
+        // is actually the newest N across all shards — not just whichever shard's parallel
+        // promise resolved first. `latestReceivedOn` is stored as ISO-8601 text (see
+        // apps/server/src/routes/agent/db/schema.ts:12), so a lexical compare is correct.
+        // Ties fall back to thread id DESC so the cursor can advance without dropping
+        // same-timestamp rows across shards. Threads with a null/missing timestamp sort
+        // to the end (treated as oldest).
+        const allThreads = shardResults
+          .flatMap((result) => result.threads)
+          .sort((a, b) => {
+            const aTs = a.latestReceivedOn ?? '';
+            const bTs = b.latestReceivedOn ?? '';
+            // DESC — newer first. localeCompare handles null/empty deterministically.
+            const byTimestamp = bTs.localeCompare(aTs);
+            if (byTimestamp !== 0) return byTimestamp;
+            return b.id.localeCompare(a.id);
+          });
 
-        // Take only the requested amount
         const threads = allThreads.slice(0, maxResults);
 
-        // Determine if there's a next page token (simplified logic)
-        const hasMoreResults = allThreads.length > maxResults;
-        const nextPageToken = hasMoreResults
-          ? shardResults.find((r) => r.nextPageToken)?.nextPageToken || null
-          : null;
+        // Pagination signal is union of two facts:
+        //   1. We had more aggregated rows than the page-size slice — definitely more.
+        //   2. ANY shard reported its own non-null nextPageToken — at least one shard
+        //      has further rows beyond what it returned this call, so even if our
+        //      aggregated count happened to equal maxResults exactly, more exists.
+        // The previous shape (`allThreads.length > maxResults`) silently dropped case 2,
+        // which broke pagination entirely for single-shard users (they hit exactly
+        // maxResults aggregated rows on every page → `>` is false → null token → no
+        // further pages ever fetchable, regardless of how many threads exist).
+        //
+        // The composite cursor uses the page-boundary `(latestReceivedOn, id)` pair.
+        // Shards compare rows by the same ordering, so equal timestamps no longer get
+        // skipped when the current page boundary lands in the middle of a tie group.
+        const anyShardHasMore = shardResults.some((r) => r.nextPageToken);
+        const hasMoreResults = allThreads.length > maxResults || anyShardHasMore;
+        const boundaryThread = threads.length > 0 ? threads[threads.length - 1] : null;
+        let nextPageToken: string | null = null;
+        if (hasMoreResults) {
+          if (boundaryThread) {
+            nextPageToken = encodeCompositePageToken(boundaryThread);
+          } else {
+            const lastValidThread = threads.findLast((t) => t.latestReceivedOn);
+            nextPageToken = lastValidThread ? encodeCompositePageToken(lastValidThread) : null;
+          }
+        }
 
         return {
           threads,
