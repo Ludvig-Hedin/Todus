@@ -486,8 +486,8 @@ struct MacAssistantPanel: View {
         .macClickablePointer()
     }
 
-    /// Dark panel background — matches iOS AppTheme.backgroundTop
-    private let panelBackground = Color(light: Color(white: 0.98), dark: Color(white: 0.08))
+    /// Dark panel background — matches iOS AppTheme.backgroundTop via MacTheme.contentBackground
+    private let panelBackground = MacTheme.contentBackground
 
     private var displayModeIcon: String {
         switch displayMode {
@@ -658,7 +658,8 @@ struct MacAssistantPanel: View {
         .sheet(isPresented: $isShowingVoiceChat) {
             MacVoiceChatPanel(
                 chatService: chatService,
-                tokenService: services.voiceTokenService
+                tokenService: services.voiceTokenService,
+                services: services
             )
         }
     }
@@ -736,9 +737,10 @@ struct MacAssistantPanel: View {
                 .buttonStyle(.plain)
                 .macClickablePointer()
                 .help("Conversation History")
+                .accessibilityLabel("Conversation History")
             } else {
                 Button {
-                    withAnimation(.snappy(duration: 0.2)) { panelContent = .chat }
+                    withAnimation(MacTheme.Motion.base) { panelContent = .chat }
                 } label: {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 12, weight: .semibold))
@@ -748,6 +750,7 @@ struct MacAssistantPanel: View {
                 .buttonStyle(.plain)
                 .macClickablePointer()
                 .help("Back to Chat")
+                .accessibilityLabel("Back to Chat")
             }
 
             if displayMode == .floating {
@@ -778,7 +781,7 @@ struct MacAssistantPanel: View {
 
             if panelContent == .chat {
                 Button {
-                    withAnimation(.snappy(duration: 0.2)) { panelContent = .groupList }
+                    withAnimation(MacTheme.Motion.base) { panelContent = .groupList }
                 } label: {
                     Image(systemName: "person.2")
                         .font(.system(size: 12, weight: .semibold))
@@ -788,11 +791,12 @@ struct MacAssistantPanel: View {
                 .buttonStyle(.plain)
                 .macClickablePointer()
                 .help("Group Chats")
+                .accessibilityLabel("Group Chats")
             }
 
             if panelContent == .chat {
                 Button {
-                    withAnimation(.snappy(duration: 0.2)) { chatService.clearHistory() }
+                    withAnimation(MacTheme.Motion.base) { chatService.clearHistory() }
                 } label: {
                     Image(systemName: "square.and.pencil")
                         .font(.system(size: 12, weight: .semibold))
@@ -802,6 +806,7 @@ struct MacAssistantPanel: View {
                 .buttonStyle(.plain)
                 .macClickablePointer()
                 .help("New Conversation")
+                .accessibilityLabel("New Conversation")
             }
 
             if panelContent == .chat { Menu {
@@ -840,7 +845,7 @@ struct MacAssistantPanel: View {
                     }
                     Divider()
                     Button(role: .destructive) {
-                        withAnimation(.snappy(duration: 0.2)) { chatService.clearHistory() }
+                        withAnimation(MacTheme.Motion.base) { chatService.clearHistory() }
                     } label: {
                         Label("Delete Conversation", systemImage: "trash")
                     }
@@ -859,14 +864,14 @@ struct MacAssistantPanel: View {
             // Layout picker — Floating / Side panel / Separate window
             Menu {
                 Button {
-                    withAnimation(.snappy(duration: 0.25)) { displayMode = .floating }
+                    withAnimation(MacTheme.Motion.base) { displayMode = .floating }
                 } label: {
                     Label("Floating Panel", systemImage: "macwindow")
                 }
                 .disabled(displayMode == .floating)
 
                 Button {
-                    withAnimation(.snappy(duration: 0.25)) { displayMode = .sidepane }
+                    withAnimation(MacTheme.Motion.base) { displayMode = .sidepane }
                 } label: {
                     Label("Side Panel", systemImage: "sidebar.right")
                 }
@@ -882,7 +887,7 @@ struct MacAssistantPanel: View {
                 Divider()
 
                 Button {
-                    withAnimation(.snappy(duration: 0.25)) { displayMode = .full }
+                    withAnimation(MacTheme.Motion.base) { displayMode = .full }
                 } label: {
                     Label("Full Screen", systemImage: "arrow.up.left.and.arrow.down.right")
                 }
@@ -897,9 +902,10 @@ struct MacAssistantPanel: View {
             .macClickablePointer()
             .frame(width: 26)
             .help("Panel Layout")
+            .accessibilityLabel("Panel Layout")
 
             Button {
-                withAnimation(.snappy(duration: 0.2)) { isPresented = false }
+                withAnimation(MacTheme.Motion.base) { isPresented = false }
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 10, weight: .bold))
@@ -909,6 +915,7 @@ struct MacAssistantPanel: View {
             .buttonStyle(.plain)
             .macClickablePointer()
             .help("Close (⌘L)")
+            .accessibilityLabel("Close assistant panel")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
@@ -1013,7 +1020,7 @@ struct MacAssistantPanel: View {
                     if suggestionsExpanded {
                         HStack(spacing: 12) {
                             Button {
-                                withAnimation(.snappy(duration: 0.2)) { suggestionsExpanded = false }
+                                withAnimation(MacTheme.Motion.base) { suggestionsExpanded = false }
                             } label: {
                                 Label("Show less", systemImage: "chevron.up")
                                     .font(.system(size: 11, weight: .medium))
@@ -1024,7 +1031,7 @@ struct MacAssistantPanel: View {
                             Spacer()
 
                             Button {
-                                withAnimation(.snappy(duration: 0.15)) { suggestionSeed += 1 }
+                                withAnimation(MacTheme.Motion.fast) { suggestionSeed += 1 }
                             } label: {
                                 Label("Refresh", systemImage: "arrow.clockwise")
                                     .font(.system(size: 11, weight: .medium))
@@ -1037,7 +1044,7 @@ struct MacAssistantPanel: View {
                         .padding(.vertical, 6)
                     } else if pool.count > 3 {
                         Button {
-                            withAnimation(.snappy(duration: 0.2)) { suggestionsExpanded = true }
+                            withAnimation(MacTheme.Motion.base) { suggestionsExpanded = true }
                         } label: {
                             Text("Show more")
                                 .font(.system(size: 11, weight: .medium))
@@ -1107,7 +1114,15 @@ struct MacAssistantPanel: View {
                                 if let url = URL(string: upgradePricingURL()) {
                                     NSWorkspace.shared.open(url)
                                 }
-                            }
+                            },
+                            onInsertIntoDoc: {
+                                guard currentSelection.category == "docs",
+                                      !message.isStreaming,
+                                      message.role == .assistant,
+                                      chatService.messages.last(where: { $0.role == .assistant })?.id == message.id
+                                else { return nil }
+                                return { text in services.docsService.pendingDocInsert = text }
+                            }()
                         )
                         .id(message.id)
                     }
@@ -1129,7 +1144,7 @@ struct MacAssistantPanel: View {
             .onAppear { MacScrollStyle.reapplyToAllWindows() }
             .onChange(of: chatService.messages.count) {
                 if let lastID = chatService.messages.last?.id {
-                    withAnimation(.snappy(duration: 0.25)) {
+                    withAnimation(MacTheme.Motion.base) {
                         proxy.scrollTo(lastID, anchor: .bottom)
                     }
                 }
@@ -1143,7 +1158,7 @@ struct MacAssistantPanel: View {
             }
             .onChange(of: chatService.messages.last?.sources.count) {
                 if let lastID = chatService.messages.last?.id {
-                    withAnimation(.snappy(duration: 0.2)) {
+                    withAnimation(MacTheme.Motion.base) {
                         proxy.scrollTo(lastID, anchor: .bottom)
                     }
                 }
@@ -1165,7 +1180,7 @@ struct MacAssistantPanel: View {
                 .transition(.opacity)
         }
         .padding(.leading, 4)
-        .animation(.easeInOut(duration: 0.3), value: thinkingIndex)
+        .animation(MacTheme.Motion.slow, value: thinkingIndex)
     }
 
     // MARK: - Input Section (matches iOS: context chip, text field, toolbar with +/config/mic/send)
@@ -1181,10 +1196,10 @@ struct MacAssistantPanel: View {
                             HStack(spacing: 5) {
                                 Image(systemName: selectionIcon(currentSelection))
                                     .font(.system(size: 11, weight: .semibold))
-                                Text(currentSelection.title)
+                                Text(pillTitle)
                                     .font(.system(size: 11, weight: .medium))
                                 Button {
-                                    withAnimation(.snappy(duration: 0.15)) {
+                                    withAnimation(MacTheme.Motion.fast) {
                                         pageContextAttached = false
                                     }
                                 } label: {
@@ -1254,6 +1269,7 @@ struct MacAssistantPanel: View {
                 .buttonStyle(.plain)
                 .macClickablePointer()
                 .help("Attach File")
+                .accessibilityLabel("Attach File")
 
                 Spacer()
 
@@ -1267,6 +1283,7 @@ struct MacAssistantPanel: View {
                 .buttonStyle(.plain)
                 .macClickablePointer()
                 .help("Live Voice Chat")
+                .accessibilityLabel("Live Voice Chat")
 
                 // Voice-to-text mic button
                 MacVoiceInputButton { transcribed in
@@ -1286,6 +1303,7 @@ struct MacAssistantPanel: View {
                     .buttonStyle(.plain)
                     .macClickablePointer()
                     .help("Stop Generating")
+                    .accessibilityLabel("Stop Generating")
                     .transition(.scale.combined(with: .opacity))
                 } else {
                     let textEmpty = inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -1304,12 +1322,13 @@ struct MacAssistantPanel: View {
                     .macClickablePointer()
                     .disabled(isEmpty)
                     .help("Send (⌘↵)")
+                    .accessibilityLabel("Send message")
                     .transition(.scale.combined(with: .opacity))
                 }
             }
             .padding(.horizontal, 10)
             .padding(.bottom, 8)
-            .animation(.snappy(duration: 0.18), value: chatService.isStreaming)
+            .animation(MacTheme.Motion.base, value: chatService.isStreaming)
         }
         .background(MacTheme.surfaceCard, in: RoundedRectangle(cornerRadius: MacTheme.rowRadius, style: .continuous))
         .overlay(
@@ -1318,7 +1337,7 @@ struct MacAssistantPanel: View {
         )
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
-        .animation(.snappy(duration: 0.15), value: pendingAttachments.count)
+        .animation(MacTheme.Motion.fast, value: pendingAttachments.count)
     }
 
     // MARK: - History List
@@ -1517,7 +1536,14 @@ struct MacAssistantPanel: View {
         pendingAttachments = []
         UserDefaults.standard.removeObject(forKey: "mac_ai_draft_input")
         // Set page context so the AI knows where the user is
-        chatService.currentPageContext = pageContextAttached ? currentSelection.title + " view" : nil
+        chatService.currentPageContext = pageContextAttached ? {
+            if currentSelection.category == "docs",
+               let id = services.docsService.currentOpenDocId,
+               let title = services.docsService.allDocs.first(where: { $0.id == id })?.title {
+                return "Doc: \(title)"
+            }
+            return currentSelection.title + " view"
+        }() : nil
         chatService.send(
             userMessage: messageText,
             attachmentURLs: urls,
@@ -1527,7 +1553,14 @@ struct MacAssistantPanel: View {
     }
 
     private func sendSuggestion(_ text: String) {
-        chatService.currentPageContext = pageContextAttached ? currentSelection.title + " view" : nil
+        chatService.currentPageContext = pageContextAttached ? {
+            if currentSelection.category == "docs",
+               let id = services.docsService.currentOpenDocId,
+               let title = services.docsService.allDocs.first(where: { $0.id == id })?.title {
+                return "Doc: \(title)"
+            }
+            return currentSelection.title + " view"
+        }() : nil
         chatService.send(userMessage: text, allTasks: Array(allTasks), modelContext: modelContext)
     }
 
@@ -1612,6 +1645,21 @@ struct MacAssistantPanel: View {
                 ("moon.zzz",                 "Plan tomorrow and wind down my day"),
                 ("pencil",                   "Rename or update outdated tasks"),
             ]
+        case "docs":
+            pinned = [
+                ("pencil",            "Continue where I left off"),
+                ("wand.and.stars",    "Improve the writing and clarity"),
+                ("list.bullet.indent","Add structure with headings and sections"),
+            ]
+            extended = [
+                ("text.alignleft",                    "Write an introduction for this document"),
+                ("doc.text.magnifyingglass",           "Summarize this document"),
+                ("checkmark.circle",                   "Fix grammar and tone throughout"),
+                ("arrow.down.right.and.arrow.up.left", "Make this more concise"),
+                ("plus.bubble",                        "Expand the main points with more detail"),
+                ("text.badge.checkmark",               "Add a conclusion"),
+                ("list.bullet",                        "Convert paragraphs into bullet points"),
+            ]
         default: // home
             pinned = [
                 ("sun.max",    "Give me a morning briefing"),
@@ -1656,6 +1704,15 @@ struct MacAssistantPanel: View {
     }
 
     // MARK: - Helpers
+
+    private var pillTitle: String {
+        if currentSelection.category == "docs",
+           let id = services.docsService.currentOpenDocId,
+           let title = services.docsService.allDocs.first(where: { $0.id == id })?.title {
+            return title
+        }
+        return currentSelection.title
+    }
 
     private func selectionIcon(_ sel: MacPrimarySelection) -> String {
         switch sel {
@@ -1837,7 +1894,7 @@ private struct MacVoiceInputButton: View {
                 }
             }
             .frame(width: 26, height: 26)
-            .animation(.snappy(duration: 0.18), value: controller.recordingState)
+            .animation(MacTheme.Motion.base, value: controller.recordingState)
         }
         .buttonStyle(.plain)
         .macClickablePointer()
@@ -1902,6 +1959,8 @@ private struct MacMessageBubble: View {
     var onSpecAction: MacChatUISpecOnAction?
     /// Called when the user taps "Upgrade to Pro" after a credits-exhausted error.
     var onUpgrade: (() -> Void)?
+    /// Called when user taps "Insert into doc" — only provided when docs context is active for last AI message.
+    var onInsertIntoDoc: ((String) -> Void)?
 
     @State private var showActions = false
     @State private var didCopy = false
@@ -1948,6 +2007,27 @@ private struct MacMessageBubble: View {
                             withAnimation { showActions = true }
                         }
                     }
+            }
+
+            // "Insert into doc" button — shown when parent is in docs context
+            if let onInsert = onInsertIntoDoc,
+               message.role == .assistant,
+               !message.isStreaming,
+               !message.content.isEmpty {
+                HStack {
+                    Button {
+                        onInsert(message.content)
+                    } label: {
+                        Label("Insert into doc", systemImage: "arrow.down.doc")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(MacTheme.mutedText)
+                    }
+                    .buttonStyle(.borderless)
+                    .macClickablePointer()
+                    .help("Insert AI response at cursor position in the open document")
+                    Spacer()
+                }
+                .padding(.top, 2)
             }
         }
     }
@@ -2049,8 +2129,8 @@ private struct MacMessageBubble: View {
                 }
             }
         }
-        .animation(.snappy(duration: 0.3), value: message.searchState)
-        .animation(.snappy(duration: 0.3), value: message.sources.count)
+        .animation(MacTheme.Motion.slow, value: message.searchState)
+        .animation(MacTheme.Motion.slow, value: message.sources.count)
     }
 
     @ViewBuilder
@@ -2231,9 +2311,9 @@ private struct MacMessageBubble: View {
                 guard !didCopy else { return }
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(message.content, forType: .string)
-                withAnimation(.snappy(duration: 0.15)) { didCopy = true }
+                withAnimation(MacTheme.Motion.fast) { didCopy = true }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                    withAnimation(.snappy(duration: 0.15)) { didCopy = false }
+                    withAnimation(MacTheme.Motion.fast) { didCopy = false }
                 }
             } label: {
                 Image(systemName: didCopy ? "checkmark" : "doc.on.doc")
@@ -2248,7 +2328,7 @@ private struct MacMessageBubble: View {
 
             // Thumbs up
             Button {
-                withAnimation(.snappy(duration: 0.15)) {
+                withAnimation(MacTheme.Motion.fast) {
                     thumbsState = thumbsState == .up ? nil : .up
                 }
             } label: {
@@ -2262,7 +2342,7 @@ private struct MacMessageBubble: View {
             .macClickablePointer()
             // Thumbs down
             Button {
-                withAnimation(.snappy(duration: 0.15)) {
+                withAnimation(MacTheme.Motion.fast) {
                     thumbsState = thumbsState == .down ? nil : .down
                 }
             } label: {
@@ -2314,7 +2394,7 @@ private struct MacReasoningBox: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Button {
-                withAnimation(.snappy(duration: 0.2)) { isExpanded.toggle() }
+                withAnimation(MacTheme.Motion.base) { isExpanded.toggle() }
             } label: {
                 HStack(spacing: 5) {
                     Image(systemName: "brain")
@@ -2334,7 +2414,7 @@ private struct MacReasoningBox: View {
                     Image(systemName: "chevron.down")
                         .font(.system(size: 9, weight: .semibold))
                         .rotationEffect(.degrees(isExpanded ? 0 : -90))
-                        .animation(.snappy(duration: 0.2), value: isExpanded)
+                        .animation(MacTheme.Motion.base, value: isExpanded)
                 }
                 .foregroundStyle(MacTheme.mutedText)
             }
@@ -2359,7 +2439,7 @@ private struct MacReasoningBox: View {
         .onChange(of: isStreaming) { _, streaming in
             if !streaming && durationMs != nil {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-                    withAnimation(.snappy(duration: 0.3)) { isExpanded = false }
+                    withAnimation(MacTheme.Motion.slow) { isExpanded = false }
                 }
             }
         }
@@ -2398,7 +2478,7 @@ private struct SuggestionRow: View {
         .buttonStyle(.plain)
         .macClickablePointer()
         .onHover { isHovered = $0 }
-        .animation(.easeOut(duration: 0.1), value: isHovered)
+        .animation(MacTheme.Motion.fast, value: isHovered)
     }
 }
 
