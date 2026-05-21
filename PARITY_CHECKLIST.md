@@ -186,6 +186,70 @@ Shared/server-sensitive envs that impact behavior parity (configured outside cli
 - Billing: `AUTUMN_SECRET_KEY`
 - Messaging/Email infra: `TWILIO_*`, `RESEND_API_KEY`
 
+### 7) iOS ↔ macOS Feature Parity Matrix
+
+Source: 2026-05-17 macOS hardening + iOS parity sweep. Status legend: ✅ at parity • 🟡 partial (works but missing surface or polish) • 🔴 missing.
+
+| Feature | iOS | macOS | Notes |
+| --- | --- | --- | --- |
+| **Sign in — Apple** | ✅ | ✅ | Both call Better Auth `sign-in/social`. macOS uses native `AppleIDProvider`. |
+| **Sign in — Google** | ✅ | ✅ | Both use `ASWebAuthenticationSession` + backend mobile-token redirect. |
+| **Sign in — Email OTP** | ✅ | ✅ | OTP digit filter added on macOS this sweep. |
+| **Mailbox — folders / secondary folders** | ✅ | ✅ | macOS sidebar restored Meetings entry; folder sync hardened. |
+| **Thread — AI summary** | ✅ | ✅ | Both render summary card from `mailAssistant.summarize`. |
+| **Thread — smart actions toolbar** | ✅ | ✅ | macOS gained Create Task / Create Event / Generate Reply (inline spinners) this sweep. |
+| **Thread — "Remind me" with snooze** | ✅ | ✅ | macOS now schedules via `MacNotificationService.scheduleEmailReminder` with preset + custom date. |
+| **Thread — verification code chip** | ✅ | ✅ | macOS regex extraction + one-shot auto-copy added. |
+| **Thread — tracking info chip** | ✅ | ✅ | macOS UPS / FedEx / USPS / order-number extraction added. |
+| **Compose — from-account selector** | ✅ | ✅ | Both pick connection on send. |
+| **Compose — signatures** | ✅ | ✅ | macOS gained per-connection `MacSignatureStore` + Settings card this sweep. |
+| **Compose — attachments** | ✅ | ✅ | macOS NSOpenPanel chips + base64 send via `MacDraftService.SendInput.attachments` added. |
+| **Compose — rich text (bold/italic/underline)** | ✅ | ✅ | macOS underline button + ⌘B / ⌘I / ⌘U shortcuts added. |
+| **Compose — live recipient validation** | ✅ | ✅ | Inline error chips on both. |
+| **Drafts — offline queue** | ✅ | ✅ | SwiftData `DraftRecord` + `DraftService` on both. Idempotent flush + 5-min orphan window confirmed on macOS. |
+| **Tasks — list view** | ✅ | ✅ | Both share `TaskRecord` SwiftData model. |
+| **Tasks — board view** | ✅ | ✅ | Drag-and-drop status update on both. |
+| **Tasks — calendar view** | ✅ | ✅ | |
+| **Tasks — folders** | ✅ | ✅ | `FolderSyncService` `syncedIds` enforcement landed on macOS. |
+| **Tasks — checklist** | ✅ | ✅ | macOS added per-item add / remove / check with live persistence. |
+| **Tasks — recurrence** | ✅ | ✅ | macOS added None / Daily / Weekly / Monthly / Yearly RRULE-compatible recurrence. |
+| **Tasks — attachments** | ✅ | ✅ | macOS NSOpenPanel + copy to `Application Support/TaskAttachments/{taskId}/` added. |
+| **Tasks — Apple Reminders sync** | ✅ | ✅ | macOS dedup + `@MainActor` isolation hardened. |
+| **Calendar — day view** | ✅ | ✅ | |
+| **Calendar — week view** | ✅ | ✅ | |
+| **Calendar — month view** | ✅ | ✅ | macOS uses paged month stack; gestures tuned. |
+| **Calendar — year view** | ✅ | ✅ | macOS year scroll + month red-dot indicator. |
+| **Calendar — source picker** | ✅ | ✅ | Multi-calendar toggle on both. |
+| **Calendar — in-app create / edit / delete** | ✅ | ✅ | macOS gained native `MacEventEditSheet` this sweep (replaced Calendar.app delegation). |
+| **Home — briefing** | ✅ | ✅ | macOS briefing tap → thread deep link added. |
+| **Home — setup checklist** | ✅ | ✅ | |
+| **Notifications — categories registered** | ✅ | ✅ | macOS `TASK_REMINDER`, `EMAIL`, `EMAIL_REMINDER`, `DUE_TASKS`, `AI_RESPONSE` registered. |
+| **Notifications — actions** | ✅ | ✅ | macOS `TASK_COMPLETE`, `TASK_SNOOZE`, `ARCHIVE_EMAIL` wired. |
+| **Notifications — foreground (`willPresent`) banners** | ✅ | ✅ | macOS `MacAppDelegate` implements `UNUserNotificationCenterDelegate` (was previously silent in foreground). |
+| **Notifications — tap routing** | ✅ | ✅ | macOS `didReceive` routes `taskDue → tasks`, `importantEmail → thread`, `event → calendar`, AI / OTP routes. |
+| **Search — cross-entity (tasks + emails + events + people)** | ✅ | ✅ | macOS gained `MacSearchView` with category chips, recent searches, debounced 60-day calendar search, keyboard nav. |
+| **Sharing — outbound share link** | ✅ | ✅ | `shareService.createShare` on both. |
+| **Sharing — inbound deep link (`todus://share?slug=...`)** | ✅ | ✅ | macOS handler + new `MacSharedConversationView` sheet added this sweep. |
+| **Sharing — system share sheet** | ✅ (UIActivity) | 🟡 | macOS uses `NSSharingServicePicker` in most places; not yet wired into every conversation/doc surface. |
+| **AI chat — streaming SSE** | ✅ | ✅ | `cancelStream` race fixed on macOS via generation counter. |
+| **AI chat — tool calls** | ✅ | ✅ | macOS exec cancellation gates added. |
+| **AI chat — share conversation** | ✅ | ✅ | |
+| **AI chat — group chat** | ✅ | 🟡 | macOS `GroupChatService` still polls; WebSocket DO subscription migration TODO. |
+| **Voice — live chat (Gemini Live)** | ✅ | ✅ | macOS serialized audio send queue with backpressure + `AudioPlayer` derived state. |
+| **Voice — push-to-talk global hotkey** | 🔴 | ✅ | macOS `⌘⇧Space` via Carbon `RegisterEventHotKey`. iOS equivalent (Siri Shortcut / AppIntent) tracked in iOS sprint. |
+| **Voice — wake word ("Hey Todus" / "computer")** | 🔴 | 🟡 | macOS stub fail-soft; Picovoice Porcupine integration deferred to Phase 1.5 on both platforms. |
+| **Docs — web shim editor** | ✅ | ✅ | Both render Tiptap. |
+| **Docs — native shell (workspace + CRUD + search)** | 🟡 | ✅ | macOS has full `MacDocsShellView`; iOS still only `DocsWebView` (tracked in iOS sprint). |
+| **Docs — autosave + 3-state save indicator** | 🟡 | ✅ | macOS landed this sweep; iOS still single-state. |
+| **Meetings** | ✅ | ✅ | macOS sidebar entry restored. |
+| **Widgets — home-screen widgets** | ✅ | 🟡 | macOS widget extension wired in `project.yml` but `MacWidgetUpdateManager` real-data hydration verification pass pending. |
+| **Settings — general / appearance / connections / labels / categories / notifications / privacy / security / shortcuts / danger-zone** | ✅ | ✅ | Both at parity; macOS settings full-shape save fixed. |
+| **Settings — email automation policy (excluded senders, auto-send)** | 🔴 | ✅ | iOS-side tracked in iOS sprint. |
+| **Local AI models (Ollama selector)** | ✅ | ✅ | macOS Local Models button-wrapped rows + accessibility labels added. |
+| **Sidebar / menu / keyboard shortcuts** | n/a (tab bar) | ✅ | macOS shortcuts: ⌘1–4 calendar modes, ⌘B / ⌘I / ⌘U compose, ⌘1–5 / ⌘↩ in search. |
+
+**Net status (2026-05-17)** — macOS is now at structural parity with iOS for all primary surfaces. The only macOS surfaces still 🟡 vs iOS are: (a) `GroupChatService` polling vs WebSocket DO subscription, (b) widget real-data verification pass, (c) system-share sheet coverage on conversation / doc surfaces. Conversely iOS still trails macOS on: (a) Docs native shell, (b) email automation policy controls, (c) voice push-to-talk hotkey equivalent (AppIntent / Siri Shortcut), (d) Docs autosave 3-state indicator — all tracked under **Current iOS Parity + Hardening Sprint (2026-05-17)** in `TASK.md`. Wake word remains 🔴/🟡 on both pending Phase 1.5 Porcupine integration.
+
 ## A) Parity Dashboard
 
 ### Status Summary

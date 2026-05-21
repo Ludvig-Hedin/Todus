@@ -84,7 +84,7 @@ struct CalendarListView: View {
         }
         let scrollId = matched.date
         DispatchQueue.main.async {
-            withAnimation(.easeOut(duration: 0.2)) {
+            withAnimation(AppTheme.Motion.base) {
                 proxy.scrollTo(scrollId, anchor: .top)
             }
         }
@@ -115,6 +115,10 @@ struct CalendarListView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
         .background(AppTheme.backgroundTop)
+        .accessibilityElement(children: .combine)
+        // VoiceOver reads the en-dash as "minus"; spell out the full date
+        // plus the week number so it sounds natural.
+        .accessibilityLabel("\(date.formatted(date: .complete, time: .omitted)), week \(weekNumber)")
     }
 
     // MARK: - Event Row
@@ -159,6 +163,18 @@ struct CalendarListView: View {
             } label: {
                 Label("Add to folder…", systemImage: "folder.badge.plus")
             }
+            Button {
+                UIPasteboard.general.string = event.title
+            } label: {
+                Label("Copy title", systemImage: "doc.on.doc")
+            }
+            Button {
+                let start = event.startDate.formatted(date: .abbreviated, time: .shortened)
+                let end = event.endDate.formatted(date: .omitted, time: .shortened)
+                UIPasteboard.general.string = "\(event.title) — \(start) – \(end)"
+            } label: {
+                Label("Copy event summary", systemImage: "text.quote")
+            }
         }
 
         Divider()
@@ -176,6 +192,26 @@ struct CalendarListView: View {
             Text("No upcoming events")
                 .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(.secondary)
+
+            // Lightweight CTA — defers to the infra-owned CreateSheet via
+            // AppServices.requestCreateSheet so the empty state is actionable
+            // without us duplicating the create-event UI here.
+            Button {
+                services.requestCreateSheet = .event
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 13, weight: .semibold))
+                    Text("Create event")
+                        .font(.system(size: 14, weight: .semibold))
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .accessibilityHint("Open the create event sheet")
+
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

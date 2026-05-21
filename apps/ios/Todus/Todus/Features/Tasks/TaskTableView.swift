@@ -1,8 +1,6 @@
 import SwiftUI
 import SwiftData
 
-/// Issue #10: Rebuild table view with proper column alignment.
-/// Columns use fixed widths so the header and data rows match visually.
 struct TaskTableView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \TaskRecord.createdAt, order: .reverse) private var allTasks: [TaskRecord]
@@ -14,10 +12,6 @@ struct TaskTableView: View {
     @State private var selectedTask: TaskRecord?
     @State private var pendingDeleteTask: TaskRecord?
 
-    private let statusColumnWidth: CGFloat = 72
-    private let dueColumnWidth: CGFloat = 80
-
-    // Cached visible tasks — recomputed only when inputs change, not on every body evaluation.
     @State private var visibleTasks: [TaskRecord] = []
 
     private func recomputeVisibleTasks() {
@@ -51,110 +45,37 @@ struct TaskTableView: View {
             if visibleTasks.isEmpty {
                 emptyState
             } else {
-                List {
-                    headerRow
+                ScrollView {
+                    VStack(spacing: 0) {
+                        headerRow
 
-                    ForEach(visibleTasks) { task in
-                        Button {
-                            selectedTask = task
-                        } label: {
-                            HStack(spacing: 0) {
-                                // Title column — fills remaining width
-                                HStack(spacing: 8) {
-                                    Image(systemName: "circle")
-                                        .font(.system(size: 14, weight: .medium))
-                                        .foregroundStyle(AppTheme.mutedText.opacity(0.6))
+                        Divider().opacity(0.25)
 
-                                    VStack(alignment: .leading, spacing: 1) {
-                                        HStack(spacing: 4) {
-                                            if task.priority != .none {
-                                                Circle()
-                                                    .fill(priorityColor(task.priority))
-                                                    .frame(width: 5, height: 5)
-                                            }
-
-                                            Text(task.title)
-                                                .font(.system(size: 13, weight: .medium))
-                                                .tracking(-0.15)
-                                                .foregroundStyle(.primary.opacity(0.88))
-                                                .lineLimit(1)
-                                        }
-
-                                        if !task.taskDescription.isEmpty && task.taskDescription != task.title {
-                                            Text(task.taskDescription)
-                                                .font(.system(size: 11, weight: .medium))
-                                                .foregroundStyle(AppTheme.mutedText)
-                                                .lineLimit(1)
-                                        }
-                                    }
+                        LazyVStack(spacing: 0) {
+                            ForEach(visibleTasks) { task in
+                                tableRow(task)
+                                if task.id != visibleTasks.last?.id {
+                                    Divider()
+                                        .padding(.leading, 16)
+                                        .opacity(0.12)
                                 }
-                                .frame(maxWidth: .infinity, alignment: .leading)
-
-                                statusPill(task.status)
-                                    .frame(width: statusColumnWidth, alignment: .trailing)
-
-                                Group {
-                                    if let dueDate = task.dueDate {
-                                        Text(TaskDateFormatter.dueFormatter.string(from: dueDate))
-                                            .foregroundStyle(dueDateColor(dueDate))
-                                    } else {
-                                        Text("—")
-                                            .foregroundStyle(AppTheme.mutedText.opacity(0.4))
-                                    }
-                                }
-                                .font(.system(size: 11, weight: .medium))
-                                .frame(width: dueColumnWidth, alignment: .trailing)
-                            }
-                            .padding(.vertical, 4)
-                        }
-                        .buttonStyle(.plain)
-                        .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
-                        .contextMenu {
-                            Button {
-                                withAnimation(.snappy(duration: 0.22)) {
-                                    captureService.toggleCompletion(task, in: modelContext)
-                                }
-                            } label: {
-                                Label("Mark as Done", systemImage: "checkmark.circle")
-                            }
-
-                            Menu {
-                                ForEach(TaskStatus.allCases) { targetStatus in
-                                    if targetStatus != task.status {
-                                        Button {
-                                            withAnimation(.snappy(duration: 0.22)) {
-                                                captureService.setStatus(task, status: targetStatus, in: modelContext)
-                                            }
-                                        } label: {
-                                            Label(targetStatus.title, systemImage: targetStatus.systemImage)
-                                        }
-                                    }
-                                }
-                            } label: {
-                                Label("Move to…", systemImage: "arrow.right.circle")
-                            }
-
-                            Divider()
-
-                            Button(role: .destructive) {
-                                pendingDeleteTask = task
-                            } label: {
-                                Label("Delete", systemImage: "trash")
                             }
                         }
                     }
+                    .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.card, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: AppTheme.Radius.card, style: .continuous)
+                            .stroke(AppTheme.cardBorder, lineWidth: 0.5)
+                    )
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 6)
                 }
+                .scrollContentBackground(.hidden)
+                .scrollDismissesKeyboard(.interactively)
             }
         }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
-        .scrollDismissesKeyboard(.interactively)
         .contentShape(Rectangle())
-        .onTapGesture {
-            dismissKeyboard()
-        }
+        .onTapGesture { dismissKeyboard() }
         .sheet(item: $selectedTask) { task in
             TaskDetailSheet(task: task)
                 .presentationDragIndicator(.visible)
@@ -172,50 +93,221 @@ struct TaskTableView: View {
                 captureService.delete(task, in: modelContext)
                 pendingDeleteTask = nil
             }
-            Button("Cancel", role: .cancel) {
-                pendingDeleteTask = nil
-            }
+            Button("Cancel", role: .cancel) { pendingDeleteTask = nil }
         } message: { task in
-            Text("Delete “\(task.title)”? This action can’t be undone.")
+            Text("Delete \"\(task.title)\"? This action can't be undone.")
         }
         .onAppear { recomputeVisibleTasks() }
-        .onChange(of: allTasks) { recomputeVisibleTasks() }
+        // Use a (count + latest update) digest instead of `allTasks` so SwiftUI's
+        // change diff is O(1) instead of O(N). (Medium bug.)
+        .onChange(of: tasksChangeDigest) { recomputeVisibleTasks() }
         .onChange(of: selectedFolderID) { recomputeVisibleTasks() }
         .onChange(of: searchText) { recomputeVisibleTasks() }
         .onChange(of: sortOrder) { recomputeVisibleTasks() }
         .onChange(of: restrictToInbox) { recomputeVisibleTasks() }
     }
 
+    private var tasksChangeDigest: TasksDigest {
+        var latest: Date = .distantPast
+        for task in allTasks where task.updatedAt > latest {
+            latest = task.updatedAt
+        }
+        return TasksDigest(count: allTasks.count, latestUpdate: latest)
+    }
+
+    private struct TasksDigest: Equatable {
+        let count: Int
+        let latestUpdate: Date
+    }
+
     // MARK: - Header Row
 
     private var headerRow: some View {
         HStack(spacing: 0) {
+            // Leading spacer matches the checkbox column width on data rows
+            // so the "Task" header aligns with the title text. (UX P10.)
+            Color.clear.frame(width: 28)
             Text("Task")
                 .frame(maxWidth: .infinity, alignment: .leading)
             Text("Status")
-                .frame(width: statusColumnWidth, alignment: .trailing)
+                .frame(width: 76, alignment: .leading)
             Text("Due")
-                .frame(width: dueColumnWidth, alignment: .trailing)
+                .frame(width: 72, alignment: .leading)
         }
         .font(.system(size: 10, weight: .semibold))
-        .tracking(0.3)
+        .tracking(0.4)
         .textCase(.uppercase)
         .foregroundStyle(AppTheme.mutedText)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 7)
-        .background(AppTheme.surfaceSecondary.opacity(0.6), in: RoundedRectangle(cornerRadius: AppTheme.Radius.compact, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: AppTheme.Radius.compact, style: .continuous)
-                .stroke(AppTheme.cardBorder, lineWidth: 0.5)
-        )
-        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 6, trailing: 16))
-        .listRowBackground(Color.clear)
-        .listRowSeparator(.hidden)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 9)
+    }
+
+    // MARK: - Table Row
+
+    @State private var hoveringRow: UUID? = nil
+
+    private func tableRow(_ task: TaskRecord) -> some View {
+        HStack(spacing: 0) {
+            // Leading checkbox column — lets users complete a row directly from
+            // the table view, matching list / board parity. (UX P10.)
+            Button {
+                withAnimation(AppTheme.Motion.base) {
+                    captureService.toggleCompletion(task, in: modelContext)
+                }
+            } label: {
+                Image(systemName: task.completed ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(task.completed ? task.status.tintColor : AppTheme.subtleText)
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(task.completed ? "Mark as incomplete" : "Mark complete")
+
+            HStack(spacing: 8) {
+                Image(systemName: task.status.systemImage)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(task.status.tintColor)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack(spacing: 4) {
+                        if task.priority != .none {
+                            Circle()
+                                .fill(priorityColor(task.priority))
+                                .frame(width: 5, height: 5)
+                        }
+                        Text(task.title)
+                            .font(.system(size: 13, weight: .medium))
+                            .tracking(-0.15)
+                            .foregroundStyle(.primary.opacity(0.88))
+                            .lineLimit(1)
+                    }
+
+                    if !task.taskDescription.isEmpty && task.taskDescription != task.title {
+                        Text(task.taskDescription)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(AppTheme.mutedText)
+                            .lineLimit(1)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            statusPill(task.status)
+                .frame(width: 76, alignment: .leading)
+
+            Group {
+                if let dueDate = task.dueDate {
+                    Text(TaskDateFormatter.dueFormatter.string(from: dueDate))
+                        .foregroundStyle(dueDateColor(dueDate))
+                } else {
+                    Text("—")
+                        .foregroundStyle(AppTheme.mutedText.opacity(0.4))
+                }
+            }
+            .font(.system(size: 11, weight: .medium))
+            .frame(width: 72, alignment: .leading)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .contentShape(Rectangle())
+        .onTapGesture { selectedTask = task }
+        .contextMenu {
+            Button {
+                selectedTask = task
+            } label: {
+                Label("Edit", systemImage: "pencil")
+            }
+
+            Button {
+                withAnimation(AppTheme.Motion.base) {
+                    captureService.toggleCompletion(task, in: modelContext)
+                }
+            } label: {
+                Label(task.completed ? "Mark as incomplete" : "Mark as Done", systemImage: "checkmark.circle")
+            }
+
+            Divider()
+
+            Button {
+                UIPasteboard.general.string = task.title
+            } label: {
+                Label("Copy title", systemImage: "doc.on.doc")
+            }
+            if !task.taskDescription.isEmpty && task.taskDescription != task.title {
+                Button {
+                    UIPasteboard.general.string = task.taskDescription
+                } label: {
+                    Label("Copy description", systemImage: "text.quote")
+                }
+            }
+            Button {
+                let box = task.completed ? "- [x]" : "- [ ]"
+                UIPasteboard.general.string = "\(box) \(task.title)"
+            } label: {
+                Label("Copy as Markdown", systemImage: "checkmark.square")
+            }
+            Button {
+                captureService.captureInStatus(
+                    title: task.title,
+                    status: task.status,
+                    folder: task.folder,
+                    in: modelContext
+                )
+            } label: {
+                Label("Duplicate", systemImage: "plus.square.on.square")
+            }
+
+            Menu {
+                ForEach(AppTaskPriority.allCases) { p in
+                    Button {
+                        guard p != task.priority else { return }
+                        withAnimation(AppTheme.Motion.fast) {
+                            task.priority = p
+                            task.updatedAt = .now
+                            task.syncState = .pendingUpload
+                            try? modelContext.save()
+                        }
+                    } label: {
+                        if p == task.priority {
+                            Label(p.title, systemImage: "checkmark")
+                        } else {
+                            Text(p.title)
+                        }
+                    }
+                }
+            } label: {
+                Label("Priority", systemImage: "flag")
+            }
+
+            Menu {
+                ForEach(TaskStatus.allCases) { targetStatus in
+                    if targetStatus != task.status {
+                        Button {
+                            withAnimation(AppTheme.Motion.base) {
+                                captureService.setStatus(task, status: targetStatus, in: modelContext)
+                            }
+                        } label: {
+                            Label(targetStatus.title, systemImage: targetStatus.systemImage)
+                        }
+                    }
+                }
+            } label: {
+                Label("Move to…", systemImage: "arrow.right.circle")
+            }
+
+            Divider()
+
+            Button(role: .destructive) {
+                pendingDeleteTask = task
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
+        }
     }
 
     // MARK: - Status Pill
 
-    /// Colored status pill — tinted bg + tinted text, matching column accent colors
     private func statusPill(_ status: TaskStatus) -> some View {
         HStack(spacing: 3) {
             Image(systemName: status.systemImage)
@@ -263,6 +355,8 @@ struct TaskTableView: View {
 
     private func sortTasks(_ tasks: [TaskRecord]) -> [TaskRecord] {
         switch sortOrder {
+        case .smart:
+            return TaskSmartSort.sorted(tasks)
         case .newest:
             return tasks.sorted { $0.createdAt > $1.createdAt }
         case .oldest:

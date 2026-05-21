@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import SwiftData
 import EventKit
@@ -10,11 +11,13 @@ import EventKit
 struct MacHomeView: View {
     @Environment(MacAppServices.self) private var services
 
-    /// Matches Settings → Focus Mode (hide AI nudges).
-    @AppStorage("mac_focus_mode_enabled") private var macFocusModeEnabled = false
-
     /// Called when the user taps a row to navigate to another section.
     var onNavigate: ((MacPrimarySelection) -> Void)? = nil
+
+    /// Called when the user taps a briefing row tied to a specific email thread.
+    /// Hosts can wire this to open the thread sheet directly; falls back to
+    /// `onNavigate(.email(.inbox))` when nil so the row never becomes a dead tap.
+    var onNavigateEmailThread: ((String) -> Void)? = nil
 
     // Tasks due today — SwiftData live query (excludes completed tasks)
     @Query(filter: #Predicate<TaskRecord> { task in
@@ -30,13 +33,13 @@ struct MacHomeView: View {
     @State private var isHoveringEmailIndex: Int? = nil
     @State private var isHoveringMeetingIndex: Int? = nil
     @State private var isLoadingAssistantBriefing = false
+    /// Guards the empty-state "Connect Gmail" button so spam-clicks during the
+    /// OAuth round-trip don't queue duplicate `connectGmail` calls.
+    @State private var isConnectingGmail = false
     @State private var selectedCalendarEvent: CalendarEvent? = nil
     @State private var selectedUpcomingEvent: CalendarEvent? = nil
     @State private var selectedTask: TaskRecord? = nil
-    @State private var selectedEmailThread: EmailThread? = nil
     @State private var selectedMeetingId: IdentifiableString? = nil
-    @State private var proactiveNudgeThreadId: IdentifiableString? = nil
-    @State private var isLoadingProactiveNudges = false
 
     private var isAssistantBriefingRefreshing: Bool {
         isLoadingAssistantBriefing && services.emailService.assistantBriefing != nil
@@ -54,14 +57,6 @@ struct MacHomeView: View {
         VStack(alignment: .leading, spacing: 0) {
             // Greeting header
             greetingHeader
-                .padding(.bottom, MacTheme.spacing16)
-
-            if showProactiveAssistantOnHome {
-                proactiveAssistantSection
-                    .padding(.bottom, MacTheme.spacing20)
-            }
-
-            overviewStrip
                 .padding(.bottom, MacTheme.spacing20)
 
             if services.assistantAutomationPolicy.briefingEnabled
@@ -79,37 +74,37 @@ struct MacHomeView: View {
             if shouldShowGetStarted {
                 getStartedSection
             } else {
-                // Tasks first: action-oriented users scan obligations before the schedule.
-                HStack(alignment: .top, spacing: MacTheme.spacing16) {
+                HStack(alignment: .top, spacing: MacTheme.spacing20) {
                     tasksColumn
-                    eventsColumn
-                    scheduleSidebar
+                    VStack(alignment: .leading, spacing: MacTheme.spacing20) {
+                        eventsColumn
+                        scheduleSidebar
+                    }
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
                 }
                 .padding(.bottom, MacTheme.spacing24)
-
-                docsAndToolsRow
-                    .padding(.bottom, MacTheme.spacing24)
 
                 emailsSection
             }
         }
-        .sheet(item: $proactiveNudgeThreadId) { item in
-            MacEmailThreadView(threadId: item.value)
-                .frame(minWidth: 640, minHeight: 480)
-        }
         .task {
             await loadCalendarData()
             await services.emailService.checkConnection()
-            if services.emailService.hasConnection && services.emailService.threads.isEmpty {
-                await services.emailService.loadThreads(refresh: true)
+            if services.emailService.hasConnection {
+                // Always trigger a Gmail re-sync on Home appearance — without this, returning
+                // users see whatever stale rows the backend last persisted (was the
+                // "month-old emails" symptom on iOS too). The forceSyncCooldown coalesces
+                // this with the inbox view's polling so we don't double-wipe the DB.
+                if services.emailService.threads.isEmpty {
+                    await services.emailService.loadThreads(refresh: true, triggerSync: true)
+                } else {
+                    Task { [services] in
+                        await services.emailService.loadThreads(refresh: true, triggerSync: true)
+                    }
+                }
             }
             if services.authService.isAuthenticated {
                 await services.meetingsService.loadMeetings()
-            }
-            if shouldRefreshProactiveNudges {
-                isLoadingProactiveNudges = true
-                await services.emailService.loadAssistantNudges()
-                isLoadingProactiveNudges = false
             }
             if services.assistantAutomationPolicy.briefingEnabled
                 && services.assistantAutomationPolicy.showHomeBriefing {
@@ -118,170 +113,16 @@ struct MacHomeView: View {
                 isLoadingAssistantBriefing = false
             }
         }
-    }
-
-    // MARK: - Proactive AI suggestions (open loops)
-
-    private var showProactiveAssistantOnHome: Bool {
-        services.authService.isAuthenticated
-            && services.emailService.hasConnection
-            && services.assistantAutomationPolicy.assistantThreadActionsVisible
-            && services.assistantAutomationPolicy.briefingEnabled
-            && !macFocusModeEnabled
-    }
-
-    private var shouldRefreshProactiveNudges: Bool {
-        services.authService.isAuthenticated
-            && services.emailService.hasConnection
-            && services.assistantAutomationPolicy.assistantThreadActionsVisible
-            && services.assistantAutomationPolicy.briefingEnabled
-            && !macFocusModeEnabled
-    }
-
-    private var proactiveNudgeCards: [MailAssistantNudge] {
-        services.emailService.assistantNudges.filter { $0.count > 0 }
-    }
-
-    private var proactiveAssistantSection: some View {
-        VStack(alignment: .leading, spacing: MacTheme.spacing12) {
-            HStack(alignment: .top, spacing: MacTheme.spacing8) {
-                Image(systemName: "sparkles")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [MacTheme.accent, MacTheme.accent.opacity(0.55)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .accessibilityHidden(true)
-
-                VStack(alignment: .leading, spacing: MacTheme.spacing4) {
-                    Text("Suggestions for you")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(MacTheme.textPrimary)
-                    Text("Picked up from your inbox — open a thread or jump to Mail.")
-                        .font(MacTheme.metaFont())
-                        .foregroundStyle(MacTheme.mutedText)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                Spacer(minLength: MacTheme.spacing12)
-
-                if isLoadingProactiveNudges {
-                    ProgressView()
-                        .controlSize(.small)
-                        .padding(.trailing, 4)
-                }
-
-                Button("Open Mail") {
-                    onNavigate?(.email(.inbox))
-                }
-                .buttonStyle(.plain)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(MacTheme.accent)
-                .pointerStyle(.link)
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            // Mirror the inbox view's behavior so Home auto-updates when the user returns
+            // to the app, even if they never visit the Mail tab.
+            guard services.emailService.hasConnection,
+                  !services.emailService.isLoadingThreads,
+                  !services.emailService.isReconciling
+            else { return }
+            Task { [services] in
+                await services.emailService.loadThreads(refresh: true, triggerSync: true)
             }
-
-            if isLoadingProactiveNudges && proactiveNudgeCards.isEmpty {
-                loadingCard(message: "Checking your inbox for suggestions…")
-            } else if !isLoadingProactiveNudges && proactiveNudgeCards.isEmpty {
-                Text("Nothing to flag right now. When new replies or drafts need attention, they’ll show up here.")
-                    .font(MacTheme.cardSubtitleFont())
-                    .foregroundStyle(MacTheme.mutedText)
-                    .padding(MacTheme.spacing12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(MacTheme.emptyStateSurface, in: RoundedRectangle(cornerRadius: MacTheme.compactRadius, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: MacTheme.compactRadius, style: .continuous)
-                            .stroke(MacTheme.cardBorder.opacity(0.7), lineWidth: 0.5)
-                    )
-            } else {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: MacTheme.spacing8) {
-                        ForEach(Array(proactiveNudgeCards.prefix(6))) { nudge in
-                            proactiveNudgeCard(nudge)
-                        }
-                    }
-                    .padding(.vertical, 2)
-                }
-            }
-        }
-        .padding(MacTheme.spacing16)
-        .background(MacTheme.surfaceCard, in: RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous)
-                .stroke(
-                    LinearGradient(
-                        colors: [MacTheme.accent.opacity(0.4), MacTheme.accent.opacity(0.06)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: 1
-                )
-        )
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("AI suggestions from your mail")
-    }
-
-    private func proactiveNudgeCard(_ nudge: MailAssistantNudge) -> some View {
-        Button {
-            if let id = nudge.threadIds.first {
-                proactiveNudgeThreadId = IdentifiableString(value: id)
-            } else {
-                onNavigate?(.email(.inbox))
-            }
-        } label: {
-            HStack(alignment: .top, spacing: MacTheme.spacing8) {
-                Image(systemName: iconForAssistantNudge(nudge.type))
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(MacTheme.accent)
-                    .frame(width: 24)
-
-                VStack(alignment: .leading, spacing: MacTheme.spacing6) {
-                    HStack(alignment: .firstTextBaseline, spacing: MacTheme.spacing6) {
-                        Text(nudge.title)
-                            .font(.system(size: 12.5, weight: .semibold))
-                            .foregroundStyle(MacTheme.textPrimary)
-                            .multilineTextAlignment(.leading)
-                            .lineLimit(2)
-                        Spacer(minLength: 4)
-                        Text("\(nudge.count)")
-                            .font(.system(size: 10, weight: .bold, design: .rounded))
-                            .foregroundStyle(MacTheme.textSecondary)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(MacTheme.badgeSurface, in: Capsule(style: .continuous))
-                    }
-                    Text(nudge.description)
-                        .font(MacTheme.metaFont())
-                        .foregroundStyle(MacTheme.textSecondary)
-                        .lineLimit(3)
-                        .multilineTextAlignment(.leading)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            .padding(MacTheme.spacing12)
-            .frame(width: 272, alignment: .leading)
-            .background(MacTheme.emptyStateSurface, in: RoundedRectangle(cornerRadius: MacTheme.compactRadius, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: MacTheme.compactRadius, style: .continuous)
-                    .stroke(MacTheme.cardBorder, lineWidth: 0.5)
-            )
-        }
-        .buttonStyle(.plain)
-        .pointerStyle(.link)
-        .disabled(nudge.threadIds.isEmpty)
-        .help("\(nudge.title): \(nudge.description)")
-        .accessibilityLabel("\(nudge.title), \(nudge.count) threads")
-    }
-
-    private func iconForAssistantNudge(_ type: AssistantNudgeType) -> String {
-        switch type {
-        case .replyNeeded: return "arrowshape.turn.up.left.fill"
-        case .meetingRequest: return "calendar.badge.clock"
-        case .followUp: return "clock.arrow.circlepath"
-        case .draftReady: return "doc.text.fill"
         }
     }
 
@@ -407,9 +248,26 @@ struct MacHomeView: View {
             .sorted { $0.startsAt < $1.startsAt }
     }
 
+    /// Total actionable items in the briefing — fed to the section header badge.
+    /// Previously showed `topPriorities.count` (≈3) which mismatched what the user saw
+    /// (10+ items across columns). Now it counts what's actually rendered after dedupe
+    /// so the badge is honest.
     private var assistantBriefingPriorityCount: Int {
         guard let briefing = services.emailService.assistantBriefing else { return 0 }
-        return briefing.topPriorities.count
+        let needsYouCount = dedupedOpenLoopRows(briefing.needsYou, briefing: briefing).count
+        let waitingOnCount = dedupedOpenLoopRows(briefing.waitingOn, briefing: briefing).count
+        return briefing.prepared.count + needsYouCount + waitingOnCount
+    }
+
+    /// Drop open-loop rows whose thread already appears as a Prepared (draft-ready)
+    /// row. Without this, the same thread shows up in two columns with near-identical
+    /// content — confusing and wasteful. Drafts win because they're "almost done."
+    private func dedupedOpenLoopRows(_ loops: [AssistantOpenLoop], briefing: AssistantBriefing) -> [AssistantOpenLoop] {
+        let preparedThreadIds = Set(briefing.prepared.compactMap { $0.threadId })
+        return loops.filter { loop in
+            guard let tid = loop.threadId else { return true }
+            return !preparedThreadIds.contains(tid)
+        }
     }
 
     private var emailSectionSubtitle: String {
@@ -425,98 +283,6 @@ struct MacHomeView: View {
             return "Latest threads from your inbox."
         }
         return "Showing the \(shown) most recent of \(total) loaded threads — use Open inbox for everything."
-    }
-
-    // MARK: - Overview strip
-
-    private var overviewStrip: some View {
-        let meetingCount = upcomingMeetings.count
-        return VStack(alignment: .leading, spacing: MacTheme.spacing8) {
-            Text("Jump to")
-                .font(MacTheme.metaFont())
-                .foregroundStyle(MacTheme.mutedText)
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: MacTheme.spacing8) {
-                    overviewChip(
-                        title: "Tasks",
-                        value: incompleteTasks.isEmpty ? "None open" : "\(incompleteTasks.count) open",
-                        icon: "checkmark.circle",
-                        help: "Open the Tasks tab",
-                        action: { onNavigate?(.tasks) }
-                    )
-                    if services.emailService.hasConnection {
-                        overviewChip(
-                            title: "Mail",
-                            value: unreadEmailCount == 0 ? "All caught up" : "\(unreadEmailCount) unread",
-                            icon: "envelope.badge",
-                            help: "Open Inbox",
-                            action: { onNavigate?(.email(.inbox)) }
-                        )
-                    }
-                    if services.calendarService.canReadEvents() {
-                        overviewChip(
-                            title: "Calendar",
-                            value: todaysEvents.isEmpty ? "Free today" : "\(todaysEvents.count) today",
-                            icon: "calendar",
-                            help: "Open Calendar",
-                            action: { onNavigate?(.calendar(.all)) }
-                        )
-                    }
-                    if services.authService.isAuthenticated {
-                        overviewChip(
-                            title: "Meetings",
-                            value: meetingCount == 0 ? "None upcoming" : "\(meetingCount) upcoming",
-                            icon: "video",
-                            help: "Open Meetings",
-                            action: { onNavigate?(.meetings) }
-                        )
-                    }
-                    overviewChip(
-                        title: "Docs",
-                        value: "Notes & docs",
-                        icon: "doc.text",
-                        help: "Open Docs in the app",
-                        action: { onNavigate?(.docs) }
-                    )
-                }
-            }
-        }
-        .accessibilityElement(children: .contain)
-    }
-
-    private func overviewChip(title: String, value: String, icon: String, help: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: MacTheme.spacing8) {
-                Image(systemName: icon)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(MacTheme.textSecondary)
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(MacTheme.textPrimary)
-                    Text(value)
-                        .font(.system(size: 11, weight: .regular))
-                        .foregroundStyle(MacTheme.textSecondary)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            .padding(.horizontal, MacTheme.spacing12)
-            .padding(.vertical, MacTheme.spacing8)
-            .background(MacTheme.surfaceCard, in: RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous)
-                    .stroke(MacTheme.cardBorder, lineWidth: 0.5)
-            )
-        }
-        .buttonStyle(.plain)
-        .focusEffectDisabled()
-        .pointerStyle(.link)
-        .help(help)
-        .accessibilityLabel("\(title). \(value)")
-        .accessibilityHint(help)
     }
 
     private var setupBanner: some View {
@@ -555,47 +321,253 @@ struct MacHomeView: View {
         )
     }
 
+    /// Source of a briefing row — drives the trust-loop mutation when dismissed.
+    private enum MacBriefingRowSource { case openLoop, preparedAction }
+
+    /// Pre-rendered row used by the queue columns. Computed once per render so the
+    /// dedupe + display flip happens in one place.
+    private struct MacBriefingRow: Identifiable {
+        let id: String
+        let backendId: String
+        let source: MacBriefingRowSource
+        let display: BriefingRowDisplay
+        let threadId: String?
+        /// LLM-generated verb-first sentence; nil → fall back to subject/title.
+        let actionLine: String?
+    }
+
     private var assistantBriefingSection: some View {
-        VStack(alignment: .leading, spacing: MacTheme.spacing12) {
-            sectionHeader(
-                title: "Assistant briefing",
-                subtitle: "Summarized from your mail and tasks. Manage details in Mail or Tasks.",
-                count: assistantBriefingPriorityCount > 0 ? assistantBriefingPriorityCount : nil,
-                isUpdating: isAssistantBriefingRefreshing
-            )
+        VStack(alignment: .leading, spacing: MacTheme.spacing8) {
+            HStack(spacing: MacTheme.spacing8) {
+                Text("Today")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(MacTheme.textSecondary)
+                    .tracking(0.6)
+                    .textCase(.uppercase)
+                if isAssistantBriefingRefreshing {
+                    ProgressView().controlSize(.mini)
+                }
+                Spacer()
+                if macTodayItems.count > 5 {
+                    Button("Open Mail") { onNavigate?(.email(.inbox)) }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(MacTheme.accent)
+                }
+            }
 
             if isLoadingAssistantBriefing && services.emailService.assistantBriefing == nil {
-                loadingCard(message: "Preparing your briefing")
-            } else if let briefing = services.emailService.assistantBriefing {
-                VStack(alignment: .leading, spacing: MacTheme.spacing12) {
-                    assistantPriorityStrip(briefing)
-
-                    HStack(alignment: .top, spacing: MacTheme.spacing12) {
-                        assistantQueueColumn(
-                            title: "Needs You",
-                            items: briefing.needsYou.map { ($0.title, $0.summary) },
-                            emptyMessage: "No reply or decision blockers right now."
-                        )
-                        assistantQueueColumn(
-                            title: "Waiting On",
-                            items: briefing.waitingOn.map { ($0.title, $0.summary) },
-                            emptyMessage: "Nothing currently tracked as waiting on someone else."
-                        )
-                        assistantQueueColumn(
-                            title: "Prepared",
-                            items: briefing.prepared.map { ($0.title, $0.summary) },
-                            emptyMessage: "No prepared drafts or actions waiting for approval."
-                        )
+                loadingCard(message: "Preparing your day")
+            } else if macTodayItems.isEmpty {
+                HStack(spacing: 10) {
+                    Image(systemName: "checkmark.seal")
+                        .font(.system(size: 14, weight: .regular))
+                        .foregroundStyle(MacTheme.mutedText)
+                    Text("You're caught up.")
+                        .font(.system(size: 13))
+                        .foregroundStyle(MacTheme.textSecondary)
+                    Spacer()
+                }
+                .padding(.vertical, MacTheme.spacing16)
+            } else {
+                VStack(spacing: 0) {
+                    let items = Array(macTodayItems.prefix(5).enumerated())
+                    ForEach(items, id: \.element.id) { pair in
+                        macTodayRow(pair.element)
+                        if pair.offset < items.count - 1 {
+                            Divider().padding(.leading, 32)
+                        }
                     }
                 }
             }
         }
     }
 
+    /// Today list ranking — verb-first action sentences, max 5.
+    /// Same logic as iOS `briefingFeedItems`: urgent reply pinned first,
+    /// high-confidence drafts next, then remaining prepared items, then
+    /// needsYou open-loops. Dedupe by `threadId` against earlier rows.
+    /// `waitingOn` deliberately excluded — it's noise for action-oriented users.
+    private var macTodayItems: [MacBriefingRow] {
+        guard let briefing = services.emailService.assistantBriefing else { return [] }
+        var items: [MacBriefingRow] = []
+        var seenThreadIds = Set<String>()
+        var seenBackendIds = Set<String>()
+
+        func push(_ row: MacBriefingRow) {
+            if seenBackendIds.contains(row.backendId) { return }
+            if let tid = row.threadId, !tid.isEmpty {
+                if seenThreadIds.contains(tid) { return }
+                seenThreadIds.insert(tid)
+            }
+            seenBackendIds.insert(row.backendId)
+            items.append(row)
+        }
+
+        if let urgent = briefing.today.urgentReply {
+            push(MacBriefingRow(
+                id: "urgent-\(urgent.id)",
+                backendId: urgent.id,
+                source: .openLoop,
+                display: urgent.rowDisplay,
+                threadId: urgent.threadId,
+                actionLine: urgent.actionLine
+            ))
+        }
+        for action in briefing.prepared where action.type == "draft_reply" && action.confidence >= 0.70 {
+            push(MacBriefingRow(
+                id: "prepared-\(action.id)",
+                backendId: action.id,
+                source: .preparedAction,
+                display: action.rowDisplay,
+                threadId: action.threadId,
+                actionLine: action.actionLine
+            ))
+        }
+        for action in briefing.prepared where !(action.type == "draft_reply" && action.confidence >= 0.70) {
+            push(MacBriefingRow(
+                id: "prepared-\(action.id)",
+                backendId: action.id,
+                source: .preparedAction,
+                display: action.rowDisplay,
+                threadId: action.threadId,
+                actionLine: action.actionLine
+            ))
+        }
+        for loop in briefing.needsYou {
+            push(MacBriefingRow(
+                id: "needs-\(loop.id)",
+                backendId: loop.id,
+                source: .openLoop,
+                display: loop.rowDisplay,
+                threadId: loop.threadId,
+                actionLine: loop.actionLine
+            ))
+        }
+        return items
+    }
+
+    private func macGlyph(for badge: BriefingRowDisplay.Badge) -> String {
+        switch badge {
+        case .reply: return "arrowshape.turn.up.left"
+        case .draft: return "paperplane"
+        case .waiting: return "hourglass"
+        case .research: return "magnifyingglass"
+        case .task: return "checkmark.circle"
+        case .event: return "calendar"
+        case .followUp: return "arrow.forward.circle"
+        case .other: return "circle.dotted"
+        }
+    }
+
+    /// Resolve primary line: prefer `actionLine`, fall back to AI verb hint +
+    /// subject. Matches iOS `todayPrimaryLine`.
+    private func macPrimaryLine(_ row: MacBriefingRow) -> String {
+        if let line = row.actionLine?.trimmingCharacters(in: .whitespacesAndNewlines), !line.isEmpty {
+            return line
+        }
+        let verbHint = row.display.caption.trimmingCharacters(in: .whitespacesAndNewlines)
+        let subject = row.display.headline.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !verbHint.isEmpty && !subject.isEmpty {
+            return "\(verbHint): \(subject)"
+        }
+        return subject.isEmpty ? verbHint : subject
+    }
+
+    /// Meta line — short subject (when actionLine carries the verb) or AI verb.
+    private func macMetaLine(_ row: MacBriefingRow) -> String {
+        if let line = row.actionLine?.trimmingCharacters(in: .whitespacesAndNewlines), !line.isEmpty {
+            return row.display.headline.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return row.display.caption
+    }
+
+    /// Flat row: SF Symbol + verb-first sentence + meta + ellipsis. No card.
+    private func macTodayRow(_ row: MacBriefingRow) -> some View {
+        let primary = macPrimaryLine(row)
+        let meta = macMetaLine(row)
+        return HoverableRow(action: { openMacBriefingRow(row) }) { isHovering in
+            HStack(alignment: .top, spacing: MacTheme.spacing12) {
+                Image(systemName: macGlyph(for: row.display.badge))
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(row.display.badge == .draft || row.display.badge == .reply
+                                     ? MacTheme.accent : MacTheme.mutedText)
+                    .frame(width: 20, height: 20, alignment: .center)
+                    .padding(.top, 1)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(primary)
+                        .font(.system(size: 13.5, weight: .semibold))
+                        .foregroundStyle(MacTheme.textPrimary)
+                        .multilineTextAlignment(.leading)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if !meta.isEmpty {
+                        Text(meta)
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(MacTheme.textSecondary)
+                            .lineLimit(1)
+                    }
+                }
+
+                Spacer(minLength: MacTheme.spacing8)
+
+                // Hover-revealed action strip — Things-3 style. Keeps the row
+                // visually quiet until the user actually wants to act.
+                HStack(spacing: 6) {
+                    if isHovering {
+                        macRowActionButton(systemImage: "checkmark", tooltip: "Mark done") {
+                            Task { await markMacBriefingRowDone(row) }
+                        }
+                        macRowActionButton(systemImage: "clock", tooltip: "Snooze later today") {
+                            let date = Calendar.current.date(byAdding: .hour, value: 4, to: Date()) ?? Date()
+                            Task { await snoozeMacBriefingRow(row, until: date) }
+                        }
+                        macRowActionButton(systemImage: "xmark", tooltip: "Dismiss") {
+                            Task { await dismissMacBriefingRow(row) }
+                        }
+                    }
+                    Menu {
+                        macBriefingRowMenu(for: row)
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(MacTheme.mutedText)
+                            .frame(width: 22, height: 22)
+                            .contentShape(Rectangle())
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .help("More actions")
+                }
+            }
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
+        }
+        .contextMenu {
+            macBriefingRowMenu(for: row)
+        }
+    }
+
+    private func macRowActionButton(systemImage: String, tooltip: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(MacTheme.textSecondary)
+                .frame(width: 22, height: 22)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(tooltip)
+    }
+
     private func assistantPriorityStrip(_ briefing: AssistantBriefing) -> some View {
         HStack(spacing: MacTheme.spacing8) {
             if let urgentReply = briefing.today.urgentReply {
-                assistantPriorityCard(title: "Urgent reply", detail: urgentReply.title)
+                // Show the email subject (`summary`) as the prominent line, not the
+                // AI verb. Same flip-the-fields rule we apply to feed rows.
+                assistantPriorityCard(title: "Urgent reply", detail: urgentReply.rowDisplay.headline)
             }
             if let topTask = briefing.today.topTask {
                 assistantPriorityCard(title: "Top task", detail: topTask.title)
@@ -626,17 +598,13 @@ struct MacHomeView: View {
         )
     }
 
-    private func assistantQueueColumn(
-        title: String,
-        items: [(title: String, summary: String)],
-        emptyMessage: String
-    ) -> some View {
+    private func assistantQueueColumn(title: String, rows: [MacBriefingRow]) -> some View {
         VStack(alignment: .leading, spacing: MacTheme.spacing8) {
             HStack(spacing: MacTheme.spacing6) {
                 Text(title)
                     .font(MacTheme.sectionHeaderFont())
                     .foregroundStyle(MacTheme.textPrimary)
-                Text("\(items.count)")
+                Text("\(rows.count)")
                     .font(.system(size: 10, weight: .semibold, design: .rounded))
                     .foregroundStyle(MacTheme.textSecondary)
                     .padding(.horizontal, 5)
@@ -645,33 +613,149 @@ struct MacHomeView: View {
                 Spacer()
             }
 
-            if items.isEmpty {
-                emptyCard(message: emptyMessage, icon: "sparkles")
-            } else {
-                VStack(spacing: MacTheme.spacing6) {
-                    ForEach(Array(items.prefix(3).enumerated()), id: \.offset) { _, item in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(item.title)
-                                .font(.system(size: 12.5, weight: .semibold))
-                                .foregroundStyle(MacTheme.textPrimary)
-                                .lineLimit(1)
-                            Text(item.summary)
-                                .font(MacTheme.cardSubtitleFont())
-                                .foregroundStyle(MacTheme.textSecondary)
-                                .lineLimit(2)
-                        }
-                        .padding(MacTheme.spacing12)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(MacTheme.surfaceCard, in: RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous)
-                                .stroke(MacTheme.cardBorder, lineWidth: 0.5)
-                        )
-                    }
+            VStack(spacing: MacTheme.spacing6) {
+                ForEach(rows.prefix(3)) { row in
+                    macBriefingRowCard(row)
                 }
             }
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    /// Tint per badge — gives each category a stable visual identifier without
+    /// breaking the editorial monochrome look.
+    private func macBadgeTint(_ kind: BriefingRowDisplay.Badge) -> Color {
+        switch kind {
+        case .reply: return MacTheme.accent
+        case .draft: return Color(red: 0.40, green: 0.65, blue: 0.45) // soft green
+        case .waiting: return MacTheme.mutedText
+        case .research: return Color(red: 0.55, green: 0.45, blue: 0.75)
+        case .task: return Color(red: 0.85, green: 0.55, blue: 0.20)
+        case .event: return MacTheme.accent
+        case .followUp: return MacTheme.mutedText
+        case .other: return MacTheme.mutedText
+        }
+    }
+
+    private func macBriefingRowCard(_ row: MacBriefingRow) -> some View {
+        let tint = macBadgeTint(row.display.badge)
+        return Button {
+            openMacBriefingRow(row)
+        } label: {
+            VStack(alignment: .leading, spacing: 6) {
+                // Top: tinted badge + AI verb caption (small, subordinate to subject below)
+                HStack(alignment: .center, spacing: 6) {
+                    Text(row.display.badge.label)
+                        .font(.system(size: 9.5, weight: .bold))
+                        .textCase(.uppercase)
+                        .foregroundStyle(tint)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: MacTheme.pillRadius, style: .continuous))
+
+                    if !row.display.caption.isEmpty {
+                        Text(row.display.caption)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(MacTheme.mutedText)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
+                }
+
+                // Email subject — the user's mental anchor. Most prominent in the row.
+                Text(row.display.headline)
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .foregroundStyle(MacTheme.textPrimary)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+            }
+            .padding(MacTheme.spacing12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(MacTheme.surfaceCard, in: RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous)
+                    .stroke(MacTheme.cardBorder, lineWidth: 0.5)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .focusEffectDisabled()
+        .pointerStyle(.link)
+        .help("Open thread")
+        .contextMenu {
+            macBriefingRowMenu(for: row)
+        }
+    }
+
+    @ViewBuilder
+    private func macBriefingRowMenu(for row: MacBriefingRow) -> some View {
+        Button("Open thread") {
+            openMacBriefingRow(row)
+        }
+        Button("Mark done") {
+            Task { await markMacBriefingRowDone(row) }
+        }
+        if row.source != .preparedAction {
+            Menu("Snooze") {
+                Button("Later today") {
+                    let date = Calendar.current.date(byAdding: .hour, value: 4, to: Date()) ?? Date()
+                    Task { await snoozeMacBriefingRow(row, until: date) }
+                }
+                Button("Tomorrow morning") {
+                    let cal = Calendar.current
+                    let tomorrow = cal.date(byAdding: .day, value: 1, to: Date()) ?? Date()
+                    let date = cal.date(bySettingHour: 9, minute: 0, second: 0, of: tomorrow) ?? tomorrow
+                    Task { await snoozeMacBriefingRow(row, until: date) }
+                }
+                Button("Next week") {
+                    let date = Calendar.current.date(byAdding: .day, value: 7, to: Date()) ?? Date()
+                    Task { await snoozeMacBriefingRow(row, until: date) }
+                }
+            }
+        }
+        Divider()
+        Button(row.source == .preparedAction ? "Not a draft I want" : "Not a reply", role: .destructive) {
+            Task { await dismissMacBriefingRow(row) }
+        }
+    }
+
+    private func openMacBriefingRow(_ row: MacBriefingRow) {
+        if let id = row.threadId, !id.isEmpty, let openThread = onNavigateEmailThread {
+            // Prefer the deep-link callback when wired so the user lands directly
+            // on the thread instead of the inbox (matches iOS behavior).
+            openThread(id)
+        } else {
+            // Fallback: when no thread-aware callback is wired or the row has no
+            // threadId, route to the inbox so the row is never a silent no-op.
+            onNavigate?(.email(.inbox))
+        }
+    }
+
+    private func dismissMacBriefingRow(_ row: MacBriefingRow) async {
+        switch row.source {
+        case .openLoop:
+            await services.emailService.dismissBriefingOpenLoop(id: row.backendId, threadId: row.threadId)
+        case .preparedAction:
+            await services.emailService.dismissBriefingPreparedAction(id: row.backendId, threadId: row.threadId)
+        }
+    }
+
+    private func markMacBriefingRowDone(_ row: MacBriefingRow) async {
+        switch row.source {
+        case .openLoop:
+            await services.emailService.completeBriefingOpenLoop(id: row.backendId, threadId: row.threadId)
+        case .preparedAction:
+            await services.emailService.dismissBriefingPreparedAction(id: row.backendId, threadId: row.threadId, feedback: "completed")
+        }
+    }
+
+    private func snoozeMacBriefingRow(_ row: MacBriefingRow, until: Date) async {
+        switch row.source {
+        case .openLoop:
+            await services.emailService.snoozeBriefingOpenLoop(id: row.backendId, threadId: row.threadId, until: until)
+        case .preparedAction:
+            await services.emailService.dismissBriefingPreparedAction(id: row.backendId, threadId: row.threadId, feedback: "helpful")
+        }
     }
 
     // MARK: - Events Column
@@ -755,7 +839,7 @@ struct MacHomeView: View {
         .pointerStyle(.link)
         .help("Show event details")
         .onHover { hovering in
-            withAnimation(.easeOut(duration: 0.12)) {
+            withAnimation(MacTheme.Motion.fast) {
                 isHoveringEventIndex = hovering ? index : nil
             }
         }
@@ -781,11 +865,24 @@ struct MacHomeView: View {
                     action: { onNavigate?(.tasks) }
                 )
             } else {
-                VStack(spacing: MacTheme.spacing4) {
-                    ForEach(Array(orderedPreviewTasks.prefix(8).enumerated()), id: \.element.id) { index, task in
-                        taskRow(task, index: index, dueCaption: taskDueCaption(task))
+                let items = Array(orderedPreviewTasks.prefix(8).enumerated())
+                ScrollView(.vertical, showsIndicators: false) {
+                    VStack(spacing: 0) {
+                        ForEach(items, id: \.element.id) { index, task in
+                            taskRow(task, index: index, dueCaption: taskDueCaption(task))
+                            if index < items.count - 1 {
+                                Divider().padding(.leading, MacTheme.spacing12)
+                            }
+                        }
                     }
                 }
+                .frame(maxHeight: 280)
+                .background(MacTheme.surfaceCard, in: RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous)
+                        .stroke(MacTheme.cardBorder, lineWidth: 0.5)
+                )
             }
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -799,7 +896,7 @@ struct MacHomeView: View {
     private var scheduleSidebar: some View {
         VStack(alignment: .leading, spacing: MacTheme.spacing16) {
             upcomingEventsSection
-            meetingsSection
+            // meetingsSection
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .popover(item: $selectedUpcomingEvent, arrowEdge: .leading) { event in
@@ -889,9 +986,18 @@ struct MacHomeView: View {
                         .font(MacTheme.cardTitleFont())
                         .foregroundStyle(MacTheme.textPrimary)
                         .lineLimit(1)
-                    Text(event.startDate, format: .dateTime.month(.abbreviated).day().hour().minute())
-                        .font(MacTheme.cardSubtitleFont())
-                        .foregroundStyle(MacTheme.textSecondary)
+                    // All-day events were rendering as "Apr 30 at 00:00" — readers parse
+                    // that as "midnight meeting" first, "all-day" never. Branch on the
+                    // EKEvent flag and label them honestly.
+                    if event.isAllDay {
+                        Text("\(event.startDate.formatted(.dateTime.month(.abbreviated).day())) · All day")
+                            .font(MacTheme.cardSubtitleFont())
+                            .foregroundStyle(MacTheme.textSecondary)
+                    } else {
+                        Text(event.startDate, format: .dateTime.month(.abbreviated).day().hour().minute())
+                            .font(MacTheme.cardSubtitleFont())
+                            .foregroundStyle(MacTheme.textSecondary)
+                    }
                 }
 
                 Spacer(minLength: 0)
@@ -912,7 +1018,7 @@ struct MacHomeView: View {
         .pointerStyle(.link)
         .help("Show event details")
         .onHover { hovering in
-            withAnimation(.easeOut(duration: 0.12)) {
+            withAnimation(MacTheme.Motion.fast) {
                 isHoveringUpcomingEventIndex = hovering ? index : nil
             }
         }
@@ -965,55 +1071,10 @@ struct MacHomeView: View {
         .pointerStyle(.link)
         .help("Open meeting details")
         .onHover { hovering in
-            withAnimation(.easeOut(duration: 0.12)) {
+            withAnimation(MacTheme.Motion.fast) {
                 isHoveringMeetingIndex = hovering ? index : nil
             }
         }
-    }
-
-    private var docsAndToolsRow: some View {
-        HStack(alignment: .center, spacing: MacTheme.spacing16) {
-            Image(systemName: "doc.text.fill")
-                .font(.system(size: 20, weight: .light))
-                .foregroundStyle(MacTheme.accent.opacity(0.9))
-                .frame(width: 32)
-                .accessibilityHidden(true)
-
-            VStack(alignment: .leading, spacing: MacTheme.spacing4) {
-                Text("Docs")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(MacTheme.textPrimary)
-                Text("Notes and documents live here — same place as the Docs sidebar item.")
-                    .font(MacTheme.cardSubtitleFont())
-                    .foregroundStyle(MacTheme.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Spacer(minLength: MacTheme.spacing12)
-
-            Button {
-                onNavigate?(.docs)
-            } label: {
-                Text("Open Docs")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, MacTheme.spacing16)
-                    .padding(.vertical, MacTheme.spacing8)
-                    .background(MacTheme.accent, in: RoundedRectangle(cornerRadius: MacTheme.buttonRadius, style: .continuous))
-            }
-            .buttonStyle(.plain)
-            .focusEffectDisabled()
-            .pointerStyle(.link)
-            .help("Switch to the Docs tab")
-            .accessibilityLabel("Open Docs tab")
-        }
-        .padding(MacTheme.spacing16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(MacTheme.surfaceCard, in: RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous)
-                .stroke(MacTheme.cardBorder, lineWidth: 0.5)
-        )
     }
 
     private func taskDueCaption(_ task: TaskRecord) -> String? {
@@ -1072,7 +1133,7 @@ struct MacHomeView: View {
         .pointerStyle(.link)
         .help("Edit task")
         .onHover { hovering in
-            withAnimation(.easeOut(duration: 0.12)) {
+            withAnimation(MacTheme.Motion.fast) {
                 isHoveringTaskIndex = hovering ? index : nil
             }
         }
@@ -1119,12 +1180,23 @@ struct MacHomeView: View {
                         .foregroundStyle(MacTheme.mutedText)
 
                     Button {
-                        Task { await services.emailService.connectGmail(authService: services.authService) }
+                        guard !isConnectingGmail else { return }
+                        isConnectingGmail = true
+                        Task {
+                            defer { isConnectingGmail = false }
+                            await services.emailService.connectGmail(authService: services.authService)
+                        }
                     } label: {
                         HStack(spacing: 5) {
-                            Image(systemName: "link")
-                                .font(.system(size: 11, weight: .medium))
-                            Text("Connect Gmail")
+                            if isConnectingGmail {
+                                ProgressView()
+                                    .controlSize(.mini)
+                                    .tint(.white)
+                            } else {
+                                Image(systemName: "link")
+                                    .font(.system(size: 11, weight: .medium))
+                            }
+                            Text(isConnectingGmail ? "Connecting…" : "Connect Gmail")
                                 .font(.system(size: 12, weight: .semibold))
                         }
                         .foregroundStyle(.white)
@@ -1135,6 +1207,7 @@ struct MacHomeView: View {
                     .buttonStyle(.plain)
                     .focusEffectDisabled()
                     .pointerStyle(.link)
+                    .disabled(isConnectingGmail)
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, MacTheme.spacing20)
@@ -1144,7 +1217,10 @@ struct MacHomeView: View {
                         .stroke(MacTheme.cardBorder, lineWidth: 0.5)
                 )
             } else if services.emailService.threads.isEmpty {
-                if services.emailService.isLoadingThreads {
+                if services.emailService.isLoadingThreads || services.emailService.isReconciling {
+                    // Initial load or post-forceSync reconciliation — show the loading copy
+                    // so a user with an empty backend DB doesn't see "No recent emails"
+                    // mid-sync (~30s window while the workflow repopulates).
                     loadingCard(message: "Loading emails")
                 } else {
                     emptyActionCard(
@@ -1155,73 +1231,79 @@ struct MacHomeView: View {
                     )
                 }
             } else {
-                // Responsive grid of email cards
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 260, maximum: 400), spacing: MacTheme.spacing8)], spacing: MacTheme.spacing8) {
-                    ForEach(Array(services.emailService.threads.prefix(5).enumerated()), id: \.element.id) { index, thread in
-                        emailCard(thread, index: index)
+                let threads = Array(services.emailService.threads.prefix(5).enumerated())
+                ScrollView(.vertical, showsIndicators: false) {
+                    VStack(spacing: 0) {
+                        ForEach(threads, id: \.element.id) { index, thread in
+                            emailCard(thread, index: index)
+                            if index < threads.count - 1 {
+                                Divider().padding(.horizontal, MacTheme.spacing12)
+                            }
+                        }
                     }
                 }
+                .frame(maxHeight: 280)
+                .background(MacTheme.surfaceCard, in: RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous)
+                        .stroke(MacTheme.cardBorder, lineWidth: 0.5)
+                )
             }
-        }
-        .sheet(item: $selectedEmailThread) { thread in
-            MacEmailThreadView(threadId: thread.id)
-                .frame(minWidth: 640, minHeight: 480)
         }
     }
 
     private func emailCard(_ thread: EmailThread, index: Int) -> some View {
         Button {
-            selectedEmailThread = thread
+            if let openThread = onNavigateEmailThread {
+                openThread(thread.id)
+            } else {
+                onNavigate?(.email(.inbox))
+            }
         } label: {
-            VStack(alignment: .leading, spacing: MacTheme.spacing4) {
-                // Top row: sender + time
-                HStack(spacing: MacTheme.spacing6) {
-                    // Unread indicator
-                    Circle()
-                        .fill(thread.unread ? MacTheme.accent : Color.clear)
-                        .frame(width: 6, height: 6)
+            HStack(alignment: .top, spacing: MacTheme.spacing8) {
+                // Unread dot — vertically aligned with sender text
+                Circle()
+                    .fill(thread.unread ? MacTheme.accent : Color.clear)
+                    .frame(width: 6, height: 6)
+                    .padding(.top, 5)
 
-                    Text(thread.from.name)
-                        .font(.system(size: 13, weight: thread.unread ? .semibold : .medium))
-                        .foregroundStyle(MacTheme.textPrimary)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: MacTheme.spacing6) {
+                        Text(thread.from.name)
+                            .font(.system(size: 13, weight: thread.unread ? .semibold : .medium))
+                            .foregroundStyle(MacTheme.textPrimary)
+                            .lineLimit(1)
+
+                        Spacer(minLength: 0)
+
+                        Text(thread.date, format: .dateTime.hour().minute())
+                            .font(MacTheme.metaFont())
+                            .foregroundStyle(MacTheme.mutedText)
+                    }
+
+                    Text(thread.subject)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(MacTheme.textPrimary.opacity(0.8))
                         .lineLimit(1)
 
-                    Spacer(minLength: 0)
-
-                    Text(thread.date, format: .dateTime.hour().minute())
-                        .font(MacTheme.metaFont())
-                        .foregroundStyle(MacTheme.mutedText)
+                    Text(thread.snippet)
+                        .font(MacTheme.cardSubtitleFont())
+                        .foregroundStyle(MacTheme.textSecondary)
+                        .lineLimit(1)
                 }
-
-                // Subject
-                Text(thread.subject)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(MacTheme.textPrimary.opacity(0.8))
-                    .lineLimit(1)
-
-                // Snippet
-                Text(thread.snippet)
-                    .font(MacTheme.cardSubtitleFont())
-                    .foregroundStyle(MacTheme.textSecondary)
-                    .lineLimit(2)
             }
-            .padding(MacTheme.spacing12)
+            .padding(.horizontal, MacTheme.spacing12)
+            .padding(.vertical, MacTheme.spacing8)
             .frame(maxWidth: .infinity, alignment: .topLeading)
-            .background(
-                RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous)
-                    .fill(isHoveringEmailIndex == index ? MacTheme.surfaceHover : MacTheme.surfaceCard)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous)
-                    .stroke(thread.unread ? MacTheme.accent.opacity(0.2) : MacTheme.cardBorder, lineWidth: 0.5)
-            )
+            .background(isHoveringEmailIndex == index ? MacTheme.surfaceHover : Color.clear)
         }
         .buttonStyle(.plain)
         .focusEffectDisabled()
         .pointerStyle(.link)
         .help("Open thread: \(thread.subject)")
         .onHover { hovering in
-            withAnimation(.easeOut(duration: 0.12)) {
+            withAnimation(MacTheme.Motion.fast) {
                 isHoveringEmailIndex = hovering ? index : nil
             }
         }
@@ -1455,6 +1537,8 @@ struct MacHomeView: View {
             .padding(.horizontal, MacTheme.spacing12)
             .padding(.vertical, MacTheme.spacing6)
             .background(MacTheme.badgeSurface, in: Capsule(style: .continuous))
+            .pointerStyle(.link)
+            .macClickablePointer()
     }
 
     // MARK: - Data Loading
@@ -1477,5 +1561,31 @@ struct MacHomeView: View {
             .sorted { $0.startDate < $1.startDate }
         todaysEvents = todayList
         upcomingEvents = future
+    }
+}
+
+// MARK: - Hover row wrapper
+
+/// Click-through row that yields a hover-state binding to its content builder.
+/// Used by Today rows to reveal the inline action strip on pointer-over, in the
+/// Things-3 / Mail.app style. Self-contained so each row owns its own hover
+/// flag without polluting MacHomeView's @State surface.
+private struct HoverableRow<Content: View>: View {
+    let action: () -> Void
+    @ViewBuilder let content: (Bool) -> Content
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            content(isHovering)
+        }
+        .buttonStyle(.plain)
+        .background(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(isHovering ? MacTheme.surfaceHover : Color.clear)
+        )
+        .onHover { hovering in
+            isHovering = hovering
+        }
     }
 }

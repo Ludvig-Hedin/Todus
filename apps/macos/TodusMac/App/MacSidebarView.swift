@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 // MARK: - Sidebar
@@ -12,6 +13,8 @@ struct MacSidebarView: View {
     @Binding var isCalendarExpanded: Bool
     let onOpenSettings: () -> Void
     let onCompose: () -> Void
+
+    @State private var showLogOutConfirm = false
 
     private var authService: AuthService { services.authService }
     /// Real task count from parent (SwiftData @Query)
@@ -57,7 +60,7 @@ struct MacSidebarView: View {
                     badgeCount: inboxUnreadCount,
                     trailingSystemImage: isEmailExpanded ? "chevron.down" : "chevron.right",
                     action: {
-                        withAnimation(.snappy(duration: 0.18)) {
+                        withAnimation(MacTheme.Motion.base) {
                             isEmailExpanded.toggle()
                         }
                         if !isEmailSelected {
@@ -124,6 +127,7 @@ struct MacSidebarView: View {
                     isSelected: selection == .meetings,
                     action: { selection = .meetings }
                 )
+                .accessibilityLabel("Meetings")
 
                 SidebarItemButton(
                     title: "Docs",
@@ -140,7 +144,7 @@ struct MacSidebarView: View {
                     isSelected: isCalendarSelected && !isCalendarExpanded,
                     trailingSystemImage: isCalendarExpanded ? "chevron.down" : "chevron.right",
                     action: {
-                        withAnimation(.snappy(duration: 0.18)) {
+                        withAnimation(MacTheme.Motion.base) {
                             isCalendarExpanded.toggle()
                         }
                         if !isCalendarSelected {
@@ -209,7 +213,9 @@ struct MacSidebarView: View {
                     Button("Profile") { onOpenSettings() }
                     Divider()
                     Button("Log Out", role: .destructive) {
-                        services.signOut()
+                        // Gate destructive sign-out behind a confirmation — accidental
+                        // taps used to wipe the session immediately with no undo.
+                        showLogOutConfirm = true
                     }
                 } label: {
                     Text(displayName)
@@ -264,6 +270,18 @@ struct MacSidebarView: View {
         .task {
             // Load connections on sidebar appear for multi-account support
             await services.connectionsService.loadConnections()
+        }
+        .confirmationDialog(
+            "Sign out of Todus?",
+            isPresented: $showLogOutConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Sign Out", role: .destructive) {
+                services.signOut()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("You'll need to sign in again to access your mail and calendar.")
         }
     }
 
@@ -498,7 +516,7 @@ private struct SidebarItemButton: View {
                 }
             }
             .frame(width: badgeCount != nil && trailingSystemImage != nil ? 34 : 20, height: 20)
-            .animation(.easeOut(duration: 0.1), value: isHovered)
+            .animation(MacTheme.Motion.fast, value: isHovered)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
@@ -507,7 +525,7 @@ private struct SidebarItemButton: View {
                 .fill(fillColor)
         )
         .contentShape(Capsule(style: .continuous))
-        .animation(.easeOut(duration: 0.1), value: isHovered)
+        .animation(MacTheme.Motion.fast, value: isHovered)
         .focusEffectDisabled()
         .onHover { isHovered = $0 }
     }
@@ -554,7 +572,7 @@ private struct SidebarChildItemButton: View {
                     .fill(fillColor)
             )
             .contentShape(Capsule(style: .continuous))
-            .animation(.easeOut(duration: 0.1), value: isHovered)
+            .animation(MacTheme.Motion.fast, value: isHovered)
         }
         .buttonStyle(.plain)
         .interactiveHitTarget(expansion: 6)
@@ -578,7 +596,11 @@ private struct MiniCalendarView: View {
     var onSelectDay: ((Date) -> Void)? = nil
 
     private let calendar = Calendar.current
-    private let today = Date()
+    /// Bumped each midnight by `.onReceive(Calendar.dayChangedNotification)` so the
+    /// "today" highlight updates on day rollover without an app restart. Storing
+    /// `Date()` in a `let` would freeze it at view-init and the dot would stay on
+    /// yesterday after midnight.
+    @State private var today: Date = Date()
     @State private var selectedDay: Int? = nil
 
     // Derive single-letter weekday headers from locale, rotated to match firstWeekday
@@ -655,6 +677,15 @@ private struct MiniCalendarView: View {
                 }
             }
         }
+        // Refresh `today` on day rollover so the highlight follows the date when
+        // the app is left open across midnight, and again when the user returns
+        // from sleep/another desktop.
+        .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged)) { _ in
+            today = Date()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            today = Date()
+        }
     }
 }
 
@@ -714,8 +745,8 @@ private struct SidebarConnectionRow: View {
             )
             .contentShape(Capsule(style: .continuous))
             .opacity(isEnabled ? 1.0 : 0.35)
-            .animation(.easeOut(duration: 0.1), value: isHovered)
-            .animation(.easeOut(duration: 0.15), value: isEnabled)
+            .animation(MacTheme.Motion.fast, value: isHovered)
+            .animation(MacTheme.Motion.fast, value: isEnabled)
         }
         .buttonStyle(.plain)
         .focusEffectDisabled()
@@ -757,7 +788,7 @@ private struct ConnectionAvatarsRow: View {
                             .frame(width: 20, height: 20)
                     }
                     .opacity(isEnabled ? 1.0 : 0.35)
-                    .animation(.easeOut(duration: 0.15), value: isEnabled)
+                    .animation(MacTheme.Motion.fast, value: isEnabled)
                 }
                 .buttonStyle(.plain)
                 .focusEffectDisabled()

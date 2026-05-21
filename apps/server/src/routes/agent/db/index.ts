@@ -2,6 +2,7 @@ import { eq, count, inArray, and, sql, desc, lt, like, or } from 'drizzle-orm';
 import type { DrizzleSqliteDODatabase } from 'drizzle-orm/durable-sqlite';
 import { threads, threadLabels, labels } from './schema';
 import type * as schema from './schema';
+import { getFolderTags } from '../../../lib/utils';
 
 export type DB = DrizzleSqliteDODatabase<typeof schema>;
 
@@ -557,8 +558,15 @@ export async function findThreadsByFolderWithPagination(
 
   const conditions = [eq(threadLabels.labelId, folderLabel)];
 
+  // Composite cursor: same `(latestReceivedOn, id)` ordering as the all-threads
+  // pagination path. Without this, the cursor body (JSON like `{"latestReceivedOn":...}`)
+  // was being compared lexically as a timestamp, which made `<` true for every row
+  // and broke pagination across the inbox/folder routes after the d8d471c7 fix.
   if (pageToken) {
-    conditions.push(lt(threads.latestReceivedOn, pageToken));
+    const paginationCondition = buildPaginationConditions(pageToken);
+    if (paginationCondition) {
+      conditions.push(paginationCondition);
+    }
   }
 
   const results = await db
@@ -582,26 +590,39 @@ export interface SenderEntry {
 
 /**
  * Groups threads by sender email for the People view.
- * Intentionally queries ALL threads (no folder filter) to match the same shard
- * access pattern as suggestRecipients — which is guaranteed to have data.
- * The folder filter via threadLabels can be re-enabled once label storage is
- * confirmed to be consistent across shards.
+ * Filters by the requested folder via threadLabels join. Falls back to "all
+ * threads" only when the folder maps to no specific label (e.g. "archive").
  */
 export async function listSendersForFolder(
   db: DB,
-  _folder: string,
+  folder: string,
   maxThreads = 500,
 ): Promise<SenderEntry[]> {
-  const rows = await db
+  const labelTags = getFolderTags(folder);
+  const baseQuery = db
     .select({
       latestSender: threads.latestSender,
       latestReceivedOn: threads.latestReceivedOn,
       latestSubject: threads.latestSubject,
     })
-    .from(threads)
-    .where(sql`${threads.latestSender} IS NOT NULL`)
-    .orderBy(desc(threads.latestReceivedOn))
-    .limit(maxThreads);
+    .from(threads);
+
+  const rows =
+    labelTags.length > 0
+      ? await baseQuery
+          .innerJoin(threadLabels, eq(threads.id, threadLabels.threadId))
+          .where(
+            and(
+              sql`${threads.latestSender} IS NOT NULL`,
+              inArray(threadLabels.labelId, labelTags),
+            ),
+          )
+          .orderBy(desc(threads.latestReceivedOn))
+          .limit(maxThreads)
+      : await baseQuery
+          .where(sql`${threads.latestSender} IS NOT NULL`)
+          .orderBy(desc(threads.latestReceivedOn))
+          .limit(maxThreads);
 
   // Group by sender email in memory
   const map = new Map<string, SenderEntry>();

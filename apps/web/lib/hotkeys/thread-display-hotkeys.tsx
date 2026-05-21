@@ -2,6 +2,7 @@ import { mailNavigationCommandAtom } from '@/hooks/use-mail-navigation';
 import { enhancedKeyboardShortcuts } from '@/config/shortcuts';
 import useMoveTo from '@/hooks/driver/use-move-to';
 import useDelete from '@/hooks/driver/use-delete';
+import { useCreateTaskFromThread } from '@/hooks/use-create-task-from-thread';
 import { useShortcuts } from './use-hotkey-utils';
 import { useThread } from '@/hooks/use-threads';
 import { useParams } from 'react-router';
@@ -24,6 +25,7 @@ export function ThreadDisplayHotkeys() {
   const { mutate: deleteThread } = useDelete();
   const { mutate: moveTo } = useMoveTo();
   const setMailNavigationCommand = useSetAtom(mailNavigationCommandAtom);
+  const { createTaskFromThread } = useCreateTaskFromThread();
 
   const handlers = {
     closeView: () => closeView(new KeyboardEvent('keydown', { key: 'Escape' })),
@@ -52,6 +54,9 @@ export function ThreadDisplayHotkeys() {
         });
         setMailNavigationCommand('next');
       }
+    },
+    createTaskFromThread: () => {
+      void createTaskFromThread();
     },
   };
 

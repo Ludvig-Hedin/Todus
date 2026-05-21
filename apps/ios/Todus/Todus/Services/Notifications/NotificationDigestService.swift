@@ -56,10 +56,19 @@ final class NotificationDigestService {
 
     private weak var authService: AuthService?
     private let configuration: AppConfiguration
+    /// Preferred transport when supplied — reuses the shared 401-refresh / retry /
+    /// header pipeline instead of the hand-rolled URLSession path below. Falls back
+    /// to URLSession when nil so legacy callers keep compiling without changes.
+    private weak var apiClient: TodosAPIClient?
 
-    init(configuration: AppConfiguration, authService: AuthService?) {
+    init(
+        configuration: AppConfiguration,
+        authService: AuthService?,
+        apiClient: TodosAPIClient? = nil
+    ) {
         self.configuration = configuration
         self.authService = authService
+        self.apiClient = apiClient
     }
 
     /// Fetches an AI-generated notification digest from the user's current data.
@@ -167,40 +176,55 @@ final class NotificationDigestService {
             return
         }
 
-        let baseURL = configuration.effectiveBackendURL
-        let url = baseURL.appending(path: "api/ai/chat")
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("https://todus.app", forHTTPHeaderField: "Origin")
-
-        // Apply default headers inline (replaces TodusHTTPClient.applyDefaultHeaders)
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        if request.value(forHTTPHeaderField: "User-Agent") == nil {
-            let appName = Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "Todus"
-            let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
-            let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
-            let versionSegment = (appVersion?.isEmpty == false ? appVersion! : "unknown")
-            let buildSegment = (build?.isEmpty == false ? " (build \(build!))" : "")
-            request.setValue("\(appName)/\(versionSegment)\(buildSegment) iOS", forHTTPHeaderField: "User-Agent")
-        }
-
-        if let token = authService?.bearerToken {
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        }
-        if let sid = authService?.currentSessionId {
-            request.setValue(sid, forHTTPHeaderField: "X-Todus-Session-Id")
-        }
-        request.httpBody = body
-
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
+            let data: Data
+            if let apiClient {
+                // Preferred path: shared client handles 401 silent refresh, backoff retry,
+                // and default headers. `Origin` is added because the AI route enforces it.
+                data = try await apiClient.sendRawData(
+                    path: "api/ai/chat",
+                    method: "POST",
+                    body: body,
+                    extraHeaders: ["Origin": "https://todus.app"]
+                )
+            } else {
+                // Legacy fallback for callers that haven't been wired through
+                // AppServices.apiClient yet. Mirrors the headers the API client adds so
+                // behavior stays equivalent — just without the refresh/retry pipeline.
+                let baseURL = configuration.effectiveBackendURL
+                let url = baseURL.appending(path: "api/ai/chat")
 
-            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-                let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
-                errorMessage = "Server error (\(statusCode))."
-                return
+                var request = URLRequest(url: url)
+                request.httpMethod = "POST"
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                request.setValue("https://todus.app", forHTTPHeaderField: "Origin")
+
+                request.setValue("application/json", forHTTPHeaderField: "Accept")
+                if request.value(forHTTPHeaderField: "User-Agent") == nil {
+                    let appName = Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "Todus"
+                    let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+                    let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+                    let versionSegment = (appVersion?.isEmpty == false ? appVersion! : "unknown")
+                    let buildSegment = (build?.isEmpty == false ? " (build \(build!))" : "")
+                    request.setValue("\(appName)/\(versionSegment)\(buildSegment) iOS", forHTTPHeaderField: "User-Agent")
+                }
+
+                if let token = authService?.bearerToken {
+                    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+                }
+                if let sid = authService?.currentSessionId {
+                    request.setValue(sid, forHTTPHeaderField: "X-Todus-Session-Id")
+                }
+                request.httpBody = body
+
+                let (responseData, response) = try await URLSession.shared.data(for: request)
+
+                guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                    let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+                    errorMessage = "Server error (\(statusCode))."
+                    return
+                }
+                data = responseData
             }
 
             // The non-streaming response returns a standard OpenAI chat completion JSON

@@ -17,11 +17,19 @@ enum CalendarTrackpadScroll {
 
 final class CalendarTrackpadScrollCoordinator {
     var onHorizontalNavigate: ((Int) -> Void)?
+    /// Called each frame with raw scrollingDeltaX during a confirmed horizontal scroll.
+    /// When set, takes over from `onHorizontalNavigate` for streaming (week view panning).
+    var onHorizontalStream: ((CGFloat) -> Void)?
+    /// Called once when the finger lifts, with total accumulated delta since gesture began.
+    var onHorizontalGestureEnded: ((CGFloat) -> Void)?
     /// In key window’s base NSView coordinates, or `.null` to use whole window
     var targetRectInWindow: CGRect = .null
     var isEnabled: Bool = true
     var lastFired: TimeInterval = 0
     var accum: CGFloat = 0
+    /// Set to true after `onHorizontalGestureEnded` fires — suppresses streaming until
+    /// momentum drains or the next gesture begins.
+    var isSnapping: Bool = false
     /// `true` for Day/Week: more lenient axis test + **⇧+scroll** maps to time navigation.
     var isTimeGridViewMode: Bool = false
     var shiftYAccum: CGFloat = 0
@@ -40,7 +48,8 @@ extension CalendarTrackpadScrollCoordinator {
             guard event.type == .scrollWheel, coordinator.isEnabled, coordinator.onHorizontalNavigate != nil else {
                 return event
             }
-            guard let win = event.window, win.isKeyWindow else { return event }
+            guard let win = event.window else { return event }
+            guard MainActor.assumeIsolated({ win.isKeyWindow }) else { return event }
             if !coordinator.targetRectInWindow.isNull {
                 if !coordinator.targetRectInWindow.contains(event.locationInWindow) {
                     return event
@@ -87,6 +96,9 @@ extension CalendarTrackpadScrollCoordinator {
                 coordinator.shiftYAccum = 0
             }
 
+            // Clear snapping flag when a new gesture begins so next swipe works immediately.
+            if event.phase == .began { coordinator.isSnapping = false }
+
             // Two-finger (or any) scroll: if horizontal component wins by view-dependent weight, navigate.
             let horizontalLike = (adx * w >= ady) && adx > 0.05
             guard horizontalLike else {
@@ -97,6 +109,24 @@ extension CalendarTrackpadScrollCoordinator {
             let fingerEnded = (event.phase == .ended) && event.momentumPhase.isEmpty
             let momentumEnded = event.momentumPhase == .ended
             let legacyNoPhase = event.phase.isEmpty && !event.hasPreciseScrollingDeltas
+
+            // Streaming mode — used by week view for real-time pan.
+            if coordinator.onHorizontalGestureEnded != nil {
+                if coordinator.isSnapping {
+                    // Consume momentum events while snap/spring animation is running.
+                    if momentumEnded { coordinator.isSnapping = false }
+                    return nil
+                }
+                coordinator.onHorizontalStream?(event.scrollingDeltaX)
+                if fingerEnded {
+                    coordinator.onHorizontalGestureEnded?(coordinator.accum)
+                    coordinator.isSnapping = true
+                    coordinator.resetAccum()
+                }
+                return nil
+            }
+
+            // Legacy mode — single step navigate at gesture end (Day, Month, Year).
             if fingerEnded || momentumEnded {
                 if abs(coordinator.accum) >= CalendarTrackpadScroll.minAccum {
                     let now = Date.timeIntervalSinceReferenceDate
@@ -140,6 +170,8 @@ struct CalendarContentWindowRectKey: PreferenceKey {
 struct CalendarTrackpadNavigationModifier<Sync: Equatable>: ViewModifier {
     let isEnabled: Bool
     let onHorizontalNavigate: (Int) -> Void
+    var onHorizontalStream: ((CGFloat) -> Void)?
+    var onHorizontalGestureEnded: ((CGFloat) -> Void)?
     @Binding var targetRectInWindow: CGRect
     /// When this value changes, the scroll handler is re-bound (e.g. ``(viewMode, selectedDate)``).
     let updateWhen: Sync
@@ -151,6 +183,8 @@ struct CalendarTrackpadNavigationModifier<Sync: Equatable>: ViewModifier {
         content
             .onAppear {
                 coordinator.onHorizontalNavigate = onHorizontalNavigate
+                coordinator.onHorizontalStream = onHorizontalStream
+                coordinator.onHorizontalGestureEnded = onHorizontalGestureEnded
                 coordinator.isEnabled = isEnabled
                 coordinator.isTimeGridViewMode = isTimeGridViewMode
                 if !targetRectInWindow.isNull { coordinator.targetRectInWindow = targetRectInWindow }
@@ -163,11 +197,15 @@ struct CalendarTrackpadNavigationModifier<Sync: Equatable>: ViewModifier {
             .onChange(of: isEnabled) { _, e in
                 coordinator.isEnabled = e
                 coordinator.onHorizontalNavigate = onHorizontalNavigate
+                coordinator.onHorizontalStream = onHorizontalStream
+                coordinator.onHorizontalGestureEnded = onHorizontalGestureEnded
                 if e, coordinator.monitor == nil { coordinator.install() }
                 if !e { coordinator.remove() }
             }
             .onChange(of: updateWhen) { _, _ in
                 coordinator.onHorizontalNavigate = onHorizontalNavigate
+                coordinator.onHorizontalStream = onHorizontalStream
+                coordinator.onHorizontalGestureEnded = onHorizontalGestureEnded
                 coordinator.isTimeGridViewMode = isTimeGridViewMode
             }
             .onChange(of: isTimeGridViewMode) { _, v in
@@ -183,17 +221,24 @@ extension View {
     /// Horizontal two-finger scroll (dominant) steps the calendar. Bind `targetRectInWindow` from
     /// a `GeometryReader` + `CalendarContentWindowRectKey` in window coordinates, or use `.null`
     /// to accept the whole key window.
+    ///
+    /// When `onHorizontalStream` / `onHorizontalGestureEnded` are provided (week view), those take
+    /// over for smooth real-time panning; `onHorizontalNavigate` is then only used by other modes.
     func calendarTrackpadNavigation<Sync: Equatable>(
         isEnabled: Bool,
         targetRectInWindow: Binding<CGRect>,
         updateWhen: Sync,
         isTimeGridViewMode: Bool = false,
+        onHorizontalStream: ((CGFloat) -> Void)? = nil,
+        onHorizontalGestureEnded: ((CGFloat) -> Void)? = nil,
         onHorizontalNavigate: @escaping (Int) -> Void
     ) -> some View {
         modifier(
             CalendarTrackpadNavigationModifier(
                 isEnabled: isEnabled,
                 onHorizontalNavigate: onHorizontalNavigate,
+                onHorizontalStream: onHorizontalStream,
+                onHorizontalGestureEnded: onHorizontalGestureEnded,
                 targetRectInWindow: targetRectInWindow,
                 updateWhen: updateWhen,
                 isTimeGridViewMode: isTimeGridViewMode
@@ -226,7 +271,8 @@ extension CalendarPinchViewModeCoordinator {
         let c = self
         monitor = NSEvent.addLocalMonitorForEvents(matching: .magnify) { event in
             guard event.type == .magnify, c.isEnabled, c.onViewModeStep != nil else { return event }
-            guard let win = event.window, win.isKeyWindow else { return event }
+            guard let win = event.window else { return event }
+            guard MainActor.assumeIsolated({ win.isKeyWindow }) else { return event }
             if !c.targetRectInWindow.isNull, !c.targetRectInWindow.contains(event.locationInWindow) {
                 return event
             }

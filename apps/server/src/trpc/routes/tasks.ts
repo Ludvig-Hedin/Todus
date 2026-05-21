@@ -37,21 +37,32 @@ export const tasksRouter = router({
           conditions.push(eq(task.status, input.status));
         }
         if (input.search) {
-          conditions.push(like(task.title, `%${input.search}%`));
+          // Escape SQL LIKE wildcards in user input so a query of "50%" doesn't match
+          // every title containing "50". `\` is the default LIKE escape in Postgres.
+          const escapedSearch = input.search.replace(/[\\%_]/g, '\\$&');
+          conditions.push(like(task.title, `%${escapedSearch}%`));
         }
 
+        // Priority is a varchar enum; ranked numerically via CASE so 'high' < 'medium' < 'low' < 'none'.
+        // Tie-break on createdAt desc so equal priorities are still newest-first.
+        const priorityRank = sql`CASE ${task.priority}
+          WHEN 'high' THEN 0
+          WHEN 'medium' THEN 1
+          WHEN 'low' THEN 2
+          ELSE 3
+        END`;
         const orderBy =
           input.sortBy === 'oldest'
-            ? asc(task.createdAt)
+            ? [asc(task.createdAt)]
             : input.sortBy === 'priority'
-              ? desc(task.priority)
-              : desc(task.createdAt);
+              ? [asc(priorityRank), desc(task.createdAt)]
+              : [desc(task.createdAt)];
 
         const tasks = await db
           .select()
           .from(task)
           .where(and(...conditions))
-          .orderBy(orderBy)
+          .orderBy(...orderBy)
           .limit(input.limit)
           .offset(input.offset);
 

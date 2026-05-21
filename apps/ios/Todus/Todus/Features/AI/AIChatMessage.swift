@@ -178,6 +178,10 @@ struct AIChatMessage: Identifiable {
     var mentions: [RichInputMentionRef]
     /// Local `AttachmentService` filenames included with this user message (for thread UI + resend on retry)
     var attachmentFileNames: [String]
+    /// Inline error footer attached to a partially-streamed assistant bubble
+    /// (network drop, rate limit). Distinct from a clobbered `content` value
+    /// so retry can pick up where the stream left off without losing context.
+    var errorMessage: String?
 
     init(
         id: UUID = UUID(),
@@ -193,7 +197,8 @@ struct AIChatMessage: Identifiable {
         reasoningContent: String = "",
         reasoningDurationMs: Int? = nil,
         mentions: [RichInputMentionRef] = [],
-        attachmentFileNames: [String] = []
+        attachmentFileNames: [String] = [],
+        errorMessage: String? = nil
     ) {
         self.id = id
         self.role = role
@@ -209,6 +214,7 @@ struct AIChatMessage: Identifiable {
         self.reasoningDurationMs = reasoningDurationMs
         self.mentions = mentions
         self.attachmentFileNames = attachmentFileNames
+        self.errorMessage = errorMessage
     }
 
     /// Extracts and caches the UI spec from message content.

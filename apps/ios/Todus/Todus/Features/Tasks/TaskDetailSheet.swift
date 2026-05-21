@@ -29,6 +29,9 @@ struct TaskDetailSheet: View {
     @State private var isShowingPhotoPicker = false
     @State private var isShowingCamera = false
     @State private var selectedPhotoItem: PhotosPickerItem?
+    /// Guards the Save button from double-fires while the SwiftData write +
+    /// subsequent task reschedule are in flight.
+    @State private var isSaving = false
 
     init(task: TaskRecord) {
         self.task = task
@@ -66,9 +69,11 @@ struct TaskDetailSheet: View {
 
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Save") {
+                        guard !isSaving else { return }
+                        isSaving = true
                         saveTask()
                     }
-                    .disabled(trimmedTitle.isEmpty)
+                    .disabled(isSaving || trimmedTitle.isEmpty)
                 }
             }
         }
@@ -171,6 +176,16 @@ struct TaskDetailSheet: View {
         Section("Schedule") {
             Toggle("Due date", isOn: $hasDueDate)
                 .tint(AppTheme.switchTint)
+                .onChange(of: hasDueDate) { _, isOn in
+                    // When the user toggles Due date OFF and then back ON, we
+                    // want a fresh "today" anchor in the date picker rather
+                    // than reviving the previously-selected date. Resetting
+                    // here means the field always opens at "now" on re-enable.
+                    // (UX P12.)
+                    if !isOn {
+                        dueDate = .now
+                    }
+                }
 
             if hasDueDate {
                 DatePicker("Due", selection: $dueDate)

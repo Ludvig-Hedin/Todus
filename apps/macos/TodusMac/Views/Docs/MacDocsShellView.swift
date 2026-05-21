@@ -100,12 +100,10 @@ struct MacDocsAllPane: View {
                 .controlSize(.small)
                 .disabled(isCreatingDocument)
                 .help("Create a new page")
-                Button { isGrid = true } label: { Image(systemName: "square.grid.2x2") }
-                    .buttonStyle(.borderless)
-                    .foregroundStyle(isGrid ? MacTheme.accent : MacTheme.mutedText)
-                Button { isGrid = false } label: { Image(systemName: "list.bullet") }
-                    .buttonStyle(.borderless)
-                    .foregroundStyle(!isGrid ? MacTheme.accent : MacTheme.mutedText)
+                // Segmented grid/list toggle. Matches the visual language of
+                // `viewModePicker` in MacTasksView — selected option gets a pill
+                // on a recessed track instead of a bare borderless button.
+                gridListPicker
                 TextField("Search", text: $searchText)
                     .textFieldStyle(.roundedBorder)
                     .frame(maxWidth: 220)
@@ -113,7 +111,7 @@ struct MacDocsAllPane: View {
             .padding(.horizontal, MacTheme.spacing20)
             .padding(.vertical, MacTheme.spacing12)
             if services.docsService.isLoading {
-                ProgressView().padding(24)
+                docsLoadingState
             } else if let err = services.docsService.lastError, docs.isEmpty {
                 docsLoadErrorState(message: err)
             } else if docs.isEmpty {
@@ -124,6 +122,19 @@ struct MacDocsAllPane: View {
                 list
             }
         }
+    }
+
+    /// Centered loading state for the docs list. Mirrors the `loadingCard`
+    /// pattern in MacHomeView — vertical spinner + label, never a bare spinner.
+    private var docsLoadingState: some View {
+        VStack(spacing: MacTheme.spacing8) {
+            ProgressView()
+                .controlSize(.small)
+            Text("Loading docs…")
+                .font(.system(size: 12))
+                .foregroundStyle(MacTheme.mutedText)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func docsLoadErrorState(message: String) -> some View {
@@ -141,6 +152,47 @@ struct MacDocsAllPane: View {
             .controlSize(.large)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// Segmented grid/list picker — same visual treatment as MacTasksView's
+    /// `viewModePicker`: selected option gets a filled pill on a recessed track.
+    private var gridListPicker: some View {
+        HStack(spacing: 2) {
+            gridListSegment(isSelected: isGrid, systemImage: "square.grid.2x2", help: "Grid view") {
+                withAnimation(MacTheme.Motion.base) { isGrid = true }
+            }
+            gridListSegment(isSelected: !isGrid, systemImage: "list.bullet", help: "List view") {
+                withAnimation(MacTheme.Motion.base) { isGrid = false }
+            }
+        }
+        .padding(3)
+        .background(MacTheme.surfaceCard, in: Capsule(style: .continuous))
+        .overlay(Capsule(style: .continuous).stroke(MacTheme.cardBorder, lineWidth: 0.5))
+    }
+
+    private func gridListSegment(
+        isSelected: Bool,
+        systemImage: String,
+        help: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
+                .foregroundStyle(isSelected ? MacTheme.textPrimary : MacTheme.mutedText)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background {
+                    if isSelected {
+                        Capsule(style: .continuous)
+                            .fill(MacTheme.accent.opacity(0.12))
+                    }
+                }
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .focusEffectDisabled()
+        .help(help)
     }
 
     private var emptyState: some View {
@@ -331,18 +383,57 @@ struct MacDocsSidebarView: View {
         let ch = services.docsService.children(ofParentId: d.id, workspaceId: w.id)
         return AnyView(
             VStack(alignment: .leading, spacing: 2) {
-                HStack(alignment: .top) {
-                    Text(String(repeating: "  ", count: min(depth, 5)))
-                    Image(systemName: "doc")
-                    Text((d.emoji.map { "\($0) " } ?? "") + d.title)
-                }
-                .padding(.vertical, 1)
-                .contentShape(Rectangle())
-                .onTapGesture { selectedDocId = d.id }
+                DocsOutlineRow(doc: d, depth: depth) { selectedDocId = d.id }
                 ForEach(ch) { c in
                     docOutline(c, w: w, depth: depth + 1)
                 }
             }
         )
+    }
+}
+
+/// Hoverable outline row mirroring `sidebarRow` — button + plain style + link
+/// pointer + a subtle hover fill so each entry feels clickable.
+private struct DocsOutlineRow: View {
+    let doc: DocRecordDTO
+    let depth: Int
+    let action: () -> Void
+
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(alignment: .top) {
+                Text(String(repeating: "  ", count: min(depth, 5)))
+                Image(systemName: "doc")
+                Text((doc.emoji.map { "\($0) " } ?? "") + doc.title)
+                Spacer(minLength: 0)
+            }
+            .padding(.vertical, 2)
+            .padding(.horizontal, 4)
+            .background(
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .fill(isHovered ? MacTheme.surfaceHover : Color.clear)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .pointerStyle(.link)
+        .onHover { isHovered = $0 }
+        .contextMenu {
+            Button {
+                action()
+            } label: {
+                Label("Open", systemImage: "arrow.up.right.square")
+            }
+            Button {
+                let display = doc.title.isEmpty ? "Untitled" : doc.title
+                let pb = NSPasteboard.general
+                pb.clearContents()
+                pb.setString(display, forType: .string)
+            } label: {
+                Label("Copy title", systemImage: "doc.on.doc")
+            }
+        }
     }
 }

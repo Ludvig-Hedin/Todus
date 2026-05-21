@@ -36,6 +36,11 @@ final class TaskSyncService {
     private var isProcessing = false
     private let apiClient: TodosAPIClient
 
+    /// Per-session retry counter keyed by mutation ID (task UUID string).
+    /// Caps retries so a stuck mutation can't pin the queue forever.
+    private var retryCounts: [String: Int] = [:]
+    private static let maxRetries = 5
+
     private static let iso8601: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -107,6 +112,7 @@ final class TaskSyncService {
     /// Call on sign-out to prevent a reconnect from replaying the previous user's edits.
     func clearQueue() {
         queue.removeAll()
+        retryCounts.removeAll()
     }
 
     // MARK: - Private
@@ -133,17 +139,68 @@ final class TaskSyncService {
                     if let task = try? context.fetch(desc).first {
                         task.syncStateRawValue = SyncState.synced.rawValue
                     }
+                    // Clear retry counter for anything the server confirmed.
+                    retryCounts.removeValue(forKey: idStr)
                 }
                 try? context.save()
             } catch {
-                // Re-queue the batch so it will be retried on the next call or reconnect.
-                queue.insert(contentsOf: batch, at: 0)
-                for mutation in batch {
-                    guard let uuid = UUID(uuidString: mutation.id) else { continue }
-                    let desc = FetchDescriptor<TaskRecord>(predicate: #Predicate { $0.id == uuid })
-                    if let task = try? context.fetch(desc).first {
-                        task.syncStateRawValue = SyncState.failed.rawValue
+                // Classify the failure: 4xx → drop (client-side validation issue,
+                // retrying won't help). Anything else (network, 5xx, decoding) →
+                // requeue with a max-retry cap so a stuck mutation can't pin the
+                // queue forever and burn battery in a hot loop.
+                let isClientError: Bool = {
+                    if case let APIError.httpError(statusCode, _) = error,
+                       (400..<500).contains(statusCode) {
+                        return true
                     }
+                    return false
+                }()
+
+                if isClientError {
+                    AppLogger.shared.log(
+                        "[TaskSyncService] dropping batch of \(batch.count) mutation(s) due to client error: \(error.localizedDescription)"
+                    )
+                    for mutation in batch {
+                        retryCounts.removeValue(forKey: mutation.id)
+                        guard let uuid = UUID(uuidString: mutation.id) else { continue }
+                        let desc = FetchDescriptor<TaskRecord>(predicate: #Predicate { $0.id == uuid })
+                        if let task = try? context.fetch(desc).first {
+                            task.syncStateRawValue = SyncState.failed.rawValue
+                        }
+                    }
+                    try? context.save()
+                    break
+                }
+
+                // Network / 5xx — partition into "still retryable" and "exhausted".
+                var retryable: [TaskMutation] = []
+                for mutation in batch {
+                    let next = (retryCounts[mutation.id] ?? 0) + 1
+                    retryCounts[mutation.id] = next
+                    if next > Self.maxRetries {
+                        AppLogger.shared.log(
+                            "[TaskSyncService] dropping mutation \(mutation.id) after \(Self.maxRetries) failed attempts: \(error.localizedDescription)"
+                        )
+                        retryCounts.removeValue(forKey: mutation.id)
+                        if let uuid = UUID(uuidString: mutation.id) {
+                            let desc = FetchDescriptor<TaskRecord>(predicate: #Predicate { $0.id == uuid })
+                            if let task = try? context.fetch(desc).first {
+                                task.syncStateRawValue = SyncState.failed.rawValue
+                            }
+                        }
+                    } else {
+                        retryable.append(mutation)
+                        if let uuid = UUID(uuidString: mutation.id) {
+                            let desc = FetchDescriptor<TaskRecord>(predicate: #Predicate { $0.id == uuid })
+                            if let task = try? context.fetch(desc).first {
+                                task.syncStateRawValue = SyncState.failed.rawValue
+                            }
+                        }
+                    }
+                }
+                // Re-queue only mutations that haven't exceeded the retry cap.
+                if !retryable.isEmpty {
+                    queue.insert(contentsOf: retryable, at: 0)
                 }
                 try? context.save()
                 break

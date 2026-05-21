@@ -11,6 +11,10 @@ struct CalendarViewModePicker: View {
         Menu {
             ForEach(CalendarViewMode.allCases) { mode in
                 Button {
+                    // Selection haptic when the user picks a new mode — silent
+                    // before, which felt unresponsive next to the pinch-gesture
+                    // mode switch (which already buzzes).
+                    if mode != selection { AppHaptic.selection.play() }
                     withAnimation(.snappy(duration: 0.2)) {
                         selection = mode
                     }

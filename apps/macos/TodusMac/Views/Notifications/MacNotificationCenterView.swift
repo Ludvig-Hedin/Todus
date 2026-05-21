@@ -3,7 +3,7 @@ import SwiftData
 
 // MARK: - Notification Types (macOS copy — mirrors iOS NotificationDigestService)
 
-private enum MacNotificationType: String, Codable, CaseIterable {
+enum MacNotificationType: String, Codable, CaseIterable {
     case taskDue = "task_due"
     case event = "event"
     case importantEmail = "important_email"
@@ -272,6 +272,12 @@ struct MacNotificationCenterView: View {
     @Environment(MacAppServices.self) private var services
     @Environment(\.dismiss) private var dismiss
 
+    /// Optional callback invoked when the user taps a notification row.
+    /// Hosts can use this to route to the relevant tab (tasks, email, calendar).
+    /// When nil, rows fall back to the previous dismiss-only behavior so a tap is
+    /// never a silent no-op even before the host wires routing.
+    var onOpen: ((String?, MacNotificationType) -> Void)? = nil
+
     @Query(filter: #Predicate<TaskRecord> { !$0.completed },
            sort: \TaskRecord.createdAt, order: .reverse)
     private var allTasks: [TaskRecord]
@@ -438,6 +444,11 @@ struct MacNotificationCenterView: View {
 
     private func notificationRow(_ item: MacNotificationItem) -> some View {
         Button {
+            // Prefer host-supplied routing so a tap navigates to the relevant tab.
+            // Falls back to dismiss-only when no closure has been wired by the host.
+            if let onOpen {
+                onOpen(item.relatedId, item.type)
+            }
             dismiss()
         } label: {
             HStack(spacing: 10) {

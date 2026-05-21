@@ -11,13 +11,19 @@ final class MacNotificationService {
 
     private let center = UNUserNotificationCenter.current()
 
-    private enum Category {
+    /// Notification category identifiers. Mirrors iOS `NotificationService.Category` so
+    /// the same payloads route identically on both platforms. `AppDelegate`-style
+    /// routing in `TodusMacApp` reads `categoryIdentifier` to decide where to send the user.
+    enum Category {
         static let taskReminder = "TASK_REMINDER"
         static let emailNotification = "EMAIL_NOTIFICATION"
+        static let emailReminder = "EMAIL_REMINDER"
         static let aiResponse = "AI_RESPONSE"
         static let dueTasks = "DUE_TASKS"
     }
 
+    /// Action identifiers (must stay in sync with `UNNotificationAction` registration
+    /// below and with the delegate routing in `TodusMacApp`).
     enum Action {
         static let complete = "TASK_COMPLETE"
         static let snooze = "TASK_SNOOZE"
@@ -101,6 +107,57 @@ final class MacNotificationService {
         center.add(request)
     }
 
+    /// Schedule a reminder to revisit an email thread at a future date.
+    /// Replaces any existing reminder for the same thread (so re-scheduling
+    /// the same `threadId` cleanly updates the fire time). Mirrors iOS
+    /// `NotificationService.scheduleEmailReminder`.
+    @discardableResult
+    func scheduleEmailReminder(threadId: String, subject: String, at fireDate: Date) async -> Bool {
+        let settings = await center.notificationSettings()
+        switch settings.authorizationStatus {
+        case .notDetermined:
+            let granted = await requestPermission()
+            guard granted else { return false }
+        case .authorized, .provisional:
+            break
+        case .denied:
+            return false
+        @unknown default:
+            return false
+        }
+
+        await checkAuthorization()
+        guard isAuthorized else { return false }
+        guard fireDate > Date() else { return false }
+
+        let content = UNMutableNotificationContent()
+        content.title = "Email reminder"
+        content.body = subject.isEmpty ? "Return to this thread" : subject
+        content.sound = .default
+        content.categoryIdentifier = Category.emailReminder
+        content.userInfo = ["threadId": threadId]
+        content.threadIdentifier = "email-reminders"
+
+        let components = Calendar.current.dateComponents(
+            [.year, .month, .day, .hour, .minute],
+            from: fireDate
+        )
+        let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
+        let request = UNNotificationRequest(
+            identifier: "email-reminder-\(threadId)",
+            content: content,
+            trigger: trigger
+        )
+
+        center.removePendingNotificationRequests(withIdentifiers: ["email-reminder-\(threadId)"])
+        do {
+            try await center.add(request)
+            return true
+        } catch {
+            return false
+        }
+    }
+
     // MARK: - Due-Task Digest
 
     func scheduleDueTodayDigest(count: Int, titles: [String]) {
@@ -132,6 +189,12 @@ final class MacNotificationService {
     }
 
     // MARK: - AI Response Notifications
+
+    /// Convenience overload matching the iOS `snippet:` label naming used at some
+    /// call sites; forwards to the canonical `preview:` implementation.
+    func scheduleAIResponseNotification(conversationId: String, snippet: String) {
+        scheduleAIResponseNotification(conversationId: conversationId, preview: snippet)
+    }
 
     func scheduleAIResponseNotification(conversationId: String, preview: String) {
         guard isAuthorized else { return }
@@ -199,12 +262,23 @@ final class MacNotificationService {
             actions: [archiveAction],
             intentIdentifiers: []
         )
+        let emailReminderCategory = UNNotificationCategory(
+            identifier: Category.emailReminder,
+            actions: [],
+            intentIdentifiers: []
+        )
         let aiCategory = UNNotificationCategory(
             identifier: Category.aiResponse,
             actions: [],
             intentIdentifiers: []
         )
 
-        center.setNotificationCategories([taskCategory, dueTasksCategory, emailCategory, aiCategory])
+        center.setNotificationCategories([
+            taskCategory,
+            dueTasksCategory,
+            emailCategory,
+            emailReminderCategory,
+            aiCategory,
+        ])
     }
 }

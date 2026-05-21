@@ -4,14 +4,31 @@ import WebKit
 /// Wraps the Docs web page in a WKWebView with Bearer auth injection.
 /// Uses configuration.effectiveAppURL so local dev builds load localhost:3000
 /// and production builds load app.todus.app.
+///
+/// Pass `docId` to deep-link directly into `/mail/docs/<id>` — used by the native
+/// `DocEditorView`. Default `nil` keeps the legacy index behaviour.
 struct DocsBrowserView: View {
     @Environment(AppServices.self) private var services
 
+    /// Optional document id. When set, the web view opens `/mail/docs/<id>`
+    /// so the native list shell can drop the user straight into the editor.
+    let docId: String?
+
     @State private var isLoading: Bool = true
+
+    init(docId: String? = nil) {
+        self.docId = docId
+    }
 
     var body: some View {
         let appURL = services.configuration.effectiveAppURL
-        let docsURL = appURL.appendingPathComponent("mail/docs")
+        let docsURL: URL = {
+            let base = appURL.appendingPathComponent("mail/docs")
+            if let docId, !docId.isEmpty {
+                return base.appendingPathComponent(docId)
+            }
+            return base
+        }()
 
         return ZStack {
             DocsBrowserViewRepresentable(

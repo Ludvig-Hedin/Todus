@@ -245,10 +245,15 @@ struct MacAISourceRow: View {
                 .padding(.top, 2)
             }
             Spacer(minLength: 12)
-            Image(systemName: "chevron.right")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.tertiary)
-                .padding(.top, 4)
+            // Chevron only appears for web rows — those navigate out to a URL.
+            // Non-web rows open an in-app detail sheet, so a chevron would
+            // mislead the user into expecting an external link.
+            if source.kind == .web {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+                    .padding(.top, 4)
+            }
         }
     }
 

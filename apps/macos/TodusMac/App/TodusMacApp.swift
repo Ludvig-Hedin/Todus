@@ -1,17 +1,27 @@
 import AppKit
 import SwiftUI
 import SwiftData
+import UserNotifications
 
 @main
 struct TodusMacApp: App {
     @State private var services = MacAppServices()
     @Environment(\.scenePhase) private var scenePhase
+    /// AppDelegate is required for `UNUserNotificationCenterDelegate` so notification
+    /// taps + actions (complete, snooze, archive) route while the app is running.
+    /// Wired into `services` after `initializeApp()` finishes so action handlers can
+    /// reach SwiftData + the email/task services.
+    @NSApplicationDelegateAdaptor(MacAppDelegate.self) private var appDelegate
     /// Deferred — populated by an off-main `Task` so the first frame isn't blocked on
     /// SwiftData schema migrations + persistent-store open (can take seconds on cold launch).
     /// While nil, the splash view renders. `modelContainerFailed` flips to true if every
     /// fallback (default → file → in-memory) raises, which renders a recoverable error UI.
     @State private var sharedModelContainer: ModelContainer?
     @State private var modelContainerFailed: Bool = false
+    /// Deep-link URLs that arrived before `sharedModelContainer` / services were ready.
+    /// Replayed in order once initialization completes so we don't drop auth callbacks
+    /// or `mailto:` links sent during the splash-screen window. Cleared after replay.
+    @State private var pendingDeepLinks: [URL] = []
 
     init() {
         // Bump shared URLCache so AsyncImage's downloaded avatar bytes survive memory
@@ -37,13 +47,7 @@ struct TodusMacApp: App {
                         .frame(minWidth: 1100, minHeight: 720)
                         // Handle todus://auth-callback and mailto: deep links
                         .onOpenURL { url in
-                            // RFC 3986: URL schemes are case-insensitive — normalize so MAILTO:/Mailto:
-                            // links don't fall through to the auth callback handler.
-                            if url.scheme?.lowercased() == "mailto" {
-                                handleMailtoURL(url, services: services)
-                            } else {
-                                services.authService.handleAuthCallback(url: url)
-                            }
+                            handleIncomingURL(url)
                         }
                         // Darken the window chrome (title bar / toolbar) to match the content area.
                         // Without this, the unified toolbar background is lighter than the detail pane
@@ -66,7 +70,7 @@ struct TodusMacApp: App {
                         .onChange(of: scenePhase) { oldPhase, newPhase in
                             if newPhase == .background {
                                 Task {
-                                    await MacWidgetUpdateManager.shared.updateWidgets(
+                                    MacWidgetUpdateManager.shared.updateWidgets(
                                         context: sharedModelContainer.mainContext,
                                         emailService: services.emailService
                                     )
@@ -76,6 +80,11 @@ struct TodusMacApp: App {
                 } else {
                     splashView
                         .task { await initializeApp() }
+                        // Capture deep links that arrive before services are wired.
+                        // They're queued and replayed in `initializeApp()`.
+                        .onOpenURL { url in
+                            handleIncomingURL(url)
+                        }
                 }
             }
         }
@@ -205,8 +214,98 @@ struct TodusMacApp: App {
             self.sharedModelContainer = container
             services.modelContainer = container
             services.setupNetworkSync()
+            // Wire the delegate so UNUserNotificationCenter callbacks can resolve tasks
+            // (SwiftData) and reach email/AI services for routing + actions.
+            appDelegate.modelContainer = container
+            appDelegate.services = services
+            UNUserNotificationCenter.current().delegate = appDelegate
+            // Wire SwiftData into the voice coordinator so tool calls
+            // (create_task etc.) have a context to mutate. Without this,
+            // voice tools fall back to a friendly "open the chat panel
+            // first" error.
+            services.voiceCoordinator.modelContext = container.mainContext
+            // Apply the user's saved voice prefs after the container is
+            // ready so we never start the hotkey before the chat service
+            // can actually handle a tool call.
+            services.applyVoiceAssistantState()
+            // Replay any deep links that arrived before init completed.
+            if !pendingDeepLinks.isEmpty {
+                let queued = pendingDeepLinks
+                pendingDeepLinks = []
+                for url in queued {
+                    dispatchValidatedURL(url)
+                }
+            }
         case .failed:
             self.modelContainerFailed = true
+        }
+    }
+
+    /// Validates and dispatches incoming deep links. Reject hosts other than the
+    /// expected `auth-callback` (for `todus://` schemes) to prevent untrusted apps
+    /// from injecting URLs that flow into the auth handler. If services are not yet
+    /// ready (cold launch + immediate deep link), queue the URL and replay after init.
+    @MainActor
+    private func handleIncomingURL(_ url: URL) {
+        // mailto: links — always safe to hand to the compose handler. RFC 3986:
+        // schemes are case-insensitive, normalize so MAILTO:/Mailto: don't slip
+        // through to the auth callback branch.
+        if url.scheme?.lowercased() == "mailto" {
+            if sharedModelContainer == nil {
+                pendingDeepLinks.append(url)
+            } else {
+                handleMailtoURL(url, services: services)
+            }
+            return
+        }
+
+        // Defer non-ready URLs so they're not silently dropped during cold launch.
+        if sharedModelContainer == nil {
+            pendingDeepLinks.append(url)
+            return
+        }
+
+        dispatchValidatedURL(url)
+    }
+
+    /// Dispatch path used after services are confirmed ready. Mirrors `handleIncomingURL`
+    /// but assumes the container is initialized — used both directly and by the queued
+    /// replay loop.
+    @MainActor
+    private func dispatchValidatedURL(_ url: URL) {
+        if url.scheme?.lowercased() == "mailto" {
+            handleMailtoURL(url, services: services)
+            return
+        }
+
+        // Route `todus://` URLs by host. Only known hosts are accepted so an
+        // attacker-controlled URL (e.g. `todus://malicious`) cannot inject into
+        // the auth-callback state machine.
+        switch url.host?.lowercased() {
+        case "auth-callback":
+            // AuthService already enforces an in-flight `pendingAuthFlowExpiresAt`
+            // provenance window and rejects unsolicited auth-callback URLs that arrive
+            // while a user is already authenticated. We rely on that as the second
+            // layer of defense against an attacker-controlled token injection.
+            services.authService.handleAuthCallback(url: url)
+
+        case "share":
+            // `todus://share?slug=abc123` — open the shared AI conversation viewer.
+            // Slug is broadcast over NotificationCenter so any presenter (MacRootView
+            // or a sibling sheet) can react without requiring a new state field on
+            // MacAppServices (which is owned by another agent).
+            if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+               let slug = components.queryItems?.first(where: { $0.name == "slug" })?.value,
+               !slug.isEmpty {
+                NotificationCenter.default.post(
+                    name: .todusOpenSharedConversation,
+                    object: slug
+                )
+            }
+
+        default:
+            // Silently ignore — unknown host, not something we recognize.
+            return
         }
     }
 
@@ -298,6 +397,7 @@ private struct AIChatWindowContent: View {
             geo: geo,
             currentSelection: .home
         )
+        .focusEffectDisabled()
         .background(WindowMovableBackground())
         .onDisappear {
             if displayModeRaw == AssistantDisplayMode.window.rawValue {
@@ -349,4 +449,222 @@ private func handleMailtoURL(_ url: URL, services: MacAppServices) {
     )
     guard normalized.to != nil || normalized.subject != nil || normalized.body != nil else { return }
     services.pendingMailto = normalized
+}
+
+/// Sendable snapshot of a notification's text fields captured on the nonisolated
+/// delegate callback so we can rebuild a `UNMutableNotificationContent` on the
+/// MainActor without sending the non-Sendable original across actors. Mirrors the
+/// iOS implementation in `TodosApp.swift`.
+private struct MacSnoozeContentSnapshot: Sendable {
+    let title: String
+    let subtitle: String
+    let body: String
+    let categoryIdentifier: String
+    let threadIdentifier: String
+    let badge: Int?
+}
+
+// MARK: - MacAppDelegate (Notification Action Handling)
+
+/// Handles `UNUserNotificationCenter` foreground presentation + tap/action routing for
+/// the macOS app. Mirrors the iOS `AppDelegate` in `TodosApp.swift` so the same payload
+/// shapes (`taskID`, `threadId`, `conversationId`) route identically on both platforms.
+///
+/// Routing for surfaces this delegate can't directly mutate (the active main view's
+/// navigation selection lives in `MacRootView` `@State`) is published over
+/// `NotificationCenter` so any view can observe and react without coupling.
+@MainActor
+final class MacAppDelegate: NSObject, NSApplicationDelegate {
+    /// Provided by `TodusMacApp.initializeApp()` once SwiftData is ready. Until then,
+    /// notification actions that need a `ModelContext` (Complete) are no-ops.
+    var modelContainer: ModelContainer?
+    /// Weak reference so the delegate doesn't extend `MacAppServices` lifetime.
+    weak var services: MacAppServices?
+}
+
+extension MacAppDelegate: UNUserNotificationCenterDelegate {
+    /// Present banners + sound while the app is foregrounded so notifications aren't
+    /// silently swallowed when the user is actively using Todus.
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner, .sound, .badge])
+    }
+
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        // Snapshot Sendable primitives BEFORE hopping to the MainActor — the original
+        // `UNNotificationResponse` / userInfo dictionary are not Sendable.
+        let userInfo = response.notification.request.content.userInfo
+        let taskIDString = userInfo["taskID"] as? String ?? ""
+        let threadIdString = userInfo["threadId"] as? String
+        let conversationIdString = userInfo["conversationId"] as? String
+        let categoryIdentifier = response.notification.request.content.categoryIdentifier
+        let actionIdentifier = response.actionIdentifier
+        let requestIdentifier = response.notification.request.identifier
+
+        let snoozeSnapshot: MacSnoozeContentSnapshot? = {
+            guard actionIdentifier == MacNotificationService.Action.snooze else { return nil }
+            let c = response.notification.request.content
+            return MacSnoozeContentSnapshot(
+                title: c.title,
+                subtitle: c.subtitle,
+                body: c.body,
+                categoryIdentifier: c.categoryIdentifier,
+                threadIdentifier: c.threadIdentifier,
+                badge: c.badge?.intValue
+            )
+        }()
+
+        // Call completionHandler immediately on the nonisolated context so we don't
+        // capture an `@escaping` handler in a MainActor Task (Sendability risk).
+        completionHandler()
+
+        Task { @MainActor in
+            switch actionIdentifier {
+            case MacNotificationService.Action.complete:
+                // Mark the task complete via SwiftData. If the model container isn't
+                // ready yet (action delivered during cold launch), the user can tap
+                // again after launch completes — we don't have a queued retry path.
+                guard let container = self.modelContainer,
+                      let taskID = UUID(uuidString: taskIDString) else { return }
+                let context = container.mainContext
+                let descriptor = FetchDescriptor<TaskRecord>(
+                    predicate: #Predicate { task in task.id == taskID }
+                )
+                if let task = (try? context.fetch(descriptor))?.first {
+                    task.completed = true
+                    task.status = .done
+                    task.updatedAt = .now
+                    try? context.save()
+                    // Broadcast for any listeners (sync services, UI refreshers) so the
+                    // mutation propagates beyond the delegate context.
+                    NotificationCenter.default.post(
+                        name: .todusCompleteTask,
+                        object: nil,
+                        userInfo: ["taskID": taskIDString]
+                    )
+                }
+
+            case MacNotificationService.Action.snooze:
+                // Re-schedule the same notification 1 hour from now. Rebuild content
+                // from the Sendable snapshot to avoid sending UNNotificationContent.
+                guard let s = snoozeSnapshot else { break }
+                let content = UNMutableNotificationContent()
+                content.title = s.title
+                content.subtitle = s.subtitle
+                content.body = s.body
+                if !taskIDString.isEmpty {
+                    content.userInfo = ["taskID": taskIDString]
+                }
+                content.categoryIdentifier = s.categoryIdentifier
+                content.threadIdentifier = s.threadIdentifier
+                if let b = s.badge {
+                    content.badge = NSNumber(value: b)
+                }
+                content.sound = .default
+
+                let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 3600, repeats: false)
+                let request = UNNotificationRequest(
+                    identifier: requestIdentifier,
+                    content: content,
+                    trigger: trigger
+                )
+                try? await UNUserNotificationCenter.current().add(request)
+
+            case MacNotificationService.Action.archiveEmail:
+                // Archive the email thread via the existing EmailService API. Failures
+                // surface inside EmailService (errorMessage on the service); no
+                // additional UI prompt here since the notification has already gone.
+                guard let services = self.services,
+                      let threadId = threadIdString, !threadId.isEmpty else { return }
+                await services.emailService.archiveThreads(ids: [threadId])
+
+            default:
+                // Default tap (`UNNotificationDefaultActionIdentifier`) — route based on
+                // category + payload. Each branch publishes over NotificationCenter so
+                // MacRootView (which owns the navigation `@State`) can react without
+                // requiring new mutable surface on MacAppServices.
+                guard let services = self.services else { return }
+
+                switch categoryIdentifier {
+                case MacNotificationService.Category.emailNotification,
+                     MacNotificationService.Category.emailReminder:
+                    if let threadId = threadIdString, !threadId.isEmpty {
+                        NotificationCenter.default.post(
+                            name: .todusOpenEmailThread,
+                            object: threadId
+                        )
+                    } else {
+                        NotificationCenter.default.post(name: .todusNavigateToEmail, object: nil)
+                    }
+
+                case MacNotificationService.Category.aiResponse:
+                    // Open the AI assistant panel and load the specific conversation.
+                    services.showsAssistantPanel = true
+                    if let conversationId = conversationIdString, !conversationId.isEmpty {
+                        NotificationCenter.default.post(
+                            name: .todusOpenAIConversation,
+                            object: nil,
+                            userInfo: ["conversationId": conversationId]
+                        )
+                    }
+
+                case MacNotificationService.Category.taskReminder,
+                     MacNotificationService.Category.dueTasks:
+                    NotificationCenter.default.post(
+                        name: .todusNavigateToTasks,
+                        object: taskIDString.isEmpty ? nil : taskIDString
+                    )
+
+                default:
+                    // Unknown category — best-effort: if a threadId is present route to
+                    // mail, if a conversationId is present route to AI, otherwise no-op.
+                    if let threadId = threadIdString, !threadId.isEmpty {
+                        NotificationCenter.default.post(name: .todusOpenEmailThread, object: threadId)
+                    } else if let conversationId = conversationIdString, !conversationId.isEmpty {
+                        services.showsAssistantPanel = true
+                        NotificationCenter.default.post(
+                            name: .todusOpenAIConversation,
+                            object: nil,
+                            userInfo: ["conversationId": conversationId]
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Notification routing channels
+
+extension Notification.Name {
+    /// Posted when the user taps a `todus://share?slug=...` deep link. The slug is
+    /// passed as `object`. Observers (e.g. `MacRootView` or a sibling host view)
+    /// should present `MacSharedConversationView(slug:)` as a sheet.
+    static let todusOpenSharedConversation = Notification.Name("TodusOpenSharedConversation")
+
+    /// Posted when the user taps an AI-response notification (default action).
+    /// `userInfo["conversationId"]` carries the conversation to load.
+    static let todusOpenAIConversation = Notification.Name("TodusOpenAIConversation")
+
+    /// Posted when the user taps an email notification with a specific thread payload.
+    /// `object` is the `String` thread id.
+    static let todusOpenEmailThread = Notification.Name("TodusOpenEmailThread")
+
+    /// Posted when a notification should switch the main view to email (no specific thread).
+    static let todusNavigateToEmail = Notification.Name("TodusNavigateToEmail")
+
+    /// Posted when a notification should switch the main view to tasks. `object` may
+    /// optionally be a `String` task id to focus.
+    static let todusNavigateToTasks = Notification.Name("TodusNavigateToTasks")
+
+    /// Posted when a task-complete notification action fires. `userInfo["taskID"]`
+    /// carries the completed task id (string UUID).
+    static let todusCompleteTask = Notification.Name("TodusCompleteTask")
 }

@@ -164,10 +164,12 @@ final class AppleRemindersSyncService {
                 // EKError with a prior identifier we drop it and let the next pass re-create.
                 // Mirrors the iOS service's bug-#10 fix.
                 if existingIdentifier != nil {
-                    let descriptor = FetchDescriptor<TaskRecord>(predicate: #Predicate { $0.id == taskID })
-                    if let task = try? context.fetch(descriptor).first {
-                        task.reminderIdentifier = nil
-                        try? context.save()
+                    await MainActor.run {
+                        let descriptor = FetchDescriptor<TaskRecord>(predicate: #Predicate { $0.id == taskID })
+                        if let task = try? context.fetch(descriptor).first {
+                            task.reminderIdentifier = nil
+                            try? context.save()
+                        }
                     }
                 }
                 startupLog.error("AppleRemindersSyncService.upsert failed: \(error.localizedDescription, privacy: .public)")
@@ -177,11 +179,29 @@ final class AppleRemindersSyncService {
                 return
             }
 
-            let descriptor = FetchDescriptor<TaskRecord>(predicate: #Predicate { $0.id == taskID })
-            guard let task = try? context.fetch(descriptor).first else { return }
-            task.reminderIdentifier = identifier
-            task.syncState = .pendingUpload
-            try? context.save()
+            await MainActor.run {
+                let descriptor = FetchDescriptor<TaskRecord>(predicate: #Predicate { $0.id == taskID })
+                guard let task = try? context.fetch(descriptor).first else { return }
+                let priorState = SyncState(rawValue: task.syncStateRawValue) ?? .pendingUpload
+                let hadIdentifier = (task.reminderIdentifier?.isEmpty == false)
+                task.reminderIdentifier = identifier
+                // Explicit branching so future changes can't accidentally
+                // resurrect oscillation. Each branch documents intent.
+                if !hadIdentifier && priorState == .synced {
+                    // Just attached an identifier to a fully-synced task (e.g. freshly
+                    // imported from Reminders or matched by title to an existing entry).
+                    // No server change needed — keep .synced.
+                } else if !hadIdentifier && priorState == .pendingUpload {
+                    // Local task got matched/attached to a Reminders entry; keep
+                    // .pendingUpload so TaskSyncService eventually persists the
+                    // identifier server-side.
+                    task.syncState = .pendingUpload
+                } else {
+                    // Identifier was already set; an actual field change happened — bump.
+                    task.syncState = .pendingUpload
+                }
+                try? context.save()
+            }
         }
     }
 
@@ -191,7 +211,12 @@ final class AppleRemindersSyncService {
         guard let identifier = task.reminderIdentifier else { return }
 
         Task {
-            try? await storage.delete(identifier: identifier)
+            do {
+                try await storage.delete(identifier: identifier)
+            } catch {
+                AppLogger.shared.log("[Reminders] delete failed for \(identifier): \(error.localizedDescription)")
+                // Don't rethrow; caller already moved on. Logging is sufficient for diagnosis.
+            }
         }
     }
 
@@ -211,10 +236,31 @@ final class AppleRemindersSyncService {
         let existingTasks = (try? context.fetch(descriptor)) ?? []
         let trackedIdentifiers = Set(existingTasks.compactMap(\.reminderIdentifier))
 
+        // Fallback dedup key: (normalized title, due-date minute bucket).
+        // Protects against duplicate inserts when a reminder we already imported
+        // has lost its identifier link (e.g. task was created locally first, then
+        // the same item came back through the import path).
+        func normalizeTitle(_ title: String) -> String {
+            title.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        func dueBucket(_ date: Date?) -> Double {
+            guard let date else { return 0 }
+            // Round to nearest minute so small clock drift doesn't break dedup.
+            return (date.timeIntervalSinceReferenceDate / 60.0).rounded() * 60.0
+        }
+        var existingTitleBuckets = Set<String>()
+        for task in existingTasks {
+            let key = "\(normalizeTitle(task.title))|\(dueBucket(task.dueDate))"
+            existingTitleBuckets.insert(key)
+        }
+
         var insertedCount = 0
         for reminder in reminders {
             guard !trackedIdentifiers.contains(reminder.identifier) else { continue }
             guard !reminder.title.isEmpty else { continue }
+
+            let fallbackKey = "\(normalizeTitle(reminder.title))|\(dueBucket(reminder.dueDate))"
+            if existingTitleBuckets.contains(fallbackKey) { continue }
 
             let derivedDescription = (reminder.notes.isEmpty || reminder.notes == reminder.title) ? "" : reminder.notes
             let task = TaskRecord(
@@ -227,6 +273,9 @@ final class AppleRemindersSyncService {
                 syncState: .synced
             )
             context.insert(task)
+            // Track the new task's fallback key so subsequent reminders in the
+            // same batch don't insert a near-duplicate.
+            existingTitleBuckets.insert(fallbackKey)
             insertedCount += 1
         }
 

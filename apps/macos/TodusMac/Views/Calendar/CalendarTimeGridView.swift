@@ -243,7 +243,8 @@ struct CalendarTimeGridView: View {
 
         return timedEvents.enumerated().map { index, event in
             let startMinutes = max(CGFloat(event.startDate.timeIntervalSince(dayStart) / 60), 0)
-            let endMinutes = max(CGFloat(event.endDate.timeIntervalSince(dayStart) / 60), 0)
+            // Cap end at 24:00 (1440 min) so multi-day events clip at midnight rather than overflow.
+            let endMinutes = min(max(CGFloat(event.endDate.timeIntervalSince(dayStart) / 60), 0), 24 * 60)
             let duration = max(endMinutes - startMinutes, CGFloat(MacTheme.calendarMinEventHeight) / (MacTheme.calendarHourHeight / 60))
 
             let yOffset = startMinutes * (MacTheme.calendarHourHeight / 60)

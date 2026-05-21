@@ -141,7 +141,10 @@ final class MeetingsService {
             let _: SyncResponse = try await apiClient.trpcMutation("meet.syncFromCalendar")
             await loadMeetings(status: currentStatusFilter, search: currentSearchQuery)
         } catch {
+            // Mirror loadMeetings — surface to the published `loadError` so
+            // observers see the failure instead of it being swallowed by print.
             print("[MeetingsService] Failed to sync: \(error)")
+            loadError = error.localizedDescription
         }
     }
 

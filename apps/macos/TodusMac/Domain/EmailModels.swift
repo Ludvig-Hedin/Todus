@@ -149,10 +149,13 @@ struct EmailAttachment: Decodable, Identifiable {
 struct EmailDraft {
     var to: [String] = []
     var cc: [String] = []
+    var bcc: [String] = []
     var subject: String = ""
     var body: String = ""
     var replyToThreadId: String?
     var replyToMessageId: String?
+    /// Which connected account to send from (nil = first/default account).
+    var fromConnectionId: String?
     /// Passed through to `mail.send` for forward threading semantics.
     var isForward: Bool = false
 }

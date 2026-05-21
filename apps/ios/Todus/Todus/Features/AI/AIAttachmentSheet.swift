@@ -115,6 +115,7 @@ struct AIAttachmentSheet: View {
             .frame(width: 110, height: 110)
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("Take photo")
     }
 
     private var photoAccessDeniedTile: some View {

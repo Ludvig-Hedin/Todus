@@ -1,8 +1,17 @@
 import Foundation
 
+/// Networking seam — `RemoteFirstTaskParsingService` calls the remote NLP edge
+/// function through this protocol so unit tests can stub success / failure
+/// without making a real HTTPS call. The production
+/// `SupabaseEdgeFunctionClient` conforms via the extension at the bottom of
+/// `SupabaseEdgeFunctionClient.swift`.
+protocol RemoteTaskParsingTransport: Sendable {
+    func invokeParse(path: String, body: ParseTasksRequest) async throws -> ParseTasksResponse
+}
+
 struct RemoteFirstTaskParsingService: TaskParsingService {
     private let configuration: AppConfiguration
-    private let client: SupabaseEdgeFunctionClient?
+    private let client: RemoteTaskParsingTransport?
     private let fallback: LocalTaskParsingService
 
     init(configuration: AppConfiguration) {
@@ -13,6 +22,30 @@ struct RemoteFirstTaskParsingService: TaskParsingService {
             client = nil
         }
         fallback = LocalTaskParsingService()
+    }
+
+    /// Internal init that accepts an injected `RemoteTaskParsingTransport`.
+    /// Used by unit tests to assert the remote-succeeds and
+    /// remote-fails-→-local-fallback branches without spinning up a real
+    /// `SupabaseEdgeFunctionClient`.
+    init(configuration: AppConfiguration, client: RemoteTaskParsingTransport?) {
+        self.configuration = configuration
+        self.client = client
+        self.fallback = LocalTaskParsingService()
+    }
+
+    /// Local-only compound parse. Useful when callers (e.g. CreateSheet) need to
+    /// split an input into multiple intents (`task + event + email`) without
+    /// involving the remote NLP service. Routed through the new
+    /// `CompoundIntentParser` so date anchors and relative ("innan" / "efter")
+    /// resolution stay consistent with the macOS shell.
+    func parseCompoundLocally(
+        rawText: String,
+        now: Date = .now,
+        locale: Locale = .current,
+        timeZone: TimeZone = .current
+    ) -> [CompoundIntentParser.ParsedIntent] {
+        CompoundIntentParser.parse(text: rawText, now: now, locale: locale, timeZone: timeZone)
     }
 
     func parse(rawText: String, locale: Locale, timeZone: TimeZone, installID: String) async -> ParsedTaskResult {
@@ -31,12 +64,24 @@ struct RemoteFirstTaskParsingService: TaskParsingService {
         )
 
         do {
-            let response: ParseTasksResponse = try await client.invoke(
+            let response: ParseTasksResponse = try await client.invokeParse(
                 path: configuration.parseFunctionPath,
                 body: request
             )
             if let first = response.tasks.first {
-                return first
+                // Preserve the remote's own `lowConfidence` signal. Previously this
+                // returned `first` as-is, which is fine, but a future change to
+                // `ParsedTaskResult` defaulting `lowConfidence` to false would have
+                // silently dropped the flag — make the propagation explicit.
+                // (Bug H7.)
+                return ParsedTaskResult(
+                    title: first.title,
+                    dueDate: first.dueDate,
+                    confidence: first.confidence,
+                    originalText: first.originalText,
+                    suggestedFolderName: first.suggestedFolderName,
+                    lowConfidence: first.lowConfidence
+                )
             }
             // Empty response = the remote couldn't extract any task. Falling through to the
             // local parser is still useful, but the result is degraded — flag it.

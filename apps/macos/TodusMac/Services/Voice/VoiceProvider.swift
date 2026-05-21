@@ -120,4 +120,16 @@ protocol VoiceProvider: AnyObject, Sendable {
 
     /// Send the result of a tool call back to the model.
     func sendToolResponse(id: String, name: String, result: String) async throws
+
+    /// Signal the end of the user's current speaking turn so the model can
+    /// respond without waiting for VAD silence. Used by push-to-talk on
+    /// hotkey release. Providers that don't support an explicit end-of-turn
+    /// signal can leave this as the default no-op.
+    func sendActivityEnd() async throws
+}
+
+extension VoiceProvider {
+    /// Default no-op so non-Gemini providers (future) compile without
+    /// implementing push-to-talk explicitly.
+    func sendActivityEnd() async throws {}
 }

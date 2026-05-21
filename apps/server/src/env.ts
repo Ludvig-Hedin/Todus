@@ -74,6 +74,8 @@ export type ZeroEnv = {
   AUTUMN_SECRET_KEY: string;
   /** Optional shared secret for verifying Autumn webhook signatures. */
   AUTUMN_WEBHOOK_SECRET?: string;
+  /** "true" enables LLM-generated verb-first action lines on briefing rows. */
+  ASSISTANT_ACTION_LINE_ENABLED?: string;
   AI_SYSTEM_PROMPT: string;
   PERPLEXITY_API_KEY: string;
   TAVILY_API_KEY: string;

@@ -31,6 +31,7 @@ targets:
           - "**/*.md"
           - "**/archived/**"
           - "Services/Auth/AuthService.swift"
+          - "App/LocalModelStateStore_DEPRECATED.swift"
       - path: ../../../packages/swift-auth/Sources/TodusAuth
         group: TodusAuth
       - path: ../../../packages/swift-widgets/Sources/TodusWidgetsShared
@@ -85,6 +86,24 @@ targets:
     platform: iOS
     sources:
       - path: TodusTests
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+    dependencies:
+      - target: Todus
+
+  TodusUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: TodusUITests
+        excludes:
+          - "Info.plist"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.ludvighedin.TodusUITests
+        INFOPLIST_FILE: TodusUITests/Info.plist
+        TEST_TARGET_NAME: Todus
     dependencies:
       - target: Todus
 
@@ -94,12 +113,14 @@ schemes:
       targets:
         Todus: all
         TodusTests: [test]
+        TodusUITests: [test]
     run:
       config: Debug
     test:
       config: Debug
       targets:
         - name: TodusTests
+        - name: TodusUITests
     analyze:
       config: Debug
     archive:

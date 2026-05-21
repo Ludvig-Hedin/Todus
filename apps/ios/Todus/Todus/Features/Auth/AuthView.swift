@@ -15,18 +15,41 @@ struct AuthView: View {
     @FocusState private var isCodeFocused: Bool
     private let otpHelpMessage = "You can keep using tasks without email and connect it later in Settings."
 
-    /// Blue accent used for primary action buttons (matches todo app)
-    private let accentBlue = Color(red: 0.25, green: 0.48, blue: 1.0)
+    /// Blue accent used for primary action buttons (matches todo app).
+    /// Sourced from the shared `AppTheme.Accents.blue` palette so the same RGB
+    /// triple is used here and on macOS / web — change the palette to rebrand.
+    private let accentBlue = AppTheme.Accents.blue
 
     private let expectedCodeLength = 6
 
     private var isValidEmail: Bool {
-        email.contains("@") && email.contains(".") && email.count >= 5
+        // Trim whitespace and require at least `local@host.tld`. The previous check
+        // accepted strings like "@.aa" because `contains("@")` and `contains(".")` can
+        // both succeed on garbage; that produced a confusing "send code failed" round
+        // trip to the backend. Validate the structural shape locally instead.
+        let trimmed = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let atIndex = trimmed.firstIndex(of: "@") else { return false }
+        let local = trimmed[..<atIndex]
+        let domain = trimmed[trimmed.index(after: atIndex)...]
+        guard !local.isEmpty,
+              let dotIndex = domain.firstIndex(of: "."),
+              dotIndex > domain.startIndex else { return false }
+        let tld = domain[domain.index(after: dotIndex)...]
+        return !tld.isEmpty
     }
 
     var body: some View {
         ZStack {
-            AppTheme.backgroundTop.ignoresSafeArea()
+            // Background-only tap target so the dismiss gesture doesn't intercept
+            // taps along button edges (which used to swallow the first tap on
+            // Send/Apple/Google when SwiftUI hit-tested the ZStack first).
+            AppTheme.backgroundTop
+                .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    isEmailFocused = false
+                    isCodeFocused = false
+                }
 
             VStack(spacing: 0) {
                 Spacer()
@@ -66,9 +89,17 @@ struct AuthView: View {
                     if let pendingEmail = otpPendingEmail {
                         otpVerificationView(email: pendingEmail)
                     } else {
-                        emailInputView
-                        socialButtons
-                        guestLink
+                        // Disable the entire stage-1 stack while an auth request is
+                        // in flight. Previously the Apple/Google buttons remained
+                        // tappable while Send-OTP was loading, which let the user
+                        // start a second flow on top of the first and stranded the
+                        // app with overlapping spinner state.
+                        VStack(spacing: 12) {
+                            emailInputView
+                            socialButtons
+                            guestLink
+                        }
+                        .disabled(authService.isLoading)
                     }
                 }
                 .padding(.horizontal, 24)
@@ -79,13 +110,25 @@ struct AuthView: View {
                     .padding(.bottom, 16)
             }
         }
-        // Dismiss keyboard on tap outside any input field
-        .onTapGesture {
-            isEmailFocused = false
-            isCodeFocused = false
-        }
+        // Keyboard dismiss is wired on the background Color above so button-edge
+        // taps aren't intercepted by a ZStack-level gesture.
         .animation(.snappy(duration: 0.25), value: otpPendingEmail)
         .animation(.snappy(duration: 0.3), value: authService.lastErrorMessage != nil)
+        // Auto-dismiss the error banner after a short delay so a stale message from
+        // a previous attempt doesn't follow the user across screens or stages.
+        .task(id: authService.lastErrorMessage) {
+            guard authService.lastErrorMessage != nil else { return }
+            let snapshot = authService.lastErrorMessage
+            do {
+                try await Task.sleep(for: .seconds(6))
+            } catch {
+                return // task was cancelled because the message changed
+            }
+            // Only clear if the message hasn't changed in the meantime.
+            if authService.lastErrorMessage == snapshot {
+                authService.lastErrorMessage = nil
+            }
+        }
         .onChange(of: otpPendingEmail) { _, newEmail in
             // Clear the code field whenever we leave the OTP stage (success, failure from
             // completeAuthentication, or manual back navigation) so the input is fresh
@@ -126,6 +169,17 @@ struct AuthView: View {
                     isEmailFocused = false
                     Task { await authService.sendEmailOTP(email: email) }
                 }
+
+            // Inline validation hint — only when the user has typed something that
+            // doesn't structurally look like an email. Silent while empty so the
+            // first-impression state stays clean.
+            if !email.isEmpty && !isValidEmail {
+                Text("Enter a valid email")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 20)
+            }
 
             // Send code button — only visible when email looks valid
             if isValidEmail {
@@ -226,9 +280,18 @@ struct AuthView: View {
                         .frame(height: 48)
                         .background(accentBlue, in: Capsule())
                         .foregroundStyle(.white)
+                        .opacity(authService.isLoading ? 0.6 : 1)
                 }
                 .buttonStyle(.plain)
                 .disabled(authService.isLoading)
+                .overlay {
+                    // Mirror the Send pattern: overlay the spinner on the button so
+                    // it stays visible above the keyboard rather than sitting in the
+                    // middle of the (now off-screen) parent stack.
+                    if authService.isLoading {
+                        ButtonInlineProgressView()
+                    }
+                }
             } else {
                 Button {
                     Task { await authService.sendEmailOTP(email: email) }
@@ -239,27 +302,39 @@ struct AuthView: View {
                         .frame(height: 48)
                         .background(Color(UIColor.systemBackground), in: Capsule())
                         .overlay(Capsule().stroke(Color(UIColor.separator), lineWidth: 1))
+                        .opacity(authService.isLoading ? 0.6 : 1)
                 }
                 .buttonStyle(.plain)
                 .disabled(authService.isLoading)
+                .overlay {
+                    if authService.isLoading {
+                        ButtonInlineProgressView(tint: .primary)
+                    }
+                }
             }
 
-            // Open email app
-            Button {
-                openEmailApp()
-            } label: {
-                Text("Open your email app")
-                    .font(.system(size: 16, weight: .semibold))
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 48)
-                    .background(Color(UIColor.systemBackground), in: Capsule())
-                    .overlay(Capsule().stroke(Color(UIColor.separator), lineWidth: 1))
+            // Open email app — only render the button when the device actually has
+            // a default mail handler that can open `mailto:`. Otherwise the tap is
+            // a no-op (or worse, surfaces a "can't open" toast).
+            if let mailURL = URL(string: "mailto:"), UIApplication.shared.canOpenURL(mailURL) {
+                Button {
+                    UIApplication.shared.open(mailURL)
+                } label: {
+                    Text("Open your email app")
+                        .font(.system(size: 16, weight: .semibold))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 48)
+                        .background(Color(UIColor.systemBackground), in: Capsule())
+                        .overlay(Capsule().stroke(Color(UIColor.separator), lineWidth: 1))
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
 
+            // P13: bump muted help text contrast so it reads cleanly against the
+            // capsule background while staying visually secondary.
             Text(otpHelpMessage)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.secondary)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.primary.opacity(0.7))
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 8)
 
@@ -275,11 +350,10 @@ struct AuthView: View {
             .buttonStyle(.plain)
             .padding(.top, 4)
         }
-        .overlay {
-            if authService.isLoading {
-                ButtonInlineProgressView(tint: .primary, side: AppTheme.Metrics.buttonInlineSpinner)
-            }
-        }
+        // Spinner is rendered on the active button (Verify or Resend) so it stays
+        // visible above the keyboard. The previous outer overlay centered the
+        // spinner in the parent stack, which on small devices ended up behind
+        // the OTP keyboard and looked frozen.
     }
 
     // MARK: - Social Buttons
@@ -314,6 +388,8 @@ struct AuthView: View {
                 .foregroundStyle(colorScheme == .dark ? Color.black : Color.white)
             }
             .buttonStyle(.plain)
+            .accessibilityIdentifier("auth.signIn.appleButton")
+            .accessibilityHint("Signs you in with your Apple ID")
 
             // Google Sign In — outline pill with accurate multi-color Google SVG logo
             Button {
@@ -331,6 +407,7 @@ struct AuthView: View {
                 .overlay(Capsule().stroke(Color(UIColor.separator), lineWidth: 1))
             }
             .buttonStyle(.plain)
+            .accessibilityHint("Signs you in with your Google account")
         }
         .disabled(authService.isLoading)
         .opacity(authService.isLoading ? 0.6 : 1)

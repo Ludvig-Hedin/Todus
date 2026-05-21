@@ -54,11 +54,16 @@ function DeleteAccountDialog() {
         if (!success) return toast.error(message);
         try {
           await signOut();
-          refetch();
+          await refetch();
           await clear();
         } catch (error) {
-          console.error('Failed to delete account:', error);
+          // Cleanup failed AFTER the account was deleted server-side. Show
+          // an error and stop here — previously we showed BOTH an error and
+          // a success toast and redirected anyway, leaving the user
+          // confused with stale IDB cache still in place.
+          console.error('Failed to clean up after account deletion:', error);
           toast.error(m['pages.settings.dangerZone.error']());
+          return;
         }
         toast.success(m['pages.settings.dangerZone.deleted']());
         window.location.href = '/';
@@ -126,7 +131,7 @@ function DeleteAccountDialog() {
 
 export default function DangerPage() {
   return (
-    <div className="grid gap-6">
+    <div className="grid gap-5">
       <SettingsCard
         title={m['pages.settings.dangerZone.title']()}
         description={m['pages.settings.dangerZone.description']()}

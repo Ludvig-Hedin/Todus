@@ -17,6 +17,9 @@ struct EmailComposeView: View {
     @State private var seededAttachmentNames: [String] = []
     @State private var pendingAttachmentRemovals: Set<String> = []
     @State private var showSendError = false
+    /// Monotonic counter incremented on successful sends so the form's
+    /// `.sensoryFeedback(.success, trigger:)` fires a haptic before dismissal.
+    @State private var sendSuccessTick: Int = 0
     /// Controls visibility of CC/BCC fields — toggled by the chevron in the To row
     @State private var showCcBcc = false
     /// Controls the AI draft assistant sheet
@@ -27,6 +30,7 @@ struct EmailComposeView: View {
     /// new emails get a fresh UUID so several windows of the same composition don't collide.
     @State private var draftStorageKey: String
     @FocusState private var focusedField: Field?
+    @Environment(\.scenePhase) private var scenePhase
 
     /// UserDefaults key prefix for autosaved drafts. Key suffix is the draft ID
     /// (replyToThreadId for replies, a fresh UUID for new emails).
@@ -54,33 +58,76 @@ struct EmailComposeView: View {
     }
 
     /// Create a reply compose
-    init(replyTo message: EmailMessage, threadId: String, body: String? = nil) {
+    /// - Parameters:
+    ///   - replyAll: When true, prefills CC with the original message's `to + cc`,
+    ///     excluding the sender (already in To) and any addresses owned by the
+    ///     current user (`ownedAddresses`). Pass an empty set to skip self-filtering.
+    init(
+        replyTo message: EmailMessage,
+        threadId: String,
+        body: String? = nil,
+        replyAll: Bool = false,
+        ownedAddresses: Set<String> = []
+    ) {
+        var ccAddresses: [String] = []
+        if replyAll {
+            let normalizedOwned = Set(ownedAddresses.map { $0.lowercased() })
+            let senderLower = message.from.email.lowercased()
+            var seen = Set<String>([senderLower])
+            seen.formUnion(normalizedOwned)
+            for addr in message.to + (message.cc ?? []) {
+                let lower = addr.email.lowercased()
+                if seen.contains(lower) { continue }
+                seen.insert(lower)
+                ccAddresses.append(addr.email)
+            }
+        }
         let replyDraft = EmailDraft(
             to: [message.from.email],
+            cc: ccAddresses,
             subject: message.subject.hasPrefix("Re:") ? message.subject : "Re: \(message.subject)",
             body: body ?? "",
             replyToThreadId: threadId,
             replyToMessageId: message.id
         )
         _draft = State(initialValue: replyDraft)
-        // Reply drafts are keyed by thread so re-opening the same reply restores it.
-        _draftStorageKey = State(initialValue: "reply.\(threadId)")
+        // Reply-all expands the CC row by default so the user sees who'll be looped in.
+        _showCcBcc = State(initialValue: !ccAddresses.isEmpty)
+        // Reply drafts are keyed by thread only — reply and reply-all share the same
+        // slot. The previous split (`reply.<id>` vs `replyAll.<id>`) orphaned drafts:
+        // a user who started a reply, switched to reply-all, and re-opened the thread
+        // would never see their original body again. Sharing the key means the most
+        // recent autosave wins regardless of which entry-point was used.
+        _draftStorageKey = State(initialValue: "compose.\(threadId)")
     }
 
-    /// Create compose with pre-filled to, subject, body, and/or attachments (from CreateSheet)
-    init(to: String? = nil, subject: String? = nil, body: String? = nil, seededAttachments: [String] = []) {
+    /// Create compose with pre-filled to, cc, bcc, subject, body, and/or attachments (from CreateSheet)
+    init(to: String? = nil, cc: String? = nil, bcc: String? = nil, subject: String? = nil, body: String? = nil, seededAttachments: [String] = []) {
         var d = EmailDraft()
         if let to, !to.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             d.to = [to.trimmingCharacters(in: .whitespacesAndNewlines)]
+        }
+        if let cc, !cc.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            d.cc = [cc.trimmingCharacters(in: .whitespacesAndNewlines)]
+        }
+        if let bcc, !bcc.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            d.bcc = [bcc.trimmingCharacters(in: .whitespacesAndNewlines)]
         }
         if let subject { d.subject = subject }
         if let body { d.body = body }
         _draft = State(initialValue: d)
         _seededAttachmentNames = State(initialValue: seededAttachments)
-        // New emails get a stable per-instance UUID. The autosave is restored on appear,
-        // so opening a fresh composer always starts blank unless a previous unsent draft
-        // exists under the special "new" key (see Self.newComposeStorageKey).
-        _draftStorageKey = State(initialValue: Self.newComposeStorageKey)
+        // The autosaved "new email" slot must NOT be reused when the caller
+        // pre-filled any field (e.g. "Email john@x.com" from a contact card).
+        // Otherwise an abandoned subject/body from an earlier compose for a
+        // completely different recipient resurfaces and the user can send the
+        // wrong message without noticing.
+        let calledWithSeed =
+            to != nil || cc != nil || bcc != nil || subject != nil || body != nil
+            || !seededAttachments.isEmpty
+        _draftStorageKey = State(
+            initialValue: calledWithSeed ? "new.\(UUID().uuidString)" : Self.newComposeStorageKey
+        )
     }
 
     /// Shared key for "new email" drafts so a single unsent draft is restored on reopen.
@@ -102,10 +149,15 @@ struct EmailComposeView: View {
                             if !services.networkMonitor.isConnected {
                                 offlineNotice
                             }
-                            fromRow
+                            // Hide the From row entirely when there's a single connected
+                            // account. With one inbox the row is pure noise: the user has
+                            // no choice to make and the address is implicit. The divider
+                            // below also collapses so the form starts with the To row.
+                            if connectionsService.connections.count > 1 {
+                                fromRow
+                                Divider().foregroundStyle(AppTheme.divider)
+                            }
                         }
-
-                        Divider().foregroundStyle(AppTheme.divider)
 
                         // To field with CC/BCC disclosure chevron
                         toRow
@@ -157,15 +209,25 @@ struct EmailComposeView: View {
                             .foregroundStyle(aiGradient)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Draft with AI")
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button {
                         Task {
-                            let success = await emailService.sendEmail(draft)
+                            // Resolve the picked From connection to its email address
+                            // so the backend routes the send through the correct
+                            // mailbox (default behaviour when no picker selection).
+                            let fromEmail = draft.fromConnectionId.flatMap { id in
+                                connectionsService.connections.first { $0.id == id }?.email
+                            }
+                            let success = await emailService.sendEmail(draft, fromEmail: fromEmail)
                             if success {
                                 deletePendingAttachments()
                                 // Clear the autosaved draft once it's safely on the wire
                                 clearAutosavedDraft()
+                                // Bump a counter so the .sensoryFeedback modifier below
+                                // fires its success haptic before we dismiss the sheet.
+                                sendSuccessTick &+= 1
                                 dismiss()
                             } else {
                                 showSendError = true
@@ -173,7 +235,14 @@ struct EmailComposeView: View {
                         }
                     } label: {
                         if emailService.isSending {
-                            ButtonInlineProgressView(tint: .primary, side: AppTheme.Metrics.toolbarInlineSpinner)
+                            // Show "Sending…" alongside the spinner so the user has an
+                            // unambiguous text cue instead of just a tiny spinner that
+                            // can read as "stuck on Send tap".
+                            HStack(spacing: 6) {
+                                ButtonInlineProgressView(tint: .primary, side: AppTheme.Metrics.toolbarInlineSpinner)
+                                Text("Sending…")
+                                    .font(.system(size: 14, weight: .semibold))
+                            }
                         } else {
                             Image(systemName: "paperplane.fill")
                                 .font(.system(size: 16, weight: .semibold))
@@ -241,6 +310,27 @@ struct EmailComposeView: View {
             .onChange(of: draft.bcc) { scheduleAutosave() }
             .onChange(of: draft.subject) { scheduleAutosave() }
             .onChange(of: draft.body) { scheduleAutosave() }
+            // Flush the pending debounce immediately when the app moves off-screen.
+            // The 1s `Task.sleep` in scheduleAutosave is cancelled when the scene
+            // suspends, so a typed-but-not-yet-saved draft would otherwise be lost
+            // if the user backgrounds within 1s of typing.
+            .onChange(of: scenePhase) { _, newPhase in
+                if newPhase == .background || newPhase == .inactive {
+                    autosaveTask?.cancel()
+                    persistAutosaveSnapshot()
+                }
+            }
+            .onDisappear {
+                // Same safety net — if the sheet dismisses (programmatically or via
+                // gesture) before the 1s debounce fires, commit the current snapshot
+                // so the draft restores on the next compose open.
+                autosaveTask?.cancel()
+                persistAutosaveSnapshot()
+            }
+            // Tactile confirmation when a send succeeds. `sendSuccessTick` is
+            // bumped right before dismissal so the haptic fires reliably even
+            // though the sheet is about to tear down.
+            .sensoryFeedback(.success, trigger: sendSuccessTick)
         }
     }
 
@@ -433,6 +523,7 @@ struct EmailComposeView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(showCcBcc ? "Hide CC and BCC" : "Show CC and BCC")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
@@ -537,6 +628,7 @@ struct EmailComposeView: View {
                                 .foregroundStyle(AppTheme.mutedText)
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel("Remove attachment \(filename)")
                     }
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
@@ -636,8 +728,18 @@ struct EmailComposeView: View {
     }
 
     private var canSend: Bool {
-        let toAddress = draft.to.first ?? ""
-        return isValidEmail(toAddress) && !draft.subject.isEmpty
+        let toRecipients = draft.to
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        let allRecipients = (draft.to + draft.cc + draft.bcc)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        // Empty subject is intentionally allowed — it's valid per RFC 5322 and
+        // is common in practice ("(no subject)" replies, quick acknowledgements).
+        // Send remains gated on having at least one recipient and on every
+        // typed recipient being a syntactically-valid address.
+        return !toRecipients.isEmpty
+            && allRecipients.allSatisfy { isValidEmail($0) }
     }
 
     /// Stricter email validation — requires a non-empty local part, an `@`, a non-empty
@@ -692,6 +794,7 @@ struct EmailComposeView: View {
     /// supplied values take precedence (we only fill empty fields) so passing an
     /// explicit subject/body via `init(to:subject:body:)` still wins.
     private func restoreAutosavedDraft() {
+        migrateLegacyAutosaveIfNeeded()
         guard let payload = UserDefaults.standard.dictionary(forKey: autosaveKey) else { return }
         if draft.to.isEmpty || (draft.to.first ?? "").isEmpty,
            let saved = payload["to"] as? [String], !saved.isEmpty {
@@ -715,6 +818,32 @@ struct EmailComposeView: View {
     /// send and when the draft becomes fully empty.
     private func clearAutosavedDraft() {
         UserDefaults.standard.removeObject(forKey: autosaveKey)
+    }
+
+    /// One-shot migration from the old per-mode autosave keys (`reply.<threadId>`,
+    /// `replyAll.<threadId>`) to the unified `compose.<threadId>` slot. Runs only when
+    /// the current storage key is thread-scoped AND no payload exists at the new key
+    /// AND a legacy payload is present. The most recent legacy payload wins (replyAll
+    /// preferred when both exist because it tends to carry more state). Legacy keys
+    /// are deleted after copy so the migration is idempotent.
+    private func migrateLegacyAutosaveIfNeeded() {
+        let storageKey = draftStorageKey
+        guard storageKey.hasPrefix("compose.") else { return }
+        let threadId = String(storageKey.dropFirst("compose.".count))
+        guard !threadId.isEmpty else { return }
+        let defaults = UserDefaults.standard
+        if defaults.dictionary(forKey: autosaveKey) != nil { return }
+        let prefix = Self.autosaveKeyPrefix
+        let replyAllKey = "\(prefix)replyAll.\(threadId)"
+        let replyKey = "\(prefix)reply.\(threadId)"
+        let payload = defaults.dictionary(forKey: replyAllKey) ?? defaults.dictionary(forKey: replyKey)
+        if let payload {
+            defaults.set(payload, forKey: autosaveKey)
+            AppLogger.shared.log("Migrated email autosave from reply/replyAll to compose key for thread \(threadId)")
+        }
+        // Always remove legacy keys so they don't leak into UserDefaults forever.
+        defaults.removeObject(forKey: replyAllKey)
+        defaults.removeObject(forKey: replyKey)
     }
 
     private func deletePendingAttachments() {

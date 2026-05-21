@@ -38,6 +38,7 @@ struct HomeView: View {
     /// where we don't have the full EmailThread payload, only the id.
     @State private var briefingThreadRoute: HomeThreadIdRoute? = nil
     @State private var showDocsSheet = false
+    @State private var meetingRoute: HomeMeetingRoute? = nil
 
     /// Most recent foreground refresh — used to gate the scenePhase listener so we don't
     /// double-refresh when the app comes back to foreground rapidly (e.g. after dismissing
@@ -55,20 +56,20 @@ struct HomeView: View {
             AppTheme.backgroundTop.ignoresSafeArea()
 
             ScrollView(.vertical) {
-                VStack(alignment: .leading, spacing: 18) {
-                    briefingHero
+                VStack(alignment: .leading, spacing: 22) {
+                    slimGreeting
+
+                    if showBriefingFeed {
+                        todayList
+                    }
 
                     if showSetupChecklist {
                         setupChecklist
                     }
 
-                    if showBriefingFeed {
-                        briefingFeedSection
-                    }
-
-                    eventsSection
-                    tasksSection
+                    upcomingTimelineSection
                     emailSection
+                    meetingsSection
 
                     foldersSection
 
@@ -180,6 +181,13 @@ struct HomeView: View {
             FolderEditSheet(mode: .create)
                 .appSheetBackground()
         }
+        .sheet(item: $meetingRoute) { route in
+            NavigationStack {
+                MeetingDetailView(meetingId: route.id)
+            }
+            .presentationDragIndicator(Visibility.visible)
+            .appSheetBackground()
+        }
         // Header ellipsis menu — Refresh
         .onChange(of: services.homeRefreshTick) { _, _ in
             Task {
@@ -193,6 +201,10 @@ struct HomeView: View {
     /// Sheet route for opening a thread by id when we don't have the full EmailThread payload
     /// (briefing rows + hero priority callout).
     private struct HomeThreadIdRoute: Identifiable {
+        let id: String
+    }
+
+    private struct HomeMeetingRoute: Identifiable {
         let id: String
     }
 
@@ -217,7 +229,11 @@ struct HomeView: View {
     }
 
     private var isEmailRefreshing: Bool {
-        services.emailService.isLoadingThreads && !services.emailService.threads.isEmpty
+        // Mirror the inbox view's badge condition so Home matches what Mail shows: the
+        // "Updating" indicator is on while either the foreground load or the background
+        // post-forceSync reconciliation is running.
+        (services.emailService.isLoadingThreads || services.emailService.isReconciling)
+            && !services.emailService.threads.isEmpty
     }
 
     /// Time-aware one-line summary derived from today's counts. Falls back to a friendly
@@ -259,13 +275,18 @@ struct HomeView: View {
 
     /// Single highest-priority item to surface in the hero, picked in this order:
     /// urgent reply → top task → next event. Returns nil if briefing hasn't loaded.
+    ///
+    /// For `urgentReply` we show the email subject (`summary`) as the headline so the
+    /// hero is identifiable at a glance — same flip-the-fields rule applied to the
+    /// briefing feed. The AI's verb (`title`) becomes the secondary line.
     private var topPriority: HomeTopPriority? {
         guard let briefing = services.emailService.assistantBriefing else { return nil }
         if let urgent = briefing.today.urgentReply {
+            let display = urgent.rowDisplay
             return HomeTopPriority(
                 kind: .reply,
-                title: urgent.title,
-                detail: urgent.summary,
+                title: display.headline,
+                detail: display.caption,
                 threadId: urgent.threadId
             )
         }
@@ -319,64 +340,68 @@ struct HomeView: View {
         let action: () -> Void
     }
 
-    private struct EventDayGroup: Identifiable {
-        let id: Date
-        let label: String
-        let events: [CalendarEvent]
-    }
+    // MARK: - Unified timeline model
 
-    private struct TaskDayGroup: Identifiable {
-        let id: Date
-        let label: String
-        let tasks: [TaskRecord]
-    }
+    private enum UpcomingTimelineItem: Identifiable {
+        case event(CalendarEvent)
+        case task(TaskRecord)
 
-    private func dayLabel(for date: Date) -> String {
-        let cal = Calendar.current
-        if cal.isDateInToday(date) { return "Today" }
-        if cal.isDateInTomorrow(date) { return "Tomorrow" }
-        let diff = cal.dateComponents([.day], from: cal.startOfDay(for: Date()), to: cal.startOfDay(for: date)).day ?? 0
-        if diff < 7 {
-            return date.formatted(.dateTime.weekday(.wide))
+        var id: String {
+            switch self {
+            case .event(let e): return "event-\(e.id)"
+            case .task(let t): return "task-\(t.id.uuidString)"
+            }
         }
-        return date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())
-    }
-
-    private var groupedUpcomingEvents: [EventDayGroup] {
-        let cal = Calendar.current
-        let byDay = Dictionary(grouping: upcomingEvents) { cal.startOfDay(for: $0.startDate) }
-        return byDay.keys.sorted().map { day in
-            EventDayGroup(id: day, label: dayLabel(for: day), events: byDay[day]!.sorted { $0.startDate < $1.startDate })
+        var sortDate: Date {
+            switch self {
+            case .event(let e): return e.startDate
+            case .task(let t): return t.dueDate ?? .distantFuture
+            }
         }
     }
 
-    private var groupedUpcomingTasks: [TaskDayGroup] {
+    private struct UpcomingDaySection: Identifiable {
+        let id: Date      // start of day
+        let dayName: String   // "Today", "Tomorrow", "Wednesday"
+        let shortDate: String // "Mon 27 Apr"
+        let isToday: Bool
+        let items: [UpcomingTimelineItem]
+    }
+
+    private var upcomingTimelineSections: [UpcomingDaySection] {
         let cal = Calendar.current
         let today = cal.startOfDay(for: Date())
         guard let cutoff = cal.date(byAdding: .day, value: 7, to: today) else { return [] }
-        let upcoming = allTasks.filter { task in
-            guard !task.completed, let due = task.dueDate else { return false }
-            return due >= today && due < cutoff
+
+        var byDay: [Date: [UpcomingTimelineItem]] = [:]
+
+        for event in upcomingEvents {
+            let day = cal.startOfDay(for: event.startDate)
+            byDay[day, default: []].append(.event(event))
         }
-        let byDay = Dictionary(grouping: upcoming) { task in
-            cal.startOfDay(for: task.dueDate!)
+        for task in allTasks where !task.completed {
+            guard let due = task.dueDate, due >= today, due < cutoff else { continue }
+            let day = cal.startOfDay(for: due)
+            byDay[day, default: []].append(.task(task))
         }
+
         return byDay.keys.sorted().map { day in
-            TaskDayGroup(id: day, label: dayLabel(for: day), tasks: byDay[day]!)
+            let isToday = cal.isDateInToday(day)
+            let isTomorrow = cal.isDateInTomorrow(day)
+            let diff = cal.dateComponents([.day], from: today, to: day).day ?? 0
+            let dayName: String
+            if isToday { dayName = "Today" }
+            else if isTomorrow { dayName = "Tomorrow" }
+            else if diff < 7 { dayName = day.formatted(.dateTime.weekday(.wide)) }
+            else { dayName = day.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()) }
+            let shortDate = day.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated))
+            let sorted = (byDay[day] ?? []).sorted { $0.sortDate < $1.sortDate }
+            return UpcomingDaySection(id: day, dayName: dayName, shortDate: shortDate, isToday: isToday, items: sorted)
         }
     }
 
     private var heroStatChips: [HomeStatChip] {
         var chips: [HomeStatChip] = []
-        let upcomingTaskCount = groupedUpcomingTasks.reduce(0) { $0 + $1.tasks.count }
-        if upcomingTaskCount > 0 {
-            chips.append(HomeStatChip(
-                id: "tasks",
-                icon: "checkmark.circle",
-                label: "\(upcomingTaskCount) task\(upcomingTaskCount == 1 ? "" : "s")",
-                action: { services.navigateTo = .tasks }
-            ))
-        }
         let needsYouCount = services.emailService.assistantBriefing?.needsYou.count ?? 0
         if needsYouCount > 0 {
             chips.append(HomeStatChip(
@@ -389,88 +414,24 @@ struct HomeView: View {
         return chips
     }
 
-    private var briefingHero: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 8) {
-                    Text(greeting)
-                        .font(.system(size: 22, weight: .bold))
-                        .foregroundStyle(.primary)
-                    if isAssistantBriefingRefreshing {
-                        InlineRefreshBadge()
-                    }
+    /// Quiet greeting line. No card, no chips, no summary count — the Today list
+    /// directly below IS the count, and chips that navigate away from Home would
+    /// directly contradict the "act from Home" intent.
+    private var slimGreeting: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Text(greeting)
+                    .font(.system(size: 26, weight: .bold))
+                    .foregroundStyle(.primary)
+                if isAssistantBriefingRefreshing {
+                    InlineRefreshBadge()
                 }
-                Text(Date.now, format: .dateTime.weekday(.wide).month(.wide).day())
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.secondary)
             }
-
-            Text(summaryLine)
-                .font(.system(size: 14, weight: .medium))
+            Text(Date.now, format: .dateTime.weekday(.wide).month(.wide).day())
+                .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            if let priority = topPriority {
-                topPriorityRow(priority)
-            }
-
-            if !upcomingEvents.isEmpty {
-                VStack(spacing: 6) {
-                    ForEach(Array(upcomingEvents.prefix(3))) { event in
-                        Button {
-                            selectedCalendarEvent = event
-                        } label: {
-                            HStack(spacing: 10) {
-                                Circle()
-                                    .fill(Color(hue: Double(event.calendarColor % 360) / 360.0, saturation: 0.6, brightness: 0.8))
-                                    .frame(width: 7, height: 7)
-                                Text(event.title)
-                                    .font(.system(size: 13, weight: .medium))
-                                    .foregroundStyle(.primary)
-                                    .lineLimit(1)
-                                Spacer(minLength: 4)
-                                let timeStr = event.isAllDay ? "All day" : event.startDate.formatted(.dateTime.hour().minute())
-                                Text("\(dayLabel(for: event.startDate)) · \(timeStr)")
-                                    .font(.system(size: 12))
-                                    .foregroundStyle(.secondary)
-                            }
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 7)
-                            .background(AppTheme.surfaceSecondary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.inline, style: .continuous))
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
-
-            if !heroStatChips.isEmpty {
-                HStack(spacing: 8) {
-                    ForEach(heroStatChips) { chip in
-                        Button(action: chip.action) {
-                            HStack(spacing: 6) {
-                                Image(systemName: chip.icon)
-                                    .font(.system(size: 11, weight: .semibold))
-                                Text(chip.label)
-                                    .font(.system(size: 12, weight: .semibold))
-                            }
-                            .foregroundStyle(.primary)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(AppTheme.surfaceSecondary, in: Capsule())
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
         }
-        .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.row, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: AppTheme.Radius.row, style: .continuous)
-                .stroke(AppTheme.cardBorder, lineWidth: 1)
-        )
     }
 
     private func topPriorityRow(_ priority: HomeTopPriority) -> some View {
@@ -623,53 +584,91 @@ struct HomeView: View {
     // MARK: - Consolidated briefing feed
 
     private struct BriefingFeedItem: Identifiable {
-        enum Category {
-            case reply, waiting, draft
-            var label: String {
-                switch self {
-                case .reply: return "Reply"
-                case .waiting: return "Waiting"
-                case .draft: return "Draft"
-                }
-            }
-        }
+        /// Which bucket the row originated from — drives which trust-loop mutation
+        /// runs when the user dismisses / snoozes.
+        enum Source { case openLoop, preparedAction }
         let id: String
-        let category: Category
-        let title: String
-        let summary: String
+        let source: Source
+        /// Server-side id (open-loop id or prepared-action id) used to call dismiss/snooze.
+        let backendId: String
+        let display: BriefingRowDisplay
         let threadId: String?
     }
 
+    /// Items rendered in the Today list. Verb-first action sentences from the
+    /// briefing, ranked + deduped + capped at 5.
+    ///
+    /// **Ranking** (top → bottom):
+    /// 1. `today.urgentReply` — pinned first when present.
+    /// 2. `prepared` drafts of type `draft_reply` with confidence ≥ 70 — "almost
+    ///    done, just press send" beats new asks.
+    /// 3. Other `prepared` rows.
+    /// 4. `needsYou` open-loops (skipping urgent reply + already-prepared threads).
+    ///
+    /// **Dedupe**: by `threadId` against all earlier rows. `waitingOn` is
+    /// deliberately excluded — it's noise for an action-oriented list, exposed
+    /// elsewhere via the Mail tab when the user wants it.
     private var briefingFeedItems: [BriefingFeedItem] {
         guard let briefing = services.emailService.assistantBriefing else { return [] }
+
         var items: [BriefingFeedItem] = []
-        for loop in briefing.needsYou {
-            items.append(BriefingFeedItem(
-                id: "needs-\(loop.id)",
-                category: .reply,
-                title: loop.title,
-                summary: loop.summary,
-                threadId: loop.threadId
+        var seenThreadIds = Set<String>()
+        var seenBackendIds = Set<String>()
+
+        func push(_ item: BriefingFeedItem) {
+            if seenBackendIds.contains(item.backendId) { return }
+            if let tid = item.threadId, !tid.isEmpty {
+                if seenThreadIds.contains(tid) { return }
+                seenThreadIds.insert(tid)
+            }
+            seenBackendIds.insert(item.backendId)
+            items.append(item)
+        }
+
+        // 1. Urgent reply, pinned first.
+        if let urgent = briefing.today.urgentReply {
+            push(BriefingFeedItem(
+                id: "urgent-\(urgent.id)",
+                source: .openLoop,
+                backendId: urgent.id,
+                display: urgent.rowDisplay,
+                threadId: urgent.threadId
             ))
         }
-        for loop in briefing.waitingOn {
-            items.append(BriefingFeedItem(
-                id: "waiting-\(loop.id)",
-                category: .waiting,
-                title: loop.title,
-                summary: loop.summary,
-                threadId: loop.threadId
-            ))
-        }
-        for action in briefing.prepared {
-            items.append(BriefingFeedItem(
+
+        // 2. High-confidence drafts — confidence on the model is 0.0…1.0.
+        for action in briefing.prepared where action.type == "draft_reply" && action.confidence >= 0.70 {
+            push(BriefingFeedItem(
                 id: "prepared-\(action.id)",
-                category: .draft,
-                title: action.title,
-                summary: action.summary,
+                source: .preparedAction,
+                backendId: action.id,
+                display: action.rowDisplay,
                 threadId: action.threadId
             ))
         }
+
+        // 3. Remaining prepared items.
+        for action in briefing.prepared where !(action.type == "draft_reply" && action.confidence >= 0.70) {
+            push(BriefingFeedItem(
+                id: "prepared-\(action.id)",
+                source: .preparedAction,
+                backendId: action.id,
+                display: action.rowDisplay,
+                threadId: action.threadId
+            ))
+        }
+
+        // 4. NeedsYou — actionable open-loops.
+        for loop in briefing.needsYou {
+            push(BriefingFeedItem(
+                id: "needs-\(loop.id)",
+                source: .openLoop,
+                backendId: loop.id,
+                display: loop.rowDisplay,
+                threadId: loop.threadId
+            ))
+        }
+
         return items
     }
 
@@ -686,17 +685,21 @@ struct HomeView: View {
         return false
     }
 
-    private var briefingFeedSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 6) {
-                Image(systemName: "sparkles")
+    /// The "Today" list — verb-first action sentences, max 5, flat layout.
+    /// Replaces the previous three-rail briefing dashboard. Each row is a single
+    /// sentence ("Reply to Sarah about the Q4 proposal"), separated by a hairline
+    /// divider — no per-row card backgrounds, no tinted badges.
+    private var todayList: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text("Today")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(AppTheme.mutedText)
-                Text("Assistant Briefing")
-                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .textCase(.uppercase)
+                    .tracking(0.5)
                 Spacer()
-                if briefingFeedItems.count > 6 {
-                    Button("View all") {
+                if briefingFeedItems.count > 5 {
+                    Button("Mail") {
                         services.navigateTo = .email
                     }
                     .font(.system(size: 12, weight: .semibold))
@@ -705,176 +708,392 @@ struct HomeView: View {
             }
 
             if isLoadingAssistantBriefing && services.emailService.assistantBriefing == nil {
-                loadingState(message: "Preparing your briefing")
+                loadingState(message: "Preparing your day")
+            } else if briefingFeedItems.isEmpty {
+                HStack(spacing: 10) {
+                    Image(systemName: "checkmark.seal")
+                        .font(.system(size: 16, weight: .regular))
+                        .foregroundStyle(AppTheme.mutedText)
+                    Text("You're caught up.")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .padding(.vertical, 18)
             } else {
-                VStack(spacing: 8) {
-                    ForEach(briefingFeedItems.prefix(6)) { item in
-                        briefingFeedRow(item)
+                VStack(spacing: 0) {
+                    let items = Array(briefingFeedItems.prefix(5).enumerated())
+                    ForEach(items, id: \.element.id) { pair in
+                        todayRow(pair.element)
+                        if pair.offset < items.count - 1 {
+                            Divider()
+                                .padding(.leading, 36)
+                        }
                     }
                 }
             }
         }
     }
 
-    private func briefingFeedRow(_ item: BriefingFeedItem) -> some View {
-        Button {
-            if let id = item.threadId {
-                briefingThreadRoute = HomeThreadIdRoute(id: id)
-            } else {
-                services.navigateTo = .email
-            }
+    /// SF Symbol for a row's badge category. Replaces the previous tinted capsule —
+    /// shape carries the type so VoiceOver users and color-blind users get the
+    /// same signal as sighted ones.
+    private func glyph(for badge: BriefingRowDisplay.Badge) -> String {
+        switch badge {
+        case .reply: return "arrowshape.turn.up.left"
+        case .draft: return "paperplane"
+        case .waiting: return "hourglass"
+        case .research: return "magnifyingglass"
+        case .task: return "checkmark.circle"
+        case .event: return "calendar"
+        case .followUp: return "arrow.forward.circle"
+        case .other: return "circle.dotted"
+        }
+    }
+
+    /// Accessibility verb mapped from badge — read first by VoiceOver before the
+    /// sentence so the row's intent is immediately announced.
+    private func accessibilityVerb(for badge: BriefingRowDisplay.Badge) -> String {
+        switch badge {
+        case .reply: return "Reply"
+        case .draft: return "Send draft"
+        case .waiting: return "Waiting on"
+        case .research: return "Research"
+        case .task: return "Task"
+        case .event: return "Event"
+        case .followUp: return "Follow up"
+        case .other: return "Action"
+        }
+    }
+
+    /// Flat, full-width row: leading glyph + verb-first sentence + meta line +
+    /// trailing menu. No card background, no border — separation comes from the
+    /// list-level Divider in `todayList`. Swipe + context menu provide quick
+    /// snooze / dismiss / done without forcing the user into the trailing menu.
+    private func todayRow(_ item: BriefingFeedItem) -> some View {
+        let primary = todayPrimaryLine(item)
+        let meta = todayMetaLine(item)
+        return Button {
+            openBriefingItem(item)
         } label: {
             HStack(alignment: .top, spacing: 12) {
-                Text(item.category.label)
-                    .font(.system(size: 10, weight: .bold))
-                    .textCase(.uppercase)
-                    .foregroundStyle(AppTheme.mutedText)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
-                    .background(AppTheme.surfaceSecondary, in: Capsule())
+                Image(systemName: glyph(for: item.display.badge))
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(item.display.badge == .draft || item.display.badge == .reply
+                                    ? AppTheme.accent : AppTheme.mutedText)
+                    .frame(width: 24, height: 24, alignment: .center)
+                    .padding(.top, 2)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(item.title)
-                        .font(.system(size: 14, weight: .semibold))
+                    Text(primary)
+                        .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(.primary)
-                        .lineLimit(1)
-                    if !item.summary.isEmpty {
-                        Text(item.summary)
+                        .multilineTextAlignment(.leading)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if !meta.isEmpty {
+                        Text(meta)
                             .font(.system(size: 12))
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                     }
                 }
 
-                Spacer()
+                Spacer(minLength: 8)
+
+                Menu {
+                    briefingRowActionMenu(for: item)
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(AppTheme.mutedText)
+                        .frame(width: 32, height: 32)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("More actions")
             }
-            .padding(12)
+            .padding(.vertical, 12)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous)
-                    .stroke(AppTheme.cardBorder, lineWidth: 1)
-            )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(accessibilityVerb(for: item.display.badge)). \(primary). \(meta)")
+        .contextMenu {
+            briefingRowActionMenu(for: item)
+        }
     }
 
-    // MARK: - Events Section
+    /// Primary headline for a Today row. Prefers the LLM-generated `actionLine`
+    /// (a verb-first sentence). Falls back to the existing `headline` (email
+    /// subject) when the backend hasn't populated `actionLine` for this row.
+    private func todayPrimaryLine(_ item: BriefingFeedItem) -> String {
+        if let line = todayActionLine(item), !line.isEmpty {
+            return line
+        }
+        // Legacy fallback path: combine the AI verb hint and subject into one
+        // sentence — "Reply needed: <subject>" — so even pre-actionLine data
+        // reads as actionable instead of restating just the subject.
+        let verbHint = item.display.caption.trimmingCharacters(in: .whitespacesAndNewlines)
+        let subject = item.display.headline.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !verbHint.isEmpty && !subject.isEmpty {
+            return "\(verbHint): \(subject)"
+        }
+        return subject.isEmpty ? verbHint : subject
+    }
 
-    private var eventsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+    /// Resolve `actionLine` off the underlying open-loop or prepared-action
+    /// referenced by this briefing item.
+    private func todayActionLine(_ item: BriefingFeedItem) -> String? {
+        guard let briefing = services.emailService.assistantBriefing else { return nil }
+        switch item.source {
+        case .openLoop:
+            let pool = briefing.needsYou + briefing.waitingOn
+            if let loop = pool.first(where: { $0.id == item.backendId }) {
+                return loop.actionLine?.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            if let urgent = briefing.today.urgentReply, urgent.id == item.backendId {
+                return urgent.actionLine?.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            return nil
+        case .preparedAction:
+            return briefing.prepared
+                .first(where: { $0.id == item.backendId })?
+                .actionLine?.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+    }
+
+    /// Meta line — sender + age, kept short. Falls back to the AI verb caption
+    /// when no sender is known.
+    private func todayMetaLine(_ item: BriefingFeedItem) -> String {
+        if let line = todayActionLine(item), !line.isEmpty {
+            // actionLine carries the sender; meta is the subject (truncated).
+            let subject = item.display.headline.trimmingCharacters(in: .whitespacesAndNewlines)
+            return subject
+        }
+        return item.display.caption
+    }
+
+    @ViewBuilder
+    private func briefingRowActionMenu(for item: BriefingFeedItem) -> some View {
+        Button {
+            openBriefingItem(item)
+        } label: {
+            Label("Open thread", systemImage: "arrow.up.right.square")
+        }
+
+        Button {
+            Task { await markBriefingItemDone(item) }
+        } label: {
+            Label("Mark done", systemImage: "checkmark.circle")
+        }
+
+        Menu {
+            ForEach(snoozePresets, id: \.label) { preset in
+                Button(preset.label) {
+                    Task { await snoozeBriefingItem(item, until: preset.date()) }
+                }
+            }
+        } label: {
+            Label("Snooze", systemImage: "clock")
+        }
+
+        Divider()
+
+        // Destructive — labeled honestly: this is a "this isn't a reply" / training signal.
+        Button(role: .destructive) {
+            Task { await dismissBriefingItem(item) }
+        } label: {
+            Label(item.source == .preparedAction ? "Not a draft I want" : "Not a reply", systemImage: "xmark.circle")
+        }
+    }
+
+    private struct SnoozePreset {
+        let label: String
+        let date: () -> Date
+    }
+    private var snoozePresets: [SnoozePreset] {
+        [
+            SnoozePreset(label: "Later today") { Calendar.current.date(byAdding: .hour, value: 4, to: Date()) ?? Date() },
+            SnoozePreset(label: "Tomorrow morning") {
+                let cal = Calendar.current
+                let tomorrow = cal.date(byAdding: .day, value: 1, to: Date()) ?? Date()
+                return cal.date(bySettingHour: 9, minute: 0, second: 0, of: tomorrow) ?? tomorrow
+            },
+            SnoozePreset(label: "Next week") { Calendar.current.date(byAdding: .day, value: 7, to: Date()) ?? Date() },
+        ]
+    }
+
+    private func openBriefingItem(_ item: BriefingFeedItem) {
+        if let id = item.threadId {
+            briefingThreadRoute = HomeThreadIdRoute(id: id)
+        } else {
+            services.navigateTo = .email
+        }
+    }
+
+    private func dismissBriefingItem(_ item: BriefingFeedItem) async {
+        switch item.source {
+        case .openLoop:
+            await services.emailService.dismissBriefingOpenLoop(id: item.backendId, threadId: item.threadId)
+        case .preparedAction:
+            await services.emailService.dismissBriefingPreparedAction(id: item.backendId, threadId: item.threadId)
+        }
+    }
+
+    private func markBriefingItemDone(_ item: BriefingFeedItem) async {
+        switch item.source {
+        case .openLoop:
+            await services.emailService.completeBriefingOpenLoop(id: item.backendId, threadId: item.threadId)
+        case .preparedAction:
+            // No "done" semantic for prepared actions — the right UX is "apply" or "dismiss".
+            // Treat "Mark done" on a prepared action as a soft dismiss with `completed` feedback.
+            await services.emailService.dismissBriefingPreparedAction(id: item.backendId, threadId: item.threadId, feedback: "completed")
+        }
+    }
+
+    private func snoozeBriefingItem(_ item: BriefingFeedItem, until: Date) async {
+        switch item.source {
+        case .openLoop:
+            await services.emailService.snoozeBriefingOpenLoop(id: item.backendId, threadId: item.threadId, until: until)
+        case .preparedAction:
+            // No backend snooze for prepared actions today — fall back to a local hide
+            // (`dismiss` with `helpful` feedback so the classifier doesn't downweight).
+            await services.emailService.dismissBriefingPreparedAction(id: item.backendId, threadId: item.threadId, feedback: "helpful")
+        }
+    }
+
+    // MARK: - Unified Timeline Section
+
+    private var upcomingTimelineSection: some View {
+        let sections = upcomingTimelineSections
+        let totalCount = sections.reduce(0) { $0 + $1.items.count }
+        return VStack(alignment: .leading, spacing: 12) {
             sectionHeader(
-                title: "Upcoming Events",
+                title: "This Week",
                 icon: "calendar",
-                count: upcomingEvents.count,
+                count: totalCount,
                 actionTitle: "Open",
                 isUpdating: isEventsRefreshing,
                 onOpen: { services.navigateTo = .calendar },
                 onAdd: { services.requestCreateSheet = .event }
             )
 
-            if isLoadingEvents && upcomingEvents.isEmpty {
-                loadingState(message: "Loading upcoming events")
-            } else if !services.calendarService.canReadEvents() {
+            if isLoadingEvents && upcomingEvents.isEmpty && sections.isEmpty {
+                loadingState(message: "Loading your week")
+            } else if !services.calendarService.canReadEvents() && sections.isEmpty {
                 permissionEmptyState(
                     message: "Enable calendar access in Settings to see upcoming events",
                     actionTitle: "Open Settings"
                 )
-            } else if upcomingEvents.isEmpty {
-                emptyState(message: "No upcoming events", onTap: { services.navigateTo = .calendar })
+            } else if sections.isEmpty {
+                emptyState(message: "Nothing coming up this week", onTap: { services.navigateTo = .calendar })
             } else {
-                VStack(alignment: .leading, spacing: 16) {
-                    ForEach(groupedUpcomingEvents) { group in
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(group.label)
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(.secondary)
-                                .textCase(.uppercase)
-                                .padding(.leading, 2)
-                            VStack(spacing: 6) {
-                                ForEach(group.events) { event in
-                                    eventRow(event)
-                                }
-                            }
-                        }
+                VStack(spacing: 10) {
+                    ForEach(sections) { section in
+                        timelineDayCard(section)
                     }
                 }
             }
         }
     }
 
-    private func eventRow(_ event: CalendarEvent) -> some View {
-        Button {
-            selectedCalendarEvent = event
-        } label: {
-            HStack(spacing: 12) {
-                Circle()
-                    .fill(Color(hue: Double(event.calendarColor % 360) / 360.0, saturation: 0.6, brightness: 0.8))
-                    .frame(width: 8, height: 8)
+    private func timelineDayCard(_ section: UpcomingDaySection) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Day header strip
+            HStack(spacing: 5) {
+                Text(section.dayName)
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(section.isToday ? AppTheme.accent : .secondary)
+                Text("·")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.tertiary)
+                Text(section.shortDate)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text("\(section.items.count)")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(section.isToday ? AppTheme.accent.opacity(0.07) : AppTheme.surfaceSecondary)
 
-                VStack(alignment: .leading, spacing: 2) {
+            // Items
+            ForEach(Array(section.items.enumerated()), id: \.element.id) { index, item in
+                if index > 0 {
+                    Divider()
+                        .padding(.leading, 36)
+                }
+                timelineItemRow(item)
+            }
+        }
+        .background(AppTheme.surfacePrimary)
+        .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.row, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppTheme.Radius.row, style: .continuous)
+                .stroke(section.isToday ? AppTheme.accent.opacity(0.3) : AppTheme.cardBorder, lineWidth: 1)
+        )
+    }
+
+    @ViewBuilder
+    private func timelineItemRow(_ item: UpcomingTimelineItem) -> some View {
+        switch item {
+        case .event(let event):
+            Button { selectedCalendarEvent = event } label: {
+                HStack(spacing: 12) {
+                    Circle()
+                        .fill(Color(red: event.calendarColorRed, green: event.calendarColorGreen, blue: event.calendarColorBlue))
+                        .frame(width: 8, height: 8)
+                        .padding(.leading, 4)
                     Text(event.title)
                         .font(.system(size: 14, weight: .medium))
-                        // Allow two lines so longer event titles ("Q3 OKR review with the
-                        // platform team") aren't visually cut off mid-word in the home feed.
-                        .lineLimit(2)
-                        .truncationMode(.tail)
-                        .multilineTextAlignment(.leading)
                         .foregroundStyle(.primary)
-
-                    if let folderName = folderName(for: event.folderID) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "folder")
-                                .font(.system(size: 11, weight: .medium))
-                            Text(folderName)
-                                .font(.system(size: 12))
-                        }
+                        .lineLimit(1)
+                    Spacer()
+                    Text(event.isAllDay ? "All day" : event.startDate.formatted(.dateTime.hour().minute()))
+                        .font(.system(size: 13))
                         .foregroundStyle(.secondary)
-                    }
-
-                    if event.isAllDay {
-                        Text("All day")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Text(event.startDate, format: .dateTime.hour().minute())
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
-                    }
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.tertiary)
                 }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 11)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .contextMenu {
+                Button("Unfiled") { moveEvent(event, to: nil) }
+                if !folders.isEmpty { Divider() }
+                ForEach(folders) { folder in Button(folder.name) { moveEvent(event, to: folder.id) } }
+            }
 
-                Spacer()
-
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(AppTheme.mutedText)
-            }
-            .padding(12)
-            .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous)
-                    .stroke(AppTheme.cardBorder, lineWidth: 1)
-            )
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .contextMenu {
-            Button("Unfiled") {
-                moveEvent(event, to: nil)
-            }
-            if !folders.isEmpty {
-                Divider()
-            }
-            ForEach(folders) { folder in
-                Button(folder.name) {
-                    moveEvent(event, to: folder.id)
+        case .task(let task):
+            Button { selectedTask = task } label: {
+                HStack(spacing: 12) {
+                    Circle()
+                        .foregroundStyle(.tertiary)
+                        .frame(width: 8, height: 8)
+                        .padding(.leading, 4)
+                    Text(task.title)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.tertiary)
                 }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 11)
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
         }
     }
-
-    // MARK: - Tasks Section
 
     private func folderName(for folderID: UUID?) -> String? {
         guard let folderID else { return nil }
@@ -885,46 +1104,6 @@ struct HomeView: View {
         Task {
             await services.calendarService.setFolderID(folderID, for: event.id)
             await loadUpcomingEvents()
-        }
-    }
-
-    private var tasksSection: some View {
-        let totalCount = groupedUpcomingTasks.reduce(0) { $0 + $1.tasks.count }
-        return VStack(alignment: .leading, spacing: 12) {
-            sectionHeader(
-                title: "Upcoming Tasks",
-                icon: "checklist",
-                count: totalCount,
-                actionTitle: "View all",
-                isUpdating: false,
-                onOpen: { services.navigateTo = .tasks },
-                onAdd: { services.requestCreateSheet = .task }
-            )
-
-            if groupedUpcomingTasks.isEmpty {
-                emptyState(message: "No upcoming tasks", onTap: { services.navigateTo = .tasks })
-            } else {
-                VStack(alignment: .leading, spacing: 16) {
-                    ForEach(groupedUpcomingTasks) { group in
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(group.label)
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(.secondary)
-                                .textCase(.uppercase)
-                                .padding(.leading, 2)
-                            VStack(spacing: 6) {
-                                ForEach(group.tasks) { task in
-                                    TaskRowView(
-                                        task: task,
-                                        onMoveRequested: {},
-                                        onOpenDetails: { selectedTask = task }
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
         }
     }
 
@@ -951,14 +1130,21 @@ struct HomeView: View {
             )
 
             if !hasLoadedEmailState {
-                loadingState(message: "Checking your inbox")
+                // Cold-launch: three ghost rows convey "this list is loading" without
+                // the dead-air feel of a single spinner row. The actual email rows
+                // pop into place once the connection probe + reconcile complete.
+                emailSkeletonRows
             } else if !services.emailService.hasConnection {
                 // Not connected — prompt to connect
                 emptyState(
                     message: "Connect Gmail to see your inbox",
                     onTap: { services.navigateTo = .email }
                 )
-            } else if services.emailService.isLoadingThreads && services.emailService.threads.isEmpty {
+            } else if (services.emailService.isLoadingThreads
+                || services.emailService.isReconciling)
+                && services.emailService.threads.isEmpty {
+                // Initial load OR post-forceSync reconciliation — show the loading copy so
+                // a user with an empty backend DB doesn't see "No recent emails" mid-sync.
                 loadingState(message: "Loading recent emails")
             } else if services.emailService.threads.isEmpty {
                 // Connected but no emails loaded yet
@@ -967,37 +1153,39 @@ struct HomeView: View {
                     onTap: { services.navigateTo = .email }
                 )
             } else {
-                // Show 2 recent threads — the briefing already surfaces priority items.
                 VStack(spacing: 8) {
-                    ForEach(Array(services.emailService.threads.prefix(2))) { thread in
+                    ForEach(Array(services.emailService.threads.prefix(5))) { thread in
                         Button {
                             selectedEmailThread = thread
                         } label: {
-                            HStack(spacing: 12) {
-                                // Unread indicator dot
+                            HStack(alignment: .top, spacing: 12) {
+                                // Unread indicator dot — top-aligned with the sender line
                                 Circle()
                                     .fill(thread.unread ? Color.primary : Color.clear)
-                                    .frame(width: 8, height: 8)
+                                    .frame(width: 7, height: 7)
+                                    .padding(.top, 5)
 
-                                VStack(alignment: .leading, spacing: 2) {
-                                    HStack {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    HStack(alignment: .firstTextBaseline) {
                                         Text(thread.from.name)
                                             .font(.system(size: 14, weight: thread.unread ? .bold : .medium))
                                             .lineLimit(1)
                                             .foregroundStyle(.primary)
                                         Spacer()
-                                        Text(thread.date, format: .dateTime.hour().minute())
+                                        Text(emailTimeLabel(thread.date))
                                             .font(.system(size: 12))
                                             .foregroundStyle(.secondary)
                                     }
                                     Text(thread.subject)
-                                        .font(.system(size: 13, weight: .medium))
+                                        .font(.system(size: 13, weight: thread.unread ? .semibold : .medium))
                                         .lineLimit(1)
-                                        .foregroundStyle(.primary.opacity(0.8))
-                                    Text(thread.snippet)
-                                        .font(.system(size: 12))
-                                        .lineLimit(1)
-                                        .foregroundStyle(.secondary)
+                                        .foregroundStyle(.primary.opacity(0.85))
+                                    if !thread.snippet.isEmpty {
+                                        Text(thread.snippet)
+                                            .font(.system(size: 12))
+                                            .lineLimit(2)
+                                            .foregroundStyle(.secondary)
+                                    }
                                 }
                             }
                             .padding(12)
@@ -1012,6 +1200,169 @@ struct HomeView: View {
                     }
                 }
             }
+        }
+    }
+
+    // MARK: - Meetings Section
+
+    private var meetingsSection: some View {
+        let allMeetings = services.meetingsService.meetings
+        let displayMeetings: [MeetingItem] = {
+            let cal = Calendar.current
+            let todayStart = cal.startOfDay(for: Date())
+            let upcoming = allMeetings.filter { $0.startsAt >= todayStart }
+            return Array((upcoming.isEmpty ? allMeetings : upcoming).prefix(3))
+        }()
+
+        return VStack(alignment: .leading, spacing: 12) {
+            meetingsSectionHeader(count: allMeetings.count)
+
+            if services.meetingsService.isLoading && allMeetings.isEmpty {
+                loadingState(message: "Loading meetings")
+            } else if allMeetings.isEmpty {
+                Button {
+                    Task { await services.meetingsService.syncFromCalendar() }
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: services.meetingsService.isSyncing ? "arrow.triangle.2.circlepath" : "arrow.clockwise")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(AppTheme.subtleText)
+                        Text(services.meetingsService.isSyncing ? "Syncing calendar…" : "Sync Google Calendar to import meetings")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(AppTheme.subtleText)
+                            .multilineTextAlignment(.leading)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(14)
+                    .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.row, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: AppTheme.Radius.row, style: .continuous)
+                            .strokeBorder(AppTheme.cardBorder, lineWidth: 1)
+                    )
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(services.meetingsService.isSyncing)
+            } else {
+                VStack(spacing: 8) {
+                    ForEach(displayMeetings) { meeting in
+                        Button {
+                            meetingRoute = HomeMeetingRoute(id: meeting.id)
+                        } label: {
+                            homeMeetingRow(meeting)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+    }
+
+    private func meetingsSectionHeader(count: Int) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "video.fill")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.secondary)
+            Text("Meetings")
+                .font(.system(size: 15, weight: .semibold))
+            if count > 0 {
+                Text("\(count)")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(AppTheme.surfaceSecondary, in: Capsule())
+            }
+            if services.meetingsService.isSyncing {
+                InlineRefreshBadge()
+            }
+            Spacer()
+
+            Button("View all") {
+                services.navigateToSheet = .meetings
+            }
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(AppTheme.accent)
+
+            Button {
+                Task { await services.meetingsService.syncFromCalendar() }
+            } label: {
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 28, height: 28)
+                    .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.inline, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: AppTheme.Radius.inline, style: .continuous)
+                            .stroke(AppTheme.cardBorder, lineWidth: 1)
+                    )
+            }
+            .buttonStyle(.plain)
+            .minTouchTarget()
+            .disabled(services.meetingsService.isSyncing)
+        }
+    }
+
+    private func homeMeetingRow(_ meeting: MeetingItem) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: homeMeetingStatusIcon(meeting.status))
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(homeMeetingStatusColor(meeting.status))
+                .frame(width: 28, height: 28)
+                .background(homeMeetingStatusColor(meeting.status).opacity(0.12), in: Circle())
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(meeting.title)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                Text(meeting.startsAt.formatted(date: .abbreviated, time: .shortened))
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            if meeting.aiSummary != nil {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary.opacity(0.5))
+            }
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(12)
+        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous)
+                .stroke(AppTheme.cardBorder, lineWidth: 1)
+        )
+        .contentShape(Rectangle())
+    }
+
+    private func homeMeetingStatusIcon(_ status: String) -> String {
+        switch status {
+        case "scheduled": return "calendar"
+        case "bot_joining", "processing": return "arrow.triangle.2.circlepath"
+        case "recording": return "record.circle"
+        case "ready": return "checkmark.circle"
+        case "failed": return "exclamationmark.triangle"
+        case "cancelled": return "xmark.circle"
+        default: return "circle"
+        }
+    }
+
+    private func homeMeetingStatusColor(_ status: String) -> Color {
+        switch status {
+        case "scheduled": return .primary
+        case "bot_joining", "processing": return .orange
+        case "recording": return .red
+        case "ready": return .green
+        case "failed": return .red
+        case "cancelled": return .gray
+        default: return .secondary
         }
     }
 
@@ -1293,20 +1644,62 @@ struct HomeView: View {
     }
 
     private func loadingState(message: String) -> some View {
-        HStack(spacing: 10) {
-            ProgressView()
-                .controlSize(.small)
-            Text(message)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(.secondary)
-            Spacer()
+        // Animated dotted text — "Loading recent emails…" → "Almost there" after 2s.
+        // Reassurance copy on cold-launch when the user is staring at a spinner
+        // wondering whether anything is happening.
+        ProgressiveLoadingRow(initialMessage: message)
+    }
+
+    /// Three faint placeholder rows shaped roughly like real email rows. Pure
+    /// SwiftUI — no animation library required. The gentle redraw pulse from
+    /// `RoundedRectangle.fill(.secondary.opacity(...))` plus the cached blur
+    /// material is enough to read as "loading", without the heavy shimmer libs.
+    private var emailSkeletonRows: some View {
+        VStack(spacing: 8) {
+            ForEach(0..<3, id: \.self) { _ in
+                HStack(alignment: .top, spacing: 12) {
+                    Circle()
+                        .fill(Color.secondary.opacity(0.18))
+                        .frame(width: 7, height: 7)
+                        .padding(.top, 5)
+                    VStack(alignment: .leading, spacing: 6) {
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(Color.secondary.opacity(0.18))
+                            .frame(width: 140, height: 12)
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(Color.secondary.opacity(0.14))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .frame(height: 10)
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(Color.secondary.opacity(0.10))
+                            .frame(maxWidth: 220, alignment: .leading)
+                            .frame(height: 10)
+                    }
+                }
+                .padding(12)
+                .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous)
+                        .stroke(AppTheme.cardBorder, lineWidth: 1)
+                )
+            }
         }
-        .padding(14)
-        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous)
-                .stroke(AppTheme.cardBorder, lineWidth: 1)
-        )
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Loading recent emails")
+    }
+
+    /// Human-readable time label for an email: "5m ago", "2h ago", "Yesterday", or "Apr 23".
+    private func emailTimeLabel(_ date: Date) -> String {
+        let cal = Calendar.current
+        if cal.isDateInToday(date) {
+            let seconds = Int(Date().timeIntervalSince(date))
+            if seconds < 90 { return "Just now" }
+            let mins = seconds / 60
+            if mins < 60 { return "\(mins)m ago" }
+            return "\(mins / 60)h ago"
+        }
+        if cal.isDateInYesterday(date) { return "Yesterday" }
+        return date.formatted(.dateTime.month(.abbreviated).day())
     }
 
     private func loadUpcomingEvents() async {
@@ -1324,7 +1717,14 @@ struct HomeView: View {
             )
         }
         if services.calendarService.canReadEvents() {
+            let now = Date()
             upcomingEvents = await services.calendarService.upcomingEvents(days: 7)
+                .filter { event in
+                    // All-day events span the full day — always keep them
+                    if event.isAllDay { return true }
+                    // Timed events: skip if already over
+                    return event.endDate > now
+                }
                 .sorted { $0.startDate < $1.startDate }
         }
     }
@@ -1338,6 +1738,7 @@ struct HomeView: View {
         }
 
         await loadUpcomingEvents()
+        await services.meetingsService.loadMeetings()
         await services.captureService.syncSharedFolders(in: modelContext)
         await services.captureService.fetchFolderSummary(in: modelContext)
 
@@ -1354,5 +1755,48 @@ struct HomeView: View {
             _ = await services.emailService.loadAssistantBriefing()
             isLoadingAssistantBriefing = false
         }
+    }
+}
+
+// MARK: - ProgressiveLoadingRow
+
+/// Loading row whose copy progresses over time so a slow request feels less
+/// stuck. Starts with the caller-provided message, then swaps to a reassurance
+/// string after 2s. Spinner uses `@ScaledMetric` so it tracks Dynamic Type.
+private struct ProgressiveLoadingRow: View {
+    let initialMessage: String
+
+    @State private var hasReassured = false
+    @ScaledMetric(relativeTo: .body) private var spinnerSize: CGFloat = 16
+
+    var body: some View {
+        HStack(spacing: 10) {
+            ProgressView()
+                .controlSize(.regular)
+                .frame(width: spinnerSize, height: spinnerSize)
+            Text(displayMessage)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.secondary)
+                .animation(.easeInOut(duration: 0.25), value: hasReassured)
+            Spacer()
+        }
+        .padding(14)
+        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous)
+                .stroke(AppTheme.cardBorder, lineWidth: 1)
+        )
+        .task {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            // Don't swap the copy if the row was removed in the meantime — the
+            // .task cancellation propagates here so `hasReassured` only flips
+            // when the user actually waited the full window.
+            guard !Task.isCancelled else { return }
+            hasReassured = true
+        }
+    }
+
+    private var displayMessage: String {
+        hasReassured ? "Almost there…" : "\(initialMessage)…"
     }
 }

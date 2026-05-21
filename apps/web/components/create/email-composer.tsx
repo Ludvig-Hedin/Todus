@@ -124,8 +124,13 @@ export function EmailComposer({
   const [isLoading, setIsLoading] = useState(false);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
   const [messageLength, setMessageLength] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Used to scope the document-level paste listener to THIS composer instance —
+  // without it, pasting an image into the search bar or another open composer
+  // would attach the file to every EmailComposer on the page.
+  const composerRootRef = useRef<HTMLDivElement>(null);
   const [threadId] = useQueryState('threadId');
   const [isComposeOpen, setIsComposeOpen] = useQueryState('isComposeOpen');
   const { data: emailData } = useThread(threadId ?? null);
@@ -322,21 +327,20 @@ export function EmailComposer({
     }
   }, [isComposeOpen, editor]);
 
-  // Prevent browser navigation/refresh when there's unsaved content
+  // Prevent browser navigation/refresh when there's unsaved content. Gating
+  // on `hasUnsavedChanges` instead of polling `editor.getText()` correctly
+  // includes attachments / scheduled state and avoids prompting the user
+  // for a sibling EmailComposer's content (every composer used to register
+  // its own listener at the document level).
   useEffect(() => {
-    if (!editor) return;
-
+    if (!hasUnsavedChanges) return;
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      const hasContent = editor?.getText()?.trim().length > 0;
-      if (hasContent) {
-        e.preventDefault();
-        e.returnValue = ''; // Required for Chrome
-      }
+      e.preventDefault();
+      e.returnValue = ''; // Required for Chrome
     };
-
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [editor]);
+  }, [hasUnsavedChanges]);
 
   // Perhaps add `hasUnsavedChanges` to the condition
   useEffect(() => {
@@ -466,7 +470,7 @@ export function EmailComposer({
     }
   };
 
-  const saveDraft = async () => {
+  const saveDraft = useCallback(async () => {
     const values = getValues();
 
     if (!hasUnsavedChanges) return;
@@ -474,11 +478,18 @@ export function EmailComposer({
 
     if (messageText.trim() === initialMessage.trim()) return;
     if (editor.getHTML() === initialMessage.trim()) return;
-    if (!values.to.length || !values.subject.length || !messageText.length) return;
+    // Save as long as ANY of body/subject/recipients has content — previously
+    // required all three, so a user typing a long body without recipients
+    // would lose the body on tab-close (autosave silently skipped).
+    const hasAnyContent =
+      messageText.trim().length > 0 ||
+      values.subject.trim().length > 0 ||
+      values.to.length > 0;
+    if (!hasAnyContent) return;
     if (aiGeneratedMessage || aiIsLoading || isGeneratingSubject) return;
 
+    setIsSavingDraft(true);
     try {
-      setIsSavingDraft(true);
       const draftData = {
         to: values.to.join(', '),
         cc: values.cc?.join(', '),
@@ -496,16 +507,32 @@ export function EmailComposer({
       if (response?.id && response.id !== draftId) {
         setDraftId(response.id);
       }
+      setLastSavedAt(Date.now());
+      // Only clear the dirty flag on a confirmed successful save. Clearing
+      // it on error (as before) made autosave a one-shot that silently
+      // dropped subsequent edits after the first failed retry — meaning a
+      // transient backend hiccup could lose ~minutes of typed content.
+      setHasUnsavedChanges(false);
     } catch (error) {
       console.error('Error saving draft:', error);
       toast.error('Failed to save draft');
-      setIsSavingDraft(false);
-      setHasUnsavedChanges(false);
+      // Leave hasUnsavedChanges=true so the autosave effect re-arms.
     } finally {
       setIsSavingDraft(false);
-      setHasUnsavedChanges(false);
     }
-  };
+  }, [
+    aiGeneratedMessage,
+    aiIsLoading,
+    createDraft,
+    draftId,
+    editor,
+    getValues,
+    hasUnsavedChanges,
+    initialMessage,
+    isGeneratingSubject,
+    setDraftId,
+    threadId,
+  ]);
 
   const handleGenerateSubject = async () => {
     try {
@@ -563,7 +590,6 @@ export function EmailComposer({
     if (!hasUnsavedChanges) return;
 
     const autoSaveTimer = setTimeout(() => {
-      console.log('timeout set');
       saveDraft();
     }, 3000);
 
@@ -572,6 +598,13 @@ export function EmailComposer({
 
   useEffect(() => {
     const handlePasteFiles = (event: ClipboardEvent) => {
+      // Scope the paste handler to this composer instance — without this
+      // check, pasting an image into the search bar (or any other input)
+      // would attach the file to every open EmailComposer.
+      const root = composerRootRef.current;
+      const target = event.target as Node | null;
+      if (!root || !target || !root.contains(target)) return;
+
       const clipboardData = event.clipboardData;
       if (!clipboardData || !clipboardData.files.length) return;
 
@@ -652,6 +685,7 @@ export function EmailComposer({
 
   return (
     <div
+      ref={composerRootRef}
       className={cn(
         'flex max-h-[500px] w-full max-w-[750px] flex-col overflow-hidden rounded-2xl bg-[#FAFAFA] shadow-sm dark:bg-[#202020]',
         className,
@@ -1031,6 +1065,11 @@ export function EmailComposer({
                 <TooltipContent>Formatting options</TooltipContent>
               </Tooltip>
             </TooltipProvider>
+            <DraftSaveStatus
+              isSaving={isSavingDraft}
+              hasUnsavedChanges={hasUnsavedChanges}
+              lastSavedAt={lastSavedAt}
+            />
           </div>
         </div>
         <div className="flex items-start justify-start gap-2">
@@ -1251,3 +1290,49 @@ const ContentPreview = ({
     </div>
   </motion.div>
 );
+
+function DraftSaveStatus({
+  isSaving,
+  hasUnsavedChanges,
+  lastSavedAt,
+}: {
+  isSaving: boolean;
+  hasUnsavedChanges: boolean;
+  lastSavedAt: number | null;
+}) {
+  if (!isSaving && lastSavedAt === null && !hasUnsavedChanges) return null;
+
+  let label: string;
+  let busy = false;
+  if (isSaving) {
+    label = 'Saving draft…';
+    busy = true;
+  } else if (hasUnsavedChanges) {
+    label = 'Unsaved changes';
+  } else if (lastSavedAt !== null) {
+    label = 'Draft saved';
+  } else {
+    return null;
+  }
+
+  return (
+    <span
+      role="status"
+      aria-live="polite"
+      className="text-muted-foreground inline-flex items-center gap-1.5 px-1 text-[11px] leading-none"
+    >
+      {busy ? (
+        <Loader className="h-3 w-3 animate-spin" />
+      ) : (
+        <span
+          aria-hidden="true"
+          className={cn(
+            'h-1.5 w-1.5 rounded-full',
+            hasUnsavedChanges ? 'bg-amber-500' : 'bg-emerald-500',
+          )}
+        />
+      )}
+      <span>{label}</span>
+    </span>
+  );
+}

@@ -10,6 +10,24 @@ const GOOGLE_CONTACT_READ_MASK = 'names,emailAddresses,photos';
 const GOOGLE_OTHER_CONTACT_SEARCH_MASK = 'names,emailAddresses,metadata';
 const MAX_FAVICON_URLS = 6;
 
+// Domains of free personal email providers. Brand-favicon lookup is skipped for these —
+// the result would be the provider's own logo (Gmail's G, Outlook's O), not the sender's avatar.
+const FREE_EMAIL_PROVIDERS = new Set([
+  'gmail.com', 'googlemail.com',
+  'outlook.com', 'hotmail.com', 'live.com', 'msn.com',
+  'yahoo.com', 'yahoo.co.uk', 'yahoo.fr', 'yahoo.de', 'yahoo.co.jp', 'yahoo.com.br',
+  'icloud.com', 'me.com', 'mac.com',
+  'protonmail.com', 'proton.me', 'protonmail.ch',
+  'zohomail.com', 'zoho.com',
+  'yandex.com', 'yandex.ru',
+  'mail.ru', 'bk.ru', 'inbox.ru', 'list.ru',
+  'gmx.com', 'gmx.net', 'gmx.de', 'gmx.at',
+  'aol.com', 'aol.co.uk',
+  'fastmail.com', 'fastmail.fm',
+  'hey.com',
+  'tutanota.com', 'tutamail.com',
+]);
+
 export const senderAvatarSourceSchemaValues = ['google', 'bimi', 'favicon', 'none'] as const;
 export const senderAvatarPrimarySourceSchemaValues = ['google', 'bimi', 'favicon'] as const;
 export type SenderAvatarSource = (typeof senderAvatarSourceSchemaValues)[number];
@@ -346,6 +364,62 @@ async function findBimiAvatar(domain: string): Promise<AvatarImage | null> {
   };
 }
 
+async function computeGravatarUrl(email: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(email.trim().toLowerCase());
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashHex = Array.from(new Uint8Array(hashBuffer))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+  // d=404 makes Gravatar return HTTP 404 when no avatar exists so the client's
+  // onError waterfall advances to the next candidate instead of showing a default image.
+  return `https://www.gravatar.com/avatar/${hashHex}?s=256&d=404&r=g`;
+}
+
+function buildAugmentedFallbackUrls({
+  domain,
+  isFreeProvider,
+  gravatarUrl,
+  faviconUrls,
+}: {
+  domain: string;
+  isFreeProvider: boolean;
+  gravatarUrl: string;
+  faviconUrls: string[];
+}): string[] {
+  if (isFreeProvider) {
+    // Personal email addresses: only Gravatar — no brand logos.
+    return [gravatarUrl];
+  }
+
+  const urls: string[] = [];
+
+  // Clearbit has excellent brand-logo coverage and returns proper 404 (not a globe).
+  // Reverse candidates so the root domain (best hit rate) is tried first.
+  const candidates = [...buildDomainCandidates(domain)].reverse();
+  for (const candidate of candidates) {
+    urls.push(`https://logo.clearbit.com/${candidate}?size=256`);
+  }
+
+  // icon.horse and DuckDuckGo: reliable favicon services that return 404 on failure
+  for (const candidate of candidates) {
+    urls.push(`https://icon.horse/icon/${candidate}`);
+  }
+  for (const candidate of candidates) {
+    urls.push(`https://icons.duckduckgo.com/ip3/${candidate}.ico`);
+  }
+
+  // Gravatar: covers individuals who happen to use a brand domain
+  urls.push(gravatarUrl);
+
+  // Cheerio-extracted favicon URLs (apple-touch-icon, favicon.ico from domain HTML)
+  for (const url of faviconUrls) {
+    urls.push(url);
+  }
+
+  return Array.from(new Set(urls)).filter(isHttpsUrl);
+}
+
 export async function resolveSenderAvatar(input: {
   email: string;
   name?: string | null;
@@ -363,7 +437,18 @@ export async function resolveSenderAvatar(input: {
     };
   }
 
-  const faviconUrls = await resolveFaviconUrls(domain);
+  const isFreeProvider = FREE_EMAIL_PROVIDERS.has(domain);
+
+  // Skip favicon scraping for free email providers — it returns the provider's own icon,
+  // not the person's avatar. Gravatar covers personal addresses instead.
+  const faviconUrls = isFreeProvider ? [] : await resolveFaviconUrls(domain);
+  const gravatarUrl = await computeGravatarUrl(normalizedEmail);
+  const augmentedFallbackUrls = buildAugmentedFallbackUrls({
+    domain,
+    isFreeProvider,
+    gravatarUrl,
+    faviconUrls,
+  });
 
   if (input.googleAuth) {
     try {
@@ -381,7 +466,7 @@ export async function resolveSenderAvatar(input: {
             url: googlePhotoUrl,
             svgContent: null,
           },
-          fallbackUrls: faviconUrls,
+          fallbackUrls: augmentedFallbackUrls,
         };
       }
     } catch (error) {
@@ -389,27 +474,30 @@ export async function resolveSenderAvatar(input: {
     }
   }
 
-  const bimiAvatar = await findBimiAvatar(domain);
-  if (bimiAvatar) {
-    return {
-      email: normalizedEmail,
-      domain,
-      primary: bimiAvatar,
-      fallbackUrls: faviconUrls,
-    };
+  // BIMI is domain-specific — meaningless for free email providers
+  if (!isFreeProvider) {
+    const bimiAvatar = await findBimiAvatar(domain);
+    if (bimiAvatar) {
+      return {
+        email: normalizedEmail,
+        domain,
+        primary: bimiAvatar,
+        fallbackUrls: augmentedFallbackUrls,
+      };
+    }
   }
 
-  const [primaryFaviconUrl] = faviconUrls;
-  if (primaryFaviconUrl) {
+  const [primaryFallbackUrl] = augmentedFallbackUrls;
+  if (primaryFallbackUrl) {
     return {
       email: normalizedEmail,
       domain,
       primary: {
         source: 'favicon' as const,
-        url: primaryFaviconUrl,
+        url: primaryFallbackUrl,
         svgContent: null,
       },
-      fallbackUrls: faviconUrls,
+      fallbackUrls: augmentedFallbackUrls,
     };
   }
 

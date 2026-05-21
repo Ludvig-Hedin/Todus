@@ -15,7 +15,6 @@ struct TasksTabView: View {
     private var folders: [FolderRecord]
 
     @State private var searchText = ""
-    @State private var taskSortOrder: TaskSortOrder = .newest
     /// Task opened via AI chat card deep navigation
     @State private var pendingTaskRecord: TaskRecord?
     @State private var selectedFolder: FolderRecord?
@@ -25,7 +24,27 @@ struct TasksTabView: View {
     @Namespace private var taskViewModeSegmentNamespace
 
     @State private var headerHeight: CGFloat = 100
-    private let scrimTail: CGFloat = 32
+    /// Visual gap between the pinned search bar and the first row of content
+    /// (16–20pt is the standard breathing room across all four task views).
+    private let scrimTail: CGFloat = 18
+
+    /// Holds the in-flight deep-nav task so a rapid second `pendingTaskId` arrival
+    /// cancels the previous delayed presentation instead of stacking sheets.
+    /// (Bug H6 — replaces GCD asyncAfter with a cancellable structured Task.)
+    @State private var pendingNavTask: Task<Void, Never>?
+
+    /// Live counts driving the "Today N" / "Overdue N" header chips.
+    /// SwiftData @Query observes any TaskRecord changes, recomputing on the
+    /// fly. We intentionally don't filter by folder here — the header is a
+    /// global today-snapshot, not folder-scoped.
+    @Query(filter: #Predicate<TaskRecord> { task in task.statusRawValue != "done" })
+    private var openTasks: [TaskRecord]
+
+    /// Completed tasks — used only to gate whether the "All clear" celebration
+    /// chip should appear. Showing "All clear" on a brand-new install with
+    /// zero tasks ever felt nonsensical. (UX P11.)
+    @Query(filter: #Predicate<TaskRecord> { task in task.statusRawValue == "done" })
+    private var doneTasks: [TaskRecord]
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -44,7 +63,7 @@ struct TasksTabView: View {
                         selectedFolderID: nil,
                         restrictToInbox: true,
                         searchText: searchText,
-                        sortOrder: taskSortOrder,
+                        sortOrder: services.taskSortOrder,
                         footer: { foldersFooter }
                     )
                         .padding(.horizontal, 10)
@@ -54,7 +73,7 @@ struct TasksTabView: View {
                         selectedFolderID: nil,
                         restrictToInbox: true,
                         searchText: searchText,
-                        sortOrder: taskSortOrder
+                        sortOrder: services.taskSortOrder
                     )
                 case .table:
                     TaskTableView(
@@ -62,10 +81,10 @@ struct TasksTabView: View {
                         selectedFolderID: nil,
                         restrictToInbox: true,
                         searchText: searchText,
-                        sortOrder: taskSortOrder
+                        sortOrder: services.taskSortOrder
                     )
                 case .calendar:
-                    CalendarTaskView(searchText: searchText, sortOrder: taskSortOrder)
+                    CalendarTaskView(searchText: searchText, sortOrder: services.taskSortOrder)
                         .padding(.horizontal, 16)
                 }
             }
@@ -89,6 +108,31 @@ struct TasksTabView: View {
                         if services.captureService.isSyncingSharedFolders {
                             InlineRefreshBadge(label: "Syncing")
                         }
+                        // Live "what matters now" chips so the user gets a
+                        // one-glance read of their day right from the header.
+                        // Empty state is "Clear" — celebrates the inbox-zero moment.
+                        todayHeaderChips
+                        Spacer()
+                        // Discoverable + button on iOS — previously only macOS had a
+                        // visible "+ Add Task" affordance; iOS users had to find the
+                        // composer via the central tab-bar create action.
+                        // (UX assessment QW11.)
+                        Button {
+                            services.requestCreateSheet = .task
+                        } label: {
+                            Image(systemName: "plus")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(.primary)
+                                .frame(width: 28, height: 28)
+                                .background(AppTheme.surfaceSecondary, in: Circle())
+                                .overlay(Circle().stroke(AppTheme.strongBorder, lineWidth: 1))
+                        }
+                        .buttonStyle(.plain)
+                        // Expands hit-area to ≥44pt without enlarging the
+                        // visible 28pt affordance, matching other icon
+                        // buttons across the app. (UX P4.)
+                        .minTouchTarget()
+                        .accessibilityLabel("Add task")
                     }
                 }
                 .padding(.horizontal, 16)
@@ -116,6 +160,12 @@ struct TasksTabView: View {
         // Deep navigation from AI chat cards — open task detail sheet
         .onAppear { consumePendingTaskNavigation() }
         .onChange(of: services.pendingTaskId) { _, _ in consumePendingTaskNavigation() }
+        .onDisappear {
+            // Cancel any in-flight delayed sheet presentation so it doesn't
+            // fire after this view has gone away (Bug H6).
+            pendingNavTask?.cancel()
+            pendingNavTask = nil
+        }
         .sheet(item: $pendingTaskRecord) { task in
             TaskDetailSheet(task: task)
         }
@@ -179,17 +229,83 @@ struct TasksTabView: View {
     }
 
     /// Picks up a pending task ID set by AI chat card navigation and opens the detail sheet.
+    /// The 300ms delay lets the underlying navigation settle before the sheet appears;
+    /// the surrounding `pendingNavTask` makes that delay cancellable so a second
+    /// arrival (or `onDisappear`) supersedes the first instead of stacking sheets.
+    /// (Bug H6 — was a bare `DispatchQueue.main.asyncAfter` with no cancel path.)
     private func consumePendingTaskNavigation() {
         guard let taskId = services.pendingTaskId else { return }
         services.pendingTaskId = nil
         let descriptor = FetchDescriptor<TaskRecord>(
             predicate: #Predicate { task in task.id == taskId }
         )
-        if let task = try? modelContext.fetch(descriptor).first {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                pendingTaskRecord = task
+        guard let task = try? modelContext.fetch(descriptor).first else { return }
+
+        pendingNavTask?.cancel()
+        pendingNavTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled else { return }
+            pendingTaskRecord = task
+        }
+    }
+
+    // MARK: - Header chips
+
+    /// Live "Overdue / Today" capsules in the header. Renders nothing
+    /// when there's nothing pressing. Tapping a chip flips the sort to
+    /// `.smart` so the user lands on that bucket. The chip is the single
+    /// most important orientation cue — "do I have anything urgent?".
+    @ViewBuilder
+    private var todayHeaderChips: some View {
+        let now = Date()
+        let cal = Calendar.current
+        let overdue = openTasks.filter { task in
+            guard let due = task.dueDate else { return false }
+            return due < now && !cal.isDateInToday(due)
+        }.count
+        let today = openTasks.filter { task in
+            guard let due = task.dueDate else { return false }
+            return cal.isDateInToday(due)
+        }.count
+
+        HStack(spacing: 6) {
+            if overdue > 0 {
+                headerChip(
+                    label: "\(overdue) overdue",
+                    icon: "exclamationmark.circle.fill",
+                    tint: Color(red: 0.85, green: 0.30, blue: 0.25)
+                )
+            }
+            if today > 0 {
+                headerChip(
+                    label: "\(today) today",
+                    icon: "sun.max.fill",
+                    tint: Color(red: 0.88, green: 0.55, blue: 0.20)
+                )
             }
         }
+    }
+
+    private func headerChip(label: String, icon: String, tint: Color) -> some View {
+        Button {
+            // Chip-tap focuses the smart sort so the bucket the user just
+            // glanced at becomes the visible scroll structure.
+            services.taskSortOrder = .smart
+            services.selectedViewMode = .list
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: icon)
+                    .font(.system(size: 9, weight: .bold))
+                Text(label)
+                    .font(.system(size: 10, weight: .semibold))
+            }
+            .foregroundStyle(tint)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(tint.opacity(0.12), in: Capsule())
+            .overlay(Capsule().stroke(tint.opacity(0.22), lineWidth: 0.5))
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Header
@@ -242,8 +358,9 @@ struct TasksTabView: View {
     private var searchSortBar: some View {
         HStack(spacing: 6) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 12, weight: .semibold))
+                .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(AppTheme.mutedText)
+                .padding(.leading, 2)
 
             TextField("Search tasks…", text: $searchText)
                 .font(.system(size: 12, weight: .medium))
@@ -261,19 +378,20 @@ struct TasksTabView: View {
                 .minTouchTarget()
             }
 
-            Divider().frame(height: 12)
+            Divider().frame(height: 10)
 
             Menu {
                 ForEach(TaskSortOrder.allCases) { order in
                     Button {
-                        taskSortOrder = order
+                        services.taskSortOrder = order
                     } label: {
-                        Label(order.title, systemImage: taskSortOrder == order ? "checkmark" : order.systemImage)
+                        let icon = services.taskSortOrder == order ? "checkmark" : order.systemImage
+                        Label(order.title, systemImage: icon)
                     }
                 }
             } label: {
                 HStack(spacing: 4) {
-                    Text(taskSortOrder.title)
+                    Text(services.taskSortOrder.title)
                         .font(.system(size: 10, weight: .semibold))
                     Image(systemName: "arrow.up.arrow.down")
                         .font(.system(size: 10, weight: .semibold))
@@ -285,11 +403,8 @@ struct TasksTabView: View {
                 .minTouchTarget()
             }
         }
-        .padding(.horizontal, 8)
+        .padding(.horizontal, 10)
         .padding(.vertical, 2)
-        .frame(minHeight: 32)
-        // Use surfacePrimary (white in light / 0.11 in dark) so the bar is clearly
-        // visible against the backgroundTop (0.94 in light / 0.05 in dark).
         .background(AppTheme.surfacePrimary, in: Capsule())
         .overlay(
             Capsule()

@@ -37,6 +37,10 @@ struct CalendarTabView: View {
     /// user reconnects (`connections.list` no longer flags the account) or
     /// dismisses the banner.
     @State private var showScopeMissingBanner: Bool = false
+    /// Alert state for when an external calendar event (Google / CalDAV) cannot
+    /// be opened via EKEventStore — usually because it lives in a different
+    /// account or hasn't been synced down to Apple's calendar store yet.
+    @State private var showCannotOpenEventAlert: Bool = false
 
     /// In-flight event-load task. Cancelled and replaced on every reload so
     /// rapid date/mode changes don't race; whichever task finishes last
@@ -67,13 +71,11 @@ struct CalendarTabView: View {
         )
     }
 
-    /// True when the visible calendar scope already includes “today” (nav bar today is hidden), except year view.
+    /// True when the visible calendar scope already includes “today”.
     private var calendarAnchoredOnToday: Bool {
         let cal = Calendar.current
         let now = Date()
         switch viewMode {
-        case .year:
-            return false
         case .day:
             return cal.isDate(dayViewDisplayedDay, inSameDayAs: now)
         case .multiDay:
@@ -82,23 +84,18 @@ struct CalendarTabView: View {
             let todayStart = cal.startOfDay(for: now)
             let endStart = cal.startOfDay(for: lastDay)
             return todayStart >= start && todayStart <= endStart
+        case .month:
+            return cal.isDate(selectedDate, equalTo: now, toGranularity: .month)
+        case .year:
+            return cal.isDate(selectedDate, equalTo: now, toGranularity: .year)
         case .list:
             return cal.isDate(selectedDate, equalTo: now, toGranularity: .month)
-        case .month:
-            return false
         }
     }
 
-    /// Whether to show the go-to-today control (year view always shows it).
+    /// Whether to show the go-to-today FAB — hidden when today is already in view.
     private var showGoToTodayControl: Bool {
-        switch viewMode {
-        case .month:
-            return false
-        case .year:
-            return true
-        default:
-            return !calendarAnchoredOnToday
-        }
+        !calendarAnchoredOnToday
     }
 
     private func goToToday() {
@@ -106,7 +103,7 @@ struct CalendarTabView: View {
         case .day:
             dayGoToTodayTick += 1
         default:
-            withAnimation(.easeOut(duration: 0.2)) {
+            withAnimation(AppTheme.Motion.base) {
                 selectedDate = Date()
             }
         }
@@ -125,7 +122,7 @@ struct CalendarTabView: View {
             }
             .onEnded { _ in
                 // Spring the scale back to neutral if no switch was triggered.
-                withAnimation(.spring(response: 0.28, dampingFraction: 0.8)) {
+                withAnimation(AppTheme.Motion.base) {
                     contentScale = 1.0
                 }
                 pinchAnchorMag = 1.0
@@ -161,7 +158,7 @@ struct CalendarTabView: View {
         // Snap scale back to neutral *outside* the animation so subsequent
         // `onChanged` deltas start from a clean 1.0 baseline.
         contentScale = 1.0
-        withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+        withAnimation(AppTheme.Motion.slow) {
             previousViewMode = viewMode
             viewMode = newMode
         }
@@ -173,15 +170,63 @@ struct CalendarTabView: View {
             // content gently breathes during a pinch.
             contentView
                 .scaleEffect(contentScale)
+                .overlay(alignment: .center) {
+                    // Initial-fetch loading state for non-day modes that
+                    // render an empty view while waiting on the backend.
+                    // CalendarKit's Day view ships its own loading affordance,
+                    // so we skip the overlay there.
+                    if isLoading, events.isEmpty, viewMode != .day {
+                        VStack(spacing: 10) {
+                            ProgressView()
+                            Text("Loading events…")
+                                .font(.system(size: 13, weight: .regular))
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.top, calendarHeaderHeight)
+                        .transition(.opacity)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel("Loading events")
+                    }
+                }
 
             if !isShowingEventDetail {
                 headerOverlay
                     .transition(.opacity)
             }
+
+            // Today FAB — bottom-left, liquid glass, only when today isn't visible.
+            if showGoToTodayControl && !isShowingEventDetail {
+                VStack {
+                    Spacer()
+                    HStack {
+                        Button(action: goToToday) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "calendar")
+                                    .font(.system(size: 14, weight: .semibold))
+                                Text("Today")
+                                    .font(.system(size: 14, weight: .semibold))
+                            }
+                            .foregroundStyle(.primary)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+                        }
+                        .buttonStyle(LiquidGlassButtonStyle(cornerRadius: 22))
+                        .accessibilityLabel(String(localized: "Go to today"))
+                        Spacer()
+                    }
+                    .padding(.leading, 20)
+                    .padding(.bottom, 16)
+                }
+                .transition(.scale(scale: 0.8).combined(with: .opacity))
+            }
         }
         .toolbar(isShowingEventDetail ? .hidden : .automatic, for: .tabBar)
-        .animation(.easeInOut(duration: 0.2), value: isShowingEventDetail)
-        .highPriorityGesture(pinchModeGesture)
+        .animation(AppTheme.Motion.slow, value: showGoToTodayControl)
+        .animation(AppTheme.Motion.base, value: isShowingEventDetail)
+        // `.simultaneousGesture` (not `.highPriorityGesture`) so the multi-day
+        // UIPageViewController's horizontal pan still wins for single-finger swipes
+        // — only true two-finger pinches reach the magnify recogniser.
+        .simultaneousGesture(pinchModeGesture)
         .onAppear {
             // Route the initial load through the same task slot used by all
             // subsequent reloads so a fast user interaction (pinch / picker
@@ -214,7 +259,7 @@ struct CalendarTabView: View {
         }
         .onChange(of: services.calendarRequestedViewMode) { _, requested in
             guard let requested else { return }
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+            withAnimation(AppTheme.Motion.slow) {
                 previousViewMode = viewMode
                 viewMode = requested
             }
@@ -242,6 +287,7 @@ struct CalendarTabView: View {
                 HStack(spacing: 10) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundStyle(.orange)
+                        .accessibilityHidden(true)
                     Text("Reconnect Gmail to enable calendar editing.")
                         .font(.subheadline)
                     Spacer(minLength: 8)
@@ -258,6 +304,7 @@ struct CalendarTabView: View {
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(.secondary)
+                    .accessibilityLabel("Dismiss")
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
@@ -269,9 +316,22 @@ struct CalendarTabView: View {
                 .padding(.horizontal, 12)
                 .padding(.top, 8)
                 .transition(.move(edge: .top).combined(with: .opacity))
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Reconnect Gmail to enable calendar editing")
+                .onAppear {
+                    UINotificationFeedbackGenerator().notificationOccurred(.warning)
+                }
             }
         }
-        .animation(.easeInOut(duration: 0.2), value: showScopeMissingBanner)
+        .animation(AppTheme.Motion.base, value: showScopeMissingBanner)
+        .alert(
+            String(localized: "Could not open event"),
+            isPresented: $showCannotOpenEventAlert
+        ) {
+            Button(String(localized: "OK"), role: .cancel) { }
+        } message: {
+            Text("It may belong to a different calendar account.")
+        }
     }
 
     /// Cancel any in-flight load and start a fresh one. Prevents stale results
@@ -295,49 +355,22 @@ struct CalendarTabView: View {
             .padding(.top, 4)
             .padding(.bottom, 4)
 
-            if viewMode == .day && showGoToTodayControl {
-                HStack {
-                    Spacer()
-                    Button(action: goToToday) {
-                        Text(String(localized: "Today"))
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(.primary.opacity(0.75))
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                    }
-                    .buttonStyle(LiquidGlassButtonStyle(cornerRadius: AppTheme.Radius.row))
-                    .accessibilityLabel(String(localized: "Go to today"))
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 4)
-            }
-
             if viewMode != .day && viewMode != .month {
                 CalendarNavBar(
                     selectedDate: $selectedDate,
                     viewMode: viewMode,
                     multiDayCount: multiDayCount,
-                    showTodayButton: showGoToTodayControl,
+                    showTodayButton: false,
                     todayUsesIconOnly: true,
                     onToday: goToToday,
                     onCalendars: { showCalendarPicker = true }
                 )
             }
         }
-        .background(alignment: .top) {
-            // Grass-green header with a soft fade into the calendar content below.
-            LinearGradient(
-                stops: [
-                    .init(color: Color(red: 0.22, green: 0.58, blue: 0.20).opacity(0.88), location: 0.0),
-                    .init(color: Color(red: 0.22, green: 0.58, blue: 0.20).opacity(0.70), location: 0.60),
-                    .init(color: Color(red: 0.22, green: 0.58, blue: 0.20).opacity(0.0), location: 1.0),
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .ignoresSafeArea(edges: .top)
-            .frame(height: calendarHeaderHeight + 60)
-        }
+        .background(
+            AppTheme.backgroundTop
+                .ignoresSafeArea(edges: .top)
+        )
         .onGeometryChange(for: CGFloat.self) { proxy in
             proxy.size.height
         } action: { height in
@@ -364,6 +397,32 @@ struct CalendarTabView: View {
             )
             .ignoresSafeArea(.container, edges: .bottom)
             .transition(viewTransition)
+            .overlay(alignment: .bottom) {
+                // TODO(bug-hunt): render Google/CalDAV events as an overlay on
+                // top of CalendarKit's day timeline. CalendarKit owns its own
+                // EKEventStore so non-Apple events aren't visible here yet —
+                // warn the user and point them to Multi-Day where the unified
+                // event list IS rendered.
+                if hasNonAppleEventsToday && !isShowingEventDetail {
+                    HStack(spacing: 8) {
+                        Image(systemName: "info.circle")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                        Text("Google events aren’t shown in Day view yet — switch to Multi-Day to see all events.")
+                            .font(.system(size: 12, weight: .regular))
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 12)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("Google events not shown in Day view. Switch to Multi-Day to see all events.")
+                }
+            }
             .alert(String(localized: "Could not save event"), isPresented: $showEventSaveError) {
                 Button(String(localized: "OK"), role: .cancel) { }
             } message: {
@@ -375,7 +434,21 @@ struct CalendarTabView: View {
                 selectedDate: $selectedDate,
                 events: events,
                 dayCount: multiDayCount,
-                onEventTap: { event in presentEvent(event) }
+                onEventTap: { event in presentEvent(event) },
+                onCreateEventAt: { date in
+                    // Light haptic mirrors CalendarKit's long-press feel.
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    // Notify any infra-owned CreateSheet host that the user
+                    // tapped an empty cell at `date`. The notification name is
+                    // versioned so the (separately owned) CreateSheet can opt
+                    // in without us reaching into AppServices.
+                    NotificationCenter.default.post(
+                        name: .todusCalendarRequestCreateEventAt,
+                        object: nil,
+                        userInfo: ["date": date]
+                    )
+                    services.requestCreateSheet = .event
+                }
             )
             .padding(.top, calendarHeaderHeight)
             .transition(viewTransition)
@@ -452,15 +525,23 @@ struct CalendarTabView: View {
             if !events.isEmpty { events = [] }
             return
         }
-        guard viewMode != .day else { return }
 
         isLoading = true
+        // Always clear `isLoading` even if this task is cancelled mid-flight
+        // (e.g. rapid mode/date changes). Without `defer` the spinner stuck.
+        defer { isLoading = false }
         let cal = Calendar.current
 
         let (start, end): (Date, Date)
         switch viewMode {
         case .day:
-            return
+            // TODO(bug-hunt): full Google overlay rendering for the Day view.
+            // Until that lands we still fetch the unified events so the
+            // "non-Apple events exist today" banner and a future overlay layer
+            // have data to render.
+            let dayStart = cal.startOfDay(for: dayViewDisplayedDay)
+            start = dayStart
+            end = cal.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart
         case .multiDay:
             let dayStart = cal.startOfDay(for: selectedDate)
             start = dayStart
@@ -489,7 +570,22 @@ struct CalendarTabView: View {
         // Drop the result if a newer reload superseded us mid-fetch.
         guard !Task.isCancelled else { return }
         events = unified.map { $0.legacyCalendarEvent }
-        isLoading = false
+    }
+
+    /// True when the unified event list contains at least one event for the
+    /// currently displayed day whose source is *not* the Apple EventKit store.
+    /// Drives the Day-view "Google events not shown here" banner.
+    private var hasNonAppleEventsToday: Bool {
+        let cal = Calendar.current
+        let day = cal.startOfDay(for: dayViewDisplayedDay)
+        guard let next = cal.date(byAdding: .day, value: 1, to: day) else { return false }
+        let applePrefix = "\(CalendarSourceIDPrefix.apple):"
+        return events.contains { ev in
+            // Apple events are namespaced `apple:<eventIdentifier>`; Google and
+            // future providers use their own provider prefix.
+            guard ev.startDate < next, ev.endDate > day else { return false }
+            return !ev.id.hasPrefix(applePrefix)
+        }
     }
 
     private func loadMoreListEvents() async {
@@ -512,12 +608,36 @@ struct CalendarTabView: View {
     /// Creates EKEventStore on a background thread to avoid the XPC-fence hang
     /// (up to 9+ seconds) that occurs when EKEventStore() is called on the main thread.
     private func presentEvent(_ event: CalendarEvent) {
-        let eventID = event.id
+        // Unified ids are namespaced `<provider>:<...>`. EKEventStore only
+        // knows about Apple identifiers, so strip the `apple:` prefix; for
+        // any other provider (e.g. Google) the lookup will simply fail and
+        // we fall through to the alert below.
+        let applePrefix = "\(CalendarSourceIDPrefix.apple):"
+        let ekEventID: String? = event.id.hasPrefix(applePrefix)
+            ? String(event.id.dropFirst(applePrefix.count))
+            : (event.id.contains(":") ? nil : event.id)
+
         Task { @MainActor in
             let holder = await Task.detached(priority: .userInitiated) {
                 EKStoreHolder()
             }.value
-            guard let ekEvent = holder.store.event(withIdentifier: eventID) else { return }
+
+            // Two-step lookup: EKEventStore can return nil immediately after a
+            // store change (cache hasn't been hydrated yet). One short retry
+            // covers that race; if it still isn't there the event lives in a
+            // calendar account we can't open via EventKit (Google/CalDAV).
+            var ekEvent: EKEvent? = nil
+            if let id = ekEventID {
+                ekEvent = holder.store.event(withIdentifier: id)
+                if ekEvent == nil {
+                    try? await Task.sleep(for: .milliseconds(200))
+                    ekEvent = holder.store.event(withIdentifier: id)
+                }
+            }
+            guard let ekEvent else {
+                showCannotOpenEventAlert = true
+                return
+            }
             guard let topVC = UIApplication.topViewController() else { return }
             let eventVC = EKEventViewController()
             eventVC.event = ekEvent
@@ -569,19 +689,30 @@ nonisolated(unsafe) private var EKStoreHolderKey: UInt8 = 0
 // MARK: - UIApplication Helper
 
 extension UIApplication {
+    /// Robust key-window lookup that walks *every* window in the active scene
+    /// instead of relying on `UIWindowScene.keyWindow` (which can be nil on
+    /// iPadOS multi-window setups and during scene transitions).
+    static func keyWindowRoot() -> UIViewController? {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap { $0.windows }
+            .first(where: { $0.isKeyWindow })?
+            .rootViewController
+    }
+
     static func topViewController(
-        base: UIViewController? = UIApplication.shared.connectedScenes
-            .compactMap { ($0 as? UIWindowScene)?.keyWindow?.rootViewController }
-            .first
+        base: UIViewController? = UIApplication.keyWindowRoot()
     ) -> UIViewController? {
-        if let nav = base as? UINavigationController {
-            return topViewController(base: nav.visibleViewController)
+        // Recurse presented modals first — they sit on top of every other
+        // container, so any subsequent traversal must happen relative to them.
+        if let presented = base?.presentedViewController {
+            return topViewController(base: presented)
         }
         if let tab = base as? UITabBarController, let selected = tab.selectedViewController {
             return topViewController(base: selected)
         }
-        if let presented = base?.presentedViewController {
-            return topViewController(base: presented)
+        if let nav = base as? UINavigationController {
+            return topViewController(base: nav.visibleViewController ?? nav.topViewController)
         }
         return base
     }

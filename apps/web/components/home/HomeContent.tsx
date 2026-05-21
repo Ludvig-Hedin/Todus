@@ -34,10 +34,14 @@ import { Button } from '@/components/ui/button';
 import { Balancer } from 'react-wrap-balancer';
 import { Navigation } from '../navigation';
 import { useTheme } from 'next-themes';
+import { SplitText } from '@/components/ui/split-text';
 import { motion } from 'motion/react';
 import { useEffect } from 'react';
 import { toast } from 'sonner';
 import Footer from './footer';
+import CTASection from './cta';
+import { ProductSections } from './product-sections';
+import { HeroDemo } from './hero-demo/HeroDemo';
 import React from 'react';
 
 const firstRowQueries: string[] = [
@@ -78,7 +82,7 @@ export default function HomeContent() {
 
       <Navigation />
 
-      <section className="z-10 mt-32 flex flex-col items-center px-4">
+      <section className="z-10 mt-24 flex flex-col items-center px-4">
         <motion.h1
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -97,27 +101,7 @@ export default function HomeContent() {
         >
           {`${APP_NAME} is an AI-native email client that manages your inbox, so you don't have to.`}
         </motion.p>
-        <p className="mb-4 ml-0.5 text-xs text-[#B7B7B7]/60">No credit card required.</p>
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5 }}
-          className="border-input/50 mb-6 inline-flex items-center gap-4 rounded-full border border-[#2A2A2A] bg-[#1E1E1E] px-4 py-1"
-        >
-          <Link to="https://yc.vc" target="_blank" className="flex items-center gap-2 text-sm">
-            Backed by
-            <span>
-              <img
-                src="/yc-small.svg"
-                alt="Y Combinator"
-                className="rounded-[2px]"
-                width={18}
-                height={18}
-              />
-            </span>
-            Combinator
-          </Link>
-        </motion.div>
+        <p className="mb-6 ml-0.5 text-xs text-[#B7B7B7]/60">No credit card required.</p>
 
         {/* Get Started button only visible for mobile screens */}
         <motion.div
@@ -169,14 +153,9 @@ export default function HomeContent() {
               />
               {tabs.map((tab) => (
                 <TabsContent key={tab.value} value={tab.value}>
-                  <img
-                    src="/email-preview.png"
-                    alt={`${APP_NAME} Email Preview`}
-                    width={1920}
-                    height={1080}
-                    className="relative hidden md:block"
-                    loading="eager"
-                  />
+                  <div className="relative hidden md:block">
+                    <HeroDemo />
+                  </div>
                 </TabsContent>
               ))}
             </div>
@@ -185,46 +164,36 @@ export default function HomeContent() {
       </section>
 
       <div className="flex items-center justify-center px-4 md:hidden">
-        <img
-          src="/email-preview.png"
-          alt={`${APP_NAME} Email Preview`}
-          width={1920}
-          height={1080}
-          className="mt-10 h-fit w-full rounded-xl border"
-          loading="eager"
-        />
+        <HeroDemo variant="mobile" className="mt-10" />
       </div>
 
       <div className="relative -top-3.5 hidden h-px w-full bg-[#313135] md:block" />
 
       <div className="relative mt-52">
         <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5 }}
+          initial={{ opacity: 0, y: 10 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true, margin: '-80px' }}
+          transition={{ duration: 0.4 }}
           className="flex items-center justify-center"
         >
-          <h1 className="text-lg font-light text-white/40 md:text-xl">
+          <p className="text-lg font-light text-white/40 md:text-xl">
             Designed for power users who value time
-          </h1>
+          </p>
         </motion.div>
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.2 }}
-          className="mt-2 flex flex-col items-center justify-center md:mt-8"
-        >
-          <h1 className="text-center text-4xl font-medium text-white md:text-6xl">
-            Speed Is Everything
+        <div className="mt-2 flex flex-col items-center justify-center md:mt-8">
+          <h1 className="text-center text-4xl font-medium md:text-6xl">
+            <SplitText text="Speed Is Everything" className="text-white" delay={0.05} />
           </h1>
-          <h1 className="mb-3 text-center text-4xl font-medium text-white/40 md:text-6xl">
-            Reply in seconds
+          <h1 className="mb-3 text-center text-4xl font-medium md:text-6xl">
+            <SplitText text="Reply in seconds" className="text-white/40" delay={0.1} />
           </h1>
-        </motion.div>
+        </div>
         <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.4 }}
+          initial={{ opacity: 0, y: 24 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true, margin: '-80px' }}
+          transition={{ duration: 0.6, delay: 0.1, ease: [0.21, 0.47, 0.32, 0.98] }}
           className="relative bottom-3 mx-12 flex items-center justify-center bg-[#0F0F0F] md:mx-0"
         >
           <div className="bg-panelDark mx-auto mt-10 inline-flex max-w-[600px] flex-col items-center justify-center overflow-hidden rounded-2xl shadow-md">
@@ -377,9 +346,10 @@ export default function HomeContent() {
       <div className="relative mt-52 flex items-center justify-center">
         <div className="mx-auto grid w-full! max-w-[1250px] grid-cols-1 gap-12 md:grid-cols-2 lg:grid-cols-3">
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5 }}
+            initial={{ opacity: 0, y: 30 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true, margin: '-80px' }}
+            transition={{ duration: 0.6, ease: [0.21, 0.47, 0.32, 0.98] }}
             className="flex flex-col"
           >
             <div className="relative aspect-square w-full overflow-hidden rounded-2xl md:h-96">
@@ -524,9 +494,10 @@ export default function HomeContent() {
             </div>
           </motion.div>
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5 }}
+            initial={{ opacity: 0, y: 30 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true, margin: '-80px' }}
+            transition={{ duration: 0.6, delay: 0.1, ease: [0.21, 0.47, 0.32, 0.98] }}
           >
             <div className="relative aspect-square w-full overflow-hidden rounded-2xl md:h-96">
               <div className="absolute left-0 top-0 aspect-square w-full rounded-2xl bg-[#2B2B2B] md:h-96 md:w-96" />
@@ -757,9 +728,10 @@ export default function HomeContent() {
             </div>
           </motion.div>
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5 }}
+            initial={{ opacity: 0, y: 30 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true, margin: '-80px' }}
+            transition={{ duration: 0.6, delay: 0.2, ease: [0.21, 0.47, 0.32, 0.98] }}
           >
             <div className="relative aspect-square w-full overflow-hidden rounded-2xl md:h-96">
               <div className="absolute left-0 top-0 aspect-square w-full rounded-2xl bg-[#2B2B2B] md:h-96 md:w-96" />
@@ -1043,35 +1015,34 @@ export default function HomeContent() {
       <div className="relative mt-52">
         <div className="z-1 relative w-full">
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5 }}
+            initial={{ opacity: 0, y: 10 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true, margin: '-80px' }}
+            transition={{ duration: 0.4 }}
             className="flex items-center justify-center"
           >
-            <h1 className="text-lg font-light text-white/40 md:text-xl">
+            <p className="text-lg font-light text-white/40 md:text-xl">
               AI email chat with natural language
-            </h1>
+            </p>
           </motion.div>
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.2 }}
-            className="mt-2 flex flex-col items-center justify-center md:mt-8"
-          >
-            <h1 className="text-4xl font-medium text-white md:text-6xl">Ask away</h1>
-            <h1 className="mb-4 text-4xl font-medium text-white/40 md:text-6xl">
-              Get your answers
+          <div className="mt-2 flex flex-col items-center justify-center md:mt-8">
+            <h1 className="text-4xl font-medium md:text-6xl">
+              <SplitText text="Ask away" className="text-white" delay={0.05} />
             </h1>
-          </motion.div>
+            <h1 className="mb-4 text-4xl font-medium md:text-6xl">
+              <SplitText text="Get your answers" className="text-white/40" delay={0.1} />
+            </h1>
+          </div>
 
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.5 }}
+            initial={{ opacity: 0, y: 30 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true, margin: '-80px' }}
+            transition={{ duration: 0.6, delay: 0.1, ease: [0.21, 0.47, 0.32, 0.98] }}
             className="relative flex w-full items-center justify-center"
           >
             <div className="relative mx-auto flex h-[587px] w-full max-w-[894px] items-center justify-center rounded-xl">
-              <div className="absolute left-0 top-[319px] mx-auto inline-flex w-full max-w-[894px] flex-col items-start justify-start overflow-hidden rounded-xl bg-zinc-900 opacity-30">
+              <div className="absolute left-0 top-[319px] mx-auto inline-flex w-full max-w-[894px] flex-col items-start justify-start overflow-hidden rounded-xl border border-white/[0.04] bg-[#0A0A0A] opacity-40">
                 <div className="inline-flex items-center justify-start gap-1.5 self-stretch px-5 pb-4 pt-7">
                   <div className="flex flex-1 items-center justify-start gap-1.5">
                     <div className="justify-start text-sm leading-none text-[#8C8C8C]">Pinned</div>
@@ -1180,7 +1151,7 @@ export default function HomeContent() {
                   </div>
                 </div>
               </div>
-              <div className="absolute top-0 inline-flex aspect-96/125 w-full flex-col items-center justify-center overflow-hidden rounded-xl bg-[#252525] md:h-[500px] md:w-96">
+              <div className="absolute top-0 inline-flex aspect-96/125 w-full flex-col items-center justify-center overflow-hidden rounded-xl border border-white/[0.06] bg-[#0E0E0E] shadow-[0_30px_80px_-20px_rgba(0,0,0,0.6)] md:h-[500px] md:w-96">
                 <div className="border-tokens-stroke-light/5 inline-flex items-center justify-start gap-2 self-stretch overflow-hidden border-b-[0.50px] py-3.5 pl-5 pr-3.5">
                   <div className="flex flex-1 items-center justify-start gap-3">
                     <div className="text-base-gray-950 flex flex-1 items-center justify-start text-sm leading-none">
@@ -1221,7 +1192,7 @@ export default function HomeContent() {
                         {firstRowQueries.map((query) => (
                           <div
                             key={query}
-                            className="flex h-7 shrink-0 items-center justify-start gap-1.5 overflow-hidden rounded-md bg-[#303030] px-2 py-1.5"
+                            className="flex h-7 shrink-0 items-center justify-start gap-1.5 overflow-hidden rounded-md bg-[#181818] px-2 py-1.5"
                           >
                             <div className="flex items-center justify-start gap-1 px-0.5">
                               <div className="justify-start text-sm leading-none text-[#8B8B8B]">
@@ -1231,8 +1202,8 @@ export default function HomeContent() {
                           </div>
                         ))}
                       </div>
-                      <div className="absolute left-0 top-0 h-7 w-12 bg-linear-to-l from-neutral-800/0 to-neutral-800" />
-                      <div className="absolute right-0 top-0 h-7 w-12 bg-linear-to-l from-neutral-800 to-neutral-800/0" />
+                      <div className="absolute left-0 top-0 h-7 w-12 bg-linear-to-l from-[#0E0E0E]/0 to-[#0E0E0E]" />
+                      <div className="absolute right-0 top-0 h-7 w-12 bg-linear-to-l from-[#0E0E0E] to-[#0E0E0E]/0" />
                     </div>
 
                     {/* Second row */}
@@ -1241,7 +1212,7 @@ export default function HomeContent() {
                         {secondRowQueries.map((query) => (
                           <div
                             key={query}
-                            className="flex h-7 shrink-0 items-center justify-start gap-1.5 overflow-hidden rounded-md bg-[#303030] px-2 py-1.5"
+                            className="flex h-7 shrink-0 items-center justify-start gap-1.5 overflow-hidden rounded-md bg-[#181818] px-2 py-1.5"
                           >
                             <div className="flex items-center justify-start gap-1 px-0.5">
                               <div className="justify-start text-sm leading-none text-[#8B8B8B]">
@@ -1251,8 +1222,8 @@ export default function HomeContent() {
                           </div>
                         ))}
                       </div>
-                      <div className="absolute left-0 top-0 h-7 w-12 bg-linear-to-l from-neutral-800/0 to-neutral-800" />
-                      <div className="absolute right-0 top-0 h-7 w-12 bg-linear-to-l from-neutral-800 to-neutral-800/0" />
+                      <div className="absolute left-0 top-0 h-7 w-12 bg-linear-to-l from-[#0E0E0E]/0 to-[#0E0E0E]" />
+                      <div className="absolute right-0 top-0 h-7 w-12 bg-linear-to-l from-[#0E0E0E] to-[#0E0E0E]/0" />
                     </div>
                   </div>
                   <div className="inline-flex w-full items-center justify-start gap-4 overflow-hidden p-0 md:w-96 md:p-4 md:pb-0">
@@ -1325,9 +1296,9 @@ export default function HomeContent() {
         </div>
       </motion.div> */}
 
-      <div className="relative mt-52 flex items-center justify-center">
-        <Footer />
-      </div>
+      <ProductSections />
+      <CTASection />
+      <Footer />
     </main>
   );
 }

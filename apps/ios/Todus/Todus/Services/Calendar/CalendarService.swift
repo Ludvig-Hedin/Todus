@@ -1,3 +1,4 @@
+import CryptoKit
 import EventKit
 import Foundation
 
@@ -5,6 +6,12 @@ extension Notification.Name {
     /// Posted after `requestAccess()` completes so UI (e.g. `MainTabView`) can re-check
     /// `EKEventStore.authorizationStatus` while the app stays in the foreground.
     static let todusCalendarAuthorizationDidChange = Notification.Name("TodusCalendarAuthorizationDidChange")
+
+    /// Posted when the user taps an empty time slot in the multi-day grid and
+    /// expects a create-event flow seeded at that instant. The infra-owned
+    /// CreateSheet may observe this to pre-fill its date pickers.
+    /// `userInfo["date"]` is a `Date`.
+    static let todusCalendarRequestCreateEventAt = Notification.Name("TodusCalendarRequestCreateEventAt")
 }
 
 /// Lightweight sendable representation of a calendar event.
@@ -232,6 +239,10 @@ actor CalendarService {
            cal.allowsContentModifications {
             return cal
         }
+        // Silent fallback can leave the user staring at "I picked Work but it
+        // saved to Personal" with no explanation. Log so the bug is reproducible
+        // — callers may want to surface a friendlier alert in the future.
+        print("[CalendarService] target calendar '\(stripped)' missing or read-only — falling back to defaultCalendarForNewEvents (\(defaultCal?.title ?? "nil"))")
         return defaultCal
     }
 
@@ -405,21 +416,20 @@ private extension EKEvent {
         )
     }
 
-    /// Stable fallback identifier: hash of calendar+title+start+end.  Same
-    /// across refreshes for the same underlying event (which is what we need
-    /// for SwiftUI identity), and disambiguates two same-titled events at the
-    /// same time on different calendars.
+    /// Stable fallback identifier: hash of calendar+title+start+end. Same
+    /// across refreshes AND across process restarts (Swift's `Hasher` is
+    /// process-seeded, so it would give different IDs on each cold launch and
+    /// break SwiftUI identity continuity for events without an EKEvent
+    /// identifier).
     private static func derivedID(
         calendarTitle: String?,
         title: String?,
         start: Date,
         end: Date
     ) -> String {
-        var hasher = Hasher()
-        hasher.combine(calendarTitle ?? "")
-        hasher.combine(title ?? "")
-        hasher.combine(start.timeIntervalSinceReferenceDate)
-        hasher.combine(end.timeIntervalSinceReferenceDate)
-        return "derived-\(hasher.finalize())"
+        let payload = "\(calendarTitle ?? "")|\(title ?? "")|\(start.timeIntervalSinceReferenceDate)|\(end.timeIntervalSinceReferenceDate)"
+        let digest = SHA256.hash(data: Data(payload.utf8))
+        let hex = digest.compactMap { String(format: "%02x", $0) }.joined()
+        return "derived-\(hex.prefix(16))"
     }
 }

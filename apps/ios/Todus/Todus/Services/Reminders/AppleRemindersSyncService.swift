@@ -25,7 +25,7 @@ struct ImportedReminder: Sendable {
 /// (9000+ ms freezes visible in the iOS performance HUD). By isolating all EKEventStore
 /// work to this background actor, the main thread is only *suspended* (not *blocked*)
 /// during await calls — keeping the UI fully responsive.
-private actor RemindersStorageActor {
+actor RemindersStorageActor {
     // MUST be lazy — actor designated inits run on the CALLING context (main thread),
     // not on the actor's background executor. If this were `let`, EKEventStore() would
     // be created synchronously on the main thread during AppServices.init(), causing the
@@ -122,16 +122,83 @@ private actor RemindersStorageActor {
         }
         return imported
     }
+
+    /// Sendable status snapshot for tracked reminders — used to propagate
+    /// completion state back from Apple Reminders to local TaskRecords (#6).
+    struct ReminderStatus: Sendable {
+        let identifier: String
+        let isCompleted: Bool
+        let completionDate: Date?
+    }
+
+    /// Look up specific reminders by `calendarItemIdentifier` and return their
+    /// completion state. Includes both completed and incomplete entries so the
+    /// caller can detect a Reminders-side check-off and mirror it locally.
+    func fetchTrackedReminders(identifiers: [String]) -> [ReminderStatus] {
+        guard !identifiers.isEmpty else { return [] }
+        var out: [ReminderStatus] = []
+        for id in identifiers {
+            if let r = store.calendarItem(withIdentifier: id) as? EKReminder {
+                out.append(ReminderStatus(
+                    identifier: id,
+                    isCompleted: r.isCompleted,
+                    completionDate: r.completionDate
+                ))
+            }
+        }
+        return out
+    }
 }
+
+// MARK: - Storage seam
+
+/// EventKit-backed storage seam — abstracts the small subset of `EKEventStore`
+/// surface that `AppleRemindersSyncService` uses (save / delete / fetch +
+/// authorization). The production impl is `RemindersStorageActor`; tests
+/// inject a fake that records calls and returns canned `SaveResult` / status
+/// values without touching the device Reminders database.
+protocol EKReminderStoring: Sendable {
+    func requestFullAccess() async throws -> Bool
+    func save(
+        title: String,
+        notes: String,
+        priority: Int,
+        isCompleted: Bool,
+        completionDate: Date?,
+        dueDate: Date?,
+        existingIdentifier: String?
+    ) async throws -> RemindersStorageActor.SaveResult
+    func delete(identifier: String) async throws
+    func fetchAllIncompleteReminders() async -> [ImportedReminder]
+    func fetchTrackedReminders(identifiers: [String]) async -> [RemindersStorageActor.ReminderStatus]
+}
+
+extension RemindersStorageActor: EKReminderStoring {}
 
 // MARK: - Service
 
 @MainActor
 final class AppleRemindersSyncService {
-    // Log when this service is created to verify it's fast (no EKEventStore init here).
-    init() {
-        startupLog.info("⏱ AppleRemindersSyncService.init() — EKEventStore NOT created yet (lazy)")
+    /// Convenience init that uses the production `RemindersStorageActor`. Kept
+    /// as the public entry point so existing call sites compile unchanged.
+    convenience init() {
+        self.init(storage: RemindersStorageActor(), authorizationProbe: nil)
     }
+
+    /// Internal designated init that accepts an `EKReminderStoring` and an
+    /// optional authorization-state override. Used by unit tests to inject
+    /// a fake storage and bypass the EKEventStore authorization gate so
+    /// the upsert / reconcile branches can be exercised without permissions.
+    init(storage: EKReminderStoring, authorizationProbe: (@MainActor () -> AuthorizationState)?) {
+        startupLog.info("⏱ AppleRemindersSyncService.init() — EKEventStore NOT created yet (lazy)")
+        self.storage = storage
+        self.authorizationProbe = authorizationProbe
+    }
+
+    /// Test-only override for `authorizationState()`. When non-nil, used in
+    /// place of `EKEventStore.authorizationStatus(for: .reminder)` so tests
+    /// can drive code paths gated on `.authorized`.
+    private let authorizationProbe: (@MainActor () -> AuthorizationState)?
     enum AuthorizationState: String {
         case notDetermined
         case restricted
@@ -139,8 +206,22 @@ final class AppleRemindersSyncService {
         case authorized
     }
 
-    // Single shared actor instance — its serial queue serializes all EKEventStore I/O.
-    private let storage = RemindersStorageActor()
+    // Single shared storage instance — its serial queue serializes all EKEventStore I/O.
+    private let storage: EKReminderStoring
+
+    /// Per-task in-flight set so concurrent capture+enrich passes don't both try to
+    /// create a fresh EKReminder before the first upsert returns its identifier
+    /// (#20). Keys are local task UUIDs; presence means an upsert is in flight.
+    private var inFlightUpserts: Set<UUID> = []
+    /// Coalescing buffer — a second upsert that arrives while the first is in flight
+    /// is recorded here; we re-fire it once the first completes so the latest data
+    /// wins without an additional EK reminder being created.
+    private var pendingUpsertTaskIDs: Set<UUID> = []
+    /// Per-task drain-retry counter, bounding how many times a coalesced re-upsert
+    /// can chain. Without this a hot loop of mutations could keep re-firing
+    /// `upsert(...)` recursively. (Medium bug — recursive upsert with no max-attempts.)
+    private var coalescedRetryCount: [UUID: Int] = [:]
+    private let maxCoalescedRetries = 3
 
     /// Current sync direction. Owned at the AppServices layer (in `RemindersSyncState`);
     /// kept mirrored here so consumers that already hold this service can read
@@ -155,6 +236,9 @@ final class AppleRemindersSyncService {
     var isOneWaySync: Bool { syncDirection == .fromReminders }
 
     func authorizationState() -> AuthorizationState {
+        // Tests inject an override via `authorizationProbe` so they can drive
+        // permission-gated branches without prompting the user.
+        if let probe = authorizationProbe { return probe() }
         // authorizationStatus is a class method and doesn't block — safe to call on main.
         switch EKEventStore.authorizationStatus(for: .reminder) {
         case .notDetermined: return .notDetermined
@@ -179,12 +263,31 @@ final class AppleRemindersSyncService {
     func upsert(_ task: TaskRecord, in context: ModelContext) {
         guard authorizationState() == .authorized else { return }
 
+        // Coalesce concurrent upserts for the same task. Without this, a capture
+        // pass that calls upsert(...) before EKEventStore.save returns the
+        // identifier, followed by an enrichment pass that calls upsert(...)
+        // again, both see existingIdentifier=nil → both create new EKReminders
+        // (duplicate Reminders entries).
+        if inFlightUpserts.contains(task.id) {
+            pendingUpsertTaskIDs.insert(task.id)
+            return
+        }
+        inFlightUpserts.insert(task.id)
+
         // Capture only Sendable (value-type) data from the task before leaving the main actor.
         let title = task.title
-        let notes = task.taskDescription.isEmpty ? task.rawInput : task.taskDescription
+        // Push only the user-curated description. Falling back to `rawInput`
+        // dumps the full natural-language capture (e.g. "Buy milk tomorrow at
+        // 5pm") into the Reminders notes field, which then round-trips back as
+        // a permanent task description on the next import.
+        let notes = task.taskDescription
         let priority = task.priority.reminderPriority
         let isCompleted = task.completed
-        let completionDate = task.completed ? task.updatedAt : nil
+        // Use the dedicated `completedAt` stamp (set on false→true transition in
+        // TaskRecord) so Reminders' Completed smart list shows the actual moment
+        // the task was checked off. Fall back to `updatedAt` only when a legacy
+        // task is missing `completedAt` (older rows pre-dating the field).
+        let completionDate: Date? = task.completed ? (task.completedAt ?? task.updatedAt) : nil
         let dueDate = task.dueDate
         let existingIdentifier = task.reminderIdentifier
         let taskID = task.id
@@ -218,9 +321,13 @@ final class AppleRemindersSyncService {
                     }
                 }
                 AppLogger.shared.log("AppleRemindersSyncService.upsert failed: \(error.localizedDescription)")
+                self.inFlightUpserts.remove(taskID)
+                self.pendingUpsertTaskIDs.remove(taskID)
                 return
             } catch {
                 AppLogger.shared.log("AppleRemindersSyncService.upsert failed: \(error.localizedDescription)")
+                self.inFlightUpserts.remove(taskID)
+                self.pendingUpsertTaskIDs.remove(taskID)
                 return
             }
 
@@ -243,6 +350,32 @@ final class AppleRemindersSyncService {
                 )
             }
             try? context.save()
+
+            // Drain coalesced re-upserts. If a second upsert arrived while this one
+            // was in flight, re-fire it now with the up-to-date task state — but
+            // *with* the freshly-written reminderIdentifier so it won't create a
+            // duplicate EKReminder.
+            //
+            // Bounded to `maxCoalescedRetries` to prevent a hot loop of mutations
+            // from chaining upserts indefinitely. (Medium bug.)
+            self.inFlightUpserts.remove(taskID)
+            if self.pendingUpsertTaskIDs.remove(taskID) != nil {
+                let attempts = (self.coalescedRetryCount[taskID] ?? 0) + 1
+                if attempts >= self.maxCoalescedRetries {
+                    AppLogger.shared.log(
+                        "AppleRemindersSyncService.upsert: dropped coalesced re-upsert for \(taskID) after \(attempts) attempts"
+                    )
+                    self.coalescedRetryCount[taskID] = nil
+                } else {
+                    self.coalescedRetryCount[taskID] = attempts
+                    if let refreshed = try? context.fetch(descriptor).first {
+                        self.upsert(refreshed, in: context)
+                    }
+                }
+            } else {
+                // Clean exit — reset the retry counter for this task.
+                self.coalescedRetryCount[taskID] = nil
+            }
         }
     }
 
@@ -250,7 +383,70 @@ final class AppleRemindersSyncService {
     /// Mirrors `importFromReminders` but is called explicitly from views — `importFromReminders`
     /// is intended for the onboarding path and is no longer the only way to refresh.
     func refreshFromReminders(in context: ModelContext) async {
+        // First, mirror completion state back from Apple Reminders to local
+        // tasks (#6) — without this, checking a reminder off in the Reminders
+        // app silently leaves the corresponding TaskRecord open in Todus.
+        await reconcileCompletionFromReminders(in: context)
         await importFromReminders(in: context)
+    }
+
+    // MARK: - Reminders → Todus reconciliation
+    //
+    // **One-way semantics intentional.** This function only propagates
+    // Reminders → Todus for "marked done" — we do NOT reopen a Todus task
+    // when the user unchecks the matching reminder. Local Todus edits are
+    // authoritative for un-completion to avoid racing the "user just
+    // unchecked it locally" pathway. When `syncDirection == .twoWay` and the
+    // user explicitly wants reopen-on-uncheck, that flow lives elsewhere
+    // (TODO: not yet implemented — see medium bug 340-357).
+    //
+    /// For every locally-tracked reminder, propagate its completion state back
+    /// to the matching TaskRecord.
+    func reconcileCompletionFromReminders(in context: ModelContext) async {
+        guard authorizationState() == .authorized else { return }
+        let descriptor = FetchDescriptor<TaskRecord>()
+        let allTasks = (try? context.fetch(descriptor)) ?? []
+        let identifiers = allTasks.compactMap(\.reminderIdentifier)
+        guard !identifiers.isEmpty else { return }
+
+        let statuses = await storage.fetchTrackedReminders(identifiers: identifiers)
+        guard !statuses.isEmpty else { return }
+        let byID = Dictionary(uniqueKeysWithValues: statuses.map { ($0.identifier, $0) })
+
+        var changed = 0
+        var divergedOpenInReminders = 0
+        for task in allTasks {
+            guard let id = task.reminderIdentifier, let status = byID[id] else { continue }
+            // Only propagate true → done. See MARK: block above for rationale.
+            if status.isCompleted && !task.completed {
+                // NOTE: the previous version inserted/removed `task.id` into
+                // `inFlightUpserts` here as a "suppress the next upsert" guard,
+                // but no upsert path is invoked from this method — the
+                // insert/remove pair was a no-op. Removed to avoid misleading
+                // future readers. (Medium bug 340-358.)
+                task.completed = true
+                task.status = .done
+                if let when = status.completionDate {
+                    task.updatedAt = when
+                }
+                changed += 1
+            } else if !status.isCompleted && task.completed {
+                // Divergence: Reminders shows open but Todus has it closed.
+                // Currently always one-way (see MARK: above) — log so we can
+                // measure how often users expect reopen-on-uncheck.
+                // (Medium bug 340-357.)
+                divergedOpenInReminders += 1
+            }
+        }
+        if changed > 0 {
+            try? context.save()
+            AppLogger.shared.log("reconcileCompletionFromReminders: marked \(changed) task(s) done from Reminders")
+        }
+        if divergedOpenInReminders > 0 {
+            AppLogger.shared.log(
+                "reconcileCompletionFromReminders: \(divergedOpenInReminders) task(s) open in Reminders but done in Todus (one-way sync — not reopening)"
+            )
+        }
     }
 
     func delete(_ task: TaskRecord) {
@@ -326,6 +522,20 @@ final class AppleRemindersSyncService {
             try? context.save()
             AppLogger.shared.log("importFromReminders: inserted \(insertedCount) reminder(s) as tasks")
         }
+    }
+
+    // MARK: - Test-only accessors
+
+    /// Test-only readback of the in-flight upsert set. Used by
+    /// `AppleRemindersSyncServiceTests` to verify the set drains after an
+    /// EK error path. Not for production use.
+    var _test_inFlightUpserts: Set<UUID> { inFlightUpserts }
+    /// Test-only readback of the per-task coalesced-retry counter.
+    var _test_coalescedRetryCount: [UUID: Int] { coalescedRetryCount }
+    /// Test-only adder for the pending coalesce buffer. Used to simulate the
+    /// "second upsert arrived while first was in flight" race.
+    func _test_recordPendingUpsert(_ id: UUID) {
+        pendingUpsertTaskIDs.insert(id)
     }
 }
 

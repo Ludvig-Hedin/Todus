@@ -192,6 +192,7 @@ const categoriesSchema = z.array(mailCategorySchema).superRefine((cats, ctx) => 
 export const userSettingsSchema = z.object({
   language: z.string(),
   timezone: z.string(),
+  location: z.string().default(''),
   dynamicContent: z.boolean().optional(),
   externalImages: z.boolean(),
   contextAboutYou: z.string().default(''),
@@ -216,6 +217,29 @@ export const userSettingsSchema = z.object({
     .default('auto'),
   aiModel: z.string().default(''),
   ollamaBaseUrl: z.string().default('http://localhost:11434'),
+
+  // Cross-device sync additions — keys match iOS @AppStorage + macOS @AppStorage so all
+  // three platforms read/write the same record via trpc.settings.save / settings.get.
+  // AI capability permissions
+  aiCanReadTasks: z.boolean().default(true),
+  aiCanWriteTasks: z.boolean().default(true),
+  aiCanReadCalendar: z.boolean().default(true),
+  aiCanWriteCalendar: z.boolean().default(true),
+  aiCanReadEmail: z.boolean().default(true),
+  aiCanSendEmail: z.boolean().default(true),
+
+  // Appearance — shared accent + default task view
+  accentColor: z.enum(['blue', 'indigo', 'teal', 'green', 'orange', 'rose']).default('blue'),
+  defaultTaskView: z.enum(['list', 'board', 'table', 'calendar', 'dates']).default('list'),
+
+  // App preferences (web + macOS surface these; iOS reuses where applicable)
+  openOnLaunch: z.enum(['home', 'inbox', 'tasks', 'calendar']).default('home'),
+  resumeLastViewedPage: z.boolean().default(true),
+  compactSidebar: z.boolean().default(false),
+  showUnreadBadge: z.boolean().default(true),
+  focusModeEnabled: z.boolean().default(false),
+  groupByThread: z.boolean().default(true),
+  hideAppleSideGmailDuplicates: z.boolean().default(true),
 });
 
 export type UserSettings = z.infer<typeof userSettingsSchema>;
@@ -223,6 +247,7 @@ export type UserSettings = z.infer<typeof userSettingsSchema>;
 export const defaultUserSettings: UserSettings = {
   language: 'en',
   timezone: 'UTC',
+  location: '',
   dynamicContent: false,
   externalImages: true,
   contextAboutYou: '',
@@ -243,6 +268,21 @@ export const defaultUserSettings: UserSettings = {
   aiProvider: 'auto',
   aiModel: '',
   ollamaBaseUrl: 'http://localhost:11434',
+  aiCanReadTasks: true,
+  aiCanWriteTasks: true,
+  aiCanReadCalendar: true,
+  aiCanWriteCalendar: true,
+  aiCanReadEmail: true,
+  aiCanSendEmail: true,
+  accentColor: 'blue',
+  defaultTaskView: 'list',
+  openOnLaunch: 'home',
+  resumeLastViewedPage: true,
+  compactSidebar: false,
+  showUnreadBadge: true,
+  focusModeEnabled: false,
+  groupByThread: true,
+  hideAppleSideGmailDuplicates: true,
 };
 
 type DeepPartial<T> = T extends Array<infer U>

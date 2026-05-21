@@ -58,6 +58,50 @@ final class AIChatService {
         }
     }
 
+    // MARK: - Generic mutation confirmation
+    /// Surfaced to the UI so the user can review a side-effecting AI action
+    /// (send email, create/update/delete calendar event) before it executes.
+    var pendingMutationConfirmation: PendingMutationConfirmation? = nil
+
+    enum MutationKind {
+        case sendEmail
+        case createCalendarEvent
+        case updateCalendarEvent
+        case deleteCalendarEvent
+    }
+
+    struct PendingMutationConfirmation: Identifiable {
+        let id = UUID()
+        let kind: MutationKind
+        let title: String
+        let subtitle: String?
+        let body: String?
+    }
+
+    private var pendingMutationContinuations: [UUID: CheckedContinuation<Bool, Never>] = [:]
+
+    func confirmPendingMutation(_ confirmation: PendingMutationConfirmation, confirm: Bool) {
+        if let cont = pendingMutationContinuations.removeValue(forKey: confirmation.id) {
+            cont.resume(returning: confirm)
+        }
+        if pendingMutationConfirmation?.id == confirmation.id {
+            pendingMutationConfirmation = nil
+        }
+    }
+
+    private func awaitMutationConfirmation(
+        kind: MutationKind,
+        title: String,
+        subtitle: String? = nil,
+        body: String? = nil
+    ) async -> Bool {
+        let pending = PendingMutationConfirmation(kind: kind, title: title, subtitle: subtitle, body: body)
+        return await withCheckedContinuation { continuation in
+            pendingMutationContinuations[pending.id] = continuation
+            pendingMutationConfirmation = pending
+        }
+    }
+
     /// Title for the current conversation — set from first user message.
     var chatTitle: String? = nil
     /// Folder for the currently active conversation, saved alongside history.
@@ -82,7 +126,13 @@ final class AIChatService {
 
     /// Whether the AI can read calendar events (injected into system prompt context).
     var aiCanReadCalendar: Bool = true {
-        didSet { UserDefaults.standard.set(aiCanReadCalendar, forKey: "ai_can_read_calendar") }
+        didSet {
+            UserDefaults.standard.set(aiCanReadCalendar, forKey: "ai_can_read_calendar")
+            // Toggling the permission flips what `buildPayload` should send — drop
+            // the cached snapshot so the next send re-fetches with the new state
+            // rather than re-serving a stale "not granted" string forever.
+            invalidateCalendarSnapshot()
+        }
     }
 
     /// Whether the AI can create calendar events via the create_calendar_event tool.
@@ -96,7 +146,9 @@ final class AIChatService {
     }
 
     /// Whether the AI can send emails via the send_email tool.
-    var aiCanSendEmail: Bool = true {
+    /// Defaults to FALSE — emails leave the device irrevocably; the user must
+    /// opt in. Even with the toggle on, every send waits on confirmation.
+    var aiCanSendEmail: Bool = UserDefaults.standard.object(forKey: "ai_can_send_email") as? Bool ?? false {
         didSet { UserDefaults.standard.set(aiCanSendEmail, forKey: "ai_can_send_email") }
     }
 
@@ -110,6 +162,10 @@ final class AIChatService {
     var savedConversations: [AIChatConversation] = []
     /// Conversations deleted locally but not yet confirmed removed by the backend.
     private var locallyDeletedConversationIDs: Set<UUID> = []
+    /// Conversations with local edits that haven't been confirmed by the backend yet.
+    /// These are protected from being clobbered by a stale remote fetch — until the
+    /// upload completes, the local copy wins.
+    private var pendingUploadConversationIDs: Set<UUID> = []
 
     /// Tone instruction injected from AppServices.aiTonePreference — appended to the system prompt.
     var toneInstruction: String = ""
@@ -204,10 +260,10 @@ final class AIChatService {
             self.aiCanWebSearch = UserDefaults.standard.bool(forKey: "ai_can_web_search")
         }
 
+        // Load deleted IDs synchronously (single small Keychain read) to prevent a race
+        // where deleteConversation() runs before the Task below and gets overwritten.
         loadPersistedDeletedConversationIDs()
-
-        // Defer conversation history loading — JSON deserialization from UserDefaults
-        // can be slow with many saved conversations and blocks the main thread during startup.
+        // Defer the heavier conversation list read to avoid blocking init() on startup.
         Task { @MainActor in
             loadPersistedConversations()
         }
@@ -331,6 +387,10 @@ final class AIChatService {
         messages[assistantIndex].searchState = .none
         messages[assistantIndex].reasoningContent = ""
         messages[assistantIndex].reasoningDurationMs = nil
+        // Also drop the pinned error footer — the retry kicks off a brand-new request,
+        // so leaving the "Connection lost" / 429 banner attached confuses the user
+        // when the retried stream succeeds.
+        messages[assistantIndex].errorMessage = nil
 
         isStreaming = true
         let requestMessages = Array(messages.prefix(assistantIndex))
@@ -377,6 +437,17 @@ final class AIChatService {
         }
         pendingDeleteContinuations.removeAll()
         pendingDeleteConfirmation = nil
+        // Mirror the cleanup for generic mutation continuations (send email, create/update/
+        // delete calendar event). Without this, cancelling mid-confirmation leaves the
+        // tool-call await suspended forever and the assistant bubble stays in `isStreaming`.
+        for (_, cont) in pendingMutationContinuations {
+            cont.resume(returning: false)
+        }
+        pendingMutationContinuations.removeAll()
+        pendingMutationConfirmation = nil
+        // Reset the failed-stream banner so a fresh send after cancel doesn't leave
+        // a stale "Connection lost" / "Rate limited" banner pinned above the composer.
+        streamFailed = false
         if let streamingMessageID = messages.first(where: \.isStreaming)?.id {
             finaliseStream(messageID: streamingMessageID)
         } else {
@@ -389,8 +460,30 @@ final class AIChatService {
 
     /// Save the current conversation to history and reset to a clean slate.
     func clearHistory() {
-        if !messages.isEmpty && !isConversationSaved {
+        // Tear down any in-flight stream first. Otherwise isStreaming stays true
+        // (URLSession keeps draining tokens against the now-empty conversation)
+        // and the composer's `guard !isStreaming` blocks Send for up to the
+        // upstream timeout (~3 minutes).
+        if isStreaming {
+            cancelStream()
+        }
+        // Strip any in-flight / empty assistant placeholder before persisting so we
+        // don't save a partial bubble that would re-appear as a blank stub on reload.
+        // Only persist if there's still a meaningful user turn after stripping.
+        let persistable = messages.filter { msg in
+            if msg.role == .assistant {
+                let hasContent = !msg.content.isEmpty || msg.uiSpec != nil || !msg.taskMutations.isEmpty
+                return hasContent && !msg.isStreaming
+            }
+            return true
+        }
+        let hasRealAssistantTurn = persistable.contains(where: { $0.role == .assistant })
+        let hasUserTurn = persistable.contains(where: { $0.role == .user })
+        if !persistable.isEmpty && !isConversationSaved && hasUserTurn && hasRealAssistantTurn {
+            let snapshot = messages
+            messages = persistable
             saveCurrentConversation()
+            messages = snapshot
         }
         messages.removeAll()
         chatTitle = nil
@@ -438,11 +531,18 @@ final class AIChatService {
     func moveConversation(_ conversation: AIChatConversation, to folderID: UUID?) {
         guard let index = savedConversations.firstIndex(where: { $0.id == conversation.id }) else { return }
         savedConversations[index].folderID = folderID
+        // Bump updatedAt so the sync-merge step prefers this local copy over any
+        // older remote payload until the push to the backend completes.
+        savedConversations[index].updatedAt = Date()
         persistConversationsLocally()
         // Capture value before spawning Task — index into savedConversations may change
         // if the array is mutated before the async block runs.
         let updatedConversation = savedConversations[index]
-        Task { await syncSaveConversation(updatedConversation) }
+        pendingUploadConversationIDs.insert(updatedConversation.id)
+        Task { [convoId = updatedConversation.id] in
+            await syncSaveConversation(updatedConversation)
+            pendingUploadConversationIDs.remove(convoId)
+        }
         if currentConversationID == conversation.id {
             currentConversationFolderID = folderID
         }
@@ -811,11 +911,20 @@ final class AIChatService {
                 // Already surfaced an error message to the user.
                 return
             }
+            if step.cancelled {
+                // Stream was aborted by user mid-tool-call. Tool buffer was
+                // already cleared in runStep — nothing more to do.
+                return
+            }
             if step.producedContent {
                 producedAnyContent = true
             }
             if step.toolCalls.isEmpty {
                 // Stream ended without tool calls → final answer.
+                // If the user cancelled, leave the bubble as-is — synthesizing
+                // a "Done." reply makes it look like the AI confirmed an
+                // action it never actually started.
+                if Task.isCancelled { return }
                 if !producedAnyContent {
                     appendFallback(to: assistantMessageID)
                 }
@@ -850,6 +959,7 @@ final class AIChatService {
         var assistantContent: String = ""
         var producedContent: Bool = false
         var hardError: Bool = false
+        var cancelled: Bool = false
     }
 
     private func runStep(
@@ -1001,10 +1111,22 @@ final class AIChatService {
                 }
 
                 for try await line in asyncBytes.lines {
-                    if Task.isCancelled { break }
+                    if Task.isCancelled {
+                        // Drop any partially-accumulated tool calls so the cancel
+                        // path doesn't surface a "Invalid create_task arguments"
+                        // failure chip from a truncated argument buffer (#35).
+                        toolCallBuffer.removeAll()
+                        result.cancelled = true
+                        return result
+                    }
 
-                    guard line.hasPrefix("data: ") else { continue }
-                    let jsonString = String(line.dropFirst(6))
+                    // Trim \r and surrounding whitespace BEFORE prefix checks. URLSession's
+                    // `bytes.lines` splits on \n but leaves the trailing \r from CRLF-framed
+                    // SSE servers attached, which would make `hasPrefix("data: ")` miss every
+                    // event and silently drop the entire stream.
+                    let trimmedLine = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard trimmedLine.hasPrefix("data: ") else { continue }
+                    let jsonString = String(trimmedLine.dropFirst(6))
                     if jsonString == "[DONE]" { break }
 
                     guard let data = jsonString.data(using: .utf8) else { continue }
@@ -1090,6 +1212,9 @@ final class AIChatService {
     ) async -> [ChatMessage] {
         var results: [ChatMessage] = []
         for call in calls {
+            // Honor cancellation between tool calls so a Stop tap mid-batch
+            // doesn't continue executing remaining tools.
+            if Task.isCancelled { break }
             let resultJSON = await executeSingleToolCall(
                 call,
                 assistantMessageID: assistantMessageID,
@@ -1293,6 +1418,22 @@ final class AIChatService {
                 appendToolFailureChip(toolName: call.name, message: "Invalid update_calendar_event arguments", to: assistantMessageID)
                 return encodeToolResult(success: false, message: "Invalid update_calendar_event arguments")
             }
+            // Mutating an existing event is destructive — confirm before applying.
+            let confirmedUpdate = await awaitMutationConfirmation(
+                kind: .updateCalendarEvent,
+                title: "Update event",
+                subtitle: args.title ?? "Event",
+                body: args.notes
+            )
+            guard confirmedUpdate else {
+                appendToolFailureChip(
+                    toolName: call.name,
+                    message: "Update cancelled by user",
+                    title: "📅 \(args.title ?? "Event")",
+                    to: assistantMessageID
+                )
+                return encodeToolResult(success: false, message: "Update cancelled by user")
+            }
             guard let cal = calendarService else {
                 appendToolFailureChip(toolName: call.name, message: "Calendar not available", title: "📅 \(args.title ?? "Event")", to: assistantMessageID)
                 return encodeToolResult(success: false, message: "Calendar not available")
@@ -1330,6 +1471,20 @@ final class AIChatService {
                 appendToolFailureChip(toolName: call.name, message: "Invalid delete_calendar_event arguments", to: assistantMessageID)
                 return encodeToolResult(success: false, message: "Invalid delete_calendar_event arguments")
             }
+            let confirmedDelete = await awaitMutationConfirmation(
+                kind: .deleteCalendarEvent,
+                title: "Delete event",
+                subtitle: "Event ID \(args.id)",
+                body: nil
+            )
+            guard confirmedDelete else {
+                appendToolFailureChip(
+                    toolName: call.name,
+                    message: "Delete cancelled by user",
+                    to: assistantMessageID
+                )
+                return encodeToolResult(success: false, message: "Delete cancelled by user")
+            }
             guard let cal = calendarService else {
                 appendToolFailureChip(toolName: call.name, message: "Calendar not available", to: assistantMessageID)
                 return encodeToolResult(success: false, message: "Calendar not available")
@@ -1361,6 +1516,24 @@ final class AIChatService {
             guard let args = try? JSONDecoder().decode(SendEmailArgs.self, from: argsData) else {
                 appendToolFailureChip(toolName: call.name, message: "Invalid send_email arguments", to: assistantMessageID)
                 return encodeToolResult(success: false, message: "Invalid send_email arguments")
+            }
+            // Block on explicit user confirmation — emails leave the device
+            // irrevocably. The UI shows recipients/subject/body for review.
+            let recipientsLine = args.to.joined(separator: ", ")
+            let confirmedSend = await awaitMutationConfirmation(
+                kind: .sendEmail,
+                title: "Send email",
+                subtitle: recipientsLine.isEmpty ? args.subject : "To: \(recipientsLine)\nSubject: \(args.subject)",
+                body: args.body
+            )
+            guard confirmedSend else {
+                appendToolFailureChip(
+                    toolName: call.name,
+                    message: "Send cancelled by user",
+                    title: "✉️ \(args.subject)",
+                    to: assistantMessageID
+                )
+                return encodeToolResult(success: false, message: "Send cancelled by user")
             }
             let draft = EmailDraft(
                 to: args.to,
@@ -1394,11 +1567,32 @@ final class AIChatService {
 
     /// Fallback text shown when the model ends a turn without ever producing
     /// visible content — e.g. cheap models that emit tool_calls then nothing.
+    /// Walks the mutation chips to give the user a concrete summary instead of
+    /// a curt "Done." which often reads as a non-answer.
     private func appendFallback(to messageID: UUID) {
         guard let idx = messages.firstIndex(where: { $0.id == messageID }) else { return }
-        if messages[idx].content.isEmpty {
+        guard messages[idx].content.isEmpty else { return }
+        let successes = messages[idx].taskMutations.filter { $0.success }
+        if successes.isEmpty {
             messages[idx].content = "Done."
+            return
         }
+        var summaryParts: [String] = []
+        let creates = successes.filter { $0.action == .create }
+        let updates = successes.filter { $0.action == .update }
+        let deletes = successes.filter { $0.action == .delete }
+        func describe(_ verb: String, _ chips: [AIChatTaskMutation]) {
+            guard !chips.isEmpty else { return }
+            if chips.count == 1, let title = chips[0].title {
+                summaryParts.append("\(verb) \(title).")
+            } else {
+                summaryParts.append("\(verb) \(chips.count) item\(chips.count == 1 ? "" : "s").")
+            }
+        }
+        describe("Created", creates)
+        describe("Updated", updates)
+        describe("Deleted", deletes)
+        messages[idx].content = summaryParts.isEmpty ? "Done." : summaryParts.joined(separator: " ")
     }
 
     private func debugHTTPResponse(_ http: HTTPURLResponse, context: String) {
@@ -1604,7 +1798,12 @@ final class AIChatService {
 
         var apiMessages: [ChatMessage] = [ChatMessage(role: "system", content: systemPrompt)]
         apiMessages += activeMessages.compactMap { msg -> ChatMessage? in
-            guard !msg.isStreaming || !msg.content.isEmpty else { return nil }
+            // Skip the assistant placeholder for the CURRENT turn — sending it back
+            // to the model would echo a half-written reply (or worse, an empty
+            // bubble) as conversation context and confuse the next response.
+            // We still keep completed assistant turns even if content is empty
+            // (those were tool-only turns and may carry meaningful chips).
+            if msg.role == .assistant && msg.isStreaming { return nil }
             let role = msg.role == .user ? "user" : "assistant"
             return ChatMessage(role: role, content: msg.content)
         }
@@ -1798,18 +1997,64 @@ final class AIChatService {
     }
 
     private func flushTokenBuffer(to messageID: UUID) {
-        guard !tokenBuffer.isEmpty,
-              let idx = messages.firstIndex(where: { $0.id == messageID }) else {
+        let currentStreamingID = messages.first(where: \.isStreaming)?.id
+        let decision = AIChatService.classifyFlushDecision(
+            messageID: messageID,
+            currentStreamingMessageID: currentStreamingID,
+            bufferIsEmpty: tokenBuffer.isEmpty,
+            messageExists: messages.contains(where: { $0.id == messageID })
+        )
+        switch decision {
+        case .drop:
             tokenBuffer = ""
-            return
+        case .write:
+            guard let idx = messages.firstIndex(where: { $0.id == messageID }) else {
+                tokenBuffer = ""
+                return
+            }
+            messages[idx].content += tokenBuffer
+            tokenBuffer = ""
         }
-        messages[idx].content += tokenBuffer
-        tokenBuffer = ""
+    }
+
+    /// Decision branch extracted from `flushTokenBuffer` so unit tests can pin
+    /// the H12 "stale messageID guard" without driving the full service.
+    ///
+    /// - `drop`: bail and clear the buffer. Happens when the buffer is empty,
+    ///           when the original placeholder is gone, or when a NEW assistant
+    ///           message is currently streaming (a retry/new-turn race).
+    /// - `write`: append the buffer to the captured message.
+    enum FlushDecision: Equatable {
+        case drop
+        case write
+    }
+
+    nonisolated static func classifyFlushDecision(
+        messageID: UUID,
+        currentStreamingMessageID: UUID?,
+        bufferIsEmpty: Bool,
+        messageExists: Bool
+    ) -> FlushDecision {
+        if bufferIsEmpty || !messageExists { return .drop }
+        // Stale capture: a different message is now streaming. Drop the buffer so
+        // we don't leak tokens into the wrong turn.
+        if let current = currentStreamingMessageID, current != messageID { return .drop }
+        return .write
     }
 
     private func appendError(_ text: String, to messageID: UUID) {
         guard let idx = messages.firstIndex(where: { $0.id == messageID }) else { return }
-        messages[idx].content = "⚠️ \(text)"
+        // Flush any buffered tokens so partial assistant output already
+        // produced isn't lost when the error footer is attached.
+        flushTokenBuffer(to: messageID)
+        // Don't clobber streamed content. If the bubble already has tokens
+        // on screen, attach the error as a separate footer field so retry
+        // can pick up where the stream left off.
+        if messages[idx].content.isEmpty {
+            messages[idx].content = "⚠️ \(text)"
+        } else {
+            messages[idx].errorMessage = text
+        }
         messages[idx].isStreaming = false
     }
 
@@ -1819,7 +2064,6 @@ final class AIChatService {
     }
 
     private func finaliseStream(messageID: UUID) {
-        isStreaming = false
         currentTurnMentions = []
         flushScheduled = false
         if let idx = messages.firstIndex(where: { $0.id == messageID }) {
@@ -1835,16 +2079,22 @@ final class AIChatService {
             // on the message, removing the raw JSON from the displayed content.
             messages[idx].parseUISpec()
         }
+        // Reset the service-level flag last so SwiftUI subscribers that observe
+        // both `isStreaming` and the message content never see the indicator
+        // disappear while the final tokens are still being written.
+        isStreaming = false
     }
 
     // MARK: - History Persistence
 
     private func saveCurrentConversation() {
         guard !messages.isEmpty else { return }
+        let now = Date()
         let saved = AIChatConversation(
             id: UUID(),
             title: chatTitle ?? "Untitled",
-            createdAt: Date(),
+            createdAt: now,
+            updatedAt: now,
             folderID: currentConversationFolderID,
             messages: messages.map {
                 AIChatConversation.SavedMessage(
@@ -1860,18 +2110,45 @@ final class AIChatService {
         // Cap history at 50 conversations
         if savedConversations.count > 50 { savedConversations.removeLast() }
         persistConversationsLocally()
+        // Mark as pending-upload so a parallel background list-refresh can't
+        // overwrite the local copy with a stale remote payload before the push
+        // completes (see `syncLoadConversations` merge logic).
+        pendingUploadConversationIDs.insert(saved.id)
         // Sync new conversation to backend in background
-        Task { await syncSaveConversation(saved) }
+        Task { [savedId = saved.id] in
+            await syncSaveConversation(saved)
+            pendingUploadConversationIDs.remove(savedId)
+        }
     }
 
     private static let chatHistoryKey = "com.todus.ai.chatHistory"
     private static let deletedConversationIDsKey = "com.todus.ai.deletedConversationIDs"
 
-    /// Persist to Keychain as a local cache (fast, survives reinstall)
+    /// On-disk location for the persisted conversation list. Lives in Application
+    /// Support so it's excluded from Documents but still backed up. Protected so
+    /// the file is unreadable while the device is locked.
+    private static func chatHistoryFileURL() -> URL? {
+        guard let dir = try? FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        ) else { return nil }
+        return dir.appendingPathComponent("ai-conversations.json")
+    }
+
+    /// Persist to disk as a local cache. Keychain has a per-item size cap (~few
+    /// hundred KB on iOS) — 50 conversations × full transcripts blows past it
+    /// silently, losing history on save. The file system has no such cap, and
+    /// `.completeFileProtection` keeps the data encrypted at rest while the
+    /// device is locked. Keychain remains the home for short secrets only.
     private func persistConversationsLocally() {
-        guard let data = try? JSONEncoder().encode(savedConversations) else { return }
-        if !KeychainHelper.saveData(key: Self.chatHistoryKey, value: data) {
-            log.error("Failed to persist AI chat history to Keychain")
+        guard let url = Self.chatHistoryFileURL(),
+              let data = try? JSONEncoder().encode(savedConversations) else { return }
+        do {
+            try data.write(to: url, options: [.atomic, .completeFileProtection])
+        } catch {
+            log.error("Failed to persist AI chat history to disk: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -1890,14 +2167,22 @@ final class AIChatService {
     }
 
     private func loadPersistedConversations() {
-        // Load local cache immediately for fast UI
-        if let data = KeychainHelper.readData(key: Self.chatHistoryKey),
+        // Preferred location: file system. Falls back to Keychain (old location)
+        // and finally UserDefaults (oldest location). Each migration path writes
+        // to disk and drops the old copy so the migration only runs once.
+        if let url = Self.chatHistoryFileURL(),
+           let data = try? Data(contentsOf: url),
            let convs = try? JSONDecoder().decode([AIChatConversation].self, from: data) {
             savedConversations = convs
-        }
-        // Migrate from UserDefaults (old location) if present
-        else if let data = UserDefaults.standard.data(forKey: "ai_chat_history"),
-                let convs = try? JSONDecoder().decode([AIChatConversation].self, from: data) {
+        } else if let data = KeychainHelper.readData(key: Self.chatHistoryKey),
+                  let convs = try? JSONDecoder().decode([AIChatConversation].self, from: data) {
+            // Migrate from the old Keychain location — Keychain has a per-item
+            // size cap that 50 full transcripts blew past silently.
+            savedConversations = convs
+            persistConversationsLocally()
+            KeychainHelper.delete(key: Self.chatHistoryKey)
+        } else if let data = UserDefaults.standard.data(forKey: "ai_chat_history"),
+                  let convs = try? JSONDecoder().decode([AIChatConversation].self, from: data) {
             savedConversations = convs
             persistConversationsLocally()
             UserDefaults.standard.removeObject(forKey: "ai_chat_history")
@@ -1942,12 +2227,29 @@ final class AIChatService {
                       !deletedIDsToSkip.contains(uuid) else {
                     continue
                 }
+                // Skip remote refetch entirely for conversations the local device is
+                // still pushing — otherwise the in-flight upload races with this
+                // fetch and the user sees their just-typed reply disappear.
+                if pendingUploadConversationIDs.contains(uuid) { continue }
 
                 // Fetch full conversation with messages and update the local item in place.
                 if let full = await fetchFullConversation(id: remote.id) {
                     guard !deletedIDsToSkip.contains(full.id) else { continue }
+                    // If the local copy has a fresher `updatedAt` (user added a turn,
+                    // renamed, or moved a folder), keep it. The local copy is the
+                    // source of truth until syncSaveConversation pushes it.
+                    if let local = mergedByID[full.id], local.updatedAt > full.updatedAt {
+                        continue
+                    }
                     mergedByID[full.id] = full
                 }
+            }
+            // Re-snapshot savedConversations now — the awaits above release the
+            // main actor between iterations, so a new conversation saved by
+            // saveCurrentConversation during this loop would otherwise be
+            // clobbered when we assign back below.
+            for convo in savedConversations where mergedByID[convo.id] == nil {
+                mergedByID[convo.id] = convo
             }
             var merged = Array(mergedByID.values)
             // Sort by creation date (newest first) and cap at 50
@@ -1982,6 +2284,7 @@ final class AIChatService {
                 id: uuid,
                 title: remote.title,
                 createdAt: remote.createdAt,
+                updatedAt: remote.updatedAt,
                 folderID: remote.folderId.flatMap(UUID.init(uuidString:)),
                 messages: remote.messages ?? []
             )
@@ -2048,6 +2351,14 @@ final class AIChatService {
     }
 
     // MARK: - Calendar Context
+
+    /// Drop the cached calendar context so the next outbound turn re-fetches a
+    /// fresh snapshot. Call after granting permission or toggling the AI access
+    /// preference so a previously-cached "not granted" string can't leak into
+    /// the next prompt.
+    func invalidateCalendarSnapshot() {
+        calendarSnapshot = nil
+    }
 
     /// Fetches today's and this week's events from the actor-isolated CalendarService.
     /// Stores the result in `calendarSnapshot` so `buildPayload` (sync) can use it.
@@ -2390,9 +2701,55 @@ private enum SSEParseOutcome: Sendable {
 private func decodeSSELineOffMain(_ data: Data) -> SSEParseOutcome {
     if let chunk = try? JSONDecoder().decode(SSEChunk.self, from: data),
        let delta = chunk.choices.first?.delta {
+        // Keep-alive deltas (`{choices:[{delta:{}}]}`) decode successfully but carry
+        // nothing actionable. Returning `.unrecognised` here would force a second
+        // JSONDecoder pass on the main actor (looking for a custom event) — pure
+        // waste during long streams. Short-circuit to a no-op `.delta` instead.
         return .delta(content: delta.content, toolCalls: delta.toolCalls)
     }
     return .unrecognised(data)
+}
+
+// MARK: - SSE Line Parser (test seam)
+
+/// Pure SSE line parser used by the streaming chat pipeline. Hoisted to a
+/// standalone helper so unit tests can exercise the framing logic (CRLF
+/// handling, `[DONE]` detection, partial-line accumulation) without a live
+/// network connection. The production for-await loop in `runStep` relies on
+/// `URLSession.bytes.lines`, which splits on `\n` only — leaving the trailing
+/// `\r` from CRLF-framed servers attached. This helper mirrors the same trim +
+/// `data: ` prefix check.
+enum SSELineParser {
+    enum Event: Equatable {
+        case data(String)
+        case done
+        case skip
+    }
+
+    /// Classifies a single line returned from `URLSession.bytes.lines` (or any
+    /// `\n`-delimited stream). `\r` characters and surrounding whitespace are
+    /// stripped so CRLF-framed servers parse identically to LF-only servers
+    /// (H14 fix).
+    static func classify(line: String) -> Event {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("data: ") else { return .skip }
+        let payload = String(trimmed.dropFirst(6))
+        if payload == "[DONE]" { return .done }
+        return .data(payload)
+    }
+
+    /// Splits a raw byte buffer (possibly containing partial lines) into a
+    /// list of complete lines plus a residual that should be prepended to the
+    /// next chunk. Splits on `\n`; `\r` is left to `classify` to strip.
+    static func splitChunk(_ chunk: String, residual: inout String) -> [String] {
+        let combined = residual + chunk
+        var parts = combined.components(separatedBy: "\n")
+        // The trailing element is whatever came after the last `\n` — if the
+        // chunk didn't end on a newline boundary, that fragment is incomplete
+        // and must be carried forward.
+        residual = parts.removeLast()
+        return parts
+    }
 }
 
 // MARK: - Tool Call Argument Models

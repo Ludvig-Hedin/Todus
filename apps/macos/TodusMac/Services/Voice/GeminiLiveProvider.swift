@@ -169,6 +169,21 @@ final class GeminiLiveProvider: VoiceProvider, @unchecked Sendable {
         try await sendJSON(message)
     }
 
+    // MARK: - Activity End (push-to-talk)
+
+    /// Signal that the user has stopped speaking for this turn so Gemini Live can
+    /// respond without waiting for VAD silence. Used by the push-to-talk hotkey
+    /// release callback; equivalent to a manual end-of-turn frame.
+    func sendActivityEnd() async throws {
+        guard webSocketTask != nil else { throw VoiceProviderError.notConnected }
+        let message: [String: Any] = [
+            "clientContent": [
+                "turnComplete": true
+            ]
+        ]
+        try await sendJSON(message)
+    }
+
     // MARK: - Send Tool Response
 
     func sendToolResponse(id: String, name: String, result: String) async throws {
@@ -361,8 +376,11 @@ final class GeminiLiveProvider: VoiceProvider, @unchecked Sendable {
         if let toolCall = json["toolCall"] as? [String: Any],
            let functionCalls = toolCall["functionCalls"] as? [[String: Any]] {
             for call in functionCalls {
-                guard let name = call["name"] as? String,
-                      let callId = call["id"] as? String else { continue }
+                guard let name = call["name"] as? String else { continue }
+                // Gemini sometimes omits the call id (notably for parallel calls in
+                // older preview models). Synthesize a stable one so we can still
+                // route the tool response back via `toolResponse.functionResponses[].id`.
+                let callId = (call["id"] as? String) ?? "call_\(UUID().uuidString)"
                 let args: String
                 if let argsDict = call["args"] as? [String: Any],
                    let argsData = try? JSONSerialization.data(withJSONObject: argsDict),
@@ -405,16 +423,20 @@ final class GeminiLiveProvider: VoiceProvider, @unchecked Sendable {
             }
         }
 
-        // Input transcription — what the user said
+        // Input transcription — what the user said.
+        // Gemini Live sends these as incremental deltas, NOT final snapshots.
+        // Emit isFinal: false so the coordinator accumulates instead of
+        // overwriting; finalization happens on `turnComplete`.
         if let inputTranscription = content["inputTranscription"] as? [String: Any],
            let text = inputTranscription["text"] as? String, !text.isEmpty {
-            yield(.transcriptUpdate(role: .user, text: text, isFinal: true))
+            yield(.transcriptUpdate(role: .user, text: text, isFinal: false))
         }
 
-        // Output transcription — text version of what the model said
+        // Output transcription — text version of what the model said.
+        // Also delta-based; same accumulation semantics as input.
         if let outputTranscription = content["outputTranscription"] as? [String: Any],
            let text = outputTranscription["text"] as? String, !text.isEmpty {
-            yield(.transcriptUpdate(role: .assistant, text: text, isFinal: true))
+            yield(.transcriptUpdate(role: .assistant, text: text, isFinal: false))
         }
 
         // Turn complete

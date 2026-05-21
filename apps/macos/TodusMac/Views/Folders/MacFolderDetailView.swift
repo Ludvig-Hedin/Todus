@@ -15,6 +15,7 @@ struct MacFolderDetailView: View {
     @State private var typeFilter: FolderItemKind? = nil
     @State private var showEditSheet = false
     @State private var showDeleteConfirm = false
+    @State private var loadError: String?
 
     private var accent: Color {
         if let hex = folder.colorHex, let c = Color(hex: hex) { return c }
@@ -79,13 +80,21 @@ struct MacFolderDetailView: View {
             Spacer()
             Button { showEditSheet = true } label: {
                 Image(systemName: "pencil")
+                    .frame(minWidth: 32, minHeight: 32)
+                    .contentShape(Rectangle())
             }
+            .help("Edit folder")
+            .accessibilityLabel("Edit folder")
             Menu {
                 Button("Edit") { showEditSheet = true }
                 Button("Delete", role: .destructive) { showDeleteConfirm = true }
             } label: {
                 Image(systemName: "ellipsis.circle")
+                    .frame(minWidth: 32, minHeight: 32)
+                    .contentShape(Rectangle())
             }
+            .help("More options")
+            .accessibilityLabel("More folder options")
             Button("Done") { dismiss() }
                 .keyboardShortcut(.escape, modifiers: [])
         }
@@ -146,7 +155,9 @@ struct MacFolderDetailView: View {
     @ViewBuilder
     private var contents: some View {
         let visible = typeFilter == nil ? items : items.filter { $0.kind == typeFilter }
-        if isLoading && visible.isEmpty {
+        if let message = loadError, items.isEmpty {
+            loadErrorState(message: message)
+        } else if isLoading && visible.isEmpty {
             HStack { Spacer(); ProgressView(); Spacer() }
                 .padding(.top, 30)
         } else if visible.isEmpty {
@@ -169,8 +180,32 @@ struct MacFolderDetailView: View {
         }
     }
 
+    private func loadErrorState(message: String) -> some View {
+        VStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: 22))
+                .foregroundStyle(.orange)
+            Text("Couldn’t load folder")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(MacTheme.textPrimary)
+            Text(message)
+                .font(.system(size: 11))
+                .foregroundStyle(MacTheme.mutedText)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 320)
+            Button("Retry") {
+                loadError = nil
+                Task { await load() }
+            }
+            .controlSize(.regular)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 30)
+    }
+
     private func load() async {
         isLoading = true
+        loadError = nil
         defer { isLoading = false }
         do {
             struct ContentsInput: Encodable {
@@ -205,8 +240,10 @@ struct MacFolderDetailView: View {
             items = built
             await services.fetchFolderSummary(in: modelContext)
         } catch {
-            // Best-effort — log so silent failures show up in diagnostics, but keep the UI quiet.
+            // Surface the error to the user instead of silently swallowing it —
+            // an empty folder and a failed load look identical otherwise.
             AppLogger.shared.log("[MacFolderDetailView] load failed: \(error)")
+            loadError = error.localizedDescription
         }
     }
 

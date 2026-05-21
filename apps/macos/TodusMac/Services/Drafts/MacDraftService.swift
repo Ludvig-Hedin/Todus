@@ -20,6 +20,18 @@ final class MacDraftService {
         let email: String
     }
 
+    /// Inline attachment payload. We send the raw bytes as base64 so the
+    /// backend doesn't need a separate pre-signed upload step yet — matches the
+    /// minimal additive shape requested for the compose parity work.
+    struct AttachmentPayload: Codable {
+        let filename: String
+        let mimeType: String
+        /// Base64-encoded file contents. Optional so callers can ship metadata-only
+        /// records (e.g. an attachment that was deselected but should still appear
+        /// in the local draft history) without exploding the wire payload.
+        let base64: String?
+    }
+
     struct DraftPayload: Decodable {
         let to: [Recipient]
         let cc: [Recipient]
@@ -72,16 +84,36 @@ final class MacDraftService {
         let subject: String
         let message: String
         let draftId: String?
+        /// When set, the backend threads the reply into the existing conversation. Older
+        /// backends that don't understand this field will simply ignore it.
+        let threadId: String?
+        /// Which connected account to send from. Optional — older backends ignore it.
+        let connectionId: String?
+        /// Optional inline attachments. Older backends that don't understand this field
+        /// simply ignore it, so adding the field never breaks the existing wire format.
+        let attachments: [AttachmentPayload]?
     }
 
-    func send(draftId: String?, payload: DraftPayload) async throws {
+    func send(
+        draftId: String?,
+        payload: DraftPayload,
+        threadId: String? = nil,
+        connectionId: String? = nil,
+        attachments: [AttachmentPayload]? = nil
+    ) async throws {
+        // Collapse empty attachment lists to nil so we don't emit `"attachments": []`
+        // to a backend that doesn't care — keeps the wire payload minimal.
+        let normalizedAttachments = (attachments?.isEmpty ?? true) ? nil : attachments
         let input = SendInput(
             to: payload.to,
             cc: payload.cc.isEmpty ? nil : payload.cc,
             bcc: payload.bcc.isEmpty ? nil : payload.bcc,
             subject: payload.subject,
             message: payload.body,
-            draftId: draftId
+            draftId: draftId,
+            threadId: threadId,
+            connectionId: connectionId,
+            attachments: normalizedAttachments
         )
         let _: EmptyResult = try await api.trpcMutation("mail.send", input: input)
     }
@@ -108,10 +140,10 @@ final class MacDraftService {
         // SwiftData behavior. Mirror the iOS DraftService guard.
         if draft.modelContext == nil {
             context.insert(draft)
-            try? context.save()
+            saveContext(context, label: "saveAndSend.insert")
         }
         draft.syncState = "sending"
-        try? context.save()
+        saveContext(context, label: "saveAndSend.markSending")
         do {
             // Reconstruct a DraftPayload from the flat DraftRecord fields.
             let toList = draft.toRecipients
@@ -122,24 +154,69 @@ final class MacDraftService {
                 .split(separator: ",")
                 .map { Recipient(name: nil, email: String($0).trimmingCharacters(in: .whitespacesAndNewlines)) }
                 .filter { !$0.email.isEmpty }
+            let bccList = draft.bccRecipients
+                .split(separator: ",")
+                .map { Recipient(name: nil, email: String($0).trimmingCharacters(in: .whitespacesAndNewlines)) }
+                .filter { !$0.email.isEmpty }
             let payload = DraftPayload(
                 to: toList,
                 cc: ccList,
-                bcc: [],
+                bcc: bccList,
                 subject: draft.subject,
                 body: draft.htmlBody
             )
-            try await send(draftId: nil, payload: payload)
+            // Forward draftId so the backend can clear the corresponding remote draft on
+            // send, plus threadId / connectionId so reply threading and outbound account
+            // selection survive the local-first persistence hop. Empty connectionId
+            // collapses to nil so we don't accidentally pin sends to a blank account id
+            // when the field was never populated.
+            let normalizedConnectionId = draft.connectionId.trimmingCharacters(in: .whitespacesAndNewlines)
+            // Decode any attachments captured at compose time. Decode failures are
+            // intentionally silent so a corrupt cache entry can't block a send — the
+            // draft will simply go out without the attachment metadata.
+            let attachments: [AttachmentPayload]? = {
+                guard let raw = draft.attachmentsJSON,
+                      !raw.isEmpty,
+                      let data = raw.data(using: .utf8) else { return nil }
+                return try? JSONDecoder().decode([AttachmentPayload].self, from: data)
+            }()
+            try await send(
+                draftId: draft.id,
+                payload: payload,
+                threadId: draft.threadId,
+                connectionId: normalizedConnectionId.isEmpty ? nil : normalizedConnectionId,
+                attachments: attachments
+            )
             context.delete(draft)
-            try? context.save()
+            saveContext(context, label: "saveAndSend.delete")
         } catch {
             draft.syncState = "failed"
-            try? context.save()
+            saveContext(context, label: "saveAndSend.markFailed")
+        }
+    }
+
+    /// Threshold past which a `"sending"` row is treated as orphaned (the app was killed
+    /// or crashed mid-send). Rows younger than this are assumed to be in-flight on another
+    /// process and left alone so we don't double-send.
+    private static let inflightSendCutoff: TimeInterval = 5 * 60
+
+    /// Wraps `try modelContext.save()` so persistence failures surface via `AppLogger` instead
+    /// of silently dropping state — without this, a SwiftData write error left the draft in
+    /// memory but never on disk, and `flushPending` would retry an already-sent message.
+    private func saveContext(_ context: ModelContext, label: String) {
+        do {
+            try context.save()
+        } catch {
+            AppLogger.shared.log("[MacDraftService] context.save failed at \(label): \(error)")
         }
     }
 
     /// Re-attempts all pending or failed draft records. Call on network reconnect.
-    /// Also resets any "sending" records back to "pendingSend" — these were in-flight when the app last crashed.
+    /// Also resets any "sending" records that have been stuck longer than
+    /// `inflightSendCutoff` back to "pendingSend" — these were in-flight when the app
+    /// last crashed. Rows younger than the cutoff are assumed to still be running
+    /// inside another live `mail.send` call (or another app process) and are left
+    /// alone, so we don't trigger a duplicate send.
     func flushPending(in context: ModelContext) async {
         // Re-entrant guard. Two concurrent flushes (e.g. from a rapid reconnect
         // bounce) could otherwise reset a draft mid-flight in the first call
@@ -148,15 +225,19 @@ final class MacDraftService {
         isFlushing = true
         defer { isFlushing = false }
 
-        // Reset stuck "sending" records so they get retried
+        // Only treat *aged* "sending" records as orphans — younger rows may still be in
+        // flight on another process or a parallel task that started before this flush.
         let stuckDescriptor = FetchDescriptor<DraftRecord>(
             predicate: #Predicate { $0.syncState == "sending" }
         )
         let stuck = (try? context.fetch(stuckDescriptor)) ?? []
-        for draft in stuck {
+        let now = Date()
+        var didMutateStuck = false
+        for draft in stuck where now.timeIntervalSince(draft.createdAt) >= Self.inflightSendCutoff {
             draft.syncState = "pendingSend"
+            didMutateStuck = true
         }
-        if !stuck.isEmpty { try? context.save() }
+        if didMutateStuck { saveContext(context, label: "flushPending.resetOrphans") }
 
         let descriptor = FetchDescriptor<DraftRecord>(
             predicate: #Predicate { $0.syncState == "pendingSend" || $0.syncState == "failed" }

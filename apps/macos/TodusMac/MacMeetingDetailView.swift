@@ -103,6 +103,35 @@ struct MacMeetingDetailView: View {
             HStack {
                 Text(meeting.title)
                     .font(.system(size: 18, weight: .semibold))
+                    .textSelection(.enabled)
+                    .contextMenu {
+                        Button {
+                            let pb = NSPasteboard.general
+                            pb.clearContents()
+                            pb.setString(meeting.title, forType: .string)
+                        } label: {
+                            Label("Copy title", systemImage: "doc.on.doc")
+                        }
+                        if !meeting.meetUrl.isEmpty {
+                            Button {
+                                let pb = NSPasteboard.general
+                                pb.clearContents()
+                                pb.setString(meeting.meetUrl, forType: .string)
+                            } label: {
+                                Label("Copy meeting link", systemImage: "link")
+                            }
+                        }
+                        Button {
+                            let when = meeting.startsAt.formatted(date: .abbreviated, time: .shortened)
+                            var summary = "\(meeting.title) — \(when)"
+                            if !meeting.meetUrl.isEmpty { summary += "\n\(meeting.meetUrl)" }
+                            let pb = NSPasteboard.general
+                            pb.clearContents()
+                            pb.setString(summary, forType: .string)
+                        } label: {
+                            Label("Copy meeting summary", systemImage: "text.quote")
+                        }
+                    }
 
                 Spacer()
 

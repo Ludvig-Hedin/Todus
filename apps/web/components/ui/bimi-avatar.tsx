@@ -3,44 +3,36 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Avatar, AvatarFallback, AvatarImage } from './avatar';
 import { useQuery } from '@tanstack/react-query';
 import DOMPurify from 'dompurify';
+import * as SimpleIcons from 'simple-icons';
+import { getSenderIconSpec, type SenderIconSpec } from '@/lib/sender-icon-registry';
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MAX_FAVICON_URLS = 6;
 
-// Palette of pleasant bg/text pairs for initials avatars — deterministic per seed
-const AVATAR_COLOR_PALETTE = [
-  { bg: '#DBEAFE', text: '#1D4ED8' }, // blue
-  { bg: '#D1FAE5', text: '#065F46' }, // emerald
-  { bg: '#EDE9FE', text: '#5B21B6' }, // violet
-  { bg: '#FCE7F3', text: '#9D174D' }, // pink
-  { bg: '#FEF3C7', text: '#92400E' }, // amber
-  { bg: '#FFEDD5', text: '#9A3412' }, // orange
-  { bg: '#FEE2E2', text: '#991B1B' }, // red
-  { bg: '#F0FDF4', text: '#166534' }, // green
-  { bg: '#E0E7FF', text: '#3730A3' }, // indigo
-  { bg: '#FDF4FF', text: '#7E22CE' }, // fuchsia
-];
+// Domains of free personal email providers. Brand-favicon lookup is skipped for these —
+// the result would be the provider's own logo (Gmail's G etc.), not the sender's avatar.
+// The backend's Gravatar URL in fallbackUrls covers personal addresses instead.
+const FREE_EMAIL_PROVIDERS = new Set([
+  'gmail.com', 'googlemail.com',
+  'outlook.com', 'hotmail.com', 'live.com', 'msn.com',
+  'yahoo.com', 'yahoo.co.uk', 'yahoo.fr', 'yahoo.de', 'yahoo.co.jp', 'yahoo.com.br',
+  'icloud.com', 'me.com', 'mac.com',
+  'protonmail.com', 'proton.me', 'protonmail.ch',
+  'zohomail.com', 'zoho.com',
+  'yandex.com', 'yandex.ru',
+  'mail.ru', 'bk.ru', 'inbox.ru', 'list.ru',
+  'gmx.com', 'gmx.net', 'gmx.de', 'gmx.at',
+  'aol.com', 'aol.co.uk',
+  'fastmail.com', 'fastmail.fm',
+  'hey.com',
+  'tutanota.com', 'tutamail.com',
+]);
 
-const AVATAR_COLOR_PALETTE_DARK = [
-  { bg: '#1E3A5F', text: '#93C5FD' },
-  { bg: '#064E3B', text: '#6EE7B7' },
-  { bg: '#2E1065', text: '#C4B5FD' },
-  { bg: '#500724', text: '#F9A8D4' },
-  { bg: '#451A03', text: '#FDE68A' },
-  { bg: '#431407', text: '#FDBA74' },
-  { bg: '#450A0A', text: '#FCA5A5' },
-  { bg: '#052E16', text: '#86EFAC' },
-  { bg: '#1E1B4B', text: '#A5B4FC' },
-  { bg: '#3B0764', text: '#E879F9' },
-];
-
-function getAvatarColorIndex(seed: string): number {
-  let hash = 0;
-  for (let i = 0; i < seed.length; i++) {
-    hash = seed.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  return Math.abs(hash) % AVATAR_COLOR_PALETTE.length;
-}
+// Neutral muted fill for initials avatars — matches Notion Mail's restrained
+// style across light + dark mode. No per-sender brand rotation: saves saturation
+// budget for real brand icons.
+const INITIALS_LIGHT = { bg: '#B5B5B7', text: '#FFFFFF' };
+const INITIALS_DARK  = { bg: '#5A5A5A', text: '#FFFFFF' };
 
 function extractDomain(email: string) {
   const [, domain = ''] = email.split('@');
@@ -70,21 +62,37 @@ function buildFaviconFallbackUrls(email: string) {
     return [];
   }
 
-  // Google's favicon service has the best coverage (same source Gmail uses),
-  // so we prioritize it before direct favicon/apple-touch-icon fetches.
+  // For personal email providers, skip brand-favicon lookup entirely.
+  // The backend already provides a Gravatar URL in fallbackUrls for these addresses.
+  if (FREE_EMAIL_PROVIDERS.has(domain)) {
+    return [];
+  }
+
   const urls: string[] = [];
   for (const candidate of buildDomainCandidates(domain)) {
-    urls.push(`https://www.google.com/s2/favicons?domain=${candidate}&sz=128`);
+    // Clearbit: high-quality brand logos, returns proper 404 (not a globe image).
+    // Best coverage for well-known brands (Anthropic, Ryanair, Apple, OpenAI, Cursor…).
+    urls.push(`https://logo.clearbit.com/${candidate}?size=256`);
+    // icon.horse: reliable favicon API, returns 404 on failure
+    urls.push(`https://icon.horse/icon/${candidate}`);
+    // DuckDuckGo: reliable favicon service, returns 404 on failure
+    urls.push(`https://icons.duckduckgo.com/ip3/${candidate}.ico`);
+    // Apple touch icons + favicon.ico — broad compatibility fallbacks.
+    // Google s2 is intentionally excluded: it returns a generic globe PNG for
+    // unknown domains rather than a proper 404, so onError never fires and
+    // the waterfall stops on a meaningless globe icon.
     urls.push(`https://${candidate}/apple-touch-icon.png`);
     urls.push(`https://${candidate}/favicon.ico`);
     if (!candidate.startsWith('www.')) {
-      urls.push(`https://www.google.com/s2/favicons?domain=www.${candidate}&sz=128`);
+      urls.push(`https://logo.clearbit.com/www.${candidate}?size=256`);
+      urls.push(`https://icon.horse/icon/www.${candidate}`);
+      urls.push(`https://icons.duckduckgo.com/ip3/www.${candidate}.ico`);
       urls.push(`https://www.${candidate}/apple-touch-icon.png`);
       urls.push(`https://www.${candidate}/favicon.ico`);
     }
   }
 
-  return Array.from(new Set(urls)).slice(0, MAX_FAVICON_URLS);
+  return Array.from(new Set(urls));
 }
 
 export const getFirstLetterCharacter = (name?: string) => {
@@ -101,7 +109,60 @@ interface BimiAvatarProps {
   onImageError?: (e: React.SyntheticEvent<HTMLImageElement>) => void;
 }
 
-export const BimiAvatar = ({
+// Look up the simple-icons brand record for a slug (e.g. "github" → siGithub).
+// Returns null if the slug isn't in simple-icons.
+function lookupSimpleIcon(slug: string | undefined) {
+  if (!slug) return null;
+  const key = `si${slug.charAt(0).toUpperCase()}${slug.slice(1)}`;
+  // Cast through `unknown` because simple-icons types each export individually.
+  const record = (SimpleIcons as unknown as Record<string, { path?: string; title?: string }>)[key];
+  return record?.path ? record : null;
+}
+
+// Branded sender avatar — only used when a simple-icons SVG glyph is available.
+// Renders the brand-colored circle + glyph. If no glyph, this component is
+// skipped (BimiAvatar falls through to the neutral initials path) so we never
+// render a loud brand-colored letter.
+function BrandedSenderAvatar({ spec, className }: { spec: SenderIconSpec; className?: string }) {
+  const icon = lookupSimpleIcon(spec.slug);
+  if (!icon) return null;
+  return (
+    <span
+      className={`${className ?? ''} flex items-center justify-center rounded-full overflow-hidden`}
+      style={{ background: spec.bg, color: spec.fg }}
+      aria-hidden
+    >
+      <svg
+        viewBox="0 0 24 24"
+        xmlns="http://www.w3.org/2000/svg"
+        className="h-1/2 w-1/2"
+        fill={spec.fg}
+        aria-hidden
+      >
+        <title>{icon.title ?? ''}</title>
+        <path d={icon.path} />
+      </svg>
+    </span>
+  );
+}
+
+// Thin wrapper that runs the cheap, hookless registry check first and only
+// mounts the network-driven avatar when no known brand matches. Done this way
+// to keep React hook order stable: we cannot conditionally call useQuery from
+// inside a single component.
+export const BimiAvatar = (props: BimiAvatarProps) => {
+  const normalized = props.email?.trim().toLowerCase() ?? '';
+  const brandSpec = getSenderIconSpec(normalized);
+  // Only short-circuit when we have an actual SVG glyph to render. Registry
+  // entries without a `slug` (e.g. niche brands) deliberately fall through to
+  // the network/initials path so we don't paint loud brand-colored letters.
+  if (brandSpec?.slug && lookupSimpleIcon(brandSpec.slug)) {
+    return <BrandedSenderAvatar spec={brandSpec} className={props.className} />;
+  }
+  return <NetworkBimiAvatar {...props} />;
+};
+
+const NetworkBimiAvatar = ({
   email,
   name,
   className = 'h-8 w-8 rounded-full border dark:border-none',
@@ -170,23 +231,19 @@ export const BimiAvatar = ({
 
   const firstLetter = getFirstLetterCharacter(name || normalizedEmail);
 
-  // Deterministic color based on email so the same sender always gets the same color
-  const colorIndex = getAvatarColorIndex(normalizedEmail || name || '');
-  const lightColor = AVATAR_COLOR_PALETTE[colorIndex]!;
-  const darkColor = AVATAR_COLOR_PALETTE_DARK[colorIndex]!;
-
-  // Two spans layered via Tailwind dark-mode classes — one for light, one for dark
+  // Neutral muted fill in light + dark mode. Two spans layered via Tailwind
+  // `dark:` classes so the colors flip without JS.
   const InitialsFallback = (
     <>
       <span
-        className="dark:hidden flex h-full w-full items-center justify-center rounded-full font-bold text-sm"
-        style={{ background: lightColor.bg, color: lightColor.text }}
+        className="dark:hidden flex h-full w-full items-center justify-center rounded-full font-semibold text-sm"
+        style={{ background: INITIALS_LIGHT.bg, color: INITIALS_LIGHT.text }}
       >
         {firstLetter}
       </span>
       <span
-        className="hidden dark:flex h-full w-full items-center justify-center rounded-full font-bold text-sm"
-        style={{ background: darkColor.bg, color: darkColor.text }}
+        className="hidden dark:flex h-full w-full items-center justify-center rounded-full font-semibold text-sm"
+        style={{ background: INITIALS_DARK.bg, color: INITIALS_DARK.text }}
       >
         {firstLetter}
       </span>

@@ -15,6 +15,37 @@ struct CalendarEvent: Identifiable, Sendable {
     let calendarColorBlue: Double
     let calendarName: String
     let folderID: UUID?
+    /// Underlying `EKEvent.calendar.calendarIdentifier`, when available. Used by
+    /// `UnifiedCalendarService` to build per-source ids that survive dedup so each
+    /// Apple calendar (Home, Work, Holidays, etc.) can be toggled independently.
+    /// Optional + defaulted to nil to preserve back-compat with existing call sites.
+    let calendarIdentifier: String?
+
+    init(
+        id: String,
+        title: String,
+        startDate: Date,
+        endDate: Date,
+        isAllDay: Bool,
+        calendarColorRed: Double,
+        calendarColorGreen: Double,
+        calendarColorBlue: Double,
+        calendarName: String,
+        folderID: UUID?,
+        calendarIdentifier: String? = nil
+    ) {
+        self.id = id
+        self.title = title
+        self.startDate = startDate
+        self.endDate = endDate
+        self.isAllDay = isAllDay
+        self.calendarColorRed = calendarColorRed
+        self.calendarColorGreen = calendarColorGreen
+        self.calendarColorBlue = calendarColorBlue
+        self.calendarName = calendarName
+        self.folderID = folderID
+        self.calendarIdentifier = calendarIdentifier
+    }
 }
 
 /// Shared calendar service actor that manages a single EKEventStore instance.
@@ -122,13 +153,33 @@ actor CalendarService {
     }
 
     /// Create a new event with the given title and optional dates.
-    func createEvent(title: String, startDate: Date, endDate: Date? = nil, folderID: UUID? = nil) throws {
+    /// Pass `calendarIdentifier` (an `EKCalendar.calendarIdentifier`) to target a
+    /// specific Apple calendar; otherwise the user's `defaultCalendarForNewEvents`
+    /// is used. Unknown identifiers also fall back to the default.
+    func createEvent(
+        title: String,
+        startDate: Date,
+        endDate: Date? = nil,
+        folderID: UUID? = nil,
+        calendarIdentifier: String? = nil
+    ) throws {
         let event = EKEvent(eventStore: eventStore)
         event.title = title
         event.startDate = startDate
         event.endDate = endDate ?? startDate.addingTimeInterval(3600)
-        event.calendar = eventStore.defaultCalendarForNewEvents
-        try eventStore.save(event, span: .thisEvent)
+        if let calendarIdentifier,
+           let target = eventStore.calendars(for: .event)
+               .first(where: { $0.calendarIdentifier == calendarIdentifier }) {
+            event.calendar = target
+        } else {
+            event.calendar = eventStore.defaultCalendarForNewEvents
+        }
+        do {
+            try eventStore.save(event, span: .thisEvent)
+        } catch {
+            AppLogger.shared.log("[CalendarService] createEvent save failed: \(error)")
+            throw error
+        }
         if let folderID, let identifier = event.eventIdentifier {
             setFolderID(folderID, for: identifier)
         }
@@ -136,12 +187,16 @@ actor CalendarService {
 
     /// Update fields on an existing event. Nil fields are left unchanged.
     /// Throws if the event can't be found or the save fails.
+    /// Pass `calendarIdentifier` to move the event to a different Apple calendar;
+    /// nil leaves the existing calendar untouched. Unknown identifiers are
+    /// ignored (no reassignment) rather than silently moving to default.
     func updateEvent(
         identifier: String,
         title: String? = nil,
         startDate: Date? = nil,
         endDate: Date? = nil,
-        notes: String? = nil
+        notes: String? = nil,
+        calendarIdentifier: String? = nil
     ) throws {
         guard let event = eventStore.event(withIdentifier: identifier) else {
             throw NSError(
@@ -154,7 +209,18 @@ actor CalendarService {
         if let startDate { event.startDate = startDate }
         if let endDate { event.endDate = endDate }
         if let notes { event.notes = notes }
-        try eventStore.save(event, span: .thisEvent)
+        if let calendarIdentifier,
+           calendarIdentifier != event.calendar?.calendarIdentifier,
+           let target = eventStore.calendars(for: .event)
+               .first(where: { $0.calendarIdentifier == calendarIdentifier }) {
+            event.calendar = target
+        }
+        do {
+            try eventStore.save(event, span: .thisEvent)
+        } catch {
+            AppLogger.shared.log("[CalendarService] updateEvent save failed (id=\(identifier)): \(error)")
+            throw error
+        }
     }
 
     /// Delete an event by identifier. Throws if not found or save fails.
@@ -166,7 +232,12 @@ actor CalendarService {
                 userInfo: [NSLocalizedDescriptionKey: "Event not found"]
             )
         }
-        try eventStore.remove(event, span: .thisEvent)
+        do {
+            try eventStore.remove(event, span: .thisEvent)
+        } catch {
+            AppLogger.shared.log("[CalendarService] deleteEvent remove failed (id=\(identifier)): \(error)")
+            throw error
+        }
         setFolderID(nil, for: identifier)
     }
 
@@ -227,7 +298,8 @@ private extension EKEvent {
             calendarColorGreen: g,
             calendarColorBlue: b,
             calendarName: calendar?.title ?? "Calendar",
-            folderID: folderID
+            folderID: folderID,
+            calendarIdentifier: calendar?.calendarIdentifier
         )
     }
 }

@@ -50,9 +50,28 @@ export const useBilling = () => {
   const { customer, refetch, isLoading, error } = useCustomer();
   const { attach, track, openBillingPortal } = useAutumn();
 
+  // Stabilize the effect deps on the error's PRIMITIVE shape — `error` is a
+  // fresh object reference on every render while an error persists, so the
+  // old `[error]` dep would re-fire the side effects (and possibly repeat
+  // signOut) every render. Tracking only status/code/message stays stable
+  // across re-renders for the same error.
+  const errorStatus = (error as { status?: number } | null | undefined)?.status;
+  const errorCode = (error as { code?: string } | null | undefined)?.code;
+  const errorMessage = error instanceof Error ? error.message : undefined;
   useEffect(() => {
-    if (error) signOut();
-  }, [error]);
+    if (!error) return;
+    // Only sign out on explicit auth failures. Transient billing errors
+    // (network blip, Autumn 5xx, CORS hiccup) must NOT force a logout —
+    // useBilling is mounted app-wide via NavUser so any error here
+    // would log every active user out.
+    if (errorStatus === 401 || errorStatus === 403 || errorCode === 'UNAUTHENTICATED') {
+      signOut();
+    } else {
+      console.error('Billing error (ignored, not auth-related):', error);
+    }
+    // We intentionally depend on the stable primitives, not the object itself.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [errorStatus, errorCode, errorMessage]);
 
   const { isPro, ...customerFeatures } = useMemo(() => {
     const isPro = customer ? isProCustomer(customer) : false;

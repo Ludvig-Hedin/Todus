@@ -66,6 +66,11 @@ final class TaskCaptureService {
         guard !lines.isEmpty else { return }
 
         var mutations: [SyncMutation] = []
+        // Capture (taskID, rawInput) pairs so enrichment can only run for the
+        // tasks that survive the initial sync round-trip. (Bug H8 — previously
+        // queueEnrichment was fired inline in this loop, racing the rollback
+        // path and leaving enrichment to update a now-deleted record.)
+        var enrichmentInputs: [(taskID: UUID, rawInput: String)] = []
 
         for (index, line) in lines.enumerated() {
             let now = Date()
@@ -92,10 +97,16 @@ final class TaskCaptureService {
             syncReminder(task, in: context)
             scheduleNotificationIfNeeded(task)
             mutations.append(SyncMutation(action: .upsert, task: task.asPayload(), taskID: task.id))
-            queueEnrichment(for: task.id, rawInput: line, locale: locale, timeZone: timeZone, in: context)
+            enrichmentInputs.append((taskID: task.id, rawInput: line))
         }
 
-        try? context.save()
+        // Surface save errors instead of swallowing — disk-full / iCloud quota / corrupt
+        // store would previously have failed silently here. (Medium bug.)
+        do {
+            try context.save()
+        } catch {
+            AppLogger.shared.log("TaskCaptureService.capture: save failed: \(error.localizedDescription)")
+        }
 
         let mutationTaskIDs = mutations.compactMap(\.taskID)
         Task { @MainActor [weak self, syncService, remindersSyncService] in
@@ -110,22 +121,41 @@ final class TaskCaptureService {
             )
             let candidates = (try? context.fetch(descriptor)) ?? []
             let toRollback = candidates.filter { $0.syncState == .failed }
-            guard !toRollback.isEmpty else { return }
-            for task in toRollback {
-                if task.reminderIdentifier != nil {
-                    remindersSyncService.delete(task)
+            let rolledBackIDs = Set(toRollback.map(\.id))
+            if !toRollback.isEmpty {
+                for task in toRollback {
+                    if task.reminderIdentifier != nil {
+                        remindersSyncService.delete(task)
+                    }
+                    context.delete(task)
                 }
-                context.delete(task)
+                do {
+                    try context.save()
+                } catch {
+                    AppLogger.shared.log("TaskCaptureService.capture rollback save failed: \(error.localizedDescription)")
+                }
+                AppLogger.shared.log(
+                    "TaskCaptureService.capture: rolled back \(toRollback.count) task(s) after sync failure"
+                )
+                // Publish to observers so views can surface a banner. We assign even when the
+                // value is unchanged so a second consecutive failure still triggers tracking
+                // via `lastRollbackAt`.
+                self?.lastRollbackCount = toRollback.count
+                self?.lastRollbackAt = Date()
             }
-            try? context.save()
-            AppLogger.shared.log(
-                "TaskCaptureService.capture: rolled back \(toRollback.count) task(s) after sync failure"
-            )
-            // Publish to observers (already on the MainActor via the enclosing Task isolation)
-            // so views can surface a banner. We assign even when the value is unchanged so a
-            // second consecutive failure still triggers tracking via `lastRollbackAt`.
-            self?.lastRollbackCount = toRollback.count
-            self?.lastRollbackAt = Date()
+
+            // Only enrich tasks that survived the initial enqueue. Enriching a
+            // rolled-back task would resurrect a phantom local record. (Bug H8.)
+            guard let self else { return }
+            for entry in enrichmentInputs where !rolledBackIDs.contains(entry.taskID) {
+                self.queueEnrichment(
+                    for: entry.taskID,
+                    rawInput: entry.rawInput,
+                    locale: locale,
+                    timeZone: timeZone,
+                    in: context
+                )
+            }
         }
     }
 
@@ -227,6 +257,17 @@ final class TaskCaptureService {
         } else {
             scheduleNotificationIfNeeded(task)
         }
+    }
+
+    /// Defer this task by setting the due date to a later moment.
+    /// Used by the row swipe-trailing "Snooze" gesture.
+    func snooze(_ task: TaskRecord, until date: Date, in context: ModelContext) {
+        task.dueDate = date
+        task.updatedAt = .now
+        task.syncState = .pendingUpload
+        persist(task: task, in: context)
+        syncReminder(task, in: context)
+        scheduleNotificationIfNeeded(task)
     }
 
     func move(_ task: TaskRecord, to folder: FolderRecord?, in context: ModelContext) {
@@ -473,11 +514,25 @@ final class TaskCaptureService {
         }
     }
 
+    /// Cap on number of tasks accepted from a single paste / multi-line composer
+    /// submission. A flatfile paste of hundreds of lines would otherwise spawn
+    /// hundreds of sync mutations + Reminders writes synchronously here.
+    /// (Medium bug — TaskCaptureService no cap on splitInputLines.)
+    /// TODO: surface a UI confirmation when extras are dropped.
+    nonisolated static let maxBulkCaptureLines = 50
+
     nonisolated static func splitInputLines(_ rawText: String) -> [String] {
-        rawText
+        let trimmed = rawText
             .components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
+        if trimmed.count > maxBulkCaptureLines {
+            AppLogger.shared.log(
+                "TaskCaptureService.splitInputLines: dropping \(trimmed.count - maxBulkCaptureLines) line(s) over cap (\(maxBulkCaptureLines))"
+            )
+            return Array(trimmed.prefix(maxBulkCaptureLines))
+        }
+        return trimmed
     }
 
     nonisolated static func instantTitle(from rawText: String) -> String {

@@ -25,11 +25,12 @@ import { getContext } from 'hono/context-storage';
 import { type HonoContext } from '../../ctx';
 import { TRPCError } from '@trpc/server';
 import { env } from '../../env';
+import { EProviders, type ISubscribeBatch } from '../../types';
 import { z } from 'zod';
 
 const senderSchema = z.object({
   name: z.string().optional(),
-  email: z.string(),
+  email: z.string().email(),
 });
 
 // const getFolderLabelId = (folder: string) => {
@@ -83,6 +84,95 @@ export const mailRouter = router({
     const { activeConnection } = ctx;
     return await forceReSync(activeConnection.id);
   }),
+  /**
+   * Re-arm the Gmail PubSub watch + push subscription for this connection.
+   *
+   * Gmail watches expire after ~7 days. The hourly scheduled() cron renews any
+   * watch older than 5 days, but a connection whose watch was lost (subscription
+   * deleted, IAM policy gone, Gmail API blip) gets stuck — no new mail arrives
+   * because the webhook never fires. The "stale 2-month-old inbox" symptom on
+   * native clients is this state.
+   *
+   * This mutation force-renews the watch immediately by clearing the
+   * `gmail_sub_age` KV stamp (so the cron-style renewal logic treats it as
+   * expired) and enqueueing a fresh subscribe job onto `subscribe_queue` —
+   * the same path that runs on initial connect and on cron renewal.
+   *
+   * Safe to call repeatedly: the underlying setup is idempotent (PubSub topic
+   * `Already Exists` is swallowed).
+   */
+  rewatchGmail: activeDriverProcedure.mutation(async ({ ctx }) => {
+    const { activeConnection } = ctx;
+    if (activeConnection.providerId !== EProviders.google) {
+      return { ok: false, reason: 'unsupported-provider' as const };
+    }
+    try {
+      await env.gmail_sub_age.delete(`${activeConnection.id}__${EProviders.google}`);
+    } catch (error) {
+      console.warn('[rewatchGmail] gmail_sub_age delete failed', {
+        connectionId: activeConnection.id,
+        error,
+      });
+    }
+    await env.subscribe_queue.send({
+      connectionId: activeConnection.id,
+      providerId: EProviders.google,
+    } as ISubscribeBatch);
+    return { ok: true } as const;
+  }),
+  /**
+   * Non-destructive sync. Lists the newest N thread IDs directly from Gmail and
+   * upserts each into the shard DB via `agent.syncThread`. Unlike `forceSync`,
+   * this does NOT drop tables, so the existing inbox stays visible while fresh
+   * threads land. Preferred for routine pull-to-refresh and scene-foreground
+   * refreshes; `forceSync` should only be used when the DB looks broken (e.g.
+   * after a connection swap or a deep "rebuild" user action).
+   */
+  softSync: activeDriverProcedure
+    .input(
+      z.object({
+        folder: z.string().optional().default('inbox'),
+        maxResults: z.number().optional().default(30),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const { activeConnection } = ctx;
+      const executionCtx = getContext<HonoContext>().executionCtx;
+      const { stub: agent } = await getZeroAgent(activeConnection.id, executionCtx);
+
+      let list: { threads: { id: string }[] };
+      try {
+        list = (await agent.rawListThreads({
+          folder: input.folder,
+          maxResults: input.maxResults,
+        })) as { threads: { id: string }[] };
+      } catch (error) {
+        console.error('[softSync] rawListThreads failed:', error);
+        return { synced: 0, failed: 0, total: 0, ok: false };
+      }
+
+      const ids = list.threads.map((t) => t.id).filter(Boolean);
+      let synced = 0;
+      let failed = 0;
+      await Promise.allSettled(
+        ids.map(async (id) => {
+          try {
+            const r = await agent.syncThread({ threadId: id });
+            if (r?.success === true || (r?.success !== false && !r?.reason)) synced++;
+            else failed++;
+          } catch (error) {
+            console.error(`[softSync] syncThread failed for ${id}:`, error);
+            failed++;
+          }
+        }),
+      );
+      try {
+        await agent.reloadFolder(input.folder);
+      } catch (error) {
+        console.warn('[softSync] reloadFolder failed:', error);
+      }
+      return { synced, failed, total: ids.length, ok: true };
+    }),
   get: activeDriverProcedure
     .input(
       z.object({
@@ -92,8 +182,49 @@ export const mailRouter = router({
     .output(IGetThreadResponseSchema)
     .query(async ({ input, ctx }) => {
       const { activeConnection } = ctx;
-      const result = await getThread(activeConnection.id, input.id);
-      return result.result;
+      // Wrap the shard fetch in a hard 15s server-side timeout. Without it a
+      // hung Gmail subrequest or stuck shard RPC would keep the connection
+      // open until Cloudflare's outer limit, producing a multi-minute spinner
+      // on the client with no recoverable error. 15s is well under the iOS
+      // client's per-request budget and gives users a chance to retry while
+      // upstream recovers.
+      const THREAD_FETCH_TIMEOUT_MS = 15_000;
+      let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+      const TIMEOUT_SENTINEL = Symbol('thread-fetch-timeout');
+      try {
+        const result = await Promise.race<
+          Awaited<ReturnType<typeof getThread>> | typeof TIMEOUT_SENTINEL
+        >([
+          getThread(activeConnection.id, input.id),
+          new Promise<typeof TIMEOUT_SENTINEL>((resolve) => {
+            timeoutHandle = setTimeout(() => resolve(TIMEOUT_SENTINEL), THREAD_FETCH_TIMEOUT_MS);
+          }),
+        ]);
+        if (result === TIMEOUT_SENTINEL) {
+          console.warn('[mail.get] thread fetch timed out', {
+            threadId: input.id,
+            timeoutMs: THREAD_FETCH_TIMEOUT_MS,
+          });
+          throw new TRPCError({
+            code: 'INTERNAL_SERVER_ERROR',
+            message: 'Thread fetch timed out',
+          });
+        }
+        return result.result;
+      } catch (error) {
+        if (error instanceof TRPCError) throw error;
+        console.warn('[mail.get] thread fetch failed', {
+          threadId: input.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Failed to load thread',
+          cause: error,
+        });
+      } finally {
+        if (timeoutHandle) clearTimeout(timeoutHandle);
+      }
     }),
   listThreads: activeDriverProcedure
     .input(
@@ -186,25 +317,21 @@ export const mailRouter = router({
 
       if (folder === FOLDERS.SNOOZED) {
         const nowTs = Date.now();
-        const filtered: ThreadItem[] = [];
 
         console.debug('[listThreads] Filtering snoozed threads at', new Date(nowTs).toISOString());
 
-        await Promise.all(
+        // Preserve original date-desc ordering by computing a parallel keep[] array
+        // indexed by position. Pushing into a shared array from concurrent async
+        // callbacks would yield completion order, breaking newest-first invariant.
+        const keep = await Promise.all(
           threadsResponse.threads.map(async (t: ThreadItem) => {
             const keyName = `${t.id}__${activeConnection.id}`;
             try {
               const wakeAtIso = await env.snoozed_emails.get(keyName);
-              if (!wakeAtIso) {
-                filtered.push(t);
-                return;
-              }
+              if (!wakeAtIso) return true;
 
               const wakeAt = new Date(wakeAtIso).getTime();
-              if (wakeAt > nowTs) {
-                filtered.push(t);
-                return;
-              }
+              if (wakeAt > nowTs) return true;
 
               console.debug('[UNSNOOZE_ON_ACCESS] Expired thread', t.id, {
                 wakeAtIso,
@@ -213,38 +340,124 @@ export const mailRouter = router({
 
               await modifyThreadLabelsInDB(activeConnection.id, t.id, ['INBOX'], ['SNOOZED']);
               await env.snoozed_emails.delete(keyName);
+              return false;
             } catch (error) {
               console.error('[UNSNOOZE_ON_ACCESS] Failed for', t.id, error);
-              filtered.push(t);
+              return true;
             }
           }),
         );
 
+        const filtered = threadsResponse.threads.filter((_, i) => keep[i]);
         threadsResponse.threads = filtered;
         console.debug('[listThreads] Snoozed threads after filtering:', filtered);
       }
 
-      if (threadsResponse.threads.length === 0 && folder === FOLDERS.INBOX && !q) {
+      if (folder === FOLDERS.INBOX && !q) {
         const now = Date.now();
-        const cooldownKey = `resync_cooldown_${activeConnection.id}`;
-        const lastResyncStr = await env.gmail_processing_threads.get(cooldownKey);
-        const lastResync = lastResyncStr ? parseInt(lastResyncStr, 10) : 0;
-        const RESYNC_COOLDOWN_MS = 30000;
+        const threadsCount = threadsResponse.threads.length;
+        // Treat the inbox as stale when:
+        //  - DB is empty (workflow never ran, or just-dropped after forceSync), OR
+        //  - newest stored thread is older than STALE_THRESHOLD_MS (continuous sync
+        //    has stopped delivering mail — without this branch, users with 60+
+        //    stale DB rows would never get fresh mail unless they explicitly
+        //    pull-to-refresh, because the previous trigger only fired on `count === 0`).
+        const STALE_THRESHOLD_MS = 60 * 60 * 1000; // 1 hour
+        let newestAgeMs = Number.POSITIVE_INFINITY;
+        if (threadsCount > 0) {
+          const newestIso = (threadsResponse.threads[0] as { latestReceivedOn?: string | null })
+            .latestReceivedOn;
+          if (newestIso) {
+            const newestTs = new Date(newestIso).getTime();
+            if (!Number.isNaN(newestTs)) newestAgeMs = now - newestTs;
+          }
+        }
+        const isEmpty = threadsCount === 0;
+        const isStale = newestAgeMs > STALE_THRESHOLD_MS;
 
-        if (now - lastResync > RESYNC_COOLDOWN_MS) {
-          await env.gmail_processing_threads.put(cooldownKey, now.toString(), {
-            expirationTtl: 60,
-          });
+        if (isEmpty || isStale) {
+          const cooldownKey = `resync_cooldown_${activeConnection.id}`;
+          const lastResyncStr = await env.gmail_processing_threads.get(cooldownKey);
+          const lastResync = lastResyncStr ? parseInt(lastResyncStr, 10) : 0;
+          // Tighter cooldown when DB has rows we can keep — soft sync is cheap and
+          // non-destructive, so a 30s gate would leave users seeing stale data far
+          // longer than necessary. Empty-DB path keeps the longer cooldown because
+          // its only option is the destructive forceReSync.
+          const RESYNC_COOLDOWN_MS = isEmpty ? 30000 : 15000;
 
-          getZeroAgent(activeConnection.id, executionCtx)
-            .then((_agent) => {
-              _agent.stub.forceReSync().catch((error) => {
-                console.error('[listThreads] Async resync failed:', error);
-              });
-            })
-            .catch((error) => {
-              console.error('[listThreads] Failed to get agent for async resync:', error);
+          if (now - lastResync > RESYNC_COOLDOWN_MS) {
+            await env.gmail_processing_threads.put(cooldownKey, now.toString(), {
+              expirationTtl: 60,
             });
+
+            // Self-heal the Gmail push subscription when the inbox has been stale for
+            // long enough that the watch likely expired. The hourly cron is supposed
+            // to renew watches before they hit Gmail's 7-day limit, but a connection
+            // whose watch was lost (PubSub deleted, IAM blip, missed cron tick) gets
+            // stuck — no new mail until the user triggers a manual rewatch. Threshold
+            // is conservative (24h) so we don't enqueue subscribe jobs for every short
+            // gap, but tight enough that a multi-day stale inbox triggers recovery on
+            // the user's next list call without any client-side change.
+            const REWATCH_STALE_MS = 24 * 60 * 60 * 1000;
+            const watchProbablyExpired = isEmpty || newestAgeMs > REWATCH_STALE_MS;
+            if (
+              watchProbablyExpired &&
+              activeConnection.providerId === EProviders.google
+            ) {
+              try {
+                await env.gmail_sub_age.delete(
+                  `${activeConnection.id}__${EProviders.google}`,
+                );
+                await env.subscribe_queue.send({
+                  connectionId: activeConnection.id,
+                  providerId: EProviders.google,
+                } as ISubscribeBatch);
+                console.log('[listThreads] Auto-rewatch enqueued', {
+                  connectionId: activeConnection.id,
+                  newestAgeMs,
+                  isEmpty,
+                });
+              } catch (error) {
+                console.error('[listThreads] Auto-rewatch enqueue failed', {
+                  connectionId: activeConnection.id,
+                  error,
+                });
+              }
+            }
+
+            getZeroAgent(activeConnection.id, executionCtx)
+              .then(async (_agent) => {
+                try {
+                  if (isEmpty) {
+                    // No DB rows — only path is the destructive workflow that
+                    // refills tables from scratch.
+                    await _agent.stub.forceReSync();
+                  } else {
+                    // DB has rows but they're stale. Soft-sync: list newest IDs
+                    // from Gmail and upsert each via syncThread. Keeps the
+                    // existing inbox visible while fresh threads land.
+                    const list = (await _agent.stub.rawListThreads({
+                      folder: 'inbox',
+                      maxResults: 30,
+                    })) as { threads: { id: string }[] };
+                    const ids = list.threads.map((t) => t.id).filter(Boolean);
+                    await Promise.allSettled(
+                      ids.map((id) =>
+                        _agent.stub.syncThread({ threadId: id }).catch((err) => {
+                          console.error(`[listThreads] async syncThread ${id} failed:`, err);
+                        }),
+                      ),
+                    );
+                    await _agent.stub.reloadFolder('inbox').catch(() => {});
+                  }
+                } catch (error) {
+                  console.error('[listThreads] Async resync failed:', error);
+                }
+              })
+              .catch((error) => {
+                console.error('[listThreads] Failed to get agent for async resync:', error);
+              });
+          }
         }
       }
 
@@ -286,9 +499,26 @@ export const mailRouter = router({
           ? Math.max(5, maxResults)
           : Math.max(5, Math.ceil(maxResults / validConnections.length));
 
+      // Sentinel value the client sends back for a connection that has already
+      // exhausted its pages. The server must NOT restart pagination for those
+      // connections; previously a missing cursor fell back to '' which re-ran
+      // page 1 for the exhausted account on every `fetchNextPage` → its first
+      // page of threads kept reappearing merged into later pages.
+      const EXHAUSTED_CURSOR = '__exhausted__';
+
       const results = await Promise.allSettled(
         validConnections.map(async (conn) => {
-          const cursor = cursors[conn.id] || '';
+          const cursor = cursors[conn.id] ?? '';
+          if (cursor === EXHAUSTED_CURSOR) {
+            return {
+              connectionId: conn.id,
+              connectionEmail: conn.email,
+              connectionColor: conn.color,
+              threads: [] as ThreadSummary[],
+              nextPageToken: null as string | null,
+              exhausted: true,
+            };
+          }
           const threadsResponse = await getThreadsFromDB(conn.id, {
             folder,
             q,
@@ -303,6 +533,7 @@ export const mailRouter = router({
             connectionColor: conn.color,
             threads: threadsResponse.threads,
             nextPageToken: threadsResponse.nextPageToken,
+            exhausted: false,
           };
         }),
       );
@@ -314,13 +545,20 @@ export const mailRouter = router({
 
       for (const result of results) {
         if (result.status === 'fulfilled') {
-          const { connectionId, connectionEmail, connectionColor, threads, nextPageToken } = result.value;
+          const { connectionId, connectionEmail, connectionColor, threads, nextPageToken, exhausted } = result.value;
           for (const thread of threads) {
             allThreads.push({ ...thread, connectionId, connectionEmail, connectionColor });
           }
           if (nextPageToken) {
             nextCursors[connectionId] = nextPageToken;
+          } else {
+            // Preserve "done" status for this connection so the next fetchNextPage
+            // doesn't restart its pagination from page 1.
+            nextCursors[connectionId] = EXHAUSTED_CURSOR;
           }
+          // `exhausted` returned above for ALREADY-exhausted connections — also
+          // preserve the sentinel in that case.
+          if (exhausted) nextCursors[connectionId] = EXHAUSTED_CURSOR;
         } else {
           // Extract connectionId from the error context
           const connIndex = results.indexOf(result);
@@ -612,7 +850,7 @@ export const mailRouter = router({
   send: activeDriverProcedure
     .input(
       z.object({
-        to: z.array(senderSchema),
+        to: z.array(senderSchema).min(1, 'At least one recipient is required'),
         subject: z.string(),
         message: z.string(),
         attachments: z.array(serializedFileSchema).optional().default([]),
@@ -837,7 +1075,7 @@ export const mailRouter = router({
       const { activeConnection } = ctx;
       const executionCtx = getContext<HonoContext>().executionCtx;
       const { exec, stub } = await getZeroAgent(activeConnection.id, executionCtx);
-      exec(`DELETE FROM threads WHERE thread_id = ?`, input.id);
+      await exec(`DELETE FROM threads WHERE thread_id = ?`, input.id);
       await stub.reloadFolder('bin');
       return true;
     }),

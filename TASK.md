@@ -1,6 +1,116 @@
 # Migration Backlog
 
-Last updated: 2026-04-29
+Last updated: 2026-05-20
+
+## iOS Ship-Readiness Pass (2026-05-20) — DONE
+
+Third pass closing the "complete after small fixes" gaps from 2026-05-17 strict review.
+
+- `DONE` **All 15 skipped tests activated.** 67 unit tests pass, 0 fail, 0 skipped (was 66 / 0 / 15). DI seams added without changing public API: `AuthService.AuthTransport` + `classifyCallbackTokens` + `pendingAuthFlow` helpers, `TodosAPIClient` URLSessionConfiguration injection, `AIChatService.classifyFlushDecision`, `EmailService.mergePages`, `NetworkMonitor.PathProviding`, `RemoteFirstTaskParsingService.RemoteTaskParsingTransport`, `AppleRemindersSyncService.EKReminderStoring` + test-only readbacks.
+- `DONE` **TodusUITests target stood up.** xcodegen wires the target; `--ui-testing` launch arg in `AppServices.init` injects fake bearer + onboarding flags so XCUITests skip auth. 3 test files cover C1-C5 critical fixes + parity smoke (startup card, voice settings, docs empty state, automation policy reachability). UI target compiles clean; execution requires booted simulator (run locally).
+- `DONE` **Voice mic lock** (`Services/Voice/VoiceMicLock.swift`) — cooperative lock between `VoiceSessionCoordinator` (owner "coordinator") and `VoiceChatViewModel` (owner "modal"). Prevents AVAudioEngine double-attach race when Siri Shortcut + modal triggered concurrently.
+- `DONE` **Compose autosave migration** (`EmailComposeView.migrateLegacyAutosaveIfNeeded`) — copies `reply.<threadId>` / `replyAll.<threadId>` UserDefaults blobs to unified `compose.<threadId>` key on first restore. ReplyAll wins if both. Idempotent.
+- `DONE` **EmailAutomationPolicyView debounced push** — 300ms debounce on `saveSharedAIProfile` per change instead of `onDisappear`-only. `.onDisappear` still flushes. `AssistantAutomationPolicy` gained `Equatable`.
+- `DONE` **DocsService Personal workspace dedup** — case-insensitive name check before auto-create; refetches on 409/422 race.
+- `DONE` **Startup card migration tightened** — dropped unreliable `hasPersistedBearerToken` signal (Keychain survives uninstall). New positive `Keys.hasReachedMainTab` signal set in `MainTabView.onAppear`. Migration: card skipped only when `hasReachedMainTab` OR (`isAuthenticated && any prior onboarding flag`).
+
+**Verification**: `xcodebuild build` SUCCEEDED, `xcodebuild build-for-testing` SUCCEEDED, `xcodebuild -only-testing:TodusTests test` SUCCEEDED (67/0/0).
+
+**Manual follow-ups for user**:
+1. Open Xcode, run UI tests on simulator/device.
+2. AI conversation + avatar cache migrations are silent first-launch.
+3. Activate "Start Voice Assistant" Siri Shortcut via Shortcuts app.
+4. Apple `com.apple.developer.mail-client` entitlement still pending (pre-existing TODO).
+
+## Current iOS Parity + Hardening Sprint (2026-05-17)
+
+Source: parity audit `apps/macos → apps/ios` + test inventory + bug-hunt + ux-polish sweep. Full detail in `CODE_REVIEW_BACKLOG.md` (2026-05-17 section).
+
+### Critical parity gaps — DONE
+- `DONE` **Voice assistant parity (iOS)** — `Services/Voice/VoiceSessionCoordinator.swift` (391L state machine: idle/connecting/listening/speaking/toolRunning/error), `VoiceSystemPromptClient.swift` (60s cache + offline fallback), `VoiceToolRegistry.swift` (Gemini function declarations + `VoiceToolExecutor` protocol + iOS adapter calling `AIChatService.processVoiceToolCall`), `VoiceAudioCapture.swift` (AVAudioEngine 16kHz PCM16 capture split out for line-cap), `VoiceIntent.swift` (`StartVoiceAssistantIntent` AppIntent with `openAppWhenRun = true` + `TodusVoiceAppShortcuts` provider), `Features/Settings/VoiceAssistantSettingsView.swift`. Wired into `AppServices` + `TodosApp` (`.task` subscribes to `.todusStartVoiceSession` notification). Settings entry added under AI Assistant section.
+
+### High-impact parity gaps — DONE
+- `DONE` **Documents/Notes native shell (iOS)** — `Domain/DocTypes.swift` (DTOs mirroring macOS), `Services/Docs/DocsService.swift` (refresh/list/create/update/delete/move/star/togglePin/search, auto-creates Personal workspace), `Features/Docs/DocsListView.swift` (NavigationSplitView on iPad, NavigationStack on iPhone, recursive nested rows, pull-to-refresh, context menu, swipe actions, empty state), `Features/Docs/DocEditorView.swift` (thin native nav wrapper around existing `DocsWebView`). `DocsWebView` gained optional `docId` param for deep linking; legacy callers unchanged. `MoreSheetView` exposes native Docs + "Docs (Web)" fallback.
+- `DONE` **Email automation policy controls on iOS Settings** — `Features/Settings/EmailAutomationPolicyView.swift` (excluded-sender add/list/swipe-to-delete, auto-send experiment with confirmation, workday start/end pickers, reset to recommended). NavigationLink added in `SettingsView.swift::emailSection`. Persists via AppServices, pushes on disappear.
+- `DONE` **Compound intent parser + local NLP fallback on iOS** — `Services/Parsing/CompoundIntentParser.swift` patched with word-boundary regex (port of macOS refinements); `RemoteFirstTaskParsingService.parseCompoundLocally(...)` hook added so callers can get multi-intent results.
+
+### Production hardening — DONE
+- `DONE` **Tests** — 66 tests pass, 0 fail, 15 skipped (need DI seams, documented per-test). 8 new test files:
+  - `AuthServiceTests` (12 tests, 9 active) — C1 deep-link rejection, `preloadTokens` determinism, init→auth transition, token preview safety.
+  - `TodosAPIClientTests` (8 tests, 6 active) — superjson Date-meta envelope, omitted-meta plain payload, nested-date dotted path, batch wrap with String/Int (H16 regression pin).
+  - `AIChatServiceTests` (12 tests, 11 active) — CRLF / LF-only classify, `[DONE]` with/without trailing CR (H14 pin), heartbeat skip, chunk-boundary residual, replay end-to-end, malformed-JSON tolerance.
+  - `EmailServiceTests`, `AppleRemindersSyncServiceTests`, `NetworkMonitorTests`, `AppThemeAvatarCacheTests`, `RemoteFirstTaskParsingServiceTests`.
+  - `TodosUITests` target stood up (xcodegen). Smoke test `app.launch()` + window-exists assertion. Manual follow-up: implement `--ui-testing` launch-arg stub in `AppServices` for deeper E2E.
+- `DONE` **iOS branded startup card** — `App/StartupOnboardingView.swift` (~150L). Hero squircle logo, "Get started" + "I already have an account". Wired into `RootView` ahead of AuthView. Existing installs auto-skip via migration check (any prior onboarding flag or authenticated session).
+- `DONE` **Duplicate file resolved** — `App/LocalModelStateStore.swift` (51L stub) collided with `Services/AI/Local/LocalModelStateStore.swift` (188L real impl, used by `ModelDownloadService` + `MLXInferenceService`). Renamed stub to `LocalModelStateStore_DEPRECATED.swift` and emptied class definition; safe to delete in next cleanup.
+
+### Verification
+- `xcodebuild -project apps/ios/Todus/Todus.xcodeproj -scheme Todus -sdk iphonesimulator build` → **BUILD SUCCEEDED**
+- `xcodebuild ... -only-testing:TodusTests test` → **TEST SUCCEEDED** (66 executed, 0 failures, 15 skipped, 0.30s)
+
+### Manual follow-ups
+1. Open in Xcode, run on simulator/device for visual smoke test (sandbox blocks CoreSimulator launch here)
+2. Activate Siri Shortcut "Start Voice Assistant" via Shortcuts app to enable voice trigger
+3. AI conversation history migrates Keychain → file system on first launch (one-time, transparent)
+4. AppTheme avatar cache migrates UserDefaults → file system on first launch (one-time)
+5. Implement `--ui-testing` launch-arg stub in `AppServices` when ready for deeper E2E UI tests
+6. Apple Developer entitlement `com.apple.developer.mail-client` still pending (existing TODO from prior sprint)
+
+### Reverse gaps (iOS ahead, macOS to catch up next sprint)
+- Email signatures multi-management (iOS `Features/Settings/SignaturesView.swift`)
+- Task snooze (iOS `TaskCaptureService.snooze`)
+- Task attachments (iOS `Services/Tasks/AttachmentService.swift`)
+- Assistant persisted cache (iOS `Services/Email/AssistantPersistedCache.swift`)
+- SharedConversationView deep link (iOS handles `todus://shared/:slug`)
+- Shared folders collab (iOS `TaskCaptureService.syncSharedFolders`)
+
+### Bug + polish sweep (DONE)
+Multi-agent audit + remediation across 6 iOS surfaces: 5 critical + 17 high + 46 medium bugs + 84 polish items addressed. Integration `xcodebuild` clean. Full detail in `CHANGELOG.md` 2026-05-17 entry.
+
+## macOS hardening + parity sweep (DONE) (2026-05-17)
+
+Comprehensive bug-fix + UX-polish + iOS → macOS parity pass on `apps/macos/TodusMac`. Full integration `xcodebuild -project apps/macos/TodusMac.xcodeproj -scheme TodusMac -destination 'platform=macOS' build` → **BUILD SUCCEEDED** (zero errors). See full per-bug detail in `CHANGELOG.md` 2026-05-17 macOS entry.
+
+### Critical / high bug fixes (DONE)
+- `DONE` **C1 Meetings duplicate top-level types** — `project.yml` exclusions held; merged secondary toolbar action into canonical `MacMeetingDetailView`.
+- `DONE` **C2 Doc autosave** — flush on `onDisappear` + `onChange(docId)` + debounced title autosave + 3-state save indicator (saving / saved / failed-with-retry). Replaced placeholder doc info popover with real metadata view.
+- `DONE` **C3 OAuth callback validation** — host check + queue inbound URLs until `ModelContainer` ready.
+- `DONE` **C4 Push-to-talk hotkey release** — tear down `AudioInputBroker` on key-up + emit `sendActivityEnd()` end-turn frame.
+- `DONE` **C5 Voice panel dual-`AVAudioEngine` crash** — `.onAppear` → `.task` with awaited sequencing.
+- `DONE` **C6 Apple Reminders dedup + SwiftData `@MainActor` isolation**.
+- `DONE` **C7 Task delete sync** via `MacTaskSyncService` + confirmation dialog.
+- `DONE` **Email send hardening** — Bcc / `threadId` / `connectionId` / `draftId` plumbed; idempotent flush (5-min orphan window); pagination cursor race; spinner guard; stale-page drop; header sender match.
+- `DONE` **Tasks resilience** — 4xx vs 5xx retry policy + max retries; word-boundary compound parser; `FolderSyncService` `syncedIds` enforcement; DST gap fix.
+- `DONE` **Calendar resilience** — refresh storm dedup; per-calendar `sourceId`; multi-day overlap filter; scope-missing banner + reconnect; Toggle race fix; `accessRole` plumbing.
+- `DONE` **AI / Voice race conditions** — `cancelStream` generation counter; tool exec cancellation gates; disconnect reentrancy guard; mic teardown on `.error`; serialized audio send queue with backpressure; `functionCall.id` fallback; `AudioPlayer._isPlaying` derived from buffer count; polling cross-group leak.
+- `DONE` **Auth polish** — restore-flash gone; profile fetch gated; folder `createdAt` drop; settings full-shape save; voice context guard; OTP digit filter.
+
+### iOS → macOS parity (DONE)
+- `DONE` **Email compose**: attachments (NSOpenPanel chips + base64 send), per-connection signatures (new `MacSignatureStore`), live recipient validation, underline button + ⌘B / ⌘I / ⌘U shortcuts.
+- `DONE` **Email thread**: verification-code chip (regex + auto-copy once), tracking-info chip (UPS / FedEx / USPS / order numbers), smart-action toolbar (Create Task / Event / Generate Reply with inline spinners), "Remind me about this…" with snooze presets + custom date picker via `MacNotificationService.scheduleEmailReminder`.
+- `DONE` **Calendar**: native in-app `MacEventEditSheet` for create / edit / delete; "Open in Calendar.app" kept as context-menu fallback.
+- `DONE` **Notifications**: full category registration (`TASK_REMINDER`, `EMAIL`, `EMAIL_REMINDER`, `DUE_TASKS`, `AI_RESPONSE`) + actions (`TASK_COMPLETE`, `TASK_SNOOZE`, `ARCHIVE_EMAIL`); `MacAppDelegate` implements `UNUserNotificationCenterDelegate` with foreground `willPresent` + `didReceive` routing for all types.
+- `DONE` **Tasks**: recurrence (None / Daily / Weekly / Monthly / Yearly, RRULE-compatible) + checklist (live persist) + attachments (NSOpenPanel → `Application Support/TaskAttachments/{taskId}/`, relative path storage); JSON-backed accessors on `TaskRecord`.
+- `DONE` **Search**: cross-entity (tasks + emails + events + people) with category chips (All / Tasks / Emails / Events / People), recent searches via `@AppStorage` with clear, debounced 60-day calendar search, keyboard nav (↑ / ↓ / ⌘1–5 / ⌘↩), people derived from email senders.
+- `DONE` **Share deep link**: `todus://share?slug=...` → `MacRootView` observer → new `MacSharedConversationView` sheet (password unlock + import via `shareService.importShare`).
+- `DONE` **Sidebar**: restored Meetings sidebar entry.
+
+### UX polish (DONE)
+- `DONE` ~45 items: destructive confirmations (Log Out, task delete, folder delete), toasts (send failure, event creation, restore task, openInCalendarApp failure, moveEvent completion), accessibility labels on icon-only buttons across Voice / Assistant / Calendar / Local Models, notification routing via `onOpen` closure, Home briefing → thread deep link, Search / Meetings / Local Models row affordances, save indicator 3-state, docs loading skeleton, grid / list segmented picker, outline row hover, onboarding skip de-emphasized, Q&A button color reflects state, transcript "Show all (count)", calendar all-day Copy Date, multi-day event rendering across all spanned columns, empty search → "Create task '<query>'".
+
+### Outstanding follow-ups
+- `TODO` **macOS Widget extension real-data verification pass** — wiring exists in `project.yml`; `MacWidgetUpdateManager` needs an end-to-end hydration check.
+- `TODO` **`WakeWordService`** still stubbed — Picovoice Porcupine integration deferred to Phase 1.5 (tracked in macOS voice section below).
+- `TODO` **`GroupChatService`** polling → WebSocket Durable Object subscription migration.
+- `TODO` **`MacContentHeaderView`** top buttons still TODO real actions (accessibility labels landed).
+- `TODO` **`TodusMacTests` XCTest target** — no macOS test target exists; only iOS has `TodusTests`.
+
+## Current Voice Assistant Phase 1 (macOS)
+
+## Current Voice Assistant Phase 1 (macOS)
+
+- `DONE` **macOS voice MVP — global hotkey, state machine, tool calling, Mem0 ingest (2026-05-10):** `⌘⇧Space` push-to-talk runs end-to-end via the `VoiceSessionCoordinator` against the existing `/api/ai/voice-ws` Gemini Live proxy. Tools (`create_task`, `update_task`, `delete_task`, `get_time`) execute through `MacAIChatService.executeVoiceTool` and a Pi-portable `VoiceToolExecutor` seam. Voice transcripts persist via `ai.saveConversation` and ingest into Mem0 on save. New `GET /api/ai/voice/system-prompt` route centralizes the persona + AI profile + memories. Wake word ships as a fail-soft stub for Phase 1.5 Porcupine integration. Build green: `xcodebuild -project apps/macos/TodusMac.xcodeproj -scheme TodusMac` + `pnpm exec tsc --noEmit` (pre-existing TS noise outside voice files). User enables via Settings → Voice Assistant — both switches default OFF.
+- `TODO` **Phase 1.5 voice (deferred):** plug Porcupine SPM into `project.yml`, wire `WakeWordService` to consume frames from `AudioInputBroker`, expose Settings card to paste an access key into Keychain, wake on built-in `"computer"` keyword. Optional follow-ups: menu-bar item, custom "Hey Todus" keyword, sleep-after-30s timer, Pi voice daemon at `apps/voice-daemon/`.
 
 ## Current Review Fixes
 
@@ -172,6 +282,8 @@ Last updated: 2026-04-29
 The old M1-M7 milestones represent the historical WebView-shell phase and are complete.
 
 The active goal is a **truly native iOS app in `apps/ios`** that reaches feature + behavior parity with `apps/mail` while using native navigation/layout patterns.
+
+As of **2026-05-17**, `apps/macos/TodusMac` has also had a comprehensive hardening + iOS parity pass (Email compose/thread, Calendar in-app editing, Notifications categories/actions/routing, Tasks recurrence/checklist/attachments, cross-entity Search, Share deep link). Full integration `xcodebuild` for the macOS target is green. See `## macOS hardening + parity sweep (DONE) (2026-05-17)` above and the parity matrix in `PARITY_CHECKLIST.md` section 7.
 
 Auth/login is currently owned by another agent stream and is excluded from this stream unless explicitly reassigned.
 

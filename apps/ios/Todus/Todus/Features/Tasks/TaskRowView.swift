@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct TaskRowView: View {
     @Environment(\.modelContext) private var modelContext
@@ -8,20 +9,29 @@ struct TaskRowView: View {
     let onMoveRequested: () -> Void
     let onOpenDetails: () -> Void
 
+    @State private var showSnoozeOptions = false
+    /// Drives the destructive-delete confirmation dialog so the context-menu
+    /// Delete matches the explicit confirm flow used by `TaskTableView`.
+    /// (UX P2.)
+    @State private var showDeleteConfirmation = false
+
     var body: some View {
         Button {
             onOpenDetails()
         } label: {
             HStack(alignment: .center, spacing: 6) {
-                // Checkbox — isolated tap target, vertically centered with the text block
+                // Checkbox — isolated tap target, vertically centered with the text block.
+                // Frame is 44×44 to meet the HIG minimum hit area without shrinking the
+                // glyph (the SF symbol is still rendered at 16pt — only the touch region grows).
                 Button(action: { toggleCheckbox() }) {
                     Image(systemName: task.completed ? "checkmark.circle.fill" : "circle")
                         .font(.system(size: 16, weight: .medium))
                         .foregroundStyle(task.completed ? task.status.tintColor : AppTheme.subtleText)
                 }
                 .buttonStyle(.plain)
-                .frame(width: 36, height: 40)
+                .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
+                .accessibilityLabel(task.completed ? "Mark task incomplete" : "Mark task complete")
 
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(alignment: .center, spacing: 8) {
@@ -37,10 +47,15 @@ struct TaskRowView: View {
                                     .strikethrough(task.completed, color: .primary.opacity(0.25))
 
                                 if task.parseState == .pending {
-                                    Image(systemName: "sparkle")
-                                        .font(.system(size: 10, weight: .semibold))
-                                        .foregroundStyle(Color.primary.opacity(0.6))
-                                        .symbolEffect(.pulse.wholeSymbol, options: .repeating)
+                                    HStack(spacing: 3) {
+                                        Image(systemName: "sparkle")
+                                            .font(.system(size: 9, weight: .semibold))
+                                            .symbolEffect(.pulse.wholeSymbol, options: .repeating)
+                                        Text("Parsing…")
+                                            .font(.system(size: 10, weight: .semibold))
+                                            .tracking(-0.1)
+                                    }
+                                    .foregroundStyle(Color.primary.opacity(0.55))
                                 }
                             }
 
@@ -77,6 +92,53 @@ struct TaskRowView: View {
                 Label("Edit", systemImage: "pencil")
             }
             Button {
+                UIPasteboard.general.string = task.title
+            } label: {
+                Label("Copy title", systemImage: "doc.on.doc")
+            }
+            if !task.taskDescription.isEmpty && task.taskDescription != task.title {
+                Button {
+                    UIPasteboard.general.string = task.taskDescription
+                } label: {
+                    Label("Copy description", systemImage: "text.quote")
+                }
+            }
+            Button {
+                UIPasteboard.general.string = markdownChecklistRepresentation()
+            } label: {
+                Label("Copy as Markdown", systemImage: "checkmark.square")
+            }
+            Button {
+                duplicateTask()
+            } label: {
+                Label("Duplicate", systemImage: "plus.square.on.square")
+            }
+            Menu {
+                ForEach(AppTaskPriority.allCases) { p in
+                    Button {
+                        setPriority(p)
+                    } label: {
+                        if p == task.priority {
+                            Label(p.title, systemImage: "checkmark")
+                        } else {
+                            Text(p.title)
+                        }
+                    }
+                }
+            } label: {
+                Label("Priority", systemImage: "flag")
+            }
+            Menu {
+                // Use the shared SnoozeOption.menuOptions so labels stay in sync
+                // between the context menu and the swipe-action confirmation dialog.
+                // (UX P9.)
+                ForEach(SnoozeOption.menuOptions, id: \.option) { entry in
+                    Button(entry.label) { snooze(to: entry.option.date()) }
+                }
+            } label: {
+                Label("Snooze", systemImage: "moon.zzz")
+            }
+            Button {
                 onMoveRequested()
             } label: {
                 Label("Move to folder", systemImage: "folder")
@@ -86,19 +148,30 @@ struct TaskRowView: View {
             } label: {
                 Label(task.completed ? "Mark as incomplete" : "Mark complete", systemImage: "checkmark.circle")
             }
+            if task.emailThreadId != nil {
+                Button {
+                    openSourceEmail()
+                } label: {
+                    Label("Open source email", systemImage: "envelope")
+                }
+            }
             Divider()
             Button(role: .destructive) {
-                services.captureService.delete(task, in: modelContext)
+                showDeleteConfirmation = true
             } label: {
                 Label("Delete", systemImage: "trash")
             }
         }
+        // Trailing swipe is now Snooze (non-destructive). Delete moves to context menu only —
+        // a one-tap full-swipe destructive action on a list row was the leading cause of
+        // accidental deletions in usability testing. (UX assessment QW7 + QW8.)
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-            Button(role: .destructive) {
-                services.captureService.delete(task, in: modelContext)
+            Button {
+                showSnoozeOptions = true
             } label: {
-                Label("Delete", systemImage: "trash")
+                Label("Snooze", systemImage: "moon.zzz")
             }
+            .tint(AppTheme.switchTint)
         }
         .swipeActions(edge: .leading, allowsFullSwipe: true) {
             Button {
@@ -106,14 +179,14 @@ struct TaskRowView: View {
             } label: {
                 Label("Complete", systemImage: "checkmark")
             }
-            .tint(Color.primary)
+            .tint(Color(UIColor.systemGreen))
 
             Button {
                 onMoveRequested()
             } label: {
                 Label("Move", systemImage: "folder")
             }
-            .tint(AppTheme.secondaryAccent)
+            .tint(Color(UIColor.systemGray))
 
             Button {
                 onOpenDetails()
@@ -122,26 +195,76 @@ struct TaskRowView: View {
             }
             .tint(AppTheme.switchTint)
         }
+        .confirmationDialog("Snooze until…", isPresented: $showSnoozeOptions, titleVisibility: .visible) {
+            // Reuse the shared list so context menu + swipe dialog stay in sync.
+            // (UX P9.)
+            ForEach(SnoozeOption.menuOptions, id: \.option) { entry in
+                Button(entry.label) { snooze(to: entry.option.date()) }
+            }
+            Button("Cancel", role: .cancel) {}
+        }
+        .confirmationDialog(
+            "Delete this task?",
+            isPresented: $showDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                services.captureService.delete(task, in: modelContext)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("\"\(task.title)\" will be removed.")
+        }
     }
 
     // MARK: - Meta row (no status — status is trailing)
 
     @ViewBuilder
     private var metaChipsRow: some View {
-        let showFolderChip = task.folder != nil && task.dueDate == nil
-        if task.dueDate != nil || task.priority != .none || showFolderChip {
+        let hasOrigin = task.emailThreadId != nil
+        let hasFolder = task.folder != nil
+        let hasDue = task.dueDate != nil
+        let hasPriority = task.priority != .none
+        if hasOrigin || hasDue || hasPriority || hasFolder {
             HStack(spacing: 5) {
+                if hasOrigin {
+                    originTag
+                }
                 if let dueDate = task.dueDate {
                     dueDateTag(dueDate)
                 }
-                if task.priority != .none {
+                if hasPriority {
                     priorityTag(task.priority)
                 }
-                if let folder = task.folder, task.dueDate == nil {
+                // Folder + due-date now coexist on the same row instead of swapping.
+                // Hiding folder when a due-date exists made the chip blink in/out as
+                // dates changed and lost folder context exactly when the row was busiest.
+                if let folder = task.folder {
                     tag(title: folder.name, systemImage: "folder")
                 }
             }
         }
+    }
+
+    // MARK: - Email-origin Tag (rebuilds trust when AI extracted the task)
+
+    private var originTag: some View {
+        Button {
+            openSourceEmail()
+        } label: {
+            Label("Email", systemImage: "envelope.fill")
+                .font(.system(size: 10, weight: .semibold))
+                .tracking(-0.1)
+                .foregroundStyle(AppTheme.secondaryAccent)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(AppTheme.secondaryAccent.opacity(0.10), in: RoundedRectangle(cornerRadius: AppTheme.Radius.chip, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: AppTheme.Radius.chip, style: .continuous)
+                        .stroke(AppTheme.secondaryAccent.opacity(0.18), lineWidth: 0.5)
+                )
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Status Tag (tinted, higher contrast in light mode)
@@ -221,9 +344,59 @@ struct TaskRowView: View {
     // MARK: - Helpers
 
     private func toggleCheckbox() {
-        withAnimation(.snappy(duration: 0.22, extraBounce: 0)) {
+        // Light tap on every checkbox press; a celebratory success notification
+        // when the transition is open → done. (UX P1.)
+        let willBecomeDone = !task.completed
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        withAnimation(AppTheme.Motion.base) {
             services.captureService.toggleCompletion(task, in: modelContext)
         }
+        if willBecomeDone {
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+        }
+    }
+
+    private func snooze(to date: Date) {
+        withAnimation(AppTheme.Motion.base) {
+            services.captureService.snooze(task, until: date, in: modelContext)
+        }
+    }
+
+    /// Renders the task as a GitHub-Flavored-Markdown checklist line — pasteable
+    /// into Notion, Linear, Slack, etc. without losing the "open task" semantic.
+    private func markdownChecklistRepresentation() -> String {
+        let box = task.completed ? "- [x]" : "- [ ]"
+        if !task.taskDescription.isEmpty && task.taskDescription != task.title {
+            return "\(box) \(task.title)\n  \(task.taskDescription)"
+        }
+        return "\(box) \(task.title)"
+    }
+
+    private func duplicateTask() {
+        services.captureService.captureInStatus(
+            title: task.title,
+            status: task.status,
+            folder: task.folder,
+            in: modelContext
+        )
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+
+    private func setPriority(_ priority: AppTaskPriority) {
+        guard priority != task.priority else { return }
+        withAnimation(AppTheme.Motion.fast) {
+            task.priority = priority
+            task.updatedAt = .now
+            task.syncState = .pendingUpload
+            try? modelContext.save()
+        }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+
+    private func openSourceEmail() {
+        guard let threadId = task.emailThreadId else { return }
+        services.pendingEmailThreadId = threadId
+        services.navigateTo = .email
     }
 
     private func dueDateColor(_ date: Date) -> Color {
@@ -242,6 +415,54 @@ struct TaskRowView: View {
         case .medium: return Color(red: 0.88, green: 0.65, blue: 0.20)
         case .low:    return Color(red: 0.50, green: 0.60, blue: 0.70)
         default:      return AppTheme.mutedText
+        }
+    }
+}
+
+/// Snooze presets matching the task-row sheet and context menu.
+/// Centralised so iOS + macOS can reuse the same time-of-day rules.
+enum SnoozeOption: Hashable {
+    case tonight
+    case tomorrow
+    case weekend
+    case nextWeek
+
+    /// Single source of truth for snooze labels. Previously the context menu
+    /// said "Tonight" while the swipe-action sheet said "Tonight (8 pm)" —
+    /// same enum, different copy. Now both surfaces consume this list so
+    /// drift is impossible. (UX P9.)
+    static let menuOptions: [(option: SnoozeOption, label: String)] = [
+        (.tonight, "Tonight (8 pm)"),
+        (.tomorrow, "Tomorrow morning"),
+        (.weekend, "This weekend"),
+        (.nextWeek, "Next week"),
+    ]
+
+    func date(now: Date = .now, calendar: Calendar = .current) -> Date {
+        switch self {
+        case .tonight:
+            let candidate = calendar.date(bySettingHour: 20, minute: 0, second: 0, of: now)
+                ?? now.addingTimeInterval(4 * 3600)
+            if candidate <= now {
+                return calendar.date(byAdding: .day, value: 1, to: candidate) ?? candidate
+            }
+            return candidate
+        case .tomorrow:
+            let tomorrow = calendar.date(byAdding: .day, value: 1, to: now) ?? now.addingTimeInterval(86_400)
+            return calendar.date(bySettingHour: 9, minute: 0, second: 0, of: tomorrow) ?? tomorrow
+        case .weekend:
+            // Next Saturday at 9am.
+            var components = calendar.dateComponents([.year, .month, .day, .weekday], from: now)
+            let weekday = components.weekday ?? 1 // Sunday = 1, Saturday = 7
+            let daysUntilSaturday = ((7 - weekday) + 7) % 7
+            let target = daysUntilSaturday == 0 ? 7 : daysUntilSaturday
+            let saturday = calendar.date(byAdding: .day, value: target, to: now)
+                ?? now.addingTimeInterval(Double(target) * 86_400)
+            return calendar.date(bySettingHour: 9, minute: 0, second: 0, of: saturday) ?? saturday
+        case .nextWeek:
+            let nextWeek = calendar.date(byAdding: .day, value: 7, to: now)
+                ?? now.addingTimeInterval(7 * 86_400)
+            return calendar.date(bySettingHour: 9, minute: 0, second: 0, of: nextWeek) ?? nextWeek
         }
     }
 }

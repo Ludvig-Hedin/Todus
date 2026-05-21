@@ -1,4 +1,5 @@
 import AppKit
+import CryptoKit
 import Observation
 import SwiftUI
 
@@ -42,9 +43,26 @@ struct MacEmailInboxView: View {
     /// Which email folder to show — matches backend FOLDERS constant.
     /// Values: "inbox", "draft", "sent", "archive", "snoozed", "spam", "bin"
     var folder: String = "inbox"
+    /// Thread to open immediately on appear — used when navigating from Home.
+    /// Consumed once; call `onInitialThreadConsumed` to clear the pending ID in the parent.
+    var initialThreadId: String? = nil
+    var onInitialThreadConsumed: (() -> Void)? = nil
 
     private var isBackgroundRefreshing: Bool {
-        services.emailService.isLoadingThreads && !services.emailService.threads.isEmpty
+        // Include reconciliation so the inline "Updating" badge stays visible while we wait
+        // for the post-forceSync workflow to repopulate the backend DB — without this the
+        // user sees the badge vanish but no fresh threads, looking like the refresh failed.
+        (services.emailService.isLoadingThreads || services.emailService.isReconciling)
+            && !services.emailService.threads.isEmpty
+    }
+
+    /// True when we have no threads to show but a sync is in flight — used to suppress the
+    /// "No emails" empty-state placeholder while the backend re-sync workflow is running.
+    /// Without this, a user with an empty backend DB sees "No emails" for ~30s after a
+    /// trigger sync before fresh data lands, which reads as broken.
+    private var isInitialSyncInFlight: Bool {
+        (services.emailService.isLoadingThreads || services.emailService.isReconciling)
+            && services.emailService.threads.isEmpty
     }
 
     var body: some View {
@@ -52,6 +70,11 @@ struct MacEmailInboxView: View {
             // LEFT: thread list panel (resizable)
             leftPanel
                 .frame(width: listPanelWidth)
+                // Explicitly opt out of any inherited implicit animation on the
+                // width — without this, the parent's `.animation(.snappy, value:
+                // selectedThreadId)` modifier interpolates intermediate widths
+                // and the drag visibly lags one frame behind the cursor.
+                .animation(nil, value: listPanelWidth)
                 .background(MacTheme.contentBackground)
 
             // Draggable divider
@@ -77,7 +100,17 @@ struct MacEmailInboxView: View {
                             // translation is always relative to drag start, so adding to
                             // the captured pre-drag width gives the correct absolute value.
                             let newWidth = dragStartWidth + value.translation.width
-                            listPanelWidth = min(maxPanelWidth, max(minPanelWidth, newWidth))
+                            let clamped = min(maxPanelWidth, max(minPanelWidth, newWidth))
+                            // Force a non-animated transaction so each frame of
+                            // the drag commits straight through. Without this,
+                            // the implicit animations propagating from parent
+                            // modifiers tween every width update for 100-200ms,
+                            // which is what produced the "laggy" resize feel.
+                            var txn = Transaction()
+                            txn.disablesAnimations = true
+                            withTransaction(txn) {
+                                listPanelWidth = clamped
+                            }
                         }
                         .onEnded { _ in
                             dragStartWidth = listPanelWidth
@@ -89,7 +122,7 @@ struct MacEmailInboxView: View {
             // RIGHT: thread detail, sender thread list, or placeholder
             if let threadId = selectedThreadId {
                 MacEmailThreadView(threadId: threadId, onClose: {
-                    withAnimation(.snappy(duration: 0.15)) {
+                    withAnimation(MacTheme.Motion.fast) {
                         selectedThreadId = nil
                     }
                 })
@@ -108,25 +141,36 @@ struct MacEmailInboxView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .animation(.snappy(duration: 0.15), value: selectedThreadId)
+        .animation(MacTheme.Motion.fast, value: selectedThreadId)
         .task(id: folder) {
             services.emailService.prepareFolder(folder)
             recomputeFiltered()
             await services.emailService.ensureMailboxReady(for: folder)
         }
         .task(id: folder) {
-            // Poll for new mail every 60s while this folder is visible. Trigger a server-side
-            // Gmail re-sync so the listThreads response reflects mail received since last load
-            // — without this the backend just re-reads its DB and we never see new messages.
+            // Poll every 60s while this folder is visible — re-reads the backend DB so
+            // newly synced threads appear without user intervention. Routine polls
+            // intentionally do not call `mail.forceSync`: that mutation is destructive
+            // (drops backend tables) and produced a multi-second empty-inbox window every
+            // tick. The backend's continuous sync brings in new mail; pull-to-refresh and
+            // the header refresh button remain the user-driven force-sync paths.
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(60))
-                guard !Task.isCancelled, services.emailService.hasConnection, !services.emailService.isLoadingThreads else { continue }
-                await services.emailService.loadThreads(folder: folder, refresh: true, triggerSync: true)
+                guard !Task.isCancelled,
+                      services.emailService.hasConnection,
+                      !services.emailService.isLoadingThreads,
+                      !services.emailService.isReconciling
+                else { continue }
+                await services.emailService.loadThreads(folder: folder, refresh: true)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            guard services.emailService.hasConnection, !services.emailService.isLoadingThreads else { return }
-            Task { await services.emailService.loadThreads(folder: folder, refresh: true, triggerSync: true) }
+            guard services.emailService.hasConnection,
+                  !services.emailService.isLoadingThreads,
+                  !services.emailService.isReconciling
+            else { return }
+            // Foreground re-reads from DB only — same reasoning as the polling task.
+            Task { await services.emailService.loadThreads(folder: folder, refresh: true) }
         }
         .onChange(of: services.emailService.threads) { recomputeFiltered() }
         .onChange(of: searchText) {
@@ -136,6 +180,10 @@ struct MacEmailInboxView: View {
         .onAppear {
             syncViewModeFromPreference()
             recomputeFiltered()
+            if let id = initialThreadId {
+                selectedThreadId = id
+                onInitialThreadConsumed?()
+            }
         }
         .onChange(of: viewMode) { _, newMode in
             let prefersThreads = newMode == .threads
@@ -181,9 +229,11 @@ struct MacEmailInboxView: View {
                 loadingState(message: "Checking Gmail connection…")
             } else if !services.emailService.hasConnection {
                 connectPrompt
-            } else if services.emailService.isLoadingThreads && filteredThreads.isEmpty {
+            } else if isInitialSyncInFlight {
+                // We have no threads yet but a sync is running — show the loading state
+                // instead of "No emails" so the user knows fresh data is on its way.
                 loadingState(message: "Loading \(folderTitle.lowercased())…")
-            } else if services.emailService.errorMessage != nil && filteredThreads.isEmpty && !services.emailService.isLoadingThreads {
+            } else if services.emailService.errorMessage != nil && filteredThreads.isEmpty && !services.emailService.isLoadingThreads && !services.emailService.isReconciling {
                 // Load failed and no cached threads — show error with retry
                 errorState
             } else if filteredThreads.isEmpty {
@@ -227,7 +277,7 @@ struct MacEmailInboxView: View {
             ForEach(services.emailService.assistantNudges.prefix(2)) { nudge in
                 Button {
                     if let firstThreadId = nudge.threadIds.first {
-                        withAnimation(.snappy(duration: 0.15)) {
+                        withAnimation(MacTheme.Motion.fast) {
                             selectedThreadId = firstThreadId
                         }
                     }
@@ -297,10 +347,6 @@ struct MacEmailInboxView: View {
                 .buttonStyle(.plain)
                 .macClickablePointer()
             }
-
-            if isBackgroundRefreshing {
-                MacInlineRefreshBadge()
-            }
         }
         .padding(.horizontal, MacTheme.spacing12)
         .padding(.vertical, MacTheme.spacing6)
@@ -317,6 +363,13 @@ struct MacEmailInboxView: View {
                 .font(.system(size: 17, weight: .bold))
                 .foregroundStyle(MacTheme.textPrimary)
 
+            // Inline refresh indicator next to the title, not inside the search
+            // bar — having it in the search bar inflated the search row's height
+            // every time a sync started.
+            if isBackgroundRefreshing {
+                MacInlineRefreshBadge()
+            }
+
             macViewModePicker
 
             Spacer()
@@ -329,7 +382,7 @@ struct MacEmailInboxView: View {
         Menu {
             ForEach(MacInboxViewMode.allCases, id: \.rawValue) { mode in
                 Button {
-                    withAnimation(.easeInOut(duration: 0.15)) {
+                    withAnimation(MacTheme.Motion.fast) {
                         viewMode = mode
                         if mode == .threads { selectedSenderEmail = nil }
                     }
@@ -395,6 +448,11 @@ struct MacEmailInboxView: View {
                         .frame(maxWidth: .infinity)
                         .padding(MacTheme.spacing12)
                         .onAppear {
+                            // Guard against the spinner re-appearing while a paginate
+                            // call is already in flight — `.onAppear` fires multiple
+                            // times when LazyVStack rebuilds, which previously stacked
+                            // duplicate `loadThreads` calls against the same cursor.
+                            guard !services.emailService.isLoadingThreads else { return }
                             Task { await services.emailService.loadThreads(folder: folder) }
                         }
                 }
@@ -404,7 +462,7 @@ struct MacEmailInboxView: View {
 
     private func threadRow(_ thread: EmailThread) -> some View {
         Button {
-            withAnimation(.snappy(duration: 0.15)) {
+            withAnimation(MacTheme.Motion.fast) {
                 selectedThreadId = thread.id
             }
         } label: {
@@ -465,6 +523,87 @@ struct MacEmailInboxView: View {
         .onHover { hovering in
             hoveredThreadId = hovering ? thread.id : nil
         }
+        .contextMenu {
+            let senderDisplay = thread.from.name.isEmpty ? thread.from.email : thread.from.name
+            Button {
+                Self.copyToPasteboard(thread.subject)
+            } label: {
+                Label("Copy subject", systemImage: "text.quote")
+            }
+            .keyboardShortcut("c", modifiers: [.command, .shift])
+
+            Button {
+                Self.copyToPasteboard(senderDisplay)
+            } label: {
+                Label("Copy sender", systemImage: "person")
+            }
+            Button {
+                Self.copyToPasteboard(thread.from.email)
+            } label: {
+                Label("Copy email address", systemImage: "envelope")
+            }
+            if !thread.snippet.isEmpty {
+                Button {
+                    Self.copyToPasteboard(thread.snippet)
+                } label: {
+                    Label("Copy preview", systemImage: "doc.on.doc")
+                }
+            }
+
+            Divider()
+
+            Button {
+                withAnimation(MacTheme.Motion.fast) {
+                    selectedThreadId = thread.id
+                }
+            } label: {
+                Label("Open thread", systemImage: "tray.full")
+            }
+            .keyboardShortcut(.return, modifiers: [])
+
+            let isStarred = thread.labels.contains("STARRED")
+            Button {
+                Task { await services.emailService.toggleStar(ids: [thread.id]) }
+            } label: {
+                Label(isStarred ? "Unstar" : "Star", systemImage: isStarred ? "star.slash" : "star")
+            }
+            .keyboardShortcut("s", modifiers: [])
+
+            Button(thread.unread ? "Mark as read" : "Mark as unread") {
+                Task {
+                    if thread.unread {
+                        await services.emailService.markAsRead(ids: [thread.id])
+                    } else {
+                        await services.emailService.markAsUnread(ids: [thread.id])
+                    }
+                }
+            }
+            .keyboardShortcut("u", modifiers: [.command, .shift])
+
+            Button {
+                Task { await services.emailService.archiveThreads(ids: [thread.id]) }
+            } label: {
+                Label("Archive", systemImage: "archivebox")
+            }
+            .keyboardShortcut("e", modifiers: .command)
+
+            Button(role: .destructive) {
+                Task { await services.emailService.deleteThreads(ids: [thread.id]) }
+            } label: {
+                Label("Move to Bin", systemImage: "trash")
+            }
+            .keyboardShortcut(.delete, modifiers: .command)
+        }
+    }
+
+    /// Writes a string to the system pasteboard. Centralised so every Copy
+    /// menu item clears the pasteboard before writing — without the clear,
+    /// older types (RTF, file URL) on the previous clipboard entry can
+    /// shadow our new plain-text payload in apps that prefer richer types.
+    private static func copyToPasteboard(_ value: String) {
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(value, forType: .string)
     }
 
     // MARK: - People View
@@ -503,7 +642,7 @@ struct MacEmailInboxView: View {
             LazyVStack(spacing: 0) {
                 ForEach(macSenderGroups) { group in
                     Button {
-                        withAnimation(.snappy(duration: 0.15)) {
+                        withAnimation(MacTheme.Motion.fast) {
                             selectedSenderEmail = group.email
                             selectedThreadId = nil
                         }
@@ -602,7 +741,7 @@ struct MacEmailInboxView: View {
                 LazyVStack(spacing: 0) {
                     ForEach(group.threads) { thread in
                         Button {
-                            withAnimation(.snappy(duration: 0.15)) {
+                            withAnimation(MacTheme.Motion.fast) {
                                 selectedThreadId = thread.id
                             }
                         } label: {
@@ -739,7 +878,7 @@ struct MacEmailInboxView: View {
                     .multilineTextAlignment(.center)
             }
             Button("Try Again") {
-                Task { await services.emailService.loadThreads(folder: folder, refresh: true, triggerSync: true) }
+                Task { await services.emailService.loadThreads(folder: folder, refresh: true, triggerSync: true, bypassSyncCooldown: true) }
             }
             .font(.system(size: 12, weight: .medium))
             Spacer()
@@ -766,7 +905,7 @@ struct MacEmailInboxView: View {
 
             if searchText.isEmpty {
                 Button("Refresh") {
-                    Task { await services.emailService.loadThreads(folder: folder, refresh: true, triggerSync: true) }
+                    Task { await services.emailService.loadThreads(folder: folder, refresh: true, triggerSync: true, bypassSyncCooldown: true) }
                 }
                 .font(.system(size: 12, weight: .medium))
             }
@@ -865,6 +1004,25 @@ struct IdentifiableString: Identifiable {
     let value: String
     var id: String { value }
 }
+
+// Domains of free personal email providers. Brand-favicon lookup is skipped for these —
+// fetching their favicon would return the provider's own logo (Gmail's G, Outlook's O),
+// not the individual sender's avatar. Gravatar handles personal addresses instead.
+private let freeEmailProviderDomains: Set<String> = [
+    "gmail.com", "googlemail.com",
+    "outlook.com", "hotmail.com", "live.com", "msn.com",
+    "yahoo.com", "yahoo.co.uk", "yahoo.fr", "yahoo.de", "yahoo.co.jp", "yahoo.com.br",
+    "icloud.com", "me.com", "mac.com",
+    "protonmail.com", "proton.me", "protonmail.ch",
+    "zohomail.com", "zoho.com",
+    "yandex.com", "yandex.ru",
+    "mail.ru", "bk.ru", "inbox.ru", "list.ru",
+    "gmx.com", "gmx.net", "gmx.de", "gmx.at",
+    "aol.com", "aol.co.uk",
+    "fastmail.com", "fastmail.fm",
+    "hey.com",
+    "tutanota.com", "tutamail.com",
+]
 
 private struct MacAvatarInput: Encodable {
     let email: String
@@ -971,7 +1129,14 @@ final class MacAvatarCache {
     // MARK: - Backend fetch
 
     private func fetchCandidateURLs(email: String, name: String, api: TodosAPIClient) async -> [URL] {
+        // Same ordering as iOS: Google contact photo → Google s2 PNG / apple-touch-icon →
+        // backend fallbacks → other primaries. This guarantees a reliable PNG hits first
+        // for every real domain (matching Gmail's own behavior) and avoids relying on
+        // AsyncImage's failure cascade through .ico links.
         var urls: [URL] = []
+        var contactPhoto: URL? = nil
+        var nonGooglePrimary: URL? = nil
+        var backendFallbacks: [URL] = []
 
         do {
             let input = MacAvatarInput(email: email, name: name.isEmpty ? nil : name)
@@ -980,14 +1145,17 @@ final class MacAvatarCache {
             if let primary = response.primary,
                primary.source != "bimi",
                let urlString = primary.url,
-               let url = URL(string: urlString),
-               !urls.contains(url) {
-                urls.append(url)
+               let url = URL(string: urlString) {
+                if primary.source == "google" {
+                    contactPhoto = url
+                } else {
+                    nonGooglePrimary = url
+                }
             }
 
             for fallback in response.fallbackUrls {
-                if let url = URL(string: fallback), !urls.contains(url) {
-                    urls.append(url)
+                if let url = URL(string: fallback) {
+                    backendFallbacks.append(url)
                 }
             }
         } catch {
@@ -995,10 +1163,20 @@ final class MacAvatarCache {
             // we'll retry the backend in 5 minutes rather than waiting for a relaunch.
         }
 
+        if let cp = contactPhoto, !urls.contains(cp) { urls.append(cp) }
         for fallback in localFallbackURLs(for: email) where !urls.contains(fallback) {
             urls.append(fallback)
         }
+        if let np = nonGooglePrimary, !urls.contains(np) { urls.append(np) }
+        for fallback in backendFallbacks where !urls.contains(fallback) {
+            urls.append(fallback)
+        }
 
+        // .ico URLs are intentionally kept — for transactional senders (resend, kivra,
+        // etc.) that ship only `/favicon.ico`, those are often the only fallback that
+        // actually serves an image. The MacSenderAvatarView failure cascade advances past
+        // any URL that NSImage fails to decode, so leaving them in costs nothing while
+        // preventing initials-only renders for this class of senders.
         return urls
     }
 
@@ -1009,26 +1187,58 @@ final class MacAvatarCache {
     private func localFallbackURLs(for email: String) -> [URL] {
         guard let domain = domainFromEmail(email), !domain.isEmpty else { return [] }
 
-        var hosts: [String] = [domain]
-        if let root = rootDomain(from: domain), root != domain {
-            hosts.append(root)
+        // For personal email providers, skip brand-favicon lookup entirely.
+        if freeEmailProviderDomains.contains(domain) {
+            return gravatarURL(email: email).map { [$0] } ?? []
         }
 
+        // Root domain first for best Clearbit hit rate; then subdomain; then www. variants.
+        var rootHost: String? = rootDomain(from: domain)
+        if rootHost == domain { rootHost = nil }
+
+        var hosts: [String] = []
+        if let root = rootHost { hosts.append(root) }
+        hosts.append(domain)
         for host in Array(hosts) where !host.hasPrefix("www.") {
             hosts.append("www.\(host)")
         }
+        var seen = Set<String>()
+        hosts = hosts.filter { seen.insert($0).inserted }
 
         var candidates: [URL] = []
-        // Google's favicon service has the best coverage (same source Gmail uses),
-        // so we prioritize it. Then apple-touch-icon (higher-res), then other fallbacks.
+
+        // 1. Clearbit: high-quality brand logos, returns proper 404 (not a globe).
+        for host in hosts where !host.hasPrefix("www.") {
+            if let url = URL(string: "https://logo.clearbit.com/\(host)?size=256") {
+                candidates.append(url)
+            }
+        }
+
+        // 2. Gravatar
+        if let grav = gravatarURL(email: email), !candidates.contains(grav) {
+            candidates.append(grav)
+        }
+
+        // 3. icon.horse and DuckDuckGo: return 404 on failure
+        for host in hosts where !host.hasPrefix("www.") {
+            if let url = URL(string: "https://icon.horse/icon/\(host)"), !candidates.contains(url) {
+                candidates.append(url)
+            }
+            if let url = URL(string: "https://icons.duckduckgo.com/ip3/\(host).ico"), !candidates.contains(url) {
+                candidates.append(url)
+            }
+        }
+
+        // 4. Apple touch icons + favicon.ico — broad compatibility fallbacks.
+        //    Google s2 is intentionally excluded: it returns a generic globe PNG (HTTP
+        //    200) for unknown domains, which AsyncImage accepts as success and displays
+        //    — hiding the sender's real initials behind a meaningless globe icon.
         for host in hosts {
             let rawURLs = [
-                "https://www.google.com/s2/favicons?domain=\(host)&sz=128",
+                "https://\(host)/apple-touch-icon-precomposed.png",
                 "https://\(host)/apple-touch-icon.png",
                 "https://\(host)/favicon.ico",
-                "https://icons.duckduckgo.com/ip3/\(host).ico"
             ]
-
             for raw in rawURLs {
                 if let url = URL(string: raw), !candidates.contains(url) {
                     candidates.append(url)
@@ -1037,6 +1247,17 @@ final class MacAvatarCache {
         }
 
         return candidates
+    }
+
+    /// SHA-256 Gravatar URL for the given email (CryptoKit, macOS 10.15+).
+    /// `d=404` makes Gravatar return HTTP 404 when no avatar exists so NSImage sees
+    /// a failure and the waterfall advances rather than showing a default image.
+    private func gravatarURL(email: String) -> URL? {
+        let normalized = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty else { return nil }
+        let hash = SHA256.hash(data: Data(normalized.utf8))
+        let hashString = hash.map { String(format: "%02x", $0) }.joined()
+        return URL(string: "https://www.gravatar.com/avatar/\(hashString)?s=256&d=404&r=g")
     }
 
     private func domainFromEmail(_ email: String) -> String? {
@@ -1132,21 +1353,6 @@ final class MacAvatarCache {
     }
 }
 
-private enum MacStableAvatarColorIndex {
-    static func index(seed: String, paletteCount: Int) -> Int {
-        precondition(paletteCount > 0, "paletteCount must be positive")
-        var hash: Double = 0
-        for unit in seed.utf16 {
-            let code = Double(unit)
-            let current = Int32(truncatingIfNeeded: Int64(hash))
-            let shifted = current &<< 5
-            let next = Double(shifted) - hash
-            hash = code + next
-        }
-        return Int(abs(Int64(hash)) % Int64(paletteCount))
-    }
-}
-
 struct MacSenderAvatarView: View {
     let email: String
     let name: String
@@ -1157,71 +1363,104 @@ struct MacSenderAvatarView: View {
 
     var body: some View {
         let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let candidates = MacAvatarCache.shared.candidates(for: normalizedEmail) ?? []
 
-        Group {
-            if urlIndex < candidates.count {
-                let currentURL = candidates[urlIndex]
-                AsyncImage(url: currentURL, transaction: Transaction(animation: nil)) { phase in
-                    switch phase {
-                    case .success(let image):
-                        // White backdrop keeps transparent logos legible; ZStack ensures
-                        // only one layer is visible at a time (no bleed from initials).
-                        ZStack {
-                            Circle().fill(Color.white)
-                            image
-                                .resizable()
-                                .scaledToFill()
-                        }
-                        .onAppear {
-                            MacAvatarCache.shared.recordSuccess(email: normalizedEmail, url: currentURL)
-                        }
-                    case .failure:
-                        initialsCircle
-                            .onAppear {
-                                if urlIndex < candidates.count {
-                                    urlIndex += 1
-                                }
-                            }
-                    case .empty:
-                        initialsCircle
-                    @unknown default:
-                        initialsCircle
-                    }
+        if let spec = MacSenderIconRegistry.icon(for: normalizedEmail) {
+            // Bundled brand icon — instant, zero network, no flash, crisp at any scale.
+            // SVG path → brand-color circle + tinted glyph.
+            // No SVG (letter-only registry entry) → fall through to the neutral
+            // initialsCircle below so the avatar reads as a generic initial rather
+            // than a loud brand-colored letter.
+            if let slug = spec.slug {
+                ZStack {
+                    Circle().fill(spec.background)
+                    Image("sender-icon-\(slug)")
+                        .renderingMode(.template)
+                        .resizable()
+                        .scaledToFit()
+                        .foregroundStyle(spec.foreground)
+                        .padding(size * 0.25)
                 }
-                // Keying by URL forces SwiftUI to treat each candidate as a fresh AsyncImage,
-                // so the .empty → .success/.failure transition fires cleanly per URL and the
-                // failure-driven .onAppear isn't suppressed by view-identity reuse.
-                .id(currentURL)
+                .frame(width: size, height: size)
+                .clipShape(Circle())
             } else {
                 initialsCircle
             }
-        }
-        .frame(width: size, height: size)
-        .clipShape(Circle())
-        .task(id: normalizedEmail) {
-            urlIndex = 0
-            await MacAvatarCache.shared.resolveIfNeeded(
-                email: normalizedEmail,
-                name: name,
-                api: services.apiClient
-            )
-        }
-        .onChange(of: candidates.count) { _, newCount in
-            // If candidates arrive (or refresh) after we exhausted the previous list,
-            // restart the waterfall so we don't stay stuck on initials.
-            if urlIndex >= newCount && newCount > 0 {
+        } else {
+            let candidates = MacAvatarCache.shared.candidates(for: normalizedEmail) ?? []
+            Group {
+                if urlIndex < candidates.count {
+                    let currentURL = candidates[urlIndex]
+                    AsyncImage(url: currentURL, transaction: Transaction(animation: nil)) { phase in
+                        switch phase {
+                        case .success(let image):
+                            // Person photos (Google contacts, Gravatar) fill edge-to-edge.
+                            // Brand logos (Clearbit, favicon) are fitted with padding on
+                            // a neutral background so transparent-edge logos don't bleed
+                            // a ring into the UI.
+                            let isPhoto = Self.isPersonPhoto(currentURL)
+                            ZStack {
+                                Circle().fill(isPhoto ? .clear : Color(NSColor.windowBackgroundColor))
+                                image
+                                    .resizable()
+                                    .aspectRatio(contentMode: isPhoto ? .fill : .fit)
+                                    .padding(isPhoto ? 0 : size * 0.10)
+                            }
+                            .onAppear {
+                                MacAvatarCache.shared.recordSuccess(email: normalizedEmail, url: currentURL)
+                            }
+                        case .failure:
+                            initialsCircle
+                                .onAppear {
+                                    if urlIndex < candidates.count {
+                                        urlIndex += 1
+                                    }
+                                }
+                        case .empty:
+                            initialsCircle
+                        @unknown default:
+                            initialsCircle
+                        }
+                    }
+                    .id(currentURL)
+                } else {
+                    initialsCircle
+                }
+            }
+            .frame(width: size, height: size)
+            .clipShape(Circle())
+            .task(id: normalizedEmail) {
                 urlIndex = 0
+                await MacAvatarCache.shared.resolveIfNeeded(
+                    email: normalizedEmail,
+                    name: name,
+                    api: services.apiClient
+                )
+            }
+            .onChange(of: candidates.count) { _, newCount in
+                if urlIndex >= newCount && newCount > 0 {
+                    urlIndex = 0
+                }
             }
         }
     }
 
+    /// True for real person photos (Google profile photos, Gravatar).
+    /// These render full-bleed. All other sources are fitted with padding to prevent
+    /// transparent-edge artifacts.
+    private static func isPersonPhoto(_ url: URL) -> Bool {
+        let host = url.host?.lowercased() ?? ""
+        return host.hasSuffix("googleusercontent.com") || host.hasSuffix("gravatar.com")
+    }
+
+    /// Neutral muted avatar — gray circle + white initials.
+    /// Matches Notion Mail's restrained style: no rotating colors, no per-sender
+    /// brand color noise. Saves visual saturation budget for real brand icons.
     private var initialsCircle: some View {
         Text(initials)
-            .font(.system(size: max(size * 0.38, 10), weight: .semibold, design: .rounded))
-            .foregroundStyle(avatarForegroundColor)
+            .font(.system(size: max(size * 0.42, 10), weight: .semibold, design: .rounded))
+            .foregroundStyle(.white)
             .frame(width: size, height: size)
-            .background(avatarBackgroundColor, in: Circle())
+            .background(MacTheme.mutedAvatarFill, in: Circle())
     }
 
     private var initials: String {
@@ -1235,19 +1474,5 @@ struct MacSenderAvatarView: View {
         }
 
         return String(email.first.map { Character(String($0).uppercased()) } ?? "?")
-    }
-
-    private var avatarPaletteIndex: Int {
-        MacStableAvatarColorIndex.index(seed: email.lowercased(), paletteCount: 8)
-    }
-
-    private var avatarBackgroundColor: Color {
-        let colors: [Color] = [.brown, .purple, .orange, .pink, .teal, .indigo, .mint, .cyan]
-        return colors[avatarPaletteIndex].opacity(0.16)
-    }
-
-    private var avatarForegroundColor: Color {
-        let colors: [Color] = [.brown, .purple, .orange, .pink, .teal, .indigo, .mint, .cyan]
-        return colors[avatarPaletteIndex]
     }
 }

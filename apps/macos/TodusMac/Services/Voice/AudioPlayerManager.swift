@@ -12,6 +12,9 @@ final class AudioPlayerManager: @unchecked Sendable {
 
     /// True while audio is actively playing or buffered for playback.
     /// Thread-safe: reads are synchronized on audioQueue to match writes.
+    /// Derived from `scheduledBufferCount` so the flag can never lie about
+    /// whether real audio is in flight (the previous eager-write version could
+    /// report `true` after every buffer had already drained).
     var isPlaying: Bool {
         audioQueue.sync { _isPlaying }
     }
@@ -22,7 +25,9 @@ final class AudioPlayerManager: @unchecked Sendable {
     private let outputFormat: AVAudioFormat
     /// Serial queue for thread-safe buffer scheduling and state access.
     private let audioQueue = DispatchQueue(label: "com.todus.audioPlayer", qos: .userInteractive)
-    private var _isPlaying = false
+    /// Derived state: true iff at least one buffer is still scheduled. Always
+    /// recomputed from `scheduledBufferCount`; never set independently.
+    private var _isPlaying: Bool { scheduledBufferCount > 0 }
     /// Tracks how many buffers are scheduled so we know when playback naturally finishes.
     private var scheduledBufferCount = 0
     private var isEngineRunning = false
@@ -57,7 +62,8 @@ final class AudioPlayerManager: @unchecked Sendable {
         audioQueue.async { [weak self] in
             guard let self else { return }
             self.playerNode.stop()
-            self._isPlaying = false
+            // Reset the buffer count first so the derived `_isPlaying` flips to false
+            // before any observer reads it during teardown.
             self.scheduledBufferCount = 0
             self.stopEngine()
         }
@@ -75,7 +81,6 @@ final class AudioPlayerManager: @unchecked Sendable {
             try engine.start()
             playerNode.play()
             isEngineRunning = true
-            _isPlaying = true
         } catch {
             print("[AudioPlayerManager] Failed to start engine: \(error)")
             // Clean up the partial attach/connect so a future enqueue can retry from scratch
@@ -83,7 +88,6 @@ final class AudioPlayerManager: @unchecked Sendable {
             engine.stop()
             engine.detach(playerNode)
             isEngineRunning = false
-            _isPlaying = false
         }
     }
 
@@ -94,7 +98,6 @@ final class AudioPlayerManager: @unchecked Sendable {
         // Detach to allow re-attaching cleanly on next session
         engine.detach(playerNode)
         isEngineRunning = false
-        _isPlaying = false
     }
 
     private func schedulePCMBuffer(_ data: Data) {
@@ -123,13 +126,12 @@ final class AudioPlayerManager: @unchecked Sendable {
             // so `self` is a strong let constant when captured by the audioQueue closure.
             guard let self else { return }
             self.audioQueue.async {
-                self.scheduledBufferCount -= 1
-                if self.scheduledBufferCount <= 0 {
-                    self.scheduledBufferCount = 0
-                    self._isPlaying = false
-                }
+                // `_isPlaying` is now derived from `scheduledBufferCount`, so just
+                // decrementing the counter is enough — no separate flag to maintain.
+                self.scheduledBufferCount = max(0, self.scheduledBufferCount - 1)
             }
         }
-        _isPlaying = true
+        // No `_isPlaying = true` — the buffer count just bumped, so the derived
+        // property already reads true on the next access.
     }
 }

@@ -42,3 +42,13 @@ Legacy apps moved to `apps/archived/` for reference only:
 - **macOS:** `cd apps/macos && xcodegen generate && open TodusMac.xcodeproj`
 - **Web + Backend:** `pnpm dev` (Turborepo), `pnpm deploy:frontend`, `pnpm deploy:backend`
 - **Database:** `pnpm docker:db:up`, `pnpm db:generate`, `pnpm db:migrate`
+
+## Design System
+
+Each platform owns a `DesignSystem/` folder for color / typography / radius / spacing / motion tokens:
+
+- Web: `apps/web/app/globals.css`
+- iOS: `apps/ios/Todus/Todus/DesignSystem/AppTheme.swift`
+- macOS: `apps/macos/TodusMac/DesignSystem/MacTheme.swift`
+
+Cross-platform parity is tracked in [DESIGN_SYSTEM.md](DESIGN_SYSTEM.md) (canonical tokens) and [DESIGN_SYSTEM_INCONSISTENCIES.md](DESIGN_SYSTEM_INCONSISTENCIES.md) (gap analysis). Live in-app viewers exist on all three platforms behind the `TODUS_ALLOWLISTED_EMAILS` allowlist.

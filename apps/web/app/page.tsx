@@ -1,3 +1,4 @@
+import { SmoothScrollProvider } from '@/components/providers/smooth-scroll';
 import HomeContent from '@/components/home/HomeContent';
 import { authProxy } from '@/lib/auth-proxy';
 import type { Route } from './+types/page';
@@ -10,5 +11,9 @@ export async function clientLoader({ request }: Route.ClientLoaderArgs) {
 }
 
 export default function Home() {
-  return <HomeContent />;
+  return (
+    <SmoothScrollProvider>
+      <HomeContent />
+    </SmoothScrollProvider>
+  );
 }

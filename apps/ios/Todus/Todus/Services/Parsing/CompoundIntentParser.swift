@@ -166,7 +166,11 @@ struct CompoundIntentParser {
         var segments: [String] = []
         var lastEnd = 0
         for match in matches {
-            let segment = nsText.substring(with: NSRange(location: lastEnd, length: match.range.location - lastEnd))
+            // Guard against negative substring length when matches overlap; only
+            // collect a segment when there is actual text between conjunctions.
+            let length = match.range.location - lastEnd
+            guard length >= 0 else { continue }
+            let segment = nsText.substring(with: NSRange(location: lastEnd, length: length))
             let nextSegmentStart = NSMaxRange(match.range)
             let remaining = nsText.substring(from: nextSegmentStart)
 
@@ -202,21 +206,31 @@ struct CompoundIntentParser {
 
     // MARK: - Relative time references
 
+    /// Word-boundary token check — avoids substring false positives such as
+    /// "innan" matching inside "innanför" or "after" matching "afterthought".
+    /// Multi-word phrases are escaped and matched literally with \b boundaries.
+    private static func containsToken(_ token: String, in text: String) -> Bool {
+        let pattern = "\\b\(NSRegularExpression.escapedPattern(for: token))\\b"
+        return text.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil
+    }
+
     private static func containsBeforeReference(_ lower: String) -> Bool {
         let tokens = ["innan", "before", "dessförinnan", "i förväg", "i forvag", "i förhand"]
-        return tokens.contains(where: lower.contains)
+        return tokens.contains(where: { containsToken($0, in: lower) })
     }
 
     private static func containsAfterReference(_ lower: String) -> Bool {
-        let tokens = ["efteråt", "efterat", "efter det", "after", "afterwards", "sedan"]
-        if tokens.contains(where: lower.contains) { return true }
+        let tokens = ["efteråt", "efterat", "efter det", "after", "afterwards"]
+        if tokens.contains(where: { containsToken($0, in: lower) }) { return true }
         let senPattern = #"\bsen\b"#
+        let sedanPattern = #"\bsedan\b"#
         return lower.range(of: senPattern, options: .regularExpression) != nil
+            || lower.range(of: sedanPattern, options: .regularExpression) != nil
     }
 
     private static func containsSoonReference(_ lower: String) -> Bool {
         let tokens = ["snart", "soon"]
-        return tokens.contains(where: lower.contains)
+        return tokens.contains(where: { containsToken($0, in: lower) })
     }
 
     private static func stripRelativeRefWords(_ title: String, locale: Locale) -> String {
@@ -227,10 +241,11 @@ struct CompoundIntentParser {
             "i förhand", "i forhand", "sedan", "efter det",
         ]
         for word in safePhrases {
+            let pattern = "\\b\(NSRegularExpression.escapedPattern(for: word))\\b"
             result = result.replacingOccurrences(
-                of: word,
+                of: pattern,
                 with: "",
-                options: [.caseInsensitive, .diacriticInsensitive]
+                options: [.regularExpression, .caseInsensitive]
             )
         }
         result = result.replacingOccurrences(

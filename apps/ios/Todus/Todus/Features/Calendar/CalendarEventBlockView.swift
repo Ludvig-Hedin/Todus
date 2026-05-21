@@ -42,14 +42,55 @@ struct CalendarEventBlockView: View {
                 RoundedRectangle(cornerRadius: eventRadius, style: .continuous)
                     .fill(eventColor.opacity(0.85))
             )
-            .contentShape(Rectangle())
+            // iOS HIG calls for a 44pt minimum tap target. A custom hit shape
+            // keeps the visible pill at `height` while widening the hit region
+            // so short events are still tappable on a thumb.
+            .contentShape(HitTargetShape(minHeight: 44))
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("\(event.title), \(timeString)")
+        .accessibilityAddTraits(.isButton)
+        .contextMenu {
+            Button {
+                onTap?()
+            } label: {
+                Label("Open", systemImage: "calendar")
+            }
+            Button {
+                UIPasteboard.general.string = event.title
+            } label: {
+                Label("Copy title", systemImage: "doc.on.doc")
+            }
+            Button {
+                UIPasteboard.general.string = "\(event.title) — \(timeString)"
+            } label: {
+                Label("Copy event summary", systemImage: "text.quote")
+            }
+        }
     }
 
     private var timeString: String {
         let start = event.startDate.formatted(date: .omitted, time: .shortened)
         let end = event.endDate.formatted(date: .omitted, time: .shortened)
         return "\(start) – \(end)"
+    }
+}
+
+/// Custom hit-test shape that always reports a rectangle at least `minHeight`
+/// points tall — used to enlarge tap targets without resizing the visible view.
+private struct HitTargetShape: Shape {
+    let minHeight: CGFloat
+    func path(in rect: CGRect) -> Path {
+        let height = max(rect.height, minHeight)
+        // Centre the expanded hit rect vertically so the touch area grows
+        // equally above and below the visible block instead of leaking only
+        // into the event below it.
+        let expandedRect = CGRect(
+            x: rect.minX,
+            y: rect.minY - (height - rect.height) / 2,
+            width: rect.width,
+            height: height
+        )
+        return Path(expandedRect)
     }
 }

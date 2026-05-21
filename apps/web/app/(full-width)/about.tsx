@@ -18,13 +18,13 @@ export const meta: MetaFunction = () => {
     {
       name: 'description',
       content:
-        'Learn about Todus, the AI-native email client founded to help busy professionals manage email, calendar, and tasks with AI. Open source, backed by Y Combinator.',
+        'Learn about Todus, the AI-native email client founded to help busy professionals manage email, calendar, and tasks with AI. Open source.',
     },
     { property: 'og:title', content: 'About Todus — AI Email Client Built to Save You Time' },
     {
       property: 'og:description',
       content:
-        'Learn about Todus, the AI-native email client founded to help busy professionals manage email, calendar, and tasks with AI. Open source, backed by Y Combinator.',
+        'Learn about Todus, the AI-native email client founded to help busy professionals manage email, calendar, and tasks with AI. Open source.',
     },
     { tagName: 'link', rel: 'canonical', href: 'https://todus.app/about' },
   ];
@@ -174,7 +174,7 @@ const sections = [
             founders@todus.app
           </a>
           <a
-            href="https://github.com/todus-app"
+            href="https://github.com/Ludvig-Hedin/Todus"
             className="inline-flex items-center text-blue-400 hover:text-blue-300"
           >
             <GithubIcon className="mr-2 h-4 w-4" />

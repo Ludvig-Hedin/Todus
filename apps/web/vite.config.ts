@@ -58,6 +58,13 @@ export default defineConfig(({ mode }) => {
     ],
     server: {
       port: 3000,
+      proxy: {
+        '/api': { target: 'http://localhost:8787', changeOrigin: true },
+        '/monitoring': { target: 'http://localhost:8787', changeOrigin: true },
+        '/sse': { target: 'http://localhost:8787', changeOrigin: true, ws: true },
+        '/agents': { target: 'http://localhost:8787', changeOrigin: true, ws: true },
+        '/.well-known': { target: 'http://localhost:8787', changeOrigin: true },
+      },
       warmup: {
         clientFiles: ['./app/**/*', './components/**/*'],
       },

@@ -30,6 +30,10 @@ struct GoogleCalendarListEntry: Decodable, Sendable {
     let name: String
     let color: String
     let primary: Bool
+    /// Google Calendar access role for this calendar (e.g. "owner", "writer",
+    /// "reader", "freeBusyReader"). Optional for backward compatibility with
+    /// older backend responses; falls back to "reader" when missing.
+    let accessRole: String?
 }
 
 @MainActor
@@ -42,6 +46,9 @@ final class GoogleCalendarService {
     private(set) var scopeMissingConnectionIds: Set<String> = []
     private var lastRefreshAt: Date?
     private let refreshTTL: TimeInterval = 5 * 60
+    /// Deduplicates concurrent refresh calls — multiple callers awaiting `refresh()`
+    /// during a refresh storm all wait on the same Task instead of firing N requests.
+    private var inflightRefresh: Task<Void, Never>?
 
     private enum Keys {
         static let cachedSources = "Todus.macos.googleCalendarSourcesV1"
@@ -78,6 +85,22 @@ final class GoogleCalendarService {
     }
 
     func refresh(googleConnections: [ConnectionAccount]) async {
+        // If a refresh is already in flight, await its result instead of starting a new one.
+        if let inflight = inflightRefresh {
+            await inflight.value
+            return
+        }
+
+        let task: Task<Void, Never> = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.performRefresh(googleConnections: googleConnections)
+        }
+        inflightRefresh = task
+        await task.value
+        if inflightRefresh == task { inflightRefresh = nil }
+    }
+
+    private func performRefresh(googleConnections: [ConnectionAccount]) async {
         guard !googleConnections.isEmpty else {
             sourcesByConnection = [:]
             scopeMissingConnectionIds = []
@@ -185,7 +208,7 @@ final class GoogleCalendarService {
                     calendarId: entry.id,
                     name: entry.name,
                     hexColor: entry.color,
-                    accessRole: "reader",
+                    accessRole: entry.accessRole ?? "reader",
                     isPrimary: entry.primary
                 )
             }

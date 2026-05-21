@@ -7,7 +7,6 @@ import {
   Danger,
   Sheet,
   LockIcon,
-  Mail,
 } from '@/components/icons/icons';
 import {
   CalendarDays,
@@ -16,6 +15,7 @@ import {
   CreditCard,
   FileText,
   Home,
+  Mail,
   MessageSquareIcon,
   Search,
   Video,
@@ -64,6 +64,13 @@ export const navigationConfig: Record<string, NavConfig> = {
         id: 'primary',
         title: '',
         items: [
+          {
+            id: 'search',
+            title: m['navigation.sidebar.search'](),
+            url: '/mail/search',
+            icon: Search,
+            shortcut: 'cmd + k',
+          },
           {
             id: 'home',
             title: m['navigation.sidebar.home'](),
@@ -144,26 +151,6 @@ export const navigationConfig: Record<string, NavConfig> = {
           },
         ],
       },
-      {
-        id: 'extras',
-        title: '',
-        items: [
-          {
-            id: 'search',
-            title: m['navigation.sidebar.search'](),
-            url: '/mail/search',
-            icon: Search,
-            shortcut: 'g + f',
-          },
-          {
-            id: 'chat',
-            title: m['navigation.sidebar.chat'](),
-            url: '/mail/chat',
-            icon: MessageSquareIcon,
-            shortcut: 'g + /',
-          },
-        ],
-      },
     ],
   },
   settings: {
@@ -171,6 +158,9 @@ export const navigationConfig: Record<string, NavConfig> = {
     sections: [
       {
         title: 'Settings',
+        // Consolidated nav — every entry leads to a substantial surface. Single-button
+        // routes (Appearance / About / Categories / Meetings) are folded into the
+        // appropriate parent page so users aren't dropped onto near-empty pages.
         items: [
           {
             title: m['common.actions.back'](),
@@ -178,7 +168,6 @@ export const navigationConfig: Record<string, NavConfig> = {
             icon: ArrowLeft,
             isBackButton: true,
           },
-
           {
             title: m['navigation.settings.general'](),
             url: '/settings/general',
@@ -186,29 +175,15 @@ export const navigationConfig: Record<string, NavConfig> = {
             shortcut: 'g + s',
           },
           {
+            // TODO(i18n): Replace the English fallback once locale catalogs add this key.
+            title: m['navigation.settings.ai'](),
+            url: '/settings/ai',
+            icon: Cpu,
+          },
+          {
             title: m['navigation.settings.connections'](),
             url: '/settings/connections',
             icon: Users,
-          },
-          {
-            title: m['navigation.settings.privacy'](),
-            url: '/settings/privacy',
-            icon: LockIcon,
-          },
-          {
-            title: m['navigation.settings.appearance'](),
-            url: '/settings/appearance',
-            icon: Stars,
-          },
-          {
-            title: m['navigation.settings.labels'](),
-            url: '/settings/labels',
-            icon: Sheet,
-          },
-          {
-            title: m['navigation.settings.categories'](),
-            url: '/settings/categories',
-            icon: Tabs,
           },
           {
             title: m['navigation.settings.signatures'](),
@@ -216,21 +191,9 @@ export const navigationConfig: Record<string, NavConfig> = {
             icon: MessageSquareIcon,
           },
           {
-            title: m['navigation.settings.shortcuts'](),
-            url: '/settings/shortcuts',
-            icon: Tabs,
-            shortcut: '?',
-          },
-          {
-            title: m['navigation.settings.meetings'](),
-            url: '/settings/meetings',
-            icon: Video,
-          },
-          {
-            // TODO(i18n): Replace the English fallback once locale catalogs add this key.
-            title: m['navigation.settings.ai'](),
-            url: '/settings/ai',
-            icon: Cpu,
+            title: m['navigation.settings.privacy'](),
+            url: '/settings/privacy',
+            icon: LockIcon,
           },
           {
             // TODO(i18n): Replace the English fallback once locale catalogs add this key.

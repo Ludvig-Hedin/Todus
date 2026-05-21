@@ -47,12 +47,23 @@ const refreshAppleJwks = async () => {
 const getAppleKey = async (kid: string) => {
   const stale = !appleKeyCache || Date.now() - appleJwksFetchedAt > APPLE_JWKS_TTL_MS;
   if (stale || !appleKeyCache?.has(kid)) {
-    await refreshAppleJwks();
+    try {
+      await refreshAppleJwks();
+    } catch (error) {
+      // Apple JWKS endpoint hiccupped. Don't propagate (would turn every
+      // in-flight Apple sign-in into an opaque 500) — fall through and try
+      // the cached key set we still have.
+      console.error('[apple-jwks] refresh failed, using cached keys:', error);
+    }
   }
   const key = appleKeyCache?.get(kid);
   if (!key) {
-    // Force a refresh on miss in case Apple rotated keys since the cached fetch.
-    await refreshAppleJwks();
+    try {
+      // Force a refresh on miss in case Apple rotated keys since the cached fetch.
+      await refreshAppleJwks();
+    } catch (error) {
+      console.error('[apple-jwks] retry refresh failed:', error);
+    }
   }
   return appleKeyCache?.get(kid);
 };
@@ -186,7 +197,14 @@ export const authProviders = (env: Record<string, string>): ProviderConfig[] => 
     name: 'Apple',
     requiredEnvVars: ['APPLE_CLIENT_ID', 'APPLE_TEAM_ID', 'APPLE_KEY_ID', 'APPLE_PRIVATE_KEY'],
     config: {
-      clientId: env.APPLE_CLIENT_ID,
+      // Better Auth uses this as the OAuth `client_id` for the WEB sign-in
+      // flow. Apple's web flow REQUIRES a Services ID (e.g.
+      // `com.ludvighedin.todus.web`) registered against the redirect URI —
+      // NOT the iOS app bundle ID. If `APPLE_WEB_CLIENT_ID` is not set the
+      // web Sign-in-with-Apple flow will fail with `invalid_client`. Native
+      // iOS/macOS sign-in is unaffected because it uses `verifyIdToken`
+      // below against the multi-bundle allowlist.
+      clientId: env.APPLE_WEB_CLIENT_ID || env.APPLE_CLIENT_ID,
       // Kept for compatibility — Better Auth uses this as fallback audience if
       // `verifyIdToken` is not provided. The custom verifier below is what
       // actually validates production traffic against the multi-bundle list.

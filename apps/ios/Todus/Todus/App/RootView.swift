@@ -15,7 +15,13 @@ struct RootView: View {
 
     var body: some View {
         Group {
-            if services.authService.showsOnboarding {
+            if !services.hasSeenStartupCard && !services.authService.isAuthenticated {
+                // One-shot branded entry — shown only for genuinely new installs.
+                // Both CTAs flip `hasSeenStartupCard`, after which the regular
+                // unauthenticated routing (AuthView → onboarding chain) takes over.
+                StartupOnboardingView()
+                    .transition(hasAppeared ? .opacity.combined(with: .move(edge: .trailing)) : .opacity)
+            } else if services.authService.showsOnboarding {
                 AuthView()
                     .transition(hasAppeared ? .opacity.combined(with: .move(edge: .trailing)) : .opacity)
             } else if !services.hasConfiguredGmailPrompt {
@@ -54,7 +60,10 @@ struct RootView: View {
                         .overlay(
                             Capsule()
                                 .stroke(AppTheme.cardBorder.opacity(0.8), lineWidth: 1)
-                                .accessibilityLabel(progressAccessibilityLabel)
+                                // Decorative stroke — outer Text already supplies the
+                                // accessibility label; hiding the inner stops VoiceOver
+                                // from reading the same string twice.
+                                .accessibilityHidden(true)
                         )
                         .accessibilityLabel(progressAccessibilityLabel)
                     Spacer()
@@ -66,11 +75,11 @@ struct RootView: View {
         }
         // Single animation modifier prevents competing animation controllers from
         // producing stuck/offset frames on cold start.
+        .animation(hasAppeared ? .snappy(duration: 0.3) : nil, value: services.hasSeenStartupCard)
         .animation(hasAppeared ? .snappy(duration: 0.3) : nil, value: services.authService.showsOnboarding)
         .animation(hasAppeared ? .snappy(duration: 0.3) : nil, value: services.hasConfiguredRemindersPrompt)
         .animation(hasAppeared ? .snappy(duration: 0.3) : nil, value: services.hasConfiguredGmailPrompt)
         .animation(hasAppeared ? .snappy(duration: 0.3) : nil, value: services.hasConfiguredNotificationsPrompt)
-        .animation(hasAppeared ? .snappy(duration: 0.3) : nil, value: services.hasConfiguredDefaultMailPrompt)
         .animation(hasAppeared ? .snappy(duration: 0.3) : nil, value: services.authService.isAuthenticated)
         .onAppear {
             // Enable transitions only after the first frame renders.
@@ -80,10 +89,14 @@ struct RootView: View {
         .task {
             guard !hasRunDeferredStartup else { return }
             hasRunDeferredStartup = true
+            // UI tests inject auth via launch arg — skip the network bootstrap
+            // so the deterministic seed is what the harness sees.
+            guard !services.isUITestingMode else { return }
             await runDeferredStartupWork()
         }
         .task(id: services.authService.isAuthenticated) {
             guard services.authService.isAuthenticated else { return }
+            guard !services.isUITestingMode else { return }
             await services.loadSharedAIProfile()
         }
     }
@@ -105,7 +118,11 @@ struct RootView: View {
         // Let the first interactive frame settle before kicking off background work.
         try? await Task.sleep(for: .milliseconds(350))
         await services.authService.fetchUserProfile()
-        await services.loadSharedAIProfile()
+        // Note: loadSharedAIProfile() is intentionally NOT called here on a
+        // signed-in launch — the `.task(id: services.authService.isAuthenticated)`
+        // handler above already triggers it once authentication state is known,
+        // and calling it from both places caused a duplicate request on every
+        // signed-in cold start.
 
         // Delay legacy upgrade work until after the initial shell is usable.
         try? await Task.sleep(for: .milliseconds(150))

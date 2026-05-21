@@ -47,8 +47,10 @@ struct AssistantButton: View {
         .focusEffectDisabled()
         .pointerStyle(.link)
         .opacity(isHovered ? 1.0 : 0.92)
-        .animation(.easeOut(duration: 0.15), value: isHovered)
+        .animation(MacTheme.Motion.fast, value: isHovered)
         .onHover { isHovered = $0 }
-        .help("AI Assistant")
+        .help("Open AI Assistant (⌘L)")
+        .accessibilityLabel("AI Assistant")
+        .accessibilityHint("Opens the assistant panel. ⌘L toggles it.")
     }
 }

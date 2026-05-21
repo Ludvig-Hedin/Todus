@@ -13,6 +13,10 @@ struct CalendarMultiDayView: View {
     let events: [CalendarEvent]
     let dayCount: Int
     var onEventTap: ((CalendarEvent) -> Void)? = nil
+    /// Tapping an empty cell in the time grid asks the parent to open the
+    /// create-event flow seeded with the chosen instant. Optional so callers
+    /// that don't need creation can keep working.
+    var onCreateEventAt: ((Date) -> Void)? = nil
 
     // Shared observable — exposes hourHeight to every page so all pages use the
     // same grid density without being re-created.
@@ -24,7 +28,8 @@ struct CalendarMultiDayView: View {
             dayCount: dayCount,
             events: events,
             shared: shared,
-            onEventTap: onEventTap
+            onEventTap: onEventTap,
+            onCreateEventAt: onCreateEventAt
         )
     }
 }
@@ -44,6 +49,7 @@ private struct MultiDayPager: UIViewControllerRepresentable {
     let events: [CalendarEvent]
     let shared: MultiDayShared
     let onEventTap: ((CalendarEvent) -> Void)?
+    let onCreateEventAt: ((Date) -> Void)?
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -89,7 +95,8 @@ private struct MultiDayPager: UIViewControllerRepresentable {
                 dayCount: dayCount,
                 events: events,
                 shared: shared,
-                onEventTap: onEventTap
+                onEventTap: onEventTap,
+                onCreateEventAt: onCreateEventAt
             )
         }
     }
@@ -115,7 +122,8 @@ private struct MultiDayPager: UIViewControllerRepresentable {
                 dayCount: parent.dayCount,
                 events: parent.events,
                 shared: parent.shared,
-                onEventTap: parent.onEventTap
+                onEventTap: parent.onEventTap,
+                onCreateEventAt: parent.onCreateEventAt
             )
         }
 
@@ -177,7 +185,8 @@ private final class MultiDayPageVC: UIHostingController<MultiDayPageView> {
         dayCount: Int,
         events: [CalendarEvent],
         shared: MultiDayShared,
-        onEventTap: ((CalendarEvent) -> Void)?
+        onEventTap: ((CalendarEvent) -> Void)?,
+        onCreateEventAt: ((Date) -> Void)?
     ) {
         self.startDate = startDate
         super.init(
@@ -186,7 +195,8 @@ private final class MultiDayPageVC: UIHostingController<MultiDayPageView> {
                 dayCount: dayCount,
                 events: events,
                 shared: shared,
-                onEventTap: onEventTap
+                onEventTap: onEventTap,
+                onCreateEventAt: onCreateEventAt
             )
         )
         view.backgroundColor = .clear
@@ -205,7 +215,8 @@ private final class MultiDayPageVC: UIHostingController<MultiDayPageView> {
                 dayCount: 1,
                 events: [],
                 shared: MultiDayShared(),
-                onEventTap: nil
+                onEventTap: nil,
+                onCreateEventAt: nil
             )
         )
     }
@@ -214,14 +225,16 @@ private final class MultiDayPageVC: UIHostingController<MultiDayPageView> {
         dayCount: Int,
         events: [CalendarEvent],
         shared: MultiDayShared,
-        onEventTap: ((CalendarEvent) -> Void)?
+        onEventTap: ((CalendarEvent) -> Void)?,
+        onCreateEventAt: ((Date) -> Void)?
     ) {
         rootView = MultiDayPageView(
             startDate: startDate,
             dayCount: dayCount,
             events: events,
             shared: shared,
-            onEventTap: onEventTap
+            onEventTap: onEventTap,
+            onCreateEventAt: onCreateEventAt
         )
     }
 }
@@ -234,6 +247,7 @@ private struct MultiDayPageView: View {
     let events: [CalendarEvent]
     let shared: MultiDayShared
     let onEventTap: ((CalendarEvent) -> Void)?
+    let onCreateEventAt: ((Date) -> Void)?
 
     var body: some View {
         let cal = Calendar.current
@@ -262,7 +276,8 @@ private struct MultiDayPageView: View {
                 columns: columns,
                 highlightToday: true,
                 hourHeight: shared.hourHeight,
-                onEventTap: { event in onEventTap?(event) }
+                onEventTap: { event in onEventTap?(event) },
+                onGridTap: onCreateEventAt
             )
         }
     }

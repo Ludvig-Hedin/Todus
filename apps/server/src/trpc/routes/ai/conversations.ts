@@ -5,6 +5,7 @@ import { eq, and, desc } from 'drizzle-orm';
 import { env } from '../../../env';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
+import { addMemories, invalidateMemoryCache, preloadMemories } from '../../../lib/mem0';
 
 const getDb = () => createDb(env.HYPERDRIVE.connectionString);
 
@@ -142,6 +143,41 @@ export const saveConversation = privateProcedure
           updatedAt: now,
         });
       }
+
+      // Mem0 ingestion. The text-chat route (/api/ai/chat) writes memories
+      // inline as the stream finishes; voice sessions never go through that
+      // route, so the only place voice transcripts can land in Mem0 is here.
+      // Without this, "remember X" said over voice would never persist into
+      // long-term memory and the next voice session's system prompt would
+      // be empty.
+      //
+      // Pull the most recent user/assistant pair off the saved transcript
+      // and fire-and-forget against Mem0. Failures are swallowed by the
+      // mem0 client so a Mem0 outage never breaks conversation save.
+      const mem0Key = env.MEM0_API_KEY;
+      if (mem0Key) {
+        const lastUser = [...input.messages].reverse().find((m) => m.role === 'user');
+        const lastAssistant = [...input.messages].reverse().find((m) => m.role === 'assistant');
+        const userContent = lastUser?.content?.trim() ?? '';
+        const assistantContent = lastAssistant?.content?.trim() ?? '';
+        // Skip ingestion if either side is empty or trivially short — small
+        // utterances ("hi", "ok") just create memory noise.
+        if (userContent.length > 0 && assistantContent.length > 10) {
+          const userId = ctx.sessionUser.id;
+          // Don't await: keep saveConversation latency unaffected. The Worker
+          // runtime keeps the promise alive long enough for the POST to land.
+          void addMemories(mem0Key, userId, [
+            { role: 'user', content: userContent },
+            { role: 'assistant', content: assistantContent },
+          ])
+            .then(() => invalidateMemoryCache(userId, env.prompts_storage))
+            .then(() => preloadMemories(userId, env.prompts_storage, mem0Key))
+            .catch((error) => {
+              console.warn('[saveConversation] Mem0 ingestion failed:', error);
+            });
+        }
+      }
+
       return { success: true };
     } finally {
       await conn.end();

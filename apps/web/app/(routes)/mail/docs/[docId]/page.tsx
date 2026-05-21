@@ -10,7 +10,7 @@
 // doesn't self-import it (it's shared with the compose flow).
 import '@/components/create/prosemirror.css';
 
-import { useParams, useNavigate, Link } from 'react-router';
+import { useParams, useNavigate, Link, redirect } from 'react-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTRPC } from '@/providers/query-provider';
 import { authProxy } from '@/lib/auth-proxy';
@@ -29,7 +29,7 @@ import { useRef, useCallback, useState, useEffect } from 'react';
 // Auth guard — redirect to login if no session
 export async function clientLoader({ request }: Route.ClientLoaderArgs) {
   const session = await authProxy.api.getSession({ headers: request.headers });
-  if (!session) return Response.redirect(`${import.meta.env.VITE_PUBLIC_APP_URL}/login`);
+  if (!session) throw redirect('/login');
   return {};
 }
 
@@ -119,20 +119,33 @@ export default function DocEditorPage() {
     [docId, doc, updateDoc],
   );
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const debouncedSave = useCallback(
-    debounce(() => {
+  // Debounced save is owned by a ref so the cleanup runs against the SAME
+  // instance the previous effect installed. The earlier useCallback pattern
+  // returned a new debounced fn on every `docId` change while cleanup ran
+  // AFTER the new instance was already in place — the lingering timer from
+  // the prior doc would later fire, read editorRef.current (now pointing at
+  // the next doc's editor) and overwrite the *previous* docId's content.
+  const debouncedSaveRef = useRef<ReturnType<typeof debounce> | null>(null);
+  useEffect(() => {
+    const fn = debounce(() => {
       if (!editorRef.current || !docId) return;
       const content: JSONContent = editorRef.current.getJSON();
       const contentText: string = editorRef.current.getText();
       updateDoc.mutate({ id: docId, content, contentText });
-    }, 1000),
-    [docId],
-  );
-
-  useEffect(() => {
-    return () => debouncedSave.cancel();
-  }, [debouncedSave]);
+    }, 1000);
+    debouncedSaveRef.current = fn;
+    return () => {
+      fn.cancel();
+      if (debouncedSaveRef.current === fn) debouncedSaveRef.current = null;
+    };
+    // updateDoc.mutate is stable per render of the page; we deliberately
+    // re-create when docId changes so the timer is scoped to one doc.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [docId]);
+  // Stable callable that forwards to the current ref-held debounce.
+  const debouncedSave = useCallback(() => {
+    debouncedSaveRef.current?.();
+  }, []);
 
   if (isLoading) {
     return (
@@ -184,7 +197,8 @@ export default function DocEditorPage() {
               type="text"
               value={title}
               placeholder="Untitled"
-              className="text-foreground w-full bg-transparent text-4xl font-bold tracking-tight outline-none placeholder:text-gray-300 dark:placeholder:text-gray-600"
+              aria-label="Document title"
+              className="text-foreground w-full rounded-md bg-transparent text-4xl font-bold tracking-tight outline-none placeholder:text-gray-300 focus-visible:ring-1 focus-visible:ring-ring dark:placeholder:text-gray-600"
               onChange={(e) => setTitle(e.target.value)}
               onBlur={() => saveTitle(title)}
               onKeyDown={(e) => {

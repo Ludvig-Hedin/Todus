@@ -122,6 +122,13 @@ const threadDisplayShortcuts: Shortcut[] = [
     description: 'Move to Bin',
     scope: 'thread-display',
   },
+  {
+    keys: ['t'],
+    action: 'createTaskFromThread',
+    type: 'single',
+    description: 'Create task from email',
+    scope: 'thread-display',
+  },
 ];
 
 const navigation: Shortcut[] = [
@@ -173,6 +180,64 @@ const navigation: Shortcut[] = [
     type: 'combination',
     description: 'Show keyboard shortcuts',
     scope: 'navigation',
+  },
+  // macOS-parity section navigation (handled directly in NavigationHotkeys
+  // via useHotkeys — listed here purely for the keyboard-shortcuts dialog).
+  {
+    keys: ['mod', '1'],
+    action: 'navHome',
+    type: 'combination',
+    description: 'Go to Home',
+    scope: 'navigation',
+    preventDefault: true,
+  },
+  {
+    keys: ['mod', '2'],
+    action: 'navTasks',
+    type: 'combination',
+    description: 'Go to Tasks',
+    scope: 'navigation',
+    preventDefault: true,
+  },
+  {
+    keys: ['mod', '3'],
+    action: 'navInbox',
+    type: 'combination',
+    description: 'Go to Email',
+    scope: 'navigation',
+    preventDefault: true,
+  },
+  {
+    keys: ['mod', '4'],
+    action: 'navCalendar',
+    type: 'combination',
+    description: 'Go to Calendar',
+    scope: 'navigation',
+    preventDefault: true,
+  },
+  {
+    keys: ['mod', '5'],
+    action: 'navMeetings',
+    type: 'combination',
+    description: 'Go to Meetings',
+    scope: 'navigation',
+    preventDefault: true,
+  },
+  {
+    keys: ['mod', 'shift', 'l'],
+    action: 'toggleAIFloating',
+    type: 'combination',
+    description: 'Toggle AI floating panel',
+    scope: 'navigation',
+    preventDefault: true,
+  },
+  {
+    keys: ['mod', 'shift', 'm'],
+    action: 'markAllRead',
+    type: 'combination',
+    description: 'Mark all as read',
+    scope: 'navigation',
+    preventDefault: true,
   },
 ];
 
@@ -339,20 +404,20 @@ const mailListShortcuts: Shortcut[] = [
     scope: 'mail-list',
     preventDefault: true,
   },
-  // {
-  //   keys: ['j'],
-  //   action: 'scrollDown',
-  //   type: 'single',
-  //   description: 'Scroll down',
-  //   scope: 'mail-list',
-  // },
-  // {
-  //   keys: ['k'],
-  //   action: 'scrollUp',
-  //   type: 'single',
-  //   description: 'Scroll up',
-  //   scope: 'mail-list',
-  // },
+  {
+    keys: ['j'],
+    action: 'scrollDown',
+    type: 'single',
+    description: 'Next thread',
+    scope: 'mail-list',
+  },
+  {
+    keys: ['k'],
+    action: 'scrollUp',
+    type: 'single',
+    description: 'Previous thread',
+    scope: 'mail-list',
+  },
   {
     keys: ['1'],
     action: 'showImportant',

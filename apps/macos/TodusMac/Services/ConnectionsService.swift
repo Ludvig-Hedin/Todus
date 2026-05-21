@@ -1,6 +1,13 @@
 import Foundation
 import Observation
 
+extension Notification.Name {
+    /// Broadcast when the set of enabled connections changes (toggle / enableAll).
+    /// Email views should reload thread lists when they receive this — without it,
+    /// disabling a connection used to leave its messages on screen until refresh.
+    static let todusConnectionToggled = Notification.Name("TodusConnectionToggled")
+}
+
 /// Represents a connected email account (Google, Microsoft, etc.)
 /// Used for multi-account support — each connection maps to one OAuth-linked mailbox.
 struct ConnectionAccount: Identifiable, Codable, Sendable {
@@ -108,11 +115,13 @@ final class ConnectionsService {
         } else {
             enabledConnectionIds.insert(id)
         }
+        NotificationCenter.default.post(name: .todusConnectionToggled, object: nil)
     }
 
     /// Enables all connections.
     func enableAll() {
         enabledConnectionIds = Set(connections.map(\.id))
+        NotificationCenter.default.post(name: .todusConnectionToggled, object: nil)
     }
 
     /// Sets the default connection on the backend.

@@ -15,6 +15,10 @@ final class EmailService {
 
     var threads: [EmailThread] = []
     var isLoadingThreads = false
+    /// True while a background reconciliation poll is running after a forceSync that
+    /// returned empty. Drives the inline "Updating" badge so the user knows fresh mail
+    /// is still on its way, while the prior thread list stays visible underneath.
+    var isReconciling = false
     var isLoadingThread = false
     var isSending = false
     // Default false — views call checkConnection() on appear to verify
@@ -31,9 +35,33 @@ final class EmailService {
     private var cachedNextPageTokenByFolder: [String: String] = [:]
     private var lastConnectionCheckAt: Date?
     private let connectionCheckInterval: TimeInterval = 30
+    /// Most recent **successful** `mail.forceSync`. Backend `forceReSync` is destructive
+    /// (drops tables) so we coalesce repeat calls within this cooldown. Routine polls and
+    /// didBecomeActive intentionally do not trigger sync — they re-read the backend DB,
+    /// which is much cheaper and never produces an empty window. Only pull-to-refresh /
+    /// refresh button / first-time inbox population pass `triggerSync: true`.
+    private var lastForceSyncAt: Date?
+    private static let forceSyncCooldown: TimeInterval = 120
+    /// Detached, non-cancellable in-flight forceSync task. Detached so a loadThreads task
+    /// that's been cancelled (e.g. user re-pulled while one was running) doesn't also kill
+    /// the in-flight Gmail re-sync mutation.
+    private var inflightForceSyncTask: Task<Bool, Never>?
+    /// Hard deadline so `isReconciling` can never linger past a known ceiling even if the
+    /// reconciliation loop's defer is delayed.
+    private var reconciliationWatchdog: Task<Void, Never>?
+    private static let reconciliationHardDeadline: TimeInterval = 60
     /// Background task that watches for the forceSync workflow to populate threads after a
     /// pull-to-refresh. Kept on the service so we can cancel it on sign-out / re-trigger.
     private var resyncReconciliationTask: Task<Void, Never>?
+    /// Most recent successful `mail.rewatchGmail` mutation. Gmail push subscriptions expire
+    /// after ~7 days, and a connection whose watch was lost gets stuck — no new mail
+    /// arrives until the backend re-subscribes. We trigger a rewatch from the client when
+    /// a refresh sees data older than `rewatchStaleThreshold` since the backend
+    /// auto-rewatch only runs from `listThreads`, which won't catch the case where a
+    /// client UI shows stale cache without ever hitting the backend.
+    private var lastRewatchAt: Date?
+    private static let rewatchCooldown: TimeInterval = 6 * 60 * 60
+    private static let rewatchStaleThreshold: TimeInterval = 24 * 60 * 60
 
     // MARK: - Init
 
@@ -45,12 +73,18 @@ final class EmailService {
     func resetForSignOut() {
         resyncReconciliationTask?.cancel()
         resyncReconciliationTask = nil
+        reconciliationWatchdog?.cancel()
+        reconciliationWatchdog = nil
+        inflightForceSyncTask?.cancel()
+        inflightForceSyncTask = nil
         threads = []
         nextPageToken = nil
         errorMessage = nil
         hasConnection = false
         isCheckingConnection = false
         hasResolvedConnection = false
+        isReconciling = false
+        isLoadingThreads = false
         assistantNudges = []
         assistantBriefing = nil
         currentFolder = "inbox"
@@ -58,6 +92,27 @@ final class EmailService {
         cachedAssistantNudgesByFolder = [:]
         cachedNextPageTokenByFolder = [:]
         lastConnectionCheckAt = nil
+        lastForceSyncAt = nil
+        lastRewatchAt = nil
+    }
+
+    /// Asks the backend to re-arm the Gmail PubSub watch + push subscription for the
+    /// active connection. Cooldown-gated to avoid flooding the backend on repeat refreshes.
+    private func triggerGmailRewatchIfStale() {
+        if let last = lastRewatchAt,
+           Date().timeIntervalSince(last) < Self.rewatchCooldown {
+            return
+        }
+        lastRewatchAt = Date()
+        Task { [api] in
+            do {
+                struct RewatchResponse: Decodable { let ok: Bool? }
+                let _: RewatchResponse = try await api.trpcMutation("mail.rewatchGmail")
+                AppLogger.shared.log("[EmailService] rewatchGmail kicked")
+            } catch {
+                AppLogger.shared.log("[EmailService] rewatchGmail failed: \(error)")
+            }
+        }
     }
 
     /// Hydrates the current mailbox surface from in-memory folder caches before a network refresh.
@@ -72,6 +127,12 @@ final class EmailService {
 
     /// Ensures the mailbox state for a folder is ready for display. Cached content is shown
     /// immediately; a refresh runs in the background unless the folder has never been loaded.
+    ///
+    /// First load passes `triggerSync: true` so a fresh-DB user gets actually-fresh data
+    /// on entry instead of landing on an "No emails" empty state forever. Subsequent loads
+    /// (when cached threads already exist) re-read the backend DB without triggering a
+    /// destructive resync — the previous shape called forceSync on every folder visit,
+    /// producing the "30s of stale emails after every navigation" symptom.
     func ensureMailboxReady(for folder: String) async {
         await checkConnection()
         guard hasConnection else { return }
@@ -79,7 +140,7 @@ final class EmailService {
         prepareFolder(folder)
 
         if threads.isEmpty {
-            await loadThreads(folder: folder, refresh: true)
+            await loadThreads(folder: folder, refresh: true, triggerSync: true)
         } else {
             Task { [weak self] in
                 await self?.loadThreads(folder: folder, refresh: true)
@@ -91,24 +152,72 @@ final class EmailService {
     /// foreground. When threads land, enriches them and updates `threads` in place — the user
     /// keeps seeing the previous inbox instead of staring at a spinner. Self-cancelling so
     /// repeated pull-to-refresh attempts don't stack.
+    ///
+    /// Drives `isReconciling` so the inline "Updating" badge is visible while we wait for
+    /// the workflow, and the empty-state "No emails" placeholder is suppressed. A watchdog
+    /// guarantees the badge clears within a hard ceiling regardless of loop progress.
     private func scheduleResyncReconciliation(
         folder: String,
         query: String?,
         input: ListThreadsInput
     ) {
         resyncReconciliationTask?.cancel()
+        reconciliationWatchdog?.cancel()
+        isReconciling = true
+
+        reconciliationWatchdog = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(Self.reconciliationHardDeadline * 1_000_000_000))
+            guard let self, !Task.isCancelled else { return }
+            if self.isReconciling {
+                self.isReconciling = false
+                self.resyncReconciliationTask?.cancel()
+                AppLogger.shared.log("[EmailService] reconciliation watchdog tripped")
+            }
+        }
+
         resyncReconciliationTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            for _ in 0..<12 {
+            defer {
+                self.isReconciling = false
+                self.reconciliationWatchdog?.cancel()
+                self.reconciliationWatchdog = nil
+            }
+            // ~50s worst case (10 attempts × 1s sleep + per-attempt 4s listThreads ceiling).
+            // Per-call timeout is critical here — the previous shape had no ceiling, so a
+            // single hung trpc query could keep the badge spinning past the 60s watchdog
+            // before the loop even attempted the next iteration.
+            for _ in 0..<10 {
                 if Task.isCancelled { return }
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
                 if Task.isCancelled { return }
                 do {
-                    let resp: ListThreadsResponse = try await self.api.trpcQuery("mail.listThreads", input: input)
+                    let resp: ListThreadsResponse = try await Self.withTimeout(seconds: 4) { [api = self.api] in
+                        try await api.trpcQuery("mail.listThreads", input: input)
+                    }
                     guard !resp.threads.isEmpty else { continue }
-                    let enriched = await self.fetchThreadDetails(ids: resp.threads.map(\.id))
+                    let enriched = try await Self.withTimeout(seconds: 12) { [weak self] in
+                        guard let self else { return [] as [EmailThread] }
+                        return await self.fetchThreadDetails(ids: resp.threads.map(\.id))
+                    }
                     if Task.isCancelled { return }
                     if !enriched.isEmpty {
+                        // Staleness guard: the workflow occasionally produces a slice
+                        // strictly older than what we're already showing — drop it so
+                        // the user doesn't see fresh mail flip back to month-old data.
+                        // Only compute `incomingNewest` from threads with a parseable
+                        // date — when *every* incoming row failed to parse a date (all
+                        // `.distantPast`) we have no signal to compare and would otherwise
+                        // wrongly drop a perfectly fresh page.
+                        let displayed = self.currentFolder == folder ? self.threads : (self.cachedThreadsByFolder[folder] ?? [])
+                        let currentNewest = displayed.map(\.date).max()
+                        let incomingDated = enriched.filter { $0.date > .distantPast }
+                        let incomingNewest = incomingDated.map(\.date).max()
+                        if let cur = currentNewest, let inc = incomingNewest, inc < cur {
+                            AppLogger.shared.log(
+                                "[EmailService] reconciliation dropped stale snapshot: incomingNewest=\(inc) currentNewest=\(cur)"
+                            )
+                            return
+                        }
                         if query == nil {
                             self.cachedThreadsByFolder[folder] = enriched
                             if let next = resp.nextPageToken {
@@ -120,6 +229,7 @@ final class EmailService {
                         if self.currentFolder == folder {
                             self.threads = enriched
                             self.nextPageToken = resp.nextPageToken
+                            self.errorMessage = nil
                         }
                     }
                     return
@@ -127,18 +237,59 @@ final class EmailService {
                     continue
                 }
             }
+            if !Task.isCancelled {
+                AppLogger.shared.log("[EmailService] resyncReconciliation budget exhausted folder=\(folder)")
+            }
         }
     }
 
     /// Asks the backend to re-sync threads from Gmail. Best-effort — actual thread population
     /// happens asynchronously inside a Cloudflare Workflow, so callers should follow up with
-    /// a `mail.listThreads` retry loop.
-    private func triggerServerSync() async {
-        do {
-            let _: EmailEmptyResponse = try await api.trpcMutation("mail.forceSync")
-        } catch {
-            AppLogger.shared.log("[EmailService] triggerServerSync error: \(error)")
+    /// a `mail.listThreads` retry loop. Returns `true` when the mutation actually completed
+    /// successfully this call so callers know whether to enter the post-sync empty-list
+    /// reconciliation path.
+    ///
+    /// Runs as an independent top-level Task so a loadThreads cancellation doesn't kill
+    /// the mutation (`Task { ... }` started inside another task does NOT inherit cancellation).
+    /// `lastForceSyncAt` is only stamped on success — a cancelled / timed-out / failed sync
+    /// must not lock the cooldown against the next attempt.
+    @discardableResult
+    private func triggerServerSync(bypassCooldown: Bool = false) async -> Bool {
+        if !bypassCooldown,
+           let last = lastForceSyncAt,
+           Date().timeIntervalSince(last) < Self.forceSyncCooldown {
+            return false
         }
+        if let existing = inflightForceSyncTask {
+            return await existing.value
+        }
+        // Independent top-level Task: `Task { ... }` started from inside another task does
+        // NOT inherit cancellation (structured cancellation only flows through TaskGroup
+        // children). A loadThreads call that gets cancelled won't also cancel this
+        // in-flight forceSync — the previous shape produced -999 cancellation errors that
+        // locked the cooldown against a sync that never actually ran.
+        // Inherits MainActor isolation from the enclosing context so capturing `api`
+        // (a class) doesn't require Sendable conformance under Swift 6 strict concurrency.
+        let task: Task<Bool, Never> = Task { [api] in
+            do {
+                return try await Self.withTimeout(seconds: 8) {
+                    let _: EmailEmptyResponse = try await api.trpcMutation("mail.forceSync")
+                    return true
+                }
+            } catch {
+                AppLogger.shared.log("[EmailService] triggerServerSync error: \(error)")
+                return false
+            }
+        }
+        inflightForceSyncTask = task
+        let success = await task.value
+        if inflightForceSyncTask == task {
+            inflightForceSyncTask = nil
+        }
+        if success {
+            lastForceSyncAt = Date()
+        }
+        return success
     }
 
     // MARK: - Inbox
@@ -153,35 +304,59 @@ final class EmailService {
         folder: String = "inbox",
         query: String? = nil,
         refresh: Bool = false,
-        triggerSync: Bool = false
+        triggerSync: Bool = false,
+        bypassSyncCooldown: Bool = false
     ) async {
+        // Early-out for "load next page" calls when there is no cursor — without this
+        // an over-eager paginator `.onAppear` keeps firing empty cursored loads, racing
+        // against the foreground refresh and burning quota.
+        if refresh == false && query == nil && nextPageToken == nil { return }
+
+        // Guard against a folder-switch race: a refresh dispatched for a folder the user
+        // already navigated away from must not blow away the cursor that belongs to the
+        // currently-displayed folder. We check `currentFolder == folder` BEFORE we
+        // overwrite `currentFolder`, then update it so subsequent reads see the new
+        // active folder.
+        let isLoadingActiveFolder = currentFolder == folder
         currentFolder = folder
-        if refresh { nextPageToken = nil }
+        if refresh && isLoadingActiveFolder { nextPageToken = nil }
         isLoadingThreads = true
         errorMessage = nil
 
+        // Only enter the post-forceSync reconciliation path when we actually ran a forceSync
+        // this call — coalesced calls under cooldown should fall straight through to a normal
+        // listThreads response so the spinner doesn't kick on for routine polling.
+        var didRunForceSync = false
         if triggerSync && query == nil {
-            await triggerServerSync()
+            didRunForceSync = await triggerServerSync(bypassCooldown: bypassSyncCooldown)
         }
 
         do {
             let input = ListThreadsInput(
                 folder: folder,
                 q: query,
-                maxResults: 30,
+                // 50 first-page threads — covers a couple of days of mail for most users,
+                // so the inbox lands full without needing to paginate immediately.
+                maxResults: 50,
                 cursor: refresh ? nil : nextPageToken
             )
-            // Step 1: Get thread IDs from backend
-            var response: ListThreadsResponse = try await api.trpcQuery("mail.listThreads", input: input)
+            // Step 1: Get thread IDs from backend (15 s budget — fits the API client's three
+            // internal retries with backoff comfortably and keeps the inbox spinner from
+            // outlasting that ceiling on a hung backend).
+            var response: ListThreadsResponse = try await Self.withTimeout(seconds: 15) { [api] in
+                try await api.trpcQuery("mail.listThreads", input: input)
+            }
 
             // After a forceSync the workflow is still populating tables. Try a couple of
             // quick re-reads in foreground for fast-resync cases, then hand off to a
             // background reconciliation task and stop the spinner so the prior inbox stays
             // visible without a multi-second wait.
-            if triggerSync && response.threads.isEmpty {
+            if didRunForceSync && response.threads.isEmpty {
                 for _ in 0..<2 {
                     try? await Task.sleep(nanoseconds: 300_000_000)
-                    response = try await api.trpcQuery("mail.listThreads", input: input)
+                    response = try await Self.withTimeout(seconds: 10) { [api] in
+                        try await api.trpcQuery("mail.listThreads", input: input)
+                    }
                     if !response.threads.isEmpty { break }
                 }
                 if response.threads.isEmpty {
@@ -191,22 +366,65 @@ final class EmailService {
                 }
             }
 
-            // Step 2: Fetch full details for each thread in parallel
+            // Step 2: Fetch full details for each thread in parallel (20 s ceiling).
             let threadIds = response.threads.map(\.id)
-            let enrichedThreads = await fetchThreadDetails(ids: threadIds)
+            let enrichedThreads = try await Self.withTimeout(seconds: 20) { [weak self] in
+                guard let self else { return [] as [EmailThread] }
+                return await self.fetchThreadDetails(ids: threadIds)
+            }
 
             let mergedThreads: [EmailThread]
             if refresh {
-                // Don't blow away a populated inbox when the server returns empty during a
-                // resync window — keep the cached list and let the next refresh pick up the
-                // freshly-synced threads.
-                if enrichedThreads.isEmpty, let cached = cachedThreadsByFolder[folder], !cached.isEmpty {
-                    mergedThreads = cached
+                // Three cases on a refresh:
+                //   1. Server empty + we had cached threads — keep cache, the resync
+                //      window emptied the table briefly.
+                //   2. Server returned threads strictly older than what we're displaying —
+                //      drop them; this is the destructive-workflow regression where
+                //      forceSync rebuilds the table from a stale Gmail history offset.
+                //   3. Otherwise — use the fresh slice.
+                let cachedThreads = cachedThreadsByFolder[folder] ?? []
+                let displayed = currentFolder == folder ? threads : cachedThreads
+                let currentNewest = displayed.map(\.date).max()
+                // Only consider dated rows for staleness — if *every* incoming row failed
+                // date parsing (all `.distantPast`) we have no signal to compare and would
+                // otherwise wrongly classify a perfectly fresh page as stale.
+                let incomingDated = enrichedThreads.filter { $0.date > .distantPast }
+                let incomingNewest = incomingDated.map(\.date).max()
+                let isStaleRefresh: Bool = {
+                    guard let cur = currentNewest, let inc = incomingNewest else { return false }
+                    return inc < cur
+                }()
+
+                if enrichedThreads.isEmpty, !cachedThreads.isEmpty {
+                    mergedThreads = cachedThreads
+                } else if isStaleRefresh {
+                    AppLogger.shared.log(
+                        "[EmailService] dropped stale refresh: incomingNewest=\(incomingNewest!) currentNewest=\(currentNewest!)"
+                    )
+                    mergedThreads = displayed
                 } else {
                     mergedThreads = enrichedThreads
                 }
+
+                // Proactive Gmail watch recovery on the client when the refresh sees mail
+                // older than a day. Gmail watches expire after ~7 days and a stuck connection
+                // never gets new mail until something forces a re-subscribe — this is the
+                // "macOS shows no emails" / "iOS stuck on 2-month-old mail" symptom.
+                let referenceNewest = incomingNewest ?? currentNewest
+                if let newest = referenceNewest {
+                    let ageSeconds = Date().timeIntervalSince(newest)
+                    if ageSeconds > Self.rewatchStaleThreshold {
+                        triggerGmailRewatchIfStale()
+                    }
+                } else if enrichedThreads.isEmpty && displayed.isEmpty {
+                    triggerGmailRewatchIfStale()
+                }
             } else {
-                mergedThreads = (cachedThreadsByFolder[folder] ?? []) + enrichedThreads
+                // Dedupe by id so cursor-page overlap doesn't render the same thread twice.
+                let existing = cachedThreadsByFolder[folder] ?? []
+                let existingIds = Set(existing.map(\.id))
+                let unique = enrichedThreads.filter { !existingIds.contains($0.id) }
+                mergedThreads = existing + unique
             }
 
             if query == nil {
@@ -352,9 +570,61 @@ final class EmailService {
             let response: GetThreadResponse = try await api.trpcQuery("mail.get", input: input)
             return response
         } catch {
-            errorMessage = "Failed to load thread."
+            AppLogger.shared.log("[EmailService] loadThread(\(id)) failed: \(error)")
+            errorMessage = Self.friendlyThreadLoadMessage(for: error)
             return nil
         }
+    }
+
+    /// Same translation pipeline as the iOS app: surface the backend's tRPC error
+    /// message when present so a transient shard miss or a re-sync window doesn't
+    /// surface as a generic "Failed to load thread."
+    private static func friendlyThreadLoadMessage(for error: Error) -> String {
+        if let apiError = error as? APIError {
+            switch apiError {
+            case .unauthorized:
+                return "Sign in expired. Please sign in again."
+            case .httpError(let code, _) where code == 404:
+                return "This thread is no longer available."
+            case .httpError(let code, let body) where (500..<600).contains(code):
+                if let detail = parseTRPCErrorMessage(body) {
+                    return "Mail service: \(detail). Try again."
+                }
+                return "Mail service is unavailable. Try again in a moment."
+            case .httpError(_, let body):
+                if let detail = parseTRPCErrorMessage(body) {
+                    return detail
+                }
+            default:
+                break
+            }
+        }
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .timedOut:
+                return "Thread is taking too long to load. Pull to retry."
+            case .notConnectedToInternet, .networkConnectionLost:
+                return "You're offline. Reconnect and try again."
+            default:
+                break
+            }
+        }
+        return "Failed to load thread."
+    }
+
+    /// Parses a tRPC HTTP error body of shape
+    /// `{ "error": { "json": { "message": "..." } } }` and returns the message string,
+    /// or nil if the body isn't a tRPC envelope.
+    private static func parseTRPCErrorMessage(_ body: String?) -> String? {
+        guard let body, let data = body.data(using: .utf8) else { return nil }
+        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let err = obj["error"] as? [String: Any],
+              let json = err["json"] as? [String: Any],
+              let message = json["message"] as? String,
+              !message.isEmpty else {
+            return nil
+        }
+        return message
     }
 
     func loadAssistant(threadId: String) async -> AssistantThreadContext? {
@@ -393,6 +663,108 @@ final class EmailService {
             AppLogger.shared.log("[EmailService] loadAssistantBriefing error: \(error)")
             return nil
         }
+    }
+
+    // MARK: - Briefing trust loop
+    //
+    // Per-row dismiss / snooze / done actions for the Home briefing. The user's
+    // biggest complaint with the briefing is that misclassified rows (Voi receipt
+    // as "Needs You") have no removal path — the screen feels permanently noisy.
+    // These mutations let the user prune wrong rows immediately and feed the
+    // classifier a `wrong` / `completed` signal at the same time.
+
+    func dismissBriefingOpenLoop(id: String, threadId: String?, feedback: String = "wrong") async {
+        removeOpenLoopLocally(id: id)
+        do {
+            let _: AssistantSimpleSuccess = try await api.trpcMutation(
+                "assistant.dismissOpenLoop",
+                input: AssistantOpenLoopIdInput(openLoopId: id)
+            )
+        } catch {
+            AppLogger.shared.log("[EmailService] dismissBriefingOpenLoop error: \(error)")
+        }
+        await recordAssistantFeedback(targetType: "open_loop", targetId: id, feedback: feedback)
+    }
+
+    func completeBriefingOpenLoop(id: String, threadId: String?) async {
+        removeOpenLoopLocally(id: id)
+        await recordAssistantFeedback(targetType: "open_loop", targetId: id, feedback: "completed")
+    }
+
+    func snoozeBriefingOpenLoop(id: String, threadId: String?, until: Date) async {
+        removeOpenLoopLocally(id: id)
+        let iso = ISO8601DateFormatter().string(from: until)
+        do {
+            let _: AssistantSimpleSuccess = try await api.trpcMutation(
+                "assistant.snoozeOpenLoop",
+                input: AssistantSnoozeOpenLoopInput(openLoopId: id, until: iso)
+            )
+        } catch {
+            AppLogger.shared.log("[EmailService] snoozeBriefingOpenLoop error: \(error)")
+        }
+    }
+
+    func dismissBriefingPreparedAction(id: String, threadId: String?, feedback: String = "wrong") async {
+        removePreparedActionLocally(id: id)
+        do {
+            let _: AssistantSimpleSuccess = try await api.trpcMutation(
+                "assistant.dismissPreparedAction",
+                input: AssistantPreparedActionIdInput(actionId: id)
+            )
+        } catch {
+            AppLogger.shared.log("[EmailService] dismissBriefingPreparedAction error: \(error)")
+        }
+        await recordAssistantFeedback(targetType: "prepared_action", targetId: id, feedback: feedback)
+    }
+
+    func recordAssistantFeedback(targetType: String, targetId: String, feedback: String, note: String? = nil) async {
+        do {
+            let _: AssistantSimpleSuccess = try await api.trpcMutation(
+                "assistant.recordFeedback",
+                input: AssistantFeedbackInput(
+                    targetType: targetType,
+                    targetId: targetId,
+                    feedback: feedback,
+                    note: note
+                )
+            )
+        } catch {
+            AppLogger.shared.log("[EmailService] recordAssistantFeedback error: \(error)")
+        }
+    }
+
+    private func removeOpenLoopLocally(id: String) {
+        guard var briefing = assistantBriefing else { return }
+        briefing = AssistantBriefing(
+            generatedAt: briefing.generatedAt,
+            today: AssistantBriefing.Today(
+                nextEvent: briefing.today.nextEvent,
+                topTask: briefing.today.topTask,
+                urgentReply: (briefing.today.urgentReply?.id == id) ? nil : briefing.today.urgentReply
+            ),
+            topPriorities: briefing.topPriorities.filter { $0.id != id },
+            needsYou: briefing.needsYou.filter { $0.id != id },
+            waitingOn: briefing.waitingOn.filter { $0.id != id },
+            prepared: briefing.prepared,
+            upcomingMeetings: briefing.upcomingMeetings,
+            changedSinceLastTime: briefing.changedSinceLastTime
+        )
+        assistantBriefing = briefing
+    }
+
+    private func removePreparedActionLocally(id: String) {
+        guard var briefing = assistantBriefing else { return }
+        briefing = AssistantBriefing(
+            generatedAt: briefing.generatedAt,
+            today: briefing.today,
+            topPriorities: briefing.topPriorities.filter { $0.id != id },
+            needsYou: briefing.needsYou,
+            waitingOn: briefing.waitingOn,
+            prepared: briefing.prepared.filter { $0.id != id },
+            upcomingMeetings: briefing.upcomingMeetings,
+            changedSinceLastTime: briefing.changedSinceLastTime
+        )
+        assistantBriefing = briefing
     }
 
     func createAssistantTask(threadId: String, suggestion: MailAssistantSuggestedTask) async -> Bool {
@@ -457,11 +829,46 @@ final class EmailService {
         }
 
         do {
-            let response: ConnectionsResponse = try await api.trpcQuery("connections.list")
+            // Bound the connection check so a hung network can't trap the inbox indefinitely
+            // — the inbox view's `.task` awaits this, and without a ceiling the user sits
+            // on the connection-checking placeholder until URLSession's default timeout
+            // (~60s+) eventually fires.
+            let response: ConnectionsResponse = try await Self.withTimeout(seconds: 8) { [api] in
+                try await api.trpcQuery("connections.list")
+            }
             hasConnection = !response.connections.isEmpty
             lastConnectionCheckAt = now
         } catch {
             hasConnection = false
+        }
+    }
+
+    /// Errors specific to EmailService's internal orchestration.
+    private enum EmailServiceError: Error {
+        /// `withTimeout` budget elapsed before `operation` produced a result.
+        case timeout
+    }
+
+    /// Race `operation` against a wall-clock timer. If `operation` doesn't complete within
+    /// `seconds`, it's cancelled and `EmailServiceError.timeout` is thrown. Used to bound
+    /// network calls so a hung backend can never trap the UI past a known ceiling.
+    private static func withTimeout<T: Sendable>(
+        seconds: TimeInterval,
+        _ operation: @escaping @Sendable () async throws -> T
+    ) async throws -> T {
+        try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask {
+                try await operation()
+            }
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                throw EmailServiceError.timeout
+            }
+            defer { group.cancelAll() }
+            guard let first = try await group.next() else {
+                throw EmailServiceError.timeout
+            }
+            return first
         }
     }
 
@@ -493,13 +900,13 @@ final class EmailService {
         }
 
         var attempt = 0
-        let maxAttempts = 6
+        let maxAttempts = 12
         while attempt < maxAttempts {
             await checkConnection(force: true)
             if hasConnection { break }
             attempt += 1
             if attempt < maxAttempts {
-                try? await Task.sleep(nanoseconds: 500_000_000)
+                try? await Task.sleep(nanoseconds: 750_000_000)
             }
         }
 
@@ -508,8 +915,7 @@ final class EmailService {
             return true
         }
 
-        errorMessage =
-            "Could not link your Gmail account. Make sure you granted access to Gmail and try again."
+        errorMessage = "Still connecting — refresh in a moment to confirm."
         return false
     }
 
@@ -521,13 +927,21 @@ final class EmailService {
         defer { isSending = false }
 
         do {
+            // Forward the optional from-connection so multi-account sends actually leave
+            // from the picked inbox. Empty strings collapse to nil so we don't pin sends
+            // to a blank account id when the field was never populated — mirrors the
+            // same normalization MacDraftService applies for the compose flow.
+            let normalizedConnectionId = draft.fromConnectionId?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
             let input = SendEmailInput(
                 to: draft.to.map { SendRecipient(email: $0) },
                 cc: draft.cc.isEmpty ? nil : draft.cc.map { SendRecipient(email: $0) },
+                bcc: draft.bcc.isEmpty ? nil : draft.bcc.map { SendRecipient(email: $0) },
                 subject: draft.subject,
                 message: draft.body,
                 threadId: draft.replyToThreadId,
-                isForward: draft.isForward ? true : nil
+                isForward: draft.isForward ? true : nil,
+                connectionId: (normalizedConnectionId?.isEmpty ?? true) ? nil : normalizedConnectionId
             )
             let _: SendResponse = try await api.trpcMutation("mail.send", input: input)
             return true
@@ -537,55 +951,111 @@ final class EmailService {
         }
     }
 
+    /// Apply read state to both the visible list and the folder cache so a
+    /// folder switch doesn't re-hydrate the unread dot from the stale cache.
+    private func applyReadState(ids: [String], unread: Bool) {
+        let mutate: (EmailThread) -> EmailThread = { t in
+            EmailThread(
+                id: t.id, subject: t.subject,
+                snippet: t.snippet, from: t.from,
+                date: t.date, unread: unread,
+                messageCount: t.messageCount, labels: t.labels
+            )
+        }
+        for i in threads.indices where ids.contains(threads[i].id) {
+            threads[i] = mutate(threads[i])
+        }
+        var cache = cachedThreadsByFolder[currentFolder] ?? []
+        for i in cache.indices where ids.contains(cache[i].id) {
+            cache[i] = mutate(cache[i])
+        }
+        cachedThreadsByFolder[currentFolder] = cache
+    }
+
     func markAsRead(ids: [String]) async {
+        // Optimistic apply, rollback on failure.
+        let snapshot = threads.filter { ids.contains($0.id) }
+        applyReadState(ids: ids, unread: false)
         do {
             let _: EmailEmptyResponse = try await api.trpcMutation("mail.markAsRead", input: IdsInput(ids: ids))
-            for i in threads.indices where ids.contains(threads[i].id) {
-                threads[i] = EmailThread(
-                    id: threads[i].id, subject: threads[i].subject,
-                    snippet: threads[i].snippet, from: threads[i].from,
-                    date: threads[i].date, unread: false,
-                    messageCount: threads[i].messageCount, labels: threads[i].labels
-                )
-            }
         } catch {
+            // Restore prior unread state from snapshot (only flips ones we changed).
+            for s in snapshot {
+                if let i = threads.firstIndex(where: { $0.id == s.id }) {
+                    threads[i] = s
+                }
+                if var cache = cachedThreadsByFolder[currentFolder],
+                   let j = cache.firstIndex(where: { $0.id == s.id }) {
+                    cache[j] = s
+                    cachedThreadsByFolder[currentFolder] = cache
+                }
+            }
             errorMessage = "Could not mark as read. Please try again."
             AppLogger.shared.log("[EmailService] markAsRead error: \(error)")
         }
     }
 
     func markAsUnread(ids: [String]) async {
+        let snapshot = threads.filter { ids.contains($0.id) }
+        applyReadState(ids: ids, unread: true)
         do {
             let _: EmailEmptyResponse = try await api.trpcMutation("mail.markAsUnread", input: IdsInput(ids: ids))
-            for i in threads.indices where ids.contains(threads[i].id) {
-                threads[i] = EmailThread(
-                    id: threads[i].id, subject: threads[i].subject,
-                    snippet: threads[i].snippet, from: threads[i].from,
-                    date: threads[i].date, unread: true,
-                    messageCount: threads[i].messageCount, labels: threads[i].labels
-                )
-            }
         } catch {
+            for s in snapshot {
+                if let i = threads.firstIndex(where: { $0.id == s.id }) {
+                    threads[i] = s
+                }
+                if var cache = cachedThreadsByFolder[currentFolder],
+                   let j = cache.firstIndex(where: { $0.id == s.id }) {
+                    cache[j] = s
+                    cachedThreadsByFolder[currentFolder] = cache
+                }
+            }
             errorMessage = "Could not mark as unread. Please try again."
             AppLogger.shared.log("[EmailService] markAsUnread error: \(error)")
         }
     }
 
+    /// Remove ids from both the visible list and the folder cache so the
+    /// removed threads don't reappear after a folder switch.
+    private func removeThreads(ids: [String]) -> [EmailThread] {
+        let snapshot = threads.filter { ids.contains($0.id) }
+        threads.removeAll { ids.contains($0.id) }
+        var cache = cachedThreadsByFolder[currentFolder] ?? []
+        cache.removeAll { ids.contains($0.id) }
+        cachedThreadsByFolder[currentFolder] = cache
+        return snapshot
+    }
+
+    /// Restore previously removed threads on optimistic-action rollback,
+    /// preserving original date order.
+    private func restoreThreadSnapshot(_ snapshot: [EmailThread]) {
+        guard !snapshot.isEmpty else { return }
+        threads.append(contentsOf: snapshot)
+        threads.sort { $0.date > $1.date }
+        var cache = cachedThreadsByFolder[currentFolder] ?? []
+        cache.append(contentsOf: snapshot)
+        cache.sort { $0.date > $1.date }
+        cachedThreadsByFolder[currentFolder] = cache
+    }
+
     func archiveThreads(ids: [String]) async {
+        let snapshot = removeThreads(ids: ids)
         do {
             let _: EmailEmptyResponse = try await api.trpcMutation("mail.bulkArchive", input: IdsInput(ids: ids))
-            threads.removeAll { ids.contains($0.id) }
         } catch {
+            restoreThreadSnapshot(snapshot)
             errorMessage = "Could not archive. Please try again."
             AppLogger.shared.log("[EmailService] archiveThreads error: \(error)")
         }
     }
 
     func deleteThreads(ids: [String]) async {
+        let snapshot = removeThreads(ids: ids)
         do {
             let _: EmailEmptyResponse = try await api.trpcMutation("mail.bulkDelete", input: IdsInput(ids: ids))
-            threads.removeAll { ids.contains($0.id) }
         } catch {
+            restoreThreadSnapshot(snapshot)
             errorMessage = "Could not delete. Please try again."
             AppLogger.shared.log("[EmailService] deleteThreads error: \(error)")
         }
@@ -653,10 +1123,16 @@ private struct SendRecipient: Encodable {
 private struct SendEmailInput: Encodable {
     let to: [SendRecipient]
     let cc: [SendRecipient]?
+    let bcc: [SendRecipient]?
     let subject: String
     let message: String
     let threadId: String?
     let isForward: Bool?
+    /// Which connected account to send from. Optional — older backends that don't
+    /// understand this field fall back to the user's default connection.
+    /// Matches the field name `MacDraftService.SendInput` uses on the wire so both
+    /// send paths stay aligned for multi-account users.
+    let connectionId: String?
 }
 
 private struct AssistantThreadInput: Encodable {
@@ -680,6 +1156,32 @@ private struct MailAssistantCreateTaskInput: Encodable {
 private struct MailAssistantCreateEventInput: Encodable {
     let threadId: String
     let event: MailAssistantSuggestedEvent
+}
+
+// MARK: - Briefing trust-loop inputs/outputs
+
+private struct AssistantOpenLoopIdInput: Encodable {
+    let openLoopId: String
+}
+
+private struct AssistantSnoozeOpenLoopInput: Encodable {
+    let openLoopId: String
+    let until: String
+}
+
+private struct AssistantPreparedActionIdInput: Encodable {
+    let actionId: String
+}
+
+private struct AssistantFeedbackInput: Encodable {
+    let targetType: String
+    let targetId: String
+    let feedback: String
+    let note: String?
+}
+
+private struct AssistantSimpleSuccess: Decodable {
+    let success: Bool
 }
 
 // Response types

@@ -64,14 +64,32 @@ export default function ShortcutsPage() {
 
                   let label: string;
 
+                  const safeMessage = (action: string): string => {
+                    // Locale catalogs may not cover every action — fall back to a humanised
+                    // version of the action key instead of throwing on `m[missing]()`.
+                    const key = `pages.settings.shortcuts.actions.${action}`;
+                    const fn = (m as Record<string, unknown>)[key];
+                    if (typeof fn === 'function') {
+                      try {
+                        return (fn as () => string)();
+                      } catch {
+                        // fall through to humanised label
+                      }
+                    }
+                    return action
+                      .replace(/([A-Z])/g, ' $1')
+                      .replace(/[-_]/g, ' ')
+                      .replace(/\s+/g, ' ')
+                      .trim()
+                      .replace(/^./, (c) => c.toUpperCase());
+                  };
+
                   if (shortcut.action in categoryActionIndex && categorySettings.length) {
                     const idx = categoryActionIndex[shortcut.action];
                     const cat = categorySettings[idx];
-                    label = cat
-                      ? `Show ${cat.name}`
-                      : m[`pages.settings.shortcuts.actions.${shortcut.action}`]();
+                    label = cat ? `Show ${cat.name}` : safeMessage(shortcut.action);
                   } else {
-                    label = m[`pages.settings.shortcuts.actions.${shortcut.action}`]();
+                    label = safeMessage(shortcut.action);
                   }
 
                   return (

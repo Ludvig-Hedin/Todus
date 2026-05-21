@@ -393,7 +393,13 @@ const getThreadEffect = (connectionId: string, threadId: string) => {
             new Error(`Failed to setup auth or get thread from shard ${shardId}: ${error}`),
         });
 
-        if (thread) {
+        // `getThreadFromDB` returns a truthy empty stub (`{ messages: [], latest: undefined }`)
+        // when the thread is not in that shard's local DB — it still kicks off an async
+        // syncThread on the side, but the immediate return value carries no payload.
+        // Treating that as race-success was making `raceAll` pick the empty shard whenever
+        // it finished before the shard that actually owns the thread, producing the
+        // "could not load thread" symptom for users whose threads live in a later shard.
+        if (thread && (thread.messages.length > 0 || thread.latest)) {
           return thread;
         }
 

@@ -55,6 +55,7 @@ export function parseNaturalLanguage(text: string, now = new Date()): ParsedNLIn
 
   let baseDate: Date = now;
   let confidence = 0.52;
+  let foundDateKeyword = false;
   const consumed: Array<[number, number]> = []; // [start, end] index pairs to remove from title
 
   // Step 1: relative date keywords
@@ -70,12 +71,13 @@ export function parseNaturalLanguage(text: string, now = new Date()): ParsedNLIn
       consumed.push([idx, idx + token.length]);
       baseDate = addDays(now, offset);
       confidence = 0.86;
+      foundDateKeyword = true;
       break; // first match wins
     }
   }
 
   // Step 2: weekday references (only if no relative marker matched)
-  if (baseDate === now) {
+  if (!foundDateKeyword) {
     const todayDow = now.getDay(); // 0=Sun … 6=Sat
     const weekdayMarkers: Array<[string, number]> = [
       ['måndag', 1],
@@ -104,6 +106,7 @@ export function parseNaturalLanguage(text: string, now = new Date()): ParsedNLIn
         if (daysAhead <= 0) daysAhead += 7;
         baseDate = addDays(now, daysAhead);
         confidence = 0.82;
+        foundDateKeyword = true;
         break;
       }
     }
@@ -111,22 +114,29 @@ export function parseNaturalLanguage(text: string, now = new Date()): ParsedNLIn
 
   // Step 3: time detection — three patterns in priority order
   let dueDate: Date | null = null;
-  const hasDateKeyword = baseDate !== now;
+  const hasDateKeyword = foundDateKeyword;
   const timeMatch = findTimeMatch(lower, hasDateKeyword);
   if (timeMatch) {
     const { hours, minutes, start, end } = timeMatch;
     consumed.push([start, end]);
     dueDate = setTime(baseDate, hours, minutes);
     // If no date keyword and the time has already passed today, roll to tomorrow
-    if (baseDate === now && dueDate < now) {
+    if (!foundDateKeyword && dueDate < now) {
       dueDate = addDays(dueDate, 1);
     }
     confidence = Math.max(confidence, 0.9);
   }
 
-  // Step 4: date keyword but no time → start of that day
-  if (!dueDate && baseDate !== now) {
-    dueDate = startOfDay(baseDate);
+  // Step 4: date keyword but no time.
+  // For "today"/"idag" with no time, default to (now + 2h) so notifications can fire.
+  // For weekday/tomorrow keywords, use start of that day.
+  if (!dueDate && foundDateKeyword) {
+    const isToday = baseDate.toDateString() === now.toDateString();
+    if (isToday) {
+      dueDate = new Date(now.getTime() + 2 * 60 * 60 * 1000);
+    } else {
+      dueDate = startOfDay(baseDate);
+    }
     confidence = Math.max(confidence, 0.72);
   }
 
@@ -230,38 +240,46 @@ interface TimeMatch {
   end: number;
 }
 
+function applyMeridiem(hours: number, meridiem: string | undefined): number {
+  if (!meridiem) return hours;
+  const m = meridiem.toLowerCase().replace(/\./g, '');
+  if (m === 'pm' && hours < 12) return hours + 12;
+  if (m === 'am' && hours === 12) return 0;
+  return hours;
+}
+
 function findTimeMatch(lower: string, hasDateKeyword: boolean): TimeMatch | null {
-  // Priority 1: explicit prefix "kl", "at", "@" anywhere
-  const prefixedRe = /(?:kl\s*|at\s+|@\s*)([01]?\d|2[0-3])(?::([0-5]\d))?(?!\d)/g;
+  // Priority 1: explicit prefix "kl", "at", "@" — optional am/pm suffix
+  const prefixedRe = /(?:kl\s*|at\s+|@\s*)([01]?\d|2[0-3])(?::([0-5]\d))?\s*(am|pm|a\.m\.|p\.m\.)?(?!\w)/gi;
   const p1 = prefixedRe.exec(lower);
   if (p1) {
     return {
-      hours: parseInt(p1[1], 10),
+      hours: applyMeridiem(parseInt(p1[1], 10), p1[3]),
       minutes: p1[2] ? parseInt(p1[2], 10) : 0,
       start: p1.index,
       end: p1.index + p1[0].length,
     };
   }
 
-  // Priority 2: HH:MM colon format (less ambiguous)
-  const colonRe = /(?<!\d)([01]?\d|2[0-3]):([0-5]\d)(?!\d)/g;
+  // Priority 2: HH:MM colon format (less ambiguous) — optional am/pm
+  const colonRe = /(?<!\d)([01]?\d|2[0-3]):([0-5]\d)\s*(am|pm|a\.m\.|p\.m\.)?(?!\w)/gi;
   const p2 = colonRe.exec(lower);
   if (p2) {
     return {
-      hours: parseInt(p2[1], 10),
+      hours: applyMeridiem(parseInt(p2[1], 10), p2[3]),
       minutes: parseInt(p2[2], 10),
       start: p2.index,
       end: p2.index + p2[0].length,
     };
   }
 
-  // Priority 3: bare number at end of string
+  // Priority 3: bare number at end of string — optional am/pm
   if (hasDateKeyword) {
-    const tailRe = /(?<![:\d])([01]?\d|2[0-3])(?::([0-5]\d))?\s*$/;
+    const tailRe = /(?<![:\d])([01]?\d|2[0-3])(?::([0-5]\d))?\s*(am|pm|a\.m\.|p\.m\.)?\s*$/i;
     const p3 = tailRe.exec(lower);
     if (p3) {
       return {
-        hours: parseInt(p3[1], 10),
+        hours: applyMeridiem(parseInt(p3[1], 10), p3[3]),
         minutes: p3[2] ? parseInt(p3[2], 10) : 0,
         start: p3.index,
         end: p3.index + p3[0].length,

@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 
 /// Reusable 24-hour time grid with positioned event blocks.
@@ -16,7 +17,10 @@ struct CalendarTimeGridView: View {
     private var totalHeight: CGFloat { 24 * hourHeight }
 
     @State private var now = Date()
-    private let timer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
+    /// Explicit Combine subscription so multi-day pages don't leak a Timer per
+    /// page once the user swipes away. Subscribed in `.onAppear`, cancelled in
+    /// `.onDisappear`.
+    @State private var timerCancellable: AnyCancellable?
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -63,9 +67,18 @@ struct CalendarTimeGridView: View {
             }
             .onAppear {
                 proxy.scrollTo("scroll-anchor-7am", anchor: .top)
+                // Start a single 60-second tick. Storing the cancellable lets
+                // `.onDisappear` tear it down — otherwise each MultiDay page
+                // would leak its own timer.
+                if timerCancellable == nil {
+                    timerCancellable = Timer.publish(every: 60, on: .main, in: .common)
+                        .autoconnect()
+                        .sink { _ in now = Date() }
+                }
             }
-            .onReceive(timer) { _ in
-                now = Date()
+            .onDisappear {
+                timerCancellable?.cancel()
+                timerCancellable = nil
             }
         }
     }
@@ -278,7 +291,8 @@ struct CalendarTimeGridView: View {
             let startMinutes = max(CGFloat(event.startDate.timeIntervalSince(dayStart) / 60), 0)
             // Compute the *visual* duration: at least minEventHeight tall, and
             // never negative even if endDate < startDate (corrupt input).
-            let rawEndMinutes = CGFloat(event.endDate.timeIntervalSince(dayStart) / 60)
+            // Cap end at 24:00 (1440 min) so multi-day events don't overflow past midnight.
+            let rawEndMinutes = min(CGFloat(event.endDate.timeIntervalSince(dayStart) / 60), 24 * 60)
             let rawDuration = max(rawEndMinutes - startMinutes, 0)
             let duration = max(rawDuration, minEventHeight / dayMinutesPerPoint)
 

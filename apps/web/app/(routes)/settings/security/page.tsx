@@ -60,7 +60,7 @@ export default function SecurityPage() {
   const otherSessions = sessions.filter((s) => !s.isCurrent);
 
   return (
-    <div className="grid gap-6">
+    <div className="grid gap-5">
       <SettingsCard
         title={m['pages.settings.security.title']()}
         description={m['pages.settings.security.description']()}

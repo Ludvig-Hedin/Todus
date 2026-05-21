@@ -145,7 +145,7 @@ export function NavMain({ items }: NavMainProps) {
   };
 
   return (
-    <SidebarGroup className={`${state !== 'collapsed' ? '' : 'mt-1'} space-y-2.5 py-0 md:px-0`}>
+    <SidebarGroup className={`${state !== 'collapsed' ? '' : 'mt-1'} space-y-2.5 px-0 py-0`}>
       <SidebarMenu>
         {items.map((section) => (
           <Collapsible
@@ -251,8 +251,8 @@ function NavItemExpandable(
       <CollapsibleTrigger asChild>
         <SidebarMenuButton
           className={cn(
-            'hover:bg-accent flex w-full items-center transition-colors duration-100',
-            item.isActive && 'bg-accent text-accent-foreground',
+            'hover:bg-accent flex w-full items-center transition-colors duration-(--motion-duration-fast) ease-(--motion-easing-standard)',
+            item.isActive && 'bg-accent text-accent-foreground px-2!',
           )}
         >
           {item.icon && <item.icon className="mr-2 h-3.5 w-3.5 shrink-0" />}
@@ -261,7 +261,7 @@ function NavItemExpandable(
           </p>
           <ChevronRight
             className={cn(
-              'text-muted-foreground ml-auto h-3.5 w-3.5 shrink-0 transition-transform duration-200',
+              'text-muted-foreground ml-auto h-3.5 w-3.5 shrink-0 transition-transform duration-(--motion-duration-base) ease-(--motion-easing-standard)',
               open && 'rotate-90',
             )}
           />
@@ -308,7 +308,7 @@ function NavChildRow({
     <SidebarMenuButton
       asChild
       className={cn(
-        'hover:bg-accent min-h-8 transition-colors duration-100',
+        'hover:bg-accent min-h-8 transition-colors duration-(--motion-duration-fast) ease-(--motion-easing-standard)',
         isActive && 'bg-accent text-accent-foreground',
       )}
     >
@@ -342,13 +342,14 @@ function NavItemRow(item: NavItemProps & { href: string }) {
     );
   }
 
-  // Search item opens the command palette modal instead of navigating to a page
+  // Search item opens the command palette modal instead of navigating to a page.
+  // Renders an inline ⌘K kbd hint so the shortcut is discoverable without hover.
   if (item.id === 'search') {
     return (
       <SidebarMenuButton
-        tooltip={state === 'collapsed' ? item.title : undefined}
+        tooltip={state === 'collapsed' ? `${item.title} (⌘K)` : undefined}
         className={cn(
-          'hover:bg-accent flex items-center transition-colors duration-100',
+          'hover:bg-accent flex items-center transition-colors duration-(--motion-duration-fast) ease-(--motion-easing-standard)',
           item.isActive && 'bg-accent text-accent-foreground',
         )}
         onClick={() => {
@@ -360,6 +361,12 @@ function NavItemRow(item: NavItemProps & { href: string }) {
         <p className="relative bottom-px mt-0.5 min-w-0 flex-1 truncate text-[13px]">
           {item.title}
         </p>
+        {state !== 'collapsed' && (
+          <kbd className="text-muted-foreground/80 border-border/70 bg-background/70 ml-auto inline-flex h-5 items-center gap-0.5 rounded-md border px-1.5 font-mono text-[10px] font-medium">
+            <span className="text-[11px] leading-none">⌘</span>
+            <span className="leading-none">K</span>
+          </kbd>
+        )}
       </SidebarMenuButton>
     );
   }
@@ -377,7 +384,7 @@ function NavItemRow(item: NavItemProps & { href: string }) {
       asChild
       tooltip={state === 'collapsed' ? item.title : undefined}
       className={cn(
-        'hover:bg-accent flex items-center transition-colors duration-100',
+        'hover:bg-accent flex items-center transition-colors duration-(--motion-duration-fast) ease-(--motion-easing-standard)',
         item.isActive && 'bg-accent text-accent-foreground',
       )}
       onClick={handleClick}

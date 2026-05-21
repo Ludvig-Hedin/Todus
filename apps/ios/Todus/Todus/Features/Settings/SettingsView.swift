@@ -11,6 +11,10 @@ struct SettingsView: View {
     @State private var deleteConfirmText = ""
     @State private var deleteConfirmError: String?
     @State private var isDeletingAccount = false
+    /// True while `performLogout` is running — drives a small "Signing out…" HUD so
+    /// the user sees feedback during the network round-trip before the auth state
+    /// flips and the sheet dismisses.
+    @State private var isSigningOut = false
     @State private var showsDisconnectGmail = false
     /// ID of the connection selected for disconnection — used by the confirmation dialog
     @State private var disconnectingConnectionId: String?
@@ -30,6 +34,7 @@ struct SettingsView: View {
 
     // AI permission flags — backed by the same UserDefaults keys read by AIChatService
     // so toggling these here updates the AI behaviour for the next request (#6).
+    @AppStorage("ios_accent_color") private var accentColorKey: String = "blue"
     @AppStorage("ai_can_read_tasks") private var aiCanReadTasks: Bool = true
     @AppStorage("ai_can_write_tasks") private var aiCanWriteTasks: Bool = true
     @AppStorage("ai_can_read_calendar") private var aiCanReadCalendar: Bool = true
@@ -101,6 +106,34 @@ struct SettingsView: View {
                 }
         }
         .presentationDragIndicator(.visible)
+        // Sync AI permission toggles to the backend so iOS / macOS / web stay aligned.
+        .onChange(of: aiCanReadTasks) { _, value in
+            Task { await services.syncSetting("aiCanReadTasks", value) }
+        }
+        .onChange(of: aiCanWriteTasks) { _, value in
+            Task { await services.syncSetting("aiCanWriteTasks", value) }
+        }
+        .onChange(of: aiCanReadCalendar) { _, value in
+            Task { await services.syncSetting("aiCanReadCalendar", value) }
+        }
+        .onChange(of: aiCanWriteCalendar) { _, value in
+            Task { await services.syncSetting("aiCanWriteCalendar", value) }
+        }
+        .onChange(of: aiCanReadEmail) { _, value in
+            Task { await services.syncSetting("aiCanReadEmail", value) }
+        }
+        .onChange(of: aiCanSendEmail) { _, value in
+            Task { await services.syncSetting("aiCanSendEmail", value) }
+        }
+        .onChange(of: accentColorKey) { _, value in
+            Task { await services.syncSetting("accentColor", value) }
+        }
+        .onChange(of: services.preferredStartViewMode) { _, value in
+            Task { await services.syncSetting("defaultTaskView", value.rawValue) }
+        }
+        .onChange(of: threadGroupingEnabled) { _, value in
+            Task { await services.syncSetting("groupByThread", value) }
+        }
         .task {
             // Refresh profile data (name, avatar) when settings opens
             await services.authService.fetchUserProfile()
@@ -210,11 +243,50 @@ struct SettingsView: View {
         } message: {
             Text("You'll stop receiving emails in Todus. You can reconnect anytime.")
         }
-        // Success feedback after a Gmail account has been disconnected (#25).
-        // Auto-dismissed by performDisconnectGmail() after a few seconds.
-        .alert("Gmail account disconnected", isPresented: $showDisconnectSuccess) {
-            Button("OK", role: .cancel) {}
+        // Transient success HUD after a Gmail account has been disconnected (#25).
+        // Replaces the previous blocking alert — the operation is non-destructive
+        // and trivially reversible, so a 1.5s overlay is the right weight. The
+        // performDisconnectGmail() task flips `showDisconnectSuccess` back to false.
+        .overlay(alignment: .bottom) {
+            if showDisconnectSuccess {
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.green)
+                    Text("Gmail account disconnected")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.primary)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(.ultraThinMaterial, in: Capsule())
+                .overlay(Capsule().stroke(AppTheme.cardBorder, lineWidth: 0.5))
+                .padding(.bottom, 32)
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Gmail account disconnected")
+            }
         }
+        .animation(AppTheme.Motion.base, value: showDisconnectSuccess)
+        // Sign-out HUD — non-interactive, centered overlay while `signOut()` runs.
+        .overlay {
+            if isSigningOut {
+                VStack(spacing: 10) {
+                    ProgressView()
+                        .controlSize(.regular)
+                    Text("Signing out…")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(20)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous).stroke(AppTheme.cardBorder, lineWidth: 0.5))
+                .transition(.opacity)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Signing out")
+            }
+        }
+        .animation(AppTheme.Motion.fast, value: isSigningOut)
     }
 
     // MARK: - Account
@@ -224,21 +296,7 @@ struct SettingsView: View {
             // Profile row — avatar, name, email
             HStack(spacing: 12) {
                 // Avatar — Google profile image or letter initial fallback
-                if let imageURLString = services.authService.userImage,
-                   let imageURL = URL(string: imageURLString) {
-                    AsyncImage(url: imageURL) { phase in
-                        switch phase {
-                        case .success(let image):
-                            image
-                                .resizable()
-                                .scaledToFill()
-                                .frame(width: 48, height: 48)
-                                .clipShape(Circle())
-                        default:
-                            avatarFallback
-                        }
-                    }
-                } else {
+                CachedAvatarImage(urlString: services.authService.userImage, size: 48) {
                     avatarFallback
                 }
 
@@ -712,6 +770,34 @@ struct SettingsView: View {
                 }
             }
 
+            // Accent color — synced across iOS / macOS / web via `accentColor` setting.
+            HStack {
+                Label("Accent", systemImage: "paintpalette")
+                Spacer()
+                HStack(spacing: 8) {
+                    ForEach(AppTheme.accentColorKeys, id: \.self) { key in
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.15)) {
+                                accentColorKey = key
+                            }
+                        } label: {
+                            ZStack {
+                                Circle()
+                                    .fill(AppTheme.accentColor(for: key))
+                                    .frame(width: 22, height: 22)
+                                if accentColorKey == key {
+                                    Image(systemName: "checkmark")
+                                        .font(.system(size: 10, weight: .bold))
+                                        .foregroundStyle(.white)
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(key.capitalized)
+                    }
+                }
+            }
+
             Picker(selection: Binding(
                 get: { services.preferredStartViewMode },
                 set: {
@@ -744,6 +830,10 @@ struct SettingsView: View {
             }
         } header: {
             Text("Preferences")
+        } footer: {
+            // Default view changes take effect on next Tasks open — clarify that so
+            // users aren't confused when the current Tasks tab keeps its old layout.
+            Text("Default View applies next time you open Tasks.")
         }
     }
 
@@ -762,10 +852,15 @@ struct SettingsView: View {
             } label: {
                 Label("Local Models", systemImage: "cpu")
             }
+            NavigationLink {
+                VoiceAssistantSettingsView()
+            } label: {
+                Label("Voice Assistant", systemImage: "waveform")
+            }
         } header: {
             Text("AI Assistant")
         } footer: {
-            Text("Configure what the AI can read, write, and how it responds. Local models run on this device and don’t use plan credits.")
+            Text("Configure what the AI can read, write, and how it responds. Local models run on this device and don’t use plan credits. Voice assistant is available via Siri Shortcuts.")
         }
     }
 
@@ -867,9 +962,31 @@ struct SettingsView: View {
                 Label("Group by Thread", systemImage: "text.bubble")
             }
             .tint(AppTheme.switchTint)
+
+            NavigationLink {
+                EmailAutomationPolicyView()
+            } label: {
+                HStack {
+                    Label("Automation policy", systemImage: "wand.and.stars")
+                    Spacer()
+                    Text(automationSummary)
+                        .font(.system(size: 14))
+                        .foregroundStyle(.secondary)
+                }
+            }
         } header: {
             Text("Email")
         }
+    }
+
+    /// Compact summary shown next to the "Automation policy" row.
+    /// Reflects the most user-visible automation toggles without opening the sub-page.
+    private var automationSummary: String {
+        let policy = services.assistantAutomationPolicy
+        if policy.autoSendExperimentEnabled { return "Auto-send on" }
+        let excluded = policy.excludedSenderPatterns.count
+        if excluded > 0 { return "\(excluded) excluded" }
+        return "Recommended"
     }
 
 
@@ -945,6 +1062,19 @@ struct SettingsView: View {
     private var developerSection: some View {
         @Bindable var ai = services.aiChatService
         return Section {
+            // Hidden Design System viewer — gated to the allowlisted email set
+            // even inside the developer section so teammate devices that flip
+            // developer mode on don't see it. Renders every token, surface,
+            // and component the iOS app uses with "How to change" callouts
+            // pointing at `AppTheme.swift` line ranges.
+            if TodusDeveloperAccess.isAllowlisted(email: services.authService.userEmail) {
+                NavigationLink {
+                    DesignSystemView()
+                } label: {
+                    Label("Design System", systemImage: "swatchpalette")
+                }
+            }
+
             Toggle("Local Backend", isOn: $useLocalBackend)
                 .onChange(of: useLocalBackend) { _, newValue in
                     AppConfiguration.useLocalBackend = newValue
@@ -1032,9 +1162,18 @@ struct SettingsView: View {
     }
 
     private func performLogout() {
+        // Brief HUD overlay covers the sign-out call so the user gets feedback
+        // instead of a blank pause between tap and sheet dismissal. signOut() can
+        // do KeyChain + network work; we don't await but we also don't dismiss
+        // until that's had a chance to run, so the HUD survives long enough to read.
+        isSigningOut = true
         services.authService.hasSeenOnboarding = false
         services.signOut()
-        dismiss()
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            isSigningOut = false
+            dismiss()
+        }
     }
 
     /// Deletes the user's account on the backend, clears local auth state, and dismisses settings.
@@ -1106,8 +1245,10 @@ struct SettingsView: View {
         // Auto-dismiss after a few seconds so it doesn't block subsequent edits.
         if didSucceed {
             showDisconnectSuccess = true
+            // 1.5s matches the standard transient-HUD dwell time used elsewhere; long
+            // enough to register, short enough not to block subsequent edits.
             Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 2_500_000_000)
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
                 showDisconnectSuccess = false
             }
         }
@@ -1264,15 +1405,19 @@ struct SessionsSettingsView: View {
         defer { revokingSessionIDs.remove(sessionId) }
         do {
             let response = try await services.apiClient.revokeSession(sessionId: sessionId)
-            await loadSessions()
             if response.revokedCurrent {
-                // Current device was logged out — pop back and sign out
+                // Current device was revoked — sign out FIRST so the user can't
+                // briefly interact with the still-visible sessions list with an
+                // invalidated bearer token. Skip the post-action `loadSessions()`
+                // refresh because the call would fail with 401 anyway.
                 services.authService.hasSeenOnboarding = false
                 services.signOut()
                 dismiss()
-            } else {
-                await services.authService.fetchUserProfile()
+                return
             }
+            // Other device revoked: refresh the list so the row disappears.
+            await loadSessions()
+            await services.authService.fetchUserProfile()
         } catch {
             AppLogger.shared.log("Revoke session failed: \(error.localizedDescription)")
         }
@@ -1304,6 +1449,7 @@ struct SessionsSettingsView: View {
 struct AIAssistantSettingsView: View {
     @Environment(AppServices.self) private var services
     @State private var showsAutoSendConfirm = false
+    @State private var showApplyRecommendedConfirmation = false
 
     private var excludedSenderPatternsText: Binding<String> {
         Binding(
@@ -1346,7 +1492,19 @@ struct AIAssistantSettingsView: View {
 
             Section {
                 Button("Apply recommended assistant defaults") {
-                    services.assistantAutomationPolicy = .recommended
+                    showApplyRecommendedConfirmation = true
+                }
+                .confirmationDialog(
+                    "Replace all Mail Assistant settings?",
+                    isPresented: $showApplyRecommendedConfirmation,
+                    titleVisibility: .visible
+                ) {
+                    Button("Apply recommended", role: .destructive) {
+                        services.assistantAutomationPolicy = .recommended
+                    }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("This overwrites every toggle, workday hours, quiet hours, and excluded sender patterns with the recommended defaults. Your custom values will be lost.")
                 }
 
                 Toggle(
@@ -1531,6 +1689,29 @@ struct AIAssistantSettingsView: View {
             }
 
             Section {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Location")
+                        .font(.system(size: 15, weight: .medium))
+                    TextField(
+                        "e.g. Oslo, Norway",
+                        text: Binding(
+                            get: { services.location },
+                            set: { services.location = $0 }
+                        )
+                    )
+                    .textFieldStyle(.plain)
+                    .padding(8)
+                    .background(Color.secondary.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
+                }
+                .padding(.vertical, 4)
+            } header: {
+                Text("Location")
+            } footer: {
+                Text("City and country (e.g. \"Oslo, Norway\"). Gives the AI location context for time zones, local references, and geographic follow-ups.")
+            }
+
+            Section {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Context about you")
                         .font(.system(size: 15, weight: .medium))
@@ -1645,6 +1826,19 @@ struct AppearanceSettingsView: View {
             } footer: {
                 Text("System follows your iPhone's Dark Mode setting.")
             }
+
+            // Brand accent — mirrors the macOS + web accent picker. The
+            // selection is persisted in `AppServices.accentPreference` and is
+            // available app-wide via `AppTheme.Accents.*` for future tint
+            // surfaces (currently used by the design-system viewer preview).
+            Section {
+                accentPickerRow
+                    .padding(.vertical, 6)
+            } header: {
+                Text("Accent")
+            } footer: {
+                Text("Brand accent used across the app. Some surfaces still use the system tint and will adopt the accent in a later release.")
+            }
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
@@ -1653,11 +1847,50 @@ struct AppearanceSettingsView: View {
         .navigationBarTitleDisplayMode(.inline)
     }
 
+    /// Six round accent swatches in a single horizontal row. Selected swatch
+    /// is wrapped in a ring at `AppTheme.Radius.chip` to stay consistent with
+    /// the design-system spec.
+    private var accentPickerRow: some View {
+        HStack(spacing: 14) {
+            ForEach(AccentPreference.allCases, id: \.rawValue) { preference in
+                Button {
+                    services.accentPreference = preference
+                } label: {
+                    accentSwatch(for: preference)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Accent \(preference.rawValue)")
+                .accessibilityAddTraits(services.accentPreference == preference ? .isSelected : [])
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func accentSwatch(for preference: AccentPreference) -> some View {
+        let isSelected = services.accentPreference == preference
+        return ZStack {
+            // Selection ring sits at chip-radius (rounded square) so a swatch
+            // never reads as a stray system button. Stroke widens slightly when
+            // selected to make the active accent unmistakable at a glance.
+            RoundedRectangle(cornerRadius: AppTheme.Radius.chip, style: .continuous)
+                .stroke(isSelected ? Color.primary : Color.clear, lineWidth: isSelected ? 2 : 0)
+                .frame(width: 38, height: 38)
+            Circle()
+                .fill(preference.color)
+                .frame(width: 28, height: 28)
+                .overlay(
+                    Circle()
+                        .strokeBorder(Color.black.opacity(0.08), lineWidth: 0.5)
+                )
+        }
+        .contentShape(RoundedRectangle(cornerRadius: AppTheme.Radius.chip, style: .continuous))
+    }
+
     private func previewBackground(for preference: AppAppearancePreference) -> Color {
         switch preference {
         case .system: return Color(UIColor.systemBackground)
         case .light:  return Color(UIColor(white: 0.98, alpha: 1))
-        case .dark:   return Color(UIColor(white: 0.08, alpha: 1))
+        case .dark:   return Color(UIColor(white: 0.109, alpha: 1))
         }
     }
 

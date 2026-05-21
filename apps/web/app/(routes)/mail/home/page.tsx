@@ -13,6 +13,7 @@ import {
   CheckSquare2,
   Mail,
   ExternalLink,
+  Sparkles,
 } from 'lucide-react';
 import { useInfiniteQuery, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { formatDistanceToNow, isToday, format, startOfDay, endOfDay } from 'date-fns';
@@ -27,9 +28,10 @@ import { useSettings } from '@/hooks/use-settings';
 import { authProxy } from '@/lib/auth-proxy';
 import { upsertTaskInTaskCaches } from '@/lib/task-cache';
 import type { Route } from './+types/page';
-import { Link } from 'react-router';
+import { Link, redirect } from 'react-router';
 import { cn } from '@/lib/utils';
 import { useMemo } from 'react';
+import { toast } from 'sonner';
 
 type Task = Outputs['tasks']['list']['tasks'][number];
 type CalendarEvent = Outputs['calendar']['events']['events'][number];
@@ -38,7 +40,7 @@ type AssistantBriefing = Outputs['assistant']['getBriefing'];
 // Auth guard
 export async function clientLoader({ request }: Route.ClientLoaderArgs) {
   const session = await authProxy.api.getSession({ headers: request.headers });
-  if (!session) return Response.redirect(`${import.meta.env.VITE_PUBLIC_APP_URL}/login`);
+  if (!session) throw redirect('/login');
   return {};
 }
 
@@ -155,6 +157,10 @@ export default function HomePage() {
     onSuccess: ({ task }) => {
       upsertTaskInTaskCaches(queryClient, task);
     },
+    onError: (err) => {
+      console.error('Failed to update task:', err);
+      toast.error('Could not update task. Please try again.');
+    },
   });
 
   // Today's calendar events
@@ -193,10 +199,10 @@ export default function HomePage() {
 
   return (
     <div className="bg-background flex h-screen flex-col overflow-y-auto">
-      <div className="mx-auto w-full max-w-2xl px-6 py-8">
+      <div className="mx-auto w-full max-w-[1280px] px-8 py-8 xl:px-12">
         {/* Greeting — first name only, date subtitle */}
         <div className="mb-8">
-          <h1 className="text-[22px] font-bold tracking-tight">
+          <h1 className="text-[26px] font-bold tracking-tight">
             {getGreeting()}
             {firstName ? `, ${firstName}` : ''}
           </h1>
@@ -209,7 +215,7 @@ export default function HomePage() {
           {showHomeBriefing && (
             <Section className="space-y-4">
               <SectionHeader
-                icon={Inbox}
+                icon={Sparkles}
                 title="Assistant Briefing"
                 isUpdating={!!briefingQuery.data && !briefingQuery.isLoading && briefingQuery.isFetching}
               />
@@ -221,13 +227,26 @@ export default function HomePage() {
                     ),
                   )}
                 </div>
+              ) : briefingQuery.isError ? (
+                <div className="flex items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2.5 text-[13px] text-destructive">
+                  <p>Couldn&apos;t load your briefing.</p>
+                  <button
+                    type="button"
+                    onClick={() => void briefingQuery.refetch()}
+                    className="rounded-md border border-destructive/40 px-2 py-1 text-[12px] font-medium transition-colors hover:bg-destructive/10"
+                  >
+                    Retry
+                  </button>
+                </div>
               ) : briefingQuery.data ? (
                 <AssistantBriefingBlock briefing={briefingQuery.data} />
               ) : null}
             </Section>
           )}
 
-          {/* ── Today's Events ────────────────────────────────────────────── */}
+          {/* ── Desktop 3-column grid: Events / Tasks / Recent Emails ────── */}
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+            {/* Today's Events */}
             <Section>
               <SectionHeader
                 icon={CalendarDays}
@@ -236,45 +255,56 @@ export default function HomePage() {
                 linkTo="/mail/calendar"
                 isUpdating={isEventsRefreshing}
               />
-            {eventsLoading ? (
-              <div className="flex flex-col gap-2">
-                {['event-skeleton-1', 'event-skeleton-2'].map((key) => (
-                  <div key={key} className="bg-muted/50 h-10 animate-pulse rounded-lg" />
-                ))}
-              </div>
-            ) : calendarScopeMissing ? (
-              /* User connected Google but hasn't granted calendar scope — prompt re-auth */
-              <button
-                type="button"
-                onClick={() =>
-                  authClient.linkSocial({ provider: 'google', callbackURL: '/mail/home' })
-                }
-                className="bg-muted/30 hover:bg-muted/50 flex w-full items-center gap-3 rounded-lg border border-dashed px-4 py-3.5 text-left transition-colors"
-              >
-                <CalendarDays className="text-muted-foreground h-5 w-5 shrink-0" />
-                <div className="min-w-0 flex-1">
-                  <p className="text-[13px] font-medium">Allow calendar access</p>
-                  <p className="text-muted-foreground text-[12px]">
-                    Grant the calendar permission to see today&apos;s events.
-                  </p>
+              {eventsLoading ? (
+                <div className="flex flex-col gap-2">
+                  {['event-skeleton-1', 'event-skeleton-2'].map((key) => (
+                    <div key={key} className="bg-muted/50 h-10 animate-pulse rounded-lg" />
+                  ))}
                 </div>
-                <ExternalLink className="text-muted-foreground h-3.5 w-3.5 shrink-0" />
-              </button>
-            ) : todayEvents.length === 0 ? (
-              <div className="flex flex-col items-center gap-2 py-3 text-center">
-                <CalendarDays className="text-muted-foreground/40 h-7 w-7" />
-                <p className="text-muted-foreground text-[13px]">No events today</p>
-              </div>
-            ) : (
-              <div className="divide-border/60 flex flex-col divide-y">
-                {todayEvents.map((event) => (
-                  <CalendarEventRow key={event.id} event={event} />
-                ))}
-              </div>
-            )}
-          </Section>
+              ) : calendarScopeMissing ? (
+                /* User connected Google but hasn't granted calendar scope — prompt re-auth.
+                   callbackURL MUST be absolute (origin-qualified). Relative URLs are
+                   resolved against the Better Auth backend origin (api.todus.app) and
+                   land the user on api.todus.app/mail/home → 404 after consent. */
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      await authClient.linkSocial({
+                        provider: 'google',
+                        callbackURL: `${window.location.origin}/mail/home`,
+                      });
+                    } catch (error) {
+                      console.error('Failed to start Google reconnect:', error);
+                      toast.error('Could not start Google reconnect. Please try again.');
+                    }
+                  }}
+                  className="bg-muted/30 hover:bg-muted/50 flex w-full items-center gap-3 rounded-lg border border-dashed px-4 py-3.5 text-left transition-colors"
+                >
+                  <CalendarDays className="text-muted-foreground h-5 w-5 shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[13px] font-medium">Allow calendar access</p>
+                    <p className="text-muted-foreground text-[12px]">
+                      Grant the calendar permission to see today&apos;s events.
+                    </p>
+                  </div>
+                  <ExternalLink className="text-muted-foreground h-3.5 w-3.5 shrink-0" />
+                </button>
+              ) : todayEvents.length === 0 ? (
+                <div className="flex flex-col items-center gap-2 py-3 text-center">
+                  <CalendarDays className="text-muted-foreground/40 h-7 w-7" />
+                  <p className="text-muted-foreground text-[13px]">No events today</p>
+                </div>
+              ) : (
+                <div className="divide-border/60 flex flex-col divide-y">
+                  {todayEvents.map((event) => (
+                    <CalendarEventRow key={event.id} event={event} />
+                  ))}
+                </div>
+              )}
+            </Section>
 
-          {/* ── Due Tasks ──────────────────────────────────────────────────── */}
+            {/* Due Tasks */}
             <Section>
               <SectionHeader
                 icon={CheckSquare2}
@@ -283,68 +313,69 @@ export default function HomePage() {
                 linkTo="/mail/tasks"
                 isUpdating={isTasksRefreshing}
               />
-            {tasksLoading ? (
-              <div className="flex flex-col gap-2">
-                {['task-skeleton-1', 'task-skeleton-2', 'task-skeleton-3'].map((key) => (
-                  <div key={key} className="bg-muted/50 h-9 animate-pulse rounded-lg" />
-                ))}
-              </div>
-            ) : todayTasks.length === 0 ? (
-              <div className="flex flex-col items-center gap-2 py-3 text-center">
-                <CheckCircle2 className="text-muted-foreground/40 h-7 w-7" />
-                <p className="text-muted-foreground text-[13px]">All caught up!</p>
-                <Button asChild variant="outline" size="sm" className="h-7 text-xs">
-                  <Link to="/mail/tasks">
-                    <Plus className="mr-1 h-3 w-3" />
-                    New task
-                  </Link>
-                </Button>
-              </div>
-            ) : (
-              <div className="divide-border/60 flex flex-col divide-y">
-                {todayTasks.map((task) => (
-                  <TaskItem
-                    key={task.id}
-                    task={task}
-                    onToggle={() =>
-                      updateTask.mutate({
-                        id: task.id,
-                        data: { status: task.status === 'done' ? 'todo' : 'done' },
-                      })
-                    }
-                  />
-                ))}
-              </div>
-            )}
-          </Section>
+              {tasksLoading ? (
+                <div className="flex flex-col gap-2">
+                  {['task-skeleton-1', 'task-skeleton-2', 'task-skeleton-3'].map((key) => (
+                    <div key={key} className="bg-muted/50 h-9 animate-pulse rounded-lg" />
+                  ))}
+                </div>
+              ) : todayTasks.length === 0 ? (
+                <div className="flex flex-col items-center gap-2 py-3 text-center">
+                  <CheckCircle2 className="text-muted-foreground/40 h-7 w-7" />
+                  <p className="text-muted-foreground text-[13px]">All caught up!</p>
+                  <Button asChild variant="outline" size="sm" className="h-7 text-xs">
+                    <Link to="/mail/tasks">
+                      <Plus className="mr-1 h-3 w-3" />
+                      New task
+                    </Link>
+                  </Button>
+                </div>
+              ) : (
+                <div className="divide-border/60 flex flex-col divide-y">
+                  {todayTasks.map((task) => (
+                    <TaskItem
+                      key={task.id}
+                      task={task}
+                      onToggle={() =>
+                        updateTask.mutate({
+                          id: task.id,
+                          data: { status: task.status === 'done' ? 'todo' : 'done' },
+                        })
+                      }
+                    />
+                  ))}
+                </div>
+              )}
+            </Section>
 
-          {/* ── Recent Emails ─────────────────────────────────────────────── */}
-          <Section>
-            <SectionHeader
-              icon={Mail}
-              title="Recent Emails"
-              linkTo="/mail/inbox"
-              isUpdating={isThreadsRefreshing}
-            />
-            {threadsQuery.isLoading ? (
-              <div className="flex flex-col gap-2">
-                {['mail-skeleton-1', 'mail-skeleton-2', 'mail-skeleton-3'].map((key) => (
-                  <div key={key} className="bg-muted/50 h-11 animate-pulse rounded-lg" />
-                ))}
-              </div>
-            ) : recentThreadIds.length === 0 ? (
-              <div className="flex flex-col items-center gap-2 py-3 text-center">
-                <Inbox className="text-muted-foreground/40 h-7 w-7" />
-                <p className="text-muted-foreground text-[13px]">Your inbox is empty</p>
-              </div>
-            ) : (
-              <div className="divide-border/60 flex flex-col divide-y">
-                {recentThreadIds.map((id) => (
-                  <EmailThreadRow key={id} threadId={id} />
-                ))}
-              </div>
-            )}
-          </Section>
+            {/* Recent Emails */}
+            <Section>
+              <SectionHeader
+                icon={Mail}
+                title="Recent Emails"
+                linkTo="/mail/inbox"
+                isUpdating={isThreadsRefreshing}
+              />
+              {threadsQuery.isLoading ? (
+                <div className="flex flex-col gap-2">
+                  {['mail-skeleton-1', 'mail-skeleton-2', 'mail-skeleton-3'].map((key) => (
+                    <div key={key} className="bg-muted/50 h-11 animate-pulse rounded-lg" />
+                  ))}
+                </div>
+              ) : recentThreadIds.length === 0 ? (
+                <div className="flex flex-col items-center gap-2 py-3 text-center">
+                  <Inbox className="text-muted-foreground/40 h-7 w-7" />
+                  <p className="text-muted-foreground text-[13px]">Your inbox is empty</p>
+                </div>
+              ) : (
+                <div className="divide-border/60 flex flex-col divide-y">
+                  {recentThreadIds.map((id) => (
+                    <EmailThreadRow key={id} threadId={id} />
+                  ))}
+                </div>
+              )}
+            </Section>
+          </div>
         </div>
       </div>
     </div>

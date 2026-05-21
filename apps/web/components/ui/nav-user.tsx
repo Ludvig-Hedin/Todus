@@ -167,15 +167,23 @@ export function NavUser() {
   };
 
   const handleLogout = async () => {
-    toast.promise(signOut(), {
-      loading: 'Signing out...',
-      success: () => 'Signed out successfully!',
-      error: 'Error signing out',
-      async finally() {
-        // await handleClearCache();
-        window.location.href = '/login';
-      },
-    });
+    try {
+      await signOut();
+    } catch (error) {
+      // Server cookie may still be set — don't redirect; user is effectively
+      // still signed in and would land confused on /login.
+      console.error('Sign-out failed:', error);
+      toast.error("Couldn't sign out. Try again — you're still signed in.");
+      return;
+    }
+    try {
+      queryClient.clear();
+      await idbClear();
+    } catch (error) {
+      console.error('Failed to clear cache after sign-out:', error);
+    }
+    toast.success('Signed out successfully');
+    window.location.href = '/login';
   };
 
   const otherConnections = useMemo(() => {
@@ -377,7 +385,7 @@ export function NavUser() {
                   </DropdownMenuItem>
                   <DropdownMenuItem asChild>
                     <a
-                      href="https://discord.gg/mail0"
+                      href="https://github.com/Ludvig-Hedin/Todus/issues"
                       target="_blank"
                       rel="noopener noreferrer"
                       className="w-full"
@@ -652,7 +660,7 @@ export function NavUser() {
                   </DropdownMenuItem>
                   <DropdownMenuItem>
                     <a
-                      href="https://discord.gg/mail0"
+                      href="https://github.com/Ludvig-Hedin/Todus/issues"
                       target="_blank"
                       rel="noopener noreferrer"
                       className="w-full"

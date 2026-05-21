@@ -42,9 +42,9 @@ struct TasksWidgetEntryView: View {
 
 struct SmallTasksView: View {
     let snapshot: TaskWidgetSnapshot?
-    
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text("Tasks")
                     .font(.caption)
@@ -55,9 +55,9 @@ struct SmallTasksView: View {
                         .frame(width: 16, height: 16)
                 }
             }
-            
+
             if let tasks = snapshot?.topTasks, !tasks.isEmpty {
-                ForEach(tasks.prefix(2)) { task in
+                ForEach(tasks.prefix(3)) { task in
                     TaskRow(task: task)
                 }
             } else {
@@ -67,7 +67,7 @@ struct SmallTasksView: View {
             }
             Spacer(minLength: 0)
         }
-        .padding()
+        .padding(12)
         .containerBackground(for: .widget) {
             #if os(macOS)
             Color(NSColor.windowBackgroundColor)
@@ -81,9 +81,9 @@ struct SmallTasksView: View {
 
 struct MediumTasksView: View {
     let snapshot: TaskWidgetSnapshot?
-    
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text("Tasks")
                     .font(.caption)
@@ -95,9 +95,9 @@ struct MediumTasksView: View {
                         .foregroundColor(.red)
                 }
             }
-            
+
             if let tasks = snapshot?.topTasks, !tasks.isEmpty {
-                ForEach(tasks.prefix(3)) { task in
+                ForEach(tasks.prefix(4)) { task in
                     TaskRow(task: task)
                 }
             } else {
@@ -107,7 +107,7 @@ struct MediumTasksView: View {
             }
             Spacer(minLength: 0)
         }
-        .padding()
+        .padding(12)
         .containerBackground(for: .widget) {
             #if os(macOS)
             Color(NSColor.windowBackgroundColor)

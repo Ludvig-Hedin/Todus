@@ -23,6 +23,7 @@ import { composeEmail } from './ai/compose';
 import { TRPCError } from '@trpc/server';
 import { createDb } from '../../db';
 import { env } from '../../env';
+import { generateActionLines } from '../../lib/assistant-action-line';
 import { z } from 'zod';
 
 const assistantLoopTypeSchema = z.enum([
@@ -70,6 +71,9 @@ const assistantOpenLoopSchema = z.object({
   confidence: z.number(),
   reason: z.string(),
   suggestedActionLabel: z.string().nullable(),
+  /// LLM-generated verb-first sentence ("Reply to Sarah about Q4"). Null when
+  /// generation disabled or failed — client falls back to title/summary render.
+  actionLine: z.string().nullable(),
   threadId: z.string().nullable(),
   meetingId: z.string().nullable(),
   personEmail: z.string().nullable(),
@@ -88,6 +92,8 @@ const assistantPreparedActionSchema = z.object({
   confidence: z.number(),
   reason: z.string(),
   preview: z.string().nullable(),
+  /// Same as openLoopSchema.actionLine — verb-first sentence; nullable.
+  actionLine: z.string().nullable(),
   threadId: z.string().nullable(),
   meetingId: z.string().nullable(),
   personEmail: z.string().nullable(),
@@ -169,10 +175,43 @@ const assistantBriefingSchema = z.object({
   changedSinceLastTime: z.array(assistantChangeFeedItemSchema),
 });
 
+// Hoisted above the schema so `assistantThreadContextSchema` can reference it.
+// The matching `ThreadKind` runtime type is exported below near the email
+// classifier helpers; the value list lives here so it stays close to the schema.
+const THREAD_KIND_VALUES = [
+  'verification',
+  'receipt',
+  'marketing',
+  'notification',
+  'conversational',
+] as const;
+
+// Structured "smart action" payloads extracted from low-signal threads.
+// These give the client something concrete to render in place of the AI
+// card on verification / receipt threads — showing the code or vendor + amount
+// is dramatically more useful than hiding everything.
+const extractedReceiptSchema = z.object({
+  vendor: z.string(),
+  amount: z.string().nullable(),
+  receivedAt: z.string().nullable(),
+});
+
 const assistantThreadContextSchema = z.object({
   threadId: z.string(),
   subject: z.string(),
   summary: z.string(),
+  /// One-line headline picked from the most useful signal in the thread:
+  /// meeting time, first action item, first question, or summary fallback.
+  /// Empty on non-conversational kinds and when nothing useful was found.
+  /// Clients prefer this over `summary` when both are present.
+  aiLeadLine: z.string().default(''),
+  threadKind: z.enum(THREAD_KIND_VALUES).default('conversational'),
+  /// Verification code lifted out of the body for one-tap copy. Null on any
+  /// non-verification thread or when extraction couldn't find a usable code.
+  extractedCode: z.string().nullable().default(null),
+  /// Vendor + amount + date for receipt-style threads. Null when not a
+  /// receipt or when we couldn't pull a confident amount/date.
+  extractedReceipt: extractedReceiptSchema.nullable().default(null),
   recommendation: z.object({
     label: z.string(),
     reason: z.string(),
@@ -247,6 +286,7 @@ type OpenLoopCandidate = {
   confidence: number;
   reason: string;
   suggestedActionLabel?: string | null;
+  actionLine?: string | null;
   sourceThreadId: string | null;
   sourceMeetingId: string | null;
   sourceTaskId: string | null;
@@ -264,6 +304,7 @@ type PreparedActionCandidate = {
   summary: string;
   confidence: number;
   reason: string;
+  actionLine?: string | null;
   preview?: string | null;
   payload: Record<string, unknown>;
   sourceThreadId: string | null;
@@ -280,6 +321,25 @@ const MEETING_KEYWORDS =
 const URGENT_KEYWORDS = /\b(urgent|asap|today|immediately|priority|by end of day|deadline)\b/i;
 const AUTOMATED_KEYWORDS = /\b(no-?reply|unsubscribe|notification|automated|do not reply)\b/i;
 
+const VERIFICATION_KEYWORDS =
+  /\b(verification|one[- ]?time|otp|verify your|confirmation code|security code|2fa|two[- ]?factor|magic link|sign[- ]?in code|access code|passcode)\b/i;
+// Strong receipt phrases — these alone are enough to classify a thread as a
+// receipt regardless of sender automation signal. Currency tokens were
+// previously OR'd in here, but newsletters/marketing emails routinely include
+// prices, so we keep them as a soft signal only.
+const RECEIPT_PHRASE_KEYWORDS =
+  /\b(receipt|invoice|order\s*#?\d|payment\s+(received|confirmation)|order\s+(confirmation|summary)|tax\s+invoice|your\s+purchase|amount\s+paid|amount\s+charged|amount\s+billed|charge\s+(receipt|confirmation)|payment\s+method|billed\s+to|paid\s+to|transaction\s+(id|details)|refund\s+confirmation|subscription\s+renewed|your\s+(payment|charge|order)\s+(was|is))\b/i;
+const RECEIPT_KEYWORDS = new RegExp(
+  `${RECEIPT_PHRASE_KEYWORDS.source}|\\$\\s?\\d|(?:USD|EUR|GBP|JPY|SEK|NOK|DKK|kr)\\s?\\d`,
+  'i',
+);
+const MARKETING_SENDER_PATTERN = /(news|newsletter|updates|digest|marketing|hello|info|hi|team)@/i;
+const NOREPLY_SENDER_PATTERN =
+  /(no[- ]?reply|do[- ]?not[- ]?reply|notification|notifications|alerts?|automated|billing|payments?|receipts?|invoices?|subscriptions?|orders?|accounts?|support|hello|noreply|donotreply|mailer-daemon|postmaster|notifications?-noreply)@/i;
+const SHORT_CODE_PATTERN = /\b\d{4,8}\b/;
+
+export type ThreadKind = (typeof THREAD_KIND_VALUES)[number];
+
 function unique<T>(items: T[]) {
   return [...new Set(items)];
 }
@@ -294,21 +354,244 @@ function latestMessageText(thread: Awaited<ReturnType<typeof getThread>>['result
   return cleanText(latest?.decodedBody || latest?.body || '');
 }
 
-function buildFallbackSummary(thread: Awaited<ReturnType<typeof getThread>>['result']) {
+export function classifyThreadKind(
+  thread: Awaited<ReturnType<typeof getThread>>['result'],
+): ThreadKind {
   const latest = thread.latest ?? thread.messages[thread.messages.length - 1];
-  const participants = unique(
-    thread.messages
-      .map((message) => message.sender?.name || message.sender?.email)
-      .filter((value): value is string => Boolean(value)),
-  )
-    .slice(0, 3)
-    .join(', ');
+  if (!latest) return 'conversational';
+  const subject = latest.subject ?? '';
+  const senderEmail = (latest.sender?.email ?? '').toLowerCase();
   const bodyText = latestMessageText(thread);
-  const snippet = bodyText.length > 240 ? `${bodyText.slice(0, 237)}...` : bodyText;
-  const sender = latest?.sender?.name || latest?.sender?.email || 'Someone';
-  const subject = latest?.subject || 'this thread';
+  const haystack = `${subject} ${bodyText}`;
+  // Marketing senders (news@, hello@, team@, etc.) count as automated for
+  // classification — kept in lockstep with mail-assistant.ts.
+  const isAutomatedSender =
+    NOREPLY_SENDER_PATTERN.test(senderEmail) ||
+    AUTOMATED_KEYWORDS.test(senderEmail) ||
+    MARKETING_SENDER_PATTERN.test(senderEmail);
+  const automated = AUTOMATED_KEYWORDS.test(haystack) || isAutomatedSender;
+  const singleMessage = thread.messages.length <= 1;
 
-  return `${sender} most recently wrote about "${subject}". Participants: ${participants || sender}. ${snippet}`.trim();
+  if (
+    singleMessage &&
+    (isAutomatedSender || automated) &&
+    VERIFICATION_KEYWORDS.test(haystack) &&
+    SHORT_CODE_PATTERN.test(bodyText)
+  ) {
+    return 'verification';
+  }
+
+  // Strong receipt phrases (e.g. "tax invoice", "amount paid", "your purchase")
+  // are enough on their own to classify as a receipt — many vendors send
+  // receipts from `support@`, `accounts@`, or even a personal-looking address
+  // that doesn't trip the no-reply pattern, and incorrectly classifying these
+  // as conversational was producing bogus "Urgent reply" briefing entries.
+  if (RECEIPT_PHRASE_KEYWORDS.test(haystack)) {
+    return 'receipt';
+  }
+
+  if ((isAutomatedSender || automated) && RECEIPT_KEYWORDS.test(haystack)) {
+    return 'receipt';
+  }
+
+  if (isAutomatedSender && MARKETING_SENDER_PATTERN.test(senderEmail)) {
+    return 'marketing';
+  }
+
+  if (automated) {
+    return 'notification';
+  }
+
+  return 'conversational';
+}
+
+/**
+ * Try to pull the verification code out of a verification email body.
+ *
+ * Strategy: prefer codes that appear right after a verification keyword
+ * ("code: 178691", "your code is 178 691"), then fall back to the longest
+ * standalone digit run in the body. We accept 4-8 digits with an optional
+ * single space splitting them in half (e.g. "178 691" rendered for
+ * readability). Returns the code with a single space inserted in the middle
+ * for any 6+ digit code so the UI can render it readably without doing the
+ * formatting itself.
+ */
+export function extractVerificationCode(body: string): string | null {
+  if (!body) return null;
+  const haystack = body.replace(/\s+/g, ' ');
+
+  // Look for "<keyword> ... <code>" patterns first — they're the most
+  // reliable. The code may have an optional space (Mailchimp / SendGrid
+  // sometimes render "178 691" for readability).
+  const labelled = haystack.match(
+    /(?:code|otp|passcode|pin|password)[^0-9]{0,30}(\d{3,4}[\s-]?\d{3,4}|\d{4,8})/i,
+  );
+  const candidate = labelled?.[1] ?? null;
+
+  // Fallback: longest 4–8 digit number in the body.
+  let result = candidate;
+  if (!result) {
+    const all = haystack.match(/\b\d{4,8}\b/g) ?? [];
+    if (all.length) {
+      result = all.reduce((a, b) => (b.length > a.length ? b : a));
+    }
+  }
+
+  if (!result) return null;
+  const digits = result.replace(/[\s-]/g, '');
+  if (digits.length < 4 || digits.length > 8) return null;
+  // Pretty-print 6+ digit codes as two halves so the UI can render them
+  // readably ("178 691" not "178691"). Shorter codes stay as-is.
+  if (digits.length >= 6) {
+    const half = Math.ceil(digits.length / 2);
+    return `${digits.slice(0, half)} ${digits.slice(half)}`;
+  }
+  return digits;
+}
+
+/**
+ * Best-effort extractor for receipt-style emails. Pulls the first currency
+ * amount it finds in the body, the sender domain as the vendor, and the
+ * received date. Returns null when none of those signals are confidently
+ * present so the client can fall back to "show nothing".
+ */
+export interface ExtractedReceipt {
+  vendor: string;
+  amount: string | null;
+  receivedAt: string | null;
+}
+
+export function extractReceiptDetails(
+  thread: Awaited<ReturnType<typeof getThread>>['result'],
+): ExtractedReceipt | null {
+  const latest = thread.latest ?? thread.messages[thread.messages.length - 1];
+  if (!latest) return null;
+  const senderEmail = latest.sender?.email ?? '';
+  const senderName = latest.sender?.name?.trim();
+  // Prefer the human sender name; fall back to the domain so we always have
+  // something to render (e.g. "Stripe" vs "stripe.com").
+  const domain = senderEmail.split('@')[1]?.split('.').slice(-2, -1)[0];
+  const vendor = senderName && senderName.length > 0
+    ? senderName
+    : domain
+      ? domain.charAt(0).toUpperCase() + domain.slice(1)
+      : 'Sender';
+
+  const body = cleanText(latest.decodedBody || latest.body || '');
+  // Match common currency patterns: $29.00, USD 29.00, €19,95, kr 100,
+  // 100 SEK, etc. We deliberately stay conservative — better to render
+  // no amount than the wrong amount.
+  const amountMatch =
+    body.match(/(?:[$€£¥]|US\$|USD|EUR|GBP|JPY|SEK|NOK|DKK|kr)\s?\d{1,3}(?:[ ,.]\d{3})*(?:[.,]\d{2})?/i)
+    ?? body.match(/\d{1,3}(?:[ ,.]\d{3})*(?:[.,]\d{2})?\s?(?:USD|EUR|GBP|JPY|SEK|NOK|DKK|kr)/i);
+  const amount = amountMatch?.[0] ?? null;
+
+  const receivedAt = latest.receivedOn
+    ? new Date(latest.receivedOn).toISOString()
+    : null;
+
+  // Require at least vendor + (amount OR receivedAt) — otherwise the chip
+  // would just show the sender name, which is already in the header.
+  if (!amount && !receivedAt) return null;
+
+  return { vendor, amount, receivedAt };
+}
+
+/**
+ * Build a fallback summary when the vector cache misses.
+ *
+ * Returns an empty string for low-signal threads (verification, receipts,
+ * marketing, automated notifications) so the client can hide the AI summary
+ * card. For conversational threads we also return empty rather than the old
+ * "X most recently wrote about Y" template — that template restated header
+ * data without adding value. An empty string signals "no useful summary";
+ * the UI hides the card until a real cached summary is available.
+ */
+function buildFallbackSummary(thread: Awaited<ReturnType<typeof getThread>>['result']) {
+  const kind = classifyThreadKind(thread);
+  if (kind !== 'conversational') return '';
+  return '';
+}
+
+/**
+ * Pick the single most useful one-liner to render in the AI summary card.
+ *
+ * The prior approach showed the cached vector summary verbatim, which often
+ * just paraphrased the email. This helper picks the most actionable signal:
+ *   1. A meeting time if one was extracted ("Meeting · Mon, Apr 28 at 3:00 PM")
+ *   2. The first action item, lightly cleaned up ("Review the Q3 forecast")
+ *   3. A direct question pulled from the body ("Can you confirm by Friday?")
+ *   4. The summary text as a last resort
+ *
+ * Returns an empty string when none of those produce something useful, which
+ * the client interprets as "hide the card on this thread".
+ */
+function buildAiLeadLine(input: {
+  threadKind: ThreadKind;
+  meetingRequested: boolean;
+  suggestedEvent: ReturnType<typeof extractEventSuggestion>;
+  actionItems: string[];
+  bodyText: string;
+  summary: string;
+}): string {
+  // Smart-action chips (verification / receipt) own the visual real estate
+  // for non-conversational kinds — never compete with them.
+  if (input.threadKind !== 'conversational') return '';
+
+  // 1. Meeting time wins when present. The user opened the email; what they
+  // need is "when, where".
+  if (input.meetingRequested && input.suggestedEvent?.startAt) {
+    const start = new Date(input.suggestedEvent.startAt);
+    if (!Number.isNaN(start.getTime())) {
+      const formatted = start.toLocaleString('en-US', {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+      });
+      const title = input.suggestedEvent.title?.trim();
+      return title ? `Meeting · ${title} · ${formatted}` : `Meeting · ${formatted}`;
+    }
+  }
+
+  // 2. First action item — usually the AI's best guess at the ask.
+  const firstAction = input.actionItems[0]?.trim();
+  if (firstAction && firstAction.length > 0 && firstAction.length <= 200) {
+    // Capitalize and trim trailing punctuation noise.
+    const cleaned = firstAction.replace(/[.,;]+$/, '');
+    return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+  }
+
+  // 3. First direct question in the body — often more useful than the summary
+  // because it's literally the thing waiting on a reply.
+  const question = extractFirstQuestion(input.bodyText);
+  if (question) return question;
+
+  // 4. Fall back to the cached summary.
+  return input.summary?.trim() ?? '';
+}
+
+/**
+ * Pull the first complete question sentence out of a body of text.
+ * Keeps it bounded (max 180 chars) so we never render a wall of text.
+ */
+function extractFirstQuestion(body: string): string | null {
+  if (!body) return null;
+  // Split on sentence terminators (.!?) so a question doesn't carry the
+  // preceding sentence's prose. Then keep only segments that end with `?`.
+  const normalized = body.replace(/\s+/g, ' ');
+  const segments = normalized
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter((s) => s.endsWith('?'));
+  for (const sentence of segments) {
+    if (sentence.length < 8 || sentence.length > 180) continue;
+    // Skip rhetorical / boilerplate questions ("Need help?" footers etc.).
+    if (/^(need help|questions?|any questions|why)\??$/i.test(sentence)) continue;
+    return sentence;
+  }
+  return null;
 }
 
 async function getThreadSummary(
@@ -739,6 +1022,7 @@ function toLoopRow(loop: OpenLoopRow) {
     confidence: loop.confidencePct / 100,
     reason: loop.reason,
     suggestedActionLabel: loop.suggestedActionLabel ?? null,
+    actionLine: loop.actionLine ?? null,
     threadId: loop.sourceThreadId ?? null,
     meetingId: loop.sourceMeetingId ?? null,
     personEmail: loop.personEmail ?? null,
@@ -759,6 +1043,7 @@ function toPreparedActionRow(action: PreparedActionRow) {
     confidence: action.confidencePct / 100,
     reason: action.reason,
     preview: action.preview ?? null,
+    actionLine: action.actionLine ?? null,
     threadId: action.sourceThreadId ?? null,
     meetingId: action.sourceMeetingId ?? null,
     personEmail: action.personEmail ?? null,
@@ -806,6 +1091,7 @@ async function syncOpenLoops(
       confidencePct: Math.round(candidate.confidence * 100),
       reason: candidate.reason,
       suggestedActionLabel: candidate.suggestedActionLabel ?? null,
+      actionLine: candidate.actionLine ?? null,
       sourceThreadId: candidate.sourceThreadId ?? null,
       sourceMeetingId: candidate.sourceMeetingId ?? null,
       sourceTaskId: candidate.sourceTaskId ?? null,
@@ -884,6 +1170,7 @@ async function syncPreparedActions(
       confidencePct: Math.round(candidate.confidence * 100),
       reason: candidate.reason,
       preview: candidate.preview ?? null,
+      actionLine: candidate.actionLine ?? null,
       payload: candidate.payload,
       sourceThreadId: candidate.sourceThreadId ?? null,
       sourceMeetingId: candidate.sourceMeetingId ?? null,
@@ -941,6 +1228,13 @@ async function buildThreadAnalysis(
   const senderName = latest?.sender?.name || latest?.sender?.email || 'the sender';
   const senderEmail = latest?.sender?.email;
   const latestText = latestMessageText(thread);
+  const threadKind = classifyThreadKind(thread);
+  // Extract "smart action" payloads when applicable. We only run the
+  // extractor matching the kind so a noisy receipt body doesn't accidentally
+  // produce a bogus verification code, and vice versa.
+  const extractedCode =
+    threadKind === 'verification' ? extractVerificationCode(latestText) : null;
+  const extractedReceipt = threadKind === 'receipt' ? extractReceiptDetails(thread) : null;
   const relatedTasks = await getRelatedTasks(db, userId, threadId);
   const relatedMeetings = await findRelatedMeetings(db, userId, subject, senderEmail);
   const summary = await getThreadSummary(threadId, activeConnection.id, thread);
@@ -952,8 +1246,19 @@ async function buildThreadAnalysis(
     AUTOMATED_KEYWORDS.test(senderEmail ?? '');
   const latestFromUser =
     (latest?.sender?.email || '').toLowerCase() === activeConnection.email.toLowerCase();
+  // Non-conversational kinds (receipts, notifications, marketing, verification)
+  // never require a human reply, even if their bodies happen to contain reply
+  // keywords like "please" or action-item phrases. This was the source of
+  // the receipt-as-urgent-reply briefing bug. Keep these in lockstep with the
+  // classifier's kind enum.
+  const isNonConversational =
+    threadKind === 'receipt' ||
+    threadKind === 'notification' ||
+    threadKind === 'marketing' ||
+    threadKind === 'verification';
   const replyNeeded =
     !automated &&
+    !isNonConversational &&
     !latestFromUser &&
     (REPLY_KEYWORDS.test(latestText) || meetingRequested || urgent || actionItems.length > 0);
   const waitingOnOther = !automated && latestFromUser;
@@ -1126,7 +1431,10 @@ async function buildThreadAnalysis(
     });
   }
 
-  if (likelyDropped || urgent) {
+  // Don't surface deadline risk for receipts/notifications/marketing — these
+  // often contain urgent-sounding phrases ("by end of day", "today") that
+  // aren't directed at the user.
+  if (!isNonConversational && (likelyDropped || urgent)) {
     loopCandidates.push({
       uniqueKey: `thread:${threadId}:deadline_risk`,
       type: urgent ? 'deadline_risk' : 'decision_needed',
@@ -1284,6 +1592,31 @@ async function buildThreadAnalysis(
     });
   }
 
+  // Fan-out one batched LLM call per thread to produce verb-first sentences
+  // ("Reply to Sarah about the Q4 proposal") for every candidate. Best-effort:
+  // returns {} on disabled flag, timeout, or model failure → actionLine stays
+  // null on each candidate and the client falls back to title+summary render.
+  const actionLines = await generateActionLines({
+    senderName,
+    senderEmail: senderEmail ?? '',
+    subject,
+    snippet: latestText.slice(0, 400),
+    candidates: [
+      ...loopCandidates.map((c) => ({
+        uniqueKey: c.uniqueKey,
+        kind: c.type,
+        fallback: c.title,
+      })),
+      ...actionCandidates.map((c) => ({
+        uniqueKey: c.uniqueKey,
+        kind: c.type,
+        fallback: c.title,
+      })),
+    ],
+  });
+  for (const c of loopCandidates) c.actionLine = actionLines[c.uniqueKey] ?? null;
+  for (const c of actionCandidates) c.actionLine = actionLines[c.uniqueKey] ?? null;
+
   await syncOpenLoops(db, userId, threadId, loopCandidates);
   await syncPreparedActions(db, userId, threadId, actionCandidates);
 
@@ -1305,9 +1638,22 @@ async function buildThreadAnalysis(
     )
     .orderBy(desc(assistantPreparedAction.updatedAt));
 
+  const aiLeadLine = buildAiLeadLine({
+    threadKind,
+    meetingRequested,
+    suggestedEvent,
+    actionItems,
+    bodyText: latestText,
+    summary,
+  });
+
   return {
     subject,
     summary,
+    aiLeadLine,
+    threadKind,
+    extractedCode,
+    extractedReceipt,
     recommendation,
     waitingState,
     confidence,
@@ -1578,10 +1924,19 @@ function buildFallbackThreadContext(
   thread: Awaited<ReturnType<typeof getThread>>['result'],
 ) {
   const latest = thread.latest ?? thread.messages[thread.messages.length - 1];
+  const fallbackKind = classifyThreadKind(thread);
   return assistantThreadContextSchema.parse({
     threadId,
     subject: latest?.subject ?? '',
     summary: buildFallbackSummary(thread),
+    // No analysis available in fallback mode — leave empty so the card hides.
+    aiLeadLine: '',
+    threadKind: fallbackKind,
+    extractedCode:
+      fallbackKind === 'verification'
+        ? extractVerificationCode(latestMessageText(thread))
+        : null,
+    extractedReceipt: fallbackKind === 'receipt' ? extractReceiptDetails(thread) : null,
     recommendation: {
       label: 'No recommendation',
       reason: 'Assistant tables are not yet provisioned for this environment.',
@@ -1974,32 +2329,56 @@ export const assistantRouter = router({
           }
         });
 
+        const isConversational = analysis.threadKind === 'conversational';
         return assistantThreadContextSchema.parse({
           threadId: input.threadId,
           subject: analysis.subject,
-          summary: analysis.summary,
+          // Suppress summary text on low-signal kinds — the card hides entirely client-side.
+          summary: isConversational ? analysis.summary : '',
+          // Smart one-liner — pre-computed in buildAiLeadLine. Already empty
+          // for non-conversational kinds; pass through verbatim.
+          aiLeadLine: analysis.aiLeadLine,
+          threadKind: analysis.threadKind,
+          // Surface the extracted code / receipt so clients can render a
+          // direct "Copy 178 691" or "$29.00 · Apr 27" affordance instead
+          // of nothing for verification / receipt threads.
+          extractedCode: analysis.extractedCode,
+          extractedReceipt: analysis.extractedReceipt,
           recommendation: analysis.recommendation,
           waitingState: analysis.waitingState,
           confidence: analysis.confidence,
           riskLevel: analysis.riskLevel,
           reason: analysis.reason,
-          replyNeeded: analysis.openLoops.some(
-            (loop) => loop.type === 'needs_reply' && loop.status === 'open',
-          ),
-          followUpNeeded: analysis.openLoops.some(
-            (loop) =>
-              (loop.type === 'meeting_follow_up' || loop.type === 'waiting_on_other') &&
-              loop.status === 'open',
-          ),
-          meetingRequested: analysis.openLoops.some(
-            (loop) => loop.type === 'meeting_follow_up' && loop.status === 'open',
-          ),
-          existingDraft: analysis.openLoops.some(
-            (loop) => loop.type === 'draft_ready' && loop.status === 'open',
-          ),
-          actionItems: analysis.actionItems,
-          researchQueries: analysis.researchQueries,
-          suggestedTasks: analysis.preparedActions
+          // For non-conversational threads we zero out every actionable signal so
+          // no Extract task / Draft reply / Create event / Book follow-up button
+          // ever appears on receipts, verification codes, marketing, etc.
+          replyNeeded:
+            isConversational &&
+            analysis.openLoops.some(
+              (loop) => loop.type === 'needs_reply' && loop.status === 'open',
+            ),
+          followUpNeeded:
+            isConversational &&
+            analysis.openLoops.some(
+              (loop) =>
+                (loop.type === 'meeting_follow_up' || loop.type === 'waiting_on_other') &&
+                loop.status === 'open',
+            ),
+          meetingRequested:
+            isConversational &&
+            analysis.openLoops.some(
+              (loop) => loop.type === 'meeting_follow_up' && loop.status === 'open',
+            ),
+          existingDraft:
+            isConversational &&
+            analysis.openLoops.some(
+              (loop) => loop.type === 'draft_ready' && loop.status === 'open',
+            ),
+          actionItems: isConversational ? analysis.actionItems : [],
+          researchQueries: isConversational ? analysis.researchQueries : [],
+          suggestedTasks: !isConversational
+            ? []
+            : analysis.preparedActions
             .filter((action) => action.type === 'create_task')
             .flatMap((action) => {
               const payload = asRecord(action.payload);
@@ -2036,8 +2415,9 @@ export const assistantRouter = router({
                 }));
             })
             .slice(0, 5),
-          suggestedEvent:
-            analysis.preparedActions
+          suggestedEvent: !isConversational
+            ? null
+            : analysis.preparedActions
               .filter((action) => action.type === 'create_event')
               .map((action) =>
                 z
@@ -2434,6 +2814,35 @@ export const assistantRouter = router({
             and(
               eq(assistantOpenLoop.userId, ctx.sessionUser.id),
               eq(assistantOpenLoop.id, input.openLoopId),
+            ),
+          );
+        return { success: true };
+      } finally {
+        await conn.end();
+      }
+    }),
+
+  /**
+   * Mark a prepared action as dismissed without applying it. Used by Home briefing
+   * "Not now" / "Not a draft" gestures so the row disappears immediately and the
+   * classifier picks up a `wrong` feedback signal alongside the dismissal.
+   *
+   * Mirrors `dismissOpenLoop` for the prepared-action side. Without this, dismissing
+   * a wrong "Draft ready" item left no path to remove it from the briefing.
+   */
+  dismissPreparedAction: privateProcedure
+    .input(z.object({ actionId: z.string() }))
+    .output(z.object({ success: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
+      try {
+        await db
+          .update(assistantPreparedAction)
+          .set({ status: 'dismissed', updatedAt: new Date() })
+          .where(
+            and(
+              eq(assistantPreparedAction.userId, ctx.sessionUser.id),
+              eq(assistantPreparedAction.id, input.actionId),
             ),
           );
         return { success: true };

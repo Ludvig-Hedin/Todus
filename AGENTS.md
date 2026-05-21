@@ -19,6 +19,26 @@ Todus is a unified productivity app — email, calendar, tasks, and AI assistant
 
 ---
 
+## Design System
+
+Cross-platform design tokens are documented and tracked. **Update these when you change colors, typography, radius, spacing, or motion.**
+
+- **Canonical reference:** [DESIGN_SYSTEM.md](DESIGN_SYSTEM.md) — tokens, accent palette, component cross-reference, "how to change"
+- **Known gaps:** [DESIGN_SYSTEM_INCONSISTENCIES.md](DESIGN_SYSTEM_INCONSISTENCIES.md) — drift, resolved + open
+- **Live viewers** (gated to `TODUS_ALLOWLISTED_EMAILS` / `VITE_TODUS_ALLOWLISTED_EMAILS`):
+  - Web: `/settings/design-system`
+  - iOS: Settings → Developer → Design System
+  - macOS: Settings → Developer → Design System
+- **Sources of truth:**
+  - Web: `apps/web/app/globals.css`
+  - iOS: `apps/ios/Todus/Todus/DesignSystem/AppTheme.swift`
+  - macOS: `apps/macos/TodusMac/DesignSystem/MacTheme.swift`
+- **Allowlist mechanism:** `packages/swift-auth/Sources/TodusAuth/TodusDeveloperAccess.swift` (Swift), `apps/web/lib/developer-access.ts` (web)
+- **Motion tokens:** `Motion.fast / base / slow` per platform — prefer these over inline `.snappy(...)`, `.easeOut(...)`, `duration-150`, etc.
+- **Dark background canonical:** Apple system dark `#1c1c1e` (`Color(white: 0.109)` on iOS / macOS)
+
+---
+
 ## Commands
 
 ```bash

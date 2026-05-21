@@ -31,7 +31,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { authProxy } from '@/lib/auth-proxy';
 import type { Route } from './+types/page';
-import { Link, useNavigate, useParams } from 'react-router';
+import { Link, useNavigate, useParams, redirect } from 'react-router';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 
@@ -40,7 +40,7 @@ type MeetingDetail = Outputs['meet']['getMeeting'];
 // Auth guard
 export async function clientLoader({ request }: Route.ClientLoaderArgs) {
   const session = await authProxy.api.getSession({ headers: request.headers });
-  if (!session) return Response.redirect(`${import.meta.env.VITE_PUBLIC_APP_URL}/login`);
+  if (!session) throw redirect('/login');
   return {};
 }
 

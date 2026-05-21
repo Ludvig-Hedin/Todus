@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import PhotosUI
+import AVFoundation
 
 /// Identifiable wrapper used by .sheet(item:) to guarantee the share sheet
 /// only appears when a conversation ID is actually available.
@@ -40,6 +41,8 @@ struct AIChatView: View {
     // Sheet presentation states
     @State private var showsHistory = false
     @State private var showsConfig = false
+    /// Whether the text input was focused when the config sheet was opened, so we can restore it on dismiss.
+    @State private var wasInputFocusedBeforeConfig = false
     @State private var showsDataSheet = false
     @State private var showsDeleteConfirm = false
     @State private var showsRenameAlert = false
@@ -84,12 +87,10 @@ struct AIChatView: View {
 
     // Edit-message undo support — captures messages that were truncated when the
     // user long-pressed "Edit" on an earlier turn, so they can restore them via
-    // the Undo banner before sending the new draft.
+    // the Edit chip × button before sending the new draft.
     @State private var lastTruncatedHistory: [AIChatMessage] = []
-    @State private var showEditUndoBanner: Bool = false
-    /// Tracks the auto-dismiss timer for the undo banner so a second edit doesn't stack a
-    /// stale dismissal that would hide the new banner mid-display.
-    @State private var editUndoBannerDismissTask: Task<Void, Never>? = nil
+    /// True while the composer holds the text of a message being edited (cleared on send or cancel).
+    @State private var isEditingMessage: Bool = false
 
     private var chatService: AIChatService { services.aiChatService }
 
@@ -135,31 +136,7 @@ struct AIChatView: View {
                         .transition(AnyTransition.opacity)
                 }
 
-                // Undo banner — appears briefly after the user long-presses "Edit"
-                // on a message so they can recover the truncated turns if it was
-                // an accident.
-                if showEditUndoBanner {
-                    HStack(spacing: 12) {
-                        Image(systemName: "arrow.uturn.backward.circle")
-                            .foregroundStyle(.primary)
-                        Text("Older messages removed. Undo to restore.")
-                            .font(.system(size: 13))
-                            .foregroundStyle(.primary)
-                        Spacer()
-                        Button("Undo") {
-                            undoEditTruncation()
-                        }
-                        .font(.system(size: 13, weight: .semibold))
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 90)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
             }
-            .animation(.easeInOut(duration: 0.2), value: showEditUndoBanner)
             // Top gradient fade — same height as header buttons, fades content below toolbar
             .safeAreaInset(edge: .top) {
                 LinearGradient(
@@ -179,11 +156,25 @@ struct AIChatView: View {
                 .appSheetBackground()
                 .preferredColorScheme(services.appearancePreference.colorScheme)
         }
-        .sheet(isPresented: $showsConfig) {
+        .sheet(isPresented: $showsConfig, onDismiss: {
+            if wasInputFocusedBeforeConfig {
+                wasInputFocusedBeforeConfig = false
+                // Re-focus the input after the sheet dismissal animation completes.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                    isInputFocused = true
+                }
+            }
+        }) {
             AIChatConfigSheet()
                 .presentationDragIndicator(.visible)
                 .appSheetBackground()
                 .preferredColorScheme(services.appearancePreference.colorScheme)
+                .onAppear {
+                    UIApplication.shared.sendAction(
+                        #selector(UIResponder.resignFirstResponder),
+                        to: nil, from: nil, for: nil
+                    )
+                }
         }
         // Prompt library — presets + user-saved prompts
         .sheet(isPresented: $showsPromptLibrary) {
@@ -251,6 +242,38 @@ struct AIChatView: View {
             }
         } message: { pending in
             Text("The AI wants to delete \"\(pending.title ?? "this task")\". This action cannot be undone.")
+        }
+        // Generic mutation confirmation — send email, create/update/delete calendar event.
+        // Without this binding, the service's `awaitMutationConfirmation` would suspend
+        // forever and the assistant bubble would stay in `isStreaming` indefinitely (C3).
+        .confirmationDialog(
+            mutationDialogTitle,
+            isPresented: Binding(
+                get: { chatService.pendingMutationConfirmation != nil },
+                set: { newVal in
+                    if !newVal, let pending = chatService.pendingMutationConfirmation {
+                        chatService.confirmPendingMutation(pending, confirm: false)
+                    }
+                }
+            ),
+            titleVisibility: .visible,
+            presenting: chatService.pendingMutationConfirmation
+        ) { pending in
+            Button(mutationConfirmLabel(for: pending),
+                   role: pending.kind == .deleteCalendarEvent ? .destructive : nil) {
+                chatService.confirmPendingMutation(pending, confirm: true)
+            }
+            Button("Cancel", role: .cancel) {
+                chatService.confirmPendingMutation(pending, confirm: false)
+            }
+        } message: { pending in
+            // Compose a one-or-two-line message — subtitle holds the structured
+            // recipients/subject/event detail; body is the email body (truncated).
+            let lines = [pending.subtitle, pending.body?.trimmingCharacters(in: .whitespacesAndNewlines)]
+                .compactMap { $0 }
+                .filter { !$0.isEmpty }
+            let preview = lines.joined(separator: "\n\n")
+            Text(preview.isEmpty ? pending.title : preview)
         }
         // Rename alert
         .alert("Rename Conversation", isPresented: $showsRenameAlert) {
@@ -366,6 +389,13 @@ struct AIChatView: View {
         }
         // Auto-save conversation when the sheet is dismissed without pressing "New Chat"
         .onDisappear {
+            // Cancel any in-flight SSE stream so URLSession doesn't keep draining
+            // tokens (and burning API credits) against a sheet that's no longer
+            // visible. `cancelStream` calls `finaliseStream` so already-accumulated
+            // tokens persist and the conversation autosaves below preserves them.
+            if chatService.isStreaming {
+                chatService.cancelStream()
+            }
             chatService.autosave()
             // Persist draft input across dismissals
             UserDefaults.standard.set(inputText, forKey: "ai_draft_input")
@@ -391,6 +421,32 @@ struct AIChatView: View {
             // Re-attach context pill when sheet re-opens
             pageContextAttached = true
             loadEventMentions()
+        }
+    }
+
+    // MARK: - Mutation Confirmation Helpers
+
+    /// Title surfaced for whichever generic mutation is awaiting confirmation. We
+    /// only need the active pending mutation (if any) — when there's nothing pending
+    /// SwiftUI hides the dialog regardless of the title.
+    private var mutationDialogTitle: String {
+        guard let kind = chatService.pendingMutationConfirmation?.kind else { return "Confirm action" }
+        switch kind {
+        case .sendEmail:            return "Send this email?"
+        case .createCalendarEvent:  return "Create this event?"
+        case .updateCalendarEvent:  return "Update this event?"
+        case .deleteCalendarEvent:  return "Delete this event?"
+        }
+    }
+
+    /// Action button label per mutation kind — matches the verb the user expects
+    /// (Send / Create / Update / Delete) instead of a generic "Confirm".
+    private func mutationConfirmLabel(for pending: AIChatService.PendingMutationConfirmation) -> String {
+        switch pending.kind {
+        case .sendEmail:            return "Send"
+        case .createCalendarEvent:  return "Create"
+        case .updateCalendarEvent:  return "Update"
+        case .deleteCalendarEvent:  return "Delete"
         }
     }
 
@@ -560,9 +616,30 @@ struct AIChatView: View {
                     // Sparkles icon — animated gradient with subtle glow
                     AnimatedSparkleIcon(size: 20)
 
-                    Text("How can I help you today?")
-                        .font(.system(size: 20, weight: .semibold))
-                        .tracking(-0.3)
+                    HStack(spacing: 8) {
+                        Text("How can I help you today?")
+                            .font(.system(size: 20, weight: .semibold))
+                            .tracking(-0.3)
+                        Spacer(minLength: 0)
+                        // Always-visible shuffle button — taps reshuffle the
+                        // suggestion pool whether expanded or collapsed (P6).
+                        Button {
+                            withAnimation(.snappy(duration: 0.15)) {
+                                suggestionSeed += 1
+                            }
+                            UISelectionFeedbackGenerator().selectionChanged()
+                        } label: {
+                            Image(systemName: "shuffle")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(AppTheme.mutedText)
+                                .frame(width: 28, height: 28)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Shuffle suggestions")
+                    }
+
+
                 }
                 .padding(.horizontal, 16)
 
@@ -825,6 +902,57 @@ struct AIChatView: View {
         return pinned + Array(shuffled.prefix(7)) // total cap of 10
     }
 
+    /// Compact pills row shown above the suggestions in the empty state.
+    /// Surfaces the active model + which integrations the AI has access to
+    /// (Gmail / Calendar) so users know what to expect before sending. (P9)
+    private var statusPillsRow: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                statusPill(icon: "cpu", label: shortModelLabel(chatService.selectedModel))
+                statusPill(
+                    icon: "envelope.fill",
+                    label: emailConnected ? "Gmail on" : "Gmail off",
+                    dim: !emailConnected
+                )
+                statusPill(
+                    icon: "calendar",
+                    label: calendarConnected ? "Calendar on" : "Calendar off",
+                    dim: !calendarConnected
+                )
+            }
+        }
+    }
+
+    private func statusPill(icon: String, label: String, dim: Bool = false) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.system(size: 10, weight: .semibold))
+            Text(label)
+                .font(.system(size: 11, weight: .medium))
+                .lineLimit(1)
+        }
+        .foregroundStyle(dim ? AppTheme.subtleText : AppTheme.mutedText)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(AppTheme.surfacePrimary, in: Capsule())
+        .overlay(Capsule().stroke(AppTheme.cardBorder, lineWidth: 0.5))
+    }
+
+    /// Trim provider prefix + variant suffix from a model id so the pill stays
+    /// short — e.g. "openai/gpt-5.4-mini" → "GPT-5.4 Mini".
+    private func shortModelLabel(_ raw: String) -> String {
+        let trailing = raw.split(separator: "/").last.map(String.init) ?? raw
+        // Capitalize first letter; replace hyphens with spaces so it reads as a title.
+        return trailing
+            .replacingOccurrences(of: "-", with: " ")
+            .split(separator: " ")
+            .map { word -> String in
+                guard let first = word.first else { return String(word) }
+                return first.uppercased() + word.dropFirst()
+            }
+            .joined(separator: " ")
+    }
+
     /// Compact connect-service buttons shown when the active tab's service pool is empty.
     private var connectServicesPrompt: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -921,9 +1049,14 @@ struct AIChatView: View {
                             .id(message.id)
                     }
 
-                    // "Thinking…" indicator while streaming and before first token
+                    // "Thinking…" indicator while streaming and before any visible
+                    // assistant content has arrived. The indicator stays through
+                    // long search / reasoning phases (which can run 5–10s with no
+                    // visible content) and only disappears once a real token lands.
                     if chatService.isStreaming,
-                       chatService.messages.last?.content.isEmpty == true {
+                       let last = chatService.messages.last,
+                       last.role == .assistant,
+                       last.content.isEmpty {
                         thinkingIndicator
                             .id("thinking")
                     }
@@ -987,6 +1120,13 @@ struct AIChatView: View {
             // Scroll when web search sources arrive (changes message height) — but only
             // if the user is still following the stream.
             .onChange(of: chatService.messages.last?.sources.count) { _, _ in
+                guard !userScrolledUp else { return }
+                scrollToLatestUserMessageTop(proxy: proxy, animation: .snappy(duration: 0.2))
+            }
+            // Mutation chips appear async after tool calls finish — they grow the
+            // bubble vertically and would otherwise push the user message off-screen.
+            // Re-anchor so the user keeps their reading position. (P5)
+            .onChange(of: chatService.messages.last?.taskMutations.count) { _, _ in
                 guard !userScrolledUp else { return }
                 scrollToLatestUserMessageTop(proxy: proxy, animation: .snappy(duration: 0.2))
             }
@@ -1074,14 +1214,33 @@ struct AIChatView: View {
 
     // MARK: - Thinking Indicator
 
+    /// Copy that reflects what's actually happening on the current turn instead
+    /// of cycling blind. Web search → "Searching…", reasoning streaming →
+    /// "Thinking…", otherwise fall back to the slow cycle below. (P7)
+    private var thinkingCopy: String {
+        guard let last = chatService.messages.last, last.role == .assistant else {
+            return thinkingPhrases[thinkingIndex % thinkingPhrases.count]
+        }
+        if last.searchState == .searching {
+            if let q = last.searchQueries.first, !q.isEmpty {
+                return "Searching for \"\(q)\""
+            }
+            return "Searching the web…"
+        }
+        if !last.reasoningContent.isEmpty {
+            return "Thinking…"
+        }
+        return thinkingPhrases[thinkingIndex % thinkingPhrases.count]
+    }
+
     private var thinkingIndicator: some View {
         HStack(spacing: 8) {
             AnimatedSparkleIcon(size: 14)
 
-            Text(thinkingPhrases[thinkingIndex % thinkingPhrases.count])
+            Text(thinkingCopy)
                 .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(AppTheme.mutedText)
-                .id(thinkingIndex)  // force re-render so transition fires
+                .id(thinkingCopy)  // force re-render so transition fires
                 .transition(.opacity)
         }
         .padding(.leading, 4)
@@ -1160,8 +1319,8 @@ struct AIChatView: View {
             inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
             pendingAttachments.isEmpty
 
-        // Whether any "above-text" accessories are visible (pill or attachments)
-        let hasAccessories = pageContextAttached || !pendingAttachments.isEmpty
+        // Whether any "above-text" accessories are visible (edit chip, pill, or attachments)
+        let hasAccessories = isEditingMessage || pageContextAttached || !pendingAttachments.isEmpty
 
         // Two-row layout: full-width text on top, button row on the bottom.
         // This avoids squeezing the text field between buttons, and prevents
@@ -1172,6 +1331,34 @@ struct AIChatView: View {
             if hasAccessories {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
+                        // Edit chip — shown while the composer holds a message being edited
+                        if isEditingMessage {
+                            HStack(spacing: 6) {
+                                Image(systemName: "pencil")
+                                    .font(.system(size: 12, weight: .semibold))
+                                Text("Edit")
+                                    .font(.system(size: 13, weight: .semibold))
+                                Button {
+                                    withAnimation(.snappy(duration: 0.15)) {
+                                        undoEditTruncation()
+                                        isEditingMessage = false
+                                        inputText = ""
+                                        inputMentions = []
+                                        pendingAttachments = []
+                                    }
+                                } label: {
+                                    Image(systemName: "xmark")
+                                        .font(.system(size: 10, weight: .bold))
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 7)
+                            .background(Color.accentColor, in: Capsule())
+                            .transition(.scale.combined(with: .opacity))
+                        }
+
                         // Page context pill — when the user opened the assistant
                         // from inside an email thread we show the truncated subject
                         // (much more useful than the generic "Email" tab label).
@@ -1255,7 +1442,10 @@ struct AIChatView: View {
             // ── Button row: [config]  spacer  [expand] [voice] [mic] [send] ──
             HStack(spacing: 8) {
                 // Config button — opens model / settings sheet
-                Button { showsConfig = true } label: {
+                Button {
+                    wasInputFocusedBeforeConfig = isInputFocused
+                    showsConfig = true
+                } label: {
                     Image(systemName: "slider.horizontal.3")
                         .font(.system(size: 15, weight: .medium))
                         .foregroundStyle(AppTheme.mutedText)
@@ -1297,7 +1487,10 @@ struct AIChatView: View {
                     inputText = current.isEmpty ? transcribed : current + " " + transcribed
                 })
 
-                // Stop button while streaming; send button only visible when there's content
+                // Stop button while streaming, otherwise the Send button — but the
+                // Send button always renders so it doesn't pop in/out as the user
+                // types the first character (P1). Disabled state is conveyed via
+                // opacity instead of removal.
                 if chatService.isStreaming {
                     Button { chatService.cancelStream() } label: {
                         Image(systemName: "stop.fill")
@@ -1307,8 +1500,9 @@ struct AIChatView: View {
                     }
                     .buttonStyle(AppPrimaryButtonStyle())
                     .clipShape(Circle())
+                    .accessibilityIdentifier("ai.chat.stopButton")
                     .transition(.scale.combined(with: .opacity))
-                } else if !isEmpty {
+                } else {
                     Button(action: sendMessage) {
                         Image(systemName: "arrow.up")
                             .font(.system(size: 15, weight: .bold))
@@ -1317,6 +1511,9 @@ struct AIChatView: View {
                     }
                     .buttonStyle(AppPrimaryButtonStyle())
                     .clipShape(Circle())
+                    .disabled(isEmpty)
+                    .opacity(isEmpty ? 0.4 : 1)
+                    .accessibilityIdentifier("ai.chat.sendButton")
                     .transition(.scale.combined(with: .opacity))
                 }
             }
@@ -1452,6 +1649,7 @@ struct AIChatView: View {
         let mentions = inputMentions
         inputMentions = []
         pendingAttachments = []
+        isEditingMessage = false
         // Clear persisted draft since the message was sent
         UserDefaults.standard.removeObject(forKey: "ai_draft_input")
         // Set the current page context so the AI knows where the user is.
@@ -1484,27 +1682,13 @@ struct AIChatView: View {
         inputText = message.content
         inputMentions = message.mentions
         pendingAttachments = message.attachmentFileNames
+        isEditingMessage = true
         // Capture the messages we're about to drop so the user can restore them
-        // via the Undo banner if they tapped Edit by accident.
+        // via the Edit chip × button if they tapped Edit by accident.
         if let idx = chatService.messages.firstIndex(where: { $0.id == message.id }) {
             lastTruncatedHistory = Array(chatService.messages[idx...])
         }
         chatService.truncateBefore(messageID: message.id)
-        showEditUndoBanner = !lastTruncatedHistory.isEmpty
-        // Auto-dismiss the undo banner after a few seconds so it doesn't linger.
-        // Cancel any in-flight timer first so consecutive edits don't stack dismissals
-        // that would hide a freshly-shown banner.
-        editUndoBannerDismissTask?.cancel()
-        if showEditUndoBanner {
-            editUndoBannerDismissTask = Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 6_000_000_000)
-                if !Task.isCancelled {
-                    showEditUndoBanner = false
-                }
-            }
-        } else {
-            editUndoBannerDismissTask = nil
-        }
         isInputFocused = true
         UserDefaults.standard.set(message.content, forKey: "ai_draft_input")
         UINotificationFeedbackGenerator().notificationOccurred(.success)
@@ -1516,9 +1700,7 @@ struct AIChatView: View {
         guard !lastTruncatedHistory.isEmpty else { return }
         chatService.messages.append(contentsOf: lastTruncatedHistory)
         lastTruncatedHistory = []
-        showEditUndoBanner = false
-        editUndoBannerDismissTask?.cancel()
-        editUndoBannerDismissTask = nil
+        isEditingMessage = false
     }
 
     /// Keeps the most recent user message near the top of the scroll view so long assistant replies
@@ -1769,15 +1951,14 @@ private struct MessageBubble: View {
     @Environment(AppServices.self) private var services
     @State private var showActions = false
     @State private var didCopy = false
-    @State private var thumbsState: ThumbsState? = nil
     @State private var previewAttachment: PreviewAttachment?
+    @State private var speechSynthesizer = AVSpeechSynthesizer()
+    @State private var isSpeaking = false
 
     private struct PreviewAttachment: Identifiable {
         let filename: String
         var id: String { filename }
     }
-
-    private enum ThumbsState { case up, down }
 
     /// Plain-text payload the long-press menu copies. Trimmed so trailing
     /// whitespace from streaming doesn't land on the pasteboard.
@@ -1908,6 +2089,9 @@ private struct MessageBubble: View {
                         AppTheme.chatUserBubbleFill,
                         in: RoundedRectangle(cornerRadius: AppTheme.Radius.card + 2, style: .continuous)
                     )
+                    // Cap the user bubble on wide screens (iPad / landscape) so a long
+                    // pasted prompt doesn't stretch edge-to-edge. (P11)
+                    .frame(maxWidth: 560, alignment: .trailing)
             }
         }
     }
@@ -1932,9 +2116,14 @@ private struct MessageBubble: View {
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
 
-            // Main content
+            // Main content. When the bubble is mid-stream with no content yet we
+            // render a 2-line shimmer instead of a blank gap — gives the user a
+            // sense the response is forming even while the thinking indicator
+            // animates above. (P3)
             if message.content.isEmpty && message.isStreaming {
-                EmptyView() // Thinking indicator shown by parent
+                AssistantShimmerPlaceholder()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.bottom, 8)
             } else {
                 assistantContent
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -2111,6 +2300,12 @@ private struct MessageBubble: View {
                     if isLastPart && message.isStreaming { BlinkingCursor() }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+                // VoiceOver: mark this run as updating live so each flush doesn't
+                // re-announce the full content from the top. We expose the final
+                // content via `accessibilityValue` so the last announcement after
+                // stream-completion still reads the answer end-to-end. (P12)
+                .accessibilityAddTraits(.updatesFrequently)
+                .accessibilityValue(message.isStreaming ? "" : txt)
 
         case .taskRef(let uuid):
             if let task = allTasks.first(where: { $0.id == uuid }) {
@@ -2238,33 +2433,12 @@ private struct MessageBubble: View {
             .buttonStyle(.plain)
             .disabled(!canCopy)
 
-            // Thumbs up — highlights when selected
-            Button {
-                withAnimation(.snappy(duration: 0.15)) {
-                    thumbsState = thumbsState == .up ? nil : .up
-                }
-            } label: {
-                Image(systemName: thumbsState == .up ? "hand.thumbsup.fill" : "hand.thumbsup")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(thumbsState == .up ? Color.primary : AppTheme.mutedText)
-                    .frame(width: 32, height: 32)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-
-            // Thumbs down — highlights when selected
-            Button {
-                withAnimation(.snappy(duration: 0.15)) {
-                    thumbsState = thumbsState == .down ? nil : .down
-                }
-            } label: {
-                Image(systemName: thumbsState == .down ? "hand.thumbsdown.fill" : "hand.thumbsdown")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(thumbsState == .down ? Color.orange : AppTheme.mutedText)
-                    .frame(width: 32, height: 32)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
+            // TODO(P4): Wire thumbs up/down to a chat-feedback endpoint. The
+            // existing `assistant.recordFeedback` tRPC route is for the morning
+            // assistant surface — not for AI chat messages — and shipping local
+            // no-op toggles fools users into thinking their rating was recorded.
+            // Removed for now; restore once a chat-message feedback endpoint is
+            // available on the backend.
         }
         .padding(.leading, 4)
     }
@@ -2301,12 +2475,71 @@ private struct MessageBubble: View {
         }
         .disabled(copyableText.isEmpty)
 
+        Button {
+            guard !copyableText.isEmpty else { return }
+            // Markdown-style block quote — pastes into reply drafts (Slack /
+            // Notion / Bear / email) as a quoted reference instead of plain
+            // text. One line per source line so quote nesting reads naturally.
+            let quoted = copyableText
+                .split(separator: "\n", omittingEmptySubsequences: false)
+                .map { "> \($0)" }
+                .joined(separator: "\n")
+            UIPasteboard.general.string = quoted
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+        } label: {
+            Label("Copy as quote", systemImage: "quote.bubble")
+        }
+        .disabled(copyableText.isEmpty)
+
         if canEdit {
             Button {
                 onEdit?(message)
             } label: {
                 Label("Edit message", systemImage: "pencil")
             }
+        }
+
+        // Share — UIActivityViewController bridge so long replies can be sent
+        // out via Messages, Mail, Notes, etc. without round-tripping through
+        // the clipboard. (P8)
+        Button {
+            guard !copyableText.isEmpty else { return }
+            presentShareSheet(for: copyableText)
+        } label: {
+            Label("Share", systemImage: "square.and.arrow.up")
+        }
+        .disabled(copyableText.isEmpty)
+
+        // Speak — pipes the content through AVSpeechSynthesizer so the user
+        // can listen to longer replies hands-free. Tapping again stops. (P8)
+        Button {
+            guard !copyableText.isEmpty else { return }
+            if speechSynthesizer.isSpeaking {
+                speechSynthesizer.stopSpeaking(at: .immediate)
+                isSpeaking = false
+            } else {
+                let utterance = AVSpeechUtterance(string: copyableText)
+                utterance.rate = AVSpeechUtteranceDefaultSpeechRate
+                speechSynthesizer.speak(utterance)
+                isSpeaking = true
+            }
+        } label: {
+            Label(isSpeaking ? "Stop" : "Speak", systemImage: isSpeaking ? "stop.circle" : "speaker.wave.2")
+        }
+        .disabled(copyableText.isEmpty)
+    }
+
+    /// Bridges to UIActivityViewController for the long-press "Share" item.
+    /// Walks the presented view chain to avoid the "view not in window hierarchy"
+    /// log when the chat sheet itself is the top-most controller.
+    private func presentShareSheet(for text: String) {
+        let activity = UIActivityViewController(activityItems: [text], applicationActivities: nil)
+        if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+           let root = scene.windows.first?.rootViewController {
+            var top = root
+            while let presented = top.presentedViewController { top = presented }
+            activity.popoverPresentationController?.sourceView = top.view
+            top.present(activity, animated: true)
         }
     }
 }
@@ -2572,6 +2805,43 @@ private struct MiniEventCard: View {
     }
 }
 
+// MARK: - AssistantShimmerPlaceholder
+
+/// Two-line rounded shimmer rendered inside an empty streaming assistant bubble.
+/// Replaces the previous blank gap so users see the response is forming even
+/// before the first token lands. (P3)
+private struct AssistantShimmerPlaceholder: View {
+    @State private var phase: CGFloat = 0
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            shimmerBar(width: .infinity, height: 10)
+            shimmerBar(width: 220, height: 10)
+        }
+        .onAppear {
+            withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) {
+                phase = 1
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func shimmerBar(width: CGFloat, height: CGFloat) -> some View {
+        let base = RoundedRectangle(cornerRadius: 5, style: .continuous)
+            .fill(AppTheme.surfacePrimary)
+            .overlay(
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .stroke(AppTheme.cardBorder.opacity(0.4), lineWidth: 0.5)
+            )
+            .opacity(0.4 + (phase * 0.5))
+        if width == .infinity {
+            base.frame(maxWidth: .infinity).frame(height: height)
+        } else {
+            base.frame(width: width, height: height)
+        }
+    }
+}
+
 // MARK: - BlinkingCursor
 
 private struct BlinkingCursor: View {
@@ -2601,8 +2871,11 @@ struct ChatHistoryView: View {
     @Environment(\.dismiss) private var dismiss
     @Query(sort: \FolderRecord.createdAt) private var folders: [FolderRecord]
 
+    enum ChatSortOrder { case newestFirst, oldestFirst, alphabetical }
+
     @State private var searchText = ""
     @State private var folderFilter: String = "all"
+    @State private var sortOrder: ChatSortOrder = .newestFirst
     @State private var movingConversation: AIChatConversation?
 
     private var chatService: AIChatService { services.aiChatService }
@@ -2610,21 +2883,23 @@ struct ChatHistoryView: View {
     private let relativeDateFormatter = RelativeDateTimeFormatter()
 
     private var filtered: [AIChatConversation] {
-        chatService.savedConversations.filter { convo in
+        let base = chatService.savedConversations.filter { convo in
             let matchesFolder: Bool = {
                 switch folderFilter {
                 case "all":
                     return true
-                case "unfiled":
-                    return convo.folderID == nil
                 default:
                     return convo.folderID?.uuidString == folderFilter
                 }
             }()
-
             guard matchesFolder else { return false }
             guard !searchText.isEmpty else { return true }
             return convo.title.localizedCaseInsensitiveContains(searchText)
+        }
+        switch sortOrder {
+        case .newestFirst:  return base.sorted { $0.createdAt > $1.createdAt }
+        case .oldestFirst:  return base.sorted { $0.createdAt < $1.createdAt }
+        case .alphabetical: return base.sorted { $0.title.localizedCompare($1.title) == .orderedAscending }
         }
     }
 
@@ -2632,7 +2907,6 @@ struct ChatHistoryView: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 folderFilterButton(title: "All", systemImage: "tray", filter: "all", count: chatService.savedConversations.count)
-                folderFilterButton(title: "Unfiled", systemImage: "folder", filter: "unfiled", count: chatService.savedConversations.filter { $0.folderID == nil }.count)
                 ForEach(folders) { folder in
                     folderFilterButton(
                         title: folder.name,
@@ -2687,6 +2961,35 @@ struct ChatHistoryView: View {
                     .tracking(-0.5)
 
                 Spacer()
+
+                // Sort / filter dropdown
+                Menu {
+                    Section("Sort") {
+                        Button {
+                            sortOrder = .newestFirst
+                        } label: {
+                            Label("Newest first", systemImage: sortOrder == .newestFirst ? "checkmark" : "")
+                        }
+                        Button {
+                            sortOrder = .oldestFirst
+                        } label: {
+                            Label("Oldest first", systemImage: sortOrder == .oldestFirst ? "checkmark" : "")
+                        }
+                        Button {
+                            sortOrder = .alphabetical
+                        } label: {
+                            Label("Alphabetical", systemImage: sortOrder == .alphabetical ? "checkmark" : "")
+                        }
+                    }
+                } label: {
+                    Image(systemName: "line.3.horizontal.decrease")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.primary)
+                        .frame(width: 40, height: 40)
+                        .background(AppTheme.surfacePrimary, in: Circle())
+                        .overlay(Circle().stroke(AppTheme.cardBorder, lineWidth: 1))
+                }
+                .menuStyle(.automatic)
 
                 // New chat button — starts fresh and dismisses this sheet
                 Button {
@@ -2759,10 +3062,10 @@ struct ChatHistoryView: View {
                                 }
                                 // .menuStyle(.borderlessButton) removed — macOS-only API
                             }
-                            .padding(.vertical, 4)
                         }
                         .buttonStyle(.plain)
                         .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets(top: 6, leading: 20, bottom: 6, trailing: 20))
                         .swipeActions(edge: .leading, allowsFullSwipe: false) {
                             Button {
                                 movingConversation = conv
@@ -2952,8 +3255,6 @@ struct AIChatConfigSheet: View {
                     }
                 } header: {
                     Text("Model")
-                } footer: {
-                    Text("Models are routed via OpenRouter.")
                 }
             }
             .scrollContentBackground(.hidden)

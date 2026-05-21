@@ -196,16 +196,13 @@ struct MeetingRowView: View {
             if meeting.aiSummary != nil {
                 Image(systemName: "sparkles")
                     .font(.system(size: 12))
-                    .foregroundStyle(.purple.opacity(0.7))
+                    .foregroundStyle(.secondary.opacity(0.5))
                     .accessibilityLabel("AI summary available")
             }
 
             Text(statusLabel)
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(statusColor)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(statusColor.opacity(0.1), in: Capsule())
+                .font(.system(size: 10, weight: .regular))
+                .foregroundStyle(.tertiary)
         }
         .padding(.vertical, 4)
     }

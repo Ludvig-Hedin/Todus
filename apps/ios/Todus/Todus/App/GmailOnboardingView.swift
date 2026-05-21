@@ -56,6 +56,10 @@ struct GmailOnboardingView: View {
                                 authService: services.authService
                             )
                             if didConnect {
+                                // Refresh the cached connections list so the new
+                                // mailbox shows up in Settings → Accounts and the
+                                // From picker without waiting for the next launch.
+                                await services.connectionsService.loadConnections()
                                 services.hasConfiguredGmailPrompt = true
                             } else {
                                 errorMessage = services.emailService.errorMessage
@@ -89,6 +93,10 @@ struct GmailOnboardingView: View {
                             .padding(.vertical, 12)
                     }
                     .buttonStyle(.plain)
+                    // Block tapping Skip mid-connection so we don't advance past Gmail
+                    // before the OAuth callback completes (and end up with a half-set
+                    // connection state).
+                    .disabled(isConnecting)
                     .accessibilityHint("Skip connecting Gmail for now")
                 }
                 .padding(.horizontal, 24)
@@ -96,6 +104,14 @@ struct GmailOnboardingView: View {
                 Spacer()
             }
             .padding(.vertical, 32)
+        }
+        // Auto-advance if Gmail is already connected (e.g. sign-in with Google
+        // auto-created a connection via the server accountCreateHook).
+        .task {
+            await services.emailService.checkConnection(force: true)
+            if services.emailService.hasConnection {
+                services.hasConfiguredGmailPrompt = true
+            }
         }
     }
 

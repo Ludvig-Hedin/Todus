@@ -14,6 +14,9 @@ struct MacGroupChatView: View {
     @State private var messageText: String = ""
     @State private var isSending = false
     @State private var inviteCopied = false
+    /// Surfaces network/send failures as a transient toast so the user gets
+    /// explicit feedback instead of a silent message-restore.
+    @State private var sendErrorToast: MacToastMessage?
 
     private var groupService: GroupChatService { services.groupChatService }
     private var group: GroupDetails? { groupService.currentGroupDetails }
@@ -43,6 +46,7 @@ struct MacGroupChatView: View {
         }
         .navigationTitle(group?.name ?? "Group")
         .toolbar { toolbarContent }
+        .macToast($sendErrorToast)
     }
 
     // MARK: - Member list (left panel)
@@ -184,7 +188,10 @@ struct MacGroupChatView: View {
             try await groupService.sendMessage(groupId: groupId, content: content)
             try? await groupService.loadMessages(groupId: groupId)
         } catch {
+            // Restore the draft so the user doesn't lose what they typed and
+            // surface a toast so the failure isn't invisible.
             messageText = content
+            sendErrorToast = .failure("Couldn't send — check your connection")
         }
     }
 }
@@ -209,6 +216,7 @@ private struct MacGroupMessageBubble: View {
                         .padding(.horizontal, 12).padding(.vertical, 7)
                         .background(Color.primary.opacity(0.12), in: RoundedRectangle(cornerRadius: MacTheme.buttonRadius, style: .continuous))
                         .foregroundStyle(.primary)
+                        .contextMenu { bubbleMenu }
                 }
 
             case "ai":
@@ -218,6 +226,7 @@ private struct MacGroupMessageBubble: View {
                         .padding(.horizontal, 12).padding(.vertical, 7)
                         .background(MacTheme.surfaceCard, in: RoundedRectangle(cornerRadius: MacTheme.buttonRadius, style: .continuous))
                         .foregroundStyle(.primary)
+                        .contextMenu { bubbleMenu }
                 }
                 Spacer(minLength: 80)
 
@@ -230,6 +239,29 @@ private struct MacGroupMessageBubble: View {
                     .multilineTextAlignment(.center)
                 Spacer()
             }
+        }
+    }
+
+    @ViewBuilder
+    private var bubbleMenu: some View {
+        Button {
+            let pb = NSPasteboard.general
+            pb.clearContents()
+            pb.setString(message.content, forType: .string)
+        } label: {
+            Label("Copy", systemImage: "doc.on.doc")
+        }
+        Button {
+            // Markdown-style quote — ready to paste into a reply draft.
+            let quoted = message.content
+                .split(separator: "\n", omittingEmptySubsequences: false)
+                .map { "> \($0)" }
+                .joined(separator: "\n")
+            let pb = NSPasteboard.general
+            pb.clearContents()
+            pb.setString(quoted, forType: .string)
+        } label: {
+            Label("Copy as quote", systemImage: "quote.bubble")
         }
     }
 }
@@ -391,6 +423,7 @@ private struct MacCreateGroupSheet: View {
             }
         }
         .padding(20)
+        .focusEffectDisabled()
     }
 
     private func create() async {
@@ -434,12 +467,27 @@ private struct MacJoinGroupSheet: View {
             HStack {
                 Button("Cancel") { dismiss() }
                 Spacer()
-                Button("Join") { Task { await join() } }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(token.trimmingCharacters(in: .whitespaces).isEmpty || isJoining)
+                Button {
+                    Task { await join() }
+                } label: {
+                    HStack(spacing: 6) {
+                        if isJoining {
+                            // Inline spinner so the user sees the join request
+                            // is in flight instead of guessing whether the
+                            // click registered.
+                            ProgressView()
+                                .controlSize(.small)
+                                .progressViewStyle(.circular)
+                        }
+                        Text(isJoining ? "Joining…" : "Join")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(token.trimmingCharacters(in: .whitespaces).isEmpty || isJoining)
             }
         }
         .padding(20)
+        .focusEffectDisabled()
     }
 
     private func join() async {

@@ -1,5 +1,285 @@
 # Project Changelog
 
+## [2026-05-21] Landing page tier-2 polish: real-component demos, darker chat panel, native section removed
+
+User feedback on the first landing-page expansion: the inline CSS mockups looked nested-card-y and off-brand, the AI chat panel was too light, the native-app section's copy ("Built native, not wrapped. Real Swift apps...") read like AI marketing speak. This pass:
+
+- **`NativeAppSection` removed.** Deleted from `components/home/product-sections.tsx` exports and from `HomeContent.tsx`. The downloads page (`/downloads`) already covers platforms.
+- **Feature demos rewritten to mirror the real app.** `product-sections.tsx` now copies the visual blueprint of the real components (`apps/web/components/calendar/calendar-grid.tsx`, `apps/web/app/(routes)/mail/tasks/page.tsx`, `apps/web/app/(routes)/mail/meetings/page.tsx`, `apps/web/components/docs/`). Single outer frame per demo (no nested cards). iOS blue `#007AFF`, system reds `#FF453A`, greens `#30D158`, yellows `#FFD60A` — matches the real app's accent palette. Each demo has scroll-triggered staggered reveals (event blocks fade in column-by-column, task cards drop in, meeting rows slide from the left, checklist items pop sequentially). Adds a live "now" line on the calendar demo.
+- **Plain copy.** Replaced marketing speak. "Built native, not wrapped" → removed entirely. "Turn email into action" → "Pull tasks out of email. Drop them where they go." "Meetings, recorded and recapped" → "Meetings get transcribed and summarized." Removed "AI-generated" claims that the demos don't actually prove.
+- **AI Chat section darkened.** In `HomeContent.tsx`: the inner chat panel `bg-[#252525]` → `bg-[#0E0E0E]` with `border border-white/[0.06]` + soft shadow. Pinned-conversations panel `bg-zinc-900 opacity-30` → `bg-[#0A0A0A] opacity-40` + hairline border. Chip backgrounds `bg-[#303030]` → `bg-[#181818]`. Edge fade gradients `neutral-800` → `#0E0E0E` so the row blends into the panel instead of standing off it.
+
+## [2026-05-21] Landing page expansion: split CTA, product sections, native-app proof, FAQ page
+
+Second polish pass on `apps/web` after the cleanup of YC badge / socials / contributors:
+
+- **CTA split out of footer** — New `components/home/cta.tsx` (`CTASection`). Flat, no card, sits inside `max-w-7xl`. Removed the gradient/rounded card that previously wrapped the "Experience the Future of Email Today" headline + columns + legal line together. Rendered from `HomeContent.tsx` as a sibling of `<Footer />`, so other pages (about, terms, pricing, downloads, contact, FAQ, blog, compare) keep using the column-only footer without the CTA.
+- **Footer flat + restructured columns** — Rewrote `components/home/footer.tsx`. Drops `bg-panelDark mx-1 ... rounded-xl`; now `border-t border-white/10 bg-transparent` sitting flat against the page. Columns: **Resources** (Privacy, Terms), **Product** (Download, Pricing, FAQ, Github), **Company** (About, Contact). Year is `new Date().getFullYear()`. Bottom row keeps About / Contact / Terms / Privacy as dividers.
+- **Landing page product sections** — New `components/home/product-sections.tsx`. Exports `ProductSections` (Calendar, Tasks, Meetings, Docs) and `NativeAppSection`. Each feature row is text + an inline HTML/CSS mockup (no PNGs needed — placeholder illustrations match the page's design tokens). `NativeAppSection` includes a CSS iPhone frame (notch + inbox rows) and a CSS Mac window frame (traffic lights + 3-pane mail UI) with `Download for Mac` / `Get on iPhone` CTAs underneath. Wired into `HomeContent.tsx` between the existing feature grid and the footer.
+- **New `/faq` page** — `app/(full-width)/faq.tsx` using the existing Radix `Accordion` primitive. 10 entries: the original 6 from the JSON-LD block plus 4 new ones (self-host, custom domains, Outlook ETA, data handling). Route registered in `app/routes.ts`; `/faq` added to the prerender list in `react-router.config.ts`.
+- **JSON-LD parity** — `structuredData.faqPage.mainEntity` in `lib/site-config.ts` now ships the same 10 Q&A pairs the FAQ page renders, so Google rich snippets stay in lock-step with the visible content.
+
+## [2026-05-21] Cross-platform design system pass: dark bg lift, motion tokens, accent palette, DS viewer + docs
+
+First unified pass on tokens across `apps/web`, `apps/ios/Todus`, `apps/macos/TodusMac`. Five slices:
+
+- **Dark mode background lifted to Apple system dark `#1c1c1e`** (`Color(white: 0.109)`) on iOS + macOS — previous iOS `#0C0C0C` and macOS `~#141414` were too inky vs reference. Surface tokens stepped in ~0.04–0.06 white increments to preserve hierarchy. Hardcoded `Color(white:)` literals across `MacSettingsView`, `MacCalendarView`, `MacAssistantPanel`, `SettingsView.swift:1758`, and `CalendarViewController.swift:55` refactored to token references so future bg sweeps stay in one place.
+- **Motion tokens** — new `Motion.fast/.base/.slow` enums on `AppTheme.swift` (iOS) and `MacTheme.swift` (macOS); new `--motion-duration-fast/base/slow` + `--motion-easing-standard/emphasized` CSS custom properties on web (`apps/web/app/globals.css`). Replaced inline `.snappy(...)`, `.easeOut(...)`, `.easeInOut(...)`, `.spring(...)` durations across ~15 iOS callsites (CustomTabBar, BoardColumnView, BoardTaskCard, TaskRowView, TaskTableView, CalendarTabView, CalendarNavBar, CalendarListView, TabBarOnboardingView, TabBarCustomizationView, ToastOverlay), ~17 macOS callsites (MacSidebarView, MacRootView, MacAssistantPanel, MacCalendarView, MacToastOverlay, MacTasksView, all Email/Home/Voice/Meetings/Docs views), and 9 web shadcn/ui files (button, input, dialog, sheet, accordion, navigation-menu, nav-main, app-sidebar, sidebar). Dropdowns, panels, hover states, and tap feedback now share a tunable duration vocabulary; previously instant transitions on sidebars and menus animate smoothly.
+- **iOS accent palette parity** — ported the 6-color accent system (blue / indigo / teal / green / orange / rose) from macOS + web to iOS. New `AppTheme.Accents` enum + `AccentPreference` stored on `AppServices` (UserDefaults-backed, default `.blue`). Picker row added to `AppearanceSettingsView`. Hardcoded `accentBlue` literals on `AuthView` and `StartupOnboardingView` swapped for `AppTheme.Accents.blue`.
+- **Hidden Design System viewer on all three platforms**, gated to `TODUS_ALLOWLISTED_EMAILS` (Swift) / `VITE_TODUS_ALLOWLISTED_EMAILS` (web) allowlist:
+  - Web: `/settings/design-system` (new route in `apps/web/app/(routes)/settings/design-system/page.tsx`). `clientLoader` redirects non-allowlisted users to `/settings/general`. Settings nav entry conditionally rendered. New `apps/web/lib/developer-access.ts` mirrors the Swift `TodusDeveloperAccess.isAllowlisted(email:)` pattern.
+  - iOS: `Features/DesignSystem/DesignSystemView.swift` + `DSTokenRow.swift`. NavigationLink from `SettingsView` developer section, gated by `TodusDeveloperAccess.isAllowlisted`. Xcode project updated.
+  - macOS: `Views/Settings/MacDesignSystemView.swift`. Sheet-presenting button in `MacSettingsView` under the existing developer-mode gate (which already requires allowlist). Pbxproj updated.
+  - Each viewer renders: Colors (light + dark swatches with hex / token name), Accent palette, Typography (samples per scale), Radius (6-tier chips), Spacing (4 / 8 grid), Shadows (web), Components gallery (buttons, cards, badges, dropdowns, dialogs, sheets, etc.), Motion (live demo blocks animating `fast/base/slow`). Each section ends with a "How to change" callout pointing to the source-of-truth file + line range.
+- **Documentation** — new `DESIGN_SYSTEM.md` (canonical token reference with cross-platform mapping table) and `DESIGN_SYSTEM_INCONSISTENCIES.md` (resolved + tracked gaps) at repo root. Design System section added to `CLAUDE.md`, `AGENTS.md`, and `APPS_ARCHITECTURE.md` so future agents know the system exists and where to update it.
+
+Verified: `xcodebuild` builds succeeded on Todus (iOS) and TodusMac (macOS). `tsc --noEmit` + `oxlint --deny-warnings` clean on touched web files.
+
+## [2026-05-21] Website polish + downloads page
+
+Marketing site cleanup pass on `apps/web`:
+
+- **Hero** — Removed the "Backed by Y Combinator" badge from the hero (`components/home/HomeContent.tsx`). Pulled YC mention from the meta description in `lib/site-config.ts` and the about-page meta in `app/(full-width)/about.tsx`.
+- **Navbar** (`components/navigation.tsx`) — Removed the round logo crop and the "beta" badge under it; logo now renders at its natural aspect. Removed the Resources mega-menu (Twitter / LinkedIn / Discord). Added a "Download" link pointing to the new `/downloads` page on both desktop nav and mobile sheet. Removed the social-icon row from the mobile sheet.
+- **Footer** (`components/home/footer.tsx`) — Full rewrite. Killed the gradient.svg background for a flat surface. Dropped the Product column. Removed SOC2 link (we don't have SOC2). Removed the Twitter / LinkedIn / Discord row. Year is now `new Date().getFullYear()` instead of hard-coded 2025. Tightened the "Experience the Future of Email Today" headline contrast (solid white) so it reads on the flat surface.
+- **Global link cleanup** — Replaced every `github.com/todus-app` / `github.com/Mail-0/Zero` URL with `github.com/Ludvig-Hedin/Todus` across `apps/web`, `.github/CONTRIBUTING.md`, `.github/PULL_REQUEST_TEMPLATE.md`, `.github/TRANSLATION.md`, and `README.md`. The `nav-user` "Customer Support" link now points at GitHub Issues instead of Discord. Translation guide no longer mentions the (defunct) Discord server.
+- **/contributors removed** — Route unregistered in `app/routes.ts` and dropped from the prerender list in `react-router.config.ts`. The old page file is left on disk but unrouted.
+- **/downloads added** — New page at `app/(full-width)/downloads.tsx`, routed in `app/routes.ts` and added to the prerender list. Three cards: macOS desktop (GitHub releases), iPhone (App Store), and the web app (login button). No Android / Windows / browser-extension placeholders.
+- **README rewrite** — Trimmed to a short overview + feature list + download pointer + quick-start. Self-hosting moved out to a new `SELF_HOSTING.md` at repo root. Star History section removed. Team / contributors footer removed.
+
+## [2026-05-21] iOS — drop stale v1 inbox cache so new mail isn't pinned below stuck rows
+
+After the sync recovery landed, returning iOS users saw fresh mail load correctly but ~30 legacy threads stayed pinned at the top of the inbox. Root cause: the v1 cache file (`email_inbox_threads_v1` in UserDefaults) was written while the backend's Gmail continuous sync was disabled, so some rows had a `latestReceivedOn` that had fallen back to `Date()` (now) inside `syncThread`'s date-normalization catch. Those rows now have a permanent future-ish date, which kept anchoring `currentNewest` ahead of every real incoming row and tripping the `isStaleRefresh` guard that keeps the cache when it looks newer than the network response.
+
+- **Cache version bump v1 → v2** (`apps/ios/Todus/Todus/Services/Email/EmailService.swift`) — New `cacheDataKey` / `cacheTimestampKey` so the next launch starts from a clean cache built from the fresh backend response. Legacy v1 keys are explicitly removed on `init` and on `resetForSignOut` to avoid leaking orphaned bytes.
+- **Sanity filter on cache load** (`apps/ios/Todus/Todus/Services/Email/EmailService.swift`) — `loadCachedThreads` now drops any thread with a date more than a day in the future or earlier than 2000-01-01. Belt-and-suspenders for future regressions that would otherwise re-stamp `Date()` into the cache and re-create the same symptom.
+
+## [2026-05-21] Mail sync recovery: Gmail watch self-heal, getThread shard race fix, folder pagination
+
+Native clients (iOS + macOS) were stuck on month-old mail with no new arrivals and "Failed to load thread." on tap. Root causes fixed:
+
+- **`mail.rewatchGmail` mutation** (`apps/server/src/trpc/routes/mail.ts`) — Force-renews the Gmail PubSub watch + push subscription for the active connection. Gmail watches expire after ~7 days; the hourly cron renews any older than 5 days, but a connection whose watch was lost (subscription deleted, IAM blip, missed cron tick) gets stuck and continuous sync stops delivering new mail. Clears `gmail_sub_age` KV + enqueues `subscribe_queue` job. Idempotent (PubSub topic `Already Exists` is swallowed).
+- **Backend auto-rewatch when inbox is stale** (`apps/server/src/trpc/routes/mail.ts`) — When `listThreads` sees an empty inbox or a newest-row older than 24h on a Google connection, it now also enqueues a subscribe job alongside the existing resync trigger. Self-heals the "stuck watch" state on the user's next list call without any client-side action.
+- **Composite-cursor pagination fix for folder queries** (`apps/server/src/routes/agent/db/index.ts`) — `findThreadsByFolderWithPagination` was still comparing the raw page-token to `latestReceivedOn` lexically. After the d8d471c7 token-format change (JSON `{ latestReceivedOn, id }`), `{` > `2` made `lt` true for every row, so page 2 returned the same newest slice forever. Now reuses `buildPaginationConditions` like the all-threads path.
+- **`getThread` shard race no longer picks empty stubs** (`apps/server/src/lib/server-utils.ts`) — `ZeroDriver.getThreadFromDB` returns a truthy `{ messages: [], latest: undefined }` placeholder for shards that don't own the thread (and kicks off an async re-sync in the background). The previous race-success condition `if (thread)` was making `Effect.raceAll` declare the empty shard the winner whenever it resolved first, so users whose thread lived in a later shard hit "Failed to load thread.". Race now only succeeds when the result actually has a message payload.
+- **iOS — proactive Gmail rewatch on stale refresh** (`apps/ios/Todus/Todus/Services/Email/EmailService.swift`) — Refresh path now triggers `mail.rewatchGmail` when the displayed inbox / incoming slice is older than 24h, or when both are empty. 6-hour cooldown to avoid flooding `subscribe_queue` on repeat refreshes within the same session. Cleared on sign-out.
+- **iOS — surface real backend error on thread tap** (`apps/ios/Todus/Todus/Services/Email/EmailService.swift`) — `friendlyThreadLoadMessage` now parses the tRPC error envelope `{ error: { json: { message } } }` and surfaces the actual server message (e.g. "Thread <id> not found") for 5xx responses instead of the generic "Mail service is unavailable.". Makes silent shard misses diagnosable from the UI.
+- **macOS — mirrored rewatch + error parsing** (`apps/macos/TodusMac/Services/Email/EmailService.swift`) — Same proactive `mail.rewatchGmail` trigger on stale refreshes. `loadThread` now uses the same `friendlyThreadLoadMessage` + `parseTRPCErrorMessage` pipeline so the desktop app surfaces backend errors instead of a flat "Failed to load thread.".
+
+## [2026-05-21] iOS UX pass: retire default-mail onboarding, tighten Tasks header, smarter briefing, thread-fetch timeouts
+
+- **Onboarding** — Removed the "Make Todus your mail app" step (`apps/ios/Todus/Todus/App/RootView.swift`). iOS still has no public API to set a default mail app, so the step couldn't function; onboarding total is now 3 steps. The `DefaultMailOnboardingView.swift` file is left in place (dead code) plus the `hasConfiguredDefaultMailPrompt` flag stays as a no-op stored preference so migration/sign-out reset paths keep compiling.
+- **Tasks header** — Removed the green "All clear" header chip; tightened search-bar vertical padding (4→2pt); raised the inset between the pinned search bar and view content from 6→18pt across all four view modes (List / Board / Table / Dates) so spacing is consistent at the 16–24px target. Smart-sort bucket headers (e.g. "No date") are now rendered as inline list rows instead of `Section` headers, so they scroll with content instead of sticking to the top.
+- **Tasks Board** — Wrapped `BoardView` in a `GeometryReader` and pinned each column to the available scroll height. Horizontal `ScrollView`s don't propagate vertical bounds to `.frame(maxHeight: .infinity)` content, which previously made columns vertical-center inside the viewport — producing a huge blank gap above the column headers.
+- **Home Assistant Briefing — fewer false positives** — Receipts from senders that don't look automated (e.g. `support@openrouter.ai`) were being classified as `needs_reply`, producing bogus "URGENT REPLY" cards for $2 invoices. Tightened `classifyThreadKind` so strong receipt phrases ("tax invoice", "amount paid", "your purchase", "transaction details", "subscription renewed", …) always classify as `receipt` regardless of sender automation status. Expanded `NOREPLY_SENDER_PATTERN` to include `billing@`, `payments@`, `receipts@`, `invoices@`, `subscriptions@`, `orders@`, `accounts@`, `mailer-daemon`, `postmaster`. `replyNeeded` and `deadline_risk` loops are now gated by `!isNonConversational` so receipts / notifications / marketing / verification threads never produce urgent-reply loops.
+- **Home Assistant Briefing — visual** — Fixed-width (72pt) badge pills on the briefing feed rows so the row title text starts at the same x-offset regardless of badge label length, plus a subtle stroke outline on the badge for legibility.
+- **Email thread load timeouts** — `mail.get` server route now races the `getThread` shard fetch against a 15s timeout and surfaces `INTERNAL_SERVER_ERROR` instead of letting the request hang to the Cloudflare outer limit. iOS `EmailService.loadThread` adds a parallel 20s watchdog that cancels the in-flight request and surfaces typed error messages ("Thread is taking too long to load. Pull to retry." / "You're offline." / "Mail service is unavailable.") instead of a generic "Failed to load thread.". Eliminates the ≈90s "loading forever" experience when a shard or Gmail subrequest stalls.
+
+## [2026-05-20] iOS ship-readiness pass: DI seams, all skipped tests activated, UI test target, voice mic lock, autosave migration, debounced policy push
+
+Third pass closes the "complete after small fixes" gaps from the 2026-05-17 review. **67 unit tests pass, 0 fail, 0 skipped** (was 66 / 0 / 15). UI test target compiles. All recommended hardening from the strict review landed.
+
+**Tests — zero skipped**
+- All 15 previously-skipped tests now active and passing, plus 1 new test (pagination dedup no-op when incoming is older). DI seams added without changing any public API:
+  - `AuthService`: `AuthTransport` protocol + `URLSession` conformance; `classifyCallbackTokens` extracted from `completeAuthentication`; `beginPendingAuthFlow`/`endPendingAuthFlow`/`isPendingAuthFlowActive` helpers extracted from `signInWithGoogle`.
+  - `TodosAPIClient`: internal init with custom `URLSessionConfiguration` injection.
+  - `AIChatService`: `classifyFlushDecision` nonisolated static helper extracted from `flushTokenBuffer`.
+  - `EmailService`: `mergePages` static helper extracted from `performLoadThreads`.
+  - `NetworkMonitor`: `PathProviding` protocol + `NWPathProvider` default impl + internal init.
+  - `RemoteFirstTaskParsingService`: `RemoteTaskParsingTransport` protocol + internal init.
+  - `AppleRemindersSyncService`: `EKReminderStoring` protocol + internal init; test-only readbacks (`_test_inFlightUpserts`, `_test_coalescedRetryCount`, `_test_recordPendingUpsert`).
+- All new init params have defaults pointing at real implementations; existing call sites untouched.
+
+**UI test target stood up**
+- `TodusUITests` target wired (xcodegen). `--ui-testing` launch-arg detected in `AppServices.init` injects fake bearer + onboarding flags + `hasReachedMainTab` so XCUITests skip auth and land on MainTab deterministically. Startup network calls (`refreshSession`, AI snapshot fetches, shared profile load) gated behind `!isUITestingMode`.
+- 3 test files in `TodusUITests/`: `TodusUITests.swift` (smoke), `CriticalFlowsTests.swift` (C1-C5 regression smoke via simulated deep link / notification / mutation pending state), `ParitySmokeTests.swift` (startup card on fresh install, voice settings accessibility, docs empty state, automation policy reachability).
+- UI test target compiles clean (`xcodebuild build-for-testing`). UI test execution requires booted simulator (sandbox blocks here — verify with `xcodebuild test -only-testing:TodusUITests` locally).
+
+**Voice race + autosave migration + policy debounce**
+- **Voice mic lock** ([`Services/Voice/VoiceMicLock.swift`](apps/ios/Todus/Todus/Services/Voice/VoiceMicLock.swift)) — cooperative `@MainActor @Observable` lock with `acquire(owner:)` / `release(owner:)`. Wired into both `VoiceSessionCoordinator` (owner: "coordinator") and `VoiceChatViewModel` (owner: "modal"). Siri Shortcut + modal-open at the same time can't double-attach AVAudioEngine. Same class of bug as H17.
+- **Compose autosave migration** ([`Features/Email/EmailComposeView.swift`](apps/ios/Todus/Todus/Features/Email/EmailComposeView.swift)) — `migrateLegacyAutosaveIfNeeded()` runs once on first restore: copies `reply.<threadId>` / `replyAll.<threadId>` UserDefaults blobs to the unified `compose.<threadId>` key (replyAll wins if both present), then deletes the legacy keys. Idempotent.
+- **EmailAutomationPolicyView debounced push** — 300ms debounced `saveSharedAIProfile` per change instead of `onDisappear`-only. Crash mid-edit no longer strands changes. `.onDisappear` still flushes as fallback. `AssistantAutomationPolicy` + `AssistantQuietHours` + `AssistantAutoSendScenario` gained `Equatable` for `onChange(of:)`.
+
+**Docs dedup + startup migration tightened**
+- `DocsService.refresh()` no longer auto-creates a "Personal" workspace when the server already has one (case-insensitive name check). On 409/422 race, refetches and uses the server's existing workspace.
+- `hasSeenStartupCard` migration: dropped unreliable `hasPersistedBearerToken` signal (Keychain survives uninstall on iOS — could silently skip card on fresh reinstall). Added new positive signal `Keys.hasReachedMainTab`, set in `MainTabView.onAppear` the first time the tab shell appears. Migration: card skipped only when `hasReachedMainTab` OR (`isAuthenticated && any prior onboarding flag`).
+
+**Verification**
+- `xcodebuild build` → **BUILD SUCCEEDED**
+- `xcodebuild build-for-testing` → **TEST BUILD SUCCEEDED**
+- `xcodebuild -only-testing:TodusTests test` → **TEST SUCCEEDED** (67 / 0 / 0)
+- UI tests pending booted simulator (run locally).
+
+**Manual follow-ups (user)**
+1. Open Xcode + run UI tests on simulator/device.
+2. AI conversation history + AppTheme avatar cache migrations run silently on first launch (transparent).
+3. Activate Siri Shortcut "Start Voice Assistant" via Shortcuts app.
+4. Apple `com.apple.developer.mail-client` entitlement still pending (pre-existing TODO).
+5. Review + commit when ready.
+
+## [2026-05-17] iOS parity sweep: voice + docs + automation + tests + startup card
+
+Second pass on iOS (after morning bug-hunt + ux-polish): closed remaining macOS→iOS parity gaps and stood up a real test suite. 5 parallel agents, full integration `xcodebuild` clean + `xcodebuild test` green.
+
+**New iOS features (parity with macOS)**
+- [Voice] **Voice assistant lifecycle on iOS** — was modal-only; now full coordinator-driven session. New `Services/Voice/`: `VoiceSessionCoordinator.swift` (391L, state machine: idle/connecting/listening/speaking/toolRunning/error, owns lifecycle + transcript persistence via `ai.saveConversation`), `VoiceSystemPromptClient.swift` (server-fetched persona with 60s TTL cache + offline fallback — replaces locally-built stale prompt), `VoiceToolRegistry.swift` (Gemini function declarations + `VoiceToolExecutor` protocol + iOS adapter calling `AIChatService.processVoiceToolCall`), `VoiceAudioCapture.swift` (AVAudioEngine 16kHz PCM16 capture). `VoiceIntent.swift` — `StartVoiceAssistantIntent` AppIntent + `TodusVoiceAppShortcuts` provider so Siri Shortcut serves as the iOS-equivalent of macOS's global hotkey. `Features/Settings/VoiceAssistantSettingsView.swift` mirrors macOS `voiceAssistantSection` (enable toggle, auto-stop idle toggle, Siri Shortcut hint with Shortcuts.app deep-link, reset persona cache, live status row). Wired into `AppServices` + `TodosApp` (`.task` subscribes to `.todusStartVoiceSession` notification, hydrates SwiftData main context, calls `coordinator.start()`).
+- [Docs] **Native iOS Docs shell** — was web shim only. New `Domain/DocTypes.swift` (DTOs mirroring macOS), `Services/Docs/DocsService.swift` (`@MainActor @Observable`, refresh/list/create/update/delete/move/star/togglePin/search, auto-creates Personal workspace), `Features/Docs/DocsListView.swift` (NavigationSplitView on iPad, NavigationStack on iPhone, recursive nested doc rows, pull-to-refresh, context menu, swipe actions, empty state, ~290L), `Features/Docs/DocEditorView.swift` (thin native nav wrapper around existing `DocsWebView` — preserves web fallback). `DocsWebView` gained optional `docId` param for deep linking; legacy callers unchanged. `MoreSheetView` exposes native Docs + "Docs (Web)" fallback (no removal of legacy).
+- [Settings] **Email automation policy controls on iOS** — `Features/Settings/EmailAutomationPolicyView.swift` (excluded-sender add/list/swipe-to-delete, auto-send experiment toggle with confirmation, workday start/end hour pickers, reset to recommended). NavigationLink added in `SettingsView.swift::emailSection`. Persists via AppServices, pushes on disappear.
+- [Tasks] **Compound intent parser refinements on iOS** — `Services/Parsing/CompoundIntentParser.swift` patched with word-boundary regex (port of macOS refinements) — handles Swedish "och" + English "and" connectors with proper `\b` boundary checks. `RemoteFirstTaskParsingService` exposes `parseCompoundLocally(...)` hook so callers can get multi-intent results.
+- [Onboarding] **Branded startup card on iOS** — `App/StartupOnboardingView.swift` (~150L). Hero squircle logo, "Get started" + "I already have an account". Wired into `RootView` ahead of AuthView. Existing installs auto-skip via migration check (any prior onboarding flag set or authenticated session). Matches macOS `MacStartupOnboardingView` brand presence.
+
+**Tests — stood up real coverage**
+- Before: 2 files, 9 tests, ~5% coverage. After: 10 files, **66 tests pass, 0 fail, 15 skipped** (skipped tests document required DI seams).
+- New: `AuthServiceTests` (12 tests — C1 deep-link rejection, preloadTokens determinism, init→auth transition, token preview safety), `TodosAPIClientTests` (8 tests — superjson Date-meta envelope, omitted-meta plain payload, nested-date dotted path, batch wrap with String/Int H16 regression pin), `AIChatServiceTests` (12 tests — CRLF / LF classify, `[DONE]` with/without trailing CR H14 pin, heartbeat skip, chunk-boundary residual, replay end-to-end, malformed-JSON tolerance), `EmailServiceTests`, `AppleRemindersSyncServiceTests`, `NetworkMonitorTests`, `AppThemeAvatarCacheTests`, `RemoteFirstTaskParsingServiceTests`.
+- Minimal non-breaking seams added: `TodosAPIClient.swift` exposes `superjsonWrap_forTesting` via `TodosAPIClientTestSeam`; `AIChatService.swift` extracts `SSELineParser` enum (production loop unchanged — pure helper).
+- `TodosUITests` target stood up via xcodegen. Smoke test (`app.launch()` + window-exists). Manual follow-up: implement `--ui-testing` launch-arg stub in `AppServices` for deeper E2E.
+
+**Infrastructure**
+- [Build] **Duplicate `LocalModelStateStore.swift` resolved** — `App/LocalModelStateStore.swift` (51L stub placeholder) collided with `Services/AI/Local/LocalModelStateStore.swift` (188L real impl used by `ModelDownloadService` + `MLXInferenceService`). Renamed stub to `LocalModelStateStore_DEPRECATED.swift`, emptied class definition. Was blocking all builds. Safe to delete from disk in next cleanup.
+
+**Verification**
+- `xcodebuild -project apps/ios/Todus/Todus.xcodeproj -scheme Todus -sdk iphonesimulator build` → **BUILD SUCCEEDED**
+- `xcodebuild ... -only-testing:TodusTests test` → **TEST SUCCEEDED** (66 / 0 / 15, 0.30s)
+
+**Manual follow-ups**
+1. Open in Xcode + run on simulator/device (sandbox blocks CoreSimulator).
+2. Activate Siri Shortcut "Start Voice Assistant" via Shortcuts app to enable voice.
+3. Conversation history migrates Keychain → file system on first launch (transparent).
+4. AppTheme avatar cache migrates UserDefaults → file system on first launch (transparent).
+5. Implement `--ui-testing` AppServices stub when ready for deeper E2E UI tests.
+6. Apple `com.apple.developer.mail-client` entitlement still pending (existing TODO).
+
+Full detail: `TASK.md` "Current iOS Parity + Hardening Sprint" + per-bug entries in `CODE_REVIEW_BACKLOG.md` "2026-05-17 — iOS Bug-Hunt + UX-Polish Audit".
+
+## [2026-05-17] macOS regression sweep (post-parity)
+
+Final regression hunt over the parity-wave diff. 10 high-confidence findings, 6 parallel fixers, **BUILD SUCCEEDED** after each. Headlines:
+
+- **Compose duplicate send with attachments** ([`MacEmailComposeView.swift`](apps/macos/TodusMac/Views/Email/MacEmailComposeView.swift)) — every email with an attachment was being POSTed to `mail.send` twice (once via `emailService.sendEmail`, again via `MacDraftService.send`). Now routes attachment sends exclusively through `MacDraftService.send` so each message ships once.
+- **Voice transcripts overwritten by final delta** ([`GeminiLiveProvider.swift`](apps/macos/TodusMac/Services/Voice/GeminiLiveProvider.swift), [`VoiceSessionCoordinator.swift`](apps/macos/TodusMac/Services/Voice/VoiceSessionCoordinator.swift)) — Gemini Live emits incremental transcription chunks; the provider was tagging every chunk `isFinal: true`, so the coordinator's `userTranscript = text` replace path discarded all but the last fragment. Flipped to `isFinal: false` so the existing `+=` accumulator captures the full turn before `turnComplete`.
+- **Calendar picker dead** ([`MacEventEditSheet.swift`](apps/macos/TodusMac/Views/Calendar/MacEventEditSheet.swift), [`CalendarService.swift`](apps/macos/TodusMac/Services/Calendar/CalendarService.swift)) — sheet bound `selectedCalendarSourceId` but `createEvent`/`updateEvent` ignored it and hardcoded `defaultCalendarForNewEvents`. Plumbed `calendarIdentifier:` through both; picker now persists.
+- **Reminders sync oscillation** ([`AppleRemindersSyncService.swift`](apps/macos/TodusMac/Services/Reminders/AppleRemindersSyncService.swift)) — `upsert` unconditionally set `.pendingUpload` after every EKReminder save, including just-imported tasks, causing per-pass redundant upserts. Preserved `.synced` when the only change was attaching a freshly imported `reminderIdentifier`.
+- **Reminders delete silent on EventKit errors** — `try?` swallowed failures; switched to `do/catch` with `AppLogger.shared.log` so deletions don't ghost.
+- **`GoogleCalendarService.refresh` nuked newer in-flight task** — unconditional `inflightRefresh = nil` post-await; now guarded with identity check `if inflightRefresh == task`.
+- **`MacAIChatService.send_email` dropped `connectionId`** — multi-account users always sent from the server-side default. Threaded `connectionId` through `MacSendEmailArgs` → `EmailDraft.fromConnectionId` → `SendEmailInput`.
+- **`VoiceSessionCoordinator.attachAudioInput` captured stale continuation** — push-to-talk re-press cycled the continuation but the broker closure still held the old one. Now reads `self.audioSendContinuation` inside the MainActor hop so each yield uses the current stream.
+- **Compose autosave phantom Cc/Bcc** ([`MacEmailComposeView.swift`](apps/macos/TodusMac/Views/Email/MacEmailComposeView.swift)) — explicit `clearedCc` / `clearedBcc` flags persisted alongside autosave so removed recipients don't resurrect on next open.
+- **Gmail connect poll too short** ([`EmailService.swift`](apps/macos/TodusMac/Services/Email/EmailService.swift)) — extended 6×500ms → 12×750ms (9s budget) and softened the timeout message to "Still connecting — refresh in a moment to confirm." so slow backends don't report a false "Could not link your Gmail account".
+
+Build: `xcodebuild -project apps/macos/TodusMac.xcodeproj -scheme TodusMac -destination 'platform=macOS' build` → **BUILD SUCCEEDED**.
+
+## [2026-05-17] macOS app hardening + iOS feature parity sweep
+
+Multi-pass audit + remediation of `apps/macos/TodusMac`: critical/high bug fixes across mail, tasks, calendar, AI, voice, and auth; ~45 UX polish items; and a deliberate iOS → macOS parity push that closed the largest remaining gaps in Email, Calendar, Notifications, Tasks, and Search. Full integration `xcodebuild -project apps/macos/TodusMac.xcodeproj -scheme TodusMac -destination 'platform=macOS' build` → **BUILD SUCCEEDED** with zero errors.
+
+**Critical / high bug fixes**
+- [Meetings] **C1 duplicate top-level types** — resolved via existing `project.yml` exclusions; merged the secondary toolbar action into the canonical [`MacMeetingDetailView`](apps/macos/TodusMac/Views/Meetings/MacMeetingDetailView.swift) so only one symbol survives.
+- [Docs] **C2 autosave reliability** ([`MacDocEditorPane`](apps/macos/TodusMac/Views/Docs/MacDocEditorPane.swift), [`MacDocsService.swift`](apps/macos/TodusMac/Services/Docs/MacDocsService.swift)) — flush on `onDisappear` + `onChange(docId)` + debounced title autosave + 3-state save indicator (saving / saved / failed-with-retry). Replaced the placeholder "Info coming soon" popover with a real word/char count + last-updated + copyable doc id view.
+- [Auth] **C3 OAuth callback validation** ([`TodusMacApp.swift`](apps/macos/TodusMac/App/TodusMacApp.swift), [`MacAppServices.swift`](apps/macos/TodusMac/App/MacAppServices.swift)) — strict host check on `todus://` callbacks; queue inbound URLs until `ModelContainer` is ready so cold-launch deep links no longer drop into the void.
+- [Voice] **C4 push-to-talk hotkey release** ([`HotkeyService.swift`](apps/macos/TodusMac/Services/Voice/HotkeyService.swift), [`VoiceSessionCoordinator.swift`](apps/macos/TodusMac/Services/Voice/VoiceSessionCoordinator.swift)) — tear down the `AudioInputBroker` on key-up and emit `sendActivityEnd()` end-turn frame so Gemini Live actually closes the turn instead of stalling.
+- [Voice] **C5 dual `AVAudioEngine` crash** ([`MacVoiceChatPanel.swift`](apps/macos/TodusMac/Views/Voice/MacVoiceChatPanel.swift)) — replaced `.onAppear` with `.task` + awaited sequencing so the panel never starts a second engine while the global hotkey loop is still spinning down.
+- [Tasks] **C6 Apple Reminders dedup + SwiftData `@MainActor` isolation** ([`AppleRemindersSyncService.swift`](apps/macos/TodusMac/Services/Tasks/AppleRemindersSyncService.swift)) — id-keyed dedupe + main-actor isolation on SwiftData mutations.
+- [Tasks] **C7 delete sync** ([`MacTasksView.swift`](apps/macos/TodusMac/Views/Tasks/MacTasksView.swift)) — routed delete through `MacTaskSyncService` with a confirmation dialog so swipe-delete no longer drifts from the server.
+- [Email] Bcc / `threadId` / `connectionId` / `draftId` now plumbed through send; idempotent flush with a 5-minute orphan window; pagination cursor race fixed; spinner guard against stale-page drops; sender match by header.
+- [Tasks] 4xx vs 5xx retry policy with bounded max retries; word-boundary regex for compound intent parsing; [`FolderSyncService`](apps/macos/TodusMac/Services/Tasks/FolderSyncService.swift) enforces `syncedIds`; DST gap fix in recurrence math.
+- [Calendar] Refresh-storm dedup; per-calendar `sourceId`; multi-day event overlap filter; scope-missing banner + reconnect CTA; Toggle race fix; `accessRole` plumbed end-to-end.
+- [AI/Voice] `cancelStream` race closed via generation counter; tool exec cancellation gates; disconnect reentrancy guard; mic teardown on `.error`; serialized audio send queue with backpressure; `functionCall.id` fallback; `AudioPlayer._isPlaying` derived from buffer count; polling cross-group leak closed.
+- [Auth] Restore-flash gone; profile fetch gated on session; folder `createdAt` drop fixed; settings now persists the full shape; voice context guard; OTP digit filter.
+
+**iOS → macOS parity features (new)**
+- [Email compose] **Attachments + signatures + live validation + rich text shortcuts** ([`MacEmailComposeView.swift`](apps/macos/TodusMac/Views/Email/MacEmailComposeView.swift), [`MacDraftService.swift`](apps/macos/TodusMac/Services/Email/MacDraftService.swift), [new] [`MacSignatureStore.swift`](apps/macos/TodusMac/Services/Email/MacSignatureStore.swift), [`MacSettingsView.swift`](apps/macos/TodusMac/Views/Settings/MacSettingsView.swift)) — `NSOpenPanel` attachment chips, base64 send through `MacDraftService.SendInput.attachments`; per-connection signatures stored in `MacSignatureStore` with a Settings card; live recipient validation; underline button + ⌘B / ⌘I / ⌘U shortcuts.
+- [Email thread] **Verification code + tracking info chips, smart-action toolbar, snooze reminders** ([`MacEmailThreadView.swift`](apps/macos/TodusMac/Views/Email/MacEmailThreadView.swift), [`MacNotificationService.swift`](apps/macos/TodusMac/Services/Notifications/MacNotificationService.swift)) — regex-based verification-code chip with one-shot auto-copy; UPS / FedEx / USPS / order-number tracking chip; toolbar with Create Task / Create Event / Generate Reply (inline spinners); "Remind me about this…" with preset snooze + custom date picker → `scheduleEmailReminder`.
+- [Calendar] **Native in-app event editor** ([new] [`MacEventEditSheet.swift`](apps/macos/TodusMac/Views/Calendar/MacEventEditSheet.swift)) — create / edit / delete inside the app (replaces Calendar.app delegation); "Open in Calendar.app" demoted to a context-menu fallback.
+- [Notifications] **Full category + action registration** ([`MacNotificationService.swift`](apps/macos/TodusMac/Services/Notifications/MacNotificationService.swift), [`MacAppDelegate.swift`](apps/macos/TodusMac/App/MacAppDelegate.swift)) — `TASK_REMINDER`, `EMAIL`, `EMAIL_REMINDER`, `DUE_TASKS`, `AI_RESPONSE` categories with `TASK_COMPLETE`, `TASK_SNOOZE`, `ARCHIVE_EMAIL` actions; `UNUserNotificationCenterDelegate` implements `willPresent` (foreground banner) + `didReceive` routing for every type.
+- [Tasks] **Recurrence + checklist + attachments** ([`MacTasksView.swift`](apps/macos/TodusMac/Views/Tasks/MacTasksView.swift), `TaskRecord` model) — RRULE-compatible None / Daily / Weekly / Monthly / Yearly; per-item checklist with live persistence; `NSOpenPanel` attachments copied to `Application Support/TaskAttachments/{taskId}/` with relative-path storage; JSON-backed accessors on `TaskRecord`.
+- [Search] **Cross-entity search** ([`MacSearchView.swift`](apps/macos/TodusMac/Views/Search/MacSearchView.swift)) — tasks + emails + events + people with category chips (All / Tasks / Emails / Events / People), recent searches persisted via `@AppStorage` with a clear button, debounced 60-day calendar search, keyboard nav (↑ / ↓ / ⌘1–5 / ⌘↩), people derived from email senders.
+- [Sharing] **Inbound `todus://share?slug=...` deep links** ([`TodusMacApp.swift`](apps/macos/TodusMac/App/TodusMacApp.swift), [`MacRootView.swift`](apps/macos/TodusMac/Views/MacRootView.swift), [new] [`MacSharedConversationView.swift`](apps/macos/TodusMac/Views/Sharing/MacSharedConversationView.swift)) — `handleIncomingURL` posts a `NotificationCenter` event; `MacRootView` presents the read-only sheet with password unlock + "Save to my conversations" via `shareService.importShare`.
+- [Sidebar] **Restored Meetings entry** ([`MacSidebarView.swift`](apps/macos/TodusMac/Views/MacSidebarView.swift)).
+
+**UX polish (~45 items)**
+- Destructive confirmations (Log Out, task delete, folder delete) across Settings + Tasks.
+- Toasts for: send failure, event creation, restore task, `openInCalendarApp` failure, `moveEvent` completion.
+- Accessibility labels on icon-only buttons across Voice / Assistant / Calendar / Local Models.
+- Notification routing via `onOpen` closure: `taskDue → tasks`, `importantEmail → thread`, `event → calendar`.
+- Home briefing tap → thread deep link.
+- Search clear (×), Meetings search clear, Local Models button-wrapped rows.
+- 3-state save indicator, docs loading skeleton, grid / list segmented picker, outline row hover.
+- Onboarding skip de-emphasized; Q&A button color reflects state; transcript "Show all (count)".
+- Calendar all-day **Copy Date**; multi-day events now render in every spanned column.
+- Empty search → **Create task '<query>'**.
+
+**Files**
+- New: [`MacSignatureStore.swift`](apps/macos/TodusMac/Services/Email/MacSignatureStore.swift), [`MacEventEditSheet.swift`](apps/macos/TodusMac/Views/Calendar/MacEventEditSheet.swift), [`MacSharedConversationView.swift`](apps/macos/TodusMac/Views/Sharing/MacSharedConversationView.swift) (plus `VoiceSessionCoordinator.swift` already untracked).
+- Modified: ~35 files across `apps/macos/TodusMac/{App,Services,Views}/**` — see `git status` for the full list.
+
+**Verification**
+- `xcodebuild -project apps/macos/TodusMac.xcodeproj -scheme TodusMac -destination 'platform=macOS' build` → **BUILD SUCCEEDED** (zero errors, zero warnings introduced by this sweep).
+
+**Manual follow-ups (out of scope this session)**
+1. macOS Widget extension is wired in `project.yml`; needs a real-data verification pass through `MacWidgetUpdateManager`.
+2. `WakeWordService` still a stub — Picovoice Porcupine integration deferred to Phase 1.5.
+3. `GroupChatService` polling not yet migrated to the WebSocket Durable Object subscription (TODO in code).
+4. `MacContentHeaderView` accessibility labels landed but top buttons still TODO real actions.
+5. No XCTest target exists for macOS (only iOS has `TodusTests`). Stand up `TodusMacTests` as a follow-up.
+
+Cross-reference: parity matrix added in [`PARITY_CHECKLIST.md`](PARITY_CHECKLIST.md) section **7) iOS ↔ macOS Feature Parity Matrix**.
+
+## [2026-05-17] Bug-hunt + UX-polish: iOS app sweep (6 surfaces)
+
+Multi-agent audit + remediation across iOS surfaces. 5 critical + 17 high + 46 medium bugs + 84 polish items addressed. Full integration `xcodebuild` clean.
+
+**Critical/security**
+- [Auth] **Deep-link token-injection blocked** ([`packages/swift-auth/Sources/TodusAuth/AuthService.swift`](packages/swift-auth/Sources/TodusAuth/AuthService.swift)) — `handleAuthCallback` strictly requires unexpired `pendingAuthFlowExpiresAt` regardless of `isAuthenticated`. Apple Sign In also sets the window (was Google-only) + adds nonce. Sentinel consumed on accept → single-use deep links.
+- [Auth] **Stale refresh-token leak across re-login** (`AuthService.completeAuthentication`) — JWT-only branch clears `refreshToken`/`currentSessionId`; first two branches clear `currentSessionId` when callback omits one. Prevents cross-account session bleed.
+- [Auth] **Sign-out hardened** — best-effort server revoke + synchronous Keychain delete on `signOut()` so suspend mid-logout can't resurrect tokens.
+- [Notifications] **Notification taps revived** ([`apps/ios/Todus/Todus/App/TodosApp.swift`](apps/ios/Todus/Todus/App/TodosApp.swift)) — default-action branch routes email-thread, AI-conversation, due-task, email-reminder taps. Was dead — only `TASK_COMPLETE`/`TASK_SNOOZE` worked.
+- [AI] **Mutation confirmation deadlock fixed** ([`Features/AI/AIChatView.swift`](apps/ios/Todus/Todus/Features/AI/AIChatView.swift), [`Services/AI/AIChatService.swift`](apps/ios/Todus/Todus/Services/AI/AIChatService.swift)) — `.confirmationDialog` bound to `pendingMutationConfirmation`. `send_email`/`update_calendar_event`/`delete_calendar_event` hung forever. `cancelStream` drains mutation continuations + resets `streamFailed`.
+- [Calendar] **Permission view stuck loading after grant** ([`Features/Calendar/CalendarPermissionView.swift`](apps/ios/Todus/Todus/Features/Calendar/CalendarPermissionView.swift)) — `.onReceive(.todusCalendarAuthorizationDidChange)` + scenePhase re-read.
+
+**High-impact**
+- [Email] `EmailService` actions (`toggleStar`, `markAsSpam`, `markAsRead`, `markAsUnread`, `archiveThreads`) return `Bool`; star toggle rolls back on failure; pagination dedupe replaces in-place when newer.
+- [Tasks] Capture rollback no longer races concurrent enrichment; `RemoteFirstTaskParsingService` preserves `lowConfidence`; Reminders sync bounded recursion (3 retries) + removed no-op guard.
+- [Calendar] Day view fetches unified events (was Apple-only); Google event tap no-op fixed (provider-prefix strip + retry-then-alert); `EKWrapper` deleted-calendar force-unwrap removed.
+- [AI] SSE parser trims `\r\n`; `flushTokenBuffer` bails on stale messageID; calendar snapshot invalidates on permission toggle; conversation persistence migrated Keychain → file system with `.completeFileProtection`.
+- [Infra] TRPC body wrapped with minimal superjson (ISO-8601 Date meta); `JSONSerialization` uses `.fragmentsAllowed`; AVAudioEngine double-attach guarded; `NetworkMonitor` seeds from `currentPath`; `SubscriptionService.cancel` re-entrancy guard; `NotificationDigestService` routes via `TodosAPIClient`; `CreateSheet` validates `endDate > startDate`; AppTheme avatar cache → SHA-256 file storage; `AppPrimaryButtonStyle` uses `Color.accentColor`.
+
+**UX polish (selected)**
+- Email: archive swipe not red, send/refresh haptics, "Sending…" inline label, search-feedback distinguishes loading vs done, From row hidden on single account, recent-message relative timestamps.
+- Tasks: complete/snooze haptics, context-menu delete confirmation, board column quick-add, 44pt tap targets, leading checkbox column in table view, "All clear" chip hides on truly empty, "Recent"/"Oldest" sort labels.
+- Calendar: 44pt event tap targets, list empty-state CTA, scope-banner haptic+a11y, loading skeleton, long-press haptic, grid-tap creates event.
+- AI: shimmer placeholder while streaming empty, always-rendered Send button, status pills in empty state (model + connected services), shuffle suggestions, contextual thinking copy from `searchState`, Share/Speak menu items, user bubble iPad maxWidth, `.updatesFrequently` VoiceOver trait.
+- Infra: offline banner red tint + Retry CTA, cold-launch home skeleton, transient "Signing out…"/"Disconnect Gmail" HUDs replace blocking alerts, `@ScaledMetric` FAB, `InlineRefreshBadge` accepts `entity` for VoiceOver.
+- Auth: stage-1 disabled during OTP loading, error banner auto-dismiss after 6s, OTP verify/resend spinner overlay (visible above keyboard), red email-validation hint, `canOpenURL` guard on mailto, accessibilityHints on social buttons, bell-icon accessibilityHidden.
+
+**Verification**
+- `swift build` (packages/swift-auth): Build complete.
+- `xcodebuild -scheme Todus -sdk iphonesimulator build`: **BUILD SUCCEEDED** (full integration across all 6 surfaces).
+
+**Manual follow-ups**
+1. Open in Xcode and run on simulator/device — sandbox can't launch CoreSimulator for live UI smoke test.
+2. AI conversation history migrates Keychain → `Application Support/ai-conversations.json` on first launch.
+3. AppTheme avatar cache migrates UserDefaults blobs → file cache on first `loadFromCache`.
+4. C1 single-use deep links non-replayable; confirm no legitimate flow needs replay (none expected).
+
+Full per-bug detail in [`CODE_REVIEW_BACKLOG.md`](CODE_REVIEW_BACKLOG.md) under "2026-05-17 — iOS Bug-Hunt + UX-Polish Audit".
+
+## [2026-05-10] Feature — Phase 1 voice assistant (macOS): global hotkey, status state machine, voice tools, Mem0 ingest
+
+- [Feature] **Backend `GET /api/ai/voice/system-prompt`** ([`apps/server/src/routes/ai.ts`](apps/server/src/routes/ai.ts)) — Bearer-auth route returns one composed system instruction (Todus voice persona + AI profile + Mem0 memories) ready to drop into Gemini Live's `setup.systemInstruction`. Reuses `getCachedMemories`, `formatMemoriesForPrompt`, `getSharedAIProfilePromptForUser` so voice and text chat share context. Failures fall back to a default persona — voice never breaks if Mem0 is down.
+- [Feature] **`ai.saveConversation` ingests voice transcripts into Mem0** ([`apps/server/src/trpc/routes/ai/conversations.ts`](apps/server/src/trpc/routes/ai/conversations.ts)). Previously only `/api/ai/chat` wrote to Mem0; voice never went through that route, so "remember X" said over voice was lost. Now the most-recent user/assistant pair is fire-and-forget posted to Mem0 on every save, cache invalidated + preloaded so the next session sees the memory immediately.
+- [Feature] **macOS voice services (`apps/macos/TodusMac/Services/Voice/`)**:
+  - `VoiceSystemPromptClient.swift` — fetches the system prompt with 60s cache + offline fallback persona.
+  - `VoiceToolRegistry.swift` — Gemini function declarations (`create_task`, `update_task`, `delete_task`, `get_time`) + `VoiceToolExecutor` protocol (Pi-portable seam).
+  - `MacAIChatService.executeVoiceTool` — runs the same SwiftData mutations the text-chat tools use, returns Gemini-shaped JSON.
+  - `AudioInputBroker.swift` — single-tap AVAudioEngine fan-out so wake-word + Live can share frames without crashing the engine.
+  - `HotkeyService.swift` — global ⌘⇧Space push-to-talk via Carbon `RegisterEventHotKey` (works inside App Sandbox without Input Monitoring permission).
+  - `WakeWordService.swift` — Phase 1 stub fail-softing as `[Wake] disabled — hotkey only`. Phase 1.5 plugs in Picovoice Porcupine with the built-in `"computer"` keyword.
+  - `VoiceSessionCoordinator.swift` — `@Observable` state machine (`idle`, `wakeListening`, `triggered`, `recording`, `thinking`, `speaking`, `toolRunning`, `interrupted`, `error`, `sleeping`) with logged transitions, transcript persistence via `ai.saveConversation`, and tool dispatch.
+  - `VoiceStatusWindow.swift` — floating status panel with state pill + live transcript + last tool call.
+- [Feature] **Settings → Voice Assistant** ([`MacSettingsView.swift`](apps/macos/TodusMac/Views/Settings/MacSettingsView.swift)) — master toggle ("Press ⌘⇧Space to talk to Todus") and always-listening toggle. Both default OFF — the always-on mic is opt-in.
+- [Feature] **`MacAppServices.applyVoiceAssistantState`** drives the coordinator from saved prefs so toggling Settings registers/unregisters the hotkey live. The chat panel temporarily yields the mic and re-arms the global loop on close.
+- [Files] `apps/server/src/routes/ai.ts`, `apps/server/src/trpc/routes/ai/conversations.ts`, `apps/macos/TodusMac/Services/Voice/VoiceSystemPromptClient.swift`, `apps/macos/TodusMac/Services/Voice/VoiceToolRegistry.swift`, `apps/macos/TodusMac/Services/Voice/AudioInputBroker.swift`, `apps/macos/TodusMac/Services/Voice/HotkeyService.swift`, `apps/macos/TodusMac/Services/Voice/WakeWordService.swift`, `apps/macos/TodusMac/Services/Voice/VoiceSessionCoordinator.swift`, `apps/macos/TodusMac/Views/Voice/VoiceStatusWindow.swift`, `apps/macos/TodusMac/Services/AI/MacAIChatService.swift`, `apps/macos/TodusMac/App/MacAppServices.swift`, `apps/macos/TodusMac/App/TodusMacApp.swift`, `apps/macos/TodusMac/Views/Voice/MacVoiceChatPanel.swift`, `apps/macos/TodusMac/Views/AI/MacAssistantPanel.swift`, `apps/macos/TodusMac/Views/Settings/MacSettingsView.swift`, `docs/voice/PHASE_1.md`, `CHANGELOG.md`, `TASK.md`
+
 ## [2026-04-29] Fix — review follow-up for shard paging and compound parsing regressions
 
 - [Fix] **Shard-backed mail pagination now uses an opaque composite cursor instead of a timestamp-only cutoff.** `apps/server/src/routes/agent/db/index.ts`, `apps/server/src/routes/agent/index.ts`, and `apps/server/src/lib/server-utils.ts` now order paged thread queries by `(latestReceivedOn DESC, id DESC)`, encode page tokens as `{ latestReceivedOn, id }`, and propagate the DB helper's real `nextPageToken` through shard aggregation. This prevents same-timestamp rows from being skipped at shard page boundaries and keeps single-shard exact-page-size pagination working.

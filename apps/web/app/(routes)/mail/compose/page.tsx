@@ -1,17 +1,26 @@
 import { Sheet, SheetContent } from '@/components/ui/sheet';
 import { CreateEmail } from '@/components/create/create-email';
 import { authProxy } from '@/lib/auth-proxy';
-import { useLoaderData, useLocation, useNavigate } from 'react-router';
+import { redirect, useLoaderData, useLocation, useNavigate } from 'react-router';
 import type { Route } from './+types/page';
 
 export async function clientLoader({ request }: Route.ClientLoaderArgs) {
   const session = await authProxy.api.getSession({ headers: request.headers });
-  if (!session) return Response.redirect(`${import.meta.env.VITE_PUBLIC_APP_URL}/login`);
+  if (!session) throw redirect('/login');
   const url = new URL(request.url);
   if (url.searchParams.get('to')?.startsWith('mailto:')) {
-    return Response.redirect(
-      `${import.meta.env.VITE_PUBLIC_APP_URL}/mail/compose/handle-mailto?mailto=${encodeURIComponent(url.searchParams.get('to') ?? '')}`,
+    throw redirect(
+      `/mail/compose/handle-mailto?mailto=${encodeURIComponent(url.searchParams.get('to') ?? '')}`,
     );
+  }
+
+  // CreateEmail's inner <Dialog> is gated on the `isComposeOpen` URL param —
+  // without it, deep-linking to /mail/compose renders an empty Sheet. Set
+  // the param via redirect so the composer actually mounts.
+  if (url.searchParams.get('isComposeOpen') !== 'true') {
+    const next = new URL(url);
+    next.searchParams.set('isComposeOpen', 'true');
+    throw redirect(`${next.pathname}${next.search}`);
   }
 
   return Object.fromEntries(url.searchParams.entries()) as {

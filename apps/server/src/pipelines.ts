@@ -16,7 +16,8 @@ import {
   type WorkflowContext,
 } from './thread-workflow-utils/workflow-engine';
 import { getServiceAccount } from './lib/factories/google-subscription.factory';
-import { getThread, getZeroAgent } from './lib/server-utils';
+import { getThread, getZeroAgent, getZeroDB } from './lib/server-utils';
+import { userSettingsSchema, defaultAssistantAutomationPolicy } from './lib/schemas';
 import { DurableObject } from 'cloudflare:workers';
 import { bulkDeleteKeys } from './lib/bulk-delete';
 import { type gmail_v1 } from '@googleapis/gmail';
@@ -618,8 +619,23 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
           return 'Thread has no messages';
         }
 
+        // Fetch user automation policy to gate which workflows run
+        const automationPolicy = yield* Effect.tryPromise({
+          try: async () => {
+            if (!foundConnection.userId) return defaultAssistantAutomationPolicy;
+            const zeroDB = await getZeroDB(foundConnection.userId);
+            const settingsRow = await zeroDB.findUserSettings();
+            if (!settingsRow) return defaultAssistantAutomationPolicy;
+            const parsed = userSettingsSchema.safeParse(settingsRow.settings);
+            return parsed.success
+              ? parsed.data.assistantAutomationPolicy
+              : defaultAssistantAutomationPolicy;
+          },
+          catch: () => defaultAssistantAutomationPolicy,
+        }).pipe(Effect.orElse(() => Effect.succeed(defaultAssistantAutomationPolicy)));
+
         // Initialize workflow engine with default workflows
-        const workflowEngine = createDefaultWorkflows();
+        const workflowEngine = createDefaultWorkflows(automationPolicy);
 
         // Create workflow context
         const workflowContext: WorkflowContext = {
@@ -779,7 +795,23 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
           return 'Thread has no messages';
         }
 
-        const workflowEngine = createDefaultWorkflows();
+        const automationPolicy = await (async () => {
+          try {
+            if (!foundConnection.userId) return defaultAssistantAutomationPolicy;
+            const zeroDB = await getZeroDB(foundConnection.userId);
+            const settingsRow = await zeroDB.findUserSettings();
+            if (!settingsRow) return defaultAssistantAutomationPolicy;
+            const parsed = userSettingsSchema.safeParse(settingsRow.settings);
+            return parsed.success
+              ? parsed.data.assistantAutomationPolicy
+              : defaultAssistantAutomationPolicy;
+          } catch (error) {
+            console.error('[THREAD_WORKFLOW] Failed to fetch automation policy:', error);
+            return defaultAssistantAutomationPolicy;
+          }
+        })();
+
+        const workflowEngine = createDefaultWorkflows(automationPolicy);
 
         const workflowContext: WorkflowContext = {
           connectionId: connectionId.toString(),

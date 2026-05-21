@@ -19,8 +19,18 @@ struct MacCalendarView: View {
     @State private var isLoading = false
     @State private var hasAccess = false
     @State private var selectedEvent: CalendarEvent? = nil
-    /// Date passed from tap-to-create on the time grid — opens system Calendar's event creation
-    @State private var createEventDate: Date? = nil
+    /// Drives the native in-app event create/edit sheet. When non-nil the
+    /// `MacEventEditSheet` is presented in either `.create` or `.edit` mode.
+    /// Replaces the previous "open in Calendar.app" delegation; the system
+    /// Calendar app remains available as a context-menu fallback.
+    @State private var eventSheetRequest: EventSheetRequest? = nil
+
+    /// Identifiable wrapper so `.sheet(item:)` can present an
+    /// `MacEventEditSheet.Mode` (enum without a stable identity).
+    private struct EventSheetRequest: Identifiable {
+        let id = UUID()
+        let mode: MacEventEditSheet.Mode
+    }
     /// Vertical month list scroll position (yyyy-MM) — `nil` before first layout.
     @State private var monthScrollID: String?
     /// AppKit window-space rect for trackpad hit testing; `.null` = whole key window
@@ -32,6 +42,16 @@ struct MacCalendarView: View {
     @State private var showCalendarPicker: Bool = false
     /// Surfaced when any backend Google Calendar call returns scopeMissing.
     @State private var showScopeMissingBanner: Bool = false
+    /// Live horizontal pan offset while the user swipes in week view.
+    @State private var weekDragOffset: CGFloat = 0
+    /// Transient feedback for calendar actions (open-in-Calendar failures,
+    /// move-event completion). Used via the shared `MacToast` overlay.
+    @State private var calendarToast: MacToastMessage?
+    /// Tracks an in-flight move-event request so the context-menu items
+    /// disable rather than firing duplicate moves.
+    @State private var isMovingEvent = false
+    /// Measured width of the week view container — used for rubber-band and snap thresholds.
+    @State private var weekViewWidth: CGFloat = 400
 
     /// Re-binds the trackpad / pinch handler when mode or focus date changes.
     private var trackpadActionSyncKey: String {
@@ -51,6 +71,11 @@ struct MacCalendarView: View {
                     .padding(.top, 8)
                     .padding(.bottom, 6)
 
+                if showScopeMissingBanner {
+                    scopeMissingBanner
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
+
                 // View content
                 switch viewMode {
                 case "Day":
@@ -65,12 +90,31 @@ struct MacCalendarView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // Trackpad: dominant horizontal two-finger scroll steps time; pinch changes Day↔…↔Year
+        .macToast($calendarToast)
+        .sheet(item: $eventSheetRequest) { request in
+            MacEventEditSheet(mode: request.mode) {
+                // Reload events immediately after a save/delete so the new or
+                // edited event appears without waiting for EKEventStoreChanged.
+                Task { await loadEvents() }
+            }
+            .environment(services)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .todusCalendarScopeMissing)) { _ in
+            // Show the banner so the user can reconnect Google Calendar scope.
+            withAnimation(MacTheme.Motion.base) {
+                showScopeMissingBanner = true
+            }
+        }
+        // Trackpad: dominant horizontal two-finger scroll steps time; pinch changes Day↔…↔Year.
+        // In Week mode, onHorizontalStream/onHorizontalGestureEnded drive real-time panning.
         .calendarTrackpadNavigation(
             isEnabled: hasAccess,
             targetRectInWindow: $trackpadContentRect,
             updateWhen: trackpadActionSyncKey,
-            isTimeGridViewMode: viewMode == "Day" || viewMode == "Week"
+            isTimeGridViewMode: viewMode == "Day" || viewMode == "Week",
+            onHorizontalStream: viewMode == "Week" ? { d in handleWeekDragDelta(d) } : nil,
+            onHorizontalGestureEnded: viewMode == "Week"
+                ? { d in handleWeekGestureEnded(d) } : nil
         ) { direction in
             handleTrackpadHorizontalNavigate(direction)
         }
@@ -81,7 +125,7 @@ struct MacCalendarView: View {
         ) { step in
             stepCalendarViewMode(step)
         }
-        .help("In Day/Week, drag two fingers left/right to change day or week, or hold ⇧ and scroll. Pinch in or out to zoom the calendar (Day, Week, Month, Year). In Month, scroll up/down between months. ⌘1–4 changes view.")
+        .help("In Day/Week, drag two fingers left/right to change day or week, or hold ⇧ and scroll. Pinch in or out to zoom the calendar (Day, Week, Month, Year). In Month, scroll up/down between months. ⌥⌘D/W/M/Y switches view; ⇧⌘T jumps to today.")
         .task {
             hasAccess = services.calendarService.canReadEvents()
             if !hasAccess {
@@ -90,6 +134,7 @@ struct MacCalendarView: View {
             await loadEvents()
         }
         .onChange(of: selectedDate) { _, d in
+            weekDragOffset = 0
             if viewMode == "Month" {
                 let t = weekToken(for: startOfWeek(for: d))
                 if monthScrollID != t {
@@ -99,6 +144,7 @@ struct MacCalendarView: View {
             Task { await loadEvents() }
         }
         .onChange(of: viewMode) { _, newMode in
+            weekDragOffset = 0
             if newMode == "Month" {
                 monthScrollID = weekToken(for: startOfWeek(for: selectedDate))
             }
@@ -107,25 +153,31 @@ struct MacCalendarView: View {
             }
             Task { await loadEvents() }
         }
-        // Keyboard shortcuts (aligns with Apple Calendar spirit: T = today, arrows = in time, 1–4 = view)
+        // Keyboard shortcuts. We deliberately avoid:
+        //  - Bare "T" / "t" — would be swallowed even while typing in text fields.
+        //  - ⌘1-4 — the root view binds these to top-level navigation; rebinding
+        //    them here would fire BOTH (e.g. ⌘1 jumps to Home AND tries to
+        //    switch view mode), giving the user unpredictable behaviour.
+        //  - ⌘← / ⌘→ — those are macOS standard "start/end of line" inside any
+        //    text field, including search and compose. Stealing them breaks
+        //    text editing.
+        // ⇧⌘T jumps to today (matches the visible "Today" button) and ⌥⌘D / ⌥⌘W
+        // / ⌥⌘M / ⌥⌘Y switch view mode without colliding with the global
+        // navigation shortcuts.
         .background {
             Group {
                 Button("") {
-                    withAnimation(.easeOut(duration: 0.2)) { selectedDate = Date() }
+                    withAnimation(MacTheme.Motion.base) { selectedDate = Date() }
                 }
-                .keyboardShortcut("t", modifiers: [])
-                Button("") { navigate(by: -1) }
-                    .keyboardShortcut(.leftArrow, modifiers: [.command])
-                Button("") { navigate(by: 1) }
-                    .keyboardShortcut(.rightArrow, modifiers: [.command])
+                .keyboardShortcut("t", modifiers: [.command, .shift])
                 Button("") { setViewMode("Day") }
-                    .keyboardShortcut("1", modifiers: [.command])
+                    .keyboardShortcut("d", modifiers: [.command, .option])
                 Button("") { setViewMode("Week") }
-                    .keyboardShortcut("2", modifiers: [.command])
+                    .keyboardShortcut("w", modifiers: [.command, .option])
                 Button("") { setViewMode("Month") }
-                    .keyboardShortcut("3", modifiers: [.command])
+                    .keyboardShortcut("m", modifiers: [.command, .option])
                 Button("") { setViewMode("Year") }
-                    .keyboardShortcut("4", modifiers: [.command])
+                    .keyboardShortcut("y", modifiers: [.command, .option])
             }
             .opacity(0)
             .allowsHitTesting(false)
@@ -179,6 +231,58 @@ struct MacCalendarView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    // MARK: - Scope Missing Banner
+
+    /// Shown above the calendar grid when the backend reports that a Google
+    /// connection no longer has the Calendar OAuth scope. Provides a quick
+    /// "Reconnect" entry point that reuses the existing Settings reconnect flow.
+    private var scopeMissingBanner: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.orange)
+            Text("Google Calendar access expired. Reconnect to sync events.")
+                .font(.system(size: 12))
+                .foregroundStyle(MacTheme.textPrimary)
+            Spacer()
+            Button {
+                NotificationCenter.default.post(name: .todusRequestReconnectGmail, object: nil)
+            } label: {
+                Text("Reconnect Google")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(MacTheme.accent, in: Capsule(style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .focusEffectDisabled()
+            .pointerStyle(.link)
+            Button {
+                withAnimation(MacTheme.Motion.base) {
+                    showScopeMissingBanner = false
+                }
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(MacTheme.mutedText)
+                    .frame(width: 18, height: 18)
+            }
+            .buttonStyle(.plain)
+            .focusEffectDisabled()
+            .pointerStyle(.link)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(Color.orange.opacity(0.10))
+        .overlay(
+            Rectangle()
+                .frame(height: 0.5)
+                .foregroundStyle(MacTheme.cardBorder),
+            alignment: .bottom
+        )
+    }
+
     // MARK: - Calendar Header
     // Modeled after Apple Calendar: "March 2026" large left, nav arrows + Today + picker right
 
@@ -187,7 +291,7 @@ struct MacCalendarView: View {
 
     /// Shared background color for header controls — matches the segmented picker outer bg
     private var controlBg: Color {
-        Color(light: Color(white: 0.88), dark: Color(white: 0.13))
+        MacTheme.segmentedTrack
     }
 
     private var calendarHeader: some View {
@@ -211,12 +315,14 @@ struct MacCalendarView: View {
             // Navigation arrows — circular, same surface as picker
             HStack(spacing: 4) {
                 calendarNavButton(icon: "chevron.left") { navigate(by: -1) }
+                    .accessibilityLabel("Previous \(viewMode.lowercased())")
                 calendarNavButton(icon: "chevron.right") { navigate(by: 1) }
+                    .accessibilityLabel("Next \(viewMode.lowercased())")
             }
 
             // Today — pill button, same surface as other controls
             Button {
-                withAnimation(.easeOut(duration: 0.2)) { selectedDate = Date() }
+                withAnimation(MacTheme.Motion.base) { selectedDate = Date() }
             } label: {
                 Text("Today")
                     .font(.system(size: 12, weight: .medium))
@@ -229,6 +335,7 @@ struct MacCalendarView: View {
             .interactiveHitTarget(expansion: 6)
             .focusEffectDisabled()
             .pointerStyle(.link)
+            .accessibilityLabel("Jump to today")
 
             // Calendars — popover button matching Apple Calendar's UX.
             Button {
@@ -311,9 +418,51 @@ struct MacCalendarView: View {
         navigate(by: direction)
     }
 
+    // MARK: - Week view smooth swipe
+
+    /// Called each trackpad frame while the user is panning horizontally in week view.
+    /// Applies rubber-band dampening once the content is dragged past 40 % of the view width.
+    private func handleWeekDragDelta(_ delta: CGFloat) {
+        let softEdge = weekViewWidth * 0.40
+        let newRaw = weekDragOffset + delta
+        let clamped: CGFloat
+        if abs(newRaw) > softEdge {
+            let excess = abs(newRaw) - softEdge
+            clamped = (newRaw < 0 ? -1 : 1) * (softEdge + excess * 0.25)
+        } else {
+            clamped = newRaw
+        }
+        weekDragOffset = min(max(clamped, -weekViewWidth * 0.55), weekViewWidth * 0.55)
+    }
+
+    /// Called once when the finger lifts. Decides whether to snap to the adjacent week or spring back.
+    private func handleWeekGestureEnded(_ totalDelta: CGFloat) {
+        let commitThreshold = weekViewWidth * 0.20
+        if weekDragOffset > commitThreshold {
+            snapWeekView(direction: -1)
+        } else if weekDragOffset < -commitThreshold {
+            snapWeekView(direction: 1)
+        } else {
+            withAnimation(.interpolatingSpring(stiffness: 420, damping: 36)) {
+                weekDragOffset = 0
+            }
+        }
+    }
+
+    /// Slides the week content off-screen, navigates to the adjacent week, then resets the offset.
+    private func snapWeekView(direction: Int) {
+        let exitOffset = direction > 0 ? -weekViewWidth : weekViewWidth
+        withAnimation(.easeIn(duration: 0.16), completionCriteria: .logicallyComplete) {
+            weekDragOffset = exitOffset
+        } completion: {
+            applyNavigation(offset: direction, cal: Calendar.current)
+            weekDragOffset = 0
+        }
+    }
+
     private func setViewMode(_ mode: String) {
         guard Self.calendarViewModes.contains(mode), viewMode != mode else { return }
-        withAnimation(.snappy(duration: 0.22)) { viewMode = mode }
+        withAnimation(MacTheme.Motion.base) { viewMode = mode }
     }
 
     /// Pinch: `step` +1 = zoom out (toward Year), -1 = zoom in (toward Day).
@@ -431,7 +580,7 @@ struct MacCalendarView: View {
                     CalendarTimeGridColumn(date: selectedDate, events: timedEvents)
                 ],
                 highlightToday: true,
-                onEventTap: { event in selectedEvent = event },
+                onEventTap: { event in openEditEvent(event) },
                 onGridTap: { date in openNewEvent(at: date) }
             )
         }
@@ -462,8 +611,15 @@ struct MacCalendarView: View {
             // Prefer the time grid’s measured width so all three rows share one column system.
             let totalW = (weekTimeGridViewportWidth ?? geo.size.width)
             let dayW = MacTheme.calendarDayColumnWidth(totalWidth: totalW, columnCount: columnCount)
-            let columns = weekDates.map { date in
-                let dayEvents = events.filter { !$0.isAllDay && cal.isDate($0.startDate, inSameDayAs: date) }
+            let columns = weekDates.map { date -> CalendarTimeGridColumn in
+                // Use overlap rather than start-day equality so multi-day timed
+                // events (e.g. an event spanning Tue → Thu) render in every
+                // affected column. CalendarTimeGridView clips at midnight.
+                let startOfDay = cal.startOfDay(for: date)
+                let endOfDay = cal.date(byAdding: .day, value: 1, to: startOfDay) ?? startOfDay
+                let dayEvents = events.filter {
+                    !$0.isAllDay && $0.startDate < endOfDay && $0.endDate > startOfDay
+                }
                 return CalendarTimeGridColumn(date: date, events: dayEvents)
             }
             VStack(alignment: .leading, spacing: 0) {
@@ -492,7 +648,7 @@ struct MacCalendarView: View {
                             .padding(.vertical, 4)
                             .contentShape(Rectangle())
                             .onTapGesture {
-                                withAnimation(.easeOut(duration: 0.2)) {
+                                withAnimation(MacTheme.Motion.base) {
                                     selectedDate = date
                                     viewMode = "Day"
                                 }
@@ -536,7 +692,7 @@ struct MacCalendarView: View {
                                                         .fill(color.opacity(0.85))
                                                 )
                                                 .contentShape(Rectangle())
-                                                .onTapGesture { selectedEvent = event }
+                                                .onTapGesture { openEditEvent(event) }
                                                 .contextMenu { eventContextMenu(event) }
                                         }
                                     }
@@ -560,18 +716,22 @@ struct MacCalendarView: View {
                     columns: columns,
                     dayColumnWidth: dayW,
                     highlightToday: true,
-                    onEventTap: { event in selectedEvent = event },
+                    onEventTap: { event in openEditEvent(event) },
                     onGridTap: { date in openNewEvent(at: date) }
                 )
                 .frame(maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .topLeading)
             }
             .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
+            .offset(x: weekDragOffset)
             .onPreferenceChange(WeekTimeGridViewportWidthKey.self) { w in
                 if w > 0.5, abs((weekTimeGridViewportWidth ?? 0) - w) > 0.25 {
                     weekTimeGridViewportWidth = w
                 }
             }
+            .onAppear { weekViewWidth = geo.size.width }
+            .onChange(of: geo.size.width) { _, w in weekViewWidth = w }
         }
+        .clipped()
         .popover(item: $selectedEvent, arrowEdge: .trailing) { event in
             eventPopover(event)
         }
@@ -607,7 +767,7 @@ struct MacCalendarView: View {
                     .background(Capsule(style: .continuous).fill(color.opacity(0.85)))
                     .contentShape(Rectangle())
                     .onTapGesture {
-                        selectedEvent = event
+                        openEditEvent(event)
                     }
                     .contextMenu {
                         eventContextMenu(event)
@@ -880,7 +1040,7 @@ struct MacCalendarView: View {
             .onTapGesture {
                 // Navigate to this month in Month view
                 if let date = cal.date(from: DateComponents(year: year, month: month, day: 1)) {
-                    withAnimation(.easeOut(duration: 0.2)) {
+                    withAnimation(MacTheme.Motion.base) {
                         selectedDate = date
                         viewMode = "Month"
                     }
@@ -997,7 +1157,7 @@ struct MacCalendarView: View {
         }
         .contentShape(Rectangle())
         .onTapGesture {
-            selectedEvent = event
+            openEditEvent(event)
         }
         .contextMenu {
             eventContextMenu(event)
@@ -1009,87 +1169,224 @@ struct MacCalendarView: View {
     private func eventPopover(_ event: CalendarEvent) -> some View {
         let color = Color(red: event.calendarColorRed, green: event.calendarColorGreen, blue: event.calendarColorBlue)
 
-        return VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                RoundedRectangle(cornerRadius: 2)
-                    .fill(color)
-                    .frame(width: 4, height: 20)
+        return VStack(alignment: .leading, spacing: 0) {
+            // Color header strip
+            color.opacity(0.85)
+                .frame(height: 5)
+
+            VStack(alignment: .leading, spacing: 10) {
+                // Title
                 Text(event.title)
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(MacTheme.textPrimary)
-            }
+                    .fixedSize(horizontal: false, vertical: true)
 
-            if event.isAllDay {
-                Label("All day", systemImage: "clock")
-                    .font(.system(size: 12))
-                    .foregroundStyle(MacTheme.textSecondary)
-            } else {
-                Label {
-                    Text("\(event.startDate.formatted(date: .abbreviated, time: .shortened)) – \(event.endDate.formatted(date: .omitted, time: .shortened))")
-                } icon: {
-                    Image(systemName: "clock")
-                }
-                .font(.system(size: 12))
-                .foregroundStyle(MacTheme.textSecondary)
-            }
-
-            Label(event.calendarName, systemImage: "calendar")
-                .font(.system(size: 12))
-                .foregroundStyle(MacTheme.textSecondary)
-
-            if let folderName = folderName(for: event.folderID) {
-                Label(folderName, systemImage: "folder")
-                    .font(.system(size: 12))
-                    .foregroundStyle(MacTheme.textSecondary)
-            }
-
-            Menu {
-                Button("Unfiled") {
-                    moveEvent(event, to: nil)
-                }
-                if !folders.isEmpty {
-                    Divider()
-                }
-                ForEach(folders) { folder in
-                    Button(folder.name) {
-                        moveEvent(event, to: folder.id)
+                // Date / time
+                if event.isAllDay {
+                    Label {
+                        Text(event.startDate.formatted(date: .long, time: .omitted) + " · All day")
+                    } icon: {
+                        Image(systemName: "clock")
                     }
-                }
-            } label: {
-                Label("Move to Folder", systemImage: "folder")
                     .font(.system(size: 12))
+                    .foregroundStyle(MacTheme.textSecondary)
+                } else {
+                    let sameDay = Calendar.current.isDate(event.startDate, inSameDayAs: event.endDate)
+                    let startFmt = event.startDate.formatted(date: .abbreviated, time: .shortened)
+                    let endShortFmt = event.endDate.formatted(date: .omitted, time: .shortened)
+                    let endFullFmt = event.endDate.formatted(date: .abbreviated, time: .shortened)
+                    Label {
+                        if sameDay {
+                            Text("\(startFmt) – \(endShortFmt)")
+                        } else {
+                            Text("\(startFmt) – \(endFullFmt)")
+                        }
+                    } icon: {
+                        Image(systemName: "clock")
+                    }
+                    .font(.system(size: 12))
+                    .foregroundStyle(MacTheme.textSecondary)
+                }
+
+                // Calendar
+                HStack(spacing: 5) {
+                    Circle()
+                        .fill(color)
+                        .frame(width: 8, height: 8)
+                    Text(event.calendarName)
+                        .font(.system(size: 12))
+                        .foregroundStyle(MacTheme.textSecondary)
+                }
+
+                // Folder
+                if let folderName = folderName(for: event.folderID) {
+                    Label(folderName, systemImage: "folder")
+                        .font(.system(size: 12))
+                        .foregroundStyle(MacTheme.textSecondary)
+                }
+
+                Divider()
+
+                // Move to Folder
+                Menu {
+                    Button("Unfiled") { moveEvent(event, to: nil) }
+                        .disabled(isMovingEvent)
+                    if !folders.isEmpty { Divider() }
+                    ForEach(folders) { folder in
+                        Button(folder.name) { moveEvent(event, to: folder.id) }
+                            .disabled(isMovingEvent)
+                    }
+                } label: {
+                    Label("Move to Folder", systemImage: "folder.badge.gearshape")
+                        .font(.system(size: 12))
+                }
+                .menuStyle(.borderlessButton)
+                .disabled(isMovingEvent)
+
+                // Edit (native in-app sheet) — primary action.
+                Button {
+                    openEditEvent(event)
+                } label: {
+                    Label("Edit Event", systemImage: "square.and.pencil")
+                        .font(.system(size: 12))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(MacTheme.accent)
+
+                // Open in Calendar — fallback for users who prefer the
+                // system Calendar.app surface.
+                Button {
+                    selectedEvent = nil
+                    openInCalendarApp(event)
+                } label: {
+                    Label("Open in Calendar", systemImage: "arrow.up.forward.app")
+                        .font(.system(size: 12))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(MacTheme.accent)
             }
-            .menuStyle(.borderlessButton)
+            .padding(14)
         }
-        .padding(14)
-        .frame(minWidth: 220, alignment: .leading)
+        .frame(minWidth: 260, alignment: .leading)
     }
 
-    // MARK: - Tap-to-Create
+    // MARK: - Tap-to-Create / Edit
 
-    /// Opens the system Calendar app with a new event at the given date/time.
-    /// Uses the calshow: URL scheme to open Calendar.app to the correct date,
-    /// then AppleScript to open the new-event dialog. Falls back to just opening Calendar.
+    /// Opens the native in-app event sheet pre-filled with the given start
+    /// time. Mirrors the iOS long-press-to-create gesture: the user can pick
+    /// title, all-day, end time, calendar source, folder, notes and location
+    /// without ever leaving Todus. The system Calendar app remains reachable
+    /// from the event context menu for users who prefer it.
     private func openNewEvent(at date: Date) {
-        // Apple Calendar uses seconds since 2001-01-01 (Core Data reference date) for calshow:
-        let refDate = date.timeIntervalSinceReferenceDate
-        if let url = URL(string: "x-apple-calevent://new?startDate=\(refDate)") {
-            NSWorkspace.shared.open(url)
-        } else if let fallback = URL(string: "ical://") {
-            NSWorkspace.shared.open(fallback)
+        // Snap to a sane start: top of the hour when the suggested time isn't
+        // already aligned (tap-to-create in the time grid passes the exact
+        // pixel-mapped time, which often lands on awkward minutes like 09:23).
+        let cal = Calendar.current
+        var comps = cal.dateComponents([.year, .month, .day, .hour, .minute], from: date)
+        if let m = comps.minute, m != 0 {
+            // Round to the nearest 15 minutes for a natural-feeling default.
+            comps.minute = Int((Double(m) / 15.0).rounded()) * 15
+            if comps.minute == 60 {
+                comps.minute = 0
+                comps.hour = (comps.hour ?? 0) + 1
+            }
         }
+        let snapped = cal.date(from: comps) ?? date
+
+        // Ensure calendar permission before showing the sheet — without write
+        // access createEvent will throw and the user will see an error alert.
+        Task { @MainActor in
+            if !services.calendarService.canCreateEvents() {
+                _ = await services.calendarService.requestAccess()
+            }
+            eventSheetRequest = EventSheetRequest(mode: .create(suggestedStart: snapped))
+        }
+    }
+
+    /// Opens the native in-app event sheet in edit mode for an existing event.
+    /// Closes the read-only popover first so we don't stack two surfaces.
+    private func openEditEvent(_ event: CalendarEvent) {
+        selectedEvent = nil
+        eventSheetRequest = EventSheetRequest(mode: .edit(event: event))
     }
 
     // MARK: - Context Menu
 
     @ViewBuilder
     private func eventContextMenu(_ event: CalendarEvent) -> some View {
+        // Primary action: native in-app editor (matches the left-click behavior).
         Button {
-            if let url = URL(string: "x-apple-calevent://\(event.id)") {
-                NSWorkspace.shared.open(url)
-            }
+            openEditEvent(event)
+        } label: {
+            Label("Edit Event…", systemImage: "square.and.pencil")
+        }
+
+        // Quick read-only summary popover — preserves the old tap-to-show-info
+        // affordance for users who don't want to open the full editor.
+        Button {
+            selectedEvent = event
+        } label: {
+            Label("Show Info", systemImage: "info.circle")
+        }
+
+        Divider()
+
+        // Fallback escape hatch: launch the system Calendar app at the event's
+        // start date for users who prefer it.
+        Button {
+            openInCalendarApp(event)
         } label: {
             Label("Open in Calendar", systemImage: "arrow.up.forward.app")
+        }
+
+        Button {
+            let pb = NSPasteboard.general
+            pb.clearContents()
+            pb.setString(event.title, forType: .string)
+        } label: {
+            Label("Copy Title", systemImage: "doc.on.doc")
+        }
+
+        Divider()
+
+        if !event.isAllDay {
+            Button {
+                let start = event.startDate.formatted(date: .abbreviated, time: .shortened)
+                let end = event.endDate.formatted(date: .omitted, time: .shortened)
+                let pb = NSPasteboard.general
+                pb.clearContents()
+                pb.setString("\(event.title): \(start) – \(end)", forType: .string)
+            } label: {
+                Label("Copy Date & Time", systemImage: "calendar.badge.clock")
+            }
+        } else {
+            // All-day events have no time component, so offer a date-only
+            // copy mirroring the timed variant for parity.
+            Button {
+                let start = event.startDate.formatted(date: .abbreviated, time: .omitted)
+                let pb = NSPasteboard.general
+                pb.clearContents()
+                pb.setString("\(event.title): \(start)", forType: .string)
+            } label: {
+                Label("Copy Date", systemImage: "calendar")
+            }
+        }
+    }
+
+    /// Navigate Apple Calendar to the event's start date using calshow: URL scheme.
+    /// calshow: uses seconds since CoreData reference date (2001-01-01).
+    private func openInCalendarApp(_ event: CalendarEvent) {
+        let refInterval = Int(event.startDate.timeIntervalSinceReferenceDate)
+        guard let url = URL(string: "calshow:\(refInterval)") else {
+            calendarToast = .failure("Couldn't open Calendar.app")
+            return
+        }
+        // NSWorkspace returns false when the URL scheme has no handler — surface
+        // that as a toast so the user knows the click didn't quietly fail.
+        if !NSWorkspace.shared.open(url) {
+            calendarToast = .failure("Couldn't open Calendar.app")
         }
     }
 
@@ -1139,9 +1436,18 @@ struct MacCalendarView: View {
     }
 
     private func moveEvent(_ event: CalendarEvent, to folderID: UUID?) {
+        // Guard so rapid double-taps on the menu items can't kick off
+        // overlapping moves while the previous request is in flight.
+        guard !isMovingEvent else { return }
+        isMovingEvent = true
         Task {
             await services.calendarService.setFolderID(folderID, for: event.id)
             await loadEvents()
+            await MainActor.run {
+                isMovingEvent = false
+                let destination = folderID.flatMap { id in folders.first(where: { $0.id == id })?.name } ?? "Unfiled"
+                calendarToast = .success("Moved to \(destination)")
+            }
         }
     }
 }
@@ -1168,7 +1474,7 @@ struct CalendarViewModePicker: View {
                 let isSelected = selection == mode
 
                 Button {
-                    withAnimation(.snappy(duration: 0.2)) {
+                    withAnimation(MacTheme.Motion.base) {
                         selection = mode
                     }
                 } label: {

@@ -72,6 +72,7 @@ struct VoiceChatModalView: View {
                     .background(AppTheme.surfaceSecondary, in: Circle())
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Close voice chat")
 
             Spacer()
 

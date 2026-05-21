@@ -10,8 +10,9 @@ final class WidgetUpdateManager {
     
     func updateWidgets(
         context: ModelContext,
-        emailService: EmailService
-    ) {
+        emailService: EmailService,
+        calendarService: CalendarService
+    ) async {
         // 1. Fetch Tasks
         let tasksDescriptor = FetchDescriptor<TaskRecord>(predicate: #Predicate { !$0.completed }, sortBy: [SortDescriptor(\.createdAt, order: .reverse)])
         let allIncompleteTasks = (try? context.fetch(tasksDescriptor)) ?? []
@@ -36,10 +37,15 @@ final class WidgetUpdateManager {
         )
         let completedToday = (try? context.fetch(completedTodayDescriptor)) ?? []
 
-        // Only count tasks due today on both sides so numerator and denominator measure the same set.
+        // Count anything that was finished today, even tasks the user added ad-hoc
+        // without a due date — they're still "work that happened today" and dropping
+        // them made the progress ring undercount common quick-capture workflows.
         let completedDueToday = completedToday.filter { task in
-            if let due = task.dueDate { return due >= todayStart && due < todayEnd }
-            return false
+            if let due = task.dueDate {
+                return due >= todayStart && due < todayEnd
+            }
+            // No due date: count it if it was completed today (updatedAt sits in today).
+            return Calendar.current.isDateInToday(task.updatedAt)
         }
         let incompleteDueToday = allIncompleteTasks.filter { task in
             if let due = task.dueDate { return due >= todayStart && due < todayEnd }
@@ -83,18 +89,37 @@ final class WidgetUpdateManager {
             topEmails: Array(topEmails)
         )
         
-        // 3. Calendar Events (we assume an async fetch or we just use EventKit directly here if needed.
-        // For simplicity, we'll let the user see placeholder until we fetch it properly, or we can fetch it synchronously if possible, but EventKit requires async or blocks.
-        // Actually, we can dispatch an async task for the calendar fetch)
-        
+        // 3. Calendar Events — fetch the next 14 days so the widget shows the
+        //    next upcoming event even when today's schedule is empty.
+        let calendarEvents: [CalendarWidgetSnapshot.Event]
+        if calendarService.canReadEvents() {
+            let rawEvents = await calendarService.upcomingEvents(days: 14)
+            calendarEvents = rawEvents.map { event in
+                CalendarWidgetSnapshot.Event(
+                    id: event.id,
+                    title: event.title,
+                    startDate: event.startDate,
+                    endDate: event.endDate,
+                    isAllDay: event.isAllDay,
+                    colorHex: event.calendarColor,
+                    url: nil
+                )
+            }
+        } else {
+            calendarEvents = []
+        }
+        let calendarSnapshot = CalendarWidgetSnapshot(upcomingEvents: calendarEvents)
+
         // All data is ready — apply via the atomic updateSnapshot so a concurrent
         // updateWidgets call can't read stale state and overwrite our changes.
+        let nextEvent = calendarEvents.first(where: { $0.endDate > Date() })
         WidgetSnapshotStore.shared.updateSnapshot { store in
             store.lastUpdated = Date()
             store.tasks = taskSnapshot
             store.email = emailSnapshot
+            store.calendar = calendarSnapshot
             store.overview = DailyOverviewWidgetSnapshot(
-                nextEvent: store.calendar?.upcomingEvents.first,
+                nextEvent: nextEvent,
                 urgentTaskCount: urgentTasks.count,
                 unreadImportantEmailCount: unreadImportantThreads.count
             )

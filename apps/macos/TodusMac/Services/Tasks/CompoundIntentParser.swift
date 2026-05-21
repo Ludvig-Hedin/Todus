@@ -202,14 +202,22 @@ struct CompoundIntentParser {
 
     // MARK: - Relative time references
 
+    /// Word-boundary token check — avoids substring false positives
+    /// (e.g. "innan" matching inside "innanför", or "after" matching "afterthought").
+    /// Multi-word phrases are escaped and matched literally with \b boundaries.
+    private static func containsToken(_ token: String, in text: String) -> Bool {
+        let pattern = "\\b\(NSRegularExpression.escapedPattern(for: token))\\b"
+        return text.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil
+    }
+
     private static func containsBeforeReference(_ lower: String) -> Bool {
         let tokens = ["innan", "before", "dessförinnan", "i förväg", "i forvag", "i förhand"]
-        return tokens.contains(where: lower.contains)
+        return tokens.contains(where: { containsToken($0, in: lower) })
     }
 
     private static func containsAfterReference(_ lower: String) -> Bool {
         let tokens = ["efteråt", "efterat", "efter det", "after", "afterwards"]
-        if tokens.contains(where: lower.contains) { return true }
+        if tokens.contains(where: { containsToken($0, in: lower) }) { return true }
         let senPattern = #"\bsen\b"#
         let sedanPattern = #"\bsedan\b"#
         return lower.range(of: senPattern, options: .regularExpression) != nil
@@ -218,7 +226,7 @@ struct CompoundIntentParser {
 
     private static func containsSoonReference(_ lower: String) -> Bool {
         let tokens = ["snart", "soon"]
-        return tokens.contains(where: lower.contains)
+        return tokens.contains(where: { containsToken($0, in: lower) })
     }
 
     private static func stripRelativeRefWords(_ title: String, locale: Locale) -> String {

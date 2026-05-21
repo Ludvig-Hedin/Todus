@@ -1,10 +1,13 @@
 /**
- * Calendar page — tasks + real Google Calendar events.
+ * Calendar page — tasks + Google Calendar events with full Day/Week/Month/Year
+ * surface powered by `<CalendarGrid>` (matches the macOS calendar parity).
  *
- * Left panel: month calendar picker with task/event count badges on dates.
- * Right panel: Google Calendar events + tasks for the selected date.
- * If the user's Google token lacks the `calendar.readonly` scope (older auth),
- * a "Connect Google Calendar" prompt appears instead of events.
+ * Left panel: month picker + week overview + (optional) Google Calendar reconnect CTA.
+ * Right panel: segmented Day/Week/Month/Year switcher → `<CalendarGrid>`.
+ * If the user's Google token lacks `calendar.readonly`, a "Connect Google Calendar"
+ * prompt appears in the left rail; the grid still renders (showing tasks only).
+ *
+ * View mode persists to localStorage('calendar.viewMode').
  */
 import {
   format,
@@ -15,10 +18,21 @@ import {
   isToday,
   startOfMonth,
   endOfMonth,
+  startOfYear,
+  endOfYear,
 } from 'date-fns';
-import { CalendarIcon, CheckCircle2, Circle, Plus, Clock, MapPin, RefreshCw } from 'lucide-react';
+import {
+  CalendarIcon,
+  Plus,
+  RefreshCw,
+  Loader2,
+  CalendarDays,
+  CalendarRange,
+  LayoutGrid,
+  Grid3X3,
+} from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useState, useMemo, useRef, useCallback } from 'react';
+import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import { Separator } from '@/components/ui/separator';
 import { useTRPC } from '@/providers/query-provider';
 import { BackgroundRefreshIndicator } from '@/components/ui/background-refresh-indicator';
@@ -30,26 +44,52 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { authProxy } from '@/lib/auth-proxy';
 import type { Route } from './+types/page';
-import { Link } from 'react-router';
+import { redirect } from 'react-router';
 import { cn } from '@/lib/utils';
 import { upsertTaskInTaskCaches } from '@/lib/task-cache';
+import { parseEventStart } from '@/lib/calendar-utils';
 import { toast } from 'sonner';
+import {
+  CalendarGrid,
+  type CalendarGridMode,
+} from '@/components/calendar/calendar-grid';
 
-type Task = Outputs['tasks']['list']['tasks'][number];
 type CalendarEvent = Outputs['calendar']['events']['events'][number];
 
 // Auth guard
 export async function clientLoader({ request }: Route.ClientLoaderArgs) {
   const session = await authProxy.api.getSession({ headers: request.headers });
-  if (!session) return Response.redirect(`${import.meta.env.VITE_PUBLIC_APP_URL}/login`);
+  if (!session) throw redirect('/login');
   return {};
 }
 
-const PRIORITY_CLASS: Record<string, string> = {
-  high: 'bg-red-50 text-red-600 dark:bg-red-950/30 dark:text-red-400',
-  medium: 'bg-yellow-50 text-yellow-600 dark:bg-yellow-950/30 dark:text-yellow-400',
-  low: 'bg-blue-50 text-blue-600 dark:bg-blue-950/30 dark:text-blue-400',
+const VIEW_MODE_KEY = 'calendar.viewMode';
+const VIEW_MODES: readonly CalendarGridMode[] = ['day', 'week', 'month', 'year'] as const;
+const VIEW_MODE_ICONS: Record<CalendarGridMode, typeof CalendarDays> = {
+  day: CalendarDays,
+  week: CalendarRange,
+  month: LayoutGrid,
+  year: Grid3X3,
 };
+const VIEW_MODE_LABELS: Record<CalendarGridMode, string> = {
+  day: 'Day',
+  week: 'Week',
+  month: 'Month',
+  year: 'Year',
+};
+
+function readViewModePref(): CalendarGridMode {
+  if (typeof window === 'undefined') return 'week';
+  try {
+    const raw = localStorage.getItem(VIEW_MODE_KEY);
+    if (raw && (VIEW_MODES as readonly string[]).includes(raw)) {
+      return raw as CalendarGridMode;
+    }
+  } catch {
+    // ignore (private mode)
+  }
+  return 'week';
+}
 
 export default function CalendarPage() {
   const trpc = useTRPC();
@@ -57,10 +97,26 @@ export default function CalendarPage() {
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   // The displayed month — controls which range we fetch calendar events for
   const [displayMonth, setDisplayMonth] = useState<Date>(new Date());
+  const [viewMode, setViewModeState] = useState<CalendarGridMode>(() => readViewModePref());
+  const setViewMode = useCallback((mode: CalendarGridMode) => {
+    setViewModeState(mode);
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem(VIEW_MODE_KEY, mode);
+      } catch {
+        // ignore
+      }
+    }
+  }, []);
 
   // Inline quick-add state
   const [quickAdd, setQuickAdd] = useState('');
   const quickAddRef = useRef<HTMLInputElement>(null);
+  // Pulse highlight applied to the quick-add row when the user taps a grid
+  // slot — gives clear visual feedback that focus moved to the input
+  // (otherwise tapping the right pane mysteriously shifts focus to the left
+  // rail with no signal).
+  const [quickAddPulse, setQuickAddPulse] = useState(false);
 
   // ── Tasks ──────────────────────────────────────────────────────────────────
   const { data: tasksData, isLoading: tasksLoading, isFetching: isFetchingTasks } = useQuery(
@@ -75,15 +131,26 @@ export default function CalendarPage() {
   const tasks = useMemo(() => tasksData?.tasks ?? [], [tasksData]);
 
   // ── Google Calendar events ─────────────────────────────────────────────────
-  // Fetch events for the displayed month plus the visible "This week" range so
-  // adjacent-month days in the week overview still show event indicators.
+  // Fetch range is widened in Year mode so the grid can show event markers
+  // across every month. For Day/Week/Month we union the displayed month with
+  // the visible week to catch adjacent-month days in the left-rail overview.
   const visibleWeekStart = startOfWeek(new Date(), { weekStartsOn: 1 });
   const visibleWeekEnd = endOfWeek(new Date(), { weekStartsOn: 1 });
-  const monthStart = startOfMonth(displayMonth);
-  const monthEnd = endOfMonth(displayMonth);
-  const eventsTimeMin =
-    (monthStart < visibleWeekStart ? monthStart : visibleWeekStart).toISOString();
-  const eventsTimeMax = (monthEnd > visibleWeekEnd ? monthEnd : visibleWeekEnd).toISOString();
+  const { eventsTimeMin, eventsTimeMax } = useMemo(() => {
+    if (viewMode === 'year') {
+      return {
+        eventsTimeMin: startOfYear(selectedDate).toISOString(),
+        eventsTimeMax: endOfYear(selectedDate).toISOString(),
+      };
+    }
+    const monthStart = startOfMonth(displayMonth);
+    const monthEnd = endOfMonth(displayMonth);
+    return {
+      eventsTimeMin:
+        (monthStart < visibleWeekStart ? monthStart : visibleWeekStart).toISOString(),
+      eventsTimeMax: (monthEnd > visibleWeekEnd ? monthEnd : visibleWeekEnd).toISOString(),
+    };
+  }, [viewMode, selectedDate, displayMonth, visibleWeekStart, visibleWeekEnd]);
 
   const { data: eventsData, isLoading: eventsLoading, isFetching: isFetchingEvents } = useQuery(
     trpc.calendar.events.queryOptions(
@@ -101,20 +168,32 @@ export default function CalendarPage() {
   // scopeMissing = true means the token lacks calendar.readonly (needs re-auth)
   const scopeMissing = eventsData?.scopeMissing ?? false;
 
-  // ── Mutations ──────────────────────────────────────────────────────────────
-  const updateTask = useMutation({
-    ...trpc.tasks.update.mutationOptions(),
-    onSuccess: ({ task }) => {
-      upsertTaskInTaskCaches(queryClient, task);
-    },
-  });
+  // Keep displayMonth in sync when selectedDate jumps to a different month
+  // (e.g. user clicked an out-of-month day in the grid). Deps intentionally
+  // exclude `displayMonth` — including it would re-fire this effect after the
+  // user navigates the picker manually (via onMonthChange) and snap the view
+  // back to selectedDate's month, breaking month pagination.
+  useEffect(() => {
+    if (
+      selectedDate.getFullYear() !== displayMonth.getFullYear() ||
+      selectedDate.getMonth() !== displayMonth.getMonth()
+    ) {
+      setDisplayMonth(selectedDate);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedDate]);
 
+  // ── Mutations ──────────────────────────────────────────────────────────────
   const createTask = useMutation({
     ...trpc.tasks.create.mutationOptions(),
     onSuccess: ({ task }) => {
       upsertTaskInTaskCaches(queryClient, task);
       setQuickAdd('');
       quickAddRef.current?.focus();
+    },
+    onError: (err) => {
+      console.error('Failed to create task:', err);
+      toast.error(err instanceof Error ? err.message : 'Could not add task');
     },
   });
 
@@ -129,38 +208,23 @@ export default function CalendarPage() {
     return set;
   }, [tasks]);
 
+  // Local-timezone safe event-start parser is now shared with the
+  // CalendarGrid component via `@/lib/calendar-utils` — keep one definition
+  // so the all-day-UTC-drift fix can't regress in only one place.
+
   // Dates that have calendar events
   const datesWithEvents = useMemo(() => {
     const set = new Set<string>();
     for (const event of calendarEvents) {
       if (event.startTime) {
-        // All-day events use YYYY-MM-DD; timed events use full ISO
-        const dateKey = event.allDay
-          ? event.startTime
-          : format(new Date(event.startTime), 'yyyy-MM-dd');
-        set.add(dateKey);
+        set.add(format(parseEventStart(event), 'yyyy-MM-dd'));
       }
     }
     return set;
-  }, [calendarEvents]);
-
-  // Events for the selected date, sorted by start time
-  const selectedDateEvents = useMemo(() => {
-    return calendarEvents
-      .filter((e) => {
-        const d = e.allDay ? new Date(e.startTime) : new Date(e.startTime);
-        return isSameDay(d, selectedDate);
-      })
-      .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
-  }, [calendarEvents, selectedDate]);
-
-  // Tasks for the selected date
-  const selectedDateTasks = useMemo(() => {
-    return tasks.filter((t) => t.dueDate && isSameDay(new Date(t.dueDate), selectedDate));
-  }, [tasks, selectedDate]);
+  }, [calendarEvents, parseEventStart]);
 
   // This week overview (Mon–Sun)
-  const weekDays = useMemo(() => {
+  const weekDaysOverview = useMemo(() => {
     const start = startOfWeek(new Date(), { weekStartsOn: 1 });
     return Array.from({ length: 7 }, (_, i) => {
       const day = addDays(start, i);
@@ -196,7 +260,44 @@ export default function CalendarPage() {
     }
   }, []);
 
-  const hasContent = selectedDateEvents.length > 0 || selectedDateTasks.length > 0;
+  // Create event from time-grid tap-to-create — same backing as quick-add but
+  // with the chosen slot's date. Renders an inline title input instead of a
+  // blocking `window.prompt`; tapping a slot focuses the left-rail quick-add
+  // input with the date pre-applied AND pulses it briefly so the user sees
+  // where focus moved.
+  const handleCreateAt = useCallback(
+    (start: Date) => {
+      setSelectedDate(start);
+      // Defer focus to two frames: one for React to commit the state update,
+      // one for the layout pass. A single rAF can miss the input if the
+      // left rail just rendered.
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          quickAddRef.current?.focus();
+          quickAddRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        });
+      });
+      setQuickAddPulse(true);
+      window.setTimeout(() => setQuickAddPulse(false), 800);
+    },
+    [],
+  );
+
+  // Adapt the tRPC events to CalendarGrid's event shape. CalendarGrid expects
+  // optional fields so we just narrow types — the real shape is a strict superset.
+  const gridEvents = useMemo(
+    () =>
+      calendarEvents.map((e) => ({
+        id: e.id,
+        title: e.title,
+        startTime: e.startTime,
+        endTime: e.endTime,
+        allDay: e.allDay,
+        color: e.color,
+      })),
+    [calendarEvents],
+  );
+
   const selectedDateLabel = isToday(selectedDate) ? 'Today' : format(selectedDate, 'EEEE, MMMM d');
   const isBackgroundRefreshing =
     (!!tasksData && !tasksLoading && isFetchingTasks) ||
@@ -216,6 +317,37 @@ export default function CalendarPage() {
               Events need permission
             </span>
           )}
+        </div>
+
+        {/* Day / Week / Month / Year switcher — mirrors the iOS segmented control */}
+        <div
+          className="bg-muted/50 flex items-center gap-0.5 rounded-lg border p-0.5"
+          role="group"
+          aria-label="Calendar view mode"
+        >
+          {VIEW_MODES.map((mode) => {
+            const Icon = VIEW_MODE_ICONS[mode];
+            const active = viewMode === mode;
+            return (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => setViewMode(mode)}
+                aria-pressed={active}
+                aria-label={`${VIEW_MODE_LABELS[mode]} view`}
+                className={cn(
+                  'flex items-center gap-1 rounded-md px-2.5 py-1 text-[12px] font-medium transition-colors',
+                  'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+                  active
+                    ? 'bg-background text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground',
+                )}
+              >
+                <Icon className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">{VIEW_MODE_LABELS[mode]}</span>
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -241,13 +373,37 @@ export default function CalendarPage() {
 
           <Separator className="my-3" />
 
+          {/* Quick-add row — always visible, prefills due date to selected day */}
+          <div
+            className={cn(
+              'bg-card mb-3 flex items-center gap-2 rounded-xl border px-3 py-2 transition-shadow',
+              quickAddPulse && 'shadow-[0_0_0_3px_var(--mainBlue)]',
+            )}
+          >
+            {createTask.isPending ? (
+              <Loader2 className="text-muted-foreground h-4 w-4 shrink-0 animate-spin" aria-hidden />
+            ) : (
+              <Plus className="text-muted-foreground h-4 w-4 shrink-0" aria-hidden />
+            )}
+            <Input
+              ref={quickAddRef}
+              value={quickAdd}
+              onChange={(e) => setQuickAdd(e.target.value)}
+              onKeyDown={handleQuickAdd}
+              placeholder={`Add for ${isToday(selectedDate) ? 'today' : format(selectedDate, 'MMM d')}…`}
+              className="h-auto border-0 bg-transparent p-0 text-[12px] shadow-none focus-visible:ring-0"
+              disabled={createTask.isPending}
+              aria-label="Add task to selected day"
+            />
+          </div>
+
           {/* This week overview */}
           <div>
             <p className="text-muted-foreground mb-2 text-[11px] font-semibold uppercase tracking-wide">
               This week
             </p>
             <div className="flex flex-col gap-0.5">
-              {weekDays.map(({ day, tasks: dayTasks, hasEvent }) => (
+              {weekDaysOverview.map(({ day, tasks: dayTasks, hasEvent }) => (
                 <button
                   key={day.toISOString()}
                   type="button"
@@ -255,12 +411,14 @@ export default function CalendarPage() {
                   className={cn(
                     'hover:bg-accent flex items-center justify-between rounded-lg px-2 py-1.5 text-left text-[13px] transition-colors',
                     isSameDay(day, selectedDate) && 'bg-accent font-medium',
-                    isToday(day) && 'text-primary',
+                    isToday(day) && 'text-[var(--mainBlue)]',
                   )}
                 >
                   <span>{format(day, 'EEE, MMM d')}</span>
                   <div className="flex items-center gap-1">
-                    {hasEvent && <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />}
+                    {hasEvent && (
+                      <span className="h-1.5 w-1.5 rounded-full bg-[var(--mainBlue)]" />
+                    )}
                     {dayTasks.length > 0 && (
                       <Badge variant="secondary" className="h-4 min-w-[1rem] px-1 text-[10px]">
                         {dayTasks.length}
@@ -302,207 +460,42 @@ export default function CalendarPage() {
           )}
         </div>
 
-        {/* ── Right: Events + Tasks for selected date ────────────────────── */}
+        {/* ── Right: Calendar grid (Day / Week / Month / Year) ─────────── */}
         <div className="flex flex-1 flex-col overflow-hidden">
-          {/* Day header */}
-          <div className="flex items-center gap-2 border-b px-6 py-3.5">
+          {/* Selected-day header — kept so users always see what's focused */}
+          <div className="flex items-center gap-2 border-b px-6 py-2.5">
             <CalendarIcon className="text-muted-foreground h-4 w-4" />
             <h2 className="text-[14px] font-semibold">{selectedDateLabel}</h2>
-            {selectedDateEvents.length > 0 && (
-              <Badge variant="secondary" className="h-5 text-[11px]">
-                {selectedDateEvents.length} {selectedDateEvents.length === 1 ? 'event' : 'events'}
-              </Badge>
-            )}
-            {selectedDateTasks.length > 0 && (
-              <Badge variant="outline" className="h-5 text-[11px]">
-                {selectedDateTasks.length} {selectedDateTasks.length === 1 ? 'task' : 'tasks'}
-              </Badge>
-            )}
           </div>
 
-          <div className="flex-1 overflow-y-auto px-6 py-4">
-            {/* Quick-add row — always visible, prefills due date to selected day */}
-            <div className="bg-card mb-4 flex items-center gap-2 rounded-xl border px-4 py-2.5">
-              <Plus className="text-muted-foreground h-4 w-4 shrink-0" />
-              <Input
-                ref={quickAddRef}
-                value={quickAdd}
-                onChange={(e) => setQuickAdd(e.target.value)}
-                onKeyDown={handleQuickAdd}
-                placeholder={`Add task for ${isToday(selectedDate) ? 'today' : format(selectedDate, 'MMM d')}…`}
-                className="h-auto border-0 bg-transparent p-0 text-[13px] shadow-none focus-visible:ring-0"
-                disabled={createTask.isPending}
-              />
-            </div>
-
+          <div className="flex-1 overflow-hidden">
+            {/* Skeleton while EITHER data set is still loading — previously the
+                && gate left an empty grid flicker when events finished first
+                but tasks were still in flight. */}
             {eventsLoading || tasksLoading ? (
-              <div className="flex flex-col gap-2">
+              <div className="flex flex-col gap-2 p-6">
                 {['calendar-skeleton-1', 'calendar-skeleton-2', 'calendar-skeleton-3'].map((key) => (
                   <div key={key} className="bg-muted/50 h-16 animate-pulse rounded-xl" />
                 ))}
               </div>
-            ) : !hasContent ? (
-              <div className="flex flex-col items-center gap-3 py-12 text-center">
-                <div className="bg-muted flex h-11 w-11 items-center justify-center rounded-full">
-                  <CalendarIcon className="text-muted-foreground h-5 w-5" />
-                </div>
-                <div>
-                  <p className="text-[13px] font-medium">
-                    {scopeMissing ? 'No tasks for this day' : 'Nothing scheduled'}
-                  </p>
-                  <p className="text-muted-foreground text-[12px]">
-                    Type above to quickly add a task, or go to{' '}
-                    <Link to="/mail/tasks" className="underline">
-                      Tasks
-                    </Link>
-                    .
-                  </p>
-                </div>
-              </div>
             ) : (
-              <div className="flex flex-col gap-4">
-                {/* Calendar events section */}
-                {selectedDateEvents.length > 0 && (
-                  <div>
-                    <p className="text-muted-foreground mb-2 text-[11px] font-semibold uppercase tracking-wide">
-                      Events
-                    </p>
-                    <div className="flex flex-col gap-2">
-                      {selectedDateEvents.map((event) => (
-                        <CalendarEventRow key={event.id} event={event} />
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Tasks section */}
-                {selectedDateTasks.length > 0 && (
-                  <div>
-                    <p className="text-muted-foreground mb-2 text-[11px] font-semibold uppercase tracking-wide">
-                      Tasks
-                    </p>
-                    <div className="flex flex-col gap-2">
-                      {selectedDateTasks.map((task) => (
-                        <CalendarTaskRow
-                          key={task.id}
-                          task={task}
-                          onToggle={() =>
-                            updateTask.mutate({
-                              id: task.id,
-                              data: { status: task.status === 'done' ? 'todo' : 'done' },
-                            })
-                          }
-                        />
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
+              <CalendarGrid
+                mode={viewMode}
+                events={gridEvents}
+                tasks={tasks.map((t) => ({
+                  id: t.id,
+                  title: t.title,
+                  dueDate: t.dueDate,
+                  status: t.status,
+                }))}
+                selectedDate={selectedDate}
+                onSelectDate={setSelectedDate}
+                onModeChange={setViewMode}
+                onCreateAt={handleCreateAt}
+              />
             )}
           </div>
         </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── CalendarEventRow ─────────────────────────────────────────────────────────
-
-function CalendarEventRow({ event }: { event: CalendarEvent }) {
-  const timeLabel = event.allDay
-    ? 'All day'
-    : (() => {
-        const start = new Date(event.startTime);
-        const end = new Date(event.endTime);
-        return `${format(start, 'h:mm a')} – ${format(end, 'h:mm a')}`;
-      })();
-
-  const content = (
-    <div
-      className="border-border bg-card hover:bg-accent/20 flex items-start gap-3 rounded-xl border p-4 transition-colors"
-      style={{ borderLeftColor: event.color, borderLeftWidth: 3 }}
-    >
-      <div className="min-w-0 flex-1">
-        <p className="text-[13px] font-medium">{event.title}</p>
-        <div className="text-muted-foreground mt-1 flex flex-wrap items-center gap-3 text-[12px]">
-          <span className="flex items-center gap-1">
-            <Clock className="h-3 w-3" />
-            {timeLabel}
-          </span>
-          {event.location && (
-            <span className="flex items-center gap-1">
-              <MapPin className="h-3 w-3" />
-              <span className="line-clamp-1">{event.location}</span>
-            </span>
-          )}
-        </div>
-        {event.description && (
-          <p className="text-muted-foreground mt-1.5 line-clamp-2 text-[11px]">
-            {event.description}
-          </p>
-        )}
-      </div>
-    </div>
-  );
-
-  // If the event has an htmlLink, wrap it in an anchor
-  if (event.htmlLink) {
-    return (
-      <a href={event.htmlLink} target="_blank" rel="noopener noreferrer" className="block">
-        {content}
-      </a>
-    );
-  }
-  return content;
-}
-
-// ─── CalendarTaskRow ───────────────────────────────────────────────────────────
-
-function CalendarTaskRow({ task, onToggle }: { task: Task; onToggle: () => void }) {
-  const isDone = task.status === 'done';
-
-  return (
-    <div
-      className={cn(
-        'border-border bg-card hover:bg-accent/20 flex items-start gap-3 rounded-xl border p-4 transition-colors',
-        isDone && 'opacity-60',
-      )}
-    >
-      <button
-        type="button"
-        onClick={onToggle}
-        className="text-muted-foreground hover:text-primary mt-0.5 shrink-0 transition-colors"
-      >
-        {isDone ? (
-          <CheckCircle2 className="text-primary h-5 w-5" />
-        ) : (
-          <Circle className="h-5 w-5" />
-        )}
-      </button>
-      <div className="min-w-0 flex-1">
-        <p
-          className={cn('text-[13px] font-medium', isDone && 'text-muted-foreground line-through')}
-        >
-          {task.title}
-        </p>
-        {task.description && (
-          <p className="text-muted-foreground mt-0.5 line-clamp-1 text-[12px]">
-            {task.description}
-          </p>
-        )}
-        {task.priority && task.priority !== 'none' && (
-          <div className="mt-1.5">
-            <Badge
-              variant="secondary"
-              className={cn(
-                'h-5 rounded-md border-0 px-1.5 text-[11px] font-medium',
-                PRIORITY_CLASS[task.priority] ?? '',
-              )}
-            >
-              {task.priority.charAt(0).toUpperCase() + task.priority.slice(1)}
-            </Badge>
-          </div>
-        )}
       </div>
     </div>
   );

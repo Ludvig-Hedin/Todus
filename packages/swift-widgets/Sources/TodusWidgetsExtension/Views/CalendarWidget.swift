@@ -42,7 +42,7 @@ struct CalendarWidgetEntryView: View {
 
 struct SmallCalendarView: View {
     let snapshot: CalendarWidgetSnapshot?
-    
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
@@ -81,7 +81,7 @@ struct SmallCalendarView: View {
                 Spacer(minLength: 0)
             }
         }
-        .padding()
+        .padding(12)
         .containerBackground(for: .widget) {
             #if os(macOS)
             Color(NSColor.windowBackgroundColor)
@@ -144,7 +144,7 @@ struct MediumCalendarView: View {
                 Spacer(minLength: 0)
             }
         }
-        .padding()
+        .padding(12)
         .containerBackground(for: .widget) {
             #if os(macOS)
             Color(NSColor.windowBackgroundColor)
@@ -158,7 +158,7 @@ struct MediumCalendarView: View {
 
 struct AccessoryCalendarView: View {
     let snapshot: CalendarWidgetSnapshot?
-    
+
     var body: some View {
         VStack(alignment: .leading) {
             if let events = snapshot?.upcomingEvents.filter({ $0.endDate > Date() }), let first = events.first {
@@ -172,22 +172,25 @@ struct AccessoryCalendarView: View {
                     .font(.headline)
             }
         }
+        .containerBackground(for: .widget) {}
         .widgetURL(URL(string: "todus://calendar"))
     }
 }
 
 struct AccessoryInlineCalendarView: View {
     let snapshot: CalendarWidgetSnapshot?
-    
+
     var body: some View {
-        if let events = snapshot?.upcomingEvents.filter({ $0.endDate > Date() }), let first = events.first {
-            Text("\(first.startDate, style: .time) \(first.title)")
-                .privacySensitive()
-                .widgetURL(URL(string: "todus://calendar"))
-        } else {
-            Text("No events")
-                .widgetURL(URL(string: "todus://calendar"))
+        Group {
+            if let events = snapshot?.upcomingEvents.filter({ $0.endDate > Date() }), let first = events.first {
+                Text("\(first.startDate, style: .time) \(first.title)")
+                    .privacySensitive()
+            } else {
+                Text("No events")
+            }
         }
+        .containerBackground(for: .widget) {}
+        .widgetURL(URL(string: "todus://calendar"))
     }
 }
 

@@ -9,6 +9,11 @@ struct MacCalendarAccountsList: View {
     @State private var appleSources: [CalendarSource] = []
     @State private var isLoading = false
     @State private var expandedConnections: Set<String> = []
+    /// Reflects a pending "Add Calendar Account" tap so the button shows a
+    /// spinner while the OAuth window is being prepared. The post is
+    /// fire-and-forget, so we briefly self-clear after a short delay rather
+    /// than awaiting a completion signal that doesn't exist.
+    @State private var isConnecting = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -49,10 +54,28 @@ struct MacCalendarAccountsList: View {
 
             HStack {
                 Button {
+                    isConnecting = true
                     NotificationCenter.default.post(name: .todusRequestConnectGmail, object: nil)
+                    // The OAuth handoff is asynchronous and runs in a separate
+                    // window we don't have a callback for; reset the spinner
+                    // after a brief grace period so the user has visible
+                    // feedback that the click registered.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                        isConnecting = false
+                    }
                 } label: {
-                    Label("Add Calendar Account", systemImage: "plus.circle.fill")
+                    HStack(spacing: 6) {
+                        if isConnecting {
+                            ProgressView()
+                                .controlSize(.small)
+                                .progressViewStyle(.circular)
+                        }
+                        Label(isConnecting ? "Connecting…" : "Add Calendar Account",
+                              systemImage: "plus.circle.fill")
+                    }
                 }
+                .buttonStyle(.borderedProminent)
+                .disabled(isConnecting)
                 Spacer()
             }
         }

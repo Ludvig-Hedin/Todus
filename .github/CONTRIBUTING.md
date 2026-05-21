@@ -31,9 +31,9 @@ Thank you for your interest in contributing to Todus! We're excited to have you 
 
    ```bash
    # HTTPS
-   git remote add upstream https://github.com/todus-app/todus.git
+   git remote add upstream https://github.com/Ludvig-Hedin/Todus.git
    # or SSH
-   git remote add upstream git@github.com:todus-app/todus.git
+   git remote add upstream git@github.com:Ludvig-Hedin/Todus.git
    ```
 
 2. **Set Up Development Environment**

@@ -80,6 +80,59 @@ const MEETING_KEYWORDS =
 const URGENT_KEYWORDS = /\b(urgent|asap|today|immediately|priority|by end of day|deadline)\b/i;
 const AUTOMATED_KEYWORDS = /\b(no-?reply|unsubscribe|notification|automated|do not reply)\b/i;
 
+const VERIFICATION_KEYWORDS =
+  /\b(verification|one[- ]?time|otp|verify your|confirmation code|security code|2fa|two[- ]?factor|magic link|sign[- ]?in code|access code|passcode)\b/i;
+// Tightened — see assistant.ts for rationale. Kept in lockstep here.
+const RECEIPT_KEYWORDS =
+  /\b(receipt|invoice|order\s*#?\d|payment\s+(received|confirmation)|order\s+(confirmation|summary)|tax\s+invoice|your\s+purchase)\b|\$\s?\d|(?:USD|EUR|GBP|JPY|SEK|NOK|DKK|kr)\s?\d/i;
+const MARKETING_SENDER_PATTERN = /(news|newsletter|updates|digest|marketing|hello|info|hi|team)@/i;
+const NOREPLY_SENDER_PATTERN = /(no[- ]?reply|do[- ]?not[- ]?reply|notification|notifications|alerts?|automated)@/i;
+const SHORT_CODE_PATTERN = /\b\d{4,8}\b/;
+
+export type ThreadKind = 'verification' | 'receipt' | 'marketing' | 'notification' | 'conversational';
+
+export function classifyThreadKind(thread: Awaited<ReturnType<typeof getThread>>['result']): ThreadKind {
+  const latest = thread.latest ?? thread.messages[thread.messages.length - 1];
+  if (!latest) return 'conversational';
+  const subject = latest.subject ?? '';
+  const senderEmail = (latest.sender?.email ?? '').toLowerCase();
+  const bodyText = latestMessageText(thread);
+  const haystack = `${subject} ${bodyText}`;
+  const isAutomatedSender =
+    NOREPLY_SENDER_PATTERN.test(senderEmail) ||
+    AUTOMATED_KEYWORDS.test(senderEmail) ||
+    MARKETING_SENDER_PATTERN.test(senderEmail);
+  const automated = AUTOMATED_KEYWORDS.test(haystack) || isAutomatedSender;
+  const singleMessage = thread.messages.length <= 1;
+
+  // Verification / OTP — typically short single message from a no-reply sender containing a code.
+  if (
+    singleMessage &&
+    (isAutomatedSender || automated) &&
+    VERIFICATION_KEYWORDS.test(haystack) &&
+    SHORT_CODE_PATTERN.test(bodyText)
+  ) {
+    return 'verification';
+  }
+
+  // Receipt / invoice / subscription renewal — automated sender + transactional language.
+  if ((isAutomatedSender || automated) && RECEIPT_KEYWORDS.test(haystack)) {
+    return 'receipt';
+  }
+
+  // Marketing / newsletter — broad sender alias + automated.
+  if (isAutomatedSender && MARKETING_SENDER_PATTERN.test(senderEmail)) {
+    return 'marketing';
+  }
+
+  // Generic automated notification — automated keywords or no-reply sender, no other category matched.
+  if (automated) {
+    return 'notification';
+  }
+
+  return 'conversational';
+}
+
 function buildActivityKey(userId: string, threadId: string | null) {
   return `assistant-activity:${userId}:${threadId ?? 'global'}:${Date.now()}:${crypto.randomUUID()}`;
 }
@@ -136,21 +189,21 @@ function latestMessageText(thread: Awaited<ReturnType<typeof getThread>>['result
   return cleanText(latest?.decodedBody || latest?.body || '');
 }
 
+/**
+ * Build a fallback summary when the vector cache misses.
+ *
+ * Returns an empty string for low-signal threads (verification codes, receipts,
+ * marketing, automated notifications) so the client can hide the AI summary card
+ * entirely. For conversational threads we also return empty rather than the
+ * old "X most recently wrote about Y" template — that template restated the
+ * email header without adding value. An empty summary signals "no useful
+ * summary available", letting the UI suppress the card until a real summary
+ * (from the vector cache or future LLM path) is ready.
+ */
 function buildFallbackSummary(thread: Awaited<ReturnType<typeof getThread>>['result']) {
-  const latest = thread.latest ?? thread.messages[thread.messages.length - 1];
-  const participants = unique(
-    thread.messages
-      .map((message) => message.sender?.name || message.sender?.email)
-      .filter((value): value is string => Boolean(value)),
-  )
-    .slice(0, 3)
-    .join(', ');
-  const bodyText = latestMessageText(thread);
-  const snippet = bodyText.length > 240 ? `${bodyText.slice(0, 237)}...` : bodyText;
-  const sender = latest?.sender?.name || latest?.sender?.email || 'Someone';
-  const subject = latest?.subject || 'this thread';
-
-  return `${sender} most recently wrote about "${subject}". Participants: ${participants || sender}. ${snippet}`.trim();
+  const kind = classifyThreadKind(thread);
+  if (kind !== 'conversational') return '';
+  return '';
 }
 
 async function getThreadSummary(threadId: string, connectionId: string, thread: Awaited<ReturnType<typeof getThread>>['result']) {

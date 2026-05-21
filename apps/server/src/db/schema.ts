@@ -311,6 +311,10 @@ export const assistantOpenLoop = createTable(
     confidencePct: integer('confidence_pct').notNull().default(50),
     reason: text('reason').notNull().default(''),
     suggestedActionLabel: text('suggested_action_label'),
+    /// Verb-first natural-language sentence ("Reply to Sarah about the Q4 proposal").
+    /// LLM-generated server-side during buildThreadAnalysis when ASSISTANT_ACTION_LINE_ENABLED.
+    /// Nullable — client falls back to title+summary rendering when null/empty.
+    actionLine: text('action_line'),
     sourceThreadId: text('source_thread_id'),
     sourceMeetingId: text('source_meeting_id').references(() => meeting.id, {
       onDelete: 'set null',
@@ -360,6 +364,8 @@ export const assistantPreparedAction = createTable(
     confidencePct: integer('confidence_pct').notNull().default(50),
     reason: text('reason').notNull().default(''),
     preview: text('preview'),
+    /// Same purpose as assistantOpenLoop.actionLine — verb-first sentence.
+    actionLine: text('action_line'),
     payload: jsonb('payload').$type<unknown>().notNull().default({}),
     sourceThreadId: text('source_thread_id'),
     sourceMeetingId: text('source_meeting_id').references(() => meeting.id, {

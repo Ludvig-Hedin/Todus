@@ -63,7 +63,7 @@ struct TabBarOnboardingView: View {
                                             Capsule()
                                                 .fill((selectedTabs.count >= 4 ? Color.primary : Color.secondary).opacity(0.1))
                                         )
-                                        .animation(.snappy(duration: 0.2), value: selectedTabs.count)
+                                        .animation(AppTheme.Motion.base, value: selectedTabs.count)
                                 }
                                 .padding(.horizontal, 4)
                                 .padding(.top, 16)
@@ -115,7 +115,7 @@ struct TabBarOnboardingView: View {
 
                         tabBarPreview
                             .transition(.opacity.combined(with: .scale(scale: 0.98)))
-                            .animation(.snappy(duration: 0.25), value: selectedTabs.map(\.rawValue))
+                            .animation(AppTheme.Motion.base, value: selectedTabs.map(\.rawValue))
 
                         Text("Bottom bar matches the app: Home, two tabs, +, then the rest. AI is the floating sparkles button above, not a tab.")
                             .font(.system(size: 11, weight: .medium))
@@ -196,7 +196,7 @@ struct TabBarOnboardingView: View {
             } else {
                 let canRemove = selectedTabs.count > 2
                 Button {
-                    withAnimation(.snappy(duration: 0.22)) {
+                    withAnimation(AppTheme.Motion.base) {
                         guard canRemove else { return }
                         selectedTabs.removeAll { $0 == tab }
                     }
@@ -263,7 +263,7 @@ struct TabBarOnboardingView: View {
             // Add button
             Button {
                 guard !atMax else { return }
-                withAnimation(.snappy(duration: 0.22)) {
+                withAnimation(AppTheme.Motion.base) {
                     selectedTabs.append(tab)
                 }
             } label: {
@@ -283,7 +283,7 @@ struct TabBarOnboardingView: View {
         )
         .padding(.bottom, 4)
         .opacity(atMax ? 0.6 : 1)
-        .animation(.easeInOut(duration: 0.15), value: atMax)
+        .animation(AppTheme.Motion.fast, value: atMax)
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -386,7 +386,7 @@ private struct TabDropDelegate: DropDelegate {
         guard let fromIndex = tabs.firstIndex(of: dragging),
               let toIndex   = tabs.firstIndex(of: tab) else { return }
 
-        withAnimation(.snappy(duration: 0.2)) {
+        withAnimation(AppTheme.Motion.base) {
             tabs.move(fromOffsets: IndexSet(integer: fromIndex), toOffset: toIndex > fromIndex ? toIndex + 1 : toIndex)
             // Pin home to index 0 after every move
             if let homeIndex = tabs.firstIndex(of: .home), homeIndex != 0 {

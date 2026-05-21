@@ -34,11 +34,19 @@ struct MoreSheetView: View {
                     }
 
                     NavigationLink {
-                        DocsWebView()
-                            .navigationTitle("Docs")
-                            .navigationBarTitleDisplayMode(.inline)
+                        DocsListView()
                     } label: {
                         Label("Docs", systemImage: "doc.text")
+                    }
+
+                    // Legacy web shim — kept as an opt-in fallback so users who
+                    // hit issues with the native shell can still get to docs.
+                    NavigationLink {
+                        DocsWebView()
+                            .navigationTitle("Docs (Web)")
+                            .navigationBarTitleDisplayMode(.inline)
+                    } label: {
+                        Label("Docs (Web)", systemImage: "globe")
                     }
                 }
 

@@ -69,10 +69,16 @@ export const useThreads = () => {
         connectionIds: enabledIds,
         cursors: pageParam as Record<string, string>,
       }),
-    getNextPageParam: (lastPage) =>
-      lastPage.nextCursors && Object.keys(lastPage.nextCursors).length > 0
-        ? lastPage.nextCursors
-        : undefined,
+    getNextPageParam: (lastPage) => {
+      // Server returns `__exhausted__` for each finished connection so the
+      // next request doesn't restart that connection's pagination. Treat the
+      // whole page as the last page when every cursor is exhausted.
+      const next = lastPage.nextCursors ?? {};
+      const entries = Object.entries(next);
+      if (entries.length === 0) return undefined;
+      const anyLive = entries.some(([, cursor]) => cursor !== '__exhausted__');
+      return anyLive ? next : undefined;
+    },
     staleTime: THREAD_SUMMARY_STALE_TIME_MS,
     refetchOnMount: false,
     refetchOnReconnect: true,
@@ -110,17 +116,26 @@ export const useThreads = () => {
   const activeQuery = isUnifiedView ? multiConnectionQuery : singleConnectionQuery;
 
   const isEmpty = useMemo(() => threads.length === 0, [threads]);
-  const isReachingEnd = isUnifiedView
-    ? isEmpty ||
-      !multiConnectionQuery.data?.pages.length ||
-      !multiConnectionQuery.data.pages[multiConnectionQuery.data.pages.length - 1]?.nextCursors ||
-      Object.keys(
-        multiConnectionQuery.data.pages[multiConnectionQuery.data.pages.length - 1]?.nextCursors ??
-          {},
-      ).length === 0
-    : isEmpty ||
-      (singleConnectionQuery.data &&
-        !singleConnectionQuery.data.pages[singleConnectionQuery.data.pages.length - 1]?.nextPageToken);
+  const isReachingEnd = useMemo<boolean>(() => {
+    if (isUnifiedView) {
+      const lastPage =
+        multiConnectionQuery.data?.pages[multiConnectionQuery.data.pages.length - 1];
+      if (!lastPage?.nextCursors) return isEmpty || !multiConnectionQuery.data?.pages.length;
+      const entries = Object.entries(lastPage.nextCursors);
+      if (entries.length === 0) return true;
+      // All exhausted = no more pages.
+      const anyLive = entries.some(([, cursor]) => cursor !== '__exhausted__');
+      return !anyLive;
+    }
+    // Single-account: explicitly coerce to boolean so consumers never receive
+    // `undefined` from the early short-circuit.
+    return Boolean(
+      isEmpty ||
+        (singleConnectionQuery.data &&
+          !singleConnectionQuery.data.pages[singleConnectionQuery.data.pages.length - 1]
+            ?.nextPageToken),
+    );
+  }, [isUnifiedView, isEmpty, multiConnectionQuery.data, singleConnectionQuery.data]);
 
   const loadMore = async () => {
     if (activeQuery.isLoading || activeQuery.isFetching) return;

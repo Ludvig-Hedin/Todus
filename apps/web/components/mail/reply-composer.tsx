@@ -14,7 +14,7 @@ import { useDraft } from '@/hooks/use-drafts';
 import { m } from '@/paraglide/messages';
 import type { Sender } from '@/types';
 import { useQueryState } from 'nuqs';
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import posthog from 'posthog-js';
 import { toast } from 'sonner';
 
@@ -43,59 +43,50 @@ export default function ReplyCompose({ messageId }: ReplyComposeProps) {
   const replyToMessage =
     (messageId && emailData?.messages.find((msg) => msg.id === messageId)) || emailData?.latest;
 
-  // Initialize recipients and subject when mode changes
-  useEffect(() => {
-    if (!replyToMessage || !mode || !activeConnection?.email) return;
+  // Derive To/Cc recipients for the active mode and feed them to EmailComposer
+  // as `initialTo` / `initialCc`. Previously these were computed in a useEffect
+  // that never assigned them — reply To-field arrived empty and the user had
+  // to retype the recipient (or hit the zod `to.min(1)` validation wall).
+  const { computedTo, computedCc } = useMemo(() => {
+    if (!replyToMessage || !mode || !activeConnection?.email) {
+      return { computedTo: [] as string[], computedCc: [] as string[] };
+    }
 
     const userEmail = activeConnection.email.toLowerCase();
     const senderEmail = replyToMessage.sender.email.toLowerCase();
 
-    // Set subject based on mode
-
     if (mode === 'reply') {
-      // Reply to sender
       const to: string[] = [];
-
-      // If the sender is not the current user, add them to the recipients
       if (senderEmail !== userEmail) {
         to.push(replyToMessage.sender.email);
       } else if (replyToMessage.to && replyToMessage.to.length > 0 && replyToMessage.to[0]?.email) {
-        // If we're replying to our own email, reply to the first recipient
+        // Replying to our own sent mail — fall back to first original recipient.
         to.push(replyToMessage.to[0].email);
       }
+      return { computedTo: to, computedCc: [] as string[] };
+    }
 
-      // Initialize email composer with these recipients
-      // Note: The actual initialization happens in the EmailComposer component
-    } else if (mode === 'replyAll') {
+    if (mode === 'replyAll') {
       const to: string[] = [];
       const cc: string[] = [];
-
-      // Add original sender if not current user
-      if (senderEmail !== userEmail) {
-        to.push(replyToMessage.sender.email);
-      }
-
-      // Add original recipients from To field
+      if (senderEmail !== userEmail) to.push(replyToMessage.sender.email);
       replyToMessage.to?.forEach((recipient) => {
         const recipientEmail = recipient.email.toLowerCase();
         if (recipientEmail !== userEmail && recipientEmail !== senderEmail) {
           to.push(recipient.email);
         }
       });
-
-      // Add CC recipients
       replyToMessage.cc?.forEach((recipient) => {
         const recipientEmail = recipient.email.toLowerCase();
         if (recipientEmail !== userEmail && !to.includes(recipient.email)) {
           cc.push(recipient.email);
         }
       });
-
-      // Initialize email composer with these recipients
-    } else if (mode === 'forward') {
-      // For forward, we start with empty recipients
-      // Just set the subject and include the original message
+      return { computedTo: to, computedCc: cc };
     }
+
+    // mode === 'forward' — start empty; user fills recipients themselves.
+    return { computedTo: [] as string[], computedCc: [] as string[] };
   }, [mode, replyToMessage, activeConnection?.email]);
 
   const handleSendEmail = async (data: {
@@ -240,10 +231,28 @@ export default function ReplyCompose({ messageId }: ReplyComposeProps) {
     };
   }, [mode, enableScope, disableScope]);
 
-  const ensureEmailArray = (emails: string | string[] | undefined | null): string[] => {
+  // Defensive coercion — drafts may arrive as `string[]`, `Sender[]` (from
+  // listDrafts $raw), `string`, or null/undefined depending on whether the
+  // draft was fetched via drafts.get or hydrated from a list payload.
+  // Previously this only handled string|string[] and would throw
+  // `email.trim is not a function` on Sender[] inputs, crashing the composer.
+  const ensureEmailArray = (
+    emails: string | Array<string | { name?: string; email?: string }> | undefined | null,
+  ): string[] => {
     if (!emails) return [];
+    const toEmailString = (entry: unknown): string => {
+      if (typeof entry === 'string') return entry;
+      if (entry && typeof entry === 'object') {
+        const e = (entry as { email?: unknown }).email;
+        if (typeof e === 'string') return e;
+      }
+      return '';
+    };
     if (Array.isArray(emails)) {
-      return emails.map((email) => email.trim().replace(/[<>]/g, ''));
+      return emails
+        .map(toEmailString)
+        .map((email) => email.trim().replace(/[<>]/g, ''))
+        .filter((email) => email.length > 0);
     }
     if (typeof emails === 'string') {
       return emails
@@ -269,8 +278,14 @@ export default function ReplyCompose({ messageId }: ReplyComposeProps) {
           setActiveReplyId(null);
         }}
         initialMessage={draft?.content ?? latestDraft?.decodedBody}
-        initialTo={ensureEmailArray(draft?.to)}
-        initialCc={ensureEmailArray(draft?.cc)}
+        // Draft values (resumed reply) take precedence; otherwise use the
+        // recipients derived from the original message for reply / reply-all.
+        initialTo={
+          draft?.to ? ensureEmailArray(draft.to) : computedTo
+        }
+        initialCc={
+          draft?.cc ? ensureEmailArray(draft.cc) : computedCc
+        }
         initialBcc={ensureEmailArray(draft?.bcc)}
         initialSubject={draft?.subject}
         autofocus={true}

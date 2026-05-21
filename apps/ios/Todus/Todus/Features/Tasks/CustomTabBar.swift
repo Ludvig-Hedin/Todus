@@ -56,6 +56,7 @@ struct CustomTabBar: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(TabButtonStyle())
+                .accessibilityLabel("More")
 
                 // Thin separator between burger and first tab
                 Rectangle()
@@ -75,11 +76,11 @@ struct CustomTabBar: View {
                 .onEnded { value in
                     guard let currentIndex = tabs.firstIndex(of: selectedTab) else { return }
                     if value.translation.width < -30, currentIndex < tabs.count - 1 {
-                        withAnimation(.snappy(duration: 0.25)) {
+                        withAnimation(AppTheme.Motion.base) {
                             selectedTab = tabs[currentIndex + 1]
                         }
                     } else if value.translation.width > 30, currentIndex > 0 {
-                        withAnimation(.snappy(duration: 0.25)) {
+                        withAnimation(AppTheme.Motion.base) {
                             selectedTab = tabs[currentIndex - 1]
                         }
                     }
@@ -95,7 +96,7 @@ struct CustomTabBar: View {
             if isSelected {
                 onReselect?(tab)
             } else {
-                withAnimation(.snappy(duration: 0.25)) { selectedTab = tab }
+                withAnimation(AppTheme.Motion.base) { selectedTab = tab }
             }
         } label: {
             Image(
@@ -134,6 +135,7 @@ struct CustomTabBar: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(TabButtonStyle())
+            .accessibilityLabel("AI assistant")
 
             // Create button
             Button { onCreate() } label: {
@@ -144,6 +146,7 @@ struct CustomTabBar: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(TabButtonStyle())
+            .accessibilityLabel("Create")
         }
         .padding(3)
         .glassTabPill()
@@ -188,7 +191,7 @@ private struct TabButtonStyle: ButtonStyle {
         configuration.label
             .scaleEffect(configuration.isPressed ? 0.88 : 1.0)
             .opacity(configuration.isPressed ? 0.7 : 1.0)
-            .animation(.snappy(duration: 0.15), value: configuration.isPressed)
+            .animation(AppTheme.Motion.fast, value: configuration.isPressed)
     }
 }
 

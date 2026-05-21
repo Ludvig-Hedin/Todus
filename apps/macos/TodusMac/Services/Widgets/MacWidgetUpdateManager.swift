@@ -60,7 +60,7 @@ final class MacWidgetUpdateManager {
         let topEmails = unreadEmails.prefix(5).map { thread in
             EmailWidgetSnapshot.EmailInfo(
                 id: thread.id,
-                senderName: thread.from.name ?? thread.from.email,
+                senderName: thread.from.name.isEmpty ? thread.from.email : thread.from.name,
                 subject: thread.subject
             )
         }

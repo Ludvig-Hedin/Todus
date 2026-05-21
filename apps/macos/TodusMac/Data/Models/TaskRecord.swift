@@ -1,6 +1,22 @@
 import Foundation
 import SwiftData
 
+/// Single checklist item embedded in a `TaskRecord`. Persisted as JSON in
+/// `TaskRecord.checklistItemsData` so this can evolve without a SwiftData migration.
+struct ChecklistItem: Codable, Identifiable, Sendable, Hashable {
+    var id: UUID
+    var title: String
+    var completed: Bool
+    var order: Int
+
+    init(id: UUID = UUID(), title: String, completed: Bool = false, order: Int = 0) {
+        self.id = id
+        self.title = title
+        self.completed = completed
+        self.order = order
+    }
+}
+
 @Model
 final class TaskRecord: Identifiable {
     @Attribute(.unique) var id: UUID
@@ -19,6 +35,14 @@ final class TaskRecord: Identifiable {
     var createdAt: Date
     var updatedAt: Date
     var dueDate: Date?
+    /// Recurrence rule. Either a simple keyword (`"daily" | "weekly" | "monthly" | "yearly"`)
+    /// or an RFC 5545 RRULE string. `nil` means non-recurring. Matches the iOS shape.
+    var recurrenceRule: String?
+    /// JSON-encoded `[ChecklistItem]`. Access via `checklistItems` accessor.
+    var checklistItemsData: Data?
+    /// JSON-encoded `[String]` of attachment file paths (relative to
+    /// `Application Support/TaskAttachments/<taskId>/`). Access via `attachmentPaths`.
+    var attachmentPathsData: Data?
     var parseStateRawValue: String
     var syncStateRawValue: String
     var folder: FolderRecord?
@@ -90,6 +114,39 @@ final class TaskRecord: Identifiable {
     var syncState: SyncState {
         get { SyncState(rawValue: syncStateRawValue) ?? .localOnly }
         set { syncStateRawValue = newValue.rawValue }
+    }
+
+    /// JSON-decoded view of `checklistItemsData`. Setter re-encodes; an empty
+    /// array is stored as `nil` to keep the underlying column tidy. Decode
+    /// failures fall back to an empty array so a malformed blob never crashes
+    /// the UI — the next write will overwrite it cleanly.
+    var checklistItems: [ChecklistItem] {
+        get {
+            guard let data = checklistItemsData, !data.isEmpty else { return [] }
+            return (try? JSONDecoder().decode([ChecklistItem].self, from: data)) ?? []
+        }
+        set {
+            if newValue.isEmpty {
+                checklistItemsData = nil
+            } else {
+                checklistItemsData = try? JSONEncoder().encode(newValue)
+            }
+        }
+    }
+
+    /// JSON-decoded view of `attachmentPathsData`. Empty array stored as `nil`.
+    var attachmentPaths: [String] {
+        get {
+            guard let data = attachmentPathsData, !data.isEmpty else { return [] }
+            return (try? JSONDecoder().decode([String].self, from: data)) ?? []
+        }
+        set {
+            if newValue.isEmpty {
+                attachmentPathsData = nil
+            } else {
+                attachmentPathsData = try? JSONEncoder().encode(newValue)
+            }
+        }
     }
 
     var folderID: UUID? {

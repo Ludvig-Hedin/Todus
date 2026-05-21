@@ -85,8 +85,14 @@ const SortableCategoryItem = React.memo(function SortableCategoryItem({
   );
 
   const handleDeleteClick = React.useCallback(() => {
+    // Confirm before destroying — even though the change is local until the
+    // form is saved, the trash icon sits inline with no undo affordance and
+    // is easy to hit accidentally.
+    if (typeof window !== 'undefined' && !window.confirm(`Delete category "${cat.name}"?`)) {
+      return;
+    }
     handleDeleteCategory(cat.id);
-  }, [cat.id, handleDeleteCategory]);
+  }, [cat.id, cat.name, handleDeleteCategory]);
 
   const handleToggleDefault = React.useCallback(() => {
     toggleDefault(cat.id);
@@ -131,6 +137,7 @@ const SortableCategoryItem = React.memo(function SortableCategoryItem({
             size="sm"
             onClick={handleDeleteClick}
             className="text-destructive hover:bg-destructive/10 h-6 w-6 p-0"
+            aria-label={`Delete category ${cat.name}`}
           >
             <Trash2 className="h-3 w-3" />
           </Button>

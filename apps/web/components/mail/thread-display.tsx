@@ -36,12 +36,13 @@ import { MailDisplaySkeleton } from './mail-skeleton';
 import { useTRPC } from '@/providers/query-provider';
 import { useMutation } from '@tanstack/react-query';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { Inbox, StickyNote } from 'lucide-react';
+import { Inbox, ListChecks, StickyNote } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cleanHtml } from '@/lib/email-utils';
 import ReplyCompose from './reply-composer';
 import { APP_NAME } from '@/lib/branding';
 import { NotesPanel } from './note-panel';
+import { useCreateTaskFromThread } from '@/hooks/use-create-task-from-thread';
 import { cn, FOLDERS } from '@/lib/utils';
 import { m } from '@/paraglide/messages';
 import MailDisplay from './mail-display';
@@ -60,6 +61,18 @@ const cleanNameDisplay = (name?: string) => {
   if (!name) return '';
   return name.replace(/["<>]/g, '');
 };
+
+// HTML-escape arbitrary email metadata before interpolating it into the print
+// iframe. Without this a hostile sender could exec JS in the iframe (same
+// origin as the app → access to cookies/IDB) via a crafted subject, name, or
+// attachment filename. Used by every interpolation in handlePrintThread.
+const escapeHtml = (str: unknown) =>
+  String(str ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 
 interface ThreadDisplayProps {
   threadParam?: unknown;
@@ -187,6 +200,7 @@ export function ThreadDisplay() {
   const [focusedIndex, setFocusedIndex] = useAtom(focusedIndexAtom);
   const trpc = useTRPC();
   const { mutateAsync: toggleImportant } = useMutation(trpc.mail.toggleImportant.mutationOptions());
+  const { createTaskFromThread, isPending: isCreatingTask } = useCreateTaskFromThread();
   const [, setIsComposeOpen] = useQueryState('isComposeOpen');
 
   // Get optimistic state for this thread
@@ -280,13 +294,10 @@ export function ThreadDisplay() {
 
       document.body.appendChild(printFrame);
 
-      // HTML-escape to prevent XSS in the print iframe (e.g. malicious email subjects)
-      const escapeHtml = (str: string) =>
-        str
-          .replace(/&/g, '&amp;')
-          .replace(/</g, '&lt;')
-          .replace(/>/g, '&gt;')
-          .replace(/"/g, '&quot;');
+      // escapeHtml is now defined at module scope so it can be reused for
+      // every interpolation below. Without per-field escaping a crafted
+      // sender name like `<img src=x onerror=...>` would execute JS inside
+      // this iframe (same origin → cookie/IDB access).
 
       // Generate clean, simple HTML content for printing
       const printContent = `
@@ -494,7 +505,11 @@ export function ThreadDisplay() {
               (message, index) => `
             <div class="email-container">
               <div class="email-header">
-                ${index === 0 ? `<h1 class="email-title">${message.subject || 'No Subject'}</h1>` : ''}
+                ${
+                  index === 0
+                    ? `<h1 class="email-title">${escapeHtml(message.subject || 'No Subject')}</h1>`
+                    : ''
+                }
 
 
                 ${
@@ -502,7 +517,10 @@ export function ThreadDisplay() {
                     ? `
                   <div class="labels-section">
                     ${message.tags
-                      .map((tag) => `<span class="label-badge">${tag.name}</span>`)
+                      .map(
+                        (tag) =>
+                          `<span class="label-badge">${escapeHtml(tag.name)}</span>`,
+                      )
                       .join('')}
                   </div>
                 `
@@ -514,8 +532,12 @@ export function ThreadDisplay() {
                   <div class="meta-row">
                     <span class="meta-label">From:</span>
                     <span class="meta-value">
-                      ${cleanNameDisplay(message.sender?.name)}
-                      ${message.sender?.email ? `<${message.sender.email}>` : ''}
+                      ${escapeHtml(cleanNameDisplay(message.sender?.name))}
+                      ${
+                        message.sender?.email
+                          ? `&lt;${escapeHtml(message.sender.email)}&gt;`
+                          : ''
+                      }
                     </span>
                   </div>
 
@@ -529,7 +551,7 @@ export function ThreadDisplay() {
                         ${message.to
                           .map(
                             (recipient) =>
-                              `${cleanNameDisplay(recipient.name)} <${recipient.email}>`,
+                              `${escapeHtml(cleanNameDisplay(recipient.name))} &lt;${escapeHtml(recipient.email)}&gt;`,
                           )
                           .join(', ')}
                       </span>
@@ -548,7 +570,7 @@ export function ThreadDisplay() {
                         ${message.cc
                           .map(
                             (recipient) =>
-                              `${cleanNameDisplay(recipient.name)} <${recipient.email}>`,
+                              `${escapeHtml(cleanNameDisplay(recipient.name))} &lt;${escapeHtml(recipient.email)}&gt;`,
                           )
                           .join(', ')}
                       </span>
@@ -567,7 +589,7 @@ export function ThreadDisplay() {
                         ${message.bcc
                           .map(
                             (recipient) =>
-                              `${cleanNameDisplay(recipient.name)} <${recipient.email}>`,
+                              `${escapeHtml(cleanNameDisplay(recipient.name))} &lt;${escapeHtml(recipient.email)}&gt;`,
                           )
                           .join(', ')}
                       </span>
@@ -579,7 +601,9 @@ export function ThreadDisplay() {
 
                   <div class="meta-row">
                     <span class="meta-label">Date:</span>
-                    <span class="meta-value">${format(new Date(message.receivedOn), 'PPpp')}</span>
+                    <span class="meta-value">${escapeHtml(
+                      format(new Date(message.receivedOn), 'PPpp'),
+                    )}</span>
                   </div>
                 </div>
               </div>
@@ -602,8 +626,12 @@ export function ThreadDisplay() {
                     .map(
                       (attachment) => `
                     <div class="attachment-item">
-                      <span class="attachment-name">${attachment.filename}</span>
-                      ${formatFileSize(attachment.size) ? ` - <span class="attachment-size">${formatFileSize(attachment.size)}</span>` : ''}
+                      <span class="attachment-name">${escapeHtml(attachment.filename)}</span>
+                      ${
+                        formatFileSize(attachment.size)
+                          ? ` - <span class="attachment-size">${escapeHtml(formatFileSize(attachment.size))}</span>`
+                          : ''
+                      }
                     </div>
                   `,
                     )
@@ -661,14 +689,28 @@ export function ThreadDisplay() {
 
   const handleToggleImportant = useCallback(async () => {
     if (!emailData || !id) return;
-    await toggleImportant({ ids: [id] });
-    await refetchThread();
-    if (isImportant) {
-      toast.success(m['common.mail.markedAsImportant']());
-    } else {
-      toast.error('Failed to mark as important');
+    // Capture the NEXT important state (toggle is from current value) so the
+    // success toast describes what just happened instead of the pre-toggle
+    // value (which would always be `!isImportant` for the visible menu item
+    // → success branch was unreachable and every success hit the error toast).
+    const willBeImportant = !isImportant;
+    try {
+      await toggleImportant({ ids: [id] });
+      await refetchThread();
+      toast.success(
+        willBeImportant
+          ? m['common.mail.markedAsImportant']()
+          : 'Removed from Important',
+      );
+    } catch (error) {
+      console.error('Failed to toggle important:', error);
+      toast.error(
+        willBeImportant
+          ? 'Failed to mark as important'
+          : 'Failed to remove from Important',
+      );
     }
-  }, [emailData, id]);
+  }, [emailData, id, isImportant, refetchThread, toggleImportant]);
 
   // Set initial star state based on email data
   useEffect(() => {
@@ -893,6 +935,13 @@ export function ThreadDisplay() {
                     <DropdownMenuItem onClick={() => setIsNotesOpen(true)}>
                       <StickyNote className="mr-2 h-4 w-4" />
                       <span>{m['common.notes.title']()}</span>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => void createTaskFromThread()}
+                      disabled={isCreatingTask}
+                    >
+                      <ListChecks className="mr-2 h-4 w-4" />
+                      <span>Create task from email</span>
                     </DropdownMenuItem>
                     {/* <DropdownMenuItem onClick={() => setIsFullscreen(!isFullscreen)}>
                       <Expand className="fill-iconLight dark:fill-iconDark mr-2" />

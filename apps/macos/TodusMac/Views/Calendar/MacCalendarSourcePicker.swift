@@ -73,6 +73,11 @@ struct MacCalendarSourcePicker: View {
             .padding(.vertical, 12)
         }
         .task { await refresh() }
+        // Refresh when a new Google account is added while the popover is open
+        // so the new connection appears without having to reopen the picker.
+        .onChange(of: services.connectionsService.connections.count) { _, _ in
+            Task { await refresh() }
+        }
     }
 
     private var googleConnections: [ConnectionAccount] {
@@ -103,7 +108,15 @@ struct MacCalendarSourcePicker: View {
                 "",
                 isOn: Binding(
                     get: { isVisible },
-                    set: { _ in services.toggleCalendarVisibility(source.id) }
+                    // Defer the mutation until after the current view-update
+                    // pass so we don't trigger a write during a Binding setter
+                    // (which can race with the dependent view rebuild and drop
+                    // the toggle's first tap on macOS 15).
+                    set: { _ in
+                        Task { @MainActor in
+                            services.toggleCalendarVisibility(source.id)
+                        }
+                    }
                 )
             )
             .labelsHidden()

@@ -42,8 +42,9 @@ import { toast } from 'sonner';
 
 // Auth guard
 export async function clientLoader({ request }: Route.ClientLoaderArgs) {
+  const { redirect } = await import('react-router');
   const session = await authProxy.api.getSession({ headers: request.headers });
-  if (!session) return Response.redirect(`${import.meta.env.VITE_PUBLIC_APP_URL}/login`);
+  if (!session) throw redirect('/login');
   return {};
 }
 
@@ -114,6 +115,12 @@ export default function ChatPage() {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   // Tracks previous user message count to detect new messages and reset isSaved
   const prevUserMsgCountRef = useRef(0);
+  // Guard against double-firing the save mutation while one is still in
+  // flight — the auto-save effect re-runs as soon as messages.length changes
+  // (streaming token chunks growing the message array), which would otherwise
+  // queue a second `saveConversation.mutate` on top of the first, producing
+  // duplicate sidebar rows.
+  const isSavingRef = useRef(false);
 
   const { data: foldersData } = useQuery(trpc.folders.list.queryOptions());
   const folders = useMemo(() => foldersData?.folders ?? [], [foldersData]);
@@ -214,6 +221,14 @@ export default function ChatPage() {
 
   const isLoading = status === 'submitted' || status === 'streaming';
 
+  // Stable snapshot of the latest messages array, updated every render. The
+  // auto-save effect intentionally doesn't include `messages` in its dep
+  // array (to avoid re-saving on every streamed token). Reading from this
+  // ref guarantees we serialize the truly-latest list at save time instead
+  // of a stale closure captured before the last token arrived.
+  const latestMessagesRef = useRef(messages);
+  latestMessagesRef.current = messages;
+
   const [pendingClipboardFiles, setPendingClipboardFiles] = useState<File[]>([]);
 
   const fileToChatAttachment = useCallback((f: File) => {
@@ -299,11 +314,15 @@ export default function ChatPage() {
   // Auto-save conversation after each assistant response (once per exchange via isSaved guard).
   // Title = first 60 chars of the first user message.
   useEffect(() => {
-    // Guard: don't re-save the same exchange if already saved
+    // Guard: don't re-save the same exchange if already saved or in-flight
     if (isSaved) return;
+    if (isSavingRef.current) return;
 
-    const assistantMessages = messages.filter((m) => m.role === 'assistant');
-    const firstUserMessage = messages.find((m) => m.role === 'user');
+    // Read from the ref so we always serialize the latest message array,
+    // even if the closure was created before the last streamed token arrived.
+    const latestMessages = latestMessagesRef.current;
+    const assistantMessages = latestMessages.filter((m) => m.role === 'assistant');
+    const firstUserMessage = latestMessages.find((m) => m.role === 'user');
 
     // Only trigger once we have at least one assistant reply and we're not mid-stream
     if (assistantMessages.length === 0 || isLoading) return;
@@ -319,13 +338,14 @@ export default function ChatPage() {
     })();
 
     // Serialize messages for storage — extract text content only
-    const serialized = messages
+    const serialized = latestMessages
       .filter((m) => m.role === 'user' || m.role === 'assistant')
       .map<ChatMessageRecord>((m) => ({
         role: m.role as 'user' | 'assistant',
         content: typeof m.content === 'string' ? m.content : extractTextContent(m.content),
       }));
 
+    isSavingRef.current = true;
     saveConversation.mutate(
       { id: conversationId, title, messages: serialized, folderId: conversationFolderId },
       {
@@ -336,14 +356,20 @@ export default function ChatPage() {
         onError: (err) => {
           console.error('Failed to auto-save conversation:', err);
         },
+        onSettled: () => {
+          isSavingRef.current = false;
+        },
       },
     );
     // Intentionally not exhaustive — only re-run when message count, loading, or isSaved changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages.length, isLoading, isSaved]);
 
-  // Start a brand new chat session
+  // Start a brand new chat session — abort any in-flight stream first so its
+  // tokens don't bleed into the next conversation's message list and corrupt
+  // the auto-saved record.
   const handleNewChat = useCallback(() => {
+    if (isLoading) stop();
     setMessages([]);
     setConversationId(newId());
     setConversationFolderId(
@@ -351,12 +377,15 @@ export default function ChatPage() {
     );
     setIsSaved(false);
     prevUserMsgCountRef.current = 0;
-  }, [folderFilter, setMessages]);
+  }, [folderFilter, isLoading, setMessages, stop]);
 
-  // Load a past conversation — show its messages in read-only mode
+  // Load a past conversation — show its messages in read-only mode. Abort any
+  // active stream first so it doesn't keep emitting tokens into the loaded
+  // conversation after the user switched away.
   const handleLoadConversation = useCallback(
     async (id: string) => {
       try {
+        if (isLoading) stop();
         // Fetch full conversation from backend
         const result = await queryClient.fetchQuery(trpc.ai.getConversation.queryOptions({ id }));
         if (!result?.messages) return;
@@ -377,12 +406,27 @@ export default function ChatPage() {
         toast.error('Failed to load conversation. Please try again.');
       }
     },
-    [queryClient, trpc.ai.getConversation, setMessages],
+    [isLoading, queryClient, stop, trpc.ai.getConversation, setMessages],
   );
+
+  // Stop any in-flight stream on unmount (route change away from /mail/chat).
+  // Without this the chat keeps writing into the discarded React tree.
+  useEffect(() => {
+    return () => {
+      if (isLoading) stop();
+    };
+    // We deliberately want this to run only on unmount, not on isLoading flips.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleDeleteConversation = useCallback(
     (id: string, e: React.MouseEvent) => {
       e.stopPropagation();
+      // Confirm before destroying a saved conversation — there is no undo path
+      // and "Delete" sits one click into a hover menu, easy to fire by accident.
+      if (typeof window !== 'undefined' && !window.confirm('Delete this conversation?')) {
+        return;
+      }
       deleteConversation.mutate(
         { id },
         {
@@ -391,6 +435,11 @@ export default function ChatPage() {
             if (id === conversationId) {
               handleNewChat();
             }
+            toast.success('Conversation deleted');
+          },
+          onError: (err) => {
+            console.error('Failed to delete conversation:', err);
+            toast.error('Failed to delete conversation. Please try again.');
           },
         },
       );
@@ -534,7 +583,7 @@ export default function ChatPage() {
                   </div>
                 </div>
                 {/* Delete via dropdown — visible by default on touch, hover-reveal on desktop */}
-                <div className="shrink-0 md:invisible md:group-hover:visible">
+                <div className="shrink-0 md:invisible md:group-hover:visible md:focus-within:visible">
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button
@@ -542,6 +591,7 @@ export default function ChatPage() {
                         size="icon"
                         className="h-5 w-5 p-0"
                         onClick={(e) => e.stopPropagation()}
+                        aria-label="Conversation options"
                       >
                         <MoreHorizontal className="h-3.5 w-3.5" />
                       </Button>
@@ -800,6 +850,7 @@ export default function ChatPage() {
                     variant="ghost"
                     className="h-8 w-8 shrink-0"
                     onClick={stop}
+                    aria-label="Stop generating"
                   >
                     <StopCircle className="h-4 w-4" />
                   </Button>
@@ -809,6 +860,7 @@ export default function ChatPage() {
                     size="icon"
                     className="h-8 w-8 shrink-0"
                     disabled={!input.trim() && pendingClipboardFiles.length === 0}
+                    aria-label="Send message"
                   >
                     <SendHorizontal className="h-4 w-4" />
                   </Button>

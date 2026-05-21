@@ -27,7 +27,9 @@ export default {
     '/pricing',
     '/terms',
     '/privacy',
-    '/contributors',
+    '/downloads',
+    '/contact',
+    '/faq',
     // SEO: Pre-render competitor comparison pages for high-intent search traffic
     '/compare/superhuman',
     '/compare/shortwave',

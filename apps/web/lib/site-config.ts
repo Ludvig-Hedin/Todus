@@ -8,7 +8,7 @@ import { APP_NAME } from '@/lib/branding';
 
 const TITLE = 'Todus — AI Email, Calendar & Tasks in One App';
 const DESCRIPTION =
-  'Todus is the AI-native email client that manages your inbox, calendar, and tasks so you don\'t have to. Summarize emails, auto-triage, draft replies, and get more done — backed by Y Combinator.';
+  'Todus is the AI-native email client that manages your inbox, calendar, and tasks so you don\'t have to. Summarize emails, auto-triage, draft replies, and get more done.';
 
 const APP_URL = import.meta.env.VITE_PUBLIC_APP_URL || 'https://todus.app';
 
@@ -104,7 +104,7 @@ export const siteConfig = {
       description: DESCRIPTION,
       foundingDate: '2024',
       sameAs: [
-        'https://github.com/todus-app',
+        'https://github.com/Ludvig-Hedin/Todus',
         // 'https://twitter.com/todus_app', // Uncomment when live
         // 'https://linkedin.com/company/todus', // Uncomment when live
       ],
@@ -174,6 +174,38 @@ export const siteConfig = {
           acceptedAnswer: {
             '@type': 'Answer',
             text: 'Yes, Todus connects to your existing Gmail and Google Workspace accounts. Outlook and Microsoft 365 support is in development.',
+          },
+        },
+        {
+          '@type': 'Question',
+          name: 'Can I self-host Todus?',
+          acceptedAnswer: {
+            '@type': 'Answer',
+            text: 'Yes. Todus is fully open source and includes a SELF_HOSTING.md guide at the repo root with the full setup, env, and database instructions. You can run your own instance on Cloudflare Workers.',
+          },
+        },
+        {
+          '@type': 'Question',
+          name: 'Does Todus support custom email domains?',
+          acceptedAnswer: {
+            '@type': 'Answer',
+            text: 'Yes. You connect your existing Google Workspace or Gmail account, so any custom domain you have already set up with Google works without further config. Native custom-domain support outside Google Workspace is on the roadmap.',
+          },
+        },
+        {
+          '@type': 'Question',
+          name: 'When is Outlook support shipping?',
+          acceptedAnswer: {
+            '@type': 'Answer',
+            text: 'Outlook and Microsoft 365 connectors are in active development. Track progress on the GitHub repo at github.com/Ludvig-Hedin/Todus.',
+          },
+        },
+        {
+          '@type': 'Question',
+          name: 'How does Todus handle my data?',
+          acceptedAnswer: {
+            '@type': 'Answer',
+            text: 'Your email data syncs into your own Cloudflare Durable Object and R2 bucket scoped to your account. Todus does not sell or train on your email. See the privacy page for the full policy.',
           },
         },
       ],

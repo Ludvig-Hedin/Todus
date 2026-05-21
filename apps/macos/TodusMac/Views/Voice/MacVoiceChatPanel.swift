@@ -37,10 +37,10 @@ final class MacVoiceChatViewModel {
 
     private var captureEngine: AVAudioEngine?
     private var audioSendTimer: DispatchSourceTimer?
-    private var pcmBuffer = Data()
-    private let pcmBufferLock = NSLock()
-    private var _micMutedAtomic = false
-    private let micMutedLock = NSLock()
+    nonisolated(unsafe) private var pcmBuffer = Data()
+    let pcmBufferLock = NSLock()
+    nonisolated(unsafe) private var _micMutedAtomic = false
+    let micMutedLock = NSLock()
 
     // MARK: - Tasks
 
@@ -191,6 +191,15 @@ final class MacVoiceChatViewModel {
             isAssistantSpeaking = false
             finalizeCurrentTurn()
         case .error(let message):
+            // Tear down audio + event consumer BEFORE flipping state so the
+            // mic doesn't stay hot capturing dead air after an upstream failure.
+            // Previously we only updated `connectionState`, which left the
+            // input tap + send timer running and kept the audio engine alive
+            // indefinitely.
+            stopAudioCapture()
+            audioPlayer?.stop()
+            eventConsumerTask?.cancel()
+            eventConsumerTask = nil
             connectionState = .failed(message)
         }
     }
@@ -409,6 +418,11 @@ struct MacVoiceChatPanel: View {
 
     let chatService: MacAIChatService
     let tokenService: VoiceTokenService
+    /// Optional shared services — when present we cooperate with the global
+    /// voice coordinator so the in-panel session and the global hotkey/wake
+    /// loop don't both try to grab the microphone (AVAudioEngine crashes
+    /// with two simultaneous taps on the same input node).
+    var services: MacAppServices? = nil
 
     @Environment(\.dismiss) private var dismiss
     @State private var viewModel: MacVoiceChatViewModel?
@@ -427,14 +441,29 @@ struct MacVoiceChatPanel: View {
         }
         .frame(minWidth: 480, minHeight: 560)
         .background(MacTheme.contentBackground)
-        .onAppear {
+        .task {
+            // Yield ownership of mic + WS to the panel for the duration of
+            // this view. Previously this ran from `.onAppear` with two
+            // unawaited tasks — the coordinator's `stop()` raced against the
+            // panel's `vm.connect()`, sometimes producing a dual AVAudioEngine
+            // attach on the same input node and a crash. Awaiting the stop
+            // serialises ownership: coordinator down -> vm constructed -> vm up.
+            if let services {
+                await services.voiceCoordinator.stop()
+            }
             let vm = MacVoiceChatViewModel(tokenService: tokenService, chatService: chatService)
             self.viewModel = vm
-            Task { await vm.connect() }
+            await vm.connect()
         }
         .onDisappear {
             guard let vm = viewModel else { return }
-            Task { await vm.disconnect() }
+            Task {
+                await vm.disconnect()
+                // Re-arm the global voice loop with the user's saved prefs
+                // (hotkey-only or hotkey+wake) — the panel was a temporary
+                // takeover, not a permanent disable.
+                if let services { services.applyVoiceAssistantState() }
+            }
         }
     }
 
@@ -469,6 +498,7 @@ struct MacVoiceChatPanel: View {
             }
             .buttonStyle(.plain)
             .help("Close")
+            .accessibilityLabel("Close voice chat")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
@@ -523,12 +553,12 @@ struct MacVoiceChatPanel: View {
                 .padding(.vertical, 12)
             }
             .onChange(of: viewModel?.assistantTranscript) { _, _ in
-                withAnimation(.easeOut(duration: 0.15)) {
+                withAnimation(MacTheme.Motion.fast) {
                     proxy.scrollTo("bottom", anchor: .bottom)
                 }
             }
             .onChange(of: viewModel?.finalizedTurns.count) { _, _ in
-                withAnimation(.easeOut(duration: 0.15)) {
+                withAnimation(MacTheme.Motion.fast) {
                     proxy.scrollTo("bottom", anchor: .bottom)
                 }
             }
@@ -650,6 +680,7 @@ struct MacVoiceChatPanel: View {
             }
             .buttonStyle(.plain)
             .help(viewModel?.isMicMuted == true ? "Unmute" : "Mute")
+            .accessibilityLabel(viewModel?.isMicMuted == true ? "Unmute microphone" : "Mute microphone")
 
             Button {
                 Task {
@@ -668,6 +699,7 @@ struct MacVoiceChatPanel: View {
             }
             .buttonStyle(.plain)
             .help("End")
+            .accessibilityLabel("End call")
         }
     }
 
@@ -703,3 +735,4 @@ extension MacAIChatService {
         }
     }
 }
+

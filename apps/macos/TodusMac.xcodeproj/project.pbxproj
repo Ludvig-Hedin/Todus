@@ -90,6 +90,7 @@
 		AA02000000000000000C4103 /* UnifiedCalendarService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB02000000000000000C4103 /* UnifiedCalendarService.swift */; };
 		AA02000000000000000C4104 /* MacCalendarSourcePicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB02000000000000000C4104 /* MacCalendarSourcePicker.swift */; };
 		AA02000000000000000C4105 /* MacCalendarAccountsList.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB02000000000000000C4105 /* MacCalendarAccountsList.swift */; };
+		AA02000000000000000C4106 /* MacDesignSystemView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB02000000000000000C4106 /* MacDesignSystemView.swift */; };
 		AA33CA5DA217503571F612DF /* MarkdownView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7360928A32937C55B2611534 /* MarkdownView.swift */; };
 		ABD2AF0E183F49EB577D3249 /* MacOnboardingViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 673D4A873E62C0874909FABC /* MacOnboardingViews.swift */; };
 		AC4E7A7FC7E659AEF1C0A8CF /* NetworkMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CD4813CA22070B5E04AEB9E /* NetworkMonitor.swift */; };
@@ -137,6 +138,23 @@
 		F863340B95E8A4CC562743E0 /* DailyOverviewWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0FAE723C18006A6DF4513588 /* DailyOverviewWidget.swift */; };
 		F963FEEC020989C445DC5402 /* MacLocalModelsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 552779E6169172C69CAEBC68 /* MacLocalModelsView.swift */; };
 		FCEABFB96E6A7260C424B81D /* VoiceTokenService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2977DD8B89938FCDC477CFD /* VoiceTokenService.swift */; };
+		A100A100A100A100A100A100 /* MacToastOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = B100B100B100B100B100B100 /* MacToastOverlay.swift */; };
+		A200A200A200A200A200A200 /* CompoundIntentParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200B200B200B200B200B200 /* CompoundIntentParser.swift */; };
+		A300A300A300A300A300A300 /* LocalTaskParsingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B300B300B300B300B300B300 /* LocalTaskParsingService.swift */; };
+		C001AAAAAAAAAAAAAAAAAA01 /* MacActionPatterns.swift in Sources */ = {isa = PBXBuildFile; fileRef = D001AAAAAAAAAAAAAAAAAA01 /* MacActionPatterns.swift */; };
+		C002AAAAAAAAAAAAAAAAAA02 /* TaskSmartSort.swift in Sources */ = {isa = PBXBuildFile; fileRef = D002AAAAAAAAAAAAAAAAAA02 /* TaskSmartSort.swift */; };
+		C003AAAAAAAAAAAAAAAAAA03 /* SnoozeOption.swift in Sources */ = {isa = PBXBuildFile; fileRef = D003AAAAAAAAAAAAAAAAAA03 /* SnoozeOption.swift */; };
+		C004AAAAAAAAAAAAAAAAAA04 /* WakeWordService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D004AAAAAAAAAAAAAAAAAA04 /* WakeWordService.swift */; };
+		C005AAAAAAAAAAAAAAAAAA05 /* VoiceSessionCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D005AAAAAAAAAAAAAAAAAA05 /* VoiceSessionCoordinator.swift */; };
+		C006AAAAAAAAAAAAAAAAAA06 /* HotkeyService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D006AAAAAAAAAAAAAAAAAA06 /* HotkeyService.swift */; };
+		C007AAAAAAAAAAAAAAAAAA07 /* AudioInputBroker.swift in Sources */ = {isa = PBXBuildFile; fileRef = D007AAAAAAAAAAAAAAAAAA07 /* AudioInputBroker.swift */; };
+		C008AAAAAAAAAAAAAAAAAA08 /* VoiceToolRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = D008AAAAAAAAAAAAAAAAAA08 /* VoiceToolRegistry.swift */; };
+		C009AAAAAAAAAAAAAAAAAA09 /* VoiceSystemPromptClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = D009AAAAAAAAAAAAAAAAAA09 /* VoiceSystemPromptClient.swift */; };
+		C010AAAAAAAAAAAAAAAAAA10 /* MacSignatureStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D010AAAAAAAAAAAAAAAAAA10 /* MacSignatureStore.swift */; };
+		C011AAAAAAAAAAAAAAAAAA11 /* MacEventEditSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D011AAAAAAAAAAAAAAAAAA11 /* MacEventEditSheet.swift */; };
+		C012AAAAAAAAAAAAAAAAAA12 /* VoiceStatusWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = D012AAAAAAAAAAAAAAAAAA12 /* VoiceStatusWindow.swift */; };
+		C013AAAAAAAAAAAAAAAAAA13 /* MacSharedConversationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D013AAAAAAAAAAAAAAAAAA13 /* MacSharedConversationView.swift */; };
+		C014AAAAAAAAAAAAAAAAAA14 /* MacSenderIconRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = D014AAAAAAAAAAAAAAAAAA14 /* MacSenderIconRegistry.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -265,6 +283,7 @@
 		BB02000000000000000C4103 /* UnifiedCalendarService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedCalendarService.swift; sourceTree = "<group>"; };
 		BB02000000000000000C4104 /* MacCalendarSourcePicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacCalendarSourcePicker.swift; sourceTree = "<group>"; };
 		BB02000000000000000C4105 /* MacCalendarAccountsList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacCalendarAccountsList.swift; sourceTree = "<group>"; };
+		BB02000000000000000C4106 /* MacDesignSystemView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacDesignSystemView.swift; sourceTree = "<group>"; };
 		BC2F71FF25248CDAA3421139 /* SmartInsightTimelineProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmartInsightTimelineProvider.swift; sourceTree = "<group>"; };
 		BC576DC4D340857DE4F44A65 /* MacMeetingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacMeetingsView.swift; sourceTree = "<group>"; };
 		BC585F2265934558433E3E36 /* AppTaskPriority.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppTaskPriority.swift; sourceTree = "<group>"; };
@@ -297,6 +316,23 @@
 		F7519142575177A0263B7A4A /* CalendarTrackpadNavigation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarTrackpadNavigation.swift; sourceTree = "<group>"; };
 		FA5AA4392C3EE1C593F697A6 /* CalendarTimelineProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarTimelineProvider.swift; sourceTree = "<group>"; };
 		FD37716E8455D21B3A4B9B88 /* FolderSyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderSyncService.swift; sourceTree = "<group>"; };
+		B100B100B100B100B100B100 /* MacToastOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacToastOverlay.swift; sourceTree = "<group>"; };
+		B200B200B200B200B200B200 /* CompoundIntentParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompoundIntentParser.swift; sourceTree = "<group>"; };
+		B300B300B300B300B300B300 /* LocalTaskParsingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalTaskParsingService.swift; sourceTree = "<group>"; };
+		D001AAAAAAAAAAAAAAAAAA01 /* MacActionPatterns.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacActionPatterns.swift; sourceTree = "<group>"; };
+		D002AAAAAAAAAAAAAAAAAA02 /* TaskSmartSort.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskSmartSort.swift; sourceTree = "<group>"; };
+		D003AAAAAAAAAAAAAAAAAA03 /* SnoozeOption.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnoozeOption.swift; sourceTree = "<group>"; };
+		D004AAAAAAAAAAAAAAAAAA04 /* WakeWordService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WakeWordService.swift; sourceTree = "<group>"; };
+		D005AAAAAAAAAAAAAAAAAA05 /* VoiceSessionCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceSessionCoordinator.swift; sourceTree = "<group>"; };
+		D006AAAAAAAAAAAAAAAAAA06 /* HotkeyService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotkeyService.swift; sourceTree = "<group>"; };
+		D007AAAAAAAAAAAAAAAAAA07 /* AudioInputBroker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioInputBroker.swift; sourceTree = "<group>"; };
+		D008AAAAAAAAAAAAAAAAAA08 /* VoiceToolRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceToolRegistry.swift; sourceTree = "<group>"; };
+		D009AAAAAAAAAAAAAAAAAA09 /* VoiceSystemPromptClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceSystemPromptClient.swift; sourceTree = "<group>"; };
+		D010AAAAAAAAAAAAAAAAAA10 /* MacSignatureStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacSignatureStore.swift; sourceTree = "<group>"; };
+		D011AAAAAAAAAAAAAAAAAA11 /* MacEventEditSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacEventEditSheet.swift; sourceTree = "<group>"; };
+		D012AAAAAAAAAAAAAAAAAA12 /* VoiceStatusWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceStatusWindow.swift; sourceTree = "<group>"; };
+		D013AAAAAAAAAAAAAAAAAA13 /* MacSharedConversationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacSharedConversationView.swift; sourceTree = "<group>"; };
+		D014AAAAAAAAAAAAAAAAAA14 /* MacSenderIconRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacSenderIconRegistry.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -381,6 +417,8 @@
 				CBA2486E15EFC7C6F22C7D19 /* MacBrandIcons.swift */,
 				A611068A14198E2651240FDA /* MacScrollStyle.swift */,
 				52580E22D0F58138E0CE848E /* MacTheme.swift */,
+				B100B100B100B100B100B100 /* MacToastOverlay.swift */,
+				D001AAAAAAAAAAAAAAAAAA01 /* MacActionPatterns.swift */,
 			);
 			path = DesignSystem;
 			sourceTree = "<group>";
@@ -464,6 +502,7 @@
 				620A8071ABFD71C08BFB844C /* MacGroupChatView.swift */,
 				27C91508CA011F9E782FC412 /* MacShareConversationPanel.swift */,
 				7360928A32937C55B2611534 /* MarkdownView.swift */,
+				D013AAAAAAAAAAAAAAAAAA13 /* MacSharedConversationView.swift */,
 			);
 			path = AI;
 			sourceTree = "<group>";
@@ -484,6 +523,7 @@
 			isa = PBXGroup;
 			children = (
 				6F4BF64F721DDA78AFF8312C /* MacVoiceChatPanel.swift */,
+				D012AAAAAAAAAAAAAAAAAA12 /* VoiceStatusWindow.swift */,
 			);
 			path = Voice;
 			sourceTree = "<group>";
@@ -495,6 +535,12 @@
 				2890D19AAEC4FF1F706709B6 /* GeminiLiveProvider.swift */,
 				5765184AD5DF2A8FCBE710CF /* VoiceProvider.swift */,
 				D2977DD8B89938FCDC477CFD /* VoiceTokenService.swift */,
+				D004AAAAAAAAAAAAAAAAAA04 /* WakeWordService.swift */,
+				D005AAAAAAAAAAAAAAAAAA05 /* VoiceSessionCoordinator.swift */,
+				D006AAAAAAAAAAAAAAAAAA06 /* HotkeyService.swift */,
+				D007AAAAAAAAAAAAAAAAAA07 /* AudioInputBroker.swift */,
+				D008AAAAAAAAAAAAAAAAAA08 /* VoiceToolRegistry.swift */,
+				D009AAAAAAAAAAAAAAAAAA09 /* VoiceSystemPromptClient.swift */,
 			);
 			path = Voice;
 			sourceTree = "<group>";
@@ -591,6 +637,8 @@
 			children = (
 				FD37716E8455D21B3A4B9B88 /* FolderSyncService.swift */,
 				310C9E10F9C8469F8381FE87 /* TaskSyncService.swift */,
+				B200B200B200B200B200B200 /* CompoundIntentParser.swift */,
+				B300B300B300B300B300B300 /* LocalTaskParsingService.swift */,
 			);
 			path = Tasks;
 			sourceTree = "<group>";
@@ -601,6 +649,7 @@
 				EC7F6BC356E4ECE3D50717F5 /* MacEmailComposeView.swift */,
 				BF20EABA4B082AA168D3DDF7 /* MacEmailInboxView.swift */,
 				9B1DA8871127C8B42C32B686 /* MacEmailThreadView.swift */,
+				D014AAAAAAAAAAAAAAAAAA14 /* MacSenderIconRegistry.swift */,
 			);
 			path = Email;
 			sourceTree = "<group>";
@@ -627,6 +676,7 @@
 			isa = PBXGroup;
 			children = (
 				90565199B1A829021602D8C0 /* EmailService.swift */,
+				D010AAAAAAAAAAAAAAAAAA10 /* MacSignatureStore.swift */,
 			);
 			path = Email;
 			sourceTree = "<group>";
@@ -663,6 +713,7 @@
 			isa = PBXGroup;
 			children = (
 				BB02000000000000000C4105 /* MacCalendarAccountsList.swift */,
+				BB02000000000000000C4106 /* MacDesignSystemView.swift */,
 				552779E6169172C69CAEBC68 /* MacLocalModelsView.swift */,
 				9D1039835BD7B82F4F126EC4 /* MacSettingsView.swift */,
 			);
@@ -691,6 +742,7 @@
 				F7519142575177A0263B7A4A /* CalendarTrackpadNavigation.swift */,
 				BB02000000000000000C4104 /* MacCalendarSourcePicker.swift */,
 				0977C553BCC4593120370036 /* MacCalendarView.swift */,
+				D011AAAAAAAAAAAAAAAAAA11 /* MacEventEditSheet.swift */,
 			);
 			path = Calendar;
 			sourceTree = "<group>";
@@ -778,6 +830,8 @@
 				4BD152C78EA2F5515F84D973 /* TaskSortOrder.swift */,
 				347B2B771EF16298AC5CBCF6 /* TaskStatus.swift */,
 				3A6E6D9EAB8380C6BE5719C3 /* TaskViewMode.swift */,
+				D002AAAAAAAAAAAAAAAAAA02 /* TaskSmartSort.swift */,
+				D003AAAAAAAAAAAAAAAAAA03 /* SnoozeOption.swift */,
 			);
 			path = Domain;
 			sourceTree = "<group>";
@@ -997,6 +1051,7 @@
 				AA02000000000000000C4103 /* UnifiedCalendarService.swift in Sources */,
 				AA02000000000000000C4104 /* MacCalendarSourcePicker.swift in Sources */,
 				AA02000000000000000C4105 /* MacCalendarAccountsList.swift in Sources */,
+				AA02000000000000000C4106 /* MacDesignSystemView.swift in Sources */,
 				3B8D7A98DF2A4ACFEA4A675E /* CalendarTimeGridView.swift in Sources */,
 				CB7E7A3831E2B1DADD8BAF8B /* CalendarTrackpadNavigation.swift in Sources */,
 				730D9396590BDEC6162F3EBE /* CardViews.swift in Sources */,
@@ -1090,6 +1145,23 @@
 				D21511E162DDB8AF315EDFD5 /* OllamaInferenceService.swift in Sources */,
 				DD3C97FAD311A498D893E819 /* MLXInferenceService.swift in Sources */,
 				1E0EE2E6C66FBA61E72C694D /* ModelDownloadService.swift in Sources */,
+				A100A100A100A100A100A100 /* MacToastOverlay.swift in Sources */,
+				A200A200A200A200A200A200 /* CompoundIntentParser.swift in Sources */,
+				A300A300A300A300A300A300 /* LocalTaskParsingService.swift in Sources */,
+				C001AAAAAAAAAAAAAAAAAA01 /* MacActionPatterns.swift in Sources */,
+				C002AAAAAAAAAAAAAAAAAA02 /* TaskSmartSort.swift in Sources */,
+				C003AAAAAAAAAAAAAAAAAA03 /* SnoozeOption.swift in Sources */,
+				C004AAAAAAAAAAAAAAAAAA04 /* WakeWordService.swift in Sources */,
+				C005AAAAAAAAAAAAAAAAAA05 /* VoiceSessionCoordinator.swift in Sources */,
+				C006AAAAAAAAAAAAAAAAAA06 /* HotkeyService.swift in Sources */,
+				C007AAAAAAAAAAAAAAAAAA07 /* AudioInputBroker.swift in Sources */,
+				C008AAAAAAAAAAAAAAAAAA08 /* VoiceToolRegistry.swift in Sources */,
+				C009AAAAAAAAAAAAAAAAAA09 /* VoiceSystemPromptClient.swift in Sources */,
+				C010AAAAAAAAAAAAAAAAAA10 /* MacSignatureStore.swift in Sources */,
+				C011AAAAAAAAAAAAAAAAAA11 /* MacEventEditSheet.swift in Sources */,
+				C012AAAAAAAAAAAAAAAAAA12 /* VoiceStatusWindow.swift in Sources */,
+				C013AAAAAAAAAAAAAAAAAA13 /* MacSharedConversationView.swift in Sources */,
+				C014AAAAAAAAAAAAAAAAAA14 /* MacSenderIconRegistry.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

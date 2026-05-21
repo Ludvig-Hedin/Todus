@@ -44,7 +44,7 @@ struct CalendarNavBar: View {
 
             if showTodayButton {
                 Button {
-                    withAnimation(.easeOut(duration: 0.2)) { onToday() }
+                    withAnimation(AppTheme.Motion.base) { onToday() }
                 } label: {
                     if todayUsesIconOnly {
                         Image(systemName: "calendar.badge.clock")
@@ -109,7 +109,7 @@ struct CalendarNavBar: View {
         let cal = Calendar.current
         let animated = viewMode != .month
         if animated {
-            withAnimation(.easeOut(duration: 0.2)) {
+            withAnimation(AppTheme.Motion.base) {
                 applyNavigation(offset: offset, cal: cal)
             }
         } else {

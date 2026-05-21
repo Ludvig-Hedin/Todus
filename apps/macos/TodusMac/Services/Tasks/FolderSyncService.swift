@@ -104,13 +104,34 @@ final class FolderSyncService {
             }
 
             do {
-                let _: FolderSyncResponse = try await apiClient.trpcMutation(
+                let response: FolderSyncResponse = try await apiClient.trpcMutation(
                     "folders.sync",
                     input: FolderSyncRequest(mutations: payloads)
                 )
+
+                // Mirror TaskSyncService: the server only confirms what it actually
+                // accepted via `syncedIds`. Anything the server *didn't* echo back
+                // is silently dropped today — log a warning and requeue so it gets
+                // retried on the next attempt rather than being lost.
+                let syncedSet = Set(response.syncedIds)
+                let payloadIDs = payloads.map(\.id)
+
+                let unsynced = zip(batch, payloadIDs).filter { !syncedSet.contains($0.1) }.map { $0.0 }
+                if !unsynced.isEmpty {
+                    AppLogger.shared.log(
+                        "[FolderSyncService] server did not confirm \(unsynced.count) of \(batch.count) folder mutation(s); requeuing"
+                    )
+                    queue.insert(contentsOf: unsynced, at: 0)
+                    // Stop draining so we don't immediately hot-loop on the same
+                    // batch; the next enqueue() or retryPending() will pick it up.
+                    break
+                }
             } catch {
                 // Network / server error — requeue the batch so retryPending() can replay it.
                 queue.insert(contentsOf: batch, at: 0)
+                AppLogger.shared.log(
+                    "[FolderSyncService] sync failed; requeued \(batch.count) mutation(s): \(error.localizedDescription)"
+                )
                 // Stop draining on failure to avoid a hot retry loop against a down server.
                 break
             }

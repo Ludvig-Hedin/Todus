@@ -72,11 +72,71 @@ struct BoardTaskCard: View {
         // Long-press context menu for quick actions
         .contextMenu {
             Button {
-                withAnimation(.snappy(duration: 0.22)) {
+                onOpenDetails()
+            } label: {
+                Label("Edit", systemImage: "pencil")
+            }
+
+            Button {
+                withAnimation(AppTheme.Motion.base) {
                     services.captureService.toggleCompletion(task, in: modelContext)
                 }
             } label: {
                 Label(task.completed ? "Restore" : "Mark as Done", systemImage: task.completed ? "arrow.uturn.backward" : "checkmark.circle")
+            }
+
+            Divider()
+
+            Button {
+                UIPasteboard.general.string = task.title
+            } label: {
+                Label("Copy title", systemImage: "doc.on.doc")
+            }
+            if !task.taskDescription.isEmpty && task.taskDescription != task.title {
+                Button {
+                    UIPasteboard.general.string = task.taskDescription
+                } label: {
+                    Label("Copy description", systemImage: "text.quote")
+                }
+            }
+            Button {
+                let box = task.completed ? "- [x]" : "- [ ]"
+                UIPasteboard.general.string = "\(box) \(task.title)"
+            } label: {
+                Label("Copy as Markdown", systemImage: "checkmark.square")
+            }
+            Button {
+                services.captureService.captureInStatus(
+                    title: task.title,
+                    status: task.status,
+                    folder: task.folder,
+                    in: modelContext
+                )
+            } label: {
+                Label("Duplicate", systemImage: "plus.square.on.square")
+            }
+
+            // Priority submenu — same as list row so the surface parity holds.
+            Menu {
+                ForEach(AppTaskPriority.allCases) { p in
+                    Button {
+                        guard p != task.priority else { return }
+                        withAnimation(AppTheme.Motion.fast) {
+                            task.priority = p
+                            task.updatedAt = .now
+                            task.syncState = .pendingUpload
+                            try? modelContext.save()
+                        }
+                    } label: {
+                        if p == task.priority {
+                            Label(p.title, systemImage: "checkmark")
+                        } else {
+                            Text(p.title)
+                        }
+                    }
+                }
+            } label: {
+                Label("Priority", systemImage: "flag")
             }
 
             // Quick status change submenu
@@ -84,7 +144,7 @@ struct BoardTaskCard: View {
                 ForEach(TaskStatus.allCases) { targetStatus in
                     if targetStatus != task.status {
                         Button {
-                            withAnimation(.snappy(duration: 0.22)) {
+                            withAnimation(AppTheme.Motion.base) {
                                 services.captureService.setStatus(task, status: targetStatus, in: modelContext)
                             }
                         } label: {

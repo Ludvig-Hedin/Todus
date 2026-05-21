@@ -24,7 +24,10 @@ struct CreateSheet: View {
 
     // Email-specific secondary fields
     @State private var recipientText = ""
+    @State private var ccText = ""
+    @State private var bccText = ""
     @State private var subjectText = ""
+    @State private var showEmailCcBcc = false
 
     // Event-specific secondary fields
     @State private var locationText = ""
@@ -42,9 +45,26 @@ struct CreateSheet: View {
     // Slash command menu
     @State private var showsSlashMenu = false
 
+    /// Surfaced when calendar permission is denied or EventKit save fails so
+    /// the user can choose between saving as a task and dismissing — instead
+    /// of having a phantom task silently appear.
+    @State private var eventSaveFallbackPrompt: EventSaveFallback? = nil
+
+    private struct EventSaveFallback: Identifiable {
+        let id = UUID()
+        let title: String
+        let message: String
+        let saveAsTask: () -> Void
+    }
+
     // Keyboard tracking — MainTabView uses .ignoresSafeArea(.keyboard),
     // so we manually push the composer above the keyboard.
     @StateObject private var keyboard = KeyboardObserver()
+    /// Captured safe-area inset bottom so the composer can fall back to a sane
+    /// position on iPad split-view / external-keyboard layouts where
+    /// `keyboardFrameEndUserInfoKey` reports zero height but the system still has
+    /// a docked keyboard region. We can't rely on `keyboard.height` alone there.
+    @State private var capturedSafeAreaBottom: CGFloat = 0
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -82,8 +102,20 @@ struct CreateSheet: View {
             // Sit above the keyboard when visible, or above the tab bar (86pt).
             // max() avoids a conditional branch so SwiftUI doesn't create a
             // redundant layout pass when the keyboard height flickers to 0.
-            .padding(.bottom, max(keyboard.height + 8, 86))
+            // On iPad split-view / external keyboard cases where `keyboard.height`
+            // can briefly read 0 mid-resize, the safe-area inset bottom is the next
+            // best guess for how much space the system is reserving below us.
+            .padding(.bottom, max(keyboard.height + 8, capturedSafeAreaBottom + 8, 86))
             .animation(.spring(response: 0.38, dampingFraction: 0.82), value: keyboard.height)
+            .background(
+                GeometryReader { proxy in
+                    Color.clear
+                        .onAppear { capturedSafeAreaBottom = proxy.safeAreaInsets.bottom }
+                        .onChange(of: proxy.safeAreaInsets.bottom) { _, newValue in
+                            capturedSafeAreaBottom = newValue
+                        }
+                }
+            )
         }
         // Ignore both container and keyboard safe areas at the bottom so the
         // ZStack extends to the physical screen edge. The keyboard.height
@@ -160,12 +192,30 @@ struct CreateSheet: View {
             guard let newStart, let end = selectedEndDate, end < newStart else { return }
             selectedEndDate = newStart.addingTimeInterval(3600)
         }
+        // Symmetric guard: if the user drags the end picker before the start, snap it
+        // forward to start + 1h so they don't have to back-track. Validation still runs
+        // in `handleCreate` to catch the rare case where they actively confirm an
+        // invalid range via the date picker `Done` button.
+        .onChange(of: selectedEndDate) { _, newEnd in
+            guard let newEnd, let start = selectedDate, newEnd <= start else { return }
+            selectedEndDate = start.addingTimeInterval(3600)
+        }
         // Auto-populate end date when type switches to event
         .onChange(of: selectedType) { _, newType in
             if newType == .event, selectedDate == nil {
                 selectedDate = Date()
                 selectedEndDate = Date().addingTimeInterval(3600)
             }
+        }
+        .alert(item: $eventSaveFallbackPrompt) { fallback in
+            Alert(
+                title: Text(fallback.title),
+                message: Text(fallback.message),
+                primaryButton: .default(Text("Save as task")) {
+                    fallback.saveAsTask()
+                },
+                secondaryButton: .cancel(Text("Dismiss"))
+            )
         }
     }
 
@@ -308,9 +358,10 @@ struct CreateSheet: View {
 
     // MARK: - Secondary Fields
 
-    /// Email-specific: To + Subject text fields rendered above the body input.
+    /// Email-specific: To + CC/BCC + Subject + formatting toolbar, rendered above the body input.
     private var emailSecondaryFields: some View {
         VStack(spacing: 0) {
+            // To row with CC/BCC chevron
             HStack(spacing: 6) {
                 Text("To")
                     .font(.system(size: 13, weight: .semibold))
@@ -321,13 +372,54 @@ struct CreateSheet: View {
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
                     .keyboardType(.emailAddress)
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) { showEmailCcBcc.toggle() }
+                } label: {
+                    Image(systemName: showEmailCcBcc ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(AppTheme.mutedText)
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 9)
 
-            Divider()
-                .opacity(0.25)
+            // CC + BCC rows — revealed by chevron
+            if showEmailCcBcc {
+                Divider().opacity(0.25).padding(.horizontal, 14)
+                HStack(spacing: 6) {
+                    Text("Cc")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(AppTheme.mutedText)
+                        .frame(width: 52, alignment: .trailing)
+                    TextField("cc@example.com", text: $ccText)
+                        .font(.system(size: 14))
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                        .keyboardType(.emailAddress)
+                }
                 .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+
+                Divider().opacity(0.25).padding(.horizontal, 14)
+                HStack(spacing: 6) {
+                    Text("Bcc")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(AppTheme.mutedText)
+                        .frame(width: 52, alignment: .trailing)
+                    TextField("bcc@example.com", text: $bccText)
+                        .font(.system(size: 14))
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                        .keyboardType(.emailAddress)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+            }
+
+            Divider().opacity(0.25).padding(.horizontal, 14)
 
             HStack(spacing: 6) {
                 Text("Subject")
@@ -340,11 +432,63 @@ struct CreateSheet: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 9)
 
-            Divider()
-                .opacity(0.25)
-                .padding(.horizontal, 14)
+            Divider().opacity(0.25).padding(.horizontal, 14)
+
+            // Compact formatting toolbar
+            emailFormattingToolbar
+
+            Divider().opacity(0.25).padding(.horizontal, 14)
         }
         .padding(.top, 6)
+    }
+
+    private var emailFormattingToolbar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 2) {
+                emailFormatButton(icon: "bold") { insertEmailFormat("**", closing: "**", placeholder: "bold text") }
+                emailFormatButton(icon: "italic") { insertEmailFormat("_", closing: "_", placeholder: "italic text") }
+                emailFormatDivider()
+                emailFormatButton(icon: "textformat.size.larger") { insertEmailLinePrefix("# ") }
+                emailFormatButton(icon: "textformat.size") { insertEmailLinePrefix("## ") }
+                emailFormatDivider()
+                emailFormatButton(icon: "list.bullet") { insertEmailLinePrefix("• ") }
+                emailFormatButton(icon: "list.number") { insertEmailLinePrefix("1. ") }
+                emailFormatButton(icon: "checklist") { insertEmailLinePrefix("☐ ") }
+                emailFormatDivider()
+                emailFormatButton(icon: "quote.opening") { insertEmailLinePrefix("> ") }
+                emailFormatButton(icon: "minus") { insertEmailLinePrefix("---") }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+        }
+    }
+
+    private func emailFormatButton(icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(AppTheme.mutedText)
+                .frame(width: 32, height: 28)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func emailFormatDivider() -> some View {
+        Rectangle()
+            .fill(AppTheme.divider)
+            .frame(width: 1, height: 16)
+            .padding(.horizontal, 3)
+    }
+
+    private func insertEmailFormat(_ opening: String, closing: String, placeholder: String) {
+        let newline = text.isEmpty || text.hasSuffix("\n") ? "" : "\n"
+        text += "\(newline)\(opening)\(placeholder)\(closing)"
+    }
+
+    private func insertEmailLinePrefix(_ prefix: String) {
+        let newline = text.isEmpty || text.hasSuffix("\n") ? "" : "\n"
+        text += "\(newline)\(prefix)"
     }
 
     /// Event-specific: location field rendered below the title input.
@@ -704,7 +848,10 @@ struct CreateSheet: View {
                 .padding(.horizontal, 16)
 
                 if (isEndDate ? selectedEndDate : selectedDate) != nil {
-                    Button(role: .destructive) {
+                    // Clearing a date is reversible — using `.destructive` painted this
+                    // row red, framing it like "delete event" to users. Secondary tint
+                    // is the right semantic weight for an undo-able choice.
+                    Button {
                         if isEndDate {
                             selectedEndDate = nil
                             isShowingEndDatePicker = false
@@ -716,7 +863,8 @@ struct CreateSheet: View {
                         Label("Clear \(isEndDate ? "End Time" : "Date")", systemImage: "xmark.circle")
                             .font(.system(size: 14, weight: .semibold))
                     }
-                    .foregroundStyle(AppTheme.danger)
+                    .tint(.secondary)
+                    .foregroundStyle(.secondary)
                     .padding(.top, 12)
                 }
             }
@@ -738,9 +886,9 @@ struct CreateSheet: View {
     private var placeholderText: String {
         switch selectedType {
         case .auto:  return "Write a task, event, or email…"
-        case .task:  return "New Task"
-        case .event: return "Event title"
-        case .email: return "Message body…"
+        case .task:  return "Create a task…"
+        case .event: return "Create an event…"
+        case .email: return "Create an email…"
         }
     }
 
@@ -778,22 +926,81 @@ struct CreateSheet: View {
         let input = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !input.isEmpty || !pendingAttachments.isEmpty else { return }
 
-        let resolvedType = selectedType == .auto ? resolveAutoType(for: input) : selectedType
+        // Small confirmation haptic on send — matches AI chat send + the iOS Mail
+        // send affordance so the action feels like a deliberate dispatch rather
+        // than a silent tap.
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+
+        // Guard: an event whose end-date is before its start-date is almost always
+        // an accidental picker drag (user adjusts start past the prior end). Surface
+        // an inline alert and bail before any IO happens — the picker stays open via
+        // the eventSaveFallbackPrompt mechanism so the user can correct without losing
+        // their other field values.
+        if selectedType == .event,
+           let start = selectedDate,
+           let end = selectedEndDate,
+           end <= start {
+            eventSaveFallbackPrompt = EventSaveFallback(
+                title: "End time is before start",
+                message: "The event ends at or before it begins. Adjust the end time and try again.",
+                // No save-as-task fallback for a malformed range — the user just needs to fix the date.
+                saveAsTask: {}
+            )
+            return
+        }
+
         let attachments = pendingAttachments
         pendingAttachments = []
-        // Don't reset folder/date — lets the user batch-capture to the same context
         text = ""
 
         Task {
+            // In auto mode: check for compound intents first (e.g. "Träffa Johan kl 13 imorgon och maila honom presentationen innan")
+            if selectedType == .auto, !input.isEmpty {
+                let intents = CompoundIntentParser.parse(text: input, now: .now, locale: .current, timeZone: .current)
+                if intents.count > 1 {
+                    for (index, intent) in intents.enumerated() {
+                        let itemAttachments = index == 0 ? attachments : []
+                        switch intent.type {
+                        case .event:
+                            await createEvent(intent.title, startDate: intent.date, attachments: itemAttachments)
+                        case .task:
+                            createTask(intent.title, dueDate: intent.date ?? selectedDate, attachments: itemAttachments)
+                        case .email:
+                            if !services.showsComposeEmail {
+                                services.composeEmailSeedBody = intent.title
+                                services.composeEmailSeedAttachments = itemAttachments
+                                services.showsComposeEmail = true
+                            }
+                        }
+                    }
+                    close()
+                    return
+                }
+            }
+
+            // Single intent — use NLP-parsed date when no explicit date was selected
+            let parsed = selectedType == .auto || selectedType == .event
+                ? LocalTaskParsingService.parseImmediate(rawText: input, now: .now, locale: .current, timeZone: .current)
+                : nil
+
+            let resolvedType = selectedType == .auto ? resolveAutoType(for: input) : selectedType
+
             switch resolvedType {
             case .task:
                 createTask(input, attachments: attachments)
             case .event:
-                await createEvent(input, attachments: attachments)
+                // Use NLP-parsed date when no date was explicitly picked
+                let eventStart = selectedDate ?? parsed?.dueDate
+                let eventTitle = selectedType == .auto ? (parsed?.title ?? input) : input
+                await createEvent(eventTitle, startDate: eventStart, attachments: attachments)
             case .email:
                 services.composeEmailSeedBody = input.isEmpty ? nil : input
                 services.composeEmailSeedTo = recipientText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                     ? nil : recipientText.trimmingCharacters(in: .whitespacesAndNewlines)
+                services.composeEmailSeedCc = ccText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    ? nil : ccText.trimmingCharacters(in: .whitespacesAndNewlines)
+                services.composeEmailSeedBcc = bccText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    ? nil : bccText.trimmingCharacters(in: .whitespacesAndNewlines)
                 services.composeEmailSeedSubject = subjectText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                     ? nil : subjectText.trimmingCharacters(in: .whitespacesAndNewlines)
                 services.composeEmailSeedAttachments = attachments
@@ -805,18 +1012,18 @@ struct CreateSheet: View {
         }
     }
 
-    private func createTask(_ input: String, attachments: [String] = []) {
+    private func createTask(_ input: String, dueDate: Date? = nil, attachments: [String] = []) {
         services.captureService.capture(
             rawComposerText: input,
             attachmentNames: attachments,
             selectedFolder: selectedFolder,
-            overrideDueDate: selectedDate,
+            overrideDueDate: dueDate ?? selectedDate,
             in: modelContext
         )
     }
 
-    private func createEvent(_ input: String, attachments: [String]) async {
-        let startDate = selectedDate ?? Date()
+    private func createEvent(_ input: String, startDate: Date?, attachments: [String]) async {
+        let startDate = startDate ?? Date()
         let endDate = selectedEndDate ?? startDate.addingTimeInterval(3600)
         let hasAccess: Bool
         if services.calendarService.canCreateEvents() {
@@ -826,7 +1033,13 @@ struct CreateSheet: View {
         }
 
         guard hasAccess else {
-            createTask(input, attachments: attachments)
+            // Don't silently produce a task the user didn't ask for. Surface
+            // the permission state and let them choose.
+            eventSaveFallbackPrompt = EventSaveFallback(
+                title: "Calendar access denied",
+                message: "Todus can't add calendar events without permission. You can save this as a task instead, or grant access in Settings.",
+                saveAsTask: { createTask(input, attachments: attachments) }
+            )
             return
         }
 
@@ -841,23 +1054,30 @@ struct CreateSheet: View {
                 attachmentFilenames: attachments
             )
         } catch {
-            createTask(input, attachments: attachments)
+            eventSaveFallbackPrompt = EventSaveFallback(
+                title: "Couldn't save event",
+                message: (error as NSError).localizedDescription,
+                saveAsTask: { createTask(input, attachments: attachments) }
+            )
         }
     }
 
     private func resolveAutoType(for input: String) -> CreateItemType {
-        if detectDate(in: input) != nil { return .event }
         let lower = input.lowercased()
+        // Email keywords
         if lower.contains("mail") || lower.contains("email") || lower.contains("reply") {
             return .email
         }
+        // Classify as event only when event-like keywords are present alongside a time/date reference
+        let eventKeywords = [
+            "träffa", "träff", "möt", "möte", "lunch", "middag", "frukost",
+            "dejt", "fika", "mingel", "samtal", "presentation", "konferens",
+            "intervju", "meet", "meeting", "dinner", "breakfast", "coffee", "call with",
+        ]
+        let hasEventKeyword = eventKeywords.contains(where: lower.contains)
+        let parsed = LocalTaskParsingService.parseImmediate(rawText: input, now: .now, locale: .current, timeZone: .current)
+        if hasEventKeyword && parsed.dueDate != nil { return .event }
         return .task
-    }
-
-    private func detectDate(in text: String) -> Date? {
-        let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.date.rawValue)
-        let range = NSRange(location: 0, length: text.utf16.count)
-        return detector?.matches(in: text, options: [], range: range).first?.date
     }
 
     private func dateLabel(for date: Date) -> String {
@@ -916,14 +1136,26 @@ struct CreateSheet: View {
         let cal = Calendar.current
         let start = cal.startOfDay(for: Date())
         let tomorrow = cal.date(byAdding: .day, value: 1, to: start) ?? start
-        selectedDate = cal.date(byAdding: .hour, value: 9, to: tomorrow) ?? tomorrow
+        // Honor the user's configured workday start so an early bird or a late starter
+        // doesn't get a 9 AM reminder that doesn't match their actual schedule.
+        let hour = workdayStartHour
+        selectedDate = cal.date(byAdding: .hour, value: hour, to: tomorrow) ?? tomorrow
     }
 
     private func setDueDateToNextWeek() {
         let cal = Calendar.current
         let start = cal.startOfDay(for: Date())
         let nextWeek = cal.date(byAdding: .day, value: 7, to: start) ?? start
-        selectedDate = cal.date(byAdding: .hour, value: 9, to: nextWeek) ?? nextWeek
+        let hour = workdayStartHour
+        selectedDate = cal.date(byAdding: .hour, value: hour, to: nextWeek) ?? nextWeek
+    }
+
+    /// User's configured workday start hour (0–23). Falls back to 9 when the policy
+    /// returns something out of range so a corrupted preference can't produce an
+    /// invalid Calendar query.
+    private var workdayStartHour: Int {
+        let raw = services.assistantAutomationPolicy.workdayStartHour
+        return (0...23).contains(raw) ? raw : 9
     }
 
     // MARK: - Image Paste Handler

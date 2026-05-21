@@ -888,8 +888,53 @@ const api = new Hono<HonoContext>()
     // Stored in Keychain on native apps, used only to obtain fresh JWTs.
     const refreshToken = session.session.token;
 
-    // Build the deep link URL with both tokens for the native app
-    const redirectUrl = c.req.query('redirect') || 'todus://auth-callback';
+    // Build the deep link URL with both tokens for the native app.
+    // SECURITY: validate redirect against an allowlist. Without this an attacker
+    // can craft `?redirect=https://evil/?` and exfiltrate JWT + 90-day refresh
+    // token via the URL.
+    const requestedRedirect = c.req.query('redirect');
+    const isAllowedRedirect = (raw: string): boolean => {
+      try {
+        const u = new URL(raw);
+        if (u.protocol === 'todus:' && (u.host === 'auth-callback' || u.host === 'link-callback')) {
+          return true;
+        }
+        if (u.protocol === 'https:' || u.protocol === 'http:') {
+          // Reuse Better Auth's trustedOrigins — same set used for session origin checks.
+          const allowed = new Set(
+            [
+              'https://app.todus.app',
+              'https://api.todus.app',
+              'https://todus.app',
+              'https://todus-production.ludvighedin15.workers.dev',
+              'https://todus-server-v1-production.ludvighedin15.workers.dev',
+              'https://zero-server-v1-production.ludvighedin15.workers.dev',
+              'http://localhost:3000',
+              'http://localhost:8787',
+              env.VITE_PUBLIC_APP_URL,
+              env.VITE_PUBLIC_BACKEND_URL,
+            ]
+              .filter(Boolean)
+              .map((o) => {
+                try {
+                  return new URL(o!).origin;
+                } catch {
+                  return null;
+                }
+              })
+              .filter((o): o is string => o !== null),
+          );
+          return allowed.has(u.origin);
+        }
+        return false;
+      } catch {
+        return false;
+      }
+    };
+    const redirectUrl =
+      requestedRedirect && isAllowedRedirect(requestedRedirect)
+        ? requestedRedirect
+        : 'todus://auth-callback';
     const separator = redirectUrl.includes('?') ? '&' : '?';
     const sessionIdParam = session.session.id
       ? `&sessionId=${encodeURIComponent(session.session.id)}`
@@ -1060,7 +1105,11 @@ const api = new Hono<HonoContext>()
             id: userId,
             email,
             emailVerified: true,
-            name: '',
+            // user.name is NOT NULL and is used for transactional email
+            // greetings + avatar fallback. An empty string renders as
+            // "Welcome to Todus, !" — derive from the local-part of the
+            // address as a sensible default until the user sets one.
+            name: email.split('@')[0] || email,
             image: null,
             createdAt: now,
             updatedAt: now,
@@ -1166,69 +1215,91 @@ const api = new Hono<HonoContext>()
       refreshToken?: string;
     }>();
 
-    const { db } = createDb(env.HYPERDRIVE.connectionString);
-    const trimmedRefreshToken = refreshToken?.trim();
+    const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
+    try {
+      const trimmedRefreshToken = refreshToken?.trim();
 
-    // Try exact refreshToken match first, then fall back to any active session.
-    // Bearer token already proved identity so the fallback is safe.
-    let [activeSession] = trimmedRefreshToken
-      ? await db
+      // Try exact refreshToken match first, then fall back to any active session.
+      // Bearer token already proved identity so the fallback is safe.
+      let [activeSession] = trimmedRefreshToken
+        ? await db
+            .select({ token: session.token })
+            .from(session)
+            .where(
+              and(
+                eq(session.userId, sessionUser.id),
+                eq(session.token, trimmedRefreshToken),
+                gt(session.expiresAt, new Date()),
+              ),
+            )
+            .limit(1)
+        : [];
+
+      if (!activeSession?.token) {
+        [activeSession] = await db
+          .select({ token: session.token })
+          .from(session)
+          .where(and(eq(session.userId, sessionUser.id), gt(session.expiresAt, new Date())))
+          .orderBy(desc(session.updatedAt), desc(session.createdAt))
+          .limit(1);
+      }
+
+      // Fallback: verify the provided token belongs to this user without the expiry
+      // constraint (covers replication lag and freshly-rotated tokens).
+      if (!activeSession?.token && trimmedRefreshToken) {
+        const [ownedSession] = await db
           .select({ token: session.token })
           .from(session)
           .where(
             and(
               eq(session.userId, sessionUser.id),
               eq(session.token, trimmedRefreshToken),
-              gt(session.expiresAt, new Date()),
             ),
           )
-          .limit(1)
-      : [];
+          .limit(1);
+        if (ownedSession?.token) {
+          activeSession = { token: ownedSession.token };
+        }
+      }
 
-    if (!activeSession?.token) {
-      [activeSession] = await db
-        .select({ token: session.token })
-        .from(session)
-        .where(and(eq(session.userId, sessionUser.id), gt(session.expiresAt, new Date())))
-        .orderBy(desc(session.updatedAt), desc(session.createdAt))
-        .limit(1);
+      if (!activeSession?.token) {
+        return c.json({ error: 'No active session found for account linking.' }, 401);
+      }
+
+      const cookiePrefix = env.NODE_ENV === 'development' ? 'better-auth-dev' : 'better-auth';
+      const signedSessionToken = (
+        await serializeSignedCookie('', activeSession.token, env.BETTER_AUTH_SECRET)
+      ).replace('=', '');
+
+      const forwardedHeaders = new Headers(c.req.raw.headers);
+      forwardedHeaders.delete('authorization');
+      const existingCookies = forwardedHeaders.get('cookie');
+      forwardedHeaders.set(
+        'cookie',
+        existingCookies
+          ? `${existingCookies}; ${cookiePrefix}.session_token=${signedSessionToken}`
+          : `${cookiePrefix}.session_token=${signedSessionToken}`,
+      );
+      forwardedHeaders.set('content-type', 'application/json');
+
+      const forwardedRequest = new Request(new URL('/api/auth/link-social', c.req.url).toString(), {
+        method: 'POST',
+        headers: forwardedHeaders,
+        body: JSON.stringify({
+          provider,
+          callbackURL,
+          disableRedirect,
+          errorCallbackURL,
+          scopes,
+          requestSignUp,
+        }),
+        redirect: 'manual',
+      });
+
+      return await auth.handler(forwardedRequest);
+    } finally {
+      await conn.end();
     }
-
-    if (!activeSession?.token) {
-      return c.json({ error: 'No active session found for account linking.' }, 401);
-    }
-
-    const cookiePrefix = env.NODE_ENV === 'development' ? 'better-auth-dev' : 'better-auth';
-    const signedSessionToken = (
-      await serializeSignedCookie('', activeSession.token, env.BETTER_AUTH_SECRET)
-    ).replace('=', '');
-
-    const forwardedHeaders = new Headers(c.req.raw.headers);
-    forwardedHeaders.delete('authorization');
-    const existingCookies = forwardedHeaders.get('cookie');
-    forwardedHeaders.set(
-      'cookie',
-      existingCookies
-        ? `${existingCookies}; ${cookiePrefix}.session_token=${signedSessionToken}`
-        : `${cookiePrefix}.session_token=${signedSessionToken}`,
-    );
-    forwardedHeaders.set('content-type', 'application/json');
-
-    const forwardedRequest = new Request(new URL('/api/auth/link-social', c.req.url).toString(), {
-      method: 'POST',
-      headers: forwardedHeaders,
-      body: JSON.stringify({
-        provider,
-        callbackURL,
-        disableRedirect,
-        errorCallbackURL,
-        scopes,
-        requestSignUp,
-      }),
-      redirect: 'manual',
-    });
-
-    return await auth.handler(forwardedRequest);
   })
   .on(['GET', 'POST', 'OPTIONS'], '/auth/*', async (c) => {
     const authPath = new URL(c.req.url).pathname;

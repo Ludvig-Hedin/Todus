@@ -856,30 +856,37 @@ export function CommandPalette({ children }: { children: React.ReactNode }) {
         {!commandInputValue && threads && Array.isArray(threads) && threads.length > 0 && (
           <>
             <CommandGroup heading="Recent Emails">
-              {(threads as any[]).filter(Boolean).slice(0, 4).map((thread: any) => (
-                <CommandItem
-                  key={thread.id}
-                  onSelect={() =>
-                    runCommand(() => navigate(`/mail/${currentFolder}?threadId=${thread.id}`))
-                  }
-                >
-                  <Mail className="h-4 w-4 shrink-0 opacity-60" />
-                  <div className="ml-2 flex min-w-0 flex-1 flex-col">
-                    <span className="truncate text-sm font-medium">
-                      {thread.subject || 'No Subject'}
-                    </span>
-                    <span className="text-muted-foreground truncate text-xs">
-                      {thread.from?.name || thread.from?.email || ''}
-                    </span>
-                  </div>
-                  <Badge
-                    variant="secondary"
-                    className="text-muted-foreground ml-2 shrink-0 rounded-full border-none bg-transparent text-[10px]"
-                  >
-                    Email
-                  </Badge>
-                </CommandItem>
-              ))}
+              {(threads as any[])
+                .filter(Boolean)
+                .filter((t: any) => t.subject || t.from?.name || t.from?.email || t.snippet)
+                .slice(0, 4)
+                .map((thread: any) => {
+                  const displayName = thread.from?.name || thread.from?.email || '';
+                  const displaySubject = thread.subject || thread.snippet?.slice(0, 60) || 'No Subject';
+                  return (
+                    <CommandItem
+                      key={thread.id}
+                      value={thread.id}
+                      onSelect={() =>
+                        runCommand(() => navigate(`/mail/${currentFolder}?threadId=${thread.id}`))
+                      }
+                    >
+                      <Mail className="h-4 w-4 shrink-0 opacity-60" />
+                      <div className="ml-2 flex min-w-0 flex-1 flex-col">
+                        <span className="truncate text-sm font-medium">{displaySubject}</span>
+                        {displayName && (
+                          <span className="text-muted-foreground truncate text-xs">{displayName}</span>
+                        )}
+                      </div>
+                      <Badge
+                        variant="secondary"
+                        className="text-muted-foreground ml-2 shrink-0 rounded-full border-none bg-transparent text-[10px]"
+                      >
+                        Email
+                      </Badge>
+                    </CommandItem>
+                  );
+                })}
             </CommandGroup>
             <Separator />
           </>
@@ -1012,6 +1019,7 @@ export function CommandPalette({ children }: { children: React.ReactNode }) {
               {quickSearchResults.map((thread: any) => (
                 <CommandItem
                   key={thread.id || `thread-${Math.random()}`}
+                  value={thread.id}
                   onSelect={() => {
                     runCommand(() => {
                       try {
@@ -1028,10 +1036,10 @@ export function CommandPalette({ children }: { children: React.ReactNode }) {
                 >
                   <Mail className="h-4 w-4 opacity-60" />
                   <div className="ml-2 flex flex-1 flex-col overflow-hidden">
-                    <span className="truncate font-medium">{thread.subject || 'No Subject'}</span>
+                    <span className="truncate font-medium">{thread.subject || thread.snippet?.slice(0, 60) || 'No Subject'}</span>
                     <span className="text-muted-foreground truncate text-xs">
-                      {thread.from?.name || thread.from?.email || 'Unknown sender'} -{' '}
-                      {thread.snippet || ''}
+                      {thread.from?.name || thread.from?.email || 'Unknown sender'}
+                      {thread.snippet ? ` — ${thread.snippet}` : ''}
                     </span>
                   </div>
                 </CommandItem>

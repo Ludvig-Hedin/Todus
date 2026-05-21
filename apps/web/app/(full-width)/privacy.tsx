@@ -439,7 +439,7 @@ const sections = [
           </a>
 
           <a
-            href="https://github.com/todus-app"
+            href="https://github.com/Ludvig-Hedin/Todus"
             className="inline-flex items-center text-blue-600 hover:text-blue-800"
           >
             <GithubIcon className="mr-2 h-4 w-4" />

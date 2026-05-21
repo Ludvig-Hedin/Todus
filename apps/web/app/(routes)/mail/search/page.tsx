@@ -13,7 +13,7 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useTRPC } from '@/providers/query-provider';
 import { useState, useEffect, useRef } from 'react';
 import type { Outputs } from '@zero/server/trpc';
-import { Link, useNavigate } from 'react-router';
+import { Link, redirect, useNavigate } from 'react-router';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -29,7 +29,7 @@ type Task = Outputs['tasks']['list']['tasks'][number];
 // Auth guard
 export async function clientLoader({ request }: Route.ClientLoaderArgs) {
   const session = await authProxy.api.getSession({ headers: request.headers });
-  if (!session) return Response.redirect(`${import.meta.env.VITE_PUBLIC_APP_URL}/login`);
+  if (!session) throw redirect('/login');
   return {};
 }
 

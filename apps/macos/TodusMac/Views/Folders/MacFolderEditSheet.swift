@@ -18,6 +18,12 @@ struct MacFolderEditSheet: View {
     @State private var name: String = ""
     @State private var selectedColor: String?
     @State private var selectedIcon: String?
+    @State private var isSaving = false
+    // Track which pickers the user actually touched in edit mode so the PATCH
+    // only sends fields the user changed. Hydration on `.onAppear` does not
+    // flip these — only the picker buttons do.
+    @State private var didChangeColor = false
+    @State private var didChangeIcon = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -46,6 +52,7 @@ struct MacFolderEditSheet: View {
                         let isSelected = selectedColor?.lowercased() == hex.lowercased()
                         Button {
                             selectedColor = hex
+                            didChangeColor = true
                         } label: {
                             Circle()
                                 .fill(Color(hex: hex) ?? MacTheme.textSecondary)
@@ -60,6 +67,7 @@ struct MacFolderEditSheet: View {
                     }
                     Button {
                         selectedColor = nil
+                        didChangeColor = true
                     } label: {
                         ZStack {
                             Circle()
@@ -92,6 +100,7 @@ struct MacFolderEditSheet: View {
                         }()
                         Button {
                             selectedIcon = symbol
+                            didChangeIcon = true
                         } label: {
                             Image(systemName: symbol)
                                 .font(.system(size: 14, weight: .semibold))
@@ -109,14 +118,18 @@ struct MacFolderEditSheet: View {
 
             HStack {
                 Spacer()
-                Button("Save") { Task { await save() } }
+                Button(isSaving ? "Saving…" : "Save") { Task { await save() } }
                     .keyboardShortcut(.defaultAction)
-                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(
+                        isSaving
+                            || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    )
             }
         }
         .padding(20)
         .frame(width: 420)
         .background(MacTheme.contentBackground)
+        .focusEffectDisabled()
         .onAppear(perform: hydrate)
     }
 
@@ -142,6 +155,11 @@ struct MacFolderEditSheet: View {
     private func save() async {
         let cleaned = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleaned.isEmpty else { return }
+        // Prevent double-submit when the Save button is mashed before the
+        // network round-trip completes.
+        guard !isSaving else { return }
+        isSaving = true
+        defer { isSaving = false }
 
         switch mode {
         case .create:
@@ -154,11 +172,15 @@ struct MacFolderEditSheet: View {
                 onSaved?(folder)
             }
         case .edit(let folder):
+            // Double-optional: .none ⇒ leave field alone; .some(value) ⇒ overwrite
+            // with `value` (which itself may be nil to clear the field).
+            let colorArg: String?? = didChangeColor ? .some(selectedColor) : .none
+            let iconArg: String?? = didChangeIcon ? .some(selectedIcon) : .none
             await services.updateSharedFolder(
                 folder,
                 name: cleaned,
-                colorHex: .some(selectedColor),
-                iconName: .some(selectedIcon),
+                colorHex: colorArg,
+                iconName: iconArg,
                 in: modelContext
             )
             onSaved?(folder)

@@ -423,7 +423,14 @@ const syncConnectionFromAccount = async (
         welcomeEmailSent: true,
       });
 
-      if (env.NODE_ENV === 'production') {
+      // Onboarding drip campaign is disabled until an explicit opt-in UX is
+      // built at signup. Enrolling every new user without consent is risky
+      // for deliverability (spam complaints) and compliance (CAN-SPAM/GDPR).
+      // Re-enable by setting ENABLE_ONBOARDING_CAMPAIGN=true after wiring
+      // an opt-in checkbox or post-signup confirmation step.
+      const onboardingCampaignEnabled =
+        (env as { ENABLE_ONBOARDING_CAMPAIGN?: string }).ENABLE_ONBOARDING_CAMPAIGN === 'true';
+      if (env.NODE_ENV === 'production' && onboardingCampaignEnabled) {
         await scheduleCampaign({
           userId: account.userId,
           address: userInfo.address,
@@ -686,7 +693,10 @@ export const createAuth = () => {
       },
     },
     emailVerification: {
-      sendOnSignUp: false,
+      // Must be true: emailAndPassword.requireEmailVerification blocks sign-in
+      // until the user verifies. With sendOnSignUp false, no email is dispatched
+      // by the sign-up endpoint and the user is permanently locked out.
+      sendOnSignUp: true,
       autoSignInAfterVerification: true,
       sendVerificationEmail: async ({ user, token }) => {
         const verificationUrl = `${env.VITE_PUBLIC_APP_URL}/api/auth/verify-email?token=${token}&callbackURL=/settings/connections`;
@@ -782,34 +792,7 @@ export const createAuth = () => {
 const createAuthConfig = () => {
   const cache = redis();
   const { db } = createDb(env.HYPERDRIVE.connectionString);
-  const toOrigin = (input: string) => {
-    try {
-      return new URL(input).origin;
-    } catch {
-      return input;
-    }
-  };
-  const trustedOrigins = Array.from(
-    new Set(
-      [
-        'https://app.todus.app',
-        'https://api.todus.app',
-        'https://todus.app',
-        'https://todus.app',
-        'https://todus-production.ludvighedin15.workers.dev',
-        'https://todus-server-v1-production.ludvighedin15.workers.dev',
-        'https://zero-server-v1-production.ludvighedin15.workers.dev',
-        'http://localhost:3000',
-        'http://localhost:8787',
-        toOrigin(env.VITE_PUBLIC_APP_URL),
-        toOrigin(env.VITE_PUBLIC_BACKEND_URL),
-        'todus://auth-callback',
-        'todus://link-callback',
-        // Required for Apple Sign-in ID token validation flows
-        'https://appleid.apple.com',
-      ].filter(Boolean),
-    ),
-  );
+  const trustedOrigins = getTrustedOrigins(env);
 
   return {
     database: drizzleAdapter(db, { provider: 'pg' }),
@@ -875,11 +858,64 @@ const createAuthConfig = () => {
       onError: (error) => {
         console.error('API Error', error);
       },
-      errorURL: `${env.VITE_PUBLIC_APP_URL}/login`,
+      // Strip any trailing slash from VITE_PUBLIC_APP_URL so we don't end up
+      // with `https://todus.app//login` when the env value is set with a
+      // trailing slash.
+      errorURL: `${(env.VITE_PUBLIC_APP_URL ?? '').replace(/\/+$/, '')}/login`,
       throw: true,
     },
   } satisfies BetterAuthOptions;
 };
+
+/**
+ * Single source of truth for trusted origins. Imported by both Better Auth
+ * (CSRF check) and the mobile-token redirect validator in main.ts. Keeping
+ * the list in one place prevents drift — adding an origin here automatically
+ * covers both the auth and the mobile-token paths.
+ */
+export function getTrustedOrigins(env: {
+  VITE_PUBLIC_APP_URL?: string;
+  VITE_PUBLIC_BACKEND_URL?: string;
+  ADDITIONAL_TRUSTED_ORIGINS?: string;
+}): string[] {
+  const toOrigin = (input: string | undefined) => {
+    if (!input) return '';
+    try {
+      return new URL(input).origin;
+    } catch {
+      return input;
+    }
+  };
+  // Preview/branch deploys (e.g. pr-123.todus-production.ludvighedin15.workers.dev)
+  // would otherwise hit Better Auth's CSRF check and fail with cryptic 403s.
+  // Allow callers (Wrangler env, dotenv) to pass extra origins as a
+  // comma-separated list via ADDITIONAL_TRUSTED_ORIGINS.
+  const additional = (env.ADDITIONAL_TRUSTED_ORIGINS ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map(toOrigin);
+  return Array.from(
+    new Set(
+      [
+        'https://app.todus.app',
+        'https://api.todus.app',
+        'https://todus.app',
+        'https://todus-production.ludvighedin15.workers.dev',
+        'https://todus-server-v1-production.ludvighedin15.workers.dev',
+        'https://zero-server-v1-production.ludvighedin15.workers.dev',
+        'http://localhost:3000',
+        'http://localhost:8787',
+        toOrigin(env.VITE_PUBLIC_APP_URL),
+        toOrigin(env.VITE_PUBLIC_BACKEND_URL),
+        ...additional,
+        'todus://auth-callback',
+        'todus://link-callback',
+        'https://appleid.apple.com',
+      ].filter(Boolean),
+    ),
+  );
+}
 
 export const createSimpleAuth = () => {
   return betterAuth(createAuthConfig());

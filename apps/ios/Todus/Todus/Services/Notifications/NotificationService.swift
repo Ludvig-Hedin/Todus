@@ -94,6 +94,14 @@ final class NotificationService {
         guard isAuthorized else { return }
         guard fireDate > Date() else { return }
 
+        // Always cancel the prior pending request for this task ID before scheduling.
+        // `center.add` with the same identifier already replaces a pending request,
+        // but a previously-fired (delivered) notification with the same identifier
+        // is not auto-removed — explicit cancel keeps stale reminders out of the
+        // tray when a user reschedules right around the original fire time.
+        center.removePendingNotificationRequests(withIdentifiers: ["task-\(taskID)"])
+        center.removeDeliveredNotifications(withIdentifiers: ["task-\(taskID)"])
+
         let content = UNMutableNotificationContent()
         content.title = "Task Due Soon"
         content.body = title

@@ -164,6 +164,11 @@ final class GroupChatService {
             "groups.listMessages",
             input: Input(groupId: groupId, limit: 50)
         )
+        // Don't write back results if the task was cancelled (e.g. user
+        // switched groups while the request was in flight). Otherwise stale
+        // messages from the previous group would briefly appear in the new
+        // group's view.
+        if Task.isCancelled { return }
         currentMessages = page.messages
     }
 
@@ -195,6 +200,11 @@ final class GroupChatService {
                 do {
                     try await self.loadMessages(groupId: groupId)
                 } catch { }
+                // Bail before the next iteration if the user switched groups
+                // while loadMessages was awaiting. Without this we'd sleep
+                // for 5s and then issue another query against the old groupId,
+                // overwriting the freshly-loaded current group's messages.
+                if Task.isCancelled { break }
                 try? await Task.sleep(for: .seconds(5))
             }
             await MainActor.run { [weak self] in

@@ -74,8 +74,8 @@ struct MacAuthView: View {
             .padding(.bottom, 40)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .animation(.snappy(duration: 0.25), value: otpPendingEmail)
-        .animation(.snappy(duration: 0.3), value: authService.lastErrorMessage != nil)
+        .animation(MacTheme.Motion.base, value: otpPendingEmail)
+        .animation(MacTheme.Motion.slow, value: authService.lastErrorMessage != nil)
     }
 
     /// Extracts the pending email if in OTP state
@@ -156,8 +156,16 @@ struct MacAuthView: View {
                 )
                 .focusEffectDisabled()
                 .onChange(of: code) { _, newValue in
-                    if newValue.count >= expectedCodeLength {
-                        Task { await authService.verifyEmailOTP(code: newValue) }
+                    // Strip non-digits and cap at the expected code length so pasted
+                    // strings (e.g. "Code: 123 456") collapse to "123456" and any
+                    // trailing characters don't trigger a verify with garbage.
+                    let sanitized = String(newValue.filter(\.isNumber).prefix(expectedCodeLength))
+                    if sanitized != newValue {
+                        code = sanitized
+                        return
+                    }
+                    if sanitized.count >= expectedCodeLength {
+                        Task { await authService.verifyEmailOTP(code: sanitized) }
                     }
                 }
                 .onAppear {

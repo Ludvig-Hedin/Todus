@@ -102,7 +102,11 @@ export const trpcClient = createTRPCClient<AppRouter>({
       transformer: superjson,
       url: getUrl(),
       methodOverride: 'POST',
-      maxItems: 1,
+      // `maxItems: 1` disables batching entirely. The Drafts folder renders
+      // `useDraft(message.id)` per row, so on a folder with 100 drafts that
+      // becomes 100 separate HTTP requests. Allow up to 10 procedures per
+      // batched POST — keeps payloads small while collapsing per-row queries.
+      maxItems: 10,
       fetch: (url, options) =>
         fetch(url, { ...(options as RequestInit), credentials: 'include' }).then((res) => {
           const currentPath = new URL(window.location.href).pathname;
@@ -137,19 +141,33 @@ export function QueryProvider({
         maxAge: 1000 * 60 * 60 * 24, // 24 hours
       }}
       onSuccess={() => {
-        const threadQueryKey = [['mail', 'listThreads'], { type: 'infinite' }];
+        // Cap restored thread caches at 3 pages so invalidation doesn't refetch
+        // 20+ pages on every reconnect. Applies to BOTH the single-account
+        // `listThreads` infinite query AND the hand-rolled `listThreadsMulti`
+        // infinite query — unified-view power users previously kept the full
+        // N-page payload alive and paid the cost on every IDB restore.
+        const trimPages = (data: InfiniteData<unknown> | undefined) => {
+          if (!data) return data;
+          return {
+            pages: data.pages.slice(0, 3),
+            pageParams: data.pageParams.slice(0, 3),
+          };
+        };
         queryClient.setQueriesData(
-          { queryKey: threadQueryKey },
-          (data: InfiniteData<TrpcHook['mail']['listThreads']['~types']['output']>) => {
-            if (!data) return data;
-            // We only keep few pages of threads in the cache before we invalidate them
-            // invalidating will attempt to refetch every page that was in cache, if someone have too many pages in cache, it will refetch every page every time
-            // We don't want that, just keep like 3 pages (20 * 3 = 60 threads) in cache
-            return {
-              pages: data.pages.slice(0, 3),
-              pageParams: data.pageParams.slice(0, 3),
-            };
+          {
+            predicate: (query) => {
+              const key = query.queryKey as unknown[];
+              if (!Array.isArray(key) || !Array.isArray(key[0])) return false;
+              const route = key[0] as unknown[];
+              return (
+                route[0] === 'mail' &&
+                (route[1] === 'listThreads' || route[1] === 'listThreadsMulti')
+              );
+            },
           },
+          trimPages as unknown as (
+            data: InfiniteData<TrpcHook['mail']['listThreads']['~types']['output']> | undefined,
+          ) => InfiniteData<TrpcHook['mail']['listThreads']['~types']['output']> | undefined,
         );
       }}
     >

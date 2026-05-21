@@ -51,6 +51,10 @@ export default function LabelsPage() {
   };
 
   const handleDelete = async (id: string) => {
+    // Confirm before destroying a label — there is no undo path and the
+    // delete affordance is a small icon-only button inside a hover toolbar,
+    // easy to click accidentally.
+    if (typeof window !== 'undefined' && !window.confirm('Delete this label?')) return;
     toast.promise(deleteLabel({ id }), {
       loading: m['common.labels.deletingLabel'](),
       success: m['common.labels.deleteLabelSuccess'](),
@@ -95,7 +99,11 @@ export default function LabelsPage() {
           <ScrollArea className="h-full pr-4">
             <div className="space-y-4">
               {isLoading && !error ? (
-                <div className="flex h-32 items-center justify-center">
+                <div
+                  className="flex h-32 items-center justify-center"
+                  role="status"
+                  aria-label="Loading labels"
+                >
                   <div className="h-4 w-4 animate-spin rounded-full border-2 border-neutral-900 border-t-transparent dark:border-white dark:border-t-transparent" />
                 </div>
               ) : error ? (
@@ -131,6 +139,7 @@ export default function LabelsPage() {
                                 size="icon"
                                 className="h-6 w-6 [&_svg]:size-3.5"
                                 onClick={() => handleEdit(label)}
+                                aria-label={`Edit label ${label.name}`}
                               >
                                 <Pencil className="text-[#898989]" />
                               </Button>
@@ -146,6 +155,7 @@ export default function LabelsPage() {
                                 size="icon"
                                 className="h-6 w-6 hover:bg-[#FDE4E9] dark:hover:bg-[#411D23] [&_svg]:size-3.5"
                                 onClick={() => handleDelete(label.id!)}
+                                aria-label={`Delete label ${label.name}`}
                               >
                                 <Bin className="fill-[#F43F5E]" />
                               </Button>

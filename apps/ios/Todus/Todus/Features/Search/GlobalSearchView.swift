@@ -128,6 +128,7 @@ struct GlobalSearchView: View {
                         .foregroundStyle(AppTheme.mutedText)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Clear search")
                 .minTouchTarget()
             }
         }

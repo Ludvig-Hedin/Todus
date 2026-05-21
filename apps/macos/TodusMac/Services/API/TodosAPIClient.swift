@@ -83,7 +83,9 @@ final class TodosAPIClient {
                let dataObj = result["data"] as? [String: Any],
                let json = dataObj["json"] {
                 do {
-                    let jsonData = try JSONSerialization.data(withJSONObject: json)
+                    // Use the null-/fragment-safe re-encoder so a single `null` or primitive
+                    // result inside a batch can't crash the whole call.
+                    let jsonData = try Self.serializeJSONValue(json)
                     let decoded = try JSONDecoder.apiDecoder.decode(Output.self, from: jsonData)
                     out.append(.success(decoded))
                 } catch {
@@ -180,12 +182,27 @@ final class TodosAPIClient {
            let result = trpcResponse["result"] as? [String: Any],
            let dataObj = result["data"] as? [String: Any],
            let json = dataObj["json"] {
-            let jsonData = try JSONSerialization.data(withJSONObject: json)
+            let jsonData = try Self.serializeJSONValue(json)
             return try JSONDecoder.apiDecoder.decode(T.self, from: jsonData)
         }
 
         // Fallback: try decoding the whole response (e.g. for endpoints not wrapped in tRPC envelope)
         return try JSONDecoder.apiDecoder.decode(T.self, from: data)
+    }
+
+    /// Re-encodes a value extracted from `dataObj["json"]` back to `Data`.
+    ///
+    /// `JSONSerialization.data(withJSONObject:)` throws an *uncatchable* Objective-C
+    /// `NSInvalidArgumentException` when given `NSNull` or any primitive (string/number/bool)
+    /// at the top level — this is what crashed the app for void-returning mutations like
+    /// `mail.forceSync` whose tRPC payload is `{ json: null }`. Special-case null to a `{}`
+    /// stand-in so empty `Decodable` structs decode cleanly, and use `.fragmentsAllowed`
+    /// for the rest so primitive returns (e.g. a bare string id) round-trip safely.
+    private static func serializeJSONValue(_ value: Any) throws -> Data {
+        if value is NSNull {
+            return try JSONSerialization.data(withJSONObject: [:] as [String: Any])
+        }
+        return try JSONSerialization.data(withJSONObject: value, options: [.fragmentsAllowed])
     }
 
     /// Builds a URLRequest with current bearer token + session id. Called per-attempt so we

@@ -12,6 +12,7 @@ final class MacAppServices {
     private enum Keys {
         static let contextAboutYou = "MacApp.contextAboutYou"
         static let customInstructions = "MacApp.customInstructions"
+        static let location = "MacApp.location"
         static let assistantAutomationPolicy = "MacApp.assistantAutomationPolicy"
         static let calendarPreferences = "MacApp.calendarPreferences"
         static let startupView = "MacApp.startupView"
@@ -27,6 +28,13 @@ final class MacAppServices {
         static let remindersSyncDirection = "MacApp.remindersSyncDirection"
         /// Shared with iOS so one account’s preference can match across devices if desired.
         static let developerModeEnabled = "TaskApp.developerModeEnabled"
+        /// Voice assistant: always-listening wake-word toggle. Defaults to OFF —
+        /// the always-on mic is opt-in to keep the first-launch experience
+        /// non-creepy and to avoid a permission prompt the user didn't ask for.
+        static let voiceWakeWordEnabled = "Voice.WakeWordEnabled"
+        /// Voice assistant: master enable. Hotkey and wake registration only run
+        /// when this is true.
+        static let voiceAssistantEnabled = "Voice.AssistantEnabled"
     }
 
     let authService: AuthService
@@ -42,6 +50,11 @@ final class MacAppServices {
     let notificationService: MacNotificationService
     let aiChatService: MacAIChatService
     let voiceTokenService: VoiceTokenService
+    let voiceSystemPromptClient: VoiceSystemPromptClient
+    let audioInputBroker: AudioInputBroker
+    let hotkeyService: HotkeyService
+    let wakeWordService: WakeWordService
+    let voiceCoordinator: VoiceSessionCoordinator
     let shareConversationService: ShareConversationService
     let groupChatService: GroupChatService
     let meetingsService: MeetingsService
@@ -79,6 +92,11 @@ final class MacAppServices {
     var showsAssistantPanel = false
     var isSyncingSharedFolders = false
 
+    /// Thread IDs for which the verification code has already been auto-copied
+    /// in this session. Prevents `MacEmailThreadView` from re-copying every
+    /// time the user re-opens the same verification email. Resets on relaunch.
+    var autoCopiedVerificationThreads: Set<String> = []
+
     var contextAboutYou: String {
         didSet {
             defaults.set(contextAboutYou, forKey: Keys.contextAboutYou)
@@ -90,6 +108,14 @@ final class MacAppServices {
         didSet {
             defaults.set(customInstructions, forKey: Keys.customInstructions)
             aiChatService.customInstructions = customInstructions
+        }
+    }
+
+    /// City/country (e.g. "Oslo, Norway") — piped into the server-side AI profile
+    /// so the assistant has location context without the user repeating it.
+    var location: String {
+        didSet {
+            defaults.set(location, forKey: Keys.location)
         }
     }
 
@@ -191,6 +217,25 @@ final class MacAppServices {
         }
     }
 
+    /// User-facing master switch for the voice assistant. Off → no hotkey
+    /// registration, no wake-word listener, no global mic. On → at minimum
+    /// the global hotkey is registered.
+    var voiceAssistantEnabled: Bool {
+        didSet {
+            defaults.set(voiceAssistantEnabled, forKey: Keys.voiceAssistantEnabled)
+            applyVoiceAssistantState()
+        }
+    }
+
+    /// Whether the always-listening wake word is enabled. Independent of the
+    /// hotkey: a user can keep voice on with hotkey-only and never enable wake.
+    var voiceWakeWordEnabled: Bool {
+        didSet {
+            defaults.set(voiceWakeWordEnabled, forKey: Keys.voiceWakeWordEnabled)
+            applyVoiceAssistantState()
+        }
+    }
+
     /// Whether the signed-in user may see the Developer Mode toggle (allowlisted accounts only).
     var isDeveloperModeUIAvailable: Bool {
         TodusDeveloperAccess.isAllowlisted(email: authService.userEmail)
@@ -221,6 +266,7 @@ final class MacAppServices {
         self.notificationService = MacNotificationService()
         self.contextAboutYou = defaults.string(forKey: Keys.contextAboutYou) ?? ""
         self.customInstructions = defaults.string(forKey: Keys.customInstructions) ?? ""
+        self.location = defaults.string(forKey: Keys.location) ?? ""
         self.startupView = defaults.string(forKey: Keys.startupView) ?? "home"
         self.restoreLastViewedPage = defaults.object(forKey: Keys.restoreLastViewedPage) as? Bool ?? false
         self.hasConfiguredGmailPrompt = defaults.bool(forKey: Keys.hasConfiguredGmailPrompt)
@@ -250,6 +296,15 @@ final class MacAppServices {
             self.calendarPreferences = .default
         }
         self.developerModeEnabled = defaults.bool(forKey: Keys.developerModeEnabled)
+        // Voice assistant prefs default OFF — the always-on mic is opt-in.
+        self.voiceAssistantEnabled = defaults.object(forKey: Keys.voiceAssistantEnabled) as? Bool ?? false
+        // Wake-word toggle is "Coming soon" — `WakeWordService` is a Phase 1
+        // stub that fails soft and never actually fires. We force the
+        // persisted preference to false on launch so users who toggled it on
+        // before the deprecation don't see a stale "on" state in Settings.
+        // Restore the real preference once Porcupine integration ships.
+        self.voiceWakeWordEnabled = false
+        defaults.set(false, forKey: Keys.voiceWakeWordEnabled)
         self.aiChatService = MacAIChatService(
             backendURL: backendURL,
             apiClient: api,
@@ -258,6 +313,23 @@ final class MacAppServices {
             calendarService: calendar
         )
         self.voiceTokenService = VoiceTokenService(authService: auth, backendURL: backendURL)
+        let promptClient = VoiceSystemPromptClient(authService: auth, backendURL: backendURL)
+        self.voiceSystemPromptClient = promptClient
+        let broker = AudioInputBroker()
+        self.audioInputBroker = broker
+        let hotkey = HotkeyService()
+        self.hotkeyService = hotkey
+        let wake = WakeWordService(broker: broker)
+        self.wakeWordService = wake
+        self.voiceCoordinator = VoiceSessionCoordinator(
+            tokenService: self.voiceTokenService,
+            systemPromptClient: promptClient,
+            chatService: self.aiChatService,
+            apiClient: api,
+            inputBroker: broker,
+            hotkey: hotkey,
+            wakeService: wake
+        )
         self.shareConversationService = ShareConversationService(apiClient: api)
         self.groupChatService = GroupChatService(apiClient: api)
         self.meetingsService = MeetingsService(apiClient: api)
@@ -297,6 +369,30 @@ final class MacAppServices {
         self.remindersSyncState.direction = self.remindersSyncDirection
     }
 
+    /// Reflect the current `voiceAssistantEnabled` / `voiceWakeWordEnabled`
+    /// settings into the live coordinator. Called from the prefs setters AND
+    /// once at the end of init so the user's saved state is restored on
+    /// launch.
+    ///
+    /// Hotkey is registered whenever the master switch is on, regardless of
+    /// the wake-word toggle — push-to-talk is the always-available baseline.
+    /// Wake registration only runs when both flags are on.
+    func applyVoiceAssistantState() {
+        // Guard against early defaults-driven invocations that happen before
+        // `TodusMacApp.initializeApp()` has wired the SwiftData container into the
+        // coordinator. Starting voice without a context means tool calls
+        // (create_task, complete_task, etc.) can't mutate anything — and the
+        // hotkey/wake-word listeners would fire into a half-initialized session.
+        // `initializeApp` calls this again once `modelContext` is set, so we don't
+        // miss the user's saved state.
+        guard voiceCoordinator.modelContext != nil else { return }
+        if voiceAssistantEnabled {
+            voiceCoordinator.start(enableWakeWord: voiceWakeWordEnabled)
+        } else {
+            Task { await voiceCoordinator.stop() }
+        }
+    }
+
     func loadSharedAIProfile() async {
         guard authService.isAuthenticated else { return }
 
@@ -304,13 +400,73 @@ final class MacAppServices {
             let response: MailAssistantSettingsResponse = try await apiClient.trpcQuery("settings.get")
             contextAboutYou = response.settings.contextAboutYou
             customInstructions = response.settings.customPrompt
+            location = response.settings.location ?? ""
             assistantAutomationPolicy = response.settings.assistantAutomationPolicy
             if let prefs = response.settings.calendarPreferences {
                 calendarPreferences = prefs
             }
+            // Hydrate cross-device synced fields into UserDefaults so @AppStorage
+            // bindings in MacSettingsView reflect the server state on next render.
+            let defaults = UserDefaults.standard
+            if let v = response.settings.aiCanReadTasks       { defaults.set(v, forKey: "mac_ai_can_read_tasks") }
+            if let v = response.settings.aiCanWriteTasks      { defaults.set(v, forKey: "mac_ai_can_write_tasks") }
+            if let v = response.settings.aiCanReadCalendar    { defaults.set(v, forKey: "ai_can_read_calendar") }
+            if let v = response.settings.aiCanWriteCalendar   { defaults.set(v, forKey: "ai_can_write_calendar") }
+            if let v = response.settings.aiCanReadEmail       { defaults.set(v, forKey: "ai_can_read_email") }
+            if let v = response.settings.aiCanSendEmail       { defaults.set(v, forKey: "ai_can_send_email") }
+            if let v = response.settings.accentColor          { defaults.set(v, forKey: "mac_accent_color") }
+            if let v = response.settings.defaultTaskView      { defaults.set(v, forKey: "TaskApp.selectedViewMode") }
+            if let v = response.settings.compactSidebar       { defaults.set(v, forKey: "mac_compact_sidebar") }
+            if let v = response.settings.showUnreadBadge      { defaults.set(v, forKey: "mac_show_unread_badge") }
+            if let v = response.settings.focusModeEnabled     { defaults.set(v, forKey: "mac_focus_mode_enabled") }
+            if let v = response.settings.groupByThread        { defaults.set(v, forKey: "threadGroupingEnabled") }
         } catch {
             AppLogger.shared.log("[MacAppServices] Failed to load shared AI profile: \(error)")
         }
+    }
+
+    /// Push a single user-settings field to the backend via `settings.save`.
+    /// Mirrors iOS AppServices.syncSetting; used by per-toggle bindings in
+    /// MacSettingsView to keep all surfaces aligned.
+    func syncSetting<T: Encodable>(_ key: String, _ value: T) async {
+        guard authService.isAuthenticated else { return }
+        struct OneFieldInput<V: Encodable>: Encodable {
+            let key: String
+            let value: V
+            func encode(to encoder: Encoder) throws {
+                var container = encoder.container(keyedBy: DynamicCodingKeys.self)
+                try container.encode(value, forKey: DynamicCodingKeys(stringValue: key)!)
+            }
+        }
+        struct DynamicCodingKeys: CodingKey {
+            var stringValue: String
+            var intValue: Int? { nil }
+            init?(stringValue: String) { self.stringValue = stringValue }
+            init?(intValue: Int) { return nil }
+        }
+        do {
+            let _: SharedAIProfileSaveResponse = try await apiClient.trpcMutation(
+                "settings.save",
+                input: OneFieldInput(key: key, value: value)
+            )
+        } catch {
+            AppLogger.shared.log("[MacAppServices] Failed to sync setting \(key): \(error)")
+        }
+    }
+
+    /// Builds the full settings shape from the current in-memory state. Both
+    /// `saveSharedAIProfile()` and `saveCalendarPreferences()` send the SAME full
+    /// shape, so a save of one section can never partial-wipe another section that
+    /// the user has separately edited (e.g. saving `calendarPreferences` no longer
+    /// loses an in-flight `customInstructions` edit, and vice versa).
+    private func currentSettingsInput() -> SettingsSaveInput {
+        SettingsSaveInput(
+            contextAboutYou: contextAboutYou,
+            customPrompt: customInstructions,
+            location: location,
+            assistantAutomationPolicy: assistantAutomationPolicy,
+            calendarPreferences: calendarPreferences
+        )
     }
 
     func saveSharedAIProfile() async {
@@ -319,11 +475,7 @@ final class MacAppServices {
         do {
             let _: SharedAIProfileSaveResponse = try await apiClient.trpcMutation(
                 "settings.save",
-                input: SharedAIProfileSaveInput(
-                    contextAboutYou: contextAboutYou,
-                    customPrompt: customInstructions,
-                    assistantAutomationPolicy: assistantAutomationPolicy
-                )
+                input: currentSettingsInput()
             )
         } catch {
             AppLogger.shared.log("[MacAppServices] Failed to save shared AI profile: \(error)")
@@ -334,12 +486,9 @@ final class MacAppServices {
     func saveCalendarPreferences() async {
         guard authService.isAuthenticated else { return }
         do {
-            struct Input: Encodable {
-                let calendarPreferences: CalendarPreferences
-            }
             let _: SharedAIProfileSaveResponse = try await apiClient.trpcMutation(
                 "settings.save",
-                input: Input(calendarPreferences: calendarPreferences)
+                input: currentSettingsInput()
             )
         } catch {
             AppLogger.shared.log("[MacAppServices] Failed to save calendar preferences: \(error)")
@@ -393,7 +542,10 @@ final class MacAppServices {
                 local.colorHex = remote.color
                 local.iconName = remote.icon
                 local.position = remote.position ?? local.position
-                local.createdAt = remote.createdAt
+                // Preserve `createdAt` from the local record. Overwriting from remote
+                // caused sidebar flicker on every sync because the SwiftData diff
+                // touched the field on every refresh (servers may return a
+                // re-serialized timestamp with sub-second drift).
                 local.updatedAt = remote.updatedAt ?? local.updatedAt
             } else {
                 let folder = FolderRecord(
@@ -679,6 +831,10 @@ final class MacAppServices {
         taskSyncService.clearQueue()
         folderSyncService.clearQueue()
         emailService.resetForSignOut()
+        // Tear down voice triggers so the new user's hotkey/wake start fresh.
+        // Must happen BEFORE authService.signOut() so the coordinator can
+        // still send a final disconnect over the (now-stale) auth.
+        Task { await voiceCoordinator.stop() }
         authService.signOut()
         closeSettingsWindowIfPresent()
     }
@@ -722,10 +878,15 @@ final class MacAppServices {
     }
 }
 
-private struct SharedAIProfileSaveInput: Encodable {
+/// Full settings shape sent to `settings.save`. Always send every field we know
+/// about so that a save of one section (e.g. calendar prefs) can never partial-wipe
+/// another section (e.g. AI custom instructions) on the backend.
+private struct SettingsSaveInput: Encodable {
     let contextAboutYou: String
     let customPrompt: String
+    let location: String
     let assistantAutomationPolicy: AssistantAutomationPolicy
+    let calendarPreferences: CalendarPreferences
 }
 
 private struct SharedAIProfileSaveResponse: Decodable {

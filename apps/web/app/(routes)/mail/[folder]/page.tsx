@@ -1,4 +1,4 @@
-import { useLoaderData, useNavigate } from 'react-router';
+import { redirect, useLoaderData, useNavigate } from 'react-router';
 
 import { MailLayout } from '@/components/mail/mail';
 import { useLabels } from '@/hooks/use-labels';
@@ -9,10 +9,10 @@ import type { Route } from './+types/page';
 const ALLOWED_FOLDERS = new Set(['inbox', 'draft', 'sent', 'spam', 'bin', 'archive', 'snoozed']);
 
 export async function clientLoader({ params, request }: Route.ClientLoaderArgs) {
-  if (!params.folder) return Response.redirect(`${import.meta.env.VITE_PUBLIC_APP_URL}/mail/inbox`);
+  if (!params.folder) throw redirect('/mail/inbox');
 
   const session = await authProxy.api.getSession({ headers: request.headers });
-  if (!session) return Response.redirect(`${import.meta.env.VITE_PUBLIC_APP_URL}/login`);
+  if (!session) throw redirect('/login');
 
   return {
     folder: params.folder,
@@ -63,14 +63,18 @@ export default function MailPage() {
 
   if (!isLabelValid) {
     return (
-      <div className="flex h-screen w-full flex-col items-center justify-center gap-4">
+      <div
+        className="flex h-screen w-full flex-col items-center justify-center gap-4"
+        role="status"
+        aria-live="polite"
+      >
         <h2 className="text-xl font-semibold">Folder not found</h2>
         <p className="text-muted-foreground mt-2">
-          The folder you're looking for doesn't exist. Redirecting to inbox...
+          The folder you&apos;re looking for doesn&apos;t exist. Redirecting to inbox in 5 seconds…
         </p>
         <button
           onClick={() => navigate('/mail/inbox')}
-          className="text-sm font-medium text-blue-500 hover:text-blue-600 underline underline-offset-4"
+          className="text-sm font-medium text-blue-500 hover:text-blue-600 underline underline-offset-4 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded"
         >
           Go to Inbox now
         </button>

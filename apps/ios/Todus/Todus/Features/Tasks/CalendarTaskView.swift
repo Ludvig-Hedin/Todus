@@ -36,6 +36,7 @@ struct CalendarTaskView: View {
               let weekEnd = cal.date(byAdding: .day, value: 7, to: todayStart) else { return }
 
 
+        var overdue: [TaskRecord] = []
         var today: [TaskRecord] = []
         var tomorrow: [TaskRecord] = []
         var thisWeek: [TaskRecord] = []
@@ -54,7 +55,9 @@ struct CalendarTaskView: View {
                 continue
             }
             let dueDay = cal.startOfDay(for: due)
-            if dueDay <= todayStart {
+            if dueDay < todayStart {
+                overdue.append(task)
+            } else if dueDay == todayStart {
                 today.append(task)
             } else if dueDay == tomorrowStart {
                 tomorrow.append(task)
@@ -67,6 +70,10 @@ struct CalendarTaskView: View {
 
         var result: [CalendarDateBucket] = []
         // Bucket colors: warm red-orange for urgent → cool blue for distant → neutral for unscheduled
+        if !overdue.isEmpty {
+            result.append(CalendarDateBucket(id: "overdue", label: "Overdue", subtitle: "Past due — handle or reschedule", icon: "exclamationmark.triangle.fill",
+                                     tint: Color(red: 0.92, green: 0.30, blue: 0.30), tasks: sortTasks(overdue)))
+        }
         if !today.isEmpty {
             result.append(CalendarDateBucket(id: "today", label: "Today", subtitle: "Needs attention first", icon: "sun.max.fill",
                                      tint: Color(red: 0.88, green: 0.50, blue: 0.20), tasks: sortTasks(today)))
@@ -112,11 +119,10 @@ struct CalendarTaskView: View {
                                         }
                                     }
                                 }
-                                .padding(.leading, 14)
                             }
                         }
                     }
-                    .padding(.vertical, 10)
+                    .padding(.bottom, 10)
                 }
                 .scrollDismissesKeyboard(.interactively)
                 .sheet(item: $taskPendingMove) { task in
@@ -132,10 +138,25 @@ struct CalendarTaskView: View {
             }
         }
         .onAppear { recomputeBuckets() }
-        .onChange(of: allTasks) { recomputeBuckets() }
+        // (count + latest update) digest avoids walking N tasks for Equatable.
+        // (Medium bug.)
+        .onChange(of: tasksChangeDigest) { recomputeBuckets() }
         .onChange(of: searchText) { recomputeBuckets() }
         .onChange(of: sortOrder) { recomputeBuckets() }
         .onChange(of: services.selectedFolderID) { recomputeBuckets() }
+    }
+
+    private var tasksChangeDigest: TasksDigest {
+        var latest: Date = .distantPast
+        for task in allTasks where task.updatedAt > latest {
+            latest = task.updatedAt
+        }
+        return TasksDigest(count: allTasks.count, latestUpdate: latest)
+    }
+
+    private struct TasksDigest: Equatable {
+        let count: Int
+        let latestUpdate: Date
     }
 
     // MARK: - Bucket Header
@@ -172,6 +193,8 @@ struct CalendarTaskView: View {
 
     private func sortTasks(_ tasks: [TaskRecord]) -> [TaskRecord] {
         switch sortOrder {
+        case .smart:
+            return TaskSmartSort.sorted(tasks)
         case .newest:
             return tasks.sorted { $0.createdAt > $1.createdAt }
         case .oldest:
@@ -218,6 +241,8 @@ struct CalendarTaskView: View {
 }
 
 private struct CalendarTaskCard: View {
+    @Environment(\.modelContext) private var modelContext
+    @Environment(AppServices.self) private var services
     let task: TaskRecord
     let bucket: CalendarDateBucket
     let onMoveRequested: () -> Void
@@ -227,65 +252,50 @@ private struct CalendarTaskCard: View {
         Button {
             onOpenDetails()
         } label: {
-            HStack(alignment: .center, spacing: 12) {
-                VStack(spacing: 4) {
-                    Circle()
-                        .fill(bucket.tint)
-                        .frame(width: 8, height: 8)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(task.title)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.primary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
 
-                    Rectangle()
-                        .fill(bucket.tint.opacity(0.18))
-                        .frame(width: 2)
+                    CalendarMetaPill(
+                        text: task.status.title,
+                        systemImage: task.status.systemImage,
+                        tint: task.status.tintColor
+                    )
                 }
-                .frame(width: 12)
 
-                VStack(alignment: .leading, spacing: 5) {
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(task.title)
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(.primary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                if !task.taskDescription.isEmpty && task.taskDescription != task.title {
+                    Text(task.taskDescription)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(AppTheme.mutedText)
+                        .lineLimit(1)
+                }
 
-                        if let dueDate = task.dueDate {
-                            Text(TaskDateFormatter.dueFormatter.string(from: dueDate))
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(bucket.tint)
-                        }
-                    }
-
-                    HStack(spacing: 6) {
-                        if !task.taskDescription.isEmpty && task.taskDescription != task.title {
-                            Text(task.taskDescription)
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(AppTheme.mutedText)
-                                .lineLimit(1)
-                        }
-
-                        Spacer(minLength: 0)
-                    }
-
-                    HStack(spacing: 6) {
+                HStack(spacing: 6) {
+                    if let dueDate = task.dueDate {
                         CalendarMetaPill(
-                            text: task.status.title,
-                            systemImage: task.status.systemImage,
-                            tint: task.status.tintColor
+                            text: TaskDateFormatter.dueFormatter.string(from: dueDate),
+                            systemImage: "calendar",
+                            tint: bucket.tint
                         )
+                    }
 
-                        if task.priority != .none {
-                            CalendarMetaPill(
-                                text: task.priority.title,
-                                systemImage: "flag.fill",
-                                tint: priorityColor(task.priority)
-                            )
-                        }
+                    if task.priority != .none {
+                        CalendarMetaPill(
+                            text: task.priority.title,
+                            systemImage: "flag.fill",
+                            tint: priorityColor(task.priority)
+                        )
+                    }
 
-                        if let folder = task.folder {
-                            CalendarMetaPill(
-                                text: folder.name,
-                                systemImage: "folder",
-                                tint: AppTheme.mutedText
-                            )
-                        }
+                    if let folder = task.folder {
+                        CalendarMetaPill(
+                            text: folder.name,
+                            systemImage: "folder",
+                            tint: AppTheme.mutedText
+                        )
                     }
                 }
             }
@@ -299,10 +309,36 @@ private struct CalendarTaskCard: View {
         }
         .buttonStyle(.plain)
         .contextMenu {
+            // Brought to parity with TaskRowView's context-menu actions
+            // (complete / snooze / move / delete) so calendar bucket cards
+            // aren't a second-class surface. Native `.swipeActions` requires
+            // a `List`, and the calendar view uses a `ScrollView` for the
+            // bucket layout — keeping the context menu rich is the lower-risk
+            // parity fix. (UX P7.)
+            Button {
+                services.captureService.toggleCompletion(task, in: modelContext)
+            } label: {
+                Label(task.completed ? "Mark as incomplete" : "Mark complete", systemImage: "checkmark.circle")
+            }
+            Menu {
+                ForEach(SnoozeOption.menuOptions, id: \.option) { entry in
+                    Button(entry.label) {
+                        services.captureService.snooze(task, until: entry.option.date(), in: modelContext)
+                    }
+                }
+            } label: {
+                Label("Snooze", systemImage: "moon.zzz")
+            }
             Button {
                 onMoveRequested()
             } label: {
                 Label("Move", systemImage: "folder")
+            }
+            Divider()
+            Button(role: .destructive) {
+                services.captureService.delete(task, in: modelContext)
+            } label: {
+                Label("Delete", systemImage: "trash")
             }
         }
     }

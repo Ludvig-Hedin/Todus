@@ -13,7 +13,7 @@ enum AssistantNudgeType: String, Codable, Sendable {
     case draftReady = "draft_ready"
 }
 
-enum AssistantAutoSendScenario: String, Codable, CaseIterable, Identifiable, Sendable {
+enum AssistantAutoSendScenario: String, Codable, CaseIterable, Identifiable, Sendable, Equatable {
     case acknowledgment
     case simpleConfirmation = "simple_confirmation"
     case schedulingConfirmation = "scheduling_confirmation"
@@ -29,14 +29,14 @@ enum AssistantAutoSendScenario: String, Codable, CaseIterable, Identifiable, Sen
     }
 }
 
-struct AssistantQuietHours: Codable, Sendable {
+struct AssistantQuietHours: Codable, Sendable, Equatable {
     var startHour: Int
     var endHour: Int
 
     static let `default` = AssistantQuietHours(startHour: 22, endHour: 7)
 }
 
-struct AssistantAutomationPolicy: Codable, Sendable {
+struct AssistantAutomationPolicy: Codable, Sendable, Equatable {
     var autoSummarizeLongThreads: Bool
     var suggestTasksFromEmail: Bool
     var suggestEventsFromEmail: Bool
@@ -180,6 +180,9 @@ struct AssistantOpenLoop: Codable, Identifiable, Sendable {
     let confidence: Double
     let reason: String
     let suggestedActionLabel: String?
+    /// LLM-generated verb-first sentence ("Reply to Sarah about Q4").
+    /// Nullable — falls back to subject/title rendering when absent.
+    let actionLine: String?
     let threadId: String?
     let meetingId: String?
     let personEmail: String?
@@ -198,12 +201,106 @@ struct AssistantPreparedAction: Codable, Identifiable, Sendable {
     let confidence: Double
     let reason: String
     let preview: String?
+    /// Same as AssistantOpenLoop.actionLine — verb-first sentence; nullable.
+    let actionLine: String?
     let threadId: String?
     let meetingId: String?
     let personEmail: String?
     let workstreamKey: String?
     let payload: [String: JSONValue]
     let evidence: [AssistantEvidence]
+}
+
+// MARK: - Briefing row display
+
+/// What an assistant briefing row should *show* to the user.
+///
+/// The server gives us a `title` that's the AI's verb ("Double-check details",
+/// "Research before acting") and a `summary` that's almost always the email
+/// subject — i.e., the most identifying content. Showing the verb as the row's
+/// headline makes every row look identical at a glance, so we flip it: subject
+/// up top, AI verb demoted to caption, and a short stable badge so the user
+/// can still tell Reply / Waiting / Draft apart.
+struct BriefingRowDisplay: Sendable, Equatable {
+    enum Badge: String, Sendable {
+        case reply
+        case waiting
+        case draft
+        case research
+        case task
+        case event
+        case followUp
+        case other
+
+        var label: String {
+            switch self {
+            case .reply: return "Reply"
+            case .waiting: return "Waiting"
+            case .draft: return "Draft ready"
+            case .research: return "Research"
+            case .task: return "Task"
+            case .event: return "Event"
+            case .followUp: return "Follow-up"
+            case .other: return "Briefing"
+            }
+        }
+    }
+
+    /// Primary line — the subject / identifying content. Bold and most prominent.
+    let headline: String
+    /// Secondary line — the AI's verb hint or rationale. Dimmer.
+    let caption: String
+    let badge: Badge
+}
+
+private func _briefingHeadline(summary: String, title: String) -> (headline: String, caption: String) {
+    let s = summary.trimmingCharacters(in: .whitespacesAndNewlines)
+    let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
+    // Prefer the email subject (`summary`) as the headline. Fall back to the AI
+    // verb if the server didn't populate a summary for this row.
+    if !s.isEmpty {
+        return (headline: s, caption: t)
+    }
+    return (headline: t.isEmpty ? "Email thread" : t, caption: "")
+}
+
+extension AssistantOpenLoop {
+    var rowDisplay: BriefingRowDisplay {
+        let (headline, caption) = _briefingHeadline(summary: summary, title: title)
+        let badge: BriefingRowDisplay.Badge
+        switch queue {
+        case "needs_you": badge = .reply
+        case "waiting_on": badge = .waiting
+        case "drafts_ready": badge = .draft
+        case "scheduling": badge = .followUp
+        default:
+            switch type {
+            case "needs_reply": badge = .reply
+            case "waiting_on_other": badge = .waiting
+            case "draft_ready": badge = .draft
+            case "research_needed": badge = .research
+            case "meeting_follow_up", "follow_up": badge = .followUp
+            default: badge = .other
+            }
+        }
+        return BriefingRowDisplay(headline: headline, caption: caption, badge: badge)
+    }
+}
+
+extension AssistantPreparedAction {
+    var rowDisplay: BriefingRowDisplay {
+        let (headline, caption) = _briefingHeadline(summary: summary, title: title)
+        let badge: BriefingRowDisplay.Badge
+        switch type {
+        case "draft_reply": badge = .draft
+        case "create_task": badge = .task
+        case "create_event": badge = .event
+        case "follow_up": badge = .followUp
+        case "research": badge = .research
+        default: badge = .other
+        }
+        return BriefingRowDisplay(headline: headline, caption: caption, badge: badge)
+    }
 }
 
 struct AssistantPersonContext: Codable, Identifiable, Sendable {
@@ -268,6 +365,21 @@ struct AssistantBriefing: Codable, Sendable {
     let changedSinceLastTime: [AssistantChangeFeedItem]
 }
 
+/// High-level classification the backend assigns to a thread. Drives whether
+/// we show the AI summary card and action buttons at all — non-conversational
+/// kinds (verification codes, receipts, marketing, automated notifications)
+/// render nothing assistant-related so the thread page stays quiet.
+enum AssistantThreadKind: String, Codable, Sendable {
+    case verification
+    case receipt
+    case marketing
+    case notification
+    case conversational
+
+    /// Whether the thread is worth surfacing AI summary + action UI for.
+    var isConversational: Bool { self == .conversational }
+}
+
 struct AssistantThreadContext: Codable, Sendable {
     struct Recommendation: Codable, Sendable {
         let label: String
@@ -281,9 +393,31 @@ struct AssistantThreadContext: Codable, Sendable {
         let dueDate: String?
     }
 
+    /// Vendor + amount + date pulled from a receipt-style email. Lets the
+    /// client render a clean inline chip instead of an empty AI card.
+    struct ExtractedReceipt: Codable, Sendable, Equatable {
+        let vendor: String
+        let amount: String?
+        let receivedAt: String?
+    }
+
     let threadId: String
     let subject: String
     let summary: String
+    /// Smart one-liner picked from the most useful signal in the thread —
+    /// meeting time, first action item, first question, or summary fallback.
+    /// Empty on non-conversational kinds and when nothing useful was found.
+    /// Prefer this over `summary` when both are present.
+    let aiLeadLine: String
+    /// Optional for backward compatibility with older backends. Defaults to
+    /// `.conversational` when the field is missing so existing UI keeps
+    /// working until the backend is redeployed.
+    let threadKind: AssistantThreadKind
+    /// Verification code lifted out of the body for one-tap copy. nil on
+    /// any non-verification thread or when extraction failed.
+    let extractedCode: String?
+    /// Receipt vendor + amount + date for receipt-style threads.
+    let extractedReceipt: ExtractedReceipt?
     let recommendation: Recommendation
     let waitingState: String
     let confidence: Double
@@ -303,6 +437,45 @@ struct AssistantThreadContext: Codable, Sendable {
     let openLoops: [AssistantOpenLoop]
     let preparedActions: [AssistantPreparedAction]
     let changedSinceLastOpen: [String]
+
+    private enum CodingKeys: String, CodingKey {
+        case threadId, subject, summary, aiLeadLine, threadKind, extractedCode, extractedReceipt,
+             recommendation, waitingState,
+             confidence, riskLevel, reason, replyNeeded, followUpNeeded,
+             meetingRequested, existingDraft, actionItems, researchQueries,
+             suggestedTasks, suggestedEvent, relatedTasks, relatedMeetings,
+             people, openLoops, preparedActions, changedSinceLastOpen
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        threadId = try c.decode(String.self, forKey: .threadId)
+        subject = try c.decode(String.self, forKey: .subject)
+        summary = try c.decode(String.self, forKey: .summary)
+        aiLeadLine = (try? c.decode(String.self, forKey: .aiLeadLine)) ?? ""
+        threadKind = (try? c.decode(AssistantThreadKind.self, forKey: .threadKind)) ?? .conversational
+        extractedCode = try c.decodeIfPresent(String.self, forKey: .extractedCode)
+        extractedReceipt = try c.decodeIfPresent(ExtractedReceipt.self, forKey: .extractedReceipt)
+        recommendation = try c.decode(Recommendation.self, forKey: .recommendation)
+        waitingState = try c.decode(String.self, forKey: .waitingState)
+        confidence = try c.decode(Double.self, forKey: .confidence)
+        riskLevel = try c.decode(AssistantRiskLevel.self, forKey: .riskLevel)
+        reason = try c.decode(String.self, forKey: .reason)
+        replyNeeded = try c.decode(Bool.self, forKey: .replyNeeded)
+        followUpNeeded = try c.decode(Bool.self, forKey: .followUpNeeded)
+        meetingRequested = try c.decode(Bool.self, forKey: .meetingRequested)
+        existingDraft = try c.decode(Bool.self, forKey: .existingDraft)
+        actionItems = try c.decode([String].self, forKey: .actionItems)
+        researchQueries = try c.decode([String].self, forKey: .researchQueries)
+        suggestedTasks = try c.decode([MailAssistantSuggestedTask].self, forKey: .suggestedTasks)
+        suggestedEvent = try c.decodeIfPresent(MailAssistantSuggestedEvent.self, forKey: .suggestedEvent)
+        relatedTasks = try c.decode([RelatedTask].self, forKey: .relatedTasks)
+        relatedMeetings = try c.decode([AssistantMeetingSummary].self, forKey: .relatedMeetings)
+        people = try c.decode([AssistantPersonContext].self, forKey: .people)
+        openLoops = try c.decode([AssistantOpenLoop].self, forKey: .openLoops)
+        preparedActions = try c.decode([AssistantPreparedAction].self, forKey: .preparedActions)
+        changedSinceLastOpen = try c.decode([String].self, forKey: .changedSinceLastOpen)
+    }
 }
 
 struct AssistantPreparedActionApplyResult: Codable, Sendable {
@@ -358,10 +531,30 @@ struct MailAssistantSettingsResponse: Decodable {
     struct Settings: Decodable {
         let contextAboutYou: String
         let customPrompt: String
+        /// City/country the user configured — optional for backward compat with
+        /// server payloads that predate this field.
+        let location: String?
         let assistantAutomationPolicy: AssistantAutomationPolicy
         /// Server-synced calendar visibility prefs. Optional for backward compat
         /// with older server payloads that predate this field.
         let calendarPreferences: CalendarPreferences?
+
+        // Cross-device sync fields — all optional so older server payloads still decode.
+        let aiCanReadTasks: Bool?
+        let aiCanWriteTasks: Bool?
+        let aiCanReadCalendar: Bool?
+        let aiCanWriteCalendar: Bool?
+        let aiCanReadEmail: Bool?
+        let aiCanSendEmail: Bool?
+        let accentColor: String?
+        let defaultTaskView: String?
+        let openOnLaunch: String?
+        let resumeLastViewedPage: Bool?
+        let compactSidebar: Bool?
+        let showUnreadBadge: Bool?
+        let focusModeEnabled: Bool?
+        let groupByThread: Bool?
+        let hideAppleSideGmailDuplicates: Bool?
     }
 
     let settings: Settings

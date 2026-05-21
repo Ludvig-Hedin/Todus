@@ -98,9 +98,21 @@ final class SubscriptionService {
     }
 
     func cancel(productId: String) async throws {
+        // Re-entrancy guard: a rapid double-tap on the "Cancel plan" button used to
+        // start two concurrent cancel flows and leave `isLoading` flipped after only
+        // one completed — spinning the UI forever. The second tap now silently no-ops.
+        guard !isLoading else { return }
+        isLoading = true
+        defer { isLoading = false }
+
         let input = CancelInput(productId: productId)
-        let _: CancelResponse = try await apiClient.trpcMutation("subscription.cancel", input: input)
-        await forceRefreshFromAutumn()
+        // `subscription.cancel` already returns the post-cancel plan + status — apply
+        // it directly rather than firing `forceRefreshFromAutumn` (which would flip
+        // `isLoading` recursively and conflict with this guard).
+        let response: CancelResponse = try await apiClient.trpcMutation("subscription.cancel", input: input)
+        self.plan = Plan(rawValue: response.plan)
+        self.status = response.status
+        lastError = nil
     }
 
     private func apply(_ response: SubscriptionStatusResponse) {

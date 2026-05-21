@@ -118,6 +118,10 @@ struct EmailInboxView: View {
     /// True after a pagination request fails so we can show a tap-to-retry CTA instead of an
     /// indefinite spinner. Reset whenever a new pagination attempt starts.
     @State private var paginationFailed = false
+    /// Guards the pagination retry button + onAppear trigger so rapid taps or
+    /// re-renders don't fire concurrent `loadNextPage()` calls that re-fetch
+    /// the same cursor.
+    @State private var isLoadingNextPage = false
     /// True after the connection check has been spinning for too long with no resolution —
     /// switches the loading state to a softer "Still checking…" message and offers recovery.
     @State private var connectionCheckTimedOut = false
@@ -131,6 +135,18 @@ struct EmailInboxView: View {
 
     @State private var emailHeaderHeight: CGFloat = 120
     private let emailScrimTail: CGFloat = 32
+    /// Holds the delayed push triggered by `consumePendingThreadNavigation` so a
+    /// new invocation or `.onDisappear` can cancel it. Without this, a
+    /// `DispatchQueue.main.asyncAfter` could fire after the inbox has already
+    /// disappeared and re-push a thread that the user navigated away from.
+    @State private var pendingThreadNavTask: Task<Void, Never>?
+
+    /// UI-level wallclock cap on the inline "Updating" badge. The service already bounds
+    /// its loading/reconciling state via timeouts and a watchdog, but a defensive cap here
+    /// guarantees the badge can never linger past this ceiling even if a future regression
+    /// re-introduces a stuck-state path. Tripped by the watchdog task below.
+    @State private var badgeForciblyHidden = false
+    private static let badgeMaxVisibleSeconds: Double = 90
 
     // Deterministic skeleton widths — computed once to avoid visual jitter from CGFloat.random in view body
     private static let skeletonNameWidths: [CGFloat]    = [120, 140, 130, 155, 125, 145]
@@ -146,6 +162,14 @@ struct EmailInboxView: View {
     /// for the server to surface fresh threads, instead of an empty stretch followed by a
     /// surprise update.
     private var isBackgroundRefreshing: Bool {
+        (emailService.isLoadingThreads || emailService.isReconciling)
+            && !emailService.threads.isEmpty
+            && !badgeForciblyHidden
+    }
+
+    /// Raw signal from the service — used by the badge watchdog so it can detect the
+    /// "service still claims it's loading" condition independently of the UI cap above.
+    private var serviceIsRefreshing: Bool {
         (emailService.isLoadingThreads || emailService.isReconciling)
             && !emailService.threads.isEmpty
     }
@@ -183,13 +207,15 @@ struct EmailInboxView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
                 .transition(.opacity)
-            } else if emailService.isLoadingThreads && emailService.threads.isEmpty {
-                // First load — show skeleton rather than empty state to avoid flicker
+            } else if (emailService.isLoadingThreads || emailService.isReconciling) && emailService.threads.isEmpty {
+                // First load OR post-forceSync reconciliation — show skeleton rather than
+                // the empty state. Without including isReconciling, a fresh-DB user briefly
+                // sees the empty placeholder before the workflow repopulates threads.
                 loadingState
-            } else if emailService.errorMessage != nil && emailService.threads.isEmpty && !emailService.isLoadingThreads {
+            } else if emailService.errorMessage != nil && emailService.threads.isEmpty && !emailService.isLoadingThreads && !emailService.isReconciling {
                 // Load failed and no cached threads to show — surface the error
                 errorState
-            } else if emailService.threads.isEmpty && !emailService.isLoadingThreads {
+            } else if emailService.threads.isEmpty && !emailService.isLoadingThreads && !emailService.isReconciling {
                 emptyState
             } else {
                 threadList
@@ -212,9 +238,12 @@ struct EmailInboxView: View {
             await connectionsService.loadConnections()
         }
         .task {
-            // Poll for new mail every 60s while the inbox is visible. Trigger a server-side
-            // Gmail re-sync so the listThreads response reflects mail received since last load
-            // — without this the backend just re-reads its DB and we never see new messages.
+            // Poll every 60s while the inbox is visible — re-reads the backend DB so freshly
+            // synced threads appear without user intervention. Routine polls intentionally
+            // do **not** call `mail.forceSync`: that mutation drops the backend tables and
+            // kicks an async workflow, producing a multi-second empty-inbox window every
+            // tick. The backend's continuous sync brings in new mail; pull-to-refresh and
+            // the header refresh button remain the user-driven force-sync paths.
             // Skip a tick if a refresh or reconciliation is already running so we don't pile
             // up concurrent loads.
             while !Task.isCancelled {
@@ -224,7 +253,17 @@ struct EmailInboxView: View {
                       !emailService.isLoadingThreads,
                       !emailService.isReconciling
                 else { continue }
-                await emailService.loadThreads(folder: selectedFolder.rawValue, refresh: true, triggerSync: true)
+                // Routine polling tick — pass `triggerSync: true` so the backend's
+                // soft-sync path (non-destructive: upserts newest 20 thread IDs from
+                // Gmail) runs. Without this, users whose continuous sync has stalled
+                // see month-old mail with no recovery short of an explicit
+                // pull-to-refresh. The 2-minute cooldown still coalesces calls so
+                // this tick can't flood the backend.
+                await emailService.loadThreads(
+                    folder: selectedFolder.rawValue,
+                    refresh: true,
+                    triggerSync: true
+                )
             }
         }
         .onChange(of: scenePhase) { _, newPhase in
@@ -233,7 +272,16 @@ struct EmailInboxView: View {
                   !emailService.isLoadingThreads,
                   !emailService.isReconciling
             else { return }
-            Task { await emailService.loadThreads(folder: selectedFolder.rawValue, refresh: true, triggerSync: true) }
+            // Re-foreground triggers a soft sync — user expects to see new mail on
+            // open, not a stale snapshot from last launch. Cooldown still applies so
+            // back-to-back open/close doesn't flood the backend.
+            Task {
+                await emailService.loadThreads(
+                    folder: selectedFolder.rawValue,
+                    refresh: true,
+                    triggerSync: true
+                )
+            }
         }
         .onChange(of: selectedFolder) { _, newFolder in
             // Clear search and cancel any pending debounce task.
@@ -264,6 +312,12 @@ struct EmailInboxView: View {
             recomputeFilteredThreads()
             consumePendingThreadNavigation()
         }
+        .onDisappear {
+            // Cancel any pending deep-navigation push so it can't fire after the
+            // inbox is offscreen and re-push a thread we've already navigated away from.
+            pendingThreadNavTask?.cancel()
+            pendingThreadNavTask = nil
+        }
         .onChange(of: viewMode) { _, newMode in
             let shouldGroupByThread = newMode == .threads
             guard services.threadGroupingEnabled != shouldGroupByThread else { return }
@@ -278,18 +332,39 @@ struct EmailInboxView: View {
             // re-checks don't keep showing the timeout copy.
             if resolved { connectionCheckTimedOut = false }
         }
+        // Defensive UI cap on the "Updating" badge. The service already bounds loading +
+        // reconciliation state, but if any future regression leaves a stuck flag this
+        // ensures the user never sees a multi-minute spinner. Reset whenever the service
+        // legitimately finishes so the next refresh starts fresh.
+        .onChange(of: serviceIsRefreshing) { _, refreshing in
+            if !refreshing { badgeForciblyHidden = false }
+        }
+        .task(id: serviceIsRefreshing) {
+            guard serviceIsRefreshing else { return }
+            try? await Task.sleep(for: .seconds(Self.badgeMaxVisibleSeconds))
+            // If the service is still claiming a refresh is in flight after the
+            // wallclock budget, hide the badge — better to look idle than to look broken.
+            if serviceIsRefreshing {
+                badgeForciblyHidden = true
+                AppLogger.shared.log(
+                    "[EmailInboxView] badge wallclock cap tripped after \(Self.badgeMaxVisibleSeconds)s"
+                )
+            }
+        }
         // Deep navigation from AI chat cards — pick up pending thread ID set by AIChatView
         .onChange(of: services.pendingEmailThreadId) { _, _ in
             consumePendingThreadNavigation()
         }
         // Header ellipsis menu actions
         .onChange(of: services.emailRefreshTick) { _, _ in
+            // Header ellipsis "Refresh" — also user-explicit, bypass cooldown.
             Task {
                 await emailService.loadThreads(
                     folder: selectedFolder.rawValue,
                     query: searchText.isEmpty ? nil : searchText,
                     refresh: true,
-                    triggerSync: searchText.isEmpty
+                    triggerSync: searchText.isEmpty,
+                    bypassSyncCooldown: true
                 )
             }
         }
@@ -481,12 +556,25 @@ struct EmailInboxView: View {
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
             .refreshable {
+                // Clear any latched badge cap from a previous refresh — without
+                // this the inline "Updating" badge can stay hidden across the
+                // next refresh and the user gets no progress signal.
+                badgeForciblyHidden = false
+                // Pull-to-refresh is an explicit user request — bypass the forceSync
+                // cooldown so we always pull fresh data from Gmail, regardless of how
+                // recently the 60s polling tick fired.
                 await emailService.loadThreads(
                     folder: selectedFolder.rawValue,
                     query: searchText.isEmpty ? nil : searchText,
                     refresh: true,
-                    triggerSync: searchText.isEmpty
+                    triggerSync: searchText.isEmpty,
+                    bypassSyncCooldown: true
                 )
+                // Tactile confirmation that the refresh completed — closes the
+                // feedback loop on the pull gesture, which otherwise just snaps
+                // back silently. Done here (after the await) so the haptic only
+                // fires once the network call resolved.
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
             }
             .contentMargins(.bottom, 130, for: .scrollContent)
             // Confirm before destructive delete — archive remains unconfirmed (it's reversible).
@@ -530,7 +618,7 @@ struct EmailInboxView: View {
                     HStack(spacing: 6) {
                         Image(systemName: "arrow.clockwise")
                             .font(.system(size: 12, weight: .semibold))
-                        Text("Tap to retry")
+                        Text(isLoadingNextPage ? "Retrying…" : "Tap to retry")
                             .font(.system(size: 13, weight: .semibold))
                     }
                     .foregroundStyle(AppTheme.mutedText)
@@ -538,6 +626,7 @@ struct EmailInboxView: View {
                     .padding(.vertical, 10)
                 }
                 .buttonStyle(.plain)
+                .disabled(isLoadingNextPage)
             } else {
                 ProgressView()
                     .frame(maxWidth: .infinity)
@@ -552,14 +641,32 @@ struct EmailInboxView: View {
     /// service produced an error message during the call so we can flip into the
     /// retry footer state.
     private func loadNextPage() async {
+        // Re-entry guard — multiple onAppear/retry-tap firings could otherwise
+        // spawn concurrent loadThreads calls that race on the cursor.
+        guard !isLoadingNextPage else { return }
+        isLoadingNextPage = true
+        defer { isLoadingNextPage = false }
         let priorError = emailService.errorMessage
+        let cursorBeforeCall = emailService.nextPageToken
         await emailService.loadThreads(
             folder: selectedFolder.rawValue,
             query: searchText.isEmpty ? nil : searchText
         )
-        // If a fresh errorMessage appeared during this call, treat it as a pagination failure.
-        if let current = emailService.errorMessage, current != priorError {
+        // Treat pagination as failed when an error surfaced during this call OR
+        // when the cursor is unchanged AND no new threads landed — a stale cursor
+        // would otherwise re-fetch the same page indefinitely on retry. Reset
+        // the cursor on failure so the next retry starts a fresh paginated walk
+        // instead of looping over the broken position.
+        let didError = (emailService.errorMessage != nil)
+            && (emailService.errorMessage != priorError)
+        if didError {
             paginationFailed = true
+            emailService.nextPageToken = nil
+        } else if emailService.nextPageToken == cursorBeforeCall && cursorBeforeCall != nil {
+            // No advance — backend likely returned an empty page with the same
+            // cursor. Clear so the user can retry from page 1.
+            paginationFailed = true
+            emailService.nextPageToken = nil
         } else {
             paginationFailed = false
         }
@@ -587,7 +694,10 @@ struct EmailInboxView: View {
         if services.swipeGesturesEnabled {
             baseRow
                 .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                    Button(role: .destructive) {
+                    // Archive is reversible — don't paint it red with `.destructive`.
+                    // Reserve the destructive role (and the system's red colour) for
+                    // Delete, which is what users actually need to think twice about.
+                    Button {
                         Task { await emailService.archiveThreads(ids: [thread.id]) }
                     } label: {
                         Label("Archive", systemImage: "archivebox")
@@ -734,12 +844,17 @@ struct EmailInboxView: View {
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .refreshable {
+            // Mirror the threads-mode refresh: clear the latched badge cap and
+            // emit a success haptic when the request resolves.
+            badgeForciblyHidden = false
             await emailService.loadThreads(
                 folder: selectedFolder.rawValue,
                 query: searchText.isEmpty ? nil : searchText,
                 refresh: true,
-                triggerSync: searchText.isEmpty
+                triggerSync: searchText.isEmpty,
+                bypassSyncCooldown: true
             )
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
         }
         .contentMargins(.bottom, 130, for: .scrollContent)
         .navigationDestination(item: $selectedSender) { destination in
@@ -861,13 +976,11 @@ struct EmailInboxView: View {
     private var connectionFilterChips: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
-                // "All" chip — selects/deselects all connections at once
+                // "All" chip — re-enables every connection. Disabled when already
+                // selected so the user doesn't get press feedback on a no-op tap;
+                // toggling individual chips off is the way to narrow the filter.
                 Button {
-                    if connectionsService.isAllEnabled {
-                        // If all are enabled, tapping "All" does nothing (can't disable all)
-                    } else {
-                        connectionsService.enableAll()
-                    }
+                    connectionsService.enableAll()
                 } label: {
                     HStack(spacing: 5) {
                         Image(systemName: "envelope.fill")
@@ -891,6 +1004,7 @@ struct EmailInboxView: View {
                     )
                 }
                 .buttonStyle(.plain)
+                .disabled(connectionsService.isAllEnabled)
 
                 // Per-connection chips
                 ForEach(connectionsService.connections) { connection in
@@ -980,6 +1094,7 @@ struct EmailInboxView: View {
                 .buttonStyle(.plain)
                 .minTouchTarget()
                 .transition(.opacity)
+                .accessibilityLabel(searchText.isEmpty ? "Dismiss search" : "Clear search")
             }
         }
         .padding(.horizontal, 14)
@@ -1003,16 +1118,22 @@ struct EmailInboxView: View {
 
     private var searchFeedbackRow: some View {
         HStack(spacing: 6) {
-            if emailService.isLoadingThreads && filteredThreads.isEmpty {
+            if emailService.isLoadingThreads {
                 ProgressView()
                     .scaleEffect(0.6)
+                Text("Searching \(selectedFolder.title.lowercased())…")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(AppTheme.mutedText)
+            } else {
+                // Search finished — surface the result count so the user knows
+                // the in-flight indicator has resolved. Previously this row
+                // always read "Searching…", which made it ambiguous whether the
+                // request was still running or had simply returned a few matches.
+                let count = filteredThreads.count
+                Text(count == 1 ? "1 result" : "\(count) results")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(AppTheme.mutedText)
             }
-
-            // Search hits the server (server-side filtering), so use the same copy whether
-            // the request is in-flight or just finished — both states represent server search.
-            Text("Searching \(selectedFolder.title.lowercased())…")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(AppTheme.mutedText)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -1117,15 +1238,22 @@ struct EmailInboxView: View {
                     Text(selectedFolder.emptyStateDescription)
                         .font(.system(size: 14))
                         .foregroundStyle(AppTheme.subtleText)
-                    Button {
-                        Task { await emailService.loadThreads(folder: selectedFolder.rawValue, refresh: true, triggerSync: true) }
-                    } label: {
-                        Text("Refresh")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(.primary)
+                    // Refresh CTA is only useful for folders that receive a server
+                    // sync (inbox/drafts/sent/archive). Snoozed/Spam/Trash are
+                    // either local-only state (Snoozed) or curated by the provider
+                    // (Spam/Trash) — tapping Refresh there does nothing visible to
+                    // the user and reads as a broken button.
+                    if folderSupportsManualRefresh(selectedFolder) {
+                        Button {
+                            Task { await emailService.loadThreads(folder: selectedFolder.rawValue, refresh: true, triggerSync: true) }
+                        } label: {
+                            Text("Refresh")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(.primary)
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.top, 4)
                     }
-                    .buttonStyle(.plain)
-                    .padding(.top, 4)
                 }
             }
             Spacer()
@@ -1220,12 +1348,29 @@ struct EmailInboxView: View {
     // MARK: - Deep Navigation
 
     /// Picks up a pending thread ID set by AI chat card navigation and navigates to it.
+    /// Uses a tracked Task so a rapid second invocation cancels the previous one,
+    /// and so the push is dropped entirely when the inbox disappears before the
+    /// delay elapses (the prior `DispatchQueue.main.asyncAfter` had no such hook
+    /// and could fire after the view was gone).
     private func consumePendingThreadNavigation() {
         guard let threadId = services.pendingEmailThreadId else { return }
         services.pendingEmailThreadId = nil
-        // Small delay to let the tab switch and view appear before pushing
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+        pendingThreadNavTask?.cancel()
+        pendingThreadNavTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled else { return }
             selectedThreadId = threadId
+        }
+    }
+
+    /// Whether the given folder's empty-state should expose a manual Refresh
+    /// button. Snoozed/Spam/Trash never benefit from a Gmail re-sync — their
+    /// contents are either local-only (Snoozed) or fully managed server-side
+    /// (Spam/Trash) — so we suppress the no-op CTA there.
+    private func folderSupportsManualRefresh(_ folder: EmailFolder) -> Bool {
+        switch folder {
+        case .snoozed, .spam, .bin: false
+        default: true
         }
     }
 
@@ -1328,7 +1473,9 @@ struct SenderThreadsView: View {
         if services.swipeGesturesEnabled {
             baseRow
                 .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                    Button(role: .destructive) {
+                    // Archive is reversible — keep it orange but drop the destructive
+                    // role so the system doesn't tint it red on full swipe.
+                    Button {
                         Task { await emailService.archiveThreads(ids: [thread.id]) }
                     } label: {
                         Label("Archive", systemImage: "archivebox")

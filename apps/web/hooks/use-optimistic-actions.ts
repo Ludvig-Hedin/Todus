@@ -56,7 +56,11 @@ interface ActionParams {
 
 type ThreadListPage = {
   threads: ThreadSummary[];
-  nextPageToken: string | null;
+  // Single-account view (listThreads) returns nextPageToken; unified view
+  // (listThreadsMulti) returns nextCursors. Both are preserved verbatim by
+  // the updater below — only `threads` is patched.
+  nextPageToken?: string | null;
+  nextCursors?: Record<string, string>;
 };
 
 const actionEventNames: Record<ActionType, (params: ActionParams) => string> = {
@@ -99,12 +103,17 @@ export function useOptimisticActions() {
         {
           predicate: (query) => {
             const [routeKey, queryMeta] = query.queryKey as [unknown, { type?: string }?];
-            return (
-              Array.isArray(routeKey) &&
-              routeKey[0] === 'mail' &&
-              routeKey[1] === 'listThreads' &&
-              queryMeta?.type === 'infinite'
-            );
+            if (!Array.isArray(routeKey) || routeKey[0] !== 'mail') return false;
+            // Match BOTH single-account (listThreads) and unified (listThreadsMulti)
+            // caches — otherwise optimistic star/read/important/label toggles
+            // appear to do nothing in unified inbox.
+            const isThreadList =
+              routeKey[1] === 'listThreads' || routeKey[1] === 'listThreadsMulti';
+            if (!isThreadList) return false;
+            // listThreads uses TanStack's infinite query metadata;
+            // listThreadsMulti uses a hand-rolled infinite query whose key has
+            // no `type` marker. Accept both shapes.
+            return queryMeta?.type === 'infinite' || routeKey[1] === 'listThreadsMulti';
           },
         },
         (data: InfiniteData<ThreadListPage> | undefined) => {
@@ -249,6 +258,38 @@ export function useOptimisticActions() {
     return await queryClient.refetchQueries({ queryKey: trpc.labels.list.queryKey() });
   }, [queryClient]);
 
+  // Invalidate every cached `mail.listThreads` / `mail.listThreadsMulti` page
+  // whose query-key folder matches one of the affected folders. Without this,
+  // move/delete/snooze updates the optimistic state but the *server-side*
+  // contents of the source/destination folders silently drift — a refresh
+  // after the 5-minute stale window resurrects moved threads.
+  const invalidateFolderLists = useCallback(
+    (folders: string[]) => {
+      if (!folders.length) return;
+      const folderSet = new Set(folders.filter(Boolean));
+      void queryClient.invalidateQueries({
+        predicate: (query) => {
+          const key = query.queryKey as unknown[];
+          if (!Array.isArray(key) || !Array.isArray(key[0])) return false;
+          const route = key[0] as unknown[];
+          if (route[0] !== 'mail') return false;
+          if (route[1] !== 'listThreads' && route[1] !== 'listThreadsMulti') return false;
+          // Both endpoints include `folder` somewhere in their key params.
+          // Walk the key shallowly looking for a matching folder value.
+          for (const slice of key) {
+            if (slice && typeof slice === 'object') {
+              const folder = (slice as { folder?: string; input?: { folder?: string } }).folder
+                ?? (slice as { input?: { folder?: string } }).input?.folder;
+              if (folder && folderSet.has(folder)) return true;
+            }
+          }
+          return false;
+        },
+      });
+    },
+    [queryClient],
+  );
+
   function createPendingAction({
     type,
     threadIds,
@@ -257,6 +298,7 @@ export function useOptimisticActions() {
     execute,
     undo,
     toastMessage,
+    folders,
   }: {
     type: keyof typeof ActionType;
     threadIds: string[];
@@ -269,20 +311,11 @@ export function useOptimisticActions() {
   }) {
     const pendingActionId = generatePendingActionId();
     optimisticActionsManager.lastActionId = pendingActionId;
-    console.log('here Generated pending action ID:', pendingActionId);
 
     if (!optimisticActionsManager.pendingActionsByType.has(type)) {
-      console.log('here Creating new Set for action type:', type);
       optimisticActionsManager.pendingActionsByType.set(type, new Set());
     }
     optimisticActionsManager.pendingActionsByType.get(type)?.add(pendingActionId);
-    console.log(
-      'here',
-      'Added pending action to type:',
-      type,
-      'Current size:',
-      optimisticActionsManager.pendingActionsByType.get(type)?.size,
-    );
 
     const pendingAction = {
       id: pendingActionId,
@@ -303,11 +336,6 @@ export function useOptimisticActions() {
       try {
         await execute();
         const typeActions = optimisticActionsManager.pendingActionsByType.get(type);
-        console.log('here', {
-          pendingActionsByTypeRef: optimisticActionsManager.pendingActionsByType.get(type)?.size,
-          pendingActionsRef: optimisticActionsManager.pendingActions.size,
-          typeActions: typeActions?.size,
-        });
 
         const eventName = actionEventNames[type]?.(params);
         if (eventName) {
@@ -316,16 +344,38 @@ export function useOptimisticActions() {
 
         optimisticActionsManager.pendingActions.delete(pendingActionId);
         optimisticActionsManager.pendingActionsByType.get(type)?.delete(pendingActionId);
+        // TODO(bug-hunt): `typeActions.size === 1` checked AFTER the delete on
+        // line above mutates the same Set — so this fires only when one OTHER
+        // action of the same type is still pending. For the common single-
+        // action case (Set went 1 → 0) this branch never runs, so
+        // refreshData(), invalidateFolderLists(), and removeOptimisticAction()
+        // are skipped. Symptoms: jotai `optimisticActionsAtom` grows
+        // unboundedly across a session (memory leak), and MOVE actions leave
+        // `shouldHide` true forever in the optimistic state. Intended check is
+        // almost certainly `=== 0` (this was the last in flight). Needs human
+        // review before flipping because it also affects multi-action timing.
         if (typeActions?.size === 1) {
           await refreshData();
+          // Invalidate folder caches so server-truth replaces optimistic state.
+          if (folders?.length) invalidateFolderLists(folders);
           removeOptimisticAction(optimisticId);
         }
       } catch (error) {
         console.error('Action failed:', error);
-        removeOptimisticAction(optimisticId);
+        // Run the same cleanup the user would get from clicking Undo so the
+        // optimistic state, background queue, and any side-effects (e.g.
+        // closed thread) revert together rather than leaving phantom state.
+        try {
+          undo();
+        } catch (undoError) {
+          console.error('Rollback failed after action error:', undoError);
+        }
         optimisticActionsManager.pendingActions.delete(pendingActionId);
         optimisticActionsManager.pendingActionsByType.get(type)?.delete(pendingActionId);
-        toast.error('Action failed');
+        const message = error instanceof Error && error.message ? error.message : null;
+        toast.error("Couldn't save that change", {
+          description: message ?? 'Please try again.',
+        });
       }
     }
 
@@ -364,6 +414,10 @@ export function useOptimisticActions() {
         read: true,
       });
 
+      // Apply the cache patch BEFORE awaiting the network so the row updates
+      // immediately. Reverse on failure inside undo().
+      applyReadPatch(threadIds, true);
+
       createPendingAction({
         type: 'READ',
         threadIds,
@@ -371,13 +425,14 @@ export function useOptimisticActions() {
         optimisticId,
         execute: async () => {
           await markAsRead({ ids: threadIds });
-          applyReadPatch(threadIds, true);
 
           if (mail.bulkSelected.length > 0) {
             setMail((prev) => ({ ...prev, bulkSelected: [] }));
           }
         },
         undo: () => {
+          // Network failed — revert the cache patch.
+          applyReadPatch(threadIds, false);
           removeOptimisticAction(optimisticId);
         },
         toastMessage: silent ? '' : 'Marked as read',
@@ -395,6 +450,8 @@ export function useOptimisticActions() {
       read: false,
     });
 
+    applyReadPatch(threadIds, false);
+
     createPendingAction({
       type: 'READ',
       threadIds,
@@ -402,13 +459,13 @@ export function useOptimisticActions() {
       optimisticId,
       execute: async () => {
         await markAsUnread({ ids: threadIds });
-        applyReadPatch(threadIds, false);
 
         if (mail.bulkSelected.length > 0) {
           setMail({ ...mail, bulkSelected: [] });
         }
       },
       undo: () => {
+        applyReadPatch(threadIds, true);
         removeOptimisticAction(optimisticId);
       },
       toastMessage: 'Marked as unread',
@@ -425,6 +482,8 @@ export function useOptimisticActions() {
         starred,
       });
 
+      applyTagTogglePatch(threadIds, 'STARRED', starred);
+
       createPendingAction({
         type: 'STAR',
         threadIds,
@@ -432,9 +491,9 @@ export function useOptimisticActions() {
         optimisticId,
         execute: async () => {
           await toggleStar({ ids: threadIds });
-          applyTagTogglePatch(threadIds, 'STARRED', starred);
         },
         undo: () => {
+          applyTagTogglePatch(threadIds, 'STARRED', !starred);
           removeOptimisticAction(optimisticId);
         },
         toastMessage: starred
@@ -551,6 +610,7 @@ export function useOptimisticActions() {
         });
       },
       toastMessage: m['common.actions.movedToBin'](),
+      folders: [currentFolder, 'bin'],
     });
   }
 
@@ -564,6 +624,8 @@ export function useOptimisticActions() {
         important: isImportant,
       });
 
+      applyTagTogglePatch(threadIds, 'IMPORTANT', isImportant);
+
       createPendingAction({
         type: 'IMPORTANT',
         threadIds,
@@ -571,13 +633,13 @@ export function useOptimisticActions() {
         optimisticId,
         execute: async () => {
           await toggleImportant({ ids: threadIds });
-          applyTagTogglePatch(threadIds, 'IMPORTANT', isImportant);
 
           if (mail.bulkSelected.length > 0) {
             setMail((prev) => ({ ...prev, bulkSelected: [] }));
           }
         },
         undo: () => {
+          applyTagTogglePatch(threadIds, 'IMPORTANT', !isImportant);
           removeOptimisticAction(optimisticId);
         },
         toastMessage: isImportant ? 'Marked as important' : 'Unmarked as important',
@@ -596,6 +658,8 @@ export function useOptimisticActions() {
       add,
     });
 
+    applyLabelPatch(threadIds, labelId, add);
+
     createPendingAction({
       type: 'LABEL',
       threadIds,
@@ -607,13 +671,13 @@ export function useOptimisticActions() {
           addLabels: add ? [labelId] : [],
           removeLabels: add ? [] : [labelId],
         });
-        applyLabelPatch(threadIds, labelId, add);
 
         if (mail.bulkSelected.length > 0) {
           setMail((prev) => ({ ...prev, bulkSelected: [] }));
         }
       },
       undo: () => {
+        applyLabelPatch(threadIds, labelId, !add);
         removeOptimisticAction(optimisticId);
       },
       toastMessage: add
@@ -696,6 +760,10 @@ export function useOptimisticActions() {
         removeOptimisticAction(optimisticId);
       },
       toastMessage: 'Draft deleted',
+      // Invalidate the Drafts mail-list cache too — otherwise the deleted
+      // row reappears when the user revisits the Drafts folder until the
+      // 5-minute stale window passes.
+      folders: ['draft'],
     });
   }
 

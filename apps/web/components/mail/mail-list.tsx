@@ -4,7 +4,6 @@ import {
   useQuery,
   useInfiniteQuery,
   useQueryClient,
-  type UseQueryResult,
 } from '@tanstack/react-query';
 import {
   Archive2,
@@ -28,11 +27,14 @@ import { focusedIndexAtom, useMailNavigation } from '@/hooks/use-mail-navigation
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Check, Star, ChevronRight, ChevronLeft, Users } from 'lucide-react';
 import type { MailSelectMode, ThreadProps } from '@/types';
-import type { ParsedDraft } from '../../../server/src/lib/driver/types';
+// ParsedDraft import removed — Draft row reads from `$raw` shape served by
+// listDrafts (parsed message, not ParsedDraft). See `DraftRowSummary` below.
 import { ThreadContextMenu } from '@/components/context/thread-context';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
 import { useMail, type Config } from '@/components/mail/use-mail';
-import { useActiveConnection } from '@/hooks/use-connections';
+import { authClient } from '@/lib/auth-client';
+import { useActiveConnection, useConnections } from '@/hooks/use-connections';
+import { toast } from 'sonner';
 import { type ThreadDestination } from '@/lib/thread-actions';
 import { useThreads } from '@/hooks/use-threads';
 import { useSearchValue } from '@/hooks/use-search-value';
@@ -48,7 +50,7 @@ import { BimiAvatar } from '../ui/bimi-avatar';
 import { RenderLabels } from './render-labels';
 import { Badge } from '@/components/ui/badge';
 import { BackgroundRefreshIndicator } from '@/components/ui/background-refresh-indicator';
-import { useDraft } from '@/hooks/use-drafts';
+// useDraft removed — Draft row now reads from `message.$raw` populated by listThreads.
 import { Skeleton } from '../ui/skeleton';
 import { m } from '@/paraglide/messages';
 import { useParams } from 'react-router';
@@ -57,7 +59,9 @@ import { Avatar } from '../ui/avatar';
 import { useQueryState } from 'nuqs';
 import { useAtom } from 'jotai';
 
-const HOVER_PREFETCH_DELAY_MS = 120;
+// Short debounce so prefetch fires on intentional hovers but skips fly-bys.
+// Lowered from 120ms — at 120 the prefetch rarely won the race against a click.
+const HOVER_PREFETCH_DELAY_MS = 50;
 
 const Thread = memo(
   function Thread({
@@ -164,13 +168,19 @@ const Thread = memo(
     const handleNext = useCallback(
       (id: string) => {
         if (!id || !threads.length || focusedIndex === null) return setThreadId(null);
+        // After archive/move from a row, advance focus to the next sibling
+        // (focusedIndex + 1) — otherwise the reader pane re-opens the thread
+        // that just disappeared from the list.
         if (focusedIndex < threads.length - 1) {
-          const nextThread = threads[focusedIndex];
+          const nextThread = threads[focusedIndex + 1];
           if (nextThread) {
             setThreadId(nextThread.id);
             // Don't clear activeReplyId - let ThreadDisplay handle Reply All auto-opening
             setFocusedIndex(focusedIndex);
           }
+        } else {
+          // We were on the last row — no sibling to advance to, clear selection.
+          setThreadId(null);
         }
       },
       [threads, id, focusedIndex],
@@ -570,9 +580,30 @@ const Thread = memo(
   },
 );
 
-const Draft = memo(({ message, index }: { message: { id: string }; index: number }) => {
-  const draftQuery = useDraft(message.id) as UseQueryResult<ParsedDraft>;
-  const draft = draftQuery.data;
+type DraftRowSummary = {
+  id?: string;
+  subject?: string;
+  // Server's listDrafts attaches the parsed Gmail message via `$raw`, where
+  // `to` is `Sender[]` (`{name?, email}`), not `string[]` as ParsedDraft
+  // suggests. Date lives on `receivedOn` (RFC 2822 string), not
+  // `rawMessage.internalDate`. We type the row to that real shape and adapt
+  // around it — the previous cast to ParsedDraft rendered "[object Object]"
+  // as the recipient and never showed a date.
+  to?: Array<{ name?: string; email?: string }>;
+  receivedOn?: string;
+};
+
+const Draft = memo(({ message, index }: { message: { id: string; $raw?: unknown }; index: number }) => {
+  // Render directly from the parsed draft already attached to the listThreads
+  // page payload via `$raw`. Previously this component called
+  // `useDraft(message.id)` per row, which fanned out into N tRPC requests on
+  // every drafts-folder mount (and broke batching because httpBatchLink had
+  // maxItems: 1). Now we use the pre-parsed message the server already
+  // hydrated as part of `listDrafts` — zero extra requests per row.
+  const draft = message.$raw as DraftRowSummary | undefined;
+  const recipient =
+    draft?.to?.[0]?.email || draft?.to?.[0]?.name || 'No Recipient';
+  const receivedOnTime = draft?.receivedOn ? Date.parse(draft.receivedOn) : Number.NaN;
   const [, setComposeOpen] = useQueryState('isComposeOpen');
   const [, setDraftId] = useQueryState('draftId');
   const { optimisticDeleteDraft } = useOptimisticActions();
@@ -674,17 +705,17 @@ const Draft = memo(({ message, index }: { message: { id: string }; index: number
                     )}
                   >
                     <span className={cn('max-w-[25ch] truncate text-sm')}>
-                      {cleanNameDisplay(draft?.to?.[0] || 'No Recipient') || ''}
+                      {cleanNameDisplay(recipient)}
                     </span>
                   </span>
                 </div>
-                {draft.rawMessage?.internalDate && (
+                {Number.isFinite(receivedOnTime) && (
                   <p
                     className={cn(
                       'text-muted-foreground text-nowrap text-[11px] font-normal opacity-70 transition-opacity group-hover:opacity-100',
                     )}
                   >
-                    {formatDate(Number(draft.rawMessage?.internalDate))}
+                    {formatDate(receivedOnTime)}
                   </p>
                 )}
               </div>
@@ -950,13 +981,33 @@ export const MailList = memo(
     const { folder } = useParams<{ folder: string }>();
     const { data: settingsData } = useSettings();
     const { data: activeConnection, isLoading: isConnectionLoading } = useActiveConnection();
+    // A user can be authenticated *and* have provider accounts linked while
+    // still having zero `mail0_connection` rows wired up. Detect that
+    // mid-state so the empty-state can offer a self-service "Connect Gmail"
+    // re-link instead of silently telling the user to "connect an inbox"
+    // when the macOS app shows them as connected.
+    const { data: connectionsList, isLoading: isConnectionsListLoading } = useConnections();
+    const hasNoConnections =
+      !isConnectionsListLoading &&
+      Array.isArray(connectionsList?.connections) &&
+      connectionsList.connections.length === 0;
     const [, setThreadId] = useQueryState('threadId');
     const [, setDraftId] = useQueryState('draftId');
     const [searchValue, setSearchValue] = useSearchValue();
-    const [anchorIndex, setAnchorIndex] = useState<number | null>(null);
+    // Store the shift-click anchor as a thread ID rather than an index — the
+    // list mutates (archive/delete/optimistic remove) and an index-based
+    // anchor would silently point at a different thread after every change,
+    // so shift-click would later select the wrong range. Translate to an
+    // index lazily at click time against the current items.
+    const [anchorThreadId, setAnchorThreadId] = useState<string | null>(null);
 
-    // People view state — persisted in URL so refresh preserves position
-    const [viewMode, setViewMode] = useQueryState('viewMode');
+    // People view state — persisted in URL so refresh preserves position.
+    // Key is `inboxView` (NOT `viewMode`) because the AI sidebar also reads
+    // `?viewMode` for its own popup/sidebar/fullscreen state. The previous
+    // shared key meant opening the AI sidebar wiped the People view back to
+    // Threads, and visiting People view caused the AI to read an unrecognized
+    // viewMode value.
+    const [viewMode, setViewMode] = useQueryState('inboxView');
     const [personEmail, setPersonEmail] = useQueryState('personEmail');
     const [personName, setPersonName] = useQueryState('personName');
     const isPeopleView = viewMode === 'people';
@@ -967,7 +1018,7 @@ export const MailList = memo(
     useEffect(() => {
       const handleKeyDown = (event: KeyboardEvent) => {
         if (event.key === 'Escape') {
-          setAnchorIndex(null);
+          setAnchorThreadId(null);
         }
       };
 
@@ -976,7 +1027,7 @@ export const MailList = memo(
       return () => {
         window.removeEventListener('keydown', handleKeyDown);
       };
-    }, [setAnchorIndex]);
+    }, []);
 
     const [{ refetch, isLoading, isFetching, isFetchingNextPage, hasNextPage }, items, , loadMore] =
       useThreads();
@@ -1082,7 +1133,16 @@ export const MailList = memo(
             }
             case 'range': {
               console.log('Range selection mode');
-              if (anchorIndex === null) {
+              if (!anchorThreadId) {
+                return { ...mail, bulkSelected: [itemId] };
+              }
+              // Translate the stored anchor THREAD ID to its current index in
+              // the live list — protects against the anchor pointing at a
+              // thread that has since been archived or moved.
+              const anchorIndex = itemsRef.current.findIndex(
+                (item) => item.id === anchorThreadId,
+              );
+              if (anchorIndex === -1) {
                 return { ...mail, bulkSelected: [itemId] };
               }
               const start = Math.min(anchorIndex, clickedIndex);
@@ -1099,7 +1159,7 @@ export const MailList = memo(
           }
         });
       },
-      [getSelectMode, setMail, anchorIndex],
+      [getSelectMode, setMail, anchorThreadId],
     );
 
     const [, setFocusedIndex] = useAtom(focusedIndexAtom);
@@ -1115,7 +1175,8 @@ export const MailList = memo(
           const messageThreadId = message.threadId ?? message.id;
           const clickedIndex = itemsRef.current.findIndex((item) => item.id === messageThreadId);
           if (clickedIndex !== -1 && mode !== 'range') {
-            setAnchorIndex(clickedIndex);
+            // Anchor stored as thread ID; survives list mutations.
+            setAnchorThreadId(messageThreadId);
           }
           return handleSelectMail(message);
         }
@@ -1325,12 +1386,34 @@ export const MailList = memo(
                     <div className="flex max-w-sm flex-col items-center justify-center gap-2 text-center">
                       <EmptyStateIcon width={200} height={200} />
                       <div className="mt-5 space-y-1">
-                        <p className="text-base font-medium">Connect an inbox to load your mail</p>
+                        <p className="text-base font-medium">
+                          {hasNoConnections
+                            ? 'Connect an inbox to load your mail'
+                            : 'Your inbox needs to be reconnected'}
+                        </p>
                         <p className="text-muted-foreground text-[13px]">
-                          Add Gmail or Outlook to start reading threads, drafting replies, and using
-                          AI on your messages.
+                          {hasNoConnections
+                            ? 'Add Gmail or Outlook to start reading threads, drafting replies, and using AI on your messages.'
+                            : 'We can see your account but the mail connection has expired or lost permissions. Reconnect to start syncing again.'}
                         </p>
                       </div>
+                      <Button
+                        size="sm"
+                        className="mt-3"
+                        onClick={async () => {
+                          try {
+                            await authClient.linkSocial({
+                              provider: 'google',
+                              callbackURL: `${window.location.origin}/mail/inbox`,
+                            });
+                          } catch (error) {
+                            console.error('Failed to start Google reconnect:', error);
+                            toast.error('Could not start Google reconnect. Please try again.');
+                          }
+                        }}
+                      >
+                        {hasNoConnections ? 'Connect Gmail' : 'Reconnect Gmail'}
+                      </Button>
                     </div>
                   </div>
                 ) : !items || items.length === 0 ? (

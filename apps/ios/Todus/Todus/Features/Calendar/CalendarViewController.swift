@@ -48,10 +48,15 @@ final class CalendarViewController: DayViewController {
         super.viewDidLoad()
         title = "Calendar"
 
-        // Match CalendarKit backgrounds to the white page content background
-        // so the all-day events area and timeline aren't a different gray.
-        view.backgroundColor = .systemBackground
-        dayView.backgroundColor = .systemBackground
+        // Match CalendarKit backgrounds to AppTheme.backgroundTop so the
+        // timeline background matches the SwiftUI header overlay above it.
+        let pageBg = UIColor { trait in
+            trait.userInterfaceStyle == .dark
+                ? UIColor(white: 0.109, alpha: 1)
+                : UIColor(white: 0.94, alpha: 1)
+        }
+        view.backgroundColor = pageBg
+        dayView.backgroundColor = pageBg
 
         // Customize CalendarKit event styling — slightly more rounded event pills
         var style = CalendarStyle()
@@ -70,11 +75,63 @@ final class CalendarViewController: DayViewController {
                 self.requestAccessToCalendar()
             }
         }
+
+        // Re-check permission whenever the app returns from background so a
+        // user who toggled Calendar access in Settings sees the right state
+        // (revoked → clear; granted → reload).
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleWillEnterForeground),
+            name: UIApplication.willEnterForegroundNotification,
+            object: nil
+        )
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
     }
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         navigationController?.setToolbarHidden(true, animated: false)
+        // Authorization can flip while the app is suspended. Drop cached
+        // events if the user revoked access since the last appearance so we
+        // don't render stale data.
+        reconcileAuthorizationState()
+    }
+
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        // End any in-flight long-press edit and drop the editing buffer so
+        // the next appearance starts from a clean slate. Without this the
+        // half-edited wrapper stays referenced and re-renders on return.
+        endEventEditing()
+    }
+
+    @objc private func handleWillEnterForeground() {
+        reconcileAuthorizationState()
+    }
+
+    /// If the user revoked calendar access (e.g. in Settings) clear cached
+    /// events and notify the SwiftUI host so it can swap in the permission
+    /// view. On (re-)grant, reload data so the timeline refreshes immediately.
+    private func reconcileAuthorizationState() {
+        let status = EKEventStore.authorizationStatus(for: .event)
+        let authorized: Bool
+        if #available(iOS 17.0, *) {
+            authorized = status == .fullAccess
+        } else {
+            authorized = status == .authorized
+        }
+        if !authorized {
+            cachedEvents.removeAll()
+            inFlightDates.removeAll()
+            reloadData()
+            NotificationCenter.default.post(
+                name: .todusCalendarAuthorizationDidChange,
+                object: nil
+            )
+        }
     }
 
     private func requestAccessToCalendar() {
@@ -182,6 +239,7 @@ final class CalendarViewController: DayViewController {
         eventController.event = ekEvent
         eventController.allowsCalendarPreview = true
         eventController.allowsEditing = true
+        eventController.delegate = self
         // Slide the outer tab bar off while the event detail is on top — matches
         // Apple Calendar where the event page is full-bleed.
         eventController.hidesBottomBarWhenPushed = true
@@ -193,6 +251,9 @@ final class CalendarViewController: DayViewController {
 
     override func dayView(dayView: DayView, didLongPressTimelineAt date: Date) {
         endEventEditing()
+        // Light haptic confirms the long-press registered before the new
+        // event pill drops into the timeline.
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
         guard let newEKWrapper = createNewEvent(at: date) else { return }
         create(event: newEKWrapper, animated: true)
     }
@@ -208,7 +269,7 @@ final class CalendarViewController: DayViewController {
 
         newEKEvent.startDate = date
         newEKEvent.endDate = endDate
-        newEKEvent.title = "New event"
+        newEKEvent.title = String(localized: "New event")
 
         let newEKWrapper = EKWrapper(eventKitEvent: newEKEvent)
         newEKWrapper.editedEvent = newEKWrapper
@@ -271,9 +332,11 @@ final class CalendarViewController: DayViewController {
     }
 
     override func dayView(dayView: DayView, didTapTimelineAt date: Date) {
+        // Only end any in-progress edit. Apple Calendar requires a long-press to
+        // create a new event; spawning one on every casual tap (e.g. trying to
+        // dismiss something or scroll) made it trivial to pollute the calendar
+        // with phantom "New Event" entries.
         endEventEditing()
-        guard let newEKWrapper = createNewEvent(at: date) else { return }
-        create(event: newEKWrapper, animated: true)
     }
 
     override func dayViewDidBeginDragging(dayView: DayView) {
@@ -288,9 +351,27 @@ final class CalendarViewController: DayViewController {
 
 }
 
+// MARK: - EKEventViewDelegate
+
+extension CalendarViewController: @MainActor EKEventViewDelegate {
+    nonisolated func eventViewController(
+        _ controller: EKEventViewController,
+        didCompleteWith action: EKEventViewAction
+    ) {
+        Task { @MainActor [weak self, weak controller] in
+            guard let self else { return }
+            controller?.navigationController?.popViewController(animated: true)
+            self.reloadData()
+        }
+    }
+}
+
 // MARK: - EKEventEditViewDelegate
 extension CalendarViewController: @MainActor EKEventEditViewDelegate {
-    nonisolated func eventEditViewController(_ controller: EKEventEditViewController, didCompleteWith action: EKEventEditViewAction) {
+    nonisolated func eventEditViewController(
+        _ controller: EKEventEditViewController,
+        didCompleteWith action: EKEventEditViewAction
+    ) {
         DispatchQueue.main.async { [weak self, weak controller] in
             guard let self, let controller else { return }
             self.endEventEditing()

@@ -185,7 +185,7 @@
         {
           "binding": "HYPERDRIVE",
           "id": "57834ddb6716440496c8836f6d99bc9a",
-          "localConnectionString": "postgresql://postgres:postgres@localhost:5432/todus",
+          "localConnectionString": "postgresql://postgres:postgres@localhost:5433/todus",
         },
       ],
       // Non-secret defaults for local `wrangler dev`. Real secrets: `wrangler secret put <NAME>` or `.dev.vars` (gitignored).
@@ -441,7 +441,7 @@
         {
           "binding": "HYPERDRIVE",
           "id": "e53252a4a8394ddab18f855b93601978",
-          "localConnectionString": "postgresql://postgres:postgres@localhost:5432/todus",
+          "localConnectionString": "postgresql://postgres:postgres@localhost:5433/todus",
         },
       ],
       "vars": {
@@ -545,7 +545,7 @@
         {
           "binding": "HYPERDRIVE",
           "id": "e53252a4a8394ddab18f855b93601978",
-          "localConnectionString": "postgresql://postgres:postgres@localhost:5432/todus",
+          "localConnectionString": "postgresql://postgres:postgres@localhost:5433/todus",
         },
       ],
       "durable_objects": {

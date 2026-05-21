@@ -80,6 +80,7 @@ struct MacShareConversationPanel: View {
         }
         .frame(width: 340)
         .background(MacTheme.surfaceCard, in: RoundedRectangle(cornerRadius: MacTheme.buttonRadius, style: .continuous))
+        .focusEffectDisabled()
     }
 
     // MARK: - Form
@@ -122,6 +123,11 @@ struct MacShareConversationPanel: View {
                     SecureField("Enter password", text: $password)
                         .textFieldStyle(.roundedBorder)
                         .font(.system(size: 13))
+                    // Helper text so the user knows what's expected before
+                    // they hit Create and see a generic error.
+                    Text("At least 4 characters")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
                 }
             }
 
@@ -188,6 +194,9 @@ struct MacShareConversationPanel: View {
                 }
                 .buttonStyle(.plain)
                 .help("Copy link")
+                // VoiceOver users need the state change announced — the
+                // checkmark icon alone has no semantic meaning.
+                .accessibilityLabel(copied ? "Copied" : "Copy link")
             }
             Text("Manage shared links in Settings → Sharing.")
                 .font(.system(size: 11))

@@ -19,6 +19,10 @@ import { workflowFunctions } from './workflow-functions';
 import { shouldGenerateDraft } from './index';
 import { connection } from '../db/schema';
 import { initTracing } from '../lib/tracing';
+import {
+  type AssistantAutomationPolicy,
+  defaultAssistantAutomationPolicy,
+} from '../lib/schemas';
 
 export type WorkflowContext = {
   connectionId: string;
@@ -186,7 +190,9 @@ export class WorkflowEngine {
   }
 }
 
-export const createDefaultWorkflows = (): WorkflowEngine => {
+export const createDefaultWorkflows = (
+  policy: AssistantAutomationPolicy = defaultAssistantAutomationPolicy,
+): WorkflowEngine => {
   const engine = new WorkflowEngine();
 
   const autoDraftWorkflow: WorkflowDefinition = {
@@ -373,9 +379,9 @@ export const createDefaultWorkflows = (): WorkflowEngine => {
     ],
   };
 
-  engine.registerWorkflow(autoDraftWorkflow);
+  if (policy.autoDraftReplies) engine.registerWorkflow(autoDraftWorkflow);
   engine.registerWorkflow(vectorizationWorkflow);
-  engine.registerWorkflow(threadSummaryWorkflow);
+  if (policy.autoSummarizeLongThreads) engine.registerWorkflow(threadSummaryWorkflow);
   engine.registerWorkflow(labelGenerationWorkflow);
 
   return engine;

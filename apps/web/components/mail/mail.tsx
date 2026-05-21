@@ -28,7 +28,7 @@ import { useMediaQuery } from '../../hooks/use-media-query';
 import useSearchLabels from '@/hooks/use-labels-search';
 import * as CustomIcons from '@/components/icons/icons';
 import { MailList } from '@/components/mail/mail-list';
-import { useNavigate, useParams } from 'react-router';
+import { Link, useNavigate, useParams } from 'react-router';
 import { useTRPC } from '@/providers/query-provider';
 import { useMail } from '@/components/mail/use-mail';
 import { SidebarToggle } from '../ui/sidebar-toggle';
@@ -36,6 +36,9 @@ import { PricingDialog } from '../ui/pricing-dialog';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { clearBulkSelectionAtom } from './use-mail';
 import { useThreads } from '@/hooks/use-threads';
+import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
+import { toast } from 'sonner';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -479,9 +482,29 @@ export function MailLayout() {
     }
   }, [session?.user, isPending, navigate]);
 
-  const [{ isFetching, refetch: refetchThreads }] = useThreads();
+  const [{ isFetching, refetch: refetchThreads }, threadItems] = useThreads();
   const { mutateAsync: forceSync } = useMutation(trpc.mail.forceSync.mutationOptions());
   const isDesktop = useMediaQuery('(min-width: 768px)');
+  const { optimisticMarkAsRead } = useOptimisticActions();
+
+  // Mark every visible unread thread as read. Mirrors macOS ⌘⇧M behavior.
+  // Folder is captured at call time, so this naturally respects whichever
+  // folder the user is viewing.
+  const handleMarkAllRead = useCallback(() => {
+    const unreadIds = (threadItems ?? [])
+      .filter((t: { id: string; hasUnread?: boolean }) => t.hasUnread !== false)
+      .map((t: { id: string }) => t.id);
+    if (unreadIds.length === 0) {
+      toast('No unread messages here');
+      return;
+    }
+    optimisticMarkAsRead(unreadIds);
+  }, [threadItems, optimisticMarkAsRead]);
+
+  useHotkeys('meta+shift+m, ctrl+shift+m', (event) => {
+    event.preventDefault();
+    handleMarkAllRead();
+  }, { enableOnFormTags: false });
 
   const [threadId] = useQueryState('threadId');
 
@@ -691,6 +714,28 @@ export function MailLayout() {
                       {activeConnection?.providerId === 'google' && folder === 'inbox' && (
                         <CategoryDropdown isMultiSelectMode={mail.bulkSelected.length > 0} />
                       )}
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-10 w-10 shrink-0 rounded-2xl"
+                            onClick={handleMarkAllRead}
+                            aria-label="Mark all as read"
+                          >
+                            <Check className="h-4 w-4" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <span className="text-xs">
+                            Mark all as read
+                            <kbd className="bg-muted ml-2 rounded border px-1 py-0.5 text-[10px]">
+                              {isMac ? '⌘⇧M' : 'Ctrl ⇧ M'}
+                            </kbd>
+                          </span>
+                        </TooltipContent>
+                      </Tooltip>
+                      <DailyBriefBell />
                     </>
                   ) : (
                     <div className="flex flex-1 items-center justify-between">
@@ -1046,5 +1091,141 @@ function CategoryDropdown({ isMultiSelectMode }: CategoryDropdownProps) {
         ))}
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+// ─── DailyBriefBell ─────────────────────────────────────────────────────────
+// Compact AI digest popover. Mirrors macOS `MacNotificationCenterView` so
+// users can glance at the most urgent reply, next event, and top task from
+// any mail page without bouncing through /mail/home.
+const BRIEF_SEEN_KEY = 'mail.dailyBrief.lastSeen';
+
+function DailyBriefBell() {
+  const trpc = useTRPC();
+  const { data: briefing, isLoading } = useQuery(
+    trpc.assistant.getBriefing.queryOptions(undefined, { staleTime: 60_000 }),
+  );
+
+  // Track when the user last viewed the brief so the "unread" dot can be
+  // dismissed by simply opening the popover. Without this the dot was
+  // permanent even after the user had clearly seen the content.
+  const [lastSeenAt, setLastSeenAt] = useState<number>(() => {
+    if (typeof window === 'undefined') return 0;
+    try {
+      const raw = window.localStorage.getItem(BRIEF_SEEN_KEY);
+      return raw ? Number(raw) : 0;
+    } catch {
+      return 0;
+    }
+  });
+  const itemCount =
+    (briefing?.needsYou?.length ?? 0) +
+    (briefing?.waitingOn?.length ?? 0) +
+    (briefing?.prepared?.length ?? 0);
+  // `briefing.updatedAt` would be ideal — fall back to: "show dot until user
+  // opens the popover at least once after the brief query finished."
+  const briefingLoadedAt = briefing ? Date.now() : 0;
+  const hasUnseen = itemCount > 0 && briefingLoadedAt > lastSeenAt;
+
+  const markSeen = () => {
+    const now = Date.now();
+    setLastSeenAt(now);
+    try {
+      window.localStorage.setItem(BRIEF_SEEN_KEY, String(now));
+    } catch {
+      // ignore
+    }
+  };
+
+  return (
+    <Popover onOpenChange={(open) => open && markSeen()}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="relative h-10 w-10 shrink-0 rounded-2xl"
+          aria-label="Daily brief"
+        >
+          <Bell className="h-4 w-4" />
+          {hasUnseen && (
+            <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-mainBlue" />
+          )}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-[340px] p-3">
+        <div className="mb-2 flex items-center justify-between">
+          <p className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">
+            Today's brief
+          </p>
+          <Link to="/mail/home" className="text-[11px] text-muted-foreground hover:text-foreground">
+            View full
+          </Link>
+        </div>
+        {isLoading ? (
+          <div className="space-y-2">
+            {['s1', 's2', 's3'].map((k) => (
+              <div key={k} className="bg-muted/50 h-12 animate-pulse rounded-lg" />
+            ))}
+          </div>
+        ) : !briefing ? (
+          <p className="py-4 text-center text-[12px] text-muted-foreground">
+            No brief available yet.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {briefing.today?.urgentReply ? (
+              <Link
+                to={
+                  briefing.today.urgentReply.threadId
+                    ? `/mail/inbox?threadId=${briefing.today.urgentReply.threadId}`
+                    : '/mail/inbox'
+                }
+                className="block rounded-md border bg-muted/15 px-3 py-2 hover:bg-accent/60"
+              >
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Urgent reply
+                </p>
+                <p className="mt-0.5 line-clamp-2 text-[13px] font-medium">
+                  {briefing.today.urgentReply.title}
+                </p>
+              </Link>
+            ) : null}
+            {briefing.today?.nextEvent ? (
+              <Link
+                to={`/mail/meetings/${briefing.today.nextEvent.id}`}
+                className="block rounded-md border bg-muted/15 px-3 py-2 hover:bg-accent/60"
+              >
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Next event
+                </p>
+                <p className="mt-0.5 line-clamp-2 text-[13px] font-medium">
+                  {briefing.today.nextEvent.title}
+                </p>
+              </Link>
+            ) : null}
+            {briefing.today?.topTask ? (
+              <Link
+                to="/mail/tasks"
+                className="block rounded-md border bg-muted/15 px-3 py-2 hover:bg-accent/60"
+              >
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Top task
+                </p>
+                <p className="mt-0.5 line-clamp-2 text-[13px] font-medium">
+                  {briefing.today.topTask.title}
+                </p>
+              </Link>
+            ) : null}
+            {!briefing.today?.urgentReply &&
+              !briefing.today?.nextEvent &&
+              !briefing.today?.topTask && (
+                <p className="py-4 text-center text-[12px] text-muted-foreground">
+                  You're all caught up.
+                </p>
+              )}
+          </div>
+        )}
+      </PopoverContent>
+    </Popover>
   );
 }

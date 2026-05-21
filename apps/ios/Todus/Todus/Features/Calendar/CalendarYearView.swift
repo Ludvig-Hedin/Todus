@@ -199,6 +199,9 @@ struct CalendarYearView: View {
             .contentShape(Rectangle())
             .onTapGesture {
                 if let date = cal.date(from: DateComponents(year: year, month: month, day: 1)) {
+                    // Light haptic confirms the year→month zoom in — mirrors the
+                    // month→day haptic in CalendarMonthView for a consistent feel.
+                    AppHaptic.light.play()
                     withAnimation(.easeOut(duration: 0.2)) {
                         selectedDate = date
                         viewMode = .month

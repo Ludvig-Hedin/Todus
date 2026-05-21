@@ -51,11 +51,35 @@ struct CalendarEventBlockView: View {
         .onHover { isHovered = $0 }
         .contextMenu {
             Button {
-                if let url = URL(string: "x-apple-calevent://\(event.id)") {
+                onTap?()
+            } label: {
+                Label("Open details", systemImage: "info.circle")
+            }
+            Button {
+                let refInterval = Int(event.startDate.timeIntervalSinceReferenceDate)
+                if let url = URL(string: "calshow:\(refInterval)") {
                     NSWorkspace.shared.open(url)
                 }
             } label: {
                 Label("Open in Calendar", systemImage: "arrow.up.forward.app")
+            }
+
+            Divider()
+
+            Button {
+                let pb = NSPasteboard.general
+                pb.clearContents()
+                pb.setString(event.title, forType: .string)
+            } label: {
+                Label("Copy title", systemImage: "doc.on.doc")
+            }
+            Button {
+                let summary = "\(event.title) — \(timeString)"
+                let pb = NSPasteboard.general
+                pb.clearContents()
+                pb.setString(summary, forType: .string)
+            } label: {
+                Label("Copy event summary", systemImage: "text.quote")
             }
         }
     }

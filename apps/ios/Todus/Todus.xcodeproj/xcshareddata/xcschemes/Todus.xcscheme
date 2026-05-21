@@ -35,6 +35,20 @@
                ReferencedContainer = "container:Todus.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "NO"
+            buildForProfiling = "NO"
+            buildForArchiving = "NO"
+            buildForAnalyzing = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "AD9BE12610A10EDE75DC4D65"
+               BuildableName = "TodusUITests.xctest"
+               BlueprintName = "TodusUITests"
+               ReferencedContainer = "container:Todus.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
       </BuildActionEntries>
    </BuildAction>
    <TestAction
@@ -61,6 +75,17 @@
                BlueprintIdentifier = "9D9291D0B768CB2678EFCFD2"
                BuildableName = "TodusTests.xctest"
                BlueprintName = "TodusTests"
+               ReferencedContainer = "container:Todus.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "AD9BE12610A10EDE75DC4D65"
+               BuildableName = "TodusUITests.xctest"
+               BlueprintName = "TodusUITests"
                ReferencedContainer = "container:Todus.xcodeproj">
             </BuildableReference>
          </TestableReference>

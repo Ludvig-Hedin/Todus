@@ -18,8 +18,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
 import { useForm } from 'react-hook-form';
-import { Bell } from 'lucide-react';
-import { useState } from 'react';
+import { AlertCircle, Bell } from 'lucide-react';
 import * as z from 'zod';
 
 const formSchema = z.object({
@@ -27,9 +26,13 @@ const formSchema = z.object({
   marketingCommunications: z.boolean(),
 });
 
+// NOTE: the `newMailNotifications` and `marketingCommunications` preferences
+// are NOT in `userSettingsSchema` on the backend yet — there is no persistence
+// path for them. The previous version pretended to save via `setTimeout` and
+// silently discarded user input; that's worse than not saving at all, so we
+// now disable the save action and explicitly tell the user this section is
+// preview-only. Wire to `trpc.settings.save` once the schema is extended.
 export default function NotificationsPage() {
-  const [isSaving, setIsSaving] = useState(false);
-
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
@@ -38,15 +41,8 @@ export default function NotificationsPage() {
     },
   });
 
-  function onSubmit() {
-    setIsSaving(true);
-    setTimeout(() => {
-      setIsSaving(false);
-    }, 1000);
-  }
-
   return (
-    <div className="grid gap-6">
+    <div className="grid gap-5">
       <SettingsCard
         title="Notifications"
         description="Choose what notifications you want to receive."
@@ -55,16 +51,26 @@ export default function NotificationsPage() {
             <Button type="button" variant="outline" onClick={() => form.reset()}>
               Reset to Defaults
             </Button>
-            <Button type="submit" form="notifications-form" disabled={isSaving}>
-              {isSaving ? 'Saving...' : 'Save Changes'}
+            <Button type="submit" form="notifications-form" disabled>
+              Coming soon
             </Button>
           </div>
         }
       >
+        <div
+          role="status"
+          className="mb-4 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-[13px] text-amber-700 dark:text-amber-400"
+        >
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+          <p>
+            Notification preferences aren&apos;t saved yet — this section is preview-only until
+            we ship the backend setting. Your choices below will reset on reload.
+          </p>
+        </div>
         <Form {...form}>
           <form
             id="notifications-form"
-            onSubmit={form.handleSubmit(onSubmit)}
+            onSubmit={(e) => e.preventDefault()}
             className="space-y-6"
           >
             <FormField

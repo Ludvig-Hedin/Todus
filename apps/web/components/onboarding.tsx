@@ -1,9 +1,16 @@
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { useConnections } from '@/hooks/use-connections';
+import { useSession } from '@/lib/auth-client';
 import { Button } from '@/components/ui/button';
 import { useState, useEffect } from 'react';
 import { APP_NAME } from '@/lib/branding';
 import confetti from 'canvas-confetti';
+
+// Storage key for tracking onboarding completion. Scoped per-user so signing
+// out and signing in as a different account doesn't skip the tour.
+const ONBOARDING_KEY_BASE = 'hasCompletedOnboarding';
+const onboardingKeyForUser = (userId: string | undefined) =>
+  userId ? `${ONBOARDING_KEY_BASE}:${userId}` : ONBOARDING_KEY_BASE;
 
 const steps = [
   {
@@ -45,15 +52,25 @@ export function OnboardingDialog({
 }) {
   const [currentStep, setCurrentStep] = useState(0);
 
+  // Reset to step 0 whenever the dialog closes so reopening starts fresh.
   useEffect(() => {
-    if (currentStep === steps.length - 1) {
-      confetti({
-        particleCount: 100,
-        spread: 70,
-        origin: { y: 0.6 },
-      });
-    }
-  }, [currentStep]);
+    if (!open) setCurrentStep(0);
+  }, [open]);
+
+  // Confetti only when the dialog is actually visible AND the user reaches the
+  // last step (not on a remount that lands on the last step).
+  useEffect(() => {
+    if (!open) return;
+    if (currentStep !== steps.length - 1) return;
+    confetti({
+      particleCount: 100,
+      spread: 70,
+      origin: { y: 0.6 },
+    });
+    return () => {
+      confetti.reset();
+    };
+  }, [currentStep, open]);
 
   const handleNext = () => {
     if (currentStep < steps.length - 1) {
@@ -139,23 +156,50 @@ export function OnboardingDialog({
 
 export function OnboardingWrapper() {
   const [showOnboarding, setShowOnboarding] = useState(false);
-  const ONBOARDING_KEY = 'hasCompletedOnboarding';
-  const { data: connectionsData, isLoading } = useConnections();
+  const { isLoading } = useConnections();
+  const { data: session } = useSession();
+  const userId = session?.user?.id as string | undefined;
+  const ONBOARDING_KEY = onboardingKeyForUser(userId);
 
   useEffect(() => {
     if (isLoading) return;
+    if (!userId) return;
 
-    const hasCompletedOnboarding = localStorage.getItem(ONBOARDING_KEY) === 'true';
-    const hasConnections = (connectionsData?.connections.length ?? 0) > 0;
+    // Wrap localStorage in try/catch — Safari private browsing & some
+    // cookie-blocked iOS setups throw on access.
+    let hasCompletedOnboarding = false;
+    try {
+      hasCompletedOnboarding = localStorage.getItem(ONBOARDING_KEY) === 'true';
+    } catch {
+      // No storage — assume first run; the tour opens once per session.
+    }
 
-    // Show the tour only after the user has at least one connected inbox.
-    // Otherwise the connect prompt and onboarding compete for attention on first run.
-    setShowOnboarding(hasConnections && !hasCompletedOnboarding);
-  }, [connectionsData?.connections.length, isLoading]);
+    setShowOnboarding(!hasCompletedOnboarding);
+
+    // Sync across tabs: if tab A finishes onboarding, tab B should close it too.
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === ONBOARDING_KEY && e.newValue === 'true') {
+        setShowOnboarding(false);
+      }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, [isLoading, userId, ONBOARDING_KEY]);
 
   const handleOpenChange = (open: boolean) => {
     if (!open) {
-      localStorage.setItem(ONBOARDING_KEY, 'true');
+      try {
+        localStorage.setItem(ONBOARDING_KEY, 'true');
+      } catch {
+        // Ignore — without storage we re-show the tour next time, which is harmless.
+      }
+      // Notify same-tab listeners (storage event only fires cross-tab) so the
+      // connection prompt can render now that onboarding finished.
+      try {
+        window.dispatchEvent(new Event('onboarding-completed'));
+      } catch {
+        // No-op in non-browser environments.
+      }
     }
     setShowOnboarding(open);
   };

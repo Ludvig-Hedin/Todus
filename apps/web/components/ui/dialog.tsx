@@ -45,7 +45,7 @@ const DialogContent = React.forwardRef<
     <DialogPrimitive.Content
       ref={ref}
       className={cn(
-        'fixed left-1/2 top-1/2 z-100 -translate-x-1/2 -translate-y-1/2 duration-200',
+        'fixed left-1/2 top-1/2 z-100 -translate-x-1/2 -translate-y-1/2 duration-(--motion-duration-base) ease-(--motion-easing-emphasized)',
         'data-[state=open]:animate-in data-[state=closed]:animate-out',
         'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
         'data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95',

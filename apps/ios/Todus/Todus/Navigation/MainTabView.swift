@@ -1,3 +1,4 @@
+import EventKit
 import SwiftUI
 import UIKit
 
@@ -27,6 +28,11 @@ struct MainTabView: View {
     @State private var calendarTabId = UUID()
 
     @State private var sheetTab: AppTab? = nil
+
+    /// FAB edge length scales with the user's Dynamic Type setting so the AI button
+    /// stays tappable at the largest accessibility sizes (it used to clip the
+    /// sparkles icon and become hard to hit at XXL+).
+    @ScaledMetric(relativeTo: .body) private var fabSize: CGFloat = 58
 
     // MARK: - Body
 
@@ -75,6 +81,10 @@ struct MainTabView: View {
 
             Color.clear
                 .id(createTabId)
+                // Hide the empty placeholder from VoiceOver — the tab item itself is
+                // exposed by `TabView` so adding a second focusable element here just
+                // landed users on an empty page when swiping the rotor.
+                .accessibilityHidden(true)
                 .tabItem { Label(AppTab.create.title, systemImage: AppTab.create.inactiveIcon()) }
                 .tag(AppTab.create)
 
@@ -83,17 +93,20 @@ struct MainTabView: View {
                 .tabItem { Label(AppTab.email.title, systemImage: AppTab.email.inactiveIcon()) }
                 .tag(AppTab.email)
 
-            Group {
-                if calendarPermissionGranted {
-                    NavigationStack {
-                        CalendarTabView()
-                            .toolbar(.hidden, for: .navigationBar)
-                    }
+            // Resolve permission at render time so the tab switches the moment the
+            // user grants/revokes access via Settings or the in-app prompt. The
+            // earlier @State-only flag could go stale if the system callback fired
+            // before the next `scenePhase` transition or `EKEventStoreChangedNotification`
+            // arrival. We keep `calendarPermissionGranted` as a hint so onChange/onAppear
+            // can still trigger refreshes, but use `canReadEvents()` for the actual
+            // branch — same source of truth, no desync.
+            NavigationStack {
+                if calendarPermissionGranted || services.calendarService.canReadEvents() {
+                    CalendarTabView()
+                        .toolbar(.hidden, for: .navigationBar)
                 } else {
-                    NavigationStack {
-                        CalendarPermissionView()
-                            .background(AppTheme.backgroundTop)
-                    }
+                    CalendarPermissionView()
+                        .background(AppTheme.backgroundTop)
                 }
             }
             .id(calendarTabId)
@@ -144,11 +157,15 @@ struct MainTabView: View {
         .sheet(isPresented: composeEmailBinding, onDismiss: {
             services.composeEmailSeedBody = nil
             services.composeEmailSeedTo = nil
+            services.composeEmailSeedCc = nil
+            services.composeEmailSeedBcc = nil
             services.composeEmailSeedSubject = nil
             services.composeEmailSeedAttachments = []
         }) {
             EmailComposeView(
                 to: services.composeEmailSeedTo,
+                cc: services.composeEmailSeedCc,
+                bcc: services.composeEmailSeedBcc,
                 subject: services.composeEmailSeedSubject,
                 body: services.composeEmailSeedBody,
                 seededAttachments: services.composeEmailSeedAttachments
@@ -177,6 +194,8 @@ struct MainTabView: View {
             if !isPresented {
                 services.composeEmailSeedBody = nil
                 services.composeEmailSeedTo = nil
+                services.composeEmailSeedCc = nil
+                services.composeEmailSeedBcc = nil
                 services.composeEmailSeedSubject = nil
                 services.composeEmailSeedAttachments = []
             }
@@ -202,6 +221,12 @@ struct MainTabView: View {
                 selectedTab = .home
             }
             calendarPermissionGranted = services.calendarService.canReadEvents()
+            // Positive returning-user signal — see Keys.hasReachedMainTab
+            // doc. Used by the startup-card migration so a fresh install
+            // with a stale Keychain bearer can't silently skip the card.
+            if !services.hasReachedMainTab {
+                services.hasReachedMainTab = true
+            }
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
@@ -209,6 +234,12 @@ struct MainTabView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .todusCalendarAuthorizationDidChange)) { _ in
+            calendarPermissionGranted = services.calendarService.canReadEvents()
+        }
+        // Pick up direct EventKit store changes (calendars added/removed, permission
+        // toggled in Settings) so the tab swaps instantly rather than waiting for the
+        // next scene-active transition.
+        .onReceive(NotificationCenter.default.publisher(for: .EKEventStoreChanged)) { _ in
             calendarPermissionGranted = services.calendarService.canReadEvents()
         }
     }
@@ -224,12 +255,13 @@ struct MainTabView: View {
             Image(systemName: "sparkles")
                 .font(.system(size: 20, weight: .semibold))
                 .foregroundStyle(aiGradient)
-                .frame(width: 58, height: 58)
+                .frame(width: fabSize, height: fabSize)
                 .contentShape(Circle())
         }
         .buttonStyle(FABButtonStyle())
         .fabGlass()
         .accessibilityLabel("Open AI Assistant")
+        .accessibilityIdentifier("ai.fab.open")
     }
 
     private var aiGradient: LinearGradient {
@@ -287,18 +319,40 @@ struct MainTabView: View {
 
     // MARK: - Offline Banner
 
+    /// Subtle red-tinted capsule with an inline "Retry" CTA so the user has a clear
+    /// action when the indicator surfaces — the silent grey pill used to read as
+    /// background chrome and got ignored. Pressing Retry asks the path monitor to
+    /// re-check connectivity and pings any registered reconnect handler so queued
+    /// work flushes immediately rather than waiting for the next path change.
     private var offlineBanner: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 8) {
             Image(systemName: "wifi.slash")
-                .font(.caption2)
-                .fontWeight(.medium)
-            Text("Offline — changes will sync when reconnected")
-                .font(.caption2)
+                .font(.system(size: 11, weight: .semibold))
+            Text("Offline")
+                .font(.system(size: 12, weight: .semibold))
+            Button {
+                // Best-effort reconnect: trigger any onReconnect handler so callers
+                // (sync, drafts) get a chance to re-attempt. The actual path status
+                // will update via NWPathMonitor's normal callback.
+                services.networkMonitor.onReconnect?()
+            } label: {
+                Text("Retry")
+                    .font(.system(size: 12, weight: .semibold))
+                    .underline()
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Retry network connection")
         }
-        .foregroundStyle(.secondary)
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 7)
-        .background(.ultraThinMaterial)
+        .foregroundStyle(Color.red.opacity(0.95))
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(
+            Capsule()
+                .fill(.ultraThinMaterial)
+                .overlay(Capsule().fill(Color.red.opacity(0.10)))
+                .overlay(Capsule().stroke(Color.red.opacity(0.25), lineWidth: 0.8))
+        )
+        .padding(.top, 4)
     }
 
     // MARK: - Session Expired Banner
@@ -324,7 +378,10 @@ struct MainTabView: View {
         .buttonStyle(.plain)
         .padding(.top, 4)
         .confirmationDialog("Your session has expired", isPresented: $showSessionExpiredConfirm, titleVisibility: .visible) {
-            Button("Sign In Again", role: .destructive) {
+            // "Sign In Again" is the recommended action — using `.destructive` painted
+            // it red, which read as "delete account" to a fair number of testers. No
+            // role means it gets the default tint and Cancel is the single muted choice.
+            Button("Sign In Again") {
                 services.authService.isSessionExpired = false
                 services.signOut()
             }

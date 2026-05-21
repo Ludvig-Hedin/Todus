@@ -18,7 +18,7 @@ struct InboxView<Footer: View>: View {
     /// Filter text from the home search bar
     var searchText: String = ""
     /// Sort order selected from the home sort menu
-    var sortOrder: TaskSortOrder = .newest
+    var sortOrder: TaskSortOrder = .smart
 
     /// Optional content rendered below the task list, scrolling together as one page.
     /// Used by the Tasks tab to surface the Folders grid at the bottom.
@@ -28,11 +28,18 @@ struct InboxView<Footer: View>: View {
     // Computing filtered+sorted arrays in computed properties re-ran on every SwiftUI
     // body evaluation, causing unnecessary CPU work during animations and scrolling.
     @State private var visibleTasks: [TaskRecord] = []
+    /// When smart sort is active, the same `visibleTasks` are also grouped
+    /// into time-relevance buckets (Overdue / Today / This week / Later /
+    /// No date) so the list reads as structured sections instead of one
+    /// long scroll. Empty buckets are skipped. (UX assessment S1.)
+    @State private var smartBuckets: [(bucket: TaskSmartSort.Bucket, tasks: [TaskRecord])] = []
+    /// Completed within the last 24 hours — shown by default so the user can
+    /// undo or reflect on recent wins.
     @State private var completedTasks: [TaskRecord] = []
-    /// Sleeps until the next done-task exits the 5s grace window, then recomputes once.
-    /// Replaces a 2 Hz `Timer.publish` that woke the main thread forever and contributed
-    /// to perceived UI hangs.
-    @State private var graceWindowRefreshTask: Task<Void, Never>?
+    /// Completed more than 24 hours ago — folded behind a "Show older" link
+    /// so finished work doesn't dominate the list. (UX assessment QW4.)
+    @State private var olderCompletedTasks: [TaskRecord] = []
+    @State private var showsOlderCompleted = false
 
     var body: some View {
         ZStack {
@@ -44,6 +51,28 @@ struct InboxView<Footer: View>: View {
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
                     }
+                } else if sortOrder == .smart && !smartBuckets.isEmpty {
+                    // Smart sort renders one section per non-empty bucket so
+                    // the user sees structure instead of one long flat list.
+                    // Headers are rendered inline (as rows) instead of Section
+                    // headers so they scroll with content rather than sticking
+                    // to the top of the list as the user scrolls.
+                    ForEach(smartBuckets, id: \.bucket.id) { group in
+                        Section {
+                            bucketHeader(group.bucket, count: group.tasks.count)
+                            ForEach(group.tasks) { task in
+                                TaskRowView(task: task) {
+                                    taskPendingMove = task
+                                } onOpenDetails: {
+                                    selectedTask = task
+                                }
+                                .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 2, trailing: 0))
+                                .listRowBackground(Color.clear)
+                                .listRowSeparator(.hidden)
+                            }
+                        }
+                    }
+                    completedSection
                 } else {
                     Section {
                         ForEach(visibleTasks) { task in
@@ -58,70 +87,7 @@ struct InboxView<Footer: View>: View {
                         }
                     }
 
-                    if !completedTasks.isEmpty {
-                        Section {
-                            ForEach(completedTasks) { task in
-                                HStack(spacing: 12) {
-                                    Image(systemName: "checkmark.circle.fill")
-                                        .foregroundStyle(AppTheme.mutedText)
-                                    Text(task.title)
-                                        .font(.system(size: 14, weight: .medium))
-                                        .tracking(-0.2)
-                                        .foregroundStyle(AppTheme.mutedText)
-                                        .strikethrough()
-                                    Spacer()
-                                }
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 8)
-                                .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.row, style: .continuous))
-                                // Tap to restore a completed task back to .todo
-                                .contentShape(Rectangle())
-                                    .onTapGesture {
-                                        withAnimation(.snappy(duration: 0.22)) {
-                                            captureService.toggleCompletion(task, in: modelContext)
-                                        }
-                                    }
-                                .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                                    Button {
-                                        withAnimation(.snappy(duration: 0.22)) {
-                                            captureService.toggleCompletion(task, in: modelContext)
-                                        }
-                                    } label: {
-                                        Label("Restore", systemImage: "arrow.uturn.backward")
-                                    }
-                                    .tint(Color.primary)
-                                }
-                                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                    Button(role: .destructive) {
-                                        captureService.delete(task, in: modelContext)
-                                    } label: {
-                                        Label("Delete", systemImage: "trash")
-                                    }
-                                }
-                                .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 2, trailing: 0))
-                                .listRowBackground(Color.clear)
-                                .listRowSeparator(.hidden)
-                            }
-                        } header: {
-                            HStack {
-                                Text("Recently completed")
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .tracking(-0.1)
-                                    .textCase(nil)
-                                    .foregroundStyle(AppTheme.mutedText)
-
-                                Spacer()
-
-                                Button("Clear") {
-                                    showsClearCompletedConfirmation = true
-                                }
-                                .font(.system(size: 12, weight: .semibold))
-                                .textCase(nil)
-                            }
-                            .padding(.top, 16)
-                            .padding(.bottom, 4)
-                        }
-                    }
+                    completedSection
                 }
 
                 Section {
@@ -160,21 +126,40 @@ struct InboxView<Footer: View>: View {
         // Recompute cached arrays only when their actual inputs change.
         // Previously these were computed properties that re-ran on every body evaluation
         // (including mid-animation frames), wasting CPU and causing scrolling stutter.
+        //
+        // Watching `allTasks` directly walked the entire `[TaskRecord]` array on every
+        // change for Equatable comparison — O(N) per emission. Swap to a lightweight
+        // (count + most-recent-update) digest so equality is O(1). (Medium bug.)
         .onAppear { recomputeTasks() }
-        .onDisappear { graceWindowRefreshTask?.cancel() }
-        .onChange(of: allTasks) { recomputeTasks() }
+        .onChange(of: tasksChangeDigest) { withAnimation(.snappy(duration: 0.3)) { recomputeTasks() } }
         .onChange(of: searchText) { recomputeTasks() }
         .onChange(of: sortOrder) { recomputeTasks() }
         .onChange(of: selectedFolderID) { recomputeTasks() }
     }
 
+    /// Lightweight digest of `allTasks` so `onChange` doesn't walk every element
+    /// for Equatable comparison. `(count, latest updatedAt)` is a cheap proxy:
+    /// any insert/delete shifts count, any in-place mutation bumps updatedAt
+    /// (TaskCaptureService writes `.updatedAt = .now` on every change).
+    private var tasksChangeDigest: TasksDigest {
+        // Walk once — same cost as Equatable on the array but bounded to two
+        // scalars in @State so SwiftUI's diffing path is O(1).
+        var latest: Date = .distantPast
+        for task in allTasks where task.updatedAt > latest {
+            latest = task.updatedAt
+        }
+        return TasksDigest(count: allTasks.count, latestUpdate: latest)
+    }
+
+    private struct TasksDigest: Equatable {
+        let count: Int
+        let latestUpdate: Date
+    }
+
     // MARK: - Helpers
 
-    /// `true` when the task should appear in the main list (incomplete, or done but still inside the 5s window after `completedAt`).
     private func isInActiveSection(_ task: TaskRecord) -> Bool {
-        if task.status != .done { return true }
-        guard let at = task.completedAt else { return false }
-        return Date() < at.addingTimeInterval(5)
+        return task.status != .done
     }
 
     /// Recomputes the filtered and sorted task arrays and writes them to @State.
@@ -201,35 +186,22 @@ struct InboxView<Footer: View>: View {
             }
             return folderMatches && matchesSearch(task)
         }
-        visibleTasks = sorted(allTasks.filter { task in
+        let activeTasks = allTasks.filter { task in
             isInActiveSection(task) && inFolder(task)
-        })
+        }
+        visibleTasks = sorted(activeTasks)
+        // Bucketed view only matters for smart sort — other sorts get a flat list.
+        smartBuckets = sortOrder == .smart ? TaskSmartSort.bucketed(activeTasks) : []
         var done = allTasks.filter { task in
-            task.status == .done && !isInActiveSection(task) && inFolder(task)
+            task.status == .done && inFolder(task)
         }
         done.sort { $0.updatedAt > $1.updatedAt }
-        completedTasks = done
-        scheduleGraceWindowRefresh()
-    }
-
-    /// Schedules a single recompute for when the next done-task exits its 5s
-    /// grace window. Skips entirely when no task is in the window — so the main
-    /// thread is not woken up while the user is just reading their list.
-    private func scheduleGraceWindowRefresh() {
-        graceWindowRefreshTask?.cancel()
-        let now = Date()
-        let nextExit = allTasks.compactMap { task -> Date? in
-            guard task.status == .done, let at = task.completedAt else { return nil }
-            let exit = at.addingTimeInterval(5)
-            return exit > now ? exit : nil
-        }.min()
-        guard let nextExit else { return }
-        let delay = max(0.05, nextExit.timeIntervalSince(now))
-        graceWindowRefreshTask = Task { @MainActor in
-            try? await Task.sleep(for: .seconds(delay))
-            guard !Task.isCancelled else { return }
-            recomputeTasks()
-        }
+        // Split completed into "recent (≤24h)" vs "older" so the list doesn't
+        // get dominated by yesterday's wins. (UX assessment QW4.)
+        let cutoff = Date().addingTimeInterval(-24 * 60 * 60)
+        let recencyAnchor: (TaskRecord) -> Date = { $0.completedAt ?? $0.updatedAt }
+        completedTasks = done.filter { recencyAnchor($0) >= cutoff }
+        olderCompletedTasks = done.filter { recencyAnchor($0) < cutoff }
     }
 
     private func matchesSearch(_ task: TaskRecord) -> Bool {
@@ -240,6 +212,8 @@ struct InboxView<Footer: View>: View {
 
     private func sorted(_ tasks: [TaskRecord]) -> [TaskRecord] {
         switch sortOrder {
+        case .smart:
+            return TaskSmartSort.sorted(tasks)
         case .newest:
             return tasks.sorted { $0.createdAt > $1.createdAt }
         case .oldest:
@@ -257,34 +231,216 @@ struct InboxView<Footer: View>: View {
         }
     }
 
+    /// Section header for smart-sort buckets. Mirrors the colour-coded
+    /// "control-center" feel: Overdue tinted red, Today tinted accent,
+    /// the rest muted so the eye drops naturally to what matters.
+    @ViewBuilder
+    private func bucketHeader(_ bucket: TaskSmartSort.Bucket, count: Int) -> some View {
+        let tint = bucketTint(bucket)
+        HStack(spacing: 8) {
+            Image(systemName: bucket.systemImage)
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(tint)
+                .frame(width: 16, height: 16)
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 6) {
+                    Text(bucket.title)
+                        .font(.system(size: 13, weight: .semibold))
+                        .tracking(-0.2)
+                        .foregroundStyle(.primary)
+                    Text("\(count)")
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .foregroundStyle(tint)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 1)
+                        .background(tint.opacity(0.12), in: Capsule())
+                }
+                Text(bucket.subtitle)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(AppTheme.mutedText)
+            }
+            Spacer()
+        }
+        .padding(.top, bucket == .overdue || bucket == .today ? 12 : 16)
+        .padding(.bottom, 4)
+        .listRowInsets(EdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 0))
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+        .accessibilityAddTraits(.isHeader)
+    }
+
+    private func bucketTint(_ bucket: TaskSmartSort.Bucket) -> Color {
+        switch bucket {
+        case .overdue: return Color(red: 0.85, green: 0.30, blue: 0.25)
+        case .today: return Color(red: 0.88, green: 0.55, blue: 0.20)
+        case .thisWeek: return Color(red: 0.40, green: 0.56, blue: 0.85)
+        case .later: return AppTheme.mutedText
+        case .noDate: return AppTheme.mutedText.opacity(0.85)
+        }
+    }
+
+    @ViewBuilder
+    private var completedSection: some View {
+        if !completedTasks.isEmpty || !olderCompletedTasks.isEmpty {
+            Section {
+                HStack {
+                    Text("Recently completed")
+                        .font(.system(size: 12, weight: .semibold))
+                        .tracking(-0.1)
+                        .foregroundStyle(AppTheme.mutedText)
+                    Spacer()
+                    Button("Clear") {
+                        showsClearCompletedConfirmation = true
+                    }
+                    .font(.system(size: 12, weight: .semibold))
+                }
+                .padding(.top, 12)
+                .padding(.bottom, 4)
+                .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+                .accessibilityAddTraits(.isHeader)
+
+                let visibleCompleted = showsOlderCompleted
+                    ? (completedTasks + olderCompletedTasks)
+                    : completedTasks
+
+                ForEach(visibleCompleted) { task in
+                    HStack(spacing: 12) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(AppTheme.mutedText)
+                        Text(task.title)
+                            .font(.system(size: 14, weight: .medium))
+                            .tracking(-0.2)
+                            .foregroundStyle(AppTheme.mutedText)
+                            .strikethrough()
+                        Spacer()
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(
+                        AppTheme.surfacePrimary,
+                        in: RoundedRectangle(cornerRadius: AppTheme.Radius.row, style: .continuous)
+                    )
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        withAnimation(.snappy(duration: 0.22)) {
+                            captureService.toggleCompletion(task, in: modelContext)
+                        }
+                    }
+                    .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                        Button {
+                            withAnimation(.snappy(duration: 0.22)) {
+                                captureService.toggleCompletion(task, in: modelContext)
+                            }
+                        } label: {
+                            Label("Restore", systemImage: "arrow.uturn.backward")
+                        }
+                        .tint(Color.primary)
+                    }
+                    // Disable full-swipe on the completed-row Delete action — a
+                    // long horizontal swipe in the busy "Recently completed"
+                    // section was the leading source of mistaken deletes.
+                    // (UX P6.)
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        Button(role: .destructive) {
+                            captureService.delete(task, in: modelContext)
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                    }
+                    .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 2, trailing: 0))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                }
+
+                if !olderCompletedTasks.isEmpty {
+                    Button {
+                        withAnimation(.snappy(duration: 0.22)) {
+                            showsOlderCompleted.toggle()
+                        }
+                    } label: {
+                        Text(showsOlderCompleted
+                             ? "Hide older"
+                             : "Show \(olderCompletedTasks.count) older completed")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(AppTheme.mutedText)
+                            .padding(.vertical, 8)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 8, bottom: 0, trailing: 8))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                }
+            }
+        }
+    }
+
     private var emptyState: some View {
         VStack(spacing: 12) {
             Spacer()
 
-            Image(systemName: searchText.isEmpty ? "text.badge.plus" : "magnifyingglass")
+            Image(systemName: emptyStateIcon)
                 .font(.system(size: 32, weight: .medium))
-                .foregroundStyle(AppTheme.mutedText)
+                .foregroundStyle(emptyStateTint)
                 .appIconButton(size: 48)
 
-            Text(searchText.isEmpty ? "The inbox is clear." : "No matching tasks.")
+            Text(emptyStateTitle)
                 .font(.system(size: 22, weight: .semibold))
                 .tracking(-0.4)
 
-            Text(
-                searchText.isEmpty
-                    ? "Folders and other views can wait until you need them."
-                    : "Try a different search term or clear the filter to get back to your full list."
-            )
-            .font(.system(size: 14, weight: .medium))
-            .tracking(-0.2)
-            .foregroundStyle(AppTheme.mutedText)
-            .multilineTextAlignment(.center)
-            .lineSpacing(4)
-            .padding(.horizontal, 24)
+            Text(emptyStateSubtitle)
+                .font(.system(size: 14, weight: .medium))
+                .tracking(-0.2)
+                .foregroundStyle(AppTheme.mutedText)
+                .multilineTextAlignment(.center)
+                .lineSpacing(4)
+                .padding(.horizontal, 24)
 
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// Empty-state copy varies by reason: searching, post-completion celebration,
+    /// or first-launch onboarding nudge. Avoids the previous one-size copy that
+    /// said "the inbox is clear" even when the user had cleared a busy day.
+    private var emptyStateIcon: String {
+        if !searchText.isEmpty { return "magnifyingglass" }
+        if !olderCompletedTasks.isEmpty || !completedTasks.isEmpty {
+            return "checkmark.seal.fill"
+        }
+        return "text.badge.plus"
+    }
+
+    private var emptyStateTint: Color {
+        if !searchText.isEmpty { return AppTheme.mutedText }
+        if !olderCompletedTasks.isEmpty || !completedTasks.isEmpty {
+            return Color(red: 0.30, green: 0.65, blue: 0.45)
+        }
+        return AppTheme.mutedText
+    }
+
+    private var emptyStateTitle: String {
+        if !searchText.isEmpty { return "No matching tasks." }
+        if !olderCompletedTasks.isEmpty || !completedTasks.isEmpty {
+            return "All clear."
+        }
+        return "Inbox is empty."
+    }
+
+    private var emptyStateSubtitle: String {
+        if !searchText.isEmpty {
+            return "Try a different search term or clear the filter."
+        }
+        if !completedTasks.isEmpty {
+            return "Everything you wrapped up is right below."
+        }
+        if !olderCompletedTasks.isEmpty {
+            return "Past wins are tucked away — tap + to capture the next thing."
+        }
+        return "Tap + above to capture the first thing on your mind."
     }
 }
 
@@ -295,7 +451,7 @@ extension InboxView where Footer == EmptyView {
         selectedFolderID: UUID?,
         restrictToInbox: Bool = false,
         searchText: String = "",
-        sortOrder: TaskSortOrder = .newest
+        sortOrder: TaskSortOrder = .smart
     ) {
         self.init(
             captureService: captureService,

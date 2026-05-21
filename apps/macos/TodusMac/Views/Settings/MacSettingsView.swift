@@ -20,6 +20,7 @@ struct MacSettingsView: View {
 
     @State private var showsLogoutConfirmation = false
     @State private var showsLocalModels = false
+    @State private var showsDesignSystem = false
     @State private var showsDeleteConfirmation = false
     @State private var showsDeleteAlert = false
     @State private var deleteConfirmText = ""
@@ -31,6 +32,7 @@ struct MacSettingsView: View {
     @State private var sessionsLoadError: String? = nil
     @State private var settingsError: String?
     @State private var showAutoSendConfirmation = false
+    @State private var showApplyRecommendedConfirmation = false
     @State private var excludedSenderPatternsText = ""
     @State private var isConnectingReminders = false
     @State private var isOpeningBillingPortal = false
@@ -51,6 +53,9 @@ struct MacSettingsView: View {
     // Accent color — stored key, resolved via MacTheme.accentColor(for:)
     @AppStorage("mac_accent_color") private var accentColorKey = "blue"
 
+    // Default tasks view — shared with MacTasksView via the existing AppStorage key.
+    @AppStorage("TaskApp.selectedViewMode") private var defaultTaskViewModeRaw = TaskViewMode.list.rawValue
+
     // General preferences
     @AppStorage("mac_compact_sidebar") private var compactSidebar = false
     @AppStorage("mac_show_unread_badge") private var showUnreadBadge = true
@@ -63,9 +68,13 @@ struct MacSettingsView: View {
     @State private var pendingPrivacyPreference: PrivacyPreference?
     @State private var showsPrivacyConsentDialog = false
 
-    // AI permissions
+    // AI permissions — keys match iOS for cross-device parity once we sync settings.
     @AppStorage("mac_ai_can_read_tasks") private var aiCanReadTasks = true
     @AppStorage("mac_ai_can_write_tasks") private var aiCanWriteTasks = true
+    @AppStorage("ai_can_read_calendar") private var aiCanReadCalendar = true
+    @AppStorage("ai_can_write_calendar") private var aiCanWriteCalendar = true
+    @AppStorage("ai_can_read_email") private var aiCanReadEmail = true
+    @AppStorage("ai_can_send_email") private var aiCanSendEmail = true
     @AppStorage("mac_ai_tone") private var aiTone = "professional"
 
     private var calendarAccessGranted: Bool {
@@ -86,24 +95,27 @@ struct MacSettingsView: View {
             headerBar
             Divider().opacity(0.2)
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: MacTheme.settingsSectionSpacing) {
                     accountSection
                     activeSessionsSection
+                    connectedServicesSection
+                    calendarAccountsSection
+                    generalSection
+                    appearanceSection
+                    aiAssistantSection
+                    emailPreferencesSection
+                    signaturesSection
+                    voiceAssistantSection
+                    billingSection
+                    notificationsSection
+                    privacySection
                     if services.isDeveloperModeUIAvailable {
                         developerModeToggleSection
                     }
                     if services.effectiveDeveloperModeEnabled {
                         authDebugSection
+                        designSystemSection
                     }
-                    generalSection
-                    connectedServicesSection
-                    calendarAccountsSection
-                    appearanceSection
-                    emailPreferencesSection
-                    aiAssistantSection
-                    billingSection
-                    notificationsSection
-                    privacySection
                     aboutAndLegalSection
                 }
                 .padding(.horizontal, 16)
@@ -112,7 +124,44 @@ struct MacSettingsView: View {
             }
             .scrollIndicators(.never)
         }
-        .background(Color(light: Color(white: 0.96), dark: Color(white: 0.11)))
+        .background(MacTheme.contentBackground)
+        // Sync settings changes to the backend so iOS / macOS / web stay aligned.
+        .onChange(of: aiCanReadTasks) { _, value in
+            Task { await services.syncSetting("aiCanReadTasks", value) }
+        }
+        .onChange(of: aiCanWriteTasks) { _, value in
+            Task { await services.syncSetting("aiCanWriteTasks", value) }
+        }
+        .onChange(of: aiCanReadCalendar) { _, value in
+            Task { await services.syncSetting("aiCanReadCalendar", value) }
+        }
+        .onChange(of: aiCanWriteCalendar) { _, value in
+            Task { await services.syncSetting("aiCanWriteCalendar", value) }
+        }
+        .onChange(of: aiCanReadEmail) { _, value in
+            Task { await services.syncSetting("aiCanReadEmail", value) }
+        }
+        .onChange(of: aiCanSendEmail) { _, value in
+            Task { await services.syncSetting("aiCanSendEmail", value) }
+        }
+        .onChange(of: accentColorKey) { _, value in
+            Task { await services.syncSetting("accentColor", value) }
+        }
+        .onChange(of: defaultTaskViewModeRaw) { _, value in
+            Task { await services.syncSetting("defaultTaskView", value) }
+        }
+        .onChange(of: compactSidebar) { _, value in
+            Task { await services.syncSetting("compactSidebar", value) }
+        }
+        .onChange(of: showUnreadBadge) { _, value in
+            Task { await services.syncSetting("showUnreadBadge", value) }
+        }
+        .onChange(of: focusModeEnabled) { _, value in
+            Task { await services.syncSetting("focusModeEnabled", value) }
+        }
+        .onChange(of: threadGroupingEnabled) { _, value in
+            Task { await services.syncSetting("groupByThread", value) }
+        }
         .task { await services.emailService.checkConnection() }
         .task {
             // Refresh profile data (name, avatar) when settings opens — matches iOS SettingsView
@@ -144,6 +193,21 @@ struct MacSettingsView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Only narrow, high-confidence acknowledgements and confirmations become eligible. Review the experiment notes before turning this on.")
+        }
+        .confirmationDialog(
+            "Replace all Mail Assistant settings with the recommended defaults?",
+            isPresented: $showApplyRecommendedConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Apply recommended", role: .destructive) {
+                services.assistantAutomationPolicy = .recommended
+                excludedSenderPatternsText = services.assistantAutomationPolicy
+                    .excludedSenderPatterns
+                    .joined(separator: "\n")
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This overwrites every Mail Assistant toggle, workday hours, quiet hours, and excluded sender patterns with the recommended values. Your custom values will be lost.")
         }
         .confirmationDialog(
             privacyConsentTitle,
@@ -292,6 +356,9 @@ struct MacSettingsView: View {
                     }
                     .buttonStyle(.plain)
 
+                    // Hard separation between Log out (recoverable) and Delete
+                    // (irreversible) so a stray click can't slide between them.
+                    Spacer().frame(minWidth: 24)
                     Spacer()
 
                     Button(role: .destructive) {
@@ -560,6 +627,74 @@ struct MacSettingsView: View {
         }
     }
 
+    // MARK: - Voice Assistant
+
+    /// Phase-1 voice settings. Two switches:
+    ///   • Master: registers the global ⌘⇧Space push-to-talk hotkey.
+    ///   • Wake word: opt-in always-listening (Phase 1 ships a fail-soft
+    ///     stub; full Porcupine support arrives in Phase 1.5).
+    private var voiceAssistantSection: some View {
+        settingsGroup(title: "Voice Assistant") {
+            settingsCard {
+                rowContainer {
+                    Image(systemName: "waveform")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(MacTheme.mutedText)
+                        .frame(width: 18)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Voice assistant")
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(MacTheme.textPrimary)
+                        Text("Press ⌘⇧Space to talk to Todus from anywhere.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(MacTheme.mutedText)
+                    }
+                    Spacer()
+                    Toggle(
+                        "",
+                        isOn: Binding(
+                            get: { services.voiceAssistantEnabled },
+                            set: { services.voiceAssistantEnabled = $0 }
+                        )
+                    )
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .labelsHidden()
+                }
+                cardDivider
+                rowContainer {
+                    Image(systemName: "ear")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(MacTheme.mutedText)
+                        .frame(width: 18)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Always-listening (wake word) (Coming soon)")
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(MacTheme.textPrimary)
+                        Text("Listen for \"Hey computer\" in the background. Requires Porcupine integration — currently disabled.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(MacTheme.mutedText)
+                    }
+                    Spacer()
+                    Toggle(
+                        "",
+                        isOn: Binding(
+                            get: { services.voiceWakeWordEnabled },
+                            set: { services.voiceWakeWordEnabled = $0 }
+                        )
+                    )
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .labelsHidden()
+                    // Disabled until the Phase 1.5 Porcupine integration ships;
+                    // toggling this had no functional effect (stub fail-soft).
+                    .disabled(true)
+                    .help("Coming soon — wake-word detector not yet shipped.")
+                }
+            }
+        }
+    }
+
     // MARK: - Developer (allowlisted users only)
 
     private var developerModeToggleSection: some View {
@@ -605,6 +740,38 @@ struct MacSettingsView: View {
                 infoRow(icon: "at", label: "Profile email",
                         value: services.authService.userEmail ?? "—")
             }
+        }
+    }
+
+    /// Live macOS design-token viewer — gated to developer mode (which already
+    /// requires the allowlist via `effectiveDeveloperModeEnabled`).
+    private var designSystemSection: some View {
+        settingsGroup(title: "Design System") {
+            settingsCard {
+                Button {
+                    showsDesignSystem = true
+                } label: {
+                    rowContainer {
+                        Image(systemName: "paintbrush.pointed")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(MacTheme.mutedText)
+                            .frame(width: 18)
+                        Text("Design System")
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(MacTheme.textPrimary)
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(MacTheme.mutedText)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .macClickablePointer()
+            }
+        }
+        .sheet(isPresented: $showsDesignSystem) {
+            MacDesignSystemView()
         }
     }
 
@@ -745,7 +912,7 @@ struct MacSettingsView: View {
                     HStack(spacing: 6) {
                         ForEach(MacTheme.accentColorKeys, id: \.self) { key in
                             Button {
-                                withAnimation(.easeInOut(duration: 0.15)) {
+                                withAnimation(MacTheme.Motion.fast) {
                                     accentColorKey = key
                                 }
                             } label: {
@@ -761,8 +928,33 @@ struct MacSettingsView: View {
                                 }
                             }
                             .buttonStyle(.plain)
+                            .help(key.capitalized)
                         }
                     }
+                }
+
+                cardDivider
+
+                // Default tasks view — parity with iOS Settings → Preferences → Default View.
+                rowContainer {
+                    Image(systemName: "square.grid.2x2")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(MacTheme.mutedText)
+                        .frame(width: 18)
+                    Text("Default View")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(MacTheme.textPrimary)
+                    Spacer()
+                    Picker("", selection: Binding(
+                        get: { TaskViewMode(rawValue: defaultTaskViewModeRaw) ?? .list },
+                        set: { defaultTaskViewModeRaw = $0.rawValue }
+                    )) {
+                        ForEach(TaskViewMode.allCases) { mode in
+                            Text(mode.title).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .frame(width: 130)
                 }
             }
         }
@@ -778,17 +970,100 @@ struct MacSettingsView: View {
         }
     }
 
+    // MARK: - Signatures
+    //
+    // Per-connection email signatures persisted in `MacSignatureStore`.
+    // Each connected mailbox gets its own multi-line editor so multi-account
+    // users can keep distinct sign-offs. Saves are debounced (500ms) so we
+    // don't slam UserDefaults on every keystroke.
+
+    private var signaturesSection: some View {
+        settingsGroup(title: "Signatures") {
+            settingsCard {
+                if services.connectionsService.connections.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("No connected accounts")
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(MacTheme.textPrimary)
+                        Text("Connect a Gmail account above to set a signature.")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(MacTheme.textSecondary)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                } else {
+                    ForEach(Array(services.connectionsService.connections.enumerated()), id: \.element.id) { index, connection in
+                        if index > 0 {
+                            cardDivider
+                        }
+                        MacSignatureEditorRow(connection: connection)
+                    }
+                }
+            }
+        }
+        .task {
+            // Pull the connection list so the editors render even on a cold
+            // settings open. Mirrors the calendar accounts list behaviour.
+            if services.connectionsService.connections.isEmpty {
+                await services.connectionsService.loadConnections()
+            }
+        }
+    }
+
     // MARK: - AI Assistant
 
     private var aiAssistantSection: some View {
         @Bindable var ai = services.aiChatService
         return settingsGroup(title: "AI Assistant") {
             settingsCard {
-                settingsToggle(icon: "eye", label: "Read my tasks", isOn: $aiCanReadTasks)
+                settingsToggle(icon: "checklist", label: "Read my tasks", isOn: $aiCanReadTasks)
 
                 cardDivider
 
-                settingsToggle(icon: "pencil", label: "Create & edit tasks", isOn: $aiCanWriteTasks)
+                settingsToggle(icon: "square.and.pencil", label: "Create & edit tasks", isOn: $aiCanWriteTasks)
+
+                cardDivider
+
+                settingsToggle(icon: "calendar", label: "Read calendar", isOn: $aiCanReadCalendar)
+
+                cardDivider
+
+                settingsToggle(icon: "calendar.badge.plus", label: "Create calendar events", isOn: $aiCanWriteCalendar)
+
+                cardDivider
+
+                settingsToggle(icon: "envelope", label: "Read email", isOn: $aiCanReadEmail)
+
+                cardDivider
+
+                settingsToggle(icon: "paperplane", label: "Send email", isOn: $aiCanSendEmail)
+
+                cardDivider
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Location")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(MacTheme.textPrimary)
+                    TextField(
+                        "e.g. Oslo, Norway",
+                        text: Binding(
+                            get: { services.location },
+                            set: { services.location = $0 }
+                        )
+                    )
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(MacTheme.inputBackground)
+                    .clipShape(RoundedRectangle(cornerRadius: MacTheme.compactRadius, style: .continuous))
+                    Text("City and country (e.g. \"Oslo, Norway\"). Optional — gives the AI location context.")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(MacTheme.textSecondary)
+                }
+                .padding(.horizontal, MacTheme.settingsRowHorizontalPadding)
+                .padding(.vertical, MacTheme.settingsRowVerticalPadding)
 
                 cardDivider
 
@@ -796,18 +1071,16 @@ struct MacSettingsView: View {
                     Text("Context about you")
                         .font(.system(size: 12.5))
                         .foregroundStyle(MacTheme.textPrimary)
-                    TextEditor(
+                    MacPlaceholderTextEditor(
                         text: Binding(
                             get: { services.contextAboutYou },
                             set: { services.contextAboutYou = $0 }
-                        )
+                        ),
+                        placeholder: "Anything the assistant should know about you — your role, projects, tone, communication style…"
                     )
-                    .frame(minHeight: 96)
-                    .scrollContentBackground(.hidden)
-                    .padding(8)
-                    .background(Color.white.opacity(0.04))
-                    .clipShape(RoundedRectangle(cornerRadius: MacTheme.compactRadius, style: .continuous))
                 }
+                .padding(.horizontal, MacTheme.settingsRowHorizontalPadding)
+                .padding(.vertical, MacTheme.settingsRowVerticalPadding)
 
                 cardDivider
 
@@ -815,18 +1088,16 @@ struct MacSettingsView: View {
                     Text("Custom instructions")
                         .font(.system(size: 12.5))
                         .foregroundStyle(MacTheme.textPrimary)
-                    TextEditor(
+                    MacPlaceholderTextEditor(
                         text: Binding(
                             get: { services.customInstructions },
                             set: { services.customInstructions = $0 }
-                        )
+                        ),
+                        placeholder: "e.g. Keep replies under 3 sentences. Never use emojis. Always end with “— Ludvig”."
                     )
-                    .frame(minHeight: 96)
-                    .scrollContentBackground(.hidden)
-                    .padding(8)
-                    .background(Color.white.opacity(0.04))
-                    .clipShape(RoundedRectangle(cornerRadius: MacTheme.compactRadius, style: .continuous))
                 }
+                .padding(.horizontal, MacTheme.settingsRowHorizontalPadding)
+                .padding(.vertical, MacTheme.settingsRowVerticalPadding)
 
                 cardDivider
 
@@ -836,10 +1107,7 @@ struct MacSettingsView: View {
                         .foregroundStyle(MacTheme.textPrimary)
                     Spacer()
                     Button("Apply recommended defaults") {
-                        services.assistantAutomationPolicy = .recommended
-                        excludedSenderPatternsText = services.assistantAutomationPolicy
-                            .excludedSenderPatterns
-                            .joined(separator: "\n")
+                        showApplyRecommendedConfirmation = true
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
@@ -1074,28 +1342,27 @@ struct MacSettingsView: View {
                         .font(.system(size: 12.5, weight: .semibold))
                         .foregroundStyle(MacTheme.textPrimary)
 
-                    TextEditor(text: Binding(
-                        get: { excludedSenderPatternsText },
-                        set: { newValue in
-                            excludedSenderPatternsText = newValue
-                            services.assistantAutomationPolicy.excludedSenderPatterns = newValue
-                                .split(separator: "\n")
-                                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                                .filter { !$0.isEmpty }
-                        }
-                    ))
-                    .font(.system(size: 12))
-                    .frame(minHeight: 88)
-                    .padding(8)
-                    .background(Color.white.opacity(0.04))
-                    .clipShape(RoundedRectangle(cornerRadius: MacTheme.compactRadius, style: .continuous))
+                    MacPlaceholderTextEditor(
+                        text: Binding(
+                            get: { excludedSenderPatternsText },
+                            set: { newValue in
+                                excludedSenderPatternsText = newValue
+                                services.assistantAutomationPolicy.excludedSenderPatterns = newValue
+                                    .split(separator: "\n")
+                                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                                    .filter { !$0.isEmpty }
+                            }
+                        ),
+                        placeholder: "One pattern per line. e.g. @newsletter., *@noreply.*",
+                        minHeight: 88
+                    )
 
                     Text("One pattern per line. Use this to suppress newsletters, no-reply mail, and other low-value automation from the assistant queues.")
                         .font(.system(size: 11.5))
                         .foregroundStyle(MacTheme.textSecondary)
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 7)
+                .padding(.horizontal, MacTheme.settingsRowHorizontalPadding)
+                .padding(.vertical, MacTheme.settingsRowVerticalPadding)
 
                 cardDivider
 
@@ -1249,13 +1516,13 @@ struct MacSettingsView: View {
 
     // MARK: - Shared Components
 
-    /// Section title — sentence case, soft muted weight.
+    /// Section title — matches iOS Settings header weight/size for visual parity.
     private func settingsGroup<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: 8) {
             Text(title)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(MacTheme.mutedText)
-                .padding(.leading, 2)
+                .font(MacTheme.settingsSectionHeaderFont())
+                .foregroundStyle(MacTheme.textSecondary)
+                .padding(.leading, 4)
             content()
         }
     }
@@ -1274,16 +1541,16 @@ struct MacSettingsView: View {
 
     /// Thin divider between rows within a card.
     private var cardDivider: some View {
-        Divider().opacity(0.12).padding(.horizontal, 12)
+        Divider().opacity(0.12).padding(.horizontal, MacTheme.settingsRowHorizontalPadding)
     }
 
     /// Generic row container — icon + label + trailing content.
     private func rowContainer<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        HStack(spacing: 7) {
+        HStack(spacing: 8) {
             content()
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 7)
+        .padding(.horizontal, MacTheme.settingsRowHorizontalPadding)
+        .padding(.vertical, MacTheme.settingsRowVerticalPadding)
     }
 
     /// Toggle row — icon left, label, spacer, switch right.
@@ -1854,5 +2121,127 @@ struct MacSettingsView: View {
             settingsError = "Could not revoke sessions. Please try again."
             AppLogger.shared.log("[Settings] Revoke all sessions failed: \(error)")
         }
+    }
+}
+
+// MARK: - MacSignatureEditorRow
+
+/// One row inside the Signatures card. Owns the local draft so each editor
+/// can debounce its own saves into `MacSignatureStore` without polluting
+/// the parent settings view's state.
+private struct MacSignatureEditorRow: View {
+    let connection: ConnectionAccount
+
+    @State private var draft: String = ""
+    /// Tracks the currently scheduled debounce so a fast typist's older save
+    /// can be cancelled before it overwrites a fresher value.
+    @State private var pendingSave: Task<Void, Never>? = nil
+
+    /// 500ms debounce — matches the typical "user paused typing" threshold
+    /// used elsewhere in the app and keeps UserDefaults writes batched.
+    private let debounceNanos: UInt64 = 500_000_000
+
+    @State private var showPreview = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 8) {
+                Image(systemName: "signature")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(MacTheme.mutedText)
+                    .frame(width: 18)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(connection.email)
+                        .font(.system(size: 12.5, weight: .medium))
+                        .foregroundStyle(MacTheme.textPrimary)
+                    Text("Appended to new messages from this account.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(MacTheme.textSecondary)
+                }
+                Spacer()
+            }
+            TextEditor(text: $draft)
+                .frame(minHeight: 80)
+                .scrollContentBackground(.hidden)
+                .font(.system(size: 12))
+                .padding(8)
+                .background(MacTheme.inputBackground)
+                .clipShape(RoundedRectangle(cornerRadius: MacTheme.compactRadius, style: .continuous))
+
+            DisclosureGroup(isExpanded: $showPreview) {
+                // Render the signature with the exact prefix used in real drafts
+                // so users can see the trailing separator and spacing.
+                Text(previewText)
+                    .font(.system(size: 11.5, design: .monospaced))
+                    .foregroundStyle(MacTheme.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
+                    .background(MacTheme.surfaceCard)
+                    .clipShape(RoundedRectangle(cornerRadius: MacTheme.compactRadius, style: .continuous))
+                    .padding(.top, 4)
+            } label: {
+                Text("Preview")
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(MacTheme.mutedText)
+            }
+            .controlSize(.small)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .onAppear {
+            // Hydrate from disk on first render. Each row has its own onAppear
+            // because the parent ForEach recreates them when connections load.
+            draft = MacSignatureStore.shared.signature(for: connection.id)
+        }
+        .onChange(of: draft) { _, newValue in
+            pendingSave?.cancel()
+            let connectionId = connection.id
+            pendingSave = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: debounceNanos)
+                if Task.isCancelled { return }
+                MacSignatureStore.shared.setSignature(newValue, for: connectionId)
+            }
+        }
+        .onDisappear {
+            // Flush any in-flight debounce so the Settings window closing
+            // mid-typing doesn't lose the last edit.
+            pendingSave?.cancel()
+            MacSignatureStore.shared.setSignature(draft, for: connection.id)
+        }
+    }
+
+    private var previewText: String {
+        let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "(empty — no signature will be appended)" }
+        return "\n\n-- \n\(trimmed)"
+    }
+}
+
+/// Multi-line text input with a placeholder overlay. SwiftUI's `TextEditor` has no native
+/// placeholder, so we render one as an inert overlay when the bound text is empty.
+fileprivate struct MacPlaceholderTextEditor: View {
+    @Binding var text: String
+    let placeholder: String
+    var minHeight: CGFloat = 96
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            TextEditor(text: $text)
+                .font(.system(size: 12))
+                .frame(minHeight: minHeight)
+                .scrollContentBackground(.hidden)
+                .padding(8)
+
+            if text.isEmpty {
+                Text(placeholder)
+                    .font(.system(size: 12))
+                    .foregroundStyle(MacTheme.textSecondary)
+                    .padding(.horizontal, 13)
+                    .padding(.vertical, 16)
+                    .allowsHitTesting(false)
+            }
+        }
+        .background(MacTheme.inputBackground)
+        .clipShape(RoundedRectangle(cornerRadius: MacTheme.compactRadius, style: .continuous))
     }
 }

@@ -23,8 +23,10 @@
   --font-geist-sans: 'Geist Variable', 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   --font-geist-mono: 'Geist Mono Variable', 'Geist Mono', ui-monospace, SFMono-Regular, 'SF Mono', Consolas, 'Liberation Mono', Menlo, monospace;
 
-  /* Theme colors (light mode: default) — softened blacks, warm neutrals */
-  --background: hsl(0 0% 99%);
+  /* Theme colors (light mode: default) — softened blacks, warm neutrals.
+     Background slightly darker than card (#FFF) to give bg-card surfaces
+     visible lift, matching iOS AppTheme.backgroundTop (~0.94 white). */
+  --background: hsl(0 0% 96%);
   --foreground: hsl(240 6% 13%);
   --card: hsl(0 0% 100%);
   --card-foreground: hsl(240 6% 13%);
@@ -59,8 +61,27 @@
   --panel: hsl(0 0% 100%);
   --icon-color: currentColor;
 
-  /* Radius — increased for Apple-like rounded aesthetic */
-  --radius: 0.75rem;
+  /* Radius — increased for Apple-like rounded aesthetic.
+     Matches iOS AppTheme.Radius.card (18) and .row (16) more closely:
+     rounded-lg → 16, rounded-md → 14, rounded-sm → 12. */
+  --radius: 1rem;
+
+  /* Extended radius scale — adds chip (xs) + composer (2xl) tiers so the web
+     ramp matches iOS / macOS. `--radius-sm/md/lg` stay derived from `--radius`
+     via the calc chain in @theme inline below; xs and 2xl are absolute so the
+     full ladder reads chip / compact / control / row / card / composer. */
+  --radius-xs: 0.4375rem;
+  --radius-2xl: 1.5rem;
+
+  /* Motion tokens — match iOS Motion.fast/base/slow & macOS equivalents so
+     dropdowns, sheets, hover transitions, etc. animate at the same cadence
+     across platforms. `standard` is the workhorse easing; `emphasized` is
+     reserved for enter / exit on larger surfaces (sheets, drawers). */
+  --motion-duration-fast: 150ms;
+  --motion-duration-base: 220ms;
+  --motion-duration-slow: 320ms;
+  --motion-easing-standard: cubic-bezier(0.2, 0, 0, 1);
+  --motion-easing-emphasized: cubic-bezier(0.16, 1, 0.3, 1);
 
   /* Static colors — softer palette, no pure black */
   --darkBackground: #161618;
@@ -72,10 +93,10 @@
   --iconDark: #8A8A8E;
   --iconLight: #737378;
   --logout: #D93036;
-  --mainBlue: #437DFB;
+  --mainBlue: #007AFF;
   --subtleWhite: #EBEBED;
   --subtleBlack: #222224;
-  --skyBlue: #0066FF;
+  --skyBlue: #0A84FF;
   --shinyGray: #A1A1A6;
 }
 
@@ -175,6 +196,14 @@
   --radius-lg: var(--radius);
   --radius-md: calc(var(--radius) - 2px);
   --radius-sm: calc(var(--radius) - 4px);
+
+  /* Motion — exposes the design tokens to Tailwind v4 utilities so
+     `duration-(--motion-duration-fast)`, `ease-(--motion-easing-standard)`,
+     etc. all work, and the default `transition-*` utility uses base timing. */
+  --default-transition-duration: var(--motion-duration-base);
+  --default-transition-timing-function: var(--motion-easing-standard);
+  --animate-duration-fast: var(--motion-duration-fast);
+  --animate-duration-slow: var(--motion-duration-slow);
 
   /* Typography */
   --font-sans: var(--font-geist-sans);
@@ -282,7 +311,7 @@
     @apply bg-background text-foreground font-sans overscroll-none style-scrollbar;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    letter-spacing: -0.011em;
+    letter-spacing: -0.014em;
     line-height: 1.5;
   }
 
@@ -337,6 +366,12 @@
     .group.bg-accent\/70 > .group-hover\:opacity-100 {
       opacity: 1;
     }
+  }
+
+  /* Strip focus rings on mouse-click focus. Keyboard navigation (:focus-visible) is preserved. */
+  *:focus:not(:focus-visible) {
+    outline: none !important;
+    box-shadow: none !important;
   }
 }
 
@@ -529,4 +564,17 @@
 .no-scrollbar {
   -ms-overflow-style: none; /* IE and Edge */
   scrollbar-width: none; /* Firefox */
+}
+
+/* Lenis smooth scroll */
+.lenis.lenis-smooth {
+  scroll-behavior: auto !important;
+}
+
+.lenis.lenis-smooth [data-lenis-prevent] {
+  overscroll-behavior: contain;
+}
+
+.lenis.lenis-stopped {
+  overflow: hidden;
 }

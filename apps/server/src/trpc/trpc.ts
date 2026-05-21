@@ -133,14 +133,17 @@ export const activeConnectionProcedure = privateProcedure.use(async ({ ctx, next
       );
     }
 
-    await ctx.c.var.auth.api.signOut({ headers: ctx.c.req.raw.headers }).catch((error: unknown) => {
-      console.warn(
-        '[activeConnectionProcedure] Failed to sign out after connection resolution error',
-        error,
-      );
-    });
+    // Surface the failure as INTERNAL_SERVER_ERROR. Previously we treated every
+    // non-NOT_FOUND failure as "user has no usable connection" and signed them
+    // out — but a transient DB blip or Hyperdrive hiccup is not unrecoverable,
+    // and silently invalidating the session forces a full OAuth round-trip
+    // for what should have been a retryable error.
+    console.error(
+      '[activeConnectionProcedure] Connection resolution failed (transient — preserving session)',
+      err,
+    );
     throw new TRPCError({
-      code: 'BAD_REQUEST',
+      code: 'INTERNAL_SERVER_ERROR',
       message: err instanceof Error ? err.message : 'Failed to get active connection',
     });
   }

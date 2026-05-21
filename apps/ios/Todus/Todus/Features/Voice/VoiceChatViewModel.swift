@@ -65,11 +65,24 @@ final class VoiceChatViewModel {
 
     // MARK: - Init
 
-    init(tokenService: VoiceTokenService, chatService: AIChatService) {
+    /// Optional shared mic lock — when provided, this view-model cooperates
+    /// with `VoiceSessionCoordinator` so a Siri Shortcut and the in-app modal
+    /// can't both start AVAudioEngine at the same time (same class of bug as
+    /// H17 double-attach crash). nil keeps existing behavior for callers that
+    /// don't pass it.
+    private let micLock: VoiceMicLock?
+    private static let micOwner = "modal"
+
+    init(
+        tokenService: VoiceTokenService,
+        chatService: AIChatService,
+        micLock: VoiceMicLock? = nil
+    ) {
         self.tokenService = tokenService
         self.chatService = chatService
         self.provider = GeminiLiveProvider()
         self.audioPlayer = AudioPlayerManager(sampleRate: 24000)
+        self.micLock = micLock
     }
 
     // MARK: - Connect
@@ -84,6 +97,11 @@ final class VoiceChatViewModel {
 
     func connect() async {
         guard canConnect else { return }
+
+        if let micLock, !micLock.acquire(owner: Self.micOwner) {
+            connectionState = .failed("Voice is already active in another window — close it before opening this one.")
+            return
+        }
 
         connectionState = .connecting
 
@@ -114,6 +132,7 @@ final class VoiceChatViewModel {
                 eventConsumerTask?.cancel()
                 eventConsumerTask = nil
                 await provider.disconnect()
+                micLock?.release(owner: Self.micOwner)
             }
 
         } catch {
@@ -129,6 +148,7 @@ final class VoiceChatViewModel {
                 message = error.localizedDescription
             }
             connectionState = .failed(message)
+            micLock?.release(owner: Self.micOwner)
         }
     }
 
@@ -165,6 +185,7 @@ final class VoiceChatViewModel {
         finalizedTurns = []
 
         connectionState = .disconnected
+        micLock?.release(owner: Self.micOwner)
     }
 
     // MARK: - Mute Toggle

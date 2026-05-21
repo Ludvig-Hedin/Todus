@@ -23,7 +23,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { authProxy } from '@/lib/auth-proxy';
 import type { Route } from './+types/page';
-import { Link } from 'react-router';
+import { Link, redirect } from 'react-router';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import {
@@ -38,7 +38,7 @@ type MeetingStatus = Meeting['status'];
 // Auth guard
 export async function clientLoader({ request }: Route.ClientLoaderArgs) {
   const session = await authProxy.api.getSession({ headers: request.headers });
-  if (!session) return Response.redirect(`${import.meta.env.VITE_PUBLIC_APP_URL}/login`);
+  if (!session) throw redirect('/login');
   return {};
 }
 
@@ -96,8 +96,8 @@ const STATUS_CONFIG: Record<
 const FILTER_OPTIONS: { value: MeetingStatus | 'all'; label: string }[] = [
   { value: 'all', label: 'All' },
   { value: 'scheduled', label: 'Scheduled' },
-  { value: 'recording', label: 'Recording' },
   { value: 'ready', label: 'Ready' },
+  { value: 'recording', label: 'Live' },
   { value: 'failed', label: 'Failed' },
 ];
 
@@ -178,13 +178,15 @@ export default function MeetingsPage() {
             className="h-7 border-none bg-accent/40 pl-7 text-[13px] shadow-none placeholder:text-muted-foreground/50 focus-visible:ring-0"
           />
         </div>
-        <div className="flex gap-0.5">
+        <div className="flex gap-0.5" role="group" aria-label="Filter meetings by status">
           {FILTER_OPTIONS.map((opt) => (
             <button
               type="button"
               key={opt.value}
+              aria-pressed={statusFilter === opt.value}
               className={cn(
                 'rounded-md px-2 py-1 text-[11px] font-medium tracking-tight transition-colors',
+                'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
                 statusFilter === opt.value
                   ? 'bg-accent text-foreground'
                   : 'text-muted-foreground hover:text-foreground',

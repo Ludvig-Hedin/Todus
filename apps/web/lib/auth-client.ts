@@ -1,4 +1,4 @@
-import { phoneNumberClient } from 'better-auth/client/plugins';
+import { emailOTPClient, phoneNumberClient } from 'better-auth/client/plugins';
 import { createAuthClient } from 'better-auth/react';
 import type { Auth } from '@zero/server/auth';
 
@@ -13,7 +13,11 @@ export const authClient = createAuthClient({
   fetchOptions: {
     credentials: 'include',
   },
-  plugins: [phoneNumberClient()],
+  // emailOTPClient mirrors the server's `emailOTP()` plugin so the web app
+  // can call signIn.emailOtp / emailOtp.sendVerificationOtp / verifyEmail
+  // through the typed client. Without it those endpoints existed only as
+  // raw POSTs and were effectively unreachable from the web UI.
+  plugins: [phoneNumberClient(), emailOTPClient()],
 });
 
 const paritySession = {

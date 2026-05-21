@@ -22,19 +22,21 @@ export function SettingsCard({
   return (
     <Card
       className={cn(
-        'bg-transparent w-full border-none px-0 shadow-none',
+        'w-full border-none bg-transparent px-0 pb-0 shadow-none',
         className,
       )}
     >
-      <CardHeader className="flex flex-row items-start justify-between px-0 pt-0">
-        <div className="space-y-1">
-          <CardTitle className="text-base">{title}</CardTitle>
-          {description && <CardDescription className="text-[13px]">{description}</CardDescription>}
+      <CardHeader className="flex flex-row items-start justify-between gap-3 px-0 pb-2 pt-0">
+        <div className="space-y-0.5">
+          <CardTitle className="text-sm font-semibold">{title}</CardTitle>
+          {description && (
+            <CardDescription className="text-muted-foreground text-xs">{description}</CardDescription>
+          )}
         </div>
         {action && <div>{action}</div>}
       </CardHeader>
-      <CardContent className="space-y-5 px-0">{children}</CardContent>
-      {footer && <div className="border-t border-border/60 py-3.5">{footer}</div>}
+      <CardContent className="space-y-3 px-0">{children}</CardContent>
+      {footer && <div className="border-border/60 mt-3 border-t pt-3">{footer}</div>}
       <PricingDialog />
     </Card>
   );

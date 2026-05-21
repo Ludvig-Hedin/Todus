@@ -1,4 +1,5 @@
 import SwiftUI
+import CryptoKit
 
 // MARK: - Avatar API DTOs
 
@@ -19,6 +20,25 @@ private struct AvatarResponse: Decodable {
         let svgContent: String?
     }
 }
+
+// Domains of free personal email providers. Brand-favicon lookup is skipped for these —
+// fetching their favicon would return the provider's own logo (Gmail's G, Outlook's O),
+// not the individual sender's avatar. Gravatar handles personal addresses instead.
+private let freeEmailProviderDomains: Set<String> = [
+    "gmail.com", "googlemail.com",
+    "outlook.com", "hotmail.com", "live.com", "msn.com",
+    "yahoo.com", "yahoo.co.uk", "yahoo.fr", "yahoo.de", "yahoo.co.jp", "yahoo.com.br",
+    "icloud.com", "me.com", "mac.com",
+    "protonmail.com", "proton.me", "protonmail.ch",
+    "zohomail.com", "zoho.com",
+    "yandex.com", "yandex.ru",
+    "mail.ru", "bk.ru", "inbox.ru", "list.ru",
+    "gmx.com", "gmx.net", "gmx.de", "gmx.at",
+    "aol.com", "aol.co.uk",
+    "fastmail.com", "fastmail.fm",
+    "hey.com",
+    "tutanota.com", "tutamail.com",
+]
 
 // MARK: - Avatar Cache
 
@@ -135,37 +155,57 @@ final class AvatarCache {
     // MARK: - Backend fetch
 
     private func fetchCandidateURLs(email: String, name: String, api: TodosAPIClient) async -> [URL] {
+        // Resolution order: real Google contact photos first (highest fidelity when
+        // available), then Clearbit/icon.horse brand logos, then backend cheerio-extracted
+        // URLs, then any backend non-Google primary, then local favicon fallbacks.
         var urls: [URL] = []
+        var contactPhoto: URL? = nil
+        var nonGooglePrimary: URL? = nil
+        var backendFallbacks: [URL] = []
 
         do {
             let input = AvatarInput(email: email, name: name.isEmpty ? nil : name)
             let response: AvatarResponse = try await api.trpcQuery("avatar.getByEmail", input: input)
 
-            // Primary source first (best quality) — skip BIMI SVGs (iOS has no native SVG renderer).
             if let primary = response.primary,
-               primary.source != "bimi",
+               primary.source != "bimi",  // BIMI is SVG — iOS has no native SVG renderer.
                let urlStr = primary.url,
-               let url = URL(string: urlStr),
-               !urls.contains(url) {
-                urls.append(url)
+               let url = URL(string: urlStr) {
+                if primary.source == "google" {
+                    contactPhoto = url
+                } else {
+                    nonGooglePrimary = url
+                }
             }
 
             for urlStr in response.fallbackUrls {
-                if let url = URL(string: urlStr), !urls.contains(url) {
-                    urls.append(url)
+                if let url = URL(string: urlStr) {
+                    backendFallbacks.append(url)
                 }
             }
         } catch {
-            // Backend failure → fall through to local fallbacks below. The empty-TTL
-            // ensures we'll retry the backend in 5 minutes rather than waiting for restart.
+            // Backend failure → fall through to local deterministic fallbacks. The empty-TTL
+            // ensures we retry the backend in 5 minutes rather than waiting for relaunch.
         }
 
-        // Local deterministic fallbacks always appended — Google's s2 favicon service has
-        // near-100% coverage for any real domain, so the chain almost always resolves.
-        for fallback in localFallbackURLs(email: email) where !urls.contains(fallback) {
-            urls.append(fallback)
+        if let cp = contactPhoto, !urls.contains(cp) { urls.append(cp) }
+
+        // Clearbit/icon.horse sources first — highest fidelity brand logos, reliable 404
+        // for unknowns. Backend cheerio-extracted URLs added afterward as supplemental.
+        for fb in localFallbackURLs(email: email) where !urls.contains(fb) {
+            urls.append(fb)
         }
 
+        if let np = nonGooglePrimary, !urls.contains(np) { urls.append(np) }
+        for fb in backendFallbacks where !urls.contains(fb) {
+            urls.append(fb)
+        }
+
+        // .ico URLs are intentionally kept — UIImage on iOS 17+ decodes ICO containers
+        // reliably, and for transactional brands (resend, kivra, etc.) that ship only
+        // `/favicon.ico` they're often the only fallback that actually serves an image.
+        // The AsyncImage failure cascade in `body` advances past any URL that fails to
+        // decode, so leaving them in costs nothing while preventing initials-only renders.
         return urls
     }
 
@@ -174,27 +214,71 @@ final class AvatarCache {
     }
 
     /// Includes root-domain and `www.` variants to improve hit rate on transactional senders.
+    /// (e.g. `noreply@notifications.resend.com` falls back to `resend.com`.)
     private func localFallbackURLs(email: String) -> [URL] {
         guard let domain = domainFromEmail(email), !domain.isEmpty else { return [] }
 
-        var hostCandidates: [String] = [domain]
-        if let root = rootDomain(from: domain), root != domain {
-            hostCandidates.append(root)
+        // For personal email providers, skip brand-favicon lookup entirely.
+        // The backend already provides a Gravatar URL in fallbackUrls for these.
+        if freeEmailProviderDomains.contains(domain) {
+            return gravatarURL(email: email).map { [$0] } ?? []
         }
 
+        // Build host candidates: root domain first (best brand-logo hit rate),
+        // then original domain (for sub-domain transactional senders), then www. variants.
+        var rootHost: String? = rootDomain(from: domain)
+        if rootHost == domain { rootHost = nil } // already at root
+
+        var hostCandidates: [String] = []
+        if let root = rootHost {
+            hostCandidates.append(root)
+        }
+        hostCandidates.append(domain)
+        // Add www. variants for each non-www host
         for host in Array(hostCandidates) where !host.hasPrefix("www.") {
             hostCandidates.append("www.\(host)")
         }
+        // Deduplicate while preserving insertion order
+        var seen = Set<String>()
+        hostCandidates = hostCandidates.filter { seen.insert($0).inserted }
 
         var candidates: [URL] = []
-        // Google's favicon service has the best coverage (same source Gmail uses), so we
-        // prioritize it. apple-touch-icon (higher-res) next, then standard fallbacks.
+
+        // 1. Clearbit: high-quality brand logos, returns proper 404 (not a globe).
+        //    Covers Anthropic, Ryanair, Apple, OpenAI, Cursor, Sky Showtime, and thousands more.
+        //    Only try non-www hosts — Clearbit resolves by root domain internally.
+        for host in hostCandidates where !host.hasPrefix("www.") {
+            if let url = URL(string: "https://logo.clearbit.com/\(host)?size=256") {
+                candidates.append(url)
+            }
+        }
+
+        // 2. Gravatar: covers individuals with a registered Gravatar on brand domains
+        if let grav = gravatarURL(email: email), !candidates.contains(grav) {
+            candidates.append(grav)
+        }
+
+        // 3. icon.horse and DuckDuckGo: reliable favicon APIs, return 404 on failure
+        for host in hostCandidates where !host.hasPrefix("www.") {
+            if let url = URL(string: "https://icon.horse/icon/\(host)"),
+               !candidates.contains(url) {
+                candidates.append(url)
+            }
+            if let url = URL(string: "https://icons.duckduckgo.com/ip3/\(host).ico"),
+               !candidates.contains(url) {
+                candidates.append(url)
+            }
+        }
+
+        // 4. Apple touch icons and favicon.ico — broad compatibility fallbacks.
+        //    Google s2 is intentionally excluded: it returns a generic globe PNG (HTTP 200)
+        //    for unknown domains, which AsyncImage accepts as success and displays — hiding
+        //    the sender's real initials behind a meaningless globe icon.
         for host in hostCandidates {
             let rawURLs = [
-                "https://www.google.com/s2/favicons?domain=\(host)&sz=128",
+                "https://\(host)/apple-touch-icon-precomposed.png",
                 "https://\(host)/apple-touch-icon.png",
                 "https://\(host)/favicon.ico",
-                "https://icons.duckduckgo.com/ip3/\(host).ico"
             ]
             for raw in rawURLs {
                 if let url = URL(string: raw), !candidates.contains(url) {
@@ -204,6 +288,18 @@ final class AvatarCache {
         }
 
         return candidates
+    }
+
+    /// Computes the SHA-256 Gravatar URL for the given email (CryptoKit, iOS 13+).
+    /// `d=404` ensures Gravatar returns HTTP 404 when no avatar exists, so AsyncImage
+    /// sees `.failure` and the waterfall advances to the next candidate rather than
+    /// displaying Gravatar's default mystery-person image.
+    private func gravatarURL(email: String) -> URL? {
+        let normalized = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty else { return nil }
+        let hash = SHA256.hash(data: Data(normalized.utf8))
+        let hashString = hash.map { String(format: "%02x", $0) }.joined()
+        return URL(string: "https://www.gravatar.com/avatar/\(hashString)?s=256&d=404&r=g")
     }
 
     private func domainFromEmail(_ email: String) -> String? {
@@ -302,26 +398,6 @@ final class AvatarCache {
     }
 }
 
-// MARK: - Stable avatar color index (matches web `getAvatarColorIndex`)
-
-/// Same algorithm as `getAvatarColorIndex` in `apps/mail/components/ui/bimi-avatar.tsx`.
-/// Uses UTF-16 code units (JS `charCodeAt`) and JavaScript `<<` / `ToInt32` semantics — **not**
-/// `String.hashValue`, which is unstable across launches and OS versions.
-private enum StableAvatarColorIndex {
-    static func index(seed: String, paletteCount: Int) -> Int {
-        precondition(paletteCount > 0, "paletteCount must be positive")
-        var hash: Double = 0
-        for unit in seed.utf16 {
-            let c = Double(unit)
-            let h32 = Int32(truncatingIfNeeded: Int64(hash))
-            let left = h32 &<< 5
-            let sub = Double(left) - hash
-            hash = c + sub
-        }
-        let mag = abs(Int64(hash)) % Int64(paletteCount)
-        return Int(mag)
-    }
-}
 
 // MARK: - Sender Avatar View
 
@@ -353,83 +429,110 @@ struct SenderAvatarView: View {
 
     var body: some View {
         let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        // Direct property access on @Observable triggers re-render when cache is populated.
-        // Use `candidates(for:)` to apply last-successful reordering.
-        let candidates: [URL] = AvatarCache.shared.candidates(for: normalizedEmail) ?? []
 
-        // Initials always render as the base layer. The actual avatar image fades in on top
-        // when it loads — eliminates the initials-then-avatar pop-in that happens with a
-        // bare AsyncImage swap. The user only ever sees a smooth fade.
-        ZStack {
-            initialsCircle
-
-            if urlIndex < candidates.count {
-                let currentURL = candidates[urlIndex]
-                AsyncImage(url: currentURL, transaction: Transaction(animation: .easeOut(duration: 0.15))) { phase in
-                    switch phase {
-                    case .success(let image):
-                        ZStack {
-                            // White backdrop keeps transparent brand logos legible.
-                            Circle().fill(Color.white)
-                            image
-                                .resizable()
-                                .scaledToFill()
-                        }
-                        .transition(.opacity)
-                        .onAppear {
-                            AvatarCache.shared.recordSuccess(email: normalizedEmail, url: currentURL)
-                        }
-                    case .failure:
-                        // Transparent placeholder while we advance to the next candidate.
-                        // Initials remain visible underneath via the ZStack base layer.
-                        Color.clear
-                            .onAppear {
-                                if urlIndex < candidates.count {
-                                    urlIndex += 1
-                                }
-                            }
-                    case .empty:
-                        // Still loading — initials are already visible underneath, so render
-                        // a transparent placeholder rather than re-stacking initials.
-                        Color.clear
-                    @unknown default:
-                        Color.clear
-                    }
+        if let spec = SenderIconRegistry.icon(for: normalizedEmail) {
+            // Bundled brand icon — instant, zero network, no flash, crisp at any scale.
+            // SVG path → brand-color circle + tinted glyph.
+            // No SVG (letter-only registry entry) → falls through to the neutral
+            // initialsCircle below so the avatar reads as a generic initial rather
+            // than a loud brand-colored letter.
+            if let slug = spec.slug {
+                ZStack {
+                    Circle().fill(spec.background)
+                    Image("sender-icon-\(slug)")
+                        .renderingMode(.template)
+                        .resizable()
+                        .scaledToFit()
+                        .foregroundStyle(spec.foreground)
+                        .padding(size * 0.25)
                 }
-                // Keying by URL forces SwiftUI to treat each candidate as a fresh AsyncImage,
-                // so the .empty → .success/.failure transition fires cleanly per URL and the
-                // failure-driven .onAppear isn't suppressed by view-identity reuse.
-                .id(currentURL)
+                .frame(width: size, height: size)
+                .clipShape(Circle())
+            } else {
+                initialsCircle
             }
-        }
-        .frame(width: size, height: size)
-        .clipShape(Circle())
-        .task(id: normalizedEmail) {
-            // Reset index when email changes (e.g. the same list cell is reused for a new sender)
-            urlIndex = 0
-            await AvatarCache.shared.resolveIfNeeded(
-                email: normalizedEmail,
-                name: name,
-                api: services.apiClient
-            )
-        }
-        .onChange(of: candidates.count) { _, newCount in
-            // If candidates arrive (or refresh) after we exhausted the previous list,
-            // restart the waterfall so we don't stay stuck on initials.
-            if urlIndex >= newCount && newCount > 0 {
+        } else {
+            // Network waterfall: initials base layer → try resolved URLs one by one.
+            // Direct property access on @Observable triggers re-render when cache updates.
+            let candidates: [URL] = AvatarCache.shared.candidates(for: normalizedEmail) ?? []
+            ZStack {
+                initialsCircle
+
+                if urlIndex < candidates.count {
+                    let currentURL = candidates[urlIndex]
+                    AsyncImage(url: currentURL, transaction: Transaction(animation: .easeOut(duration: 0.15))) { phase in
+                        switch phase {
+                        case .success(let image):
+                            // Person photos (Google contacts, Gravatar) fill the circle edge-to-edge.
+                            // Brand logos (Clearbit, favicon) are fitted with padding on a neutral
+                            // background so transparent-edge logos don't bleed a ring into the UI.
+                            let isPhoto = Self.isPersonPhoto(currentURL)
+                            ZStack {
+                                Circle().fill(isPhoto ? .clear : Color(UIColor.secondarySystemBackground))
+                                image
+                                    .resizable()
+                                    .aspectRatio(contentMode: isPhoto ? .fill : .fit)
+                                    .padding(isPhoto ? 0 : size * 0.10)
+                            }
+                            .transition(.opacity)
+                            .onAppear {
+                                AvatarCache.shared.recordSuccess(email: normalizedEmail, url: currentURL)
+                            }
+                        case .failure:
+                            Color.clear
+                                .onAppear {
+                                    if urlIndex < candidates.count {
+                                        urlIndex += 1
+                                    }
+                                }
+                        case .empty:
+                            Color.clear
+                        @unknown default:
+                            Color.clear
+                        }
+                    }
+                    // Keying by URL forces SwiftUI to treat each candidate as a fresh
+                    // AsyncImage so the failure-driven .onAppear fires cleanly per URL.
+                    .id(currentURL)
+                }
+            }
+            .frame(width: size, height: size)
+            .clipShape(Circle())
+            .task(id: normalizedEmail) {
                 urlIndex = 0
+                await AvatarCache.shared.resolveIfNeeded(
+                    email: normalizedEmail,
+                    name: name,
+                    api: services.apiClient
+                )
+            }
+            .onChange(of: candidates.count) { _, newCount in
+                if urlIndex >= newCount && newCount > 0 {
+                    urlIndex = 0
+                }
             }
         }
     }
 
+    /// True for real person photos (Google profile photos, Gravatar).
+    /// These are rendered full-bleed/fill. All other sources (brand logos, favicons)
+    /// are fitted with padding to prevent transparent-edge artifacts.
+    private static func isPersonPhoto(_ url: URL) -> Bool {
+        let host = url.host?.lowercased() ?? ""
+        return host.hasSuffix("googleusercontent.com") || host.hasSuffix("gravatar.com")
+    }
+
     // MARK: - Initials fallback
 
+    /// Neutral muted avatar — gray circle + white initials.
+    /// Matches Notion Mail's restrained style: no rotating colors, no per-sender
+    /// brand color noise. Saves visual saturation budget for real brand icons.
     private var initialsCircle: some View {
         Text(initials)
-            .font(.system(size: size * 0.325, weight: .semibold))
+            .font(.system(size: size * 0.38, weight: .semibold, design: .rounded))
             .foregroundStyle(.white)
             .frame(width: size, height: size)
-            .background(avatarColor, in: Circle())
+            .background(Color(UIColor.systemGray2), in: Circle())
     }
 
     /// Up to two initials extracted from the display name, or a single letter from the email.
@@ -446,15 +549,4 @@ struct SenderAvatarView: View {
         return "?"
     }
 
-    /// Deterministic color derived from the sender email (stable across name changes and app
-    /// launches). Uses the same string hash as `BimiAvatar` on web — not `String.hashValue`.
-    private var avatarColor: Color {
-        let colors: [Color] = [
-            .brown, .purple, .orange, .pink, .teal, .indigo, .mint, .cyan, .gray, .green
-        ]
-        let normalized = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let seed = !normalized.isEmpty ? normalized : name
-        let idx = StableAvatarColorIndex.index(seed: seed, paletteCount: colors.count)
-        return colors[idx]
-    }
 }

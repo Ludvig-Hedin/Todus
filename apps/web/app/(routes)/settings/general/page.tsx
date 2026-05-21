@@ -19,8 +19,10 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { useForm, type ControllerRenderProps } from 'react-hook-form';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { SettingsCard } from '@/components/settings/settings-card';
+import { RowList, SelectRow, ToggleRow } from '@/components/settings/primitives';
 import { useEmailAliases } from '@/hooks/use-email-aliases';
-import { Globe, Clock, Mail, InfoIcon } from 'lucide-react';
+import { Globe, Clock, Mail, MapPin, InfoIcon } from 'lucide-react';
+import { Input } from '@/components/ui/input';
 import { getLocale, setLocale } from '@/paraglide/runtime';
 import { useState, useEffect, useMemo, memo } from 'react';
 import {
@@ -92,6 +94,8 @@ const TimezoneSelect = memo(
               placeholder={m['pages.settings.general.selectTimezone']()}
               value={timezoneSearch}
               onChange={(e) => setTimezoneSearch(e.target.value)}
+              aria-label="Search timezones"
+              autoFocus
             />
           </div>
           <ScrollArea className="h-[300px]">
@@ -148,6 +152,7 @@ export default function GeneralPage() {
     defaultValues: {
       language: locale,
       timezone: getBrowserTimezone(),
+      location: '',
       dynamicContent: false,
       contextAboutYou: '',
       customPrompt: '',
@@ -246,6 +251,26 @@ export default function GeneralPage() {
           {m['pages.settings.general.timezone']()}
         </FormLabel>
         <TimezoneSelect field={field} />
+      </FormItem>
+    ),
+    [],
+  );
+
+  const renderLocationField = useCallback(
+    ({ field }: { field: any }) => (
+      <FormItem className="w-full md:w-[200px]">
+        <FormLabel className="text-sm font-medium">{m['pages.settings.general.location']()}</FormLabel>
+        <FormControl>
+          <div className="flex items-center gap-2">
+            <MapPin className="text-muted-foreground h-4 w-4 shrink-0" />
+            <Input
+              {...field}
+              value={field.value ?? ''}
+              placeholder={m['pages.settings.general.locationPlaceholder']()}
+              className="h-9"
+            />
+          </div>
+        </FormControl>
       </FormItem>
     ),
     [],
@@ -439,7 +464,7 @@ export default function GeneralPage() {
   }, [form]);
 
   return (
-    <div className="grid gap-6">
+    <div className="grid gap-5">
       <SettingsCard
         title={m['pages.settings.general.title']()}
         description={m['pages.settings.general.description']()}
@@ -491,19 +516,15 @@ export default function GeneralPage() {
               name="undoSendEnabled"
               render={renderUndoSendEnabledField}
             />
-            <div className="space-y-4">
-              <FormField
-                control={form.control}
-                name="contextAboutYou"
-                render={renderContextAboutYouField}
-              />
-              <FormField
-                control={form.control}
-                name="customPrompt"
-                render={renderCustomInstructionsField}
-              />
-            </div>
-            <div className="space-y-4">
+            <p className="text-muted-foreground text-xs">
+              Looking for Location, Context about you, Custom instructions, or Mail Assistant
+              automation? Those live under{' '}
+              <a className="underline hover:text-foreground" href="/settings/ai">
+                AI Assistant
+              </a>
+              .
+            </p>
+            <div className="hidden">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <h3 className="text-sm font-semibold">Mail assistant automation</h3>
@@ -797,6 +818,95 @@ export default function GeneralPage() {
           </form>
         </Form>
       </SettingsCard>
+      <AppPreferencesCard />
     </div>
+  );
+}
+
+const OPEN_ON_LAUNCH_OPTIONS = [
+  { value: 'home', label: 'Home' },
+  { value: 'inbox', label: 'Inbox' },
+  { value: 'tasks', label: 'Tasks' },
+  { value: 'calendar', label: 'Calendar' },
+] as const;
+
+function AppPreferencesCard() {
+  const { data } = useSettings();
+  const trpc = useTRPC();
+  const queryClient = useQueryClient();
+  const { mutateAsync: saveUserSettings } = useMutation(trpc.settings.save.mutationOptions());
+  const settings = data?.settings;
+
+  const patch = async (changes: Record<string, unknown>) => {
+    if (!settings) return;
+    const snapshot = settings;
+    queryClient.setQueryData(trpc.settings.get.queryKey(), (updater) => {
+      if (!updater) return;
+      return { settings: { ...updater.settings, ...changes } };
+    });
+    try {
+      await saveUserSettings({ ...snapshot, ...changes } as any);
+    } catch {
+      toast.error(m['common.settings.failedToSave']());
+      queryClient.setQueryData(trpc.settings.get.queryKey(), (updater) => {
+        if (!updater) return;
+        return { settings: snapshot };
+      });
+    }
+  };
+
+  const openOnLaunch = (settings as any)?.openOnLaunch ?? 'home';
+  const resumeLastViewed = (settings as any)?.resumeLastViewedPage ?? true;
+  const compactSidebar = (settings as any)?.compactSidebar ?? false;
+  const showUnreadBadge = (settings as any)?.showUnreadBadge ?? true;
+  const focusMode = (settings as any)?.focusModeEnabled ?? false;
+  const groupByThread = (settings as any)?.groupByThread ?? true;
+
+  return (
+    <SettingsCard
+      title="App preferences"
+      description="Syncs to iOS and macOS where applicable."
+    >
+      <RowList>
+        <SelectRow
+          label="Open on launch"
+          description="Where Todus opens when you load the app."
+          value={openOnLaunch}
+          options={[...OPEN_ON_LAUNCH_OPTIONS]}
+          onChange={(value) => patch({ openOnLaunch: value })}
+          width={140}
+        />
+        <ToggleRow
+          label="Resume last viewed page"
+          description="When off, Todus always opens on the launch page above."
+          checked={resumeLastViewed}
+          onChange={(value) => patch({ resumeLastViewedPage: value })}
+        />
+        <ToggleRow
+          label="Compact sidebar"
+          description="Use a denser sidebar layout."
+          checked={compactSidebar}
+          onChange={(value) => patch({ compactSidebar: value })}
+        />
+        <ToggleRow
+          label="Show unread badge"
+          description="Display unread counts on the sidebar."
+          checked={showUnreadBadge}
+          onChange={(value) => patch({ showUnreadBadge: value })}
+        />
+        <ToggleRow
+          label="Focus mode"
+          description="Hide AI nudges and reduce visual noise."
+          checked={focusMode}
+          onChange={(value) => patch({ focusModeEnabled: value })}
+        />
+        <ToggleRow
+          label="Group by thread"
+          description="Combine related messages into a single conversation row."
+          checked={groupByThread}
+          onChange={(value) => patch({ groupByThread: value })}
+        />
+      </RowList>
+    </SettingsCard>
   );
 }

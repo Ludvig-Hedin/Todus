@@ -330,11 +330,18 @@ struct MacRootView: View {
         committedFloatOffset = floatingGeo.liveOffset
     }
 
+    /// Thread ID to open immediately when navigating to the email inbox from Home.
+    /// Cleared by MacEmailInboxView after consumption so re-entering inbox doesn't reopen it.
+    @State private var pendingEmailThreadId: String? = nil
     @State private var isComposePresented = false
     @State private var isCreatePresented = false
     @State private var isSearchPresented = false
     @State private var isNotificationsPresented = false
     @State private var selectedEmailThread: IdentifiableString? = nil
+    /// Drives the `MacSharedConversationView` sheet when a `todus://share?slug=…`
+    /// deep link arrives via `Notification.Name.todusOpenSharedConversation`.
+    /// Wrapped in `IdentifiableString` so we can use `.sheet(item:)` cleanly.
+    @State private var sharedConversationSlug: IdentifiableString? = nil
     @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
     @State private var calendarViewMode: String = "Week"
     @State private var calendarSelectedDate: Date = Date()
@@ -343,13 +350,24 @@ struct MacRootView: View {
     @State private var composeEmailSeedSubject: String = ""
     @State private var hasBootstrappedAuthState = false
     @State private var hasAppliedStartupSelection = false
+    /// Gates the `fetchUserProfile` + `loadSharedAIProfile` task so it runs once per
+    /// authenticated session instead of every `isAuthenticated` flip. Without this,
+    /// transient auth-state changes during background refresh re-fire the profile
+    /// fetch and clobber unsaved Settings edits (e.g. `customInstructions`).
+    /// Reset by the `showsOnboarding` change handler so re-login refreshes correctly.
+    @State private var didFetchProfileForSession = false
 
     // Accent color — drives .tint() on root so SwiftUI controls update immediately
     @AppStorage("mac_accent_color") private var accentColorKey = "blue"
 
     var body: some View {
         Group {
-            if !hasBootstrappedAuthState && services.authService.hasPersistedBearerToken {
+            if !hasBootstrappedAuthState {
+                // Always show the restoring spinner until the bootstrap task completes —
+                // including for users with no persisted token. The view is brief in that
+                // case (one frame), but it prevents a flash of the sign-in screen on
+                // every cold launch while AuthService finishes preloading from the
+                // Keychain off the main actor.
                 restoringSessionView
                     .transition(.opacity)
             } else if services.authService.showsOnboarding {
@@ -381,14 +399,14 @@ struct MacRootView: View {
         .focusEffectDisabled()
         // Primary text tint so symbols and controls are not system / accent blue.
         .tint(Color.primary)
-        .animation(.snappy(duration: 0.3), value: services.authService.showsOnboarding)
-        .animation(.snappy(duration: 0.3), value: services.authService.isAuthenticated)
-        .animation(.snappy(duration: 0.3), value: services.hasConfiguredGmailPrompt)
-        .animation(.snappy(duration: 0.3), value: services.hasConfiguredCalendarPrompt)
-        .animation(.snappy(duration: 0.3), value: services.hasConfiguredRemindersPrompt)
-        .animation(.snappy(duration: 0.3), value: services.hasConfiguredStartupViewPrompt)
-        .animation(.snappy(duration: 0.3), value: services.hasConfiguredNotificationsPrompt)
-        .animation(.snappy(duration: 0.3), value: services.hasConfiguredDefaultMailPrompt)
+        .animation(MacTheme.Motion.slow, value: services.authService.showsOnboarding)
+        .animation(MacTheme.Motion.slow, value: services.authService.isAuthenticated)
+        .animation(MacTheme.Motion.slow, value: services.hasConfiguredGmailPrompt)
+        .animation(MacTheme.Motion.slow, value: services.hasConfiguredCalendarPrompt)
+        .animation(MacTheme.Motion.slow, value: services.hasConfiguredRemindersPrompt)
+        .animation(MacTheme.Motion.slow, value: services.hasConfiguredStartupViewPrompt)
+        .animation(MacTheme.Motion.slow, value: services.hasConfiguredNotificationsPrompt)
+        .animation(MacTheme.Motion.slow, value: services.hasConfiguredDefaultMailPrompt)
         .safeAreaInset(edge: .top, spacing: 0) {
             if let onboardingStep = onboardingStep {
                 HStack {
@@ -425,16 +443,19 @@ struct MacRootView: View {
             composeEmailSeedTo = p.to ?? ""
             composeEmailSeedSubject = p.subject ?? ""
             composeEmailSeedBody = p.body ?? ""
-            withAnimation(.snappy(duration: 0.18)) { isComposePresented = true }
+            withAnimation(MacTheme.Motion.base) { isComposePresented = true }
             services.pendingMailto = nil
         }
         .task {
             guard !hasBootstrappedAuthState else { return }
-            defer { hasBootstrappedAuthState = true }
 
+            // Wait for the persisted session to actually restore before flipping the
+            // bootstrap flag — otherwise users with a valid Keychain token see a
+            // momentary sign-in flash while restorePersistedSession is in flight.
             if services.authService.hasPersistedBearerToken {
                 _ = await services.authService.restorePersistedSession()
             }
+            hasBootstrappedAuthState = true
         }
         .task {
             // Validate session on launch — but DON'T sign out on failure.
@@ -448,16 +469,23 @@ struct MacRootView: View {
             }
         }
         .task(id: services.authService.isAuthenticated) {
-            // Fetch user profile (name, avatar, email) whenever auth state changes
-            // to authenticated. Uses task(id:) so it re-runs after login — a plain
-            // .task{} only fires on initial appear (before login), when bearerToken
-            // is still nil. Matches iOS RootView behavior.
+            // Fetch user profile (name, avatar, email) ONCE per authenticated session.
+            // The `didFetchProfileForSession` gate prevents transient auth-state flips
+            // (e.g. background token refresh) from re-firing the fetch and clobbering
+            // unsaved Settings edits via `loadSharedAIProfile`. Reset on sign-out so
+            // a subsequent sign-in still triggers a refresh.
             guard services.authService.isAuthenticated else { return }
+            guard !didFetchProfileForSession else { return }
             await services.authService.fetchUserProfile()
             await services.loadSharedAIProfile()
+            didFetchProfileForSession = true
         }
         .onChange(of: services.authService.showsOnboarding) { _, showsLogin in
             guard showsLogin else { return }
+            // Reset the per-session fetch gate so the next sign-in re-fetches the
+            // profile and shared AI prefs (otherwise a sign-out → sign-in cycle in
+            // the same app session would leave the new user with stale data).
+            didFetchProfileForSession = false
             services.closeSettingsWindowIfPresent()
         }
         .onAppear {
@@ -511,7 +539,7 @@ struct MacRootView: View {
                         isComposePresented = true
                     },
                     onClose: {
-                        withAnimation(.snappy(duration: 0.18)) { isCreatePresented = false }
+                        withAnimation(MacTheme.Motion.base) { isCreatePresented = false }
                     }
                 )
                 .frame(width: 440)
@@ -527,7 +555,7 @@ struct MacRootView: View {
                     subject: composeEmailSeedSubject,
                     body: composeEmailSeedBody,
                     onClose: {
-                        withAnimation(.snappy(duration: 0.18)) { isComposePresented = false }
+                        withAnimation(MacTheme.Motion.base) { isComposePresented = false }
                         composeEmailSeedTo = ""
                         composeEmailSeedSubject = ""
                         composeEmailSeedBody = ""
@@ -541,24 +569,33 @@ struct MacRootView: View {
 
             // Side pane mode — docked assistant panel on the right
             if isAssistantPresented && assistantDisplayMode == .sidepane {
-                // Draggable resize divider — replaces plain Divider() so user can adjust side pane width
-                Rectangle()
-                    .fill(Color.primary.opacity(0.08))
-                    .frame(width: 5)
-                    .contentShape(Rectangle())
-                    .onHover { hovering in
-                        if hovering { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
-                    }
-                    .gesture(
-                        DragGesture()
-                            .onChanged { value in
-                                if sidePaneDragStartWidth == nil { sidePaneDragStartWidth = CGFloat(sidePaneWidth) }
-                                let start = sidePaneDragStartWidth ?? CGFloat(sidePaneWidth)
-                                let proposed = start - value.translation.width
+                // Draggable resize divider — 1pt visual line with an 8pt invisible grab zone.
+                // `withTransaction { disablesAnimations }` prevents implicit animations from
+                // interpolating intermediate widths on every drag frame (was the lag source).
+                ZStack {
+                    Color.clear.frame(width: 8)
+                    Rectangle()
+                        .fill(Color.primary.opacity(0.04))
+                        .frame(width: 1)
+                }
+                .contentShape(Rectangle())
+                .onHover { hovering in
+                    if hovering { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+                }
+                .gesture(
+                    DragGesture(minimumDistance: 1)
+                        .onChanged { value in
+                            if sidePaneDragStartWidth == nil { sidePaneDragStartWidth = CGFloat(sidePaneWidth) }
+                            let start = sidePaneDragStartWidth ?? CGFloat(sidePaneWidth)
+                            let proposed = start - value.translation.width
+                            var txn = Transaction()
+                            txn.disablesAnimations = true
+                            withTransaction(txn) {
                                 sidePaneWidth = Double(max(280, min(600, proposed)))
                             }
-                            .onEnded { _ in sidePaneDragStartWidth = nil }
-                    )
+                        }
+                        .onEnded { _ in sidePaneDragStartWidth = nil }
+                )
 
                 MacAssistantPanel(
                     isPresented: $isAssistantPresented,
@@ -569,9 +606,9 @@ struct MacRootView: View {
                 .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }
-        .animation(.snappy(duration: 0.25), value: isAssistantPresented && assistantDisplayMode == .sidepane)
-        .animation(.snappy(duration: 0.18), value: isCreatePresented)
-        .animation(.snappy(duration: 0.18), value: isComposePresented)
+        .animation(MacTheme.Motion.base, value: isAssistantPresented && assistantDisplayMode == .sidepane)
+        .animation(MacTheme.Motion.base, value: isCreatePresented)
+        .animation(MacTheme.Motion.base, value: isComposePresented)
         // Floating mode — overlay panel positioned bottom-right, wrapped in FloatingPanelShell
         // so only the shell re-renders per drag/resize frame (not MacAssistantPanel).
         .overlay(alignment: .bottomTrailing) {
@@ -595,7 +632,7 @@ struct MacRootView: View {
                 .transition(.scale(scale: 0.92, anchor: .bottomTrailing).combined(with: .opacity))
             }
         }
-        .animation(.snappy(duration: 0.25), value: isAssistantPresented && assistantDisplayMode == .floating)
+        .animation(MacTheme.Motion.base, value: isAssistantPresented && assistantDisplayMode == .floating)
         // Full-screen mode — panel covers the entire content area
         .overlay {
             if isAssistantPresented && assistantDisplayMode == .full {
@@ -608,7 +645,7 @@ struct MacRootView: View {
                 .transition(.opacity)
             }
         }
-        .animation(.snappy(duration: 0.25), value: isAssistantPresented && assistantDisplayMode == .full)
+        .animation(MacTheme.Motion.base, value: isAssistantPresented && assistantDisplayMode == .full)
         .onChange(of: selection) { _, newValue in
             // Persist sidebar selection so the next launch restores the same view.
             selectionStorageKey = newValue.storageKey
@@ -691,7 +728,7 @@ struct MacRootView: View {
                 // Hide the FAB when the assistant panel is already open
                 if !isAssistantPresented {
                     AssistantButton {
-                        withAnimation(.snappy(duration: 0.25)) {
+                        withAnimation(MacTheme.Motion.base) {
                             isAssistantPresented = true
                         }
                     }
@@ -716,8 +753,8 @@ struct MacRootView: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
                 }
             }
-            .animation(.snappy(duration: 0.3), value: services.networkMonitor.isConnected)
-            .animation(.snappy(duration: 0.2), value: isAssistantPresented)
+            .animation(MacTheme.Motion.slow, value: services.networkMonitor.isConnected)
+            .animation(MacTheme.Motion.base, value: isAssistantPresented)
             .navigationTitle(selection.title)
             // Hide the toolbar's own background so the content-area
             // MacTheme.contentBackground bleeds through seamlessly.
@@ -744,7 +781,24 @@ struct MacRootView: View {
                     .accessibilityHint("Opens your daily brief with tasks, events, and emails")
                     .macClickablePointer()
                     .popover(isPresented: $isNotificationsPresented, arrowEdge: .bottom) {
-                        MacNotificationCenterView()
+                        MacNotificationCenterView(onOpen: { relatedId, type in
+                            // Route the notification tap to the relevant tab so the popover
+                            // never silently dismisses without context. Email rows that carry
+                            // a threadId open the thread sheet directly; everything else
+                            // falls back to the matching tab landing surface.
+                            switch type {
+                            case .taskDue, .reminder:
+                                selection = .tasks
+                            case .importantEmail:
+                                if let threadId = relatedId, !threadId.isEmpty {
+                                    selectedEmailThread = IdentifiableString(value: threadId)
+                                } else {
+                                    selection = .email(.inbox)
+                                }
+                            case .event:
+                                selection = .calendar(.all)
+                            }
+                        })
                     }
 
                     Menu {
@@ -761,7 +815,7 @@ struct MacRootView: View {
                         }
                         // Toggle assistant — shows checkmark when open
                         Button {
-                            withAnimation(.snappy(duration: 0.25)) {
+                            withAnimation(MacTheme.Motion.base) {
                                 isAssistantPresented.toggle()
                             }
                         } label: {
@@ -838,7 +892,7 @@ struct MacRootView: View {
 
                 // ⌘B — Toggle sidebar
                 Button("") {
-                    withAnimation(.easeInOut(duration: 0.2)) {
+                    withAnimation(MacTheme.Motion.base) {
                         columnVisibility = columnVisibility == .detailOnly
                             ? .automatic : .detailOnly
                     }
@@ -847,7 +901,7 @@ struct MacRootView: View {
 
                 // ⌘L — Toggle AI Assistant (not just open — toggle so it can be closed too)
                 Button("") {
-                    withAnimation(.snappy(duration: 0.25)) {
+                    withAnimation(MacTheme.Motion.base) {
                         isAssistantPresented.toggle()
                     }
                 }
@@ -913,6 +967,64 @@ struct MacRootView: View {
             MacEmailThreadView(threadId: thread.value)
                 .frame(minWidth: 560, minHeight: 400)
         }
+        // Shared AI conversation viewer — opened by `todus://share?slug=…` deep links
+        // dispatched as `Notification.Name.todusOpenSharedConversation` from
+        // `TodusMacApp.dispatchValidatedURL`.
+        .sheet(item: $sharedConversationSlug) { wrapper in
+            MacSharedConversationView(slug: wrapper.value)
+                .frame(minWidth: 560, idealWidth: 640, minHeight: 480, idealHeight: 640)
+        }
+        // MARK: - NotificationCenter deep-link routing
+        //
+        // `MacAppDelegate` / `TodusMacApp` translate deep links and notification
+        // taps into `Notification.Name` posts. We observe them here so the root
+        // view can flip selection state, present sheets, or surface the AI panel
+        // without `MacAppServices` needing to know about routing.
+        .onReceive(NotificationCenter.default.publisher(for: .todusOpenSharedConversation)) { note in
+            if let slug = note.object as? String, !slug.isEmpty {
+                sharedConversationSlug = IdentifiableString(value: slug)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .todusOpenEmailThread)) { note in
+            guard let threadId = note.object as? String, !threadId.isEmpty else { return }
+            pendingEmailThreadId = threadId
+            if selection.category != "email" {
+                selection = .email(.inbox)
+            } else {
+                // Already on email — force recreate so onAppear fires with the new ID.
+                // Temporarily switch away then back so .id(selection) resets the view.
+                let current = selection
+                selection = .home
+                selection = current
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .todusNavigateToEmail)) { _ in
+            if selection.category != "email" {
+                selection = .email(.inbox)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .todusOpenAIConversation)) { note in
+            // Always open the assistant panel so the user has a visible target,
+            // even if no conversation id was supplied (e.g. unknown category).
+            services.showsAssistantPanel = true
+            let conversationIdString =
+                (note.userInfo?["conversationId"] as? String)
+                ?? (note.object as? String)
+            guard let raw = conversationIdString, !raw.isEmpty,
+                  let uuid = UUID(uuidString: raw) else { return }
+            // Only load if the saved conversation actually exists locally —
+            // otherwise leave the panel in its current state to avoid wiping
+            // an in-flight chat.
+            if let saved = services.aiChatService.savedConversations.first(where: { $0.id == uuid }) {
+                services.aiChatService.loadConversation(saved)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .todusNavigateToTasks)) { _ in
+            selection = .tasks
+        }
+        // `.todusCompleteTask` is informational — the underlying SwiftData
+        // `@Query` re-renders automatically once the task row's `completed`
+        // flag flips, so the UI requires no explicit action here.
         .onAppear {
             applyStartupSelectionIfNeeded()
         }
@@ -990,11 +1102,22 @@ struct MacRootView: View {
     private func contentView(for currentSelection: MacPrimarySelection) -> some View {
         switch currentSelection {
         case .home:
-            MacHomeView(onNavigate: { selection = $0 })
+            MacHomeView(
+                onNavigate: { selection = $0 },
+                onNavigateEmailThread: { threadId in
+                    // Navigate to inbox and open the thread inline (no modal sheet).
+                    pendingEmailThreadId = threadId
+                    selection = .email(.inbox)
+                }
+            )
         case .tasks:
             MacTasksView(onCreateItem: { isCreatePresented = true })
         case .email(let section):
-            MacEmailInboxView(folder: section.rawValue)
+            MacEmailInboxView(
+                folder: section.rawValue,
+                initialThreadId: pendingEmailThreadId,
+                onInitialThreadConsumed: { pendingEmailThreadId = nil }
+            )
         case .calendar:
             MacCalendarView(viewMode: $calendarViewMode, selectedDate: $calendarSelectedDate)
         case .meetings:

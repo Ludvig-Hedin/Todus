@@ -192,5 +192,8 @@ struct MacNewFolderCard: View {
             .contentShape(RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous))
         }
         .buttonStyle(.plain)
+        // Match the rest of the app's clickable affordances — the new-folder
+        // card was previously indistinguishable from a static dashed rectangle.
+        .macClickablePointer()
     }
 }

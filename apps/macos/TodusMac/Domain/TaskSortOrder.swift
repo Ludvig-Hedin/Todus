@@ -2,6 +2,9 @@ import Foundation
 
 /// Sort order options for the task list view.
 enum TaskSortOrder: String, CaseIterable, Identifiable {
+    /// Urgency-aware default: overdue → today → upcoming → no-date.
+    /// What a user opening Tasks usually wants — "what should I do next?".
+    case smart
     case newest
     case oldest
     case alphabetical
@@ -11,6 +14,7 @@ enum TaskSortOrder: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
+        case .smart: return "Smart"
         case .newest: return "Newest First"
         case .oldest: return "Oldest First"
         case .alphabetical: return "Alphabetical"
@@ -20,6 +24,7 @@ enum TaskSortOrder: String, CaseIterable, Identifiable {
 
     var systemImage: String {
         switch self {
+        case .smart: return "sparkles"
         case .newest: return "arrow.down.circle"
         case .oldest: return "arrow.up.circle"
         case .alphabetical: return "textformat.abc"

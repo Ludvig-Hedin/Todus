@@ -15,8 +15,8 @@ struct NotificationsOnboardingView: View {
                 Image(systemName: "bell.badge.fill")
                     .font(.system(size: 56))
                     .foregroundStyle(AppTheme.accent)
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("Notifications")
+                    // Decorative — the heading text already announces the screen.
+                    .accessibilityHidden(true)
 
                 Spacer().frame(height: 24)
 
@@ -97,6 +97,9 @@ struct NotificationsOnboardingView: View {
                                 .padding(.vertical, 12)
                         }
                         .buttonStyle(.plain)
+                        // Block Skip while the OS prompt is in flight so we don't
+                        // advance past this screen before requestResult is observed.
+                        .disabled(isRequesting)
                         .accessibilityHint("Skip enabling notifications for now")
                     }
                 }
@@ -105,6 +108,15 @@ struct NotificationsOnboardingView: View {
                 Spacer()
             }
             .padding(.vertical, 32)
+        }
+        // Auto-skip the prompt if the OS has already authorized notifications
+        // (e.g. user returns after reinstall). Without this, returning users
+        // see the same upsell on every launch even though there's nothing to do.
+        .task {
+            await services.notificationService.checkAuthorization()
+            if services.notificationService.isAuthorized {
+                services.hasConfiguredNotificationsPrompt = true
+            }
         }
     }
 

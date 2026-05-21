@@ -304,6 +304,28 @@ private struct MacMeetingRowView: View {
             .padding(.horizontal, 8)
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            Button {
+                onSelect()
+            } label: {
+                Label("Open", systemImage: "arrow.up.right.square")
+            }
+            Button {
+                let pb = NSPasteboard.general
+                pb.clearContents()
+                pb.setString(meeting.title, forType: .string)
+            } label: {
+                Label("Copy title", systemImage: "doc.on.doc")
+            }
+            Button {
+                let when = meeting.startsAt.formatted(date: .abbreviated, time: .shortened)
+                let pb = NSPasteboard.general
+                pb.clearContents()
+                pb.setString("\(meeting.title) — \(when)", forType: .string)
+            } label: {
+                Label("Copy meeting summary", systemImage: "text.quote")
+            }
+        }
     }
 
     private var timeLabel: String {

@@ -1,6 +1,14 @@
 import SwiftUI
 import SwiftData
 
+// Note: tasks within a column are intentionally unordered — their order is
+// derived purely from `sortOrder` (Smart / Recent / Due / Alphabetical). Manual
+// drag-to-reorder *within* a column is not supported because there is no
+// persisted `boardPosition` field on `TaskRecord` to anchor a stable order
+// across sync. Drag-and-drop *between* columns still works via the column-level
+// `.dropDestination` that calls `setStatus`. Add a `boardPosition` column and
+// reorder-mutation to the sync schema before enabling within-column reordering.
+// (UX P8.)
 struct BoardView: View {
     @Query(sort: \TaskRecord.createdAt, order: .reverse) private var allTasks: [TaskRecord]
     let captureService: TaskCaptureService
@@ -13,8 +21,8 @@ struct BoardView: View {
     @State private var tasksByStatus: [TaskStatus: [TaskRecord]] = [:]
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            ScrollView(.vertical, showsIndicators: false) {
+        GeometryReader { geo in
+            ScrollView(.horizontal, showsIndicators: false) {
                 HStack(alignment: .top, spacing: 12) {
                     ForEach(TaskStatus.allCases) { status in
                         BoardColumnView(
@@ -24,14 +32,20 @@ struct BoardView: View {
                         ) { task in
                             selectedTask = task
                         }
+                        // Columns share the visible scroll height so each card
+                        // surface fills the page instead of collapsing to its
+                        // own intrinsic height (which caused horizontal-scroll
+                        // content to vertical-center within the available area,
+                        // producing a huge gap between the search bar and the
+                        // column headers).
+                        .frame(height: geo.size.height)
                     }
                 }
                 .padding(.horizontal, 16)
-                .padding(.vertical, 10)
-                .padding(.leading, 4)
+                .padding(.bottom, 10)
             }
+            .scrollDismissesKeyboard(.interactively)
         }
-        .scrollDismissesKeyboard(.interactively)
         .sheet(item: $selectedTask) { task in
             TaskDetailSheet(task: task)
                 .presentationDragIndicator(.visible)
@@ -79,7 +93,10 @@ struct BoardView: View {
             } else {
                 folderMatches = true
             }
-            guard !task.completed, folderMatches, matchesSearch(task) else { continue }
+            // Completed tasks belong in the Done column. Excluding them entirely
+            // makes drag-to-Done look like deletion.
+            guard folderMatches, matchesSearch(task) else { continue }
+            if task.completed && task.status != .done { continue }
 
             grouped[task.status, default: []].append(task)
         }
@@ -99,6 +116,8 @@ struct BoardView: View {
 
     private func sortTasks(_ tasks: [TaskRecord]) -> [TaskRecord] {
         switch sortOrder {
+        case .smart:
+            return TaskSmartSort.sorted(tasks)
         case .newest:
             return tasks.sorted { $0.createdAt > $1.createdAt }
         case .oldest:

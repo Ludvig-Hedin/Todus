@@ -9,6 +9,7 @@ import {
 } from '../lib/ai-sources';
 import { systemPrompt } from '../services/call-service/system-prompt';
 import { getSharedAIProfilePromptForUser } from '../lib/ai-profile';
+import { GENERATIVE_UI_PROMPT } from '../lib/generative-ui-contract';
 import { perplexity } from '@ai-sdk/perplexity';
 import { resolveModel, isLocalInference } from '../lib/ai-model-resolver';
 import { tools } from './agent/tools';
@@ -499,7 +500,10 @@ aiRouter.post('/chat', async (c) => {
   }
 
   try {
-    const sharedAIProfilePrompt = await getSharedAIProfilePromptForUser(user.id);
+    const sharedAIProfilePrompt = await getSharedAIProfilePromptForUser(user.id, {
+      name: user.name,
+      email: user.email,
+    });
     if (sharedAIProfilePrompt) {
       const systemIdx = enrichedMessages.findIndex((m) => m.role === 'system');
       if (systemIdx >= 0) {
@@ -515,6 +519,26 @@ aiRouter.post('/chat', async (c) => {
     }
   } catch (error) {
     console.warn('[AIProfile] Failed to inject AI profile into /ai/chat for user:', user.id, error);
+  }
+
+  // Inject the generative-UI catalog so the AI knows which inline cards it can render
+  // (InlineComposeCard, TaskListCard, EmailListCard, etc.). Without this, clients only see
+  // plain markdown — no rich card UI. Append to the existing system message so client-side
+  // base rules still take precedence.
+  {
+    const systemIdx = enrichedMessages.findIndex((m) => m.role === 'system');
+    if (systemIdx >= 0) {
+      enrichedMessages = [...enrichedMessages];
+      enrichedMessages[systemIdx] = {
+        ...enrichedMessages[systemIdx],
+        content: `${enrichedMessages[systemIdx].content}\n\n${GENERATIVE_UI_PROMPT}`,
+      };
+    } else {
+      enrichedMessages = [
+        { role: 'system', content: GENERATIVE_UI_PROMPT },
+        ...enrichedMessages,
+      ];
+    }
   }
 
   // Skip attachment merge on follow-up steps — they were already inlined on step 1
@@ -669,6 +693,23 @@ aiRouter.post('/chat', async (c) => {
     ],
   };
 
+  // Forward the inbound abort signal so that when a client disconnects (e.g. iOS
+  // force-quit during a long completion) we tear down the upstream OpenRouter
+  // request instead of continuing to read tokens and bill against the API key.
+  const upstreamAbortController = new AbortController();
+  const clientAbortSignal = c.req.raw.signal;
+  if (clientAbortSignal) {
+    if (clientAbortSignal.aborted) {
+      upstreamAbortController.abort(clientAbortSignal.reason);
+    } else {
+      clientAbortSignal.addEventListener(
+        'abort',
+        () => upstreamAbortController.abort(clientAbortSignal.reason),
+        { once: true },
+      );
+    }
+  }
+
   const fetchUpstreamResponse = () =>
     fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
@@ -679,6 +720,7 @@ aiRouter.post('/chat', async (c) => {
         'X-Title': 'Todus AI',
       },
       body: JSON.stringify(upstreamRequestBody),
+      signal: upstreamAbortController.signal,
     });
 
   const mem0LastUserMsg = parsed.data.messages.filter((m) => m.role === 'user').pop();
@@ -730,6 +772,10 @@ aiRouter.post('/chat', async (c) => {
   // 3. Pipe upstream OpenRouter SSE through unchanged
   // 4. Capture assistant text for Mem0 memory storage (fire-and-forget)
   const encoder = new TextEncoder();
+
+  // Hoisted so the stream's `cancel()` (fired by the runtime when the client
+  // disconnects) can release it and stop draining the upstream.
+  let upstreamReader: ReadableStreamDefaultReader<Uint8Array> | null = null;
 
   const responseStream = new ReadableStream({
     async start(controller) {
@@ -787,65 +833,95 @@ aiRouter.post('/chat', async (c) => {
           return;
         }
         const reader = upstreamResponse.body.getReader();
+        upstreamReader = reader;
         const decoder = new TextDecoder();
         let reasoningStartTime = 0;
         let hasReasoning = false;
         // OpenRouter emits usage on the final chunk when stream_options.include_usage=true.
         let usagePromptTokens = 0;
         let usageCompletionTokens = 0;
+        // Buffer SSE bytes across reads. OpenRouter routinely emits 1–2 KB events
+        // that don't align with HTTP chunk boundaries; splitting per chunk drops
+        // the trailing usage event (silently zero-billing the turn) and partial
+        // reasoning tokens. SSE event terminator is a blank line: \n\n.
+        let buffer = '';
+
+        const parseEvent = (rawLines: string[]): void => {
+          // An event is one or more `data: ...` lines. Concatenate per spec.
+          const dataLines = rawLines.filter((l) => l.startsWith('data: '));
+          if (dataLines.length === 0) return;
+          const json = dataLines.map((l) => l.slice(6)).join('\n');
+          if (json === '[DONE]') return;
+          let sseChunk: unknown;
+          try {
+            sseChunk = JSON.parse(json);
+          } catch {
+            // Genuinely malformed payload — skip but don't kill the stream.
+            return;
+          }
+          const obj = sseChunk as {
+            usage?: { prompt_tokens?: number; completion_tokens?: number };
+            choices?: { delta?: { content?: string; reasoning?: string; reasoning_content?: string } }[];
+          };
+          const delta = obj.choices?.[0]?.delta;
+
+          if (obj.usage) {
+            usagePromptTokens = Number(obj.usage.prompt_tokens ?? 0);
+            usageCompletionTokens = Number(obj.usage.completion_tokens ?? 0);
+          }
+
+          if (delta?.content) assistantText += delta.content;
+
+          const reasoningToken = delta?.reasoning_content ?? delta?.reasoning;
+          if (reasoningToken) {
+            if (!hasReasoning) {
+              reasoningStartTime = Date.now();
+              hasReasoning = true;
+            }
+            try {
+              controller.enqueue(
+                encoder.encode(`data: ${JSON.stringify({ type: 'reasoning', content: reasoningToken })}\n\n`),
+              );
+            } catch {
+              // Controller closed (client gone). Stop trying to enqueue.
+            }
+          }
+
+          if (hasReasoning && delta?.content && reasoningStartTime > 0) {
+            const durationMs = Date.now() - reasoningStartTime;
+            try {
+              controller.enqueue(
+                encoder.encode(`data: ${JSON.stringify({ type: 'reasoning_done', duration_ms: durationMs })}\n\n`),
+              );
+            } catch {
+              // Controller closed.
+            }
+            reasoningStartTime = 0;
+          }
+        };
 
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
 
-          // Pass through to client
+          // Pass raw bytes through to the client unchanged.
           controller.enqueue(value);
 
-          // Extract content + reasoning from SSE chunks (best-effort, errors won't break stream)
-          try {
-            const text = decoder.decode(value, { stream: true });
-            const lines = text.split('\n').filter((l) => l.startsWith('data: '));
-            for (const line of lines) {
-              const json = line.slice(6);
-              if (json === '[DONE]') continue;
-              const sseChunk = JSON.parse(json);
-              const delta = sseChunk?.choices?.[0]?.delta;
-
-              // Token usage arrives on the final chunk (often with empty choices).
-              if (sseChunk?.usage) {
-                usagePromptTokens = Number(sseChunk.usage.prompt_tokens ?? 0);
-                usageCompletionTokens = Number(sseChunk.usage.completion_tokens ?? 0);
-              }
-
-              // Capture main content for Mem0
-              if (delta?.content) assistantText += delta.content;
-
-              // Extract reasoning tokens from reasoning models (deepseek-r1, o1, etc.)
-              // OpenRouter passes these as `reasoning_content` or `reasoning` in the delta.
-              const reasoningToken = delta?.reasoning_content ?? delta?.reasoning;
-              if (reasoningToken) {
-                if (!hasReasoning) {
-                  reasoningStartTime = Date.now();
-                  hasReasoning = true;
-                }
-                // Re-emit as a custom reasoning event for the iOS client
-                controller.enqueue(
-                  encoder.encode(`data: ${JSON.stringify({ type: 'reasoning', content: reasoningToken })}\n\n`),
-                );
-              }
-
-              // When reasoning ends (first content token after reasoning), emit reasoning_done
-              if (hasReasoning && delta?.content && reasoningStartTime > 0) {
-                const durationMs = Date.now() - reasoningStartTime;
-                controller.enqueue(
-                  encoder.encode(`data: ${JSON.stringify({ type: 'reasoning_done', duration_ms: durationMs })}\n\n`),
-                );
-                reasoningStartTime = 0; // Only emit once
-              }
-            }
-          } catch {
-            // Ignore parse errors — some chunks may be partial
+          // Append decoded text to buffer; flush all complete events (\n\n-separated).
+          buffer += decoder.decode(value, { stream: true });
+          let sepIdx: number;
+          while ((sepIdx = buffer.indexOf('\n\n')) !== -1) {
+            const eventBlock = buffer.slice(0, sepIdx);
+            buffer = buffer.slice(sepIdx + 2);
+            const lines = eventBlock.split('\n');
+            parseEvent(lines);
           }
+        }
+
+        // Flush any trailing event that didn't end with \n\n.
+        if (buffer.trim().length > 0) {
+          parseEvent(buffer.split('\n'));
+          buffer = '';
         }
 
         // 3. Mem0: store conversation memory after stream completes (fire-and-forget)
@@ -880,6 +956,12 @@ aiRouter.post('/chat', async (c) => {
 
         controller.close();
       } catch (error) {
+        // Aborts (client disconnect) are an expected unwind path — bail without
+        // emitting a fake "stream failed" payload to a socket that's already gone.
+        if ((error as { name?: string })?.name === 'AbortError' || upstreamAbortController.signal.aborted) {
+          try { controller.close(); } catch { /* already closed */ }
+          return;
+        }
         const message = error instanceof Error ? error.message : 'Unknown stream error';
         controller.enqueue(
           encoder.encode(
@@ -888,6 +970,12 @@ aiRouter.post('/chat', async (c) => {
         );
         controller.close();
       }
+    },
+    cancel(reason) {
+      // Client disconnected. Abort the upstream fetch so OpenRouter stops
+      // generating tokens we're no longer reading (and that we'd be billed for).
+      try { upstreamReader?.cancel(reason).catch(() => {}); } catch { /* noop */ }
+      try { upstreamAbortController.abort(reason); } catch { /* noop */ }
     },
   });
 
@@ -941,6 +1029,72 @@ aiRouter.get('/voice-ping', async (c) => {
     console.error('[voice-ping] fetch error', msg);
     return c.json({ ok: false, error: msg }, 502);
   }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// /voice/system-prompt — single source of truth for the Gemini Live system
+// instruction used by the macOS app and (later) the Pi voice daemon.
+//
+// Centralizing here means:
+//   • Mem0 cache stays warm in one place
+//   • AI profile (name/email/locale/custom instructions) is identical across
+//     voice and text chat
+//   • The voice persona block can evolve without shipping a new app build
+//
+// The route is intentionally read-only and idempotent — clients may call it
+// once per session, or every connect, with sub-5ms latency in the warm path.
+// ─────────────────────────────────────────────────────────────────────────────
+aiRouter.get('/voice/system-prompt', async (c) => {
+  const user = c.var.sessionUser;
+  if (!user) {
+    return c.json({ error: 'unauthenticated' }, 401);
+  }
+
+  // Voice persona — kept short on purpose. Gemini Live latency is sensitive to
+  // setup payload size, and the model handles "be concise / spoken not written"
+  // better with terse rules than with paragraphs.
+  const PERSONA = [
+    'You are Todus, a calm, capable voice assistant.',
+    'This is a spoken conversation — keep replies short and natural, not written prose.',
+    'No bullet lists, no markdown, no "as an AI" filler.',
+    'Confirm only when useful. Ask a clarifying question if the request is ambiguous.',
+    'For destructive actions (delete, send, cancel) confirm before running the tool.',
+    'If a tool call fails, say so plainly and offer the next step.',
+  ].join('\n');
+
+  const mem0Key = env.MEM0_API_KEY;
+  let memories: string[] = [];
+  if (mem0Key) {
+    try {
+      memories = await getCachedMemories(user.id, env.prompts_storage, mem0Key);
+    } catch (error) {
+      // Memory failure must never block voice — log and proceed without it.
+      console.warn('[voice/system-prompt] getCachedMemories failed:', error);
+    }
+  }
+  const memoryBlock = formatMemoriesForPrompt(memories);
+
+  let aiProfile = '';
+  try {
+    aiProfile = await getSharedAIProfilePromptForUser(user.id, {
+      name: user.name,
+      email: user.email,
+    });
+  } catch (error) {
+    console.warn('[voice/system-prompt] getSharedAIProfilePromptForUser failed:', error);
+  }
+
+  const sections = [PERSONA, aiProfile, memoryBlock]
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  const systemInstruction = sections.join('\n\n');
+
+  return c.json({
+    systemInstruction,
+    persona: PERSONA,
+    memoriesCount: memories.length,
+    generatedAt: new Date().toISOString(),
+  });
 });
 
 aiRouter.get('/voice-ws', async (c) => {
@@ -1291,7 +1445,10 @@ aiRouter.post('/call', async (c) => {
   const toolset = await tools(connection.id);
   const { text } = await generateText({
     model: resolveModel({ provider: 'auto', modelId: '', ollamaBaseUrl: '', env }),
-    system: await getSharedAIProfilePromptForUser(user.id)
+    system: await getSharedAIProfilePromptForUser(user.id, {
+      name: user.name,
+      email: user.email,
+    })
       .then((sharedAIProfilePrompt) =>
         // Append profile AFTER base system instructions so core rules take precedence
         sharedAIProfilePrompt ? `${systemPrompt}\n\n${sharedAIProfilePrompt}` : systemPrompt,

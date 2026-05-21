@@ -104,7 +104,7 @@ struct TabBarCustomizationView: View {
                             // Add button — disabled when already at max 4 tabs
                             Button {
                                 guard activeTabs.count < 4 else { return }
-                                withAnimation { activeTabs.append(tab) }
+                                withAnimation(AppTheme.Motion.base) { activeTabs.append(tab) }
                             } label: {
                                 Image(systemName: activeTabs.count < 4 ? "plus.circle.fill" : "plus.circle")
                                     .font(.system(size: 22))

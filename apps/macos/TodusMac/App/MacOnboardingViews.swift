@@ -42,7 +42,7 @@ private struct MacOnboardingShell<Content: View>: View {
             }
             .padding(.vertical, 32)
         }
-        .animation(.snappy(duration: 0.25), value: step)
+        .animation(MacTheme.Motion.base, value: step)
     }
 }
 
@@ -193,11 +193,14 @@ struct MacRemindersOnboardingView: View {
         deniedMessage = nil
         let granted: Bool
         switch services.remindersSyncService.authorizationState() {
-        case .authorized:
+        case .authorized, .writeOnly:
+            // `.writeOnly` is sufficient for one-way (toReminders) sync — the
+            // underlying workers accept it. Treating it as denied here caused
+            // a false "Permission was not granted" path even though sync works.
             granted = true
         case .notDetermined:
             granted = await services.remindersSyncService.requestAccess()
-        case .restricted, .denied, .writeOnly:
+        case .restricted, .denied:
             granted = false
         }
         if granted {
@@ -232,7 +235,10 @@ struct MacCalendarOnboardingView: View {
                 )
 
                 if permissionMessage != nil {
-                    // Permission was denied — surface a primary Continue so users aren't trapped.
+                    // Permission was denied — surface a primary Continue so users
+                    // aren't trapped. The "Skip" button is hidden in this state
+                    // because it would do the exact same thing as Continue, and
+                    // two identically-behaved buttons read as a UI bug.
                     Button {
                         services.hasConfiguredCalendarPrompt = true
                     } label: {
@@ -255,12 +261,12 @@ struct MacCalendarOnboardingView: View {
                     }
                     .buttonStyle(MacOnboardingPrimaryButtonStyle())
                     .disabled(isRequestingAccess)
-                }
 
-                Button("Skip, set this up later in Settings") {
-                    services.hasConfiguredCalendarPrompt = true
+                    Button("Skip, set this up later in Settings") {
+                        services.hasConfiguredCalendarPrompt = true
+                    }
+                    .buttonStyle(MacOnboardingSecondaryButtonStyle())
                 }
-                .buttonStyle(MacOnboardingSecondaryButtonStyle())
             }
         }
     }
@@ -314,7 +320,7 @@ struct MacStartupOnboardingView: View {
                 VStack(spacing: 8) {
                     ForEach(options) { option in
                         Button {
-                            withAnimation(.snappy(duration: 0.2)) {
+                            withAnimation(MacTheme.Motion.base) {
                                 selectedStartupView = option.id
                             }
                         } label: {
@@ -539,10 +545,15 @@ struct MacDefaultMailOnboardingView: View {
                 }
                 .buttonStyle(MacOnboardingSecondaryButtonStyle())
 
+                // Skip is intentionally de-emphasized vs. "Done, I've set it" to
+                // avoid two visually identical actions competing for the user's eye.
                 Button("Skip, keep my current app") {
                     services.hasConfiguredDefaultMailPrompt = true
                 }
-                .buttonStyle(MacOnboardingSecondaryButtonStyle())
+                .buttonStyle(.plain)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(MacTheme.textSecondary)
+                .padding(.top, 2)
             }
         }
     }

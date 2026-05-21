@@ -98,7 +98,10 @@ final class UnifiedCalendarService {
                 startDate: ev.startDate,
                 endDate: ev.endDate,
                 isAllDay: ev.isAllDay,
-                sourceId: "\(CalendarSourceIDPrefix.apple):unknown",
+                // Use the per-calendar identifier so each Apple calendar gets its
+                // own sourceId (was previously collapsed to a single "unknown"
+                // bucket, breaking per-source visibility toggles).
+                sourceId: "\(CalendarSourceIDPrefix.apple):\(ev.calendarIdentifier ?? "unknown")",
                 calendarName: ev.calendarName,
                 colorRed: ev.calendarColorRed,
                 colorGreen: ev.calendarColorGreen,
@@ -123,12 +126,23 @@ final class UnifiedCalendarService {
             await googleService.refresh(googleConnections: googleConnections)
         }
 
-        let (events, _) = await googleService.events(
+        let (events, scopeMissing) = await googleService.events(
             from: startDate,
             to: endDate,
             connections: googleConnections,
             hiddenCalendarIds: Set(preferences.hiddenCalendarIds)
         )
+
+        // Surface scope-missing so MacCalendarView can show a reconnect banner.
+        // We post regardless of whether `events` came back empty, since the
+        // backend signal is independent of cached results.
+        if scopeMissing {
+            NotificationCenter.default.post(
+                name: .todusCalendarScopeMissing,
+                object: nil,
+                userInfo: [:]
+            )
+        }
 
         let isoFormatter = ISO8601DateFormatter()
         isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]

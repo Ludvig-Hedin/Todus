@@ -52,6 +52,11 @@ final class MacAIChatService {
     weak var mlxInferenceService: MLXInferenceService?
     weak var ollamaInferenceService: OllamaInferenceService?
     private var streamingTask: Task<Void, Never>?
+    /// Monotonic counter incremented on every `cancelStream` call. The drain
+    /// task captures the current value when cancellation begins and uses it
+    /// later to confirm no fresh `send()` has started in the meantime before
+    /// niling the slot.
+    private var cancelGeneration: UInt64 = 0
     private let log = Logger(subsystem: "com.todus.macos", category: "MacAIChatService")
 
     // Token batching — flush every 40ms for smooth typewriter animation
@@ -96,7 +101,14 @@ final class MacAIChatService {
         modelContext: ModelContext
     ) {
         let trimmed = userMessage.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard (!trimmed.isEmpty || !attachmentURLs.isEmpty), !isStreaming else { return }
+        // Block racing sends until the previous stream is fully torn down.
+        // Previously we only checked `isStreaming`, which flipped to false in
+        // `finaliseStream` before the underlying `streamingTask` actually
+        // completed — so a fast double-send could overlap two in-flight
+        // streams writing to the same message array.
+        guard (!trimmed.isEmpty || !attachmentURLs.isEmpty),
+              !isStreaming,
+              streamingTask == nil else { return }
 
         if chatTitle == nil {
             if !trimmed.isEmpty {
@@ -209,15 +221,36 @@ final class MacAIChatService {
     }
 
     /// Cancel an in-progress stream.
+    ///
+    /// Stays synchronous for callers (UI cancel button) but awaits the
+    /// underlying task off-loop so `streamingTask` isn't cleared until the
+    /// task actually finishes. This prevents a race where a follow-up
+    /// `send()` saw `streamingTask == nil` while the previous stream was
+    /// still draining SSE bytes and mutating `messages`.
     func cancelStream() {
-        streamingTask?.cancel()
-        streamingTask = nil
+        let task = streamingTask
+        task?.cancel()
         if let id = messages.first(where: \.isStreaming)?.id {
             finaliseStream(messageID: id)
         } else {
             isStreaming = false
             flushScheduled = false
             tokenBuffer = ""
+        }
+        // Drain in the background so a follow-up `send()` only proceeds after
+        // the cancelled work has truly completed. We tag this cancellation
+        // generation so we don't accidentally null out a fresh stream started
+        // after this cancel.
+        cancelGeneration &+= 1
+        let myGeneration = cancelGeneration
+        let cancelledTask = task
+        Task { @MainActor [weak self] in
+            await cancelledTask?.value
+            guard let self else { return }
+            // Only clear if no new stream began after our cancel.
+            if self.cancelGeneration == myGeneration && !self.isStreaming {
+                self.streamingTask = nil
+            }
         }
     }
 
@@ -367,6 +400,11 @@ final class MacAIChatService {
                 if !producedAnyContent { appendFallback(to: assistantMessageID) }
                 return
             }
+
+            // Bail before executing tools if the user cancelled mid-stream —
+            // we don't want a stale stream to fire off a send_email after
+            // the user hit cancel and started a new message.
+            if Task.isCancelled { return }
 
             let toolResults = await executeToolCalls(
                 step.toolCalls,
@@ -576,10 +614,20 @@ final class MacAIChatService {
             return Self.encodeToolResult(success: false, message: "Invalid tool arguments")
         }
 
+        // Top-of-tool cancellation gate: if the user already cancelled the
+        // stream, don't apply any side effect at all. Subsequent awaits inside
+        // each case re-check so we abort between operations too.
+        if Task.isCancelled {
+            return Self.encodeToolResult(success: false, message: "Cancelled")
+        }
+
         switch call.name {
         case "create_task":
             guard let args = try? JSONDecoder().decode(MacCreateTaskArgs.self, from: argsData) else {
                 return Self.encodeToolResult(success: false, message: "Invalid create_task arguments")
+            }
+            if Task.isCancelled {
+                return Self.encodeToolResult(success: false, message: "Cancelled")
             }
             let dueDate = args.dueDate.flatMap { ISO8601DateFormatter().date(from: $0) }
             let task = TaskRecord(rawInput: args.title, title: args.title)
@@ -603,6 +651,9 @@ final class MacAIChatService {
                   let taskID = UUID(uuidString: args.id) else {
                 return Self.encodeToolResult(success: false, message: "Invalid update_task arguments")
             }
+            if Task.isCancelled {
+                return Self.encodeToolResult(success: false, message: "Cancelled")
+            }
             applyUpdateTask(taskID: taskID, args: args, modelContext: modelContext)
             appendMutation(MacTaskMutation(action: .update, taskID: taskID, title: args.title), to: assistantMessageID)
             return Self.encodeToolResult(success: true, message: "Task updated")
@@ -611,6 +662,9 @@ final class MacAIChatService {
             guard let args = try? JSONDecoder().decode(MacDeleteTaskArgs.self, from: argsData),
                   let taskID = UUID(uuidString: args.id) else {
                 return Self.encodeToolResult(success: false, message: "Invalid delete_task arguments")
+            }
+            if Task.isCancelled {
+                return Self.encodeToolResult(success: false, message: "Cancelled")
             }
             applyDeleteTask(taskID: taskID, modelContext: modelContext)
             appendMutation(MacTaskMutation(action: .delete, taskID: taskID), to: assistantMessageID)
@@ -626,6 +680,9 @@ final class MacAIChatService {
             }
             guard let cal = calendarService, cal.canCreateEvents() else {
                 return Self.encodeToolResult(success: false, message: "Calendar permission not granted")
+            }
+            if Task.isCancelled {
+                return Self.encodeToolResult(success: false, message: "Cancelled")
             }
             let endDate = args.endDate.flatMap { iso.date(from: $0) }
             do {
@@ -646,6 +703,9 @@ final class MacAIChatService {
             let iso = ISO8601DateFormatter()
             let start = args.startDate.flatMap { iso.date(from: $0) }
             let end = args.endDate.flatMap { iso.date(from: $0) }
+            if Task.isCancelled {
+                return Self.encodeToolResult(success: false, message: "Cancelled")
+            }
             do {
                 try await cal.updateEvent(
                     identifier: args.id,
@@ -667,6 +727,9 @@ final class MacAIChatService {
             guard let cal = calendarService else {
                 return Self.encodeToolResult(success: false, message: "Calendar not available")
             }
+            if Task.isCancelled {
+                return Self.encodeToolResult(success: false, message: "Cancelled")
+            }
             do {
                 try await cal.deleteEvent(identifier: args.id)
                 appendMutation(MacTaskMutation(action: .delete, title: "📅 Event removed"), to: assistantMessageID)
@@ -680,11 +743,20 @@ final class MacAIChatService {
                   let email = emailService else {
                 return Self.encodeToolResult(success: false, message: "Invalid send_email arguments or email unavailable")
             }
+            // Hard gate before actually sending — cancelling mid-stream must
+            // never trigger an outbound email the user thought they aborted.
+            if Task.isCancelled {
+                return Self.encodeToolResult(success: false, message: "Cancelled")
+            }
+            // Forward the optional connection picked by the model so multi-account
+            // users send from the right inbox. Nil falls through to the backend's
+            // default-connection behavior, preserving the prior single-account flow.
             let draft = EmailDraft(
                 to: args.to,
                 subject: args.subject,
                 body: args.body,
-                replyToThreadId: args.threadId
+                replyToThreadId: args.threadId,
+                fromConnectionId: args.connectionId
             )
             let sent = await email.sendEmail(draft)
             if sent {
@@ -832,11 +904,14 @@ final class MacAIChatService {
             case "send_email":
                 if let args = try? JSONDecoder().decode(MacSendEmailArgs.self, from: argsData),
                    let email = emailService {
+                    // Forward the optional connection so multi-account sends go from
+                    // the inbox the model selected. Nil = backend default behavior.
                     let draft = EmailDraft(
                         to: args.to,
                         subject: args.subject,
                         body: args.body,
-                        replyToThreadId: args.threadId
+                        replyToThreadId: args.threadId,
+                        fromConnectionId: args.connectionId
                     )
                     Task { await email.sendEmail(draft) }
                     let mutation = MacTaskMutation(action: .create, title: "✉️ Sent: \(args.subject)")
@@ -866,6 +941,70 @@ final class MacAIChatService {
         guard let task = (try? modelContext.fetch(descriptor))?.first else { return }
         modelContext.delete(task)
         try? modelContext.save()
+    }
+
+    // MARK: - Voice tool execution
+
+    /// Bridge for the live voice loop: handle a Gemini Live `toolCall` event by
+    /// running the same SwiftData mutations the text chat flow uses.
+    ///
+    /// Lives on `MacAIChatService` because the existing tool implementations
+    /// (`applyUpdateTask` etc.) and arg structs (`MacCreateTaskArgs`) are
+    /// fileprivate. Voice-specific dispatch (e.g. `get_time`) is handled in
+    /// `VoiceToolRegistry` BEFORE this is called — we only get here for tools
+    /// that need access to chat state.
+    ///
+    /// Always returns a JSON string (never throws) so Gemini Live's
+    /// `toolResponse.functionResponses[].response.result` is well-formed.
+    func executeVoiceTool(
+        name: String,
+        argumentsJSON: String,
+        modelContext: ModelContext
+    ) async -> String {
+        guard let argsData = argumentsJSON.data(using: .utf8) else {
+            return Self.encodeToolResult(success: false, message: "Invalid tool arguments")
+        }
+
+        switch name {
+        case "create_task":
+            guard let args = try? JSONDecoder().decode(MacCreateTaskArgs.self, from: argsData) else {
+                return Self.encodeToolResult(success: false, message: "Invalid create_task arguments")
+            }
+            let dueDate = args.dueDate.flatMap { ISO8601DateFormatter().date(from: $0) }
+            let task = TaskRecord(rawInput: args.title, title: args.title)
+            task.dueDate = dueDate
+            if let priorityStr = args.priority {
+                task.priority = AppTaskPriority(rawValue: priorityStr) ?? .none
+            }
+            modelContext.insert(task)
+            do {
+                try modelContext.save()
+            } catch {
+                modelContext.delete(task)
+                AppLogger.shared.log("[MacAIChatService.voice] create_task save failed: \(error)")
+                return Self.encodeToolResult(success: false, message: "Failed to save task: \(error.localizedDescription)")
+            }
+            return Self.encodeToolResult(success: true, message: "Task '\(args.title)' created")
+
+        case "update_task":
+            guard let args = try? JSONDecoder().decode(MacUpdateTaskArgs.self, from: argsData),
+                  let taskID = UUID(uuidString: args.id) else {
+                return Self.encodeToolResult(success: false, message: "Invalid update_task arguments")
+            }
+            applyUpdateTask(taskID: taskID, args: args, modelContext: modelContext)
+            return Self.encodeToolResult(success: true, message: "Task updated")
+
+        case "delete_task":
+            guard let args = try? JSONDecoder().decode(MacDeleteTaskArgs.self, from: argsData),
+                  let taskID = UUID(uuidString: args.id) else {
+                return Self.encodeToolResult(success: false, message: "Invalid delete_task arguments")
+            }
+            applyDeleteTask(taskID: taskID, modelContext: modelContext)
+            return Self.encodeToolResult(success: true, message: "Task deleted")
+
+        default:
+            return Self.encodeToolResult(success: false, message: "Tool '\(name)' is not available in voice mode yet")
+        }
     }
 
     // MARK: - Payload Building
@@ -968,7 +1107,7 @@ final class MacAIChatService {
         CAPABILITIES — you can:
         • Read, create, update, and delete tasks (use create_task, update_task, delete_task tools)
         • Read calendar events and create, update, or delete them (calendar tools above)
-        • Read email threads and send new emails or replies (use send_email tool)
+        • Read email threads and send new emails or replies (use send_email tool — pass the optional `connectionId` field only when the user explicitly names which connected account to send from; omit it otherwise to use the default account)
 
         FORMATTING RULES — follow these exactly:
         • NEVER use markdown tables. Always use bullet lists (- item) for tabular data.
@@ -1772,4 +1911,7 @@ private struct MacSendEmailArgs: Decodable {
     let subject: String
     let body: String
     let threadId: String?
+    /// Optional connection (i.e. linked email account) the model wants to send from.
+    /// Nil = backend uses the user's default connection, preserving prior behavior.
+    let connectionId: String?
 }

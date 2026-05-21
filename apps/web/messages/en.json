@@ -488,7 +488,9 @@
         "autoRead": "Auto Read",
         "autoReadDescription": "Automatically mark emails as read when you click on them.",
         "animations": "Animations",
-        "animationsDescription": "Enable smooth animations when switching between emails"
+        "animationsDescription": "Enable smooth animations when switching between emails",
+        "location": "Location",
+        "locationPlaceholder": "e.g. Oslo, Norway"
       },
       "connections": {
         "title": "Email Connections",

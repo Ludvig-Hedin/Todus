@@ -45,7 +45,15 @@ final class EKWrapper: EventDescriptor, @unchecked Sendable {
     
     public var color: UIColor {
         get {
-            UIColor(cgColor: ekEvent.calendar.cgColor)
+            // `ekEvent.calendar` is nullable in practice — a referenced
+            // calendar can be deleted between the time we cached the wrapper
+            // and the time CalendarKit asks for its color, which would crash
+            // on the force-unwrap. Fall back to a neutral system grey so the
+            // event still renders.
+            if let cgColor = ekEvent.calendar?.cgColor {
+                return UIColor(cgColor: cgColor)
+            }
+            return UIColor.systemGray
         }
     }
     

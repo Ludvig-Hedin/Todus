@@ -68,8 +68,12 @@ final class AudioPlayerManager: @unchecked Sendable {
     private func ensureEngineRunning() {
         guard !isEngineRunning else { return }
         do {
-            // Attach and connect the player node to the engine's output
-            engine.attach(playerNode)
+            // Attach only if the node is not already wired to this engine — calling
+            // `attach` twice on the same node raises an exception inside AVAudioEngine
+            // (re-entry after a stop/start cycle that didn't detach is the common path).
+            if playerNode.engine == nil {
+                engine.attach(playerNode)
+            }
             engine.connect(playerNode, to: engine.mainMixerNode, format: outputFormat)
             engine.prepare()
             try engine.start()

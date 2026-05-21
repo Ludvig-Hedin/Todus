@@ -6,6 +6,10 @@ final class SupabaseSyncService: SyncService {
     private struct PendingBatch {
         let mutations: [SyncMutation]
         let taskIDs: [UUID]
+        // Resumed when this specific batch finishes processing (success or
+        // failure) so callers of enqueue() can await their batch's outcome —
+        // not merely "the queue is non-busy".
+        let continuation: CheckedContinuation<Void, Never>
     }
 
     private let configuration: AppConfiguration
@@ -22,14 +26,35 @@ final class SupabaseSyncService: SyncService {
 
     func enqueue(_ mutations: [SyncMutation], in context: ModelContext) async {
         let affectedTaskIDs = Array(Set(mutations.flatMap(\.affectedTaskIDs)))
-        queue.append(PendingBatch(mutations: mutations, taskIDs: affectedTaskIDs))
 
-        if client == nil {
-            markTasks(taskIDs: affectedTaskIDs, syncState: .localOnly, in: context)
-            return
+        // Track this batch via a continuation so callers can await its actual
+        // completion — not just "some batch is processing". Without this, a
+        // second enqueue() while another batch is in flight returned
+        // immediately, causing the rollback path to see `.pendingUpload`
+        // instead of `.failed` and silently skip rollback (#22).
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            queue.append(PendingBatch(
+                mutations: mutations,
+                taskIDs: affectedTaskIDs,
+                continuation: continuation
+            ))
+
+            if client == nil {
+                markTasks(taskIDs: affectedTaskIDs, syncState: .localOnly, in: context)
+                // No remote backend to drain against — remove the batch we just
+                // appended and resume the caller's continuation exactly once.
+                // The previous pop-then-resume pattern double-resumed the same
+                // continuation (the popped batch IS the outer one), tripping
+                // CheckedContinuation's fatal-error guard.
+                queue.removeLast()
+                continuation.resume()
+                return
+            }
+
+            // Kick off processing. processQueue() resumes each batch's
+            // continuation as it finishes that batch.
+            Task { await self.processQueue(in: context) }
         }
-
-        await processQueue(in: context)
     }
 
     /// Re-enqueues every task currently in `.localOnly` or `.failed` state for another upload
@@ -135,6 +160,7 @@ final class SupabaseSyncService: SyncService {
             } catch {
                 markTasks(taskIDs: batch.taskIDs, syncState: .failed, in: context)
             }
+            batch.continuation.resume()
         }
     }
 

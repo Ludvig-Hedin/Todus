@@ -3,14 +3,16 @@ import { useCallback, useEffect, useRef } from 'react';
 import { useOptimisticActions } from './use-optimistic-actions';
 import { useMail } from '@/components/mail/use-mail';
 import { useHotkeys } from 'react-hotkeys-hook';
+import { useSettings } from '@/hooks/use-settings';
 import { atom, useAtom } from 'jotai';
 import { useQueryState } from 'nuqs';
 
 export const focusedIndexAtom = atom<number | null>(null);
 export const mailNavigationCommandAtom = atom<null | 'next' | 'previous'>(null);
 
+type NavItem = { id: string; hasUnread?: boolean; unread?: boolean };
 export interface UseMailNavigationProps {
-  items: { id: string }[];
+  items: NavItem[];
   containerRef: React.RefObject<HTMLDivElement | null>;
   onNavigate: (threadId: string | null) => void;
 }
@@ -20,7 +22,9 @@ export function useMailNavigation({ items, containerRef, onNavigate }: UseMailNa
   const [focusedIndex, setFocusedIndex] = useAtom(focusedIndexAtom);
   const [command, setCommand] = useAtom(mailNavigationCommandAtom);
   const { optimisticMarkAsRead } = useOptimisticActions();
-  const itemsRef = useRef(items);
+  const { data: settingsData } = useSettings();
+  const autoRead = settingsData?.settings?.autoRead ?? true;
+  const itemsRef = useRef<NavItem[]>(items);
   itemsRef.current = items;
   const onNavigateRef = useRef(onNavigate);
   onNavigateRef.current = onNavigate;
@@ -81,7 +85,14 @@ export function useMailNavigation({ items, containerRef, onNavigate }: UseMailNa
 
       if (threadId) {
         onNavigateRef.current(threadId);
-        optimisticMarkAsRead([threadId], true);
+        // Mirror the click handler: only mark as read when the user has
+        // auto-read enabled AND the thread is actually unread. Previously
+        // every keyboard nav fired markAsRead unconditionally — generating
+        // useless API calls and silently overriding the user setting.
+        const isUnread = message.hasUnread !== false && message.unread !== false;
+        if (autoRead && isUnread) {
+          optimisticMarkAsRead([threadId], true);
+        }
       }
 
       setMail((prev) => ({
@@ -89,7 +100,7 @@ export function useMailNavigation({ items, containerRef, onNavigate }: UseMailNa
         bulkSelected: [],
       }));
     },
-    [setMail, threadId],
+    [autoRead, optimisticMarkAsRead, setMail],
   );
 
   const navigateNext = useCallback(() => {

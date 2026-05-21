@@ -16,6 +16,7 @@ struct MacCreateSheet: View {
     @State private var selectedFolder: FolderRecord? = nil
     @State private var selectedDate: Date? = nil
     @State private var isShowingDatePicker = false
+    @State private var toast: MacToastMessage?
     @FocusState private var isFocused: Bool
 
     /// Callback to open email compose with seed body
@@ -102,6 +103,7 @@ struct MacCreateSheet: View {
             .padding(MacTheme.spacing16)
         }
         .frame(minWidth: 420, minHeight: 280)
+        .macToast($toast)
         .onAppear {
             selectedType = defaultType
             if defaultType == .event {
@@ -124,7 +126,7 @@ struct MacCreateSheet: View {
         HStack(spacing: 2) {
             ForEach(CreateItemType.allCases) { type in
                 Button {
-                    withAnimation(.snappy(duration: 0.15)) { selectedType = type }
+                    withAnimation(MacTheme.Motion.fast) { selectedType = type }
                     if type == .event && selectedDate == nil {
                         selectedDate = Date()
                     }
@@ -247,9 +249,9 @@ struct MacCreateSheet: View {
     private var placeholderText: String {
         switch selectedType {
         case .auto:  return "Write anything..."
-        case .task:  return "New Task"
-        case .event: return "New Event"
-        case .email: return "New Email"
+        case .task:  return "What's the task?"
+        case .event: return "What's the event?"
+        case .email: return "Subject or quick note…"
         }
     }
 
@@ -267,31 +269,85 @@ struct MacCreateSheet: View {
     }
 
     private func resolveAutoType(for input: String) -> CreateItemType {
-        if detectDate(in: input) != nil { return .event }
         let lower = input.lowercased()
         if lower.contains("mail") || lower.contains("email") || lower.contains("reply") {
             return .email
         }
+        // Classify as event only when event keywords accompany a parsed date/time
+        let eventKeywords = [
+            "träffa", "träff", "möt", "möte", "lunch", "middag", "frukost",
+            "dejt", "fika", "mingel", "samtal", "presentation", "konferens",
+            "intervju", "meet", "meeting", "dinner", "breakfast", "coffee",
+        ]
+        let hasEventKeyword = eventKeywords.contains(where: lower.contains)
+        let parsed = LocalTaskParsingService.parseImmediate(
+            rawText: input,
+            now: .now,
+            locale: .current,
+            timeZone: .current
+        )
+        if hasEventKeyword && parsed.dueDate != nil { return .event }
         return .task
-    }
-
-    private func detectDate(in text: String) -> Date? {
-        let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.date.rawValue)
-        let range = NSRange(location: 0, length: text.utf16.count)
-        return detector?.matches(in: text, options: [], range: range).first?.date
     }
 
     private func handleCreate() {
         let input = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !input.isEmpty else { return }
+        guard !input.isEmpty else {
+            // ⌘↩ on an empty field used to silently no-op. Give the user a hint
+            // (and re-focus the field) so the keystroke doesn't feel broken.
+            toast = .info("Enter a title to create")
+            isFocused = true
+            return
+        }
+
+        // In auto mode: check for compound intents first
+        if selectedType == .auto {
+            let intents = CompoundIntentParser.parse(
+                text: input,
+                now: .now,
+                locale: .current,
+                timeZone: .current
+            )
+            if intents.count > 1 {
+                Task {
+                    for intent in intents {
+                        switch intent.type {
+                        case .event:
+                            await createEvent(intent.title, startDate: intent.date)
+                        case .task:
+                            createTask(intent.title, dueDate: intent.date)
+                        case .email:
+                            onComposeEmail?(intent.title)
+                        }
+                    }
+                    close()
+                }
+                return
+            }
+        }
+
+        // Single intent — use NLP-parsed date when no explicit date was selected
+        let shouldParse = selectedType == .auto || selectedType == .event
+        let parsed = shouldParse
+            ? LocalTaskParsingService.parseImmediate(
+                rawText: input,
+                now: .now,
+                locale: .current,
+                timeZone: .current
+            )
+            : nil
 
         let resolvedType = selectedType == .auto ? resolveAutoType(for: input) : selectedType
 
         switch resolvedType {
         case .task:
-            createTask(input)
+            let taskDue = selectedDate ?? parsed?.dueDate
+            let taskTitle = selectedType == .auto ? (parsed?.title ?? input) : input
+            createTask(taskTitle, dueDate: taskDue)
         case .event:
-            Task { await createEvent(input) }
+            let eventStart = selectedDate ?? parsed?.dueDate
+            let eventTitle = selectedType == .auto ? (parsed?.title ?? input) : input
+            Task { await createEvent(eventTitle, startDate: eventStart) }
         case .email:
             onComposeEmail?(input)
         case .auto:
@@ -300,19 +356,19 @@ struct MacCreateSheet: View {
         close()
     }
 
-    private func createTask(_ input: String) {
+    private func createTask(_ input: String, dueDate: Date? = nil) {
         let task = TaskRecord(
             rawInput: input,
             title: input,
-            dueDate: selectedDate,
+            dueDate: dueDate ?? selectedDate,
             folder: selectedFolder
         )
         modelContext.insert(task)
         try? modelContext.save()
     }
 
-    private func createEvent(_ input: String) async {
-        let startDate = selectedDate ?? Date()
+    private func createEvent(_ input: String, startDate: Date?) async {
+        let resolvedStart = startDate ?? Date()
         let hasAccess: Bool
         if services.calendarService.canReadEvents() {
             hasAccess = true
@@ -321,7 +377,8 @@ struct MacCreateSheet: View {
         }
 
         guard hasAccess else {
-            // Fallback to task so the input is never lost
+            // No calendar access — keep the user's work as a task and tell them.
+            toast = .failure("Calendar access denied — saved as task instead")
             createTask(input)
             return
         }
@@ -329,12 +386,16 @@ struct MacCreateSheet: View {
         do {
             try await services.calendarService.createEvent(
                 title: input,
-                startDate: startDate,
-                endDate: startDate.addingTimeInterval(3600),
+                startDate: resolvedStart,
+                endDate: resolvedStart.addingTimeInterval(3600),
                 folderID: selectedFolder?.id
             )
+            toast = .success("Event created")
         } catch {
-            // Fallback to task
+            // Surface the silent fallback — previously the user saw nothing happen
+            // and the event quietly turned into a task.
+            AppLogger.shared.log("[MacCreateSheet] createEvent failed: \(error)")
+            toast = .failure("Couldn't create event — saved as task instead")
             createTask(input)
         }
     }

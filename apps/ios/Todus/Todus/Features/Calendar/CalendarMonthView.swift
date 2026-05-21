@@ -215,6 +215,9 @@ struct CalendarMonthView: View {
         }
         .contentShape(Rectangle())
         .onTapGesture {
+            // Light haptic confirms the mode flip — without it the zoom animation
+            // alone can feel like the tap registered late on slow devices.
+            AppHaptic.light.play()
             withAnimation(.easeOut(duration: 0.2)) {
                 selectedDate = date
                 viewMode = .day

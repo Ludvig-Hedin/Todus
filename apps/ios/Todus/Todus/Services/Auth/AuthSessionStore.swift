@@ -292,6 +292,20 @@ final class AuthSessionStore {
     }
 
     func handleIncomingAuthCallback(url: URL) {
+        // Better Auth deep links are handled by AuthService; legacy Supabase magic-link
+        // path skipped here to avoid hijacking state. Without this early-return, a
+        // todus://auth-callback?email=... or todus://link-callback would flip this
+        // store into the magicLinkPending state and force the onboarding sheet,
+        // overwriting AuthService's in-progress sign-in.
+        let host = url.host?.lowercased()
+        if host == "auth-callback" || host == "link-callback" {
+            return
+        }
+        let firstPath = url.pathComponents.dropFirst().first?.lowercased()
+        if firstPath == "auth-callback" || firstPath == "link-callback" {
+            return
+        }
+
         guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
             return
         }

@@ -1,45 +1,153 @@
+import CryptoKit
 import SwiftUI
 import UIKit
+
+// MARK: - Cached Avatar Image
+
+/// Filesystem-backed avatar cache. Lives under `Caches/avatars/` so iOS can evict it
+/// on disk pressure without us shipping multi-MB blobs in UserDefaults (the previous
+/// implementation cratered cold-launch perf on accounts with dozens of senders).
+enum AvatarDiskCache {
+    /// Lazily-created directory used for cached avatar JPEGs. Resolved once and
+    /// reused — `FileManager.default.urls(for:in:)` is cheap, but we still avoid
+    /// hitting it on every read.
+    static let directory: URL = {
+        let base = FileManager.default
+            .urls(for: .cachesDirectory, in: .userDomainMask)
+            .first ?? FileManager.default.temporaryDirectory
+        let dir = base.appendingPathComponent("avatars", isDirectory: true)
+        if !FileManager.default.fileExists(atPath: dir.path) {
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        }
+        return dir
+    }()
+
+    /// Stable, filename-safe key derived from the source URL.
+    static func key(for urlString: String) -> String {
+        let hash = SHA256.hash(data: Data(urlString.utf8))
+        return hash.map { String(format: "%02x", $0) }.joined()
+    }
+
+    static func url(for key: String) -> URL {
+        directory.appendingPathComponent(key, isDirectory: false)
+    }
+
+    static func read(key: String) -> Data? {
+        try? Data(contentsOf: url(for: key))
+    }
+
+    static func write(_ data: Data, key: String) {
+        try? data.write(to: url(for: key), options: .atomic)
+    }
+}
+
+/// Avatar view that fetches from the network and persists the image data locally so
+/// it renders correctly when the device is offline. Cache updates on each successful
+/// fetch; passing nil for urlString shows the fallback immediately.
+struct CachedAvatarImage<Fallback: View>: View {
+    let urlString: String?
+    let size: CGFloat
+    @ViewBuilder let fallback: () -> Fallback
+
+    /// Stable filesystem key — SHA-256 of the URL string. Replaces the previous
+    /// `String.hashValue` key which was per-launch random (Swift seeds its String
+    /// hasher with a fresh value each process), causing every relaunch to refetch
+    /// the same avatars and then orphan the prior cache entry.
+    private var diskCacheKey: String? {
+        guard let urlString, !urlString.isEmpty else { return nil }
+        return AvatarDiskCache.key(for: urlString)
+    }
+
+    /// Legacy UserDefaults key — read once on first appear so existing cached blobs
+    /// migrate to the new on-disk store and the UserDefaults bloat can be cleared.
+    private var legacyDefaultsKey: String? {
+        guard let urlString else { return nil }
+        return "com.todus.avatar.imageData.\(urlString.hashValue)"
+    }
+
+    @State private var loadedImage: Image? = nil
+
+    var body: some View {
+        Group {
+            if let img = loadedImage {
+                img.resizable().scaledToFill()
+            } else {
+                fallback()
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(Circle())
+        .onAppear(perform: loadFromCache)
+        .task(id: urlString) { await fetchAndCache() }
+    }
+
+    private func loadFromCache() {
+        guard loadedImage == nil, let diskCacheKey else { return }
+        if let data = AvatarDiskCache.read(key: diskCacheKey),
+           let uiImage = UIImage(data: data) {
+            loadedImage = Image(uiImage: uiImage)
+            return
+        }
+        // One-shot migration: surface a stale UserDefaults blob, copy it to disk,
+        // then drop the defaults entry so we stop carrying it across launches.
+        if let legacyDefaultsKey,
+           let legacyData = UserDefaults.standard.data(forKey: legacyDefaultsKey),
+           let uiImage = UIImage(data: legacyData) {
+            AvatarDiskCache.write(legacyData, key: diskCacheKey)
+            UserDefaults.standard.removeObject(forKey: legacyDefaultsKey)
+            loadedImage = Image(uiImage: uiImage)
+        }
+    }
+
+    @MainActor
+    private func fetchAndCache() async {
+        guard let urlString, let url = URL(string: urlString), let diskCacheKey else { return }
+        guard let (data, _) = try? await URLSession.shared.data(from: url),
+              let uiImage = UIImage(data: data) else { return }
+        AvatarDiskCache.write(data, key: diskCacheKey)
+        loadedImage = Image(uiImage: uiImage)
+    }
+}
 
 enum AppTheme {
     // Custom dynamic colors — off-white / off-black, never pure
     // Light: 0.94 matches iOS systemGroupedBackground, giving List cells (white) visible contrast.
-    // Dark: 0.05 is near-black; surfacePrimary at 0.11 provides subtle but clear card lift.
+    // Dark: 0.109 = Apple system dark (#1c1c1e); surfaces step in ~0.04–0.06 increments.
     static let backgroundTop = Color(UIColor { trait in
-        trait.userInterfaceStyle == .dark ? UIColor(white: 0.05, alpha: 1) : UIColor(white: 0.94, alpha: 1)
+        trait.userInterfaceStyle == .dark ? UIColor(white: 0.109, alpha: 1) : UIColor(white: 0.94, alpha: 1)
     })
     static let backgroundBottom = Color(UIColor { trait in
-        trait.userInterfaceStyle == .dark ? UIColor(white: 0.05, alpha: 1) : UIColor(white: 0.94, alpha: 1)
+        trait.userInterfaceStyle == .dark ? UIColor(white: 0.109, alpha: 1) : UIColor(white: 0.94, alpha: 1)
     })
     // Sheets use a distinct surface: lighter “paper” in light mode vs gray app chrome; lifted gray in dark.
     static let sheetBackground = Color(UIColor { trait in
-        trait.userInterfaceStyle == .dark ? UIColor(white: 0.10, alpha: 1) : UIColor(white: 0.978, alpha: 1)
+        trait.userInterfaceStyle == .dark ? UIColor(white: 0.135, alpha: 1) : UIColor(white: 0.978, alpha: 1)
     })
     static let surfacePrimary = Color(UIColor { trait in
-        // Dark: 0.11 (up from 0.09) — slightly less stark against near-black background
-        trait.userInterfaceStyle == .dark ? UIColor(white: 0.11, alpha: 1) : UIColor(white: 1.0, alpha: 1)
+        // Dark: 0.165 — clear lift above the lifted #1c1c1e background while staying restrained.
+        trait.userInterfaceStyle == .dark ? UIColor(white: 0.165, alpha: 1) : UIColor(white: 1.0, alpha: 1)
     })
     static let surfaceSecondary = Color(UIColor { trait in
-        trait.userInterfaceStyle == .dark ? UIColor(white: 0.14, alpha: 1) : UIColor(white: 0.96, alpha: 1)
+        trait.userInterfaceStyle == .dark ? UIColor(white: 0.205, alpha: 1) : UIColor(white: 0.96, alpha: 1)
     })
     /// User chat bubble fill inside the AI sheet.
     /// Tuned to keep roughly the same perceived separation in both appearances:
     /// restrained light gray on light mode, restrained dark gray on dark mode.
     static let chatUserBubbleFill = Color(UIColor { trait in
-        trait.userInterfaceStyle == .dark ? UIColor(white: 0.16, alpha: 1) : UIColor(white: 0.92, alpha: 1)
+        trait.userInterfaceStyle == .dark ? UIColor(white: 0.23, alpha: 1) : UIColor(white: 0.92, alpha: 1)
     })
     // MARK: Segmented control (same recipe as macOS `MacTheme.segmentedTrack` / Calendar picker)
     /// Recessed track behind segments — visible in light and dark mode.
     static let segmentedTrack = Color(UIColor { trait in
-        trait.userInterfaceStyle == .dark ? UIColor(white: 0.13, alpha: 1) : UIColor(white: 0.88, alpha: 1)
+        trait.userInterfaceStyle == .dark ? UIColor(white: 0.185, alpha: 1) : UIColor(white: 0.88, alpha: 1)
     })
     /// Selected tab pill — high contrast on `segmentedTrack`.
     static let segmentedSelectedPill = Color(UIColor { trait in
-        trait.userInterfaceStyle == .dark ? UIColor(white: 0.22, alpha: 1) : UIColor(white: 1.0, alpha: 1)
+        trait.userInterfaceStyle == .dark ? UIColor(white: 0.30, alpha: 1) : UIColor(white: 1.0, alpha: 1)
     })
     /// Inset list rows on sheets — light mode uses a slightly darker fill + stroke so fields read as real cards.
     static let sheetCardFill = Color(UIColor { trait in
-        trait.userInterfaceStyle == .dark ? UIColor(white: 0.13, alpha: 1) : UIColor(white: 0.88, alpha: 1)
+        trait.userInterfaceStyle == .dark ? UIColor(white: 0.185, alpha: 1) : UIColor(white: 0.88, alpha: 1)
     })
     static let sheetListRowStroke = Color(UIColor { trait in
         trait.userInterfaceStyle == .dark
@@ -56,6 +164,21 @@ enum AppTheme {
     /// `Toggle` / `UISwitch` on-state — system blue so the track is visible in light and dark mode.
     /// Never use `.tint(.primary)` on switches; it can render as white-on-white in dark mode.
     static let switchTint = Color(UIColor.systemBlue)
+
+    /// Cross-device accent color palette. Keys match macOS `MacTheme.accentColorKeys` so
+    /// the synced `accentColor` field round-trips identically between iOS / macOS / web.
+    static let accentColorKeys: [String] = ["blue", "indigo", "teal", "green", "orange", "rose"]
+
+    static func accentColor(for key: String) -> Color {
+        switch key {
+        case "indigo": return Color(red: 0.35, green: 0.32, blue: 0.78)
+        case "teal":   return Color(red: 0.18, green: 0.52, blue: 0.55)
+        case "green":  return Color(red: 0.25, green: 0.55, blue: 0.32)
+        case "orange": return Color(red: 0.78, green: 0.48, blue: 0.18)
+        case "rose":   return Color(red: 0.72, green: 0.28, blue: 0.35)
+        default:       return Color(red: 0.22, green: 0.45, blue: 0.85)
+        }
+    }
     static let mutedGray = Color(UIColor { trait in
         trait.userInterfaceStyle == .dark
             ? UIColor(white: 0.55, alpha: 1)
@@ -72,6 +195,11 @@ enum AppTheme {
     static let mutedText = Color.secondary.opacity(0.65)
     static let danger = Color(red: 0.85, green: 0.24, blue: 0.22)
 
+    /// Single source of truth for the "now" marker color on calendar grids. Centralised
+    /// here so the various calendar surfaces (week, day, multi-day) match without each
+    /// hand-rolling an RGB literal. Match the calendar agent's deferred polish item.
+    static let calendarNow = Color(red: 0.92, green: 0.23, blue: 0.21)
+
     // Row specifics
     static let rowFill = surfacePrimary
     static let rowStroke = Color(UIColor { trait in
@@ -80,6 +208,30 @@ enum AppTheme {
             : UIColor.separator.withAlphaComponent(0.24)
     })
     static let shadowColor = Color.black.opacity(0.06)
+
+    // MARK: - Accent palette (shared with macOS + web)
+    //
+    // Six restrained accents. Used for the optional user-selectable accent
+    // (Settings → Appearance) and the future cross-platform branding tint.
+    // Keep the RGB triples in lockstep with `MacTheme` / web `ACCENT_COLORS`.
+
+    enum Accents {
+        static let blue   = Color(red: 0.25, green: 0.48, blue: 1.00)
+        static let indigo = Color(red: 0.35, green: 0.34, blue: 0.84)
+        static let teal   = Color(red: 0.20, green: 0.68, blue: 0.78)
+        static let green  = Color(red: 0.20, green: 0.72, blue: 0.40)
+        static let orange = Color(red: 0.98, green: 0.55, blue: 0.20)
+        static let rose   = Color(red: 0.93, green: 0.32, blue: 0.46)
+        /// Ordered list for swatch pickers and previews.
+        static let all: [(String, Color)] = [
+            ("blue", blue),
+            ("indigo", indigo),
+            ("teal", teal),
+            ("green", green),
+            ("orange", orange),
+            ("rose", rose),
+        ]
+    }
 
     // MARK: - Corner radii (aligned with MacTheme — continuous rounded rects app-wide)
 
@@ -108,6 +260,36 @@ enum AppTheme {
         static let toolbarInlineSpinner: CGFloat = 16
         /// Compact chips and secondary actions with 12–13pt type.
         static let compactInlineSpinner: CGFloat = 14
+    }
+
+    // MARK: - Motion tokens (shared with macOS + web duration scale)
+    //
+    // Centralised animation tokens so per-callsite durations stay in lockstep.
+    // Map ad-hoc literals as: <= 0.18s → `.fast`, 0.19–0.30s → `.base`, > 0.30s → `.slow`.
+    // `.interactive` is reserved for press / tap feedback where snap-back matters.
+
+    enum Motion {
+        static let fast: Animation = .snappy(duration: 0.15)
+        static let base: Animation = .snappy(duration: 0.25)
+        static let slow: Animation = .spring(response: 0.35, dampingFraction: 0.85)
+        static let interactive: Animation = .easeOut(duration: 0.18)
+    }
+}
+
+/// User-selectable brand accent. Mirrors macOS `MacAccentPreference` and the web
+/// `ACCENT_COLORS` array so all three platforms share the same six names + RGB.
+enum AccentPreference: String, CaseIterable, Sendable {
+    case blue, indigo, teal, green, orange, rose
+
+    var color: Color {
+        switch self {
+        case .blue:   return AppTheme.Accents.blue
+        case .indigo: return AppTheme.Accents.indigo
+        case .teal:   return AppTheme.Accents.teal
+        case .green:  return AppTheme.Accents.green
+        case .orange: return AppTheme.Accents.orange
+        case .rose:   return AppTheme.Accents.rose
+        }
     }
 }
 
@@ -209,29 +391,11 @@ struct AppTopHeader<CustomTitle: View>: View {
         .accessibilityLabel("Open settings")
     }
 
-    @ViewBuilder
     private var avatarContent: some View {
-        if let imageURLString = services.authService.userImage,
-           let imageURL = URL(string: imageURLString) {
-            AsyncImage(url: imageURL) { phase in
-                switch phase {
-                case .success(let image):
-                    image
-                        .resizable()
-                        .scaledToFill()
-                default:
-                    initialsAvatar
-                }
-            }
-            .frame(width: 34, height: 34)
-            .clipShape(Circle())
-            .overlay(Circle().stroke(AppTheme.cardBorder, lineWidth: 1))
-        } else {
+        CachedAvatarImage(urlString: services.authService.userImage, size: 34) {
             initialsAvatar
-                .frame(width: 34, height: 34)
-                .clipShape(Circle())
-                .overlay(Circle().stroke(AppTheme.cardBorder, lineWidth: 1))
         }
+        .overlay(Circle().stroke(AppTheme.cardBorder, lineWidth: 1))
     }
 
     private var initialsAvatar: some View {
@@ -272,11 +436,17 @@ struct AppTopHeader<CustomTitle: View>: View {
             Button {
                 showNotifications = true
             } label: {
-                Image(systemName: "bell.badge")
+                // Always render the plain `bell` glyph for now — the previous
+                // `bell.badge` variant made VoiceOver announce "Notifications, with badge"
+                // even when there were zero unread items, which read as a phantom alert.
+                // When we wire a real unread-count signal here, switch back to
+                // `bell.badge` only when the count is > 0.
+                Image(systemName: "bell")
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(.primary)
                     .frame(width: 44, height: 40)
                     .interactiveHitTarget(expansion: 4)
+                    .accessibilityLabel("Notifications")
             }
             .buttonStyle(.plain)
 
@@ -488,32 +658,33 @@ struct SurfaceCardModifier: ViewModifier {
     }
 }
 
-/// Primary action button — pill-shaped, blue, glass tint on iOS 26.
+/// Primary action button — pill-shaped, accent-tinted, glass on iOS 26.
+/// Uses `Color.accentColor` (which the asset catalog maps to the brand neutral) so
+/// rebranding or dark-mode tweaks flow through automatically instead of being
+/// pinned to the system blue.
 struct AppPrimaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         Group {
             if #available(iOS 26.0, *) {
-                // iOS 26: Liquid Glass with a blue tint overlay — pill shape
                 configuration.label
                     .interactiveHitTarget(expansion: 6)
                     .foregroundStyle(Color.white.opacity(configuration.isPressed ? 0.85 : 1))
                     .glassEffect(
-                        .regular.tint(Color.blue.opacity(configuration.isPressed ? 0.72 : 0.88)),
+                        .regular.tint(Color.accentColor.opacity(configuration.isPressed ? 0.72 : 0.88)),
                         in: Capsule()
                     )
             } else {
-                // Older iOS: flat blue pill
                 configuration.label
                     .interactiveHitTarget(expansion: 6)
                     .foregroundStyle(Color.white.opacity(configuration.isPressed ? 0.9 : 1))
                     .background(
                         Capsule()
-                        .fill(Color.blue.opacity(configuration.isPressed ? 0.82 : 0.96))
+                            .fill(Color.accentColor.opacity(configuration.isPressed ? 0.82 : 1.0))
                     )
             }
         }
         .scaleEffect(configuration.isPressed ? 0.98 : 1)
-        .animation(.snappy(duration: 0.15), value: configuration.isPressed)
+        .animation(AppTheme.Motion.fast, value: configuration.isPressed)
     }
 }
 
@@ -538,7 +709,7 @@ struct AppSecondaryButtonStyle: ButtonStyle {
             }
         }
         .scaleEffect(configuration.isPressed ? 0.98 : 1)
-        .animation(.snappy(duration: 0.15), value: configuration.isPressed)
+        .animation(AppTheme.Motion.fast, value: configuration.isPressed)
     }
 }
 
@@ -587,7 +758,7 @@ struct LiquidGlassButtonStyle: ButtonStyle {
             }
         }
         .scaleEffect(configuration.isPressed ? 0.97 : 1)
-        .animation(.snappy(duration: 0.15), value: configuration.isPressed)
+        .animation(AppTheme.Motion.fast, value: configuration.isPressed)
     }
 }
 
@@ -655,6 +826,158 @@ struct AttachmentThumbnailView<Placeholder: View>: View {
             await MainActor.run {
                 guard !Task.isCancelled else { return }
                 image = thumbnail
+            }
+        }
+    }
+}
+
+// MARK: - Action Patterns
+//
+// Shared SwiftUI modifiers that standardize the three most common UX gaps we
+// keep re-inventing per-view:
+//
+//   1. In-flight async buttons (disable + spinner)
+//   2. Haptic feedback on a toggling value
+//   3. Destructive confirmation dialogs from an `Item?` trigger
+//
+// New code (and audit fixes) should adopt these instead of re-implementing the
+// same `@State var isSaving` / `UIImpactFeedbackGenerator(...)` / inline
+// `confirmationDialog` boilerplate. Apply with `.inFlight(_:)`,
+// `.hapticOnChange(_:kind:)`, `.confirmDestructive(item:title:...)`.
+//
+// These live in AppTheme.swift (rather than a dedicated file) because the iOS
+// `.xcodeproj` lists source files explicitly — keeping the patterns inside an
+// already-tracked file avoids an Xcode project edit per addition.
+
+// MARK: 1. In-flight
+
+extension View {
+    /// Marks a control as performing an async action: disables it and overlays
+    /// an inline spinner. Use on `Button`, `Menu`, etc.
+    ///
+    /// Replaces the recurring `@State var isSaving = false` + manual
+    /// `.disabled` + manual ProgressView swap pattern.
+    ///
+    /// - Parameters:
+    ///   - isActive: True while the action is running.
+    ///   - showsSpinner: When true, fades the label and overlays a centered
+    ///     spinner. When false, only the disabled state applies (use for
+    ///     controls that already render their own progress badge).
+    @ViewBuilder
+    func inFlight(_ isActive: Bool, showsSpinner: Bool = true) -> some View {
+        if showsSpinner {
+            self
+                .opacity(isActive ? 0.55 : 1)
+                .overlay {
+                    if isActive {
+                        ButtonInlineProgressView(
+                            tint: AppTheme.mutedText,
+                            side: AppTheme.Metrics.compactInlineSpinner
+                        )
+                        .transition(.opacity)
+                    }
+                }
+                .disabled(isActive)
+                .animation(AppTheme.Motion.fast, value: isActive)
+        } else {
+            self.disabled(isActive)
+        }
+    }
+}
+
+// MARK: 2. Haptic feedback
+
+/// Discrete haptic kinds. Wraps UIKit's generators so callers don't have to
+/// import UIKit or pick a generator type each time.
+enum AppHaptic {
+    case light
+    case medium
+    case heavy
+    case selection
+    case success
+    case warning
+    case error
+
+    /// Fire immediately. Prefer `.hapticOnChange` modifier when feedback is
+    /// tied to a state change — that variant skips the haptic on first appear.
+    func play() {
+        switch self {
+        case .light:
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        case .medium:
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        case .heavy:
+            UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+        case .selection:
+            UISelectionFeedbackGenerator().selectionChanged()
+        case .success:
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+        case .warning:
+            UINotificationFeedbackGenerator().notificationOccurred(.warning)
+        case .error:
+            UINotificationFeedbackGenerator().notificationOccurred(.error)
+        }
+    }
+}
+
+extension View {
+    /// Plays a haptic when `value` changes after first appearance. Skips the
+    /// initial `onAppear` value so views don't buzz on every render.
+    func hapticOnChange<V: Equatable>(_ value: V, kind: AppHaptic) -> some View {
+        self.modifier(HapticOnChangeModifier(value: value, kind: kind))
+    }
+}
+
+private struct HapticOnChangeModifier<V: Equatable>: ViewModifier {
+    let value: V
+    let kind: AppHaptic
+    @State private var hasSeenInitial = false
+
+    func body(content: Content) -> some View {
+        content.onChange(of: value) { _, _ in
+            guard hasSeenInitial else { hasSeenInitial = true; return }
+            kind.play()
+        }
+        .onAppear { hasSeenInitial = true }
+    }
+}
+
+// MARK: 3. Destructive confirmation
+
+extension View {
+    /// Standard destructive `confirmationDialog` keyed off an `Item?` trigger.
+    /// Setting the binding to non-nil presents the dialog; the Confirm button
+    /// calls `perform(item)` and the dialog auto-clears the binding on dismiss.
+    ///
+    /// Use for one-shot destructive actions (Delete thread, Clear completed,
+    /// Remove account). For inline swipe-deletes prefer `allowsFullSwipe:
+    /// false` first — confirmations are cheap, but every dialog tax is a tax.
+    func confirmDestructive<Item: Identifiable>(
+        item: Binding<Item?>,
+        title: String,
+        message: ((Item) -> String)? = nil,
+        confirmLabel: String = "Delete",
+        perform: @escaping (Item) -> Void
+    ) -> some View {
+        self.confirmationDialog(
+            title,
+            isPresented: Binding(
+                get: { item.wrappedValue != nil },
+                set: { if !$0 { item.wrappedValue = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: item.wrappedValue
+        ) { presented in
+            Button(confirmLabel, role: .destructive) {
+                perform(presented)
+                item.wrappedValue = nil
+            }
+            Button("Cancel", role: .cancel) {
+                item.wrappedValue = nil
+            }
+        } message: { presented in
+            if let message {
+                Text(message(presented))
             }
         }
     }

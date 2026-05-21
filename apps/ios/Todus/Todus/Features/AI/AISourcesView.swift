@@ -145,6 +145,7 @@ struct AISourcesListSheet: View {
                             .font(.system(size: 22))
                             .foregroundStyle(Color.accentColor, AppTheme.surfaceSecondary)
                     }
+                    .accessibilityLabel("Close sources")
                 }
             }
             .sheet(item: $detailSource) { source in
@@ -318,6 +319,7 @@ struct AISourceDetailSheet: View {
                             .font(.system(size: 20))
                             .foregroundStyle(AppTheme.mutedText)
                     }
+                    .accessibilityLabel("Close source detail")
                 }
             }
         }

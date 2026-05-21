@@ -20,7 +20,7 @@ struct MacMeetingsView: View {
                 rotationAngle = 360
             }
         } else {
-            withAnimation(.easeOut(duration: 0.2)) {
+            withAnimation(MacTheme.Motion.base) {
                 rotationAngle = 0
             }
         }
@@ -115,6 +115,19 @@ struct MacMeetingsView: View {
                 TextField("Search meetings...", text: $searchText)
                     .textFieldStyle(.plain)
                     .font(.system(size: 12))
+                // Mirrors the clear pattern from MacSearchView so the user
+                // doesn't have to delete the query character-by-character.
+                if !searchText.isEmpty {
+                    Button {
+                        searchText = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.tertiary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Clear search")
+                }
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 5)
@@ -333,16 +346,12 @@ struct MacMeetingRowView: View {
                 if meeting.aiSummary != nil {
                     Image(systemName: "sparkles")
                         .font(.system(size: 10))
-                        .foregroundStyle(.purple.opacity(0.6))
+                        .foregroundStyle(.secondary.opacity(0.5))
                 }
 
-                // Status badge
                 Text(statusLabel)
-                    .font(.system(size: 9, weight: .medium))
-                    .foregroundStyle(statusColor)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(statusColor.opacity(0.1), in: Capsule())
+                    .font(.system(size: 10, weight: .regular))
+                    .foregroundStyle(.tertiary)
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 8)

@@ -253,8 +253,12 @@ struct EmailAIDraftSheet: View {
         let token = services.authService.bearerToken
         let sessionId = services.authService.currentSessionId
 
-        streamingTask = Task { [systemPrompt, model, backendURL, appOriginURL, token, sessionId, trimmed] in
-            defer { Task { @MainActor in isStreaming = false } }
+        streamingTask = Task { @MainActor [systemPrompt, model, backendURL, appOriginURL, token, sessionId, trimmed] in
+            // Outer Task is @MainActor-isolated, so we can reset the flag synchronously
+            // in `defer`. The previous detached `Task { @MainActor in … }` wrapper let
+            // the outer Task return before the flag flipped, which produced re-tap /
+            // re-open races where Generate stayed disabled until the deferred task ran.
+            defer { isStreaming = false }
             await streamDraft(
                 systemPrompt: systemPrompt,
                 userInstruction: trimmed,

@@ -440,6 +440,13 @@ struct VoiceInputButton: View {
         .buttonStyle(.plain)
         .minTouchTarget()
         .disabled(controller.recordingState == .starting || controller.recordingState == .transcribing)
+        .accessibilityLabel({
+            switch controller.recordingState {
+            case .idle: return "Start voice input"
+            case .starting, .transcribing: return "Voice input loading"
+            case .recording: return "Stop voice input"
+            }
+        }())
         .alert("Microphone Access Required", isPresented: $ctrl.permissionDenied) {
             Button("Open Settings") {
                 if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }

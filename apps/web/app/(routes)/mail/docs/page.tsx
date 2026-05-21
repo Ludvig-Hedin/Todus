@@ -7,12 +7,13 @@ import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/componen
 import { DocTree } from '@/components/docs/doc-tree';
 import { FileText, Plus, ArrowRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { useNavigate } from 'react-router';
+import { useNavigate, redirect } from 'react-router';
 import { useTRPC } from '@/providers/query-provider';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { TRPCClientError } from '@trpc/client';
 import { authProxy } from '@/lib/auth-proxy';
 import type { Route } from './+types/page';
+import { toast } from 'sonner';
 
 function mapWorkspaceListError(error: unknown): string {
   if (error instanceof TRPCClientError) {
@@ -32,7 +33,7 @@ function mapWorkspaceListError(error: unknown): string {
 // Auth guard — redirect to login if no session
 export async function clientLoader({ request }: Route.ClientLoaderArgs) {
   const session = await authProxy.api.getSession({ headers: request.headers });
-  if (!session) return Response.redirect(`${import.meta.env.VITE_PUBLIC_APP_URL}/login`);
+  if (!session) throw redirect('/login');
   return {};
 }
 
@@ -53,7 +54,36 @@ export default function DocsPage() {
       void queryClient.invalidateQueries(trpc.docs.list.queryFilter());
       void navigate(`/mail/docs/${result.doc.id}`);
     },
+    onError: (err) => {
+      console.error('Failed to create doc:', err);
+      const message = err instanceof Error ? err.message : 'Could not create page.';
+      toast.error(message);
+    },
   });
+
+  const createWorkspace = useMutation({
+    ...trpc.docs.workspaces.create.mutationOptions(),
+    onError: (err) => {
+      console.error('Failed to create workspace:', err);
+      toast.error(err instanceof Error ? err.message : 'Could not create workspace.');
+    },
+  });
+
+  // If the user has no workspaces yet (new account / first visit), creating
+  // a default one + a starter page in one click is far better UX than the
+  // permanently-disabled "New page" button this had before.
+  const handleNewPage = async () => {
+    let workspaceId = firstWorkspaceId;
+    if (!workspaceId) {
+      const created = await createWorkspace.mutateAsync({ name: 'My workspace' }).catch(() => null);
+      workspaceId = created?.workspace?.id;
+      if (workspaceId) {
+        await queryClient.invalidateQueries(trpc.docs.workspaces.list.queryFilter());
+      }
+    }
+    if (!workspaceId) return;
+    createDoc.mutate({ workspaceId, title: 'Untitled' });
+  };
 
   return (
     <ResizablePanelGroup direction="horizontal" className="h-full">
@@ -83,19 +113,16 @@ export default function DocsPage() {
             </p>
           </div>
 
-          {/* Primary action */}
+          {/* Primary action — works even when the user has zero workspaces
+              by auto-creating a default workspace first. */}
           {!isLoading && !isError && (
             <Button
-              onClick={() => {
-                if (firstWorkspaceId) {
-                  createDoc.mutate({ workspaceId: firstWorkspaceId, title: 'Untitled' });
-                }
-              }}
-              disabled={createDoc.isPending || !firstWorkspaceId}
+              onClick={() => void handleNewPage()}
+              disabled={createDoc.isPending || createWorkspace.isPending}
               className="gap-2"
             >
               <Plus className="h-4 w-4" />
-              New page
+              {firstWorkspaceId ? 'New page' : 'Get started'}
             </Button>
           )}
 

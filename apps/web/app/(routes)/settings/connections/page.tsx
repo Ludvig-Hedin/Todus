@@ -38,15 +38,23 @@ export default function ConnectionsPage() {
   const { isPro } = useBilling();
   const [, setPricingDialog] = useQueryState('pricingDialog');
   const disconnectAccount = async (connectionId: string) => {
-    await deleteConnection(
-      { connectionId },
-      {
-        onError: (error) => {
-          console.error('Error disconnecting account:', error);
-          toast.error(m['pages.settings.connections.disconnectError']());
+    // mutateAsync re-throws on error AFTER per-call onError runs. Wrap it
+    // so the rejection doesn't bubble as an unhandled promise rejection and
+    // so the success branch never runs on failure (previously it did, and
+    // the user got both an error + success toast).
+    try {
+      await deleteConnection(
+        { connectionId },
+        {
+          onError: (error) => {
+            console.error('Error disconnecting account:', error);
+            toast.error(m['pages.settings.connections.disconnectError']());
+          },
         },
-      },
-    );
+      );
+    } catch {
+      return;
+    }
     toast.success(m['pages.settings.connections.disconnectSuccess']());
     void refetchConnections();
     refetch();
@@ -54,7 +62,7 @@ export default function ConnectionsPage() {
   };
 
   return (
-    <div className="grid gap-6">
+    <div className="grid gap-5">
       <SettingsCard
         title={m['pages.settings.connections.title']()}
         description={m['pages.settings.connections.description']()}
@@ -78,7 +86,20 @@ export default function ConnectionsPage() {
                 </div>
               ))}
             </div>
-          ) : data?.connections?.length ? (
+          ) : !data?.connections?.length ? (
+            <div className="border-border/60 mb-4 rounded-md border border-dashed px-6 py-10 text-center">
+              <div className="bg-muted/40 mx-auto flex h-12 w-12 items-center justify-center rounded-full">
+                <Plus className="text-muted-foreground h-5 w-5" />
+              </div>
+              <p className="mt-3 text-sm font-medium">No mailboxes connected yet</p>
+              <p className="text-muted-foreground mx-auto mt-1 max-w-md text-xs">
+                Connect a Gmail account to start syncing email, calendars, and tasks. Todus only
+                accesses what you authorize and never sends mail without explicit confirmation.
+              </p>
+            </div>
+          ) : null}
+
+          {data?.connections?.length ? (
             <div className="lg: grid gap-4 sm:grid-cols-1 md:grid-cols-2">
               {data.connections.map((connection) => {
                 const Icon = emailProviders.find(
@@ -166,6 +187,7 @@ export default function ConnectionsPage() {
                             size="icon"
                             className="text-muted-foreground hover:text-primary ml-4 shrink-0"
                             disabled={data.connections.length === 1}
+                            aria-label={m['pages.settings.connections.disconnectTitle']()}
                           >
                             <Trash className="h-4 w-4" />
                           </Button>

@@ -1,21 +1,12 @@
-import {
-  Form,
-  FormControl,
-  FormDescription,
-  FormField,
-  FormItem,
-  FormLabel,
-} from '@/components/ui/form';
+import { Form, FormField } from '@/components/ui/form';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { SettingsCard } from '@/components/settings/settings-card';
+import { Section, RowList, ToggleRow } from '@/components/settings/primitives';
 import { userSettingsSchema } from '@zero/server/schemas';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useTRPC } from '@/providers/query-provider';
 import { useMutation } from '@tanstack/react-query';
-// import { saveUserSettings } from '@/actions/settings';
 import { useSettings } from '@/hooks/use-settings';
-import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
 import { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
@@ -66,85 +57,82 @@ export default function PrivacyPage() {
   }
 
   return (
-    <div className="grid gap-6">
-      <SettingsCard
+    <div className="space-y-10">
+      <Section
         title={m['pages.settings.privacy.title']()}
         description={m['pages.settings.privacy.description']()}
-        footer={
-          <Button type="submit" form="privacy-form" disabled={isSaving}>
-            {isSaving ? m['common.actions.saving']() : m['common.actions.saveChanges']()}
+        action={
+          <Button
+            size="sm"
+            className="h-8"
+            onClick={() => form.handleSubmit(onSubmit)()}
+            disabled={isSaving || !form.formState.isDirty}
+          >
+            {isSaving ? m['common.actions.saving']() : 'Save'}
           </Button>
         }
       >
         <Form {...form}>
-          <form id="privacy-form" onSubmit={form.handleSubmit(onSubmit)} className="space-y-8">
-            <div className="flex w-full flex-col items-start gap-5">
+          <form id="privacy-form" onSubmit={form.handleSubmit(onSubmit)}>
+            <RowList>
               <FormField
                 control={form.control}
                 name="externalImages"
                 render={({ field }) => (
-                  <FormItem className="bg-popover flex w-full flex-row items-center justify-between rounded-lg border p-4 md:w-auto">
-                    <div className="space-y-0.5">
-                      <FormLabel className="text-base">
-                        {m['pages.settings.privacy.externalImages']()}
-                      </FormLabel>
-                      <FormDescription>
-                        {m['pages.settings.privacy.externalImagesDescription']()}
-                      </FormDescription>
-                    </div>
-                    <FormControl className="ml-4">
-                      <Switch checked={field.value} onCheckedChange={field.onChange} />
-                    </FormControl>
-                  </FormItem>
+                  <ToggleRow
+                    label={m['pages.settings.privacy.externalImages']()}
+                    description={m['pages.settings.privacy.externalImagesDescription']()}
+                    checked={!!field.value}
+                    onChange={field.onChange}
+                  />
                 )}
               />
-              <FormField
-                control={form.control}
-                name="trustedSenders"
-                render={({ field }) =>
-                  (field.value?.length || 0) > 0 && !externalImages ? (
-                    <FormItem className="bg-popover flex w-full flex-col rounded-lg border p-4">
-                      <div className="space-y-0.5">
-                        <FormLabel className="text-base">
-                          {m['pages.settings.privacy.trustedSenders']()}
-                        </FormLabel>
-                        <FormDescription>
-                          {m['pages.settings.privacy.trustedSendersDescription']()}
-                        </FormDescription>
-                      </div>
-                      <ScrollArea className="flex max-h-32 flex-col pr-3">
-                        {field.value?.map((senderEmail) => (
-                          <div
-                            className="mt-1.5 flex items-center justify-between first:mt-0"
-                            key={senderEmail}
-                          >
-                            <span>{senderEmail}</span>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    field.onChange(field.value?.filter((e) => e !== senderEmail))
-                                  }
-                                >
-                                  <XIcon className="h-4 w-4 transition hover:opacity-80" />
-                                </button>
-                              </TooltipTrigger>
-                              <TooltipContent>{m['common.actions.remove']()}</TooltipContent>
-                            </Tooltip>
-                          </div>
-                        ))}
-                      </ScrollArea>
-                    </FormItem>
-                  ) : (
-                    <></>
-                  )
-                }
-              />
-            </div>
+            </RowList>
+
+            <FormField
+              control={form.control}
+              name="trustedSenders"
+              render={({ field }) =>
+                (field.value?.length || 0) > 0 && !externalImages ? (
+                  <div className="border-border/60 mt-4 rounded-lg border p-3">
+                    <p className="text-sm font-medium">
+                      {m['pages.settings.privacy.trustedSenders']()}
+                    </p>
+                    <p className="text-muted-foreground mt-0.5 text-xs">
+                      {m['pages.settings.privacy.trustedSendersDescription']()}
+                    </p>
+                    <ScrollArea className="mt-2 max-h-32 pr-3">
+                      {field.value?.map((senderEmail) => (
+                        <div
+                          className="flex items-center justify-between py-1 text-sm"
+                          key={senderEmail}
+                        >
+                          <span>{senderEmail}</span>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  field.onChange(field.value?.filter((e) => e !== senderEmail))
+                                }
+                              >
+                                <XIcon className="text-muted-foreground h-4 w-4 transition hover:opacity-80" />
+                              </button>
+                            </TooltipTrigger>
+                            <TooltipContent>{m['common.actions.remove']()}</TooltipContent>
+                          </Tooltip>
+                        </div>
+                      ))}
+                    </ScrollArea>
+                  </div>
+                ) : (
+                  <></>
+                )
+              }
+            />
           </form>
         </Form>
-      </SettingsCard>
+      </Section>
     </div>
   );
 }

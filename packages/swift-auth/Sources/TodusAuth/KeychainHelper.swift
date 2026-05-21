@@ -35,11 +35,20 @@ public enum KeychainHelper {
         guard let data = value.data(using: .utf8) else { return false }
         let query = baseQuery(key: key)
         let legacy = legacyQuery(key: key)
+        // Primary-format delete: failure here is fatal because the subsequent add
+        // will collide with the stale item.
         let deleteStatus = SecItemDelete(query as CFDictionary)
-        let legacyDeleteStatus = SecItemDelete(legacy as CFDictionary)
-        guard [deleteStatus, legacyDeleteStatus].allSatisfy({ $0 == errSecSuccess || $0 == errSecItemNotFound }) else {
-            logFailure(operation: "save", key: key, status: deleteStatus != errSecSuccess && deleteStatus != errSecItemNotFound ? deleteStatus : legacyDeleteStatus)
+        if deleteStatus != errSecSuccess && deleteStatus != errSecItemNotFound {
+            logFailure(operation: "save(delete primary)", key: key, status: deleteStatus)
             return false
+        }
+        // Legacy-format delete: best-effort cleanup of a no-service entry from older
+        // installs. If this fails (e.g. ACL mismatch on a leftover keychain entry from
+        // a previous app build), we still want to write the new value rather than
+        // abort the whole save. Log and continue.
+        let legacyDeleteStatus = SecItemDelete(legacy as CFDictionary)
+        if legacyDeleteStatus != errSecSuccess && legacyDeleteStatus != errSecItemNotFound {
+            logFailure(operation: "save(delete legacy, ignored)", key: key, status: legacyDeleteStatus)
         }
 
         var addQuery = query
@@ -89,10 +98,14 @@ public enum KeychainHelper {
         let query = baseQuery(key: key)
         let legacy = legacyQuery(key: key)
         let deleteStatus = SecItemDelete(query as CFDictionary)
-        let legacyDeleteStatus = SecItemDelete(legacy as CFDictionary)
-        guard [deleteStatus, legacyDeleteStatus].allSatisfy({ $0 == errSecSuccess || $0 == errSecItemNotFound }) else {
-            logFailure(operation: "saveData", key: key, status: deleteStatus != errSecSuccess && deleteStatus != errSecItemNotFound ? deleteStatus : legacyDeleteStatus)
+        if deleteStatus != errSecSuccess && deleteStatus != errSecItemNotFound {
+            logFailure(operation: "saveData(delete primary)", key: key, status: deleteStatus)
             return false
+        }
+        // Legacy-format delete is best-effort (see `save` for rationale).
+        let legacyDeleteStatus = SecItemDelete(legacy as CFDictionary)
+        if legacyDeleteStatus != errSecSuccess && legacyDeleteStatus != errSecItemNotFound {
+            logFailure(operation: "saveData(delete legacy, ignored)", key: key, status: legacyDeleteStatus)
         }
 
         var addQuery = query

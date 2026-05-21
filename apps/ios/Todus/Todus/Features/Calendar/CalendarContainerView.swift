@@ -137,5 +137,17 @@ struct CalendarContainerView: UIViewControllerRepresentable {
                 }
             }
         }
+
+        // EKEventViewController may override the swipe-back gesture in viewDidAppear.
+        // Re-enable it after the transition completes so left-edge swipe always works.
+        func navigationController(
+            _ navigationController: UINavigationController,
+            didShow viewController: UIViewController,
+            animated: Bool
+        ) {
+            guard navigationController.viewControllers.count > 1 else { return }
+            navigationController.interactivePopGestureRecognizer?.isEnabled = true
+            navigationController.interactivePopGestureRecognizer?.delegate = nil
+        }
     }
 }

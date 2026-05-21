@@ -120,7 +120,6 @@ struct MacMeetingDetailView: View {
                     .padding(.vertical, 3)
                     .background(statusColor(meeting.status).opacity(0.1), in: Capsule())
 
-                // Schedule bot button for meetings without one
                 if meeting.status == "scheduled" && meeting.recallBotId == nil {
                     Button {
                         Task { await scheduleBot() }
@@ -142,6 +141,7 @@ struct MacMeetingDetailView: View {
                     .buttonStyle(.plain)
                     .macClickablePointer()
                     .disabled(isSchedulingBot)
+
                 }
             }
 
@@ -206,8 +206,8 @@ struct MacMeetingDetailView: View {
             if let summary = meeting.aiSummary {
                 VStack(alignment: .leading, spacing: 8) {
                     Label("AI Recap", systemImage: "sparkles")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.purple)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
 
                     Text(summary)
                         .font(.system(size: 12))
@@ -216,8 +216,8 @@ struct MacMeetingDetailView: View {
                 }
                 .padding(14)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.purple.opacity(0.04), in: RoundedRectangle(cornerRadius: MacTheme.compactRadius, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: MacTheme.compactRadius, style: .continuous).stroke(Color.purple.opacity(0.1)))
+                .background(Color.primary.opacity(0.03), in: RoundedRectangle(cornerRadius: MacTheme.compactRadius, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: MacTheme.compactRadius, style: .continuous).stroke(Color.primary.opacity(0.06)))
             } else if meeting.transcript != nil && !meeting.transcript!.isEmpty {
                 HStack {
                     Label("Generate AI recap from transcript", systemImage: "sparkles")
@@ -254,8 +254,8 @@ struct MacMeetingDetailView: View {
     private func actionItemsSection(_ items: [MeetingActionItem]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Label("Action Items", systemImage: "checklist")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.primary)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
 
             ForEach(Array(items.enumerated()), id: \.offset) { _, item in
                 HStack(alignment: .top, spacing: 8) {
@@ -287,13 +287,15 @@ struct MacMeetingDetailView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Label("Transcript", systemImage: "text.quote")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.green)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
 
                 Spacer()
 
                 if segments.count > 20 {
-                    Button(isTranscriptExpanded ? "Show less" : "Show all") {
+                    // Tell the user how many segments are hidden so the
+                    // affordance hints at the cost of expanding.
+                    Button(isTranscriptExpanded ? "Show less" : "Show all (\(segments.count))") {
                         withAnimation { isTranscriptExpanded.toggle() }
                     }
                     .font(.system(size: 11))
@@ -326,8 +328,8 @@ struct MacMeetingDetailView: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.green.opacity(0.03), in: RoundedRectangle(cornerRadius: MacTheme.compactRadius, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: MacTheme.compactRadius, style: .continuous).stroke(Color.green.opacity(0.1)))
+        .background(Color.primary.opacity(0.03), in: RoundedRectangle(cornerRadius: MacTheme.compactRadius, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: MacTheme.compactRadius, style: .continuous).stroke(Color.primary.opacity(0.06)))
     }
 
     // MARK: - Q&A
@@ -335,8 +337,8 @@ struct MacMeetingDetailView: View {
     private var qaSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Label("Ask about this meeting", systemImage: "sparkles")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.purple)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
 
             if !qaMessages.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
@@ -358,7 +360,14 @@ struct MacMeetingDetailView: View {
                 } label: {
                     Image(systemName: "arrow.up.circle.fill")
                         .font(.system(size: 20))
-                        .foregroundStyle(Color.accentColor)
+                        // Tint follows the actual enabled state so the
+                        // button doesn't look "live" when it's actually
+                        // disabled (empty input or in-flight question).
+                        .foregroundStyle(
+                            (qaInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isAskingQuestion)
+                                ? Color.secondary
+                                : Color.accentColor
+                        )
                 }
                 .buttonStyle(.plain)
                 .macClickablePointer()
@@ -366,8 +375,8 @@ struct MacMeetingDetailView: View {
             }
         }
         .padding(14)
-        .background(Color.purple.opacity(0.03), in: RoundedRectangle(cornerRadius: MacTheme.compactRadius, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: MacTheme.compactRadius, style: .continuous).stroke(Color.purple.opacity(0.1)))
+        .background(Color.primary.opacity(0.03), in: RoundedRectangle(cornerRadius: MacTheme.compactRadius, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: MacTheme.compactRadius, style: .continuous).stroke(Color.primary.opacity(0.06)))
     }
 
     private var qaInputField: some View {

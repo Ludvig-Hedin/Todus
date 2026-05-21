@@ -137,7 +137,7 @@ export function PromptsDialog() {
             <DialogTitle className="flex items-center gap-2">
               Todus AI System Prompts{' '}
               <Link
-                to={'https://github.com/Mail-0/Zero.git'}
+                to={'https://github.com/Ludvig-Hedin/Todus.git'}
                 target="_blank"
                 className="flex items-center gap-1 text-xs underline"
               >

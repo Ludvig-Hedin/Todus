@@ -1,4 +1,5 @@
 import AuthenticationServices
+import CryptoKit
 import Foundation
 import Observation
 import OSLog
@@ -16,6 +17,24 @@ private func debugAuthLog(_ message: String) {
     authLog.debug("\(message)")
 #endif
 }
+
+/// Keychain auth tokens pre-read off the main thread so `AuthService.init` doesn't block.
+/// Call `AuthService.preloadTokens()` in a detached task, then pass the result to init.
+public struct AuthBootstrapTokens: Sendable {
+    let bearerToken: String?
+    let refreshToken: String?
+    let currentSessionId: String?
+}
+
+/// Networking seam used by `AuthService` for refresh / silent-refresh requests so
+/// unit tests can inject a `URLProtocol`-backed stub without driving `URLSession.shared`.
+/// Default conformance forwards to `URLSession`.
+protocol AuthTransport: Sendable {
+    func data(for request: URLRequest) async throws -> (Data, URLResponse)
+}
+
+extension URLSession: AuthTransport {}
+
 
 private actor KeychainPersistenceActor {
     func persist(key: String, value: String?) {
@@ -113,6 +132,9 @@ public final class AuthService: NSObject {
     // MARK: - Configuration
 
     private let backendURL: URL
+    /// Networking seam — defaults to `URLSession.shared`. Override via the
+    /// internal init param to inject `URLProtocol`-backed stubs in tests.
+    private let transport: AuthTransport
 
     /// Keep a strong reference to the web auth session so the system doesn't deallocate it mid-flow.
     /// Without this, ASWebAuthenticationSession can be garbage-collected and the callback never fires.
@@ -120,6 +142,21 @@ public final class AuthService: NSObject {
     private var isCompletingAuthentication = false
     private var lastHandledCallbackToken: String?
     private var lastHandledCallbackAt: Date?
+
+    /// Set true when the app actively initiates a sign-in flow (e.g. Google
+    /// OAuth via ASWebAuthenticationSession or a magic link click). Cleared on
+    /// completion. Used to reject `todus://auth-callback?token=...` URLs that
+    /// arrive without an in-flight flow — those can come from any other app on
+    /// the device or any web page, and would otherwise overwrite the signed-in
+    /// user's session with an attacker-controlled token (#8).
+    private var pendingAuthFlowExpiresAt: Date?
+    // Tightened from 10 minutes to 3 minutes. The window must cover the user
+    // typing their password and any 2FA challenge inside ASWebAuthenticationSession,
+    // but 10 minutes was wide enough that an attacker who briefly held the device
+    // could replay a stale `todus://auth-callback?token=…` deep link long after
+    // the user walked away. 3 minutes is comfortably above the median OAuth flow
+    // (≤30s) while shrinking the replay window by 70%.
+    private static let pendingAuthFlowWindow: TimeInterval = 180
 
     /// Short-lived JWT (15min) used as "access token" for all API calls.
     /// Verified stateless via JWKS — no DB lookup needed.
@@ -158,17 +195,44 @@ public final class AuthService: NSObject {
 
     // MARK: - Init
 
-    public init(backendURL: URL) {
+    /// Pre-reads Keychain auth tokens on the caller's thread. `nonisolated` so it can run
+    /// from a background `Task.detached` even though `AuthService` is `@MainActor` overall —
+    /// `KeychainHelper.read` is thread-safe (Apple's `SecItemCopyMatching` may be called
+    /// from any queue), so there's no main-actor state to protect here. Pass the result to
+    /// `init(backendURL:preloaded:)` to avoid blocking the main thread with synchronous
+    /// SecItem calls during startup.
+    public nonisolated static func preloadTokens() -> AuthBootstrapTokens {
+        AuthBootstrapTokens(
+            bearerToken: KeychainHelper.read(key: Keys.bearerToken),
+            refreshToken: KeychainHelper.read(key: Keys.refreshToken),
+            currentSessionId: KeychainHelper.read(key: Keys.currentSessionId)
+        )
+    }
+
+    public convenience init(backendURL: URL, preloaded: AuthBootstrapTokens? = nil) {
+        self.init(backendURL: backendURL, preloaded: preloaded, transport: URLSession.shared)
+    }
+
+    /// Internal designated init that accepts a custom networking transport.
+    /// Used by tests to inject a `URLProtocol`-backed `URLSession` so the
+    /// silent-refresh → 401 → signOut branch can be asserted without hitting
+    /// the wire. Production callers use the public `init(backendURL:preloaded:)`
+    /// convenience init, which forwards here with `URLSession.shared`.
+    init(backendURL: URL, preloaded: AuthBootstrapTokens? = nil, transport: AuthTransport) {
         debugAuthLog("AuthService bootstrap begin")
         self.backendURL = backendURL
+        self.transport = transport
         // Initialize stored properties from persisted state before super.init()
         self.hasSeenOnboarding = UserDefaults.standard.bool(forKey: Keys.hasSeenOnboarding)
         self.userEmail = nil
         self.userName = nil
         self.userImage = nil
-        self.currentSessionId = KeychainHelper.read(key: Keys.currentSessionId)
-        self.bearerToken = KeychainHelper.read(key: Keys.bearerToken)
-        self.refreshToken = KeychainHelper.read(key: Keys.refreshToken)
+        // Use pre-loaded tokens when provided to avoid a synchronous Keychain read on the
+        // main thread (each SecItemCopyMatching can block 300–800 ms on cold launch).
+        let tokens = preloaded ?? AuthService.preloadTokens()
+        self.currentSessionId = tokens.currentSessionId
+        self.bearerToken = tokens.bearerToken
+        self.refreshToken = tokens.refreshToken
         super.init()
 
         if !UserDefaults.standard.bool(forKey: Keys.hasLaunchedBefore) {
@@ -208,6 +272,15 @@ public final class AuthService: NSObject {
         let provider = ASAuthorizationAppleIDProvider()
         let appleRequest = provider.createRequest()
         appleRequest.requestedScopes = [.email, .fullName]
+        // Bind this sign-in attempt to a single-use nonce so the backend can
+        // verify the ID token wasn't replayed. Apple signs the SHA-256 hash
+        // of the nonce into the ID token; the backend compares against the
+        // raw nonce we send below.
+        let rawNonce = UUID().uuidString
+        let hashedNonce = SHA256.hash(data: Data(rawNonce.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+        appleRequest.nonce = hashedNonce
 
         let delegate = AppleSignInDelegate()
 
@@ -239,10 +312,12 @@ public final class AuthService: NSObject {
             // Using the web app URL ensures it passes both CORS and Better-Auth CSRF checks.
             request.setValue("https://todus.app", forHTTPHeaderField: "Origin")
 
-            // Better-Auth expects idToken as { token: "..." } for native Apple sign-in
+            // Better-Auth expects idToken as { token: "..." } for native Apple sign-in.
+            // Include the raw nonce so the backend can verify SHA256(nonce) == payload.nonce.
             let body: [String: Any] = [
                 "provider": "apple",
                 "idToken": ["token": idToken],
+                "nonce": rawNonce,
                 "callbackURL": "/",
                 "disableRedirect": true,
             ]
@@ -323,12 +398,16 @@ public final class AuthService: NSObject {
         isLoading = true
         lastErrorMessage = nil
         authState = .authenticating
+        // Mark a sign-in flow as in-flight so `handleAuthCallback` can validate
+        // the URL provenance.
+        beginPendingAuthFlow()
 
         // Guarantee isLoading and webAuthSession are cleared on every exit path. Before
         // this defer, errors during the OAuth flow could leave isLoading=true forever
         // when handleAuthCallback raced with the function's normal exit.
         defer {
             webAuthSession = nil
+            endPendingAuthFlow()
             if !isCompletingAuthentication {
                 isLoading = false
             }
@@ -817,6 +896,25 @@ public final class AuthService: NSObject {
             return
         }
 
+        // Provenance check: reject auth-callback URLs that arrive without an
+        // in-flight sign-in flow. ASWebAuthenticationSession returns the URL
+        // through its completion handler — NOT through openURL — so any
+        // openURL-delivered auth-callback comes from another app or a web page.
+        // Letting those through would silently overwrite the user's session with
+        // an attacker-controlled token (or, on validation failure, evict the
+        // legitimate user). Token acceptance requires an unexpired in-flight
+        // pendingAuthFlowExpiresAt window regardless of current sign-in state —
+        // a signed-out user is just as vulnerable to a forged callback hijacking
+        // the next sign-in attempt.
+        guard let expiresAt = pendingAuthFlowExpiresAt, expiresAt > Date() else {
+            authLog.warning("Auth callback: rejecting deep link — no in-flight sign-in flow (expires=\(self.pendingAuthFlowExpiresAt?.description ?? "nil")) authenticated=\(self.isAuthenticated)")
+            // Clear any stale (expired) sentinel so the next legitimate flow starts clean.
+            if pendingAuthFlowExpiresAt != nil {
+                pendingAuthFlowExpiresAt = nil
+            }
+            return
+        }
+
         if let token = components.queryItems?.first(where: { $0.name == "token" })?.value, !token.isEmpty {
             if shouldIgnoreCallbackToken(token) {
                 debugAuthLog("Auth callback: ignoring duplicate token \(tokenPreview(token))")
@@ -827,7 +925,9 @@ public final class AuthService: NSObject {
             // Extract refresh token (raw session token) for the access+refresh pattern.
             // Older backend versions may not include this — handled gracefully in completeAuthentication.
             let callbackRefreshToken = components.queryItems?.first(where: { $0.name == "refreshToken" })?.value
-            authLog.info("Auth callback: token received \(self.tokenPreview(token)), refreshToken=\(callbackRefreshToken != nil ? "present" : "absent")")
+            authLog.info("Auth callback: token received \(self.tokenPreview(token)), refreshToken=\(callbackRefreshToken != nil ? "present" : "absent") (window expires=\(expiresAt.description))")
+            // Consume the in-flight window — a single deep link must not be replayable.
+            pendingAuthFlowExpiresAt = nil
             completeAuthentication(token: token, email: email, sessionId: sessionId, refreshToken: callbackRefreshToken)
         } else {
             // No token query param — malformed callback. Reset all in-flight state so the
@@ -951,13 +1051,27 @@ public final class AuthService: NSObject {
     /// Attempt a silent session refresh. First tries the access+refresh pattern
     /// (exchange refresh token for a new JWT). Falls back to direct /auth/me validation
     /// for legacy installs that don't have a refresh token.
+    ///
+    /// On a *permanent* refresh rejection (server-side session truly gone) this
+    /// also calls `signOut()` so the app routes back to the login screen instead
+    /// of looping a banner indefinitely on every API call (#10).
     public func attemptSilentRefresh() async -> Bool {
         // Try the access+refresh pattern first
         switch await refreshAccessTokenResult() {
         case .refreshed:
             isSessionExpired = false
             return true
-        case .invalidSession, .transientFailure, .missingRefreshToken:
+        case .invalidSession:
+            // Refresh token exists and was explicitly rejected — session is
+            // gone server-side. Hard sign-out and bail.
+            authLog.warning("attemptSilentRefresh: refresh token rejected, signing out")
+            signOut()
+            return false
+        case .transientFailure:
+            // Network/5xx — leave session intact so next call can retry.
+            return false
+        case .missingRefreshToken:
+            // Fall through to legacy /auth/me path.
             break
         }
 
@@ -970,11 +1084,20 @@ public final class AuthService: NSObject {
         request.setValue("https://todus.app", forHTTPHeaderField: "Origin")
 
         do {
-            let (_, response) = try await URLSession.shared.data(for: request)
-            if let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) {
-                captureRotatedToken(from: http)
-                isSessionExpired = false
-                return true
+            let (_, response) = try await transport.data(for: request)
+            if let http = response as? HTTPURLResponse {
+                if (200..<300).contains(http.statusCode) {
+                    captureRotatedToken(from: http)
+                    isSessionExpired = false
+                    return true
+                }
+                // 401/403 — confirmed expired. Hard sign-out so the UI escapes
+                // the "Session expired" banner loop.
+                if http.statusCode == 401 || http.statusCode == 403 {
+                    authLog.warning("attemptSilentRefresh: /auth/me rejected (\(http.statusCode)), signing out")
+                    signOut()
+                    return false
+                }
             }
         } catch {
             // Network error — don't mark as expired, might just be offline
@@ -1078,7 +1201,7 @@ public final class AuthService: NSObject {
             request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
             do {
-                let (data, response) = try await URLSession.shared.data(for: request)
+                let (data, response) = try await self.transport.data(for: request)
                 guard let http = response as? HTTPURLResponse else { return .transientFailure }
 
                 if (200..<300).contains(http.statusCode),
@@ -1131,18 +1254,60 @@ public final class AuthService: NSObject {
     }
 
     public func signOut() {
+        // Capture tokens BEFORE clearing local state so we can fire a best-effort
+        // server-side revoke. Sign-out is a security-critical action; do not
+        // strand tokens valid on the backend after the user explicitly logs out.
+        let tokenForRevoke = bearerToken
         clearPersistedAuthState()
         authState = .guest
         lastErrorMessage = nil
         // Clear session-expired flag so the banner doesn't persist after sign-out
         isSessionExpired = false
+
+        // Best-effort backend revoke. We don't await — the user's session is
+        // already locally cleared. Failures are silent (next launch will retry
+        // any pending revoke if the server-side session still happens to be live).
+        if let token = tokenForRevoke, !token.isEmpty {
+            Task.detached { [backendURL] in
+                let url = backendURL.appendingPathComponent("api/auth/sign-out")
+                var request = URLRequest(url: url)
+                request.httpMethod = "POST"
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+                request.setValue("https://todus.app", forHTTPHeaderField: "Origin")
+                _ = try? await URLSession.shared.data(for: request)
+            }
+        }
+    }
+
+    /// UI-testing-only seed for an authenticated session. The Better-Auth
+    /// production setters are `private(set)` so XCUITests cannot drive
+    /// `authState` into `.authenticated` without a sign-in network round-trip.
+    /// This helper bypasses the network for tests that need to land on
+    /// MainTabView. **Never call this from production code paths** — it
+    /// stores the fake bearer in Keychain via the same `didSet` hooks the
+    /// real flow uses, which would corrupt a real account if invoked at
+    /// runtime. AppServices guards the call site behind a launch-arg check.
+    public func _uiTesting_seedAuthenticatedSession(bearer: String, email: String) {
+        bearerToken = bearer
+        userEmail = email
+        authState = .authenticated
     }
 
     private func clearPersistedAuthState() {
+        // Synchronous Keychain delete BEFORE clearing in-memory state so that an
+        // app suspend/kill mid-sign-out can't resurrect tokens on next launch
+        // (the actor-based persist path was fire-and-forget — race window).
+        KeychainHelper.delete(key: Keys.bearerToken)
+        KeychainHelper.delete(key: Keys.refreshToken)
+        KeychainHelper.delete(key: Keys.currentSessionId)
+        KeychainHelper.delete(key: Keys.userEmail)
+        KeychainHelper.delete(key: Keys.userName)
+        KeychainHelper.delete(key: Keys.userImage)
+
         bearerToken = nil
         refreshToken = nil
         currentSessionId = nil
-        // Clear stored properties — didSet handles Keychain deletion
         userEmail = nil
         userName = nil
         userImage = nil
@@ -1241,21 +1406,28 @@ public final class AuthService: NSObject {
         // Apple Sign-In / Email OTP: token=sessionToken (from set-auth-token header or body)
         let tokenIsJWT = token.split(separator: ".").count == 3
 
-        if let rt = newRefreshToken, !rt.isEmpty {
-            // Google flow: explicit refresh token provided alongside the JWT
-            bearerToken = token
-            refreshToken = rt
-        } else if !tokenIsJWT {
-            // Apple/Email OTP flow: token is a raw session token — use it as refresh token.
-            // A JWT will be obtained via refreshAccessToken() below.
-            refreshToken = token
-            bearerToken = token  // Temporary — will be replaced with JWT
-        } else {
-            // JWT without refresh token (legacy or unexpected) — store as-is
-            bearerToken = token
-        }
+        // Pure classifier (extracted for testability — see classifyCallbackTokens).
+        // Returns the bearer/refresh/sessionId values that should be written into the
+        // service for this branch. The explicit sessionId override below still wins.
+        let classified = AuthService.classifyCallbackTokens(
+            token: token,
+            newRefreshToken: newRefreshToken,
+            tokenIsJWT: tokenIsJWT
+        )
 
-        currentSessionId = sessionId?.isEmpty == false ? sessionId : nil
+        bearerToken = classified.bearer
+        refreshToken = classified.refresh
+        currentSessionId = classified.sessionId
+
+        // Only overwrite currentSessionId when the callback actually supplies one. If
+        // the caller didn't pass a sessionId (legacy or partial flow), clear any prior
+        // value rather than silently leaking the previous account's session id into the
+        // new session.
+        if let sessionId, !sessionId.isEmpty {
+            currentSessionId = sessionId
+        } else {
+            currentSessionId = nil
+        }
         if let email {
             self.userEmail = email
         }
@@ -1310,6 +1482,50 @@ public final class AuthService: NSObject {
     private func persistStringToKeychain(key: String, value: String?) {
         Task(priority: .utility) {
             await Self.keychainPersistence.persist(key: key, value: value)
+        }
+    }
+
+    /// Marks a Google / web-based sign-in flow as in-flight so subsequent
+    /// `handleAuthCallback` deep links carry a valid provenance check (#8).
+    /// Extracted from `signInWithGoogle` so unit tests can drive the lifecycle
+    /// directly without an `ASWebAuthenticationSession` round-trip.
+    func beginPendingAuthFlow() {
+        pendingAuthFlowExpiresAt = Date().addingTimeInterval(Self.pendingAuthFlowWindow)
+    }
+
+    /// Clears the pending-auth-flow window once the sign-in attempt completes
+    /// (success, failure, or cancellation).
+    func endPendingAuthFlow() {
+        pendingAuthFlowExpiresAt = nil
+    }
+
+    /// Test-only readback: true while `beginPendingAuthFlow` has set a window
+    /// that hasn't yet been cleared or expired.
+    var isPendingAuthFlowActive: Bool {
+        guard let expiresAt = pendingAuthFlowExpiresAt else { return false }
+        return expiresAt > Date()
+    }
+
+    /// Pure helper extracted from `completeAuthentication` so the three callback
+    /// classification branches (Google JWT+refresh, Apple/OTP session token,
+    /// legacy JWT-only) can be unit-tested without spinning up a full
+    /// `AuthService` or driving an Apple Sign In flow.
+    ///
+    /// - JWT+refreshToken: bearer = JWT, refresh = newRefreshToken, sessionId = nil
+    /// - !tokenIsJWT (session token): bearer = token (temp), refresh = token, sessionId = nil
+    /// - JWT-only (no refreshToken): bearer = token, refresh = nil, sessionId = nil
+    ///   (cross-account hygiene — explicitly clears any prior account's session id)
+    static func classifyCallbackTokens(
+        token: String,
+        newRefreshToken: String?,
+        tokenIsJWT: Bool
+    ) -> (bearer: String, refresh: String?, sessionId: String?) {
+        if let rt = newRefreshToken, !rt.isEmpty {
+            return (bearer: token, refresh: rt, sessionId: nil)
+        } else if !tokenIsJWT {
+            return (bearer: token, refresh: token, sessionId: nil)
+        } else {
+            return (bearer: token, refresh: nil, sessionId: nil)
         }
     }
 

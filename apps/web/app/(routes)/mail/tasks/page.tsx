@@ -33,6 +33,9 @@ import {
   LayoutGrid,
   Table2,
   GripVertical,
+  Zap,
+  Eye,
+  Loader2,
 } from 'lucide-react';
 import {
   DndContext,
@@ -69,7 +72,8 @@ import { removeTaskFromTaskCaches, upsertTaskInTaskCaches } from '@/lib/task-cac
 import { Textarea } from '@/components/ui/textarea';
 import { Calendar } from '@/components/ui/calendar';
 import { format, isPast, isToday } from 'date-fns';
-import { useState, useMemo, useRef } from 'react';
+import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
+import { toast } from 'sonner';
 import type { Outputs } from '@zero/server/trpc';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -79,18 +83,47 @@ import { useDroppable } from '@dnd-kit/core';
 import type { Route } from './+types/page';
 import { CSS } from '@dnd-kit/utilities';
 import { cn } from '@/lib/utils';
+import { parseNaturalLanguage } from '@/lib/nlp/parse-natural-language';
+import { CalendarGrid } from '@/components/calendar/calendar-grid';
 
 type Task = Outputs['tasks']['list']['tasks'][number];
 type Folder = Outputs['folders']['list']['folders'][number];
 type TaskStatus = 'todo' | 'doing' | 'done';
 type TaskPriority = 'none' | 'low' | 'medium' | 'high';
-type SortBy = 'newest' | 'oldest' | 'priority';
-type ViewMode = 'list' | 'board' | 'table';
+type SortBy = 'newest' | 'oldest' | 'priority' | 'smart';
+type ViewMode = 'list' | 'board' | 'table' | 'dates';
+
+// localStorage keys for per-session UI preferences. macOS persists view +
+// sort + status filter across launches; web used to drop them on every
+// route remount which made the user reselect Board every time they bounced
+// from Inbox → Tasks.
+const PREF_VIEW_MODE_KEY = 'tasks.viewMode';
+const PREF_SORT_BY_KEY = 'tasks.sortBy';
+const PREF_STATUS_FILTER_KEY = 'tasks.statusFilter';
+const readPref = <T extends string>(key: string, allowed: readonly T[], fallback: T): T => {
+  if (typeof window === 'undefined') return fallback;
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw && (allowed as readonly string[]).includes(raw)) return raw as T;
+  } catch {
+    // private mode etc — fall through
+  }
+  return fallback;
+};
+const writePref = (key: string, value: string) => {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // ignore
+  }
+};
 
 // Auth guard
 export async function clientLoader({ request }: Route.ClientLoaderArgs) {
+  const { redirect } = await import('react-router');
   const session = await authProxy.api.getSession({ headers: request.headers });
-  if (!session) return Response.redirect(`${import.meta.env.VITE_PUBLIC_APP_URL}/login`);
+  if (!session) throw redirect('/login');
   return {};
 }
 
@@ -143,11 +176,42 @@ export default function TasksPage() {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
 
-  const [viewMode, setViewMode] = useState<ViewMode>('list');
-  const [statusFilter, setStatusFilter] = useState<TaskStatus | 'all'>('all');
-  const [sortBy, setSortBy] = useState<SortBy>('newest');
+  const [viewMode, setViewModeState] = useState<ViewMode>(() =>
+    readPref<ViewMode>(PREF_VIEW_MODE_KEY, ['list', 'board', 'table', 'dates'] as const, 'list'),
+  );
+  const [statusFilter, setStatusFilterState] = useState<TaskStatus | 'all'>(() =>
+    readPref<TaskStatus | 'all'>(
+      PREF_STATUS_FILTER_KEY,
+      ['all', 'todo', 'doing', 'done'] as const,
+      'all',
+    ),
+  );
+  const [sortBy, setSortByState] = useState<SortBy>(() =>
+    readPref<SortBy>(
+      PREF_SORT_BY_KEY,
+      ['newest', 'oldest', 'priority', 'smart'] as const,
+      'smart',
+    ),
+  );
+  // Wrap the setters to persist on every change without scattering localStorage
+  // writes through the JSX. Memoized so dependent useCallbacks stay stable.
+  const setViewMode = useCallback((v: ViewMode) => {
+    setViewModeState(v);
+    writePref(PREF_VIEW_MODE_KEY, v);
+  }, []);
+  const setStatusFilter = useCallback((v: TaskStatus | 'all') => {
+    setStatusFilterState(v);
+    writePref(PREF_STATUS_FILTER_KEY, v);
+  }, []);
+  const setSortBy = useCallback((v: SortBy) => {
+    setSortByState(v);
+    writePref(PREF_SORT_BY_KEY, v);
+  }, []);
   const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
   const [searchText, setSearchText] = useState('');
+  // Selected date for the "Dates" calendar grid view. Independent from list
+  // state — keeps month-cell focus stable while the user pans the grid.
+  const [datesSelected, setDatesSelected] = useState<Date>(() => new Date());
 
   // Dialog state
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -163,9 +227,7 @@ export default function TasksPage() {
   const [folderName, setFolderName] = useState('');
   const [editingFolder, setEditingFolder] = useState<Folder | null>(null);
 
-  // Quick-add input ref
-  const quickAddRef = useRef<HTMLInputElement>(null);
-  const [quickAddValue, setQuickAddValue] = useState('');
+  // NLP quick-add mode preference (stored in localStorage inside NlpQuickAdd)
 
   // Board drag state
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
@@ -180,10 +242,15 @@ export default function TasksPage() {
 
   // For board mode we need all statuses; otherwise filter
   const boardMode = viewMode === 'board';
+  // Server enum currently knows `newest|oldest|priority`. 'smart' is computed
+  // client-side from the data; pass `newest` upstream so the server gives
+  // us the chronological set, then bucket it locally.
+  const serverSortBy: 'newest' | 'oldest' | 'priority' =
+    sortBy === 'smart' ? 'newest' : sortBy;
   const queryInput = {
     ...(statusFilter !== 'all' && !boardMode && { status: statusFilter }),
     ...(activeFolderId && { folderId: activeFolderId }),
-    sortBy,
+    sortBy: serverSortBy,
     limit: 500, // higher for board + table
     ...(searchText && { search: searchText }),
   };
@@ -200,20 +267,64 @@ export default function TasksPage() {
     ...trpc.tasks.create.mutationOptions(),
     onSuccess: ({ task }) => {
       upsertTaskInTaskCaches(queryClient, task);
+      // Also invalidate so any filter/sort mismatch gets reconciled
+      void queryClient.invalidateQueries(trpc.tasks.list.queryFilter());
     },
   });
+
+  const handleCreateTask = useCallback(
+    (params: { title: string; dueDate: Date | null; status: string; folderId: string | null }) => {
+      createMutation.mutate(
+        {
+          title: params.title,
+          status: params.status as 'todo' | 'doing' | 'done',
+          priority: 'none',
+          dueDate: params.dueDate ? params.dueDate.toISOString() : null,
+          folderId: params.folderId,
+        },
+        {
+          onSuccess: ({ task }) => {
+            toast.success(`"${task.title}" created`, {
+              description: params.dueDate
+                ? `Due ${format(params.dueDate, "EEE d MMM 'at' HH:mm")}`
+                : undefined,
+              duration: 3000,
+            });
+          },
+        },
+      );
+    },
+    [createMutation],
+  );
   const updateMutation = useMutation({
     ...trpc.tasks.update.mutationOptions(),
     onSuccess: ({ task }) => {
       upsertTaskInTaskCaches(queryClient, task);
     },
   });
-  const deleteMutation = useMutation({
+  const rawDeleteMutation = useMutation({
     ...trpc.tasks.delete.mutationOptions(),
     onSuccess: (_result, variables) => {
       removeTaskFromTaskCaches(queryClient, variables.id);
     },
+    onError: (err) => {
+      console.error('Failed to delete task:', err);
+      toast.error('Could not delete task. Please try again.');
+    },
   });
+  // Wrap raw delete so every call site (row menu, board card, table action,
+  // detail dialog) gets the same confirm step. The previous "instant delete"
+  // affordance was easy to fire accidentally from a hover menu with no undo.
+  const deleteMutation = useMemo(
+    () => ({
+      ...rawDeleteMutation,
+      mutate: (vars: { id: string }) => {
+        if (typeof window !== 'undefined' && !window.confirm('Delete this task?')) return;
+        rawDeleteMutation.mutate(vars);
+      },
+    }),
+    [rawDeleteMutation],
+  );
   const createFolderMutation = useMutation({
     ...trpc.folders.create.mutationOptions(),
     onSuccess: () => void queryClient.invalidateQueries(trpc.folders.list.queryFilter()),
@@ -274,19 +385,6 @@ export default function TasksPage() {
     }
   };
 
-  const handleQuickAdd = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter' && quickAddValue.trim()) {
-      createMutation.mutate(
-        {
-          title: quickAddValue.trim(),
-          status: statusFilter !== 'all' ? statusFilter : 'todo',
-          priority: 'none',
-          folderId: activeFolderId,
-        },
-        { onSuccess: () => setQuickAddValue('') },
-      );
-    }
-  };
 
   const handleMoveToFolder = (taskId: string, folderId: string | null) =>
     updateMutation.mutate({ id: taskId, data: { folderId } });
@@ -335,10 +433,22 @@ export default function TasksPage() {
     setActiveTaskId(null);
     const { active, over } = event;
     if (!over) return;
-    // over.id will be the column status string ('todo' | 'doing' | 'done')
-    const newStatus = over.id as TaskStatus;
+    // `over.id` is the column's `status` string when dropped on a column,
+    // OR the sibling task's id when dropped on another card inside the same
+    // column. Resolve to a column status either way so dropping onto a
+    // sibling card moves the dragged task to that sibling's column instead
+    // of silently no-op'ing (which was the previous behavior).
+    const overId = String(over.id);
+    const isColumnDrop = BOARD_COLUMNS.some((c) => c.status === overId);
+    let newStatus: TaskStatus | null = null;
+    if (isColumnDrop) {
+      newStatus = overId as TaskStatus;
+    } else {
+      const overTask = tasks.find((t) => t.id === overId);
+      if (overTask?.status) newStatus = overTask.status as TaskStatus;
+    }
     const task = tasks.find((t) => t.id === active.id);
-    if (task && task.status !== newStatus && BOARD_COLUMNS.some((c) => c.status === newStatus)) {
+    if (newStatus && task && task.status !== newStatus) {
       updateMutation.mutate({ id: task.id, data: { status: newStatus } });
     }
   };
@@ -377,6 +487,7 @@ export default function TasksPage() {
                 ['list', List],
                 ['board', LayoutGrid],
                 ['table', Table2],
+                ['dates', CalendarIcon],
               ] as [ViewMode, typeof List][]
             ).map(([mode, Icon]) => (
               <button
@@ -385,23 +496,32 @@ export default function TasksPage() {
                 onClick={() => setViewMode(mode)}
                 className={cn(
                   'flex h-7 w-7 items-center justify-center rounded-md transition-colors',
+                  'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
                   viewMode === mode
                     ? 'bg-background text-foreground shadow-sm'
                     : 'text-muted-foreground hover:text-foreground',
                 )}
+                aria-label={`${mode.charAt(0).toUpperCase()}${mode.slice(1)} view`}
+                aria-pressed={viewMode === mode}
               >
                 <Icon className="h-3.5 w-3.5" />
               </button>
             ))}
           </div>
 
-          {/* Sort — only for list/table */}
-          {viewMode !== 'board' && (
+          {/* Sort — only for list/table (board manages by column; dates uses month grid) */}
+          {viewMode !== 'board' && viewMode !== 'dates' && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs">
                   <ArrowUpDown className="h-3.5 w-3.5" />
-                  {sortBy === 'newest' ? 'Newest' : sortBy === 'oldest' ? 'Oldest' : 'Priority'}
+                  {sortBy === 'newest'
+                    ? 'Newest'
+                    : sortBy === 'oldest'
+                      ? 'Oldest'
+                      : sortBy === 'priority'
+                        ? 'Priority'
+                        : 'Smart'}
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
@@ -410,6 +530,7 @@ export default function TasksPage() {
                   value={sortBy}
                   onValueChange={(v) => setSortBy(v as SortBy)}
                 >
+                  <DropdownMenuRadioItem value="smart">Smart (Overdue → Today → Later)</DropdownMenuRadioItem>
                   <DropdownMenuRadioItem value="newest">Newest</DropdownMenuRadioItem>
                   <DropdownMenuRadioItem value="oldest">Oldest</DropdownMenuRadioItem>
                   <DropdownMenuRadioItem value="priority">Priority</DropdownMenuRadioItem>
@@ -463,7 +584,8 @@ export default function TasksPage() {
                   <DropdownMenuTrigger asChild>
                     <button
                       type="button"
-                      className="bg-muted text-muted-foreground absolute -right-1 -top-1 hidden h-4 w-4 items-center justify-center rounded-full shadow group-hover:flex"
+                      className="bg-muted text-muted-foreground absolute -right-1 -top-1 hidden h-4 w-4 items-center justify-center rounded-full shadow group-hover:flex focus-visible:flex focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                      aria-label={`Manage folder ${folder.name}`}
                     >
                       <X className="h-2.5 w-2.5" />
                     </button>
@@ -482,6 +604,14 @@ export default function TasksPage() {
                     <DropdownMenuItem
                       className="text-destructive focus:text-destructive"
                       onClick={() => {
+                        // Confirm before destroying a folder — there is no undo path
+                        // and tasks belonging to it lose their folder reference.
+                        if (
+                          typeof window !== 'undefined' &&
+                          !window.confirm(`Delete folder "${folder.name}"? Tasks inside will be unfiled.`)
+                        ) {
+                          return;
+                        }
                         deleteFolderMutation.mutate(
                           { id: folder.id },
                           {
@@ -489,6 +619,10 @@ export default function TasksPage() {
                               void queryClient.invalidateQueries(trpc.folders.list.queryFilter());
                               if (activeFolderId === folder.id) setActiveFolderId(null);
                               if (editingFolder?.id === folder.id) setEditingFolder(null);
+                            },
+                            onError: (err) => {
+                              console.error('Failed to delete folder:', err);
+                              toast.error('Could not delete folder. Please try again.');
                             },
                           },
                         );
@@ -519,7 +653,7 @@ export default function TasksPage() {
       </div>
 
       {/* ── Search + Filter Bar (List / Table only) ── */}
-      {viewMode !== 'board' && (
+      {viewMode !== 'board' && viewMode !== 'dates' && (
         <div className="flex shrink-0 items-center gap-2 border-b px-5 py-2">
           <div className="relative flex-1">
             <input
@@ -527,18 +661,20 @@ export default function TasksPage() {
               onChange={(e) => setSearchText(e.target.value)}
               placeholder="Search tasks…"
               aria-label="Search tasks"
-              className="bg-muted/50 placeholder:text-muted-foreground focus:ring-ring h-8 w-full rounded-full border px-3 text-[13px] focus:outline-none focus:ring-1"
+              className="bg-muted/50 placeholder:text-muted-foreground focus-visible:ring-ring h-8 w-full rounded-full border px-3 text-[13px] focus:outline-none focus-visible:ring-1"
             />
           </div>
           {/* Status filter tabs */}
-          <div className="bg-muted/50 flex items-center gap-0.5 rounded-lg border p-0.5">
+          <div className="bg-muted/50 flex items-center gap-0.5 rounded-lg border p-0.5" role="group" aria-label="Filter tasks by status">
             {(['all', 'todo', 'doing', 'done'] as const).map((s) => (
               <button
                 key={s}
                 type="button"
                 onClick={() => setStatusFilter(s)}
+                aria-pressed={statusFilter === s}
                 className={cn(
                   'rounded-md px-2.5 py-1 text-[12px] font-medium transition-colors',
+                  'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
                   statusFilter === s
                     ? 'bg-background text-foreground shadow-sm'
                     : 'text-muted-foreground hover:text-foreground',
@@ -558,10 +694,10 @@ export default function TasksPage() {
             tasks={tasks}
             folders={folders}
             isLoading={isLoading}
-            quickAddValue={quickAddValue}
-            setQuickAddValue={setQuickAddValue}
-            quickAddRef={quickAddRef}
-            onQuickAdd={handleQuickAdd}
+            defaultStatus={statusFilter}
+            activeFolderId={activeFolderId}
+            onCreateTask={handleCreateTask}
+            isCreating={createMutation.isPending}
             onToggle={handleToggle}
             onEdit={openEdit}
             onDelete={(id) => deleteMutation.mutate({ id })}
@@ -569,6 +705,7 @@ export default function TasksPage() {
             onOpenDetail={setDetailTask}
             onOpenCreate={openCreate}
             isDueDateWarning={isDueDateWarning}
+            useSmartBuckets={sortBy === 'smart'}
           />
         )}
 
@@ -620,6 +757,45 @@ export default function TasksPage() {
             onMoveToFolder={handleMoveToFolder}
             onOpenCreate={openCreate}
           />
+        )}
+
+        {viewMode === 'dates' && (
+          // Dates view: month grid keyed off task `dueDate`. Clicking a task
+          // chip opens the existing detail panel; clicking an empty day cell
+          // (double-click) prefills the create dialog with that date.
+          <div className="flex h-full flex-col">
+            {/* Quick-add row — mirrors the NLP quick-add input on list view so
+                users can capture from this view without clicking a cell.
+                Respect the current `statusFilter` so quick-add captures land
+                where the user expects (consistent with list view). */}
+            <div className="border-b px-5 py-2">
+              <NlpQuickAdd
+                defaultStatus={statusFilter}
+                folderId={activeFolderId}
+                onSubmit={handleCreateTask}
+                isSubmitting={createMutation.isPending}
+              />
+            </div>
+            <div className="min-h-0 flex-1">
+              <CalendarGrid
+                mode="month"
+                events={[]}
+                tasks={tasks.map((t) => ({
+                  id: t.id,
+                  title: t.title,
+                  dueDate: t.dueDate,
+                  status: t.status,
+                }))}
+                selectedDate={datesSelected}
+                onSelectDate={setDatesSelected}
+                onTaskClick={(taskId) => {
+                  const t = tasks.find((task) => task.id === taskId);
+                  if (t) setDetailTask(t);
+                }}
+                onCreateAt={(start) => openCreate('todo', start)}
+              />
+            </div>
+          </div>
         )}
       </div>
 
@@ -715,14 +891,50 @@ export default function TasksPage() {
 
 // ─── List Content ─────────────────────────────────────────────────────────────
 
+// Smart sort buckets — mirror the macOS `TaskSmartSort` semantics so users
+// see the same "what to do next" surface across platforms.
+type SmartBucket = 'overdue' | 'today' | 'thisWeek' | 'later' | 'noDate' | 'done';
+const SMART_BUCKET_LABEL: Record<SmartBucket, string> = {
+  overdue: 'Overdue',
+  today: 'Today',
+  thisWeek: 'This week',
+  later: 'Later',
+  noDate: 'No due date',
+  done: 'Done',
+};
+const SMART_BUCKET_ORDER: SmartBucket[] = [
+  'overdue',
+  'today',
+  'thisWeek',
+  'later',
+  'noDate',
+  'done',
+];
+function bucketForTask(task: Task, now: Date): SmartBucket {
+  if (task.status === 'done') return 'done';
+  if (!task.dueDate) return 'noDate';
+  const due = new Date(task.dueDate);
+  if (Number.isNaN(due.getTime())) return 'noDate';
+  const startOfToday = new Date(now);
+  startOfToday.setHours(0, 0, 0, 0);
+  const startOfTomorrow = new Date(startOfToday);
+  startOfTomorrow.setDate(startOfTomorrow.getDate() + 1);
+  const endOfWeek = new Date(startOfToday);
+  endOfWeek.setDate(endOfWeek.getDate() + 7);
+  if (due < startOfToday) return 'overdue';
+  if (due < startOfTomorrow) return 'today';
+  if (due < endOfWeek) return 'thisWeek';
+  return 'later';
+}
+
 function ListContent({
   tasks,
   folders,
   isLoading,
-  quickAddValue,
-  setQuickAddValue,
-  quickAddRef,
-  onQuickAdd,
+  defaultStatus,
+  activeFolderId,
+  onCreateTask,
+  isCreating,
   onToggle,
   onEdit,
   onDelete,
@@ -730,14 +942,15 @@ function ListContent({
   onOpenDetail,
   onOpenCreate,
   isDueDateWarning,
+  useSmartBuckets,
 }: {
   tasks: Task[];
   folders: Folder[];
   isLoading: boolean;
-  quickAddValue: string;
-  setQuickAddValue: (v: string) => void;
-  quickAddRef: React.RefObject<HTMLInputElement | null>;
-  onQuickAdd: (e: React.KeyboardEvent<HTMLInputElement>) => void;
+  defaultStatus: TaskStatus | 'all';
+  activeFolderId: string | null;
+  onCreateTask: (p: { title: string; dueDate: Date | null; status: string; folderId: string | null }) => void;
+  isCreating: boolean;
   onToggle: (t: Task) => void;
   onEdit: (t: Task) => void;
   onDelete: (id: string) => void;
@@ -745,23 +958,39 @@ function ListContent({
   onOpenDetail: (t: Task) => void;
   onOpenCreate: () => void;
   isDueDateWarning: (d: string | Date | null | undefined) => boolean;
+  useSmartBuckets?: boolean;
 }) {
+  const buckets = useMemo(() => {
+    if (!useSmartBuckets) return null;
+    const now = new Date();
+    const grouped = new Map<SmartBucket, Task[]>();
+    for (const task of tasks) {
+      const b = bucketForTask(task, now);
+      const arr = grouped.get(b) ?? [];
+      arr.push(task);
+      grouped.set(b, arr);
+    }
+    // Sort each bucket: overdue+today by date asc, others by date asc then title.
+    for (const [b, list] of grouped) {
+      list.sort((a, b2) => {
+        const aDate = a.dueDate ? new Date(a.dueDate).getTime() : Number.POSITIVE_INFINITY;
+        const bDate = b2.dueDate ? new Date(b2.dueDate).getTime() : Number.POSITIVE_INFINITY;
+        if (aDate !== bDate) return aDate - bDate;
+        return (a.title ?? '').localeCompare(b2.title ?? '');
+      });
+      grouped.set(b, list);
+    }
+    return grouped;
+  }, [tasks, useSmartBuckets]);
   return (
     <ScrollArea className="h-full">
       <div className="space-y-1 px-5 py-3">
-        {/* Inline quick-add row */}
-        <div className="border-border bg-muted/30 mb-3 flex items-center gap-2 rounded-xl border border-dashed px-3 py-2">
-          <Plus className="text-muted-foreground h-4 w-4 shrink-0" />
-          <input
-            ref={quickAddRef}
-            value={quickAddValue}
-            onChange={(e) => setQuickAddValue(e.target.value)}
-            onKeyDown={onQuickAdd}
-            placeholder="Add a task… (press Enter)"
-            aria-label="Quick add task"
-            className="placeholder:text-muted-foreground flex-1 bg-transparent text-sm outline-none"
-          />
-        </div>
+        <NlpQuickAdd
+          defaultStatus={defaultStatus}
+          folderId={activeFolderId}
+          onSubmit={onCreateTask}
+          isSubmitting={isCreating}
+        />
 
         {isLoading ? (
           ['list-skeleton-1', 'list-skeleton-2', 'list-skeleton-3', 'list-skeleton-4', 'list-skeleton-5'].map((key) => (
@@ -781,6 +1010,33 @@ function ListContent({
               New task
             </Button>
           </div>
+        ) : useSmartBuckets && buckets ? (
+          SMART_BUCKET_ORDER.flatMap((bucket) => {
+            const list = buckets.get(bucket) ?? [];
+            if (list.length === 0) return [];
+            return [
+              <div
+                key={`bucket-${bucket}`}
+                className="text-muted-foreground sticky top-0 z-10 bg-background/95 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wider backdrop-blur"
+              >
+                {SMART_BUCKET_LABEL[bucket]}
+                <span className="ml-1.5 opacity-60">({list.length})</span>
+              </div>,
+              ...list.map((task) => (
+                <TaskRow
+                  key={task.id}
+                  task={task}
+                  folders={folders}
+                  onToggle={onToggle}
+                  onEdit={onEdit}
+                  onDelete={onDelete}
+                  onMoveToFolder={onMoveToFolder}
+                  onOpenDetail={onOpenDetail}
+                  isDueDateWarning={isDueDateWarning(task.dueDate)}
+                />
+              )),
+            ];
+          })
         ) : (
           tasks.map((task) => (
             <TaskRow
@@ -996,6 +1252,7 @@ function BoardColumn({
           size="icon"
           className="h-6 w-6"
           onClick={() => onQuickCreate(status)}
+          aria-label={`Add task to ${label}`}
         >
           <Plus className="h-3.5 w-3.5" />
         </Button>
@@ -1598,10 +1855,204 @@ function TaskDialog({
             Cancel
           </Button>
           <Button onClick={onSubmit} disabled={!form.title.trim() || isPending}>
+            {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />}
             {editingTask ? 'Save changes' : 'Create task'}
           </Button>
         </div>
       </SheetContent>
     </Sheet>
+  );
+}
+
+// ─── NLP Quick-Add ────────────────────────────────────────────────────────────
+
+const NLP_MODE_KEY = 'tasks.nlpMode';
+
+interface NlpQuickAddProps {
+  defaultStatus: TaskStatus | 'all';
+  folderId: string | null;
+  onSubmit: (p: { title: string; dueDate: Date | null; status: string; folderId: string | null }) => void;
+  isSubmitting: boolean;
+}
+
+function NlpQuickAdd({ defaultStatus, folderId, onSubmit, isSubmitting }: NlpQuickAddProps) {
+  const [value, setValue] = useState('');
+  const [mode, setMode] = useState<'auto' | 'confirm'>('auto');
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(NLP_MODE_KEY);
+      if (stored === 'confirm') setMode('confirm');
+    } catch {
+      // ignore
+    }
+  }, []);
+  const [awaitingConfirm, setAwaitingConfirm] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Compound-intent split: one input → many tasks. Mirrors macOS
+  // `CompoundIntentParser`. Splits on " and " / "; " / newline boundaries
+  // when the surrounding tokens look like distinct task titles (each side
+  // either has a verb or a date). Conservative — falls back to single-task
+  // when the heuristic doesn't apply, so "Email Sam and Sara" stays one task.
+  const compoundParts = useMemo(() => {
+    const raw = value.trim();
+    if (!raw) return [];
+    // Split on explicit separators only — semicolon / newline / " and then "
+    // / " then ". `" and "` alone is too risky ("Email A and B"), so we
+    // require either " and then " or a date keyword to trigger.
+    const explicitSplit = raw.split(/\s*(?:;|\n|\sand then\s|\sthen\s)\s*/i);
+    const candidates = explicitSplit.length > 1 ? explicitSplit : [raw];
+    return candidates.map((s) => s.trim()).filter((s) => s.length > 0);
+  }, [value]);
+
+  const parsedParts = useMemo(
+    () => compoundParts.map((part) => parseNaturalLanguage(part) ?? { title: part, dueDate: null }),
+    [compoundParts],
+  );
+
+  const parsed = parsedParts[0] ?? null;
+  const hasDate = parsed?.dueDate != null;
+  const cleanTitle = parsed?.title ?? value.trim();
+  const isCompound = parsedParts.length > 1;
+
+  const buildParams = useCallback(
+    () => ({
+      title: cleanTitle || value.trim(),
+      dueDate: parsed?.dueDate ?? null,
+      status: defaultStatus === 'all' ? 'todo' : defaultStatus,
+      folderId,
+    }),
+    [cleanTitle, value, parsed, defaultStatus, folderId],
+  );
+
+  const handleSubmit = useCallback(() => {
+    if (!value.trim() || isSubmitting) return;
+    if (mode === 'confirm' && !awaitingConfirm) {
+      setAwaitingConfirm(true);
+      return;
+    }
+    if (isCompound) {
+      // Fire onSubmit once per parsed part so the user gets multiple captures
+      // from a single input. defaultStatus + folderId apply to all.
+      for (const part of parsedParts) {
+        onSubmit({
+          title: part.title || value.trim(),
+          dueDate: part.dueDate ?? null,
+          status: defaultStatus === 'all' ? 'todo' : defaultStatus,
+          folderId,
+        });
+      }
+    } else {
+      onSubmit(buildParams());
+    }
+    setValue('');
+    setAwaitingConfirm(false);
+  }, [value, isSubmitting, mode, awaitingConfirm, onSubmit, buildParams, isCompound, parsedParts, defaultStatus, folderId]);
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        handleSubmit();
+      } else if (e.key === 'Escape') {
+        if (awaitingConfirm) {
+          setAwaitingConfirm(false);
+        } else {
+          setValue('');
+        }
+      }
+    },
+    [handleSubmit, awaitingConfirm],
+  );
+
+  const toggleMode = useCallback(() => {
+    const next = mode === 'auto' ? 'confirm' : 'auto';
+    setMode(next);
+    setAwaitingConfirm(false);
+    try {
+      localStorage.setItem(NLP_MODE_KEY, next);
+    } catch {
+      // ignore
+    }
+  }, [mode]);
+
+  const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setValue(e.target.value);
+    setAwaitingConfirm(false);
+  }, []);
+
+  const handleConfirmClick = useCallback(() => {
+    onSubmit(buildParams());
+    setValue('');
+    setAwaitingConfirm(false);
+    inputRef.current?.focus();
+  }, [onSubmit, buildParams]);
+
+  return (
+    <div className="mb-2">
+      {/* Input row */}
+      <div className="flex items-center gap-2">
+        <div className="relative flex-1">
+          <Plus className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
+          <Input
+            ref={inputRef}
+            value={value}
+            onChange={handleChange}
+            onKeyDown={handleKeyDown}
+            placeholder={'Add task… (e.g. "Ring Lisa fredag kl 9")'}
+            className="h-9 pl-9 pr-3 text-sm"
+            disabled={isSubmitting}
+          />
+        </div>
+
+        {/* Mode toggle */}
+        <button
+          type="button"
+          onClick={toggleMode}
+          title={mode === 'auto' ? 'Auto-create (click to switch to confirm)' : 'Confirm before creating (click to switch to auto)'}
+          aria-label={mode === 'auto' ? 'Auto-create (click to switch to confirm)' : 'Confirm before creating (click to switch to auto)'}
+          className={cn(
+            'flex h-9 w-9 shrink-0 items-center justify-center rounded-md border text-sm transition-colors',
+            mode === 'auto'
+              ? 'border-transparent bg-transparent text-muted-foreground hover:bg-accent hover:text-foreground'
+              : 'border-border bg-accent text-foreground',
+          )}
+        >
+          {mode === 'auto' ? <Zap className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+        </button>
+      </div>
+
+      {/* Live NLP preview / confirm card */}
+      {value.trim() && (hasDate || awaitingConfirm) && (
+        <div
+          className={cn(
+            'mt-1.5 flex items-center justify-between rounded-lg border px-3 py-2 text-xs transition-all',
+            awaitingConfirm
+              ? 'border-primary/30 bg-primary/5'
+              : 'border-border/50 bg-muted/40',
+          )}
+        >
+          <div className="flex min-w-0 flex-col gap-0.5">
+            <span className="truncate font-medium text-foreground">{cleanTitle || value.trim()}</span>
+            {hasDate && (
+              <span className="text-muted-foreground">
+                {format(parsed!.dueDate!, "EEE d MMM 'at' HH:mm")}
+              </span>
+            )}
+          </div>
+
+          {awaitingConfirm && (
+            <button
+              type="button"
+              onClick={handleConfirmClick}
+              disabled={isSubmitting}
+              className="ml-3 shrink-0 rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+            >
+              Create ↵
+            </button>
+          )}
+        </div>
+      )}
+    </div>
   );
 }

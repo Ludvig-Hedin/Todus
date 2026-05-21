@@ -170,8 +170,10 @@ export function Navbar11() {
                       className="grid auto-cols-fr grid-cols-[max-content_1fr] items-start gap-x-3 py-2 lg:py-1"
                     >
                       <div className="flex flex-col items-start justify-center">
-                        <p className="text-sm font-semibold tracking-tight">Legal</p>
-                        <p className="text-text-alternative hidden text-xs tracking-tight md:block">
+                        <p className="text-sm font-semibold tracking-tight">
+                          Legal
+                        </p>
+                        <p className="hidden text-xs tracking-tight text-text-alternative md:block">
                           Terms of service and privacy
                         </p>
                       </div>
@@ -181,8 +183,10 @@ export function Navbar11() {
                       className="grid auto-cols-fr grid-cols-[max-content_1fr] items-start gap-x-3 py-2 lg:py-1"
                     >
                       <div className="flex flex-col items-start justify-center">
-                        <p className="text-sm font-semibold tracking-tight">Download</p>
-                        <p className="text-text-alternative hidden text-xs tracking-tight md:block">
+                        <p className="text-sm font-semibold tracking-tight">
+                          Download
+                        </p>
+                        <p className="hidden text-xs tracking-tight text-text-alternative md:block">
                           Get Todus on your device
                         </p>
                       </div>
@@ -192,8 +196,10 @@ export function Navbar11() {
                       className="grid auto-cols-fr grid-cols-[max-content_1fr] items-start gap-x-3 py-2 lg:py-1"
                     >
                       <div className="flex flex-col items-start justify-center">
-                        <p className="text-sm font-semibold tracking-tight">Contact</p>
-                        <p className="text-text-alternative hidden text-xs tracking-tight md:block">
+                        <p className="text-sm font-semibold tracking-tight">
+                          Contact
+                        </p>
+                        <p className="hidden text-xs tracking-tight text-text-alternative md:block">
                           Reach out to our team
                         </p>
                       </div>
@@ -203,8 +209,10 @@ export function Navbar11() {
                       className="grid auto-cols-fr grid-cols-[max-content_1fr] items-start gap-x-3 py-2 lg:py-1"
                     >
                       <div className="flex flex-col items-start justify-center">
-                        <p className="text-sm font-semibold tracking-tight">Home</p>
-                        <p className="text-text-alternative hidden text-xs tracking-tight md:block">
+                        <p className="text-sm font-semibold tracking-tight">
+                          Home
+                        </p>
+                        <p className="hidden text-xs tracking-tight text-text-alternative md:block">
                           Back to the main page
                         </p>
                       </div>

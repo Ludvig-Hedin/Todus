@@ -73,9 +73,16 @@ struct MacLocalModelsView: View {
                 let recs = ModelRecommender.recommend(for: profile)
                 ForEach(Array(recs.enumerated()), id: \.element.model.id) { idx, rec in
                     if idx > 0 { cardDivider }
-                    MacLocalModelRow(model: rec.model, reason: rec.reason)
-                        .contentShape(Rectangle())
-                        .onTapGesture { detailModel = rec.model }
+                    // Wrap the row as a real Button so keyboard focus and
+                    // VoiceOver treat it as activatable — an onTapGesture
+                    // alone is invisible to assistive tech.
+                    Button {
+                        detailModel = rec.model
+                    } label: {
+                        MacLocalModelRow(model: rec.model, reason: rec.reason)
+                    }
+                    .buttonStyle(.plain)
+                    .pointerStyle(.link)
                 }
             }
         }
@@ -90,9 +97,15 @@ struct MacLocalModelsView: View {
                 settingsCard {
                     ForEach(Array(installed.enumerated()), id: \.element.id) { idx, model in
                         if idx > 0 { cardDivider }
-                        MacLocalModelRow(model: model, reason: nil)
-                            .contentShape(Rectangle())
-                            .onTapGesture { detailModel = model }
+                        // Match the Recommended section: a real Button gives
+                        // assistive tech a target and proper keyboard focus.
+                        Button {
+                            detailModel = model
+                        } label: {
+                            MacLocalModelRow(model: model, reason: nil)
+                        }
+                        .buttonStyle(.plain)
+                        .pointerStyle(.link)
                     }
                 }
             }

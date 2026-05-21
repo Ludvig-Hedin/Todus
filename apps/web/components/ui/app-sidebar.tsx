@@ -112,7 +112,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           className={`bg-sidebar dark:bg-sidebar flex h-screen select-none flex-col items-center pb-2`}
         >
           <SidebarHeader
-            className={`relative top-2 flex flex-col gap-2 ${state === 'collapsed' ? 'px-2' : 'md:px-3'}`}
+            className={`relative top-2 flex flex-col gap-2 ${state === 'collapsed' ? 'px-2' : 'md:px-2'}`}
           >
             {session && <NavUser />}
 
@@ -133,7 +133,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             )}
           </SidebarHeader>
           <SidebarContent
-            className={`scrollbar scrollbar-w-1 scrollbar-thumb-accent/40 scrollbar-track-transparent hover:scrollbar-thumb-accent scrollbar-thumb-rounded-full overflow-x-hidden py-0 pt-0 ${state !== 'collapsed' ? 'mt-4 md:px-3' : 'px-2'}`}
+            className={`scrollbar scrollbar-w-1 scrollbar-thumb-accent/40 scrollbar-track-transparent hover:scrollbar-thumb-accent scrollbar-thumb-rounded-full overflow-x-hidden py-0 pt-0 ${state !== 'collapsed' ? 'mt-4 md:px-2' : 'px-2'}`}
           >
             <div className="flex-1 py-0">
               <NavMain items={navItems} />
@@ -208,7 +208,7 @@ function ComposeButton() {
       <DialogTrigger asChild>
         <button
           type="button"
-          className="bg-mainBlue hover:bg-mainBlue/90 relative mb-1 inline-flex h-8 w-full cursor-pointer items-center justify-center gap-1 self-stretch overflow-hidden rounded-full transition-all duration-150 dark:border-none"
+          className="bg-mainBlue hover:bg-mainBlue/90 relative mb-1 inline-flex h-8 w-full cursor-pointer items-center justify-center gap-1 self-stretch overflow-hidden rounded-full transition-all duration-(--motion-duration-fast) ease-(--motion-easing-standard) dark:border-none"
         >
           {state === 'collapsed' && !isMobile ? (
             <PencilCompose className="mt-0.5 fill-white text-black" />

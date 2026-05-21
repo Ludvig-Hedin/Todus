@@ -1,38 +1,64 @@
 import { Google } from '@/components/icons/icons';
+import { TodusLogo } from '@/components/ui/todus-logo';
 import { Button } from '@/components/ui/button';
 import { signIn } from '@/lib/auth-client';
+import { authProxy } from '@/lib/auth-proxy';
+import { Loader2 } from 'lucide-react';
+import { useState } from 'react';
+import { redirect } from 'react-router';
 import { toast } from 'sonner';
+import type { Route } from './+types/page';
+
+// Block signed-in users from re-running OAuth on /signup.
+// Without this guard, a logged-in user picking a different Google account here
+// would be silently linked onto the existing user row → cross-account leak.
+// Skip the round-trip on cookieless requests + race against a 3s timeout so
+// a slow backend never blocks the signup page from rendering.
+export async function clientLoader({ request }: Route.ClientLoaderArgs) {
+  const hasCookies = !!request.headers.get('cookie');
+  if (!hasCookies) return null;
+  const session = await Promise.race<Awaited<ReturnType<typeof authProxy.api.getSession>> | null>([
+    authProxy.api.getSession({ headers: request.headers }),
+    new Promise((resolve) => setTimeout(() => resolve(null), 3000)),
+  ]);
+  if (session?.user?.id) throw redirect('/mail/inbox');
+  return null;
+}
 
 export default function SignupTodus() {
-  function handleGoogleSignIn() {
-    toast.promise(
-      signIn.social({
+  const [isRedirecting, setIsRedirecting] = useState(false);
+
+  async function handleGoogleSignIn() {
+    if (isRedirecting) return;
+    setIsRedirecting(true);
+    try {
+      await signIn.social({
         provider: 'google',
         callbackURL: `${window.location.origin}/mail/inbox`,
-      }),
-      {
-        error: 'Login redirect failed',
-      },
-    );
+      });
+    } catch (error) {
+      console.error('Google sign-in failed:', error);
+      toast.error('Could not start Google sign-in. Please try again.');
+      setIsRedirecting(false);
+    }
   }
 
   return (
     <div className="flex min-h-screen w-full bg-background">
       {/* Left Column - Form */}
-      <div className="flex w-full flex-col lg:w-1/2 p-8 md:p-12 xl:p-16">
-        <div className="flex items-center gap-2 mb-auto">
-          <img src="/brand-logo.png" alt="Todus Logo" className="h-8 w-8" />
-          <span className="font-semibold tracking-tight">Todus</span>
+      <div className="flex w-full flex-col p-8 md:p-12 xl:p-16">
+        <div className="mb-auto">
+          <TodusLogo height={28} className="text-foreground" />
         </div>
 
         <div className="mx-auto flex w-full max-w-sm flex-col justify-center my-auto animate-in slide-in-from-bottom-4 duration-500">
           <div className="mb-8 flex flex-col items-start text-left">
-            <h1 className="text-2xl font-semibold tracking-tight">Signup to Todus</h1>
+            <h1 className="text-2xl font-semibold tracking-tight">Sign up for Todus</h1>
             <p className="text-2xl font-semibold tracking-tight text-muted-foreground mb-4">
               Your AI agent for emails
             </p>
             <p className="text-sm text-muted-foreground">
-              Sign up for free with your email
+              Continue with your Google account to get started.
             </p>
           </div>
 
@@ -41,10 +67,20 @@ export default function SignupTodus() {
             type="button"
             variant="outline"
             onClick={handleGoogleSignIn}
+            disabled={isRedirecting}
             className="mb-6 w-full"
           >
-            <Google className="mr-2 h-4 w-4" />
-            Continue with Google
+            {isRedirecting ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Redirecting to Google…
+              </>
+            ) : (
+              <>
+                <Google className="mr-2 h-4 w-4" />
+                Continue with Google
+              </>
+            )}
           </Button>
 
           {/*
@@ -150,7 +186,7 @@ export default function SignupTodus() {
       </div>
 
       {/* Right Column - Image Showcase */}
-      <div className="hidden lg:flex w-1/2 p-4 xl:p-6">
+      <div className="hidden w-1/2 p-4 xl:p-6">
         <div className="relative flex h-full w-full items-center justify-center overflow-hidden rounded-[2.5rem] bg-[#0F0F0F] border border-[#2A2A2A]">
           <div className="relative w-full h-full">
             <img

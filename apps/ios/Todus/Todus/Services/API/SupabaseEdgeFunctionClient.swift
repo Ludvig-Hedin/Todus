@@ -67,6 +67,14 @@ struct SupabaseEdgeFunctionClient: Sendable {
 // Note: EmptyResponse is also defined in TodosAPIClient — use that one for new code.
 private struct SupabaseEmptyResponse: Codable, Sendable {}
 
+// Conformance so `RemoteFirstTaskParsingService` can take the concrete client
+// in production while still allowing test stubs through the seam protocol.
+extension SupabaseEdgeFunctionClient: RemoteTaskParsingTransport {
+    func invokeParse(path: String, body: ParseTasksRequest) async throws -> ParseTasksResponse {
+        try await invoke(path: path, body: body)
+    }
+}
+
 enum JSONEncoderFactory {}
 
 extension JSONEncoder {

@@ -26,20 +26,39 @@ struct TodosApp: App {
                 RootView()
                     .environment(services)
                     .modelContainer(modelContainer)
+                    .task {
+                        // Forward `--simulated-deep-link <url>` / `--simulated-notification <payload>`
+                        // launch args into the same routing paths the real OpenURL / notification
+                        // handlers use. Gated on `--ui-testing` so a missing/typo arg in production
+                        // can't accidentally drive deep-link routing.
+                        processUITestingLaunchArgs(services: services)
+                    }
                     .onOpenURL { url in
                         // mailto: links — open compose with pre-filled fields
                         if url.scheme == "mailto" {
                             handleMailtoURL(url, services: services)
                             return
                         }
+                        // Route todus:// links by host so non-auth deep links don't
+                        // hit the auth state machine (which interprets a missing
+                        // token query param as a failed sign-in and signs the user out).
+                        if url.scheme == "todus", let host = url.host {
+                            switch host {
+                            case "auth-callback", "link-callback":
+                                services.authService.handleAuthCallback(url: url)
+                                services.authStore.handleIncomingAuthCallback(url: url)
+                            case "share":
+                                if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+                                   let slug = components.queryItems?.first(where: { $0.name == "slug" })?.value {
+                                    sharedConversationSlug = slug
+                                }
+                            default:
+                                break
+                            }
+                            return
+                        }
                         services.authService.handleAuthCallback(url: url)
                         services.authStore.handleIncomingAuthCallback(url: url)
-                        // todus://share?slug=abc123 — open shared conversation viewer
-                        if url.host == "share",
-                           let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-                           let slug = components.queryItems?.first(where: { $0.name == "slug" })?.value {
-                            sharedConversationSlug = slug
-                        }
                     }
                     .sheet(item: Binding(
                         get: { sharedConversationSlug.map { SlugWrapper(slug: $0) } },
@@ -52,13 +71,26 @@ struct TodosApp: App {
                     }
                     .tint(AppTheme.accent)
                     .preferredColorScheme(services.appearancePreference.colorScheme)
+                    .task(id: services.authService.isAuthenticated) {
+                        // Subscribe once after AppServices is alive — the AppIntent
+                        // posts `.todusStartVoiceSession` which we forward to the
+                        // shared `VoiceSessionCoordinator`. Re-runs on auth flips so
+                        // a session triggered before sign-in cleanly no-ops.
+                        await subscribeToVoiceSessionStartTrigger(services: services)
+                    }
                     .onChange(of: scenePhase) { oldPhase, newPhase in
                         if newPhase == .background {
                             AvatarCache.shared.flushPendingSaves()
-                            WidgetUpdateManager.shared.updateWidgets(
-                                context: modelContainer.mainContext,
-                                emailService: services.emailService
-                            )
+                            let ctx = modelContainer.mainContext
+                            let emailSvc = services.emailService
+                            let calSvc = services.calendarService
+                            Task {
+                                await WidgetUpdateManager.shared.updateWidgets(
+                                    context: ctx,
+                                    emailService: emailSvc,
+                                    calendarService: calSvc
+                                )
+                            }
                         }
                     }
             } else {
@@ -149,11 +181,18 @@ struct TodosApp: App {
         // Yield to let the run loop process any pending UI work (keeps splash responsive)
         await Task.yield()
 
+        // Pre-read Keychain auth tokens on a background thread so AppServices.init()
+        // doesn't block the main thread with synchronous SecItemCopyMatching calls
+        // (each can stall 300–800 ms on cold launch when the Keychain daemon is cold).
+        let preloadedTokens = await Task.detached(priority: .userInitiated) {
+            AuthService.preloadTokens()
+        }.value
+
         // Assign container to appDelegate BEFORE setting @State so notification
         // actions can resolve tasks immediately — avoids race with onAppear.
         appDelegate.modelContainer = container
 
-        let svc = AppServices()
+        let svc = AppServices(preloadedAuthTokens: preloadedTokens)
         // Wire AppServices into AppDelegate so notification-action failures (which run
         // outside SwiftUI environment) can surface a user-facing error state.
         appDelegate.services = svc
@@ -207,6 +246,24 @@ struct TodosApp: App {
     }
 }
 
+/// Subscribe to the `.todusStartVoiceSession` notification posted by
+/// `StartVoiceAssistantIntent`. Awaits the async-stream form so the
+/// subscription naturally ends when the surrounding `.task` is cancelled
+/// (i.e. when the user signs out and the WindowGroup body re-evaluates).
+@MainActor
+private func subscribeToVoiceSessionStartTrigger(services: AppServices) async {
+    let center = NotificationCenter.default
+    let stream = center.notifications(named: .todusStartVoiceSession).map { _ in () }
+    for await _ in stream {
+        // Hydrate the coordinator with a SwiftData context so write tools work.
+        if services.voiceSessionCoordinator.modelContext == nil,
+           let context = services.modelContainer?.mainContext {
+            services.voiceSessionCoordinator.modelContext = context
+        }
+        await services.voiceSessionCoordinator.start()
+    }
+}
+
 /// Parse a `mailto:` URL and open the email compose sheet with pre-filled fields.
 /// Format: `mailto:to@example.com?subject=Hello&body=World`
 @MainActor
@@ -238,6 +295,73 @@ private func handleMailtoURL(_ url: URL, services: AppServices) {
 private struct SlugWrapper: Identifiable {
     let slug: String
     var id: String { slug }
+}
+
+/// Bridges `--simulated-deep-link <url>` / `--simulated-notification <payload>`
+/// launch arguments into the same routing entry points the live OpenURL and
+/// notification handlers use. Only fires when `--ui-testing` is also present
+/// so a stray argument in production builds is inert.
+///
+/// Notification payload syntax:
+///   - `thread:<threadId>` → routes to the email tab + opens that thread
+///   - `task:<uuid>`       → routes to the tasks tab focused on that task
+@MainActor
+private func processUITestingLaunchArgs(services: AppServices) {
+    guard services.isUITestingMode else { return }
+    let args = CommandLine.arguments
+
+    if let i = args.firstIndex(of: "--simulated-deep-link"),
+       i + 1 < args.count,
+       let url = URL(string: args[i + 1]) {
+        // Same dispatch the .onOpenURL closure uses.
+        if url.scheme == "todus", let host = url.host {
+            switch host {
+            case "auth-callback", "link-callback":
+                services.authService.handleAuthCallback(url: url)
+            default:
+                break
+            }
+        }
+    }
+
+    if let i = args.firstIndex(of: "--simulated-notification"),
+       i + 1 < args.count {
+        let payload = args[i + 1]
+        if payload.hasPrefix("thread:") {
+            let threadId = String(payload.dropFirst("thread:".count))
+            services.pendingEmailThreadId = threadId
+            services.navigateTo = .email
+        } else if payload.hasPrefix("task:"),
+                  let taskId = UUID(uuidString: String(payload.dropFirst("task:".count))) {
+            services.pendingTaskId = taskId
+            services.navigateTo = .tasks
+        }
+    }
+
+    // Stub a pending AI mutation confirmation directly on the chat service.
+    // C3 verifies the confirmation dialog actually surfaces when the service
+    // sets `pendingMutationConfirmation`. We open the chat sheet at the same
+    // time so the dialog has a presenter in the view hierarchy.
+    if args.contains("--simulated-ai-mutation-pending") {
+        services.showsAIChat = true
+        services.aiChatService.pendingMutationConfirmation = AIChatService.PendingMutationConfirmation(
+            kind: .sendEmail,
+            title: "Send email",
+            subtitle: "To: test@example.com",
+            body: "UI test stub"
+        )
+    }
+
+    // Post the calendar-authorization-changed notification so the calendar
+    // tab + the permission view both refresh their `canReadEvents` cache.
+    // C5 uses this to assert the calendar surface updates from a permission
+    // change without needing to invoke the real EventKit prompt.
+    if args.contains("--simulated-calendar-auth-changed") {
+        NotificationCenter.default.post(
+            name: .todusCalendarAuthorizationDidChange,
+            object: nil
+        )
+    }
 }
 
 /// Result of the off-main ModelContainer initialization chain. ModelContainer is
@@ -296,6 +420,11 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
         // Extract only the values we need before hopping actors to avoid sending non-Sendable references.
         let userInfo = response.notification.request.content.userInfo
         let taskIDString = userInfo["taskID"] as? String ?? ""
+        // Tap-routing payload keys — see NotificationService.swift:140 (threadId),
+        // :191 (reminder threadId), :259 (conversationId), :102 (taskID).
+        let threadIdString = userInfo["threadId"] as? String
+        let conversationIdString = userInfo["conversationId"] as? String
+        let categoryIdentifier = response.notification.request.content.categoryIdentifier
         let actionIdentifier = response.actionIdentifier
         let requestIdentifier = response.notification.request.identifier
 
@@ -384,7 +513,37 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
                 }
 
             default:
-                break
+                // Default action (notification tap) and any other identifier: route based on payload.
+                // Covers email thread, AI conversation, email reminder, and due-task digest taps.
+                // Action-specific identifiers (TASK_COMPLETE / TASK_SNOOZE) are handled above; everything
+                // else (including `UNNotificationDefaultActionIdentifier` and `EMAIL_ARCHIVE` for now)
+                // falls through here so the user is taken to the relevant surface.
+                guard let services = self.services else { return }
+
+                if let threadId = threadIdString, !threadId.isEmpty {
+                    // Email thread or email reminder: open the email tab and let
+                    // EmailInboxView pop the thread via its pendingEmailThreadId observer.
+                    services.pendingEmailThreadId = threadId
+                    services.navigateTo = .email
+                } else if let conversationId = conversationIdString, !conversationId.isEmpty {
+                    // AI response: open the AI chat sheet. Conversation id is broadcast
+                    // via NotificationCenter so AIChatView can load the right history
+                    // (no dedicated AppServices field exists for this today).
+                    services.showsAIChat = true
+                    NotificationCenter.default.post(
+                        name: .todusOpenAIConversation,
+                        object: nil,
+                        userInfo: ["conversationId": conversationId]
+                    )
+                } else if !taskIDString.isEmpty,
+                          let taskID = UUID(uuidString: taskIDString) {
+                    // Due-task reminder tap: route to the tasks tab focused on the task.
+                    services.pendingTaskId = taskID
+                    services.navigateTo = .tasks
+                } else if categoryIdentifier == "DUE_TASKS" {
+                    // Digest tap without a specific task: take the user to the tasks tab.
+                    services.navigateTo = .tasks
+                }
             }
         }
     }
@@ -397,4 +556,12 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
         // Present banner and sound even when app is in foreground
         completionHandler([.banner, .sound])
     }
+}
+
+// MARK: - Notification routing channels
+
+extension Notification.Name {
+    /// Broadcast when the user taps an AI-response local notification.
+    /// `userInfo["conversationId"]` carries the conversation to load.
+    static let todusOpenAIConversation = Notification.Name("TodusOpenAIConversation")
 }

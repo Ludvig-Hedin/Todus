@@ -155,6 +155,24 @@ struct MeetingDetailView: View {
                         .foregroundStyle(Color.accentColor)
                 }
                 .buttonStyle(.plain)
+                .contextMenu {
+                    Button {
+                        UIPasteboard.general.string = joinURL.absoluteString
+                    } label: {
+                        Label("Copy meeting link", systemImage: "link")
+                    }
+                    Button {
+                        UIPasteboard.general.string = meeting.title
+                    } label: {
+                        Label("Copy meeting title", systemImage: "doc.on.doc")
+                    }
+                    Button {
+                        let when = meeting.startsAt.formatted(date: .abbreviated, time: .shortened)
+                        UIPasteboard.general.string = "\(meeting.title) — \(when)\n\(joinURL.absoluteString)"
+                    } label: {
+                        Label("Copy meeting summary", systemImage: "text.quote")
+                    }
+                }
             }
         }
     }
@@ -372,6 +390,7 @@ struct MeetingDetailView: View {
                         .font(.title2)
                 }
                 .disabled(qaInput.trimmingCharacters(in: .whitespaces).isEmpty || isAskingQuestion)
+                .accessibilityLabel("Send question")
             }
         }
         .padding(14)

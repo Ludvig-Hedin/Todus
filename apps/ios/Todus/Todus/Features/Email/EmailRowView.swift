@@ -4,15 +4,11 @@ import SwiftUI
 struct EmailRowView: View {
     let thread: EmailThread
 
-    /// Pre-computed once per row instance (rather than on every body re-render). The thread
-    /// date doesn't change while the row is visible, so caching is safe and avoids running
-    /// Calendar / DateFormatter work for every sibling re-render during scroll or search.
-    private let timeString: String
-
-    init(thread: EmailThread) {
-        self.thread = thread
-        self.timeString = Self.formattedTime(for: thread.date)
-    }
+    /// Computed per render rather than cached in `init`. A cached value captured at row
+    /// construction time goes stale across midnight (a "Today" 23:55 message becomes
+    /// "Yesterday" but the cached string keeps showing the original time). Recomputing
+    /// is cheap — Calendar + DateFormatter calls happen only once per visible row.
+    private var timeString: String { Self.formattedTime(for: thread.date) }
 
     private static func formattedTime(for date: Date) -> String {
         let calendar = Calendar.current
@@ -58,7 +54,7 @@ struct EmailRowView: View {
 
                     if thread.unread {
                         Circle()
-                            .fill(AppTheme.accentBlue)
+                            .fill(Color(UIColor.systemBlue))   // was: AppTheme.accentBlue (= Color.primary = black)
                             .frame(width: 8, height: 8)
                     }
                 }
@@ -73,6 +69,44 @@ struct EmailRowView: View {
         .padding(.horizontal, 16)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(thread.unread ? "Unread, " : "")From \(thread.from.name), \(thread.subject), \(timeString)")
+        // Fall back to the sender's email when the display name is missing —
+        // otherwise VoiceOver users hear "From, <subject>" with no sender at all.
+        .accessibilityLabel("\(thread.unread ? "Unread, " : "")From \(thread.from.name.isEmpty ? thread.from.email : thread.from.name), \(thread.subject), \(timeString)")
+        // Long-press copy actions so users can grab the full sender or subject
+        // when either is truncated by the single-line row layout. The wrapping
+        // .contextMenu modifier on the row in EmailInboxView (which adds the
+        // "Add to folder…" action) is intentionally separate from this one —
+        // SwiftUI only honors the innermost .contextMenu, so the parent menu
+        // already overrides any inner Text we add. Surface the full strings as
+        // copy-to-clipboard buttons instead, which both reveals the full text
+        // (label is the value, not truncated by the row) and gives a useful
+        // action.
+        .contextMenu {
+            let senderDisplay = thread.from.name.isEmpty ? thread.from.email : thread.from.name
+            Button {
+                UIPasteboard.general.string = senderDisplay
+            } label: {
+                Label("Copy sender: \(senderDisplay)", systemImage: "person")
+            }
+            if senderDisplay != thread.from.email {
+                Button {
+                    UIPasteboard.general.string = thread.from.email
+                } label: {
+                    Label("Copy email address", systemImage: "envelope")
+                }
+            }
+            Button {
+                UIPasteboard.general.string = thread.subject
+            } label: {
+                Label("Copy subject: \(thread.subject)", systemImage: "text.quote")
+            }
+            if !thread.snippet.isEmpty {
+                Button {
+                    UIPasteboard.general.string = thread.snippet
+                } label: {
+                    Label("Copy preview", systemImage: "doc.on.doc")
+                }
+            }
+        }
     }
 }
