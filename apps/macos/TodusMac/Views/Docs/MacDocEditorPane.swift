@@ -5,6 +5,14 @@ struct MacDocEditorPane: View {
     @Environment(MacAppServices.self) private var services
     @Environment(\.colorScheme) private var colorScheme
 
+    /// 3-state UI signal for autosave. `.failed(msg)` exposes a retry affordance.
+    enum SaveState: Equatable {
+        case idle
+        case saving
+        case saved
+        case failed(String)
+    }
+
     let docId: String
     var onBack: () -> Void
 
@@ -14,7 +22,10 @@ struct MacDocEditorPane: View {
     @State private var lastText: String = ""
     @State private var wk: WKWebView?
     @State private var saveTask: Task<Void, Never>?
+    @State private var titleSaveTask: Task<Void, Never>?
+    @State private var savedRevertTask: Task<Void, Never>?
     @State private var isSaving = false
+    @State private var saveState: SaveState = .idle
     @State private var showInspector = false
 
     var body: some View {
@@ -43,8 +54,72 @@ struct MacDocEditorPane: View {
         }
         .background(MacTheme.contentBackground)
         .task(id: docId) { await load() }
+        .onChange(of: docId) { oldId, _ in
+            // Flush in-memory state for the doc we're leaving before the new one loads.
+            flushPendingSave(forDocId: oldId)
+        }
+        .onAppear {
+            services.docsService.currentOpenDocId = docId
+        }
         .onDisappear {
-            saveTask?.cancel()
+            // Cancel debounce, then synchronously enqueue a final save of in-memory
+            // state so the last keystroke isn't lost when the view goes away.
+            flushPendingSave(forDocId: docId)
+            if services.docsService.currentOpenDocId == docId {
+                services.docsService.currentOpenDocId = nil
+            }
+        }
+        .onChange(of: services.docsService.pendingDocInsert) { _, text in
+            guard let text, let wk else { return }
+            let b64 = Data(text.utf8).base64EncodedString()
+            let js = """
+            (function(){
+              var b64='\(b64)';
+              var bin=atob(b64);
+              var bytes=new Uint8Array(bin.length);
+              for(var i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);
+              var decoded=new TextDecoder('utf-8').decode(bytes);
+              window.todusEditor && window.todusEditor.insertAtCursor(decoded);
+            })();
+            """
+            wk.evaluateJavaScript(js, completionHandler: nil)
+            services.docsService.pendingDocInsert = nil
+        }
+    }
+
+    /// Cancel any in-flight debounced save and fire a final detached save of the
+    /// current in-memory state. Detached so it survives the View being torn down.
+    private func flushPendingSave(forDocId id: String) {
+        saveTask?.cancel()
+        titleSaveTask?.cancel()
+        guard let snapshotDoc = doc, snapshotDoc.id == id else { return }
+        let json = lastSavedJSON
+        let text = lastText
+        let titleSnapshot = titleDraft
+        let titleChanged = titleSnapshot != snapshotDoc.title
+        // Fire-and-forget: do not capture `self` state for the result; tolerate failure.
+        let docsService = services.docsService
+        Task { @MainActor in
+            do {
+                _ = try await docsService.updateDoc(
+                    DocUpdateInput(
+                        id: id,
+                        title: titleChanged ? titleSnapshot : nil,
+                        content: json,
+                        contentText: (text.isEmpty ? " " : text),
+                        emoji: nil,
+                        order: nil,
+                        parentId: nil,
+                        workspaceId: nil,
+                        isStarred: nil,
+                        linkedThreadId: nil,
+                        linkedEventId: nil,
+                        linkedTaskId: nil
+                    )
+                )
+            } catch {
+                AppLogger.shared.log("[DocEditor] flush save: \(error)")
+            }
         }
     }
 
@@ -64,9 +139,18 @@ struct MacDocEditorPane: View {
                     .textFieldStyle(.plain)
                     .font(.system(size: 18, weight: .semibold))
                     .onSubmit { Task { await saveTitle() } }
+                    .onChange(of: titleDraft) { _, _ in
+                        // Debounce title autosave so users don't have to press Enter.
+                        titleSaveTask?.cancel()
+                        titleSaveTask = Task { @MainActor in
+                            try? await Task.sleep(nanoseconds: 600_000_000)
+                            guard !Task.isCancelled else { return }
+                            await saveTitle()
+                        }
+                    }
             }
             Spacer()
-            if isSaving { ProgressView().controlSize(.small) }
+            saveIndicator
             Button {
                 Task { await toggleStar() }
             } label: {
@@ -75,20 +159,13 @@ struct MacDocEditorPane: View {
             .buttonStyle(.borderless)
             .help("Star")
             Button { showInspector.toggle() } label: {
-                Image(systemName: "sidebar.right")
+                Image(systemName: "info.circle")
             }
             .buttonStyle(.borderless)
-            .help("Info (coming soon)")
+            .help("Document info")
+            .accessibilityLabel("Document info")
             .popover(isPresented: $showInspector) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Info")
-                        .font(.headline)
-                    Text("Version, word count, and more in a follow-up.")
-                        .font(.caption)
-                        .foregroundStyle(MacTheme.textSecondary)
-                }
-                .frame(width: 220)
-                .padding()
+                docInfoPopover
             }
         }
         .padding(.horizontal, MacTheme.spacing16)
@@ -100,6 +177,126 @@ struct MacDocEditorPane: View {
             return "Docs"
         }
         return "\(w.name) / \(d.parentId == nil ? "Unsorted" : "Nested")"
+    }
+
+    /// 3-state save badge (saving → saved → idle, or failed with retry).
+    @ViewBuilder
+    private var saveIndicator: some View {
+        switch saveState {
+        case .idle:
+            EmptyView()
+        case .saving:
+            HStack(spacing: 4) {
+                ProgressView().controlSize(.small)
+                Text("Saving…")
+                    .font(.system(size: 11))
+                    .foregroundStyle(MacTheme.mutedText)
+            }
+        case .saved:
+            HStack(spacing: 4) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.green)
+                Text("Saved")
+                    .font(.system(size: 11))
+                    .foregroundStyle(MacTheme.mutedText)
+            }
+        case .failed(let message):
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(.red)
+                    .frame(width: 6, height: 6)
+                Text("Save failed")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.red)
+                Button("Retry") {
+                    // Re-run autosave with the last known content snapshot.
+                    debouncedSave(json: lastSavedJSON, text: lastText, immediate: true)
+                }
+                .buttonStyle(.borderless)
+                .font(.system(size: 11, weight: .medium))
+                .help(message)
+            }
+        }
+    }
+
+    /// Document info popover: word count, character count, last-updated, and a
+    /// copyable monospace id. Falls back gracefully when the doc hasn't loaded.
+    @ViewBuilder
+    private var docInfoPopover: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Info")
+                .font(.headline)
+
+            HStack {
+                Text("Words")
+                    .foregroundStyle(MacTheme.textSecondary)
+                Spacer()
+                Text("\(wordCount)")
+                    .monospacedDigit()
+            }
+            .font(.system(size: 12))
+
+            HStack {
+                Text("Characters")
+                    .foregroundStyle(MacTheme.textSecondary)
+                Spacer()
+                Text("\(characterCount)")
+                    .monospacedDigit()
+            }
+            .font(.system(size: 12))
+
+            if let updatedAt = doc?.updatedAt {
+                HStack {
+                    Text("Updated")
+                        .foregroundStyle(MacTheme.textSecondary)
+                    Spacer()
+                    Text(updatedAt.formatted(date: .abbreviated, time: .shortened))
+                }
+                .font(.system(size: 12))
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("ID")
+                    .font(.system(size: 11))
+                    .foregroundStyle(MacTheme.textSecondary)
+                Text(docId)
+                    .font(.system(size: 11, design: .monospaced))
+                    .textSelection(.enabled)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+        }
+        .frame(width: 240)
+        .padding(12)
+    }
+
+    /// Word count from the current editor text — splits on any whitespace
+    /// (spaces, newlines, tabs) and drops empties so blank lines don't inflate.
+    private var wordCount: Int {
+        lastText
+            .split(whereSeparator: { $0.isWhitespace })
+            .count
+    }
+
+    /// Character count uses Swift's grapheme-cluster `count` so emoji and
+    /// combined glyphs count as one user-visible character.
+    private var characterCount: Int {
+        lastText.count
+    }
+
+    /// Sets `.saved` and schedules a revert to `.idle` after 2s. Cancellable.
+    @MainActor
+    private func markSaved() {
+        savedRevertTask?.cancel()
+        saveState = .saved
+        savedRevertTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            guard !Task.isCancelled else { return }
+            if case .saved = saveState { saveState = .idle }
+        }
     }
 
     @ViewBuilder
@@ -145,22 +342,30 @@ struct MacDocEditorPane: View {
     private func saveTitle() async {
         guard let d = doc else { return }
         if titleDraft == d.title { return }
+        saveState = .saving
+        isSaving = true
+        defer { isSaving = false }
         do {
             let u = try await services.docsService.updateDoc(DocUpdateInput(id: d.id, title: titleDraft))
             doc = u
+            markSaved()
         } catch {
             AppLogger.shared.log("[DocEditor] title save: \(error)")
+            saveState = .failed(error.localizedDescription)
         }
     }
 
     @MainActor
-    private func debouncedSave(json: DocJSONValue?, text: String) {
+    private func debouncedSave(json: DocJSONValue?, text: String, immediate: Bool = false) {
         saveTask?.cancel()
         saveTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 500_000_000)
+            if !immediate {
+                try? await Task.sleep(nanoseconds: 500_000_000)
+            }
             guard !Task.isCancelled else { return }
             guard let d = doc else { return }
             isSaving = true
+            saveState = .saving
             defer { isSaving = false }
             do {
                 _ = try await services.docsService.updateDoc(
@@ -179,8 +384,10 @@ struct MacDocEditorPane: View {
                         linkedTaskId: nil
                     )
                 )
+                markSaved()
             } catch {
                 AppLogger.shared.log("[DocEditor] autosave: \(error)")
+                saveState = .failed(error.localizedDescription)
             }
         }
     }
