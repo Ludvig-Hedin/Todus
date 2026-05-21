@@ -3,6 +3,30 @@ import Foundation
 import Observation
 import SwiftData
 
+private struct MacSingleSettingInput<Value: Encodable>: Encodable {
+    let key: String
+    let value: Value
+
+    func encode(to encoder: Encoder) throws {
+        guard let codingKey = MacDynamicCodingKey(stringValue: key) else { return }
+        var container = encoder.container(keyedBy: MacDynamicCodingKey.self)
+        try container.encode(value, forKey: codingKey)
+    }
+}
+
+private struct MacDynamicCodingKey: CodingKey {
+    var stringValue: String
+    var intValue: Int? { nil }
+
+    init?(stringValue: String) {
+        self.stringValue = stringValue
+    }
+
+    init?(intValue: Int) {
+        return nil
+    }
+}
+
 /// Centralized service container for the macOS app.
 /// Holds auth, API client, email, calendar, and network services.
 /// Injected into views via @Environment(MacAppServices.self).
@@ -430,24 +454,10 @@ final class MacAppServices {
     /// MacSettingsView to keep all surfaces aligned.
     func syncSetting<T: Encodable>(_ key: String, _ value: T) async {
         guard authService.isAuthenticated else { return }
-        struct OneFieldInput<V: Encodable>: Encodable {
-            let key: String
-            let value: V
-            func encode(to encoder: Encoder) throws {
-                var container = encoder.container(keyedBy: DynamicCodingKeys.self)
-                try container.encode(value, forKey: DynamicCodingKeys(stringValue: key)!)
-            }
-        }
-        struct DynamicCodingKeys: CodingKey {
-            var stringValue: String
-            var intValue: Int? { nil }
-            init?(stringValue: String) { self.stringValue = stringValue }
-            init?(intValue: Int) { return nil }
-        }
         do {
             let _: SharedAIProfileSaveResponse = try await apiClient.trpcMutation(
                 "settings.save",
-                input: OneFieldInput(key: key, value: value)
+                input: MacSingleSettingInput(key: key, value: value)
             )
         } catch {
             AppLogger.shared.log("[MacAppServices] Failed to sync setting \(key): \(error)")

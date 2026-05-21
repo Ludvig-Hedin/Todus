@@ -90,7 +90,207 @@ struct MacSettingsView: View {
         isLikelyEURegion && !privacyConsentAccepted
     }
 
+    private var isSettingsErrorPresented: Binding<Bool> {
+        Binding(
+            get: { settingsError != nil },
+            set: { isPresented in
+                if !isPresented {
+                    settingsError = nil
+                }
+            }
+        )
+    }
+
     var body: some View {
+        settingsDialogs(
+            settingsLifecycle(
+                settingsSync(
+                    settingsLayout.background(MacTheme.contentBackground)
+                )
+            )
+        )
+    }
+
+    private func settingsSync<Content: View>(_ content: Content) -> some View {
+        // Sync settings changes to the backend so iOS / macOS / web stay aligned.
+        settingsGeneralSync(settingsPermissionSync(content))
+    }
+
+    private func settingsPermissionSync<Content: View>(_ content: Content) -> some View {
+        content
+            .onChange(of: aiCanReadTasks) { _, value in
+                Task { await services.syncSetting("aiCanReadTasks", value) }
+            }
+            .onChange(of: aiCanWriteTasks) { _, value in
+                Task { await services.syncSetting("aiCanWriteTasks", value) }
+            }
+            .onChange(of: aiCanReadCalendar) { _, value in
+                Task { await services.syncSetting("aiCanReadCalendar", value) }
+            }
+            .onChange(of: aiCanWriteCalendar) { _, value in
+                Task { await services.syncSetting("aiCanWriteCalendar", value) }
+            }
+            .onChange(of: aiCanReadEmail) { _, value in
+                Task { await services.syncSetting("aiCanReadEmail", value) }
+            }
+            .onChange(of: aiCanSendEmail) { _, value in
+                Task { await services.syncSetting("aiCanSendEmail", value) }
+            }
+    }
+
+    private func settingsGeneralSync<Content: View>(_ content: Content) -> some View {
+        content
+            .onChange(of: accentColorKey) { _, value in
+                Task { await services.syncSetting("accentColor", value) }
+            }
+            .onChange(of: defaultTaskViewModeRaw) { _, value in
+                Task { await services.syncSetting("defaultTaskView", value) }
+            }
+            .onChange(of: compactSidebar) { _, value in
+                Task { await services.syncSetting("compactSidebar", value) }
+            }
+            .onChange(of: showUnreadBadge) { _, value in
+                Task { await services.syncSetting("showUnreadBadge", value) }
+            }
+            .onChange(of: focusModeEnabled) { _, value in
+                Task { await services.syncSetting("focusModeEnabled", value) }
+            }
+            .onChange(of: threadGroupingEnabled) { _, value in
+                Task { await services.syncSetting("groupByThread", value) }
+            }
+    }
+
+    private func settingsLifecycle<Content: View>(_ content: Content) -> some View {
+        content
+            .task { await services.emailService.checkConnection() }
+            .task {
+                await loadProfileSettings()
+            }
+            .task {
+                await loadActiveSessions()
+            }
+            .task {
+                await services.subscriptionService.refresh()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .todusRequestConnectGmail)) { _ in
+                Task { await connectGmail() }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .todusRequestReconnectGmail)) { _ in
+                Task { await connectGmail() }
+            }
+    }
+
+    private func settingsDialogs<Content: View>(_ content: Content) -> some View {
+        content
+            .confirmationDialog(
+                "Enable low-risk auto-send?",
+                isPresented: $showAutoSendConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Enable") {
+                    services.assistantAutomationPolicy.autoSendExperimentEnabled = true
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Only narrow, high-confidence acknowledgements and confirmations become eligible. Review the experiment notes before turning this on.")
+            }
+            .confirmationDialog(
+                "Replace all Mail Assistant settings with the recommended defaults?",
+                isPresented: $showApplyRecommendedConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Apply recommended", role: .destructive) {
+                    services.assistantAutomationPolicy = .recommended
+                    excludedSenderPatternsText = services.assistantAutomationPolicy
+                        .excludedSenderPatterns
+                        .joined(separator: "\n")
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This overwrites every Mail Assistant toggle, workday hours, quiet hours, and excluded sender patterns with the recommended values. Your custom values will be lost.")
+            }
+            .confirmationDialog(
+                privacyConsentTitle,
+                isPresented: $showsPrivacyConsentDialog,
+                titleVisibility: .visible
+            ) {
+                Button("Allow") {
+                    privacyConsentAccepted = true
+                    applyPrivacyPreferenceSelection(true)
+                }
+                Button("Not now", role: .cancel) {
+                    pendingPrivacyPreference = nil
+                }
+            } message: {
+                Text(privacyConsentMessage)
+            }
+            // Logout confirmation
+            .confirmationDialog(
+                "Are you sure you want to log out?",
+                isPresented: $showsLogoutConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Log out", role: .destructive) { services.signOut() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("You can sign back in anytime.")
+            }
+            // Cancel subscription
+            .confirmationDialog(
+                "Cancel your Pro subscription?",
+                isPresented: $showCancelSubscriptionConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("Cancel subscription", role: .destructive) {
+                    Task { await performCancelSubscription() }
+                }
+                Button("Keep Pro", role: .cancel) {}
+            } message: {
+                Text("You'll keep access until the end of the current billing period.")
+            }
+            // Delete account — first confirmation
+            .confirmationDialog(
+                "Delete your account?",
+                isPresented: $showsDeleteConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Delete Everything", role: .destructive) { showsDeleteAlert = true }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This will permanently delete your account, tasks, email connections, and all data. This cannot be undone.")
+            }
+            // Delete account — type DELETE
+            .alert("Type DELETE to confirm", isPresented: $showsDeleteAlert) {
+                TextField("DELETE", text: $deleteConfirmText)
+                Button("Delete Account", role: .destructive) {
+                    guard deleteConfirmText == "DELETE" else { return }
+                    Task { await performDeleteAccount() }
+                }
+                Button("Cancel", role: .cancel) { deleteConfirmText = "" }
+            } message: {
+                Text("This action is irreversible.")
+            }
+            // Disconnect Gmail
+            .confirmationDialog(
+                "Disconnect Gmail?",
+                isPresented: $showsDisconnectGmail,
+                titleVisibility: .visible
+            ) {
+                Button("Disconnect", role: .destructive) {
+                    Task { await performDisconnectGmail() }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("You'll stop receiving emails in Todus. You can reconnect anytime.")
+            }
+            .alert("Error", isPresented: isSettingsErrorPresented) {
+                Button("OK", role: .cancel) { settingsError = nil }
+            } message: {
+                Text(settingsError ?? "")
+            }
+    }
+
+    private var settingsLayout: some View {
         VStack(spacing: 0) {
             headerBar
             Divider().opacity(0.2)
@@ -124,176 +324,21 @@ struct MacSettingsView: View {
             }
             .scrollIndicators(.never)
         }
-        .background(MacTheme.contentBackground)
-        // Sync settings changes to the backend so iOS / macOS / web stay aligned.
-        .onChange(of: aiCanReadTasks) { _, value in
-            Task { await services.syncSetting("aiCanReadTasks", value) }
-        }
-        .onChange(of: aiCanWriteTasks) { _, value in
-            Task { await services.syncSetting("aiCanWriteTasks", value) }
-        }
-        .onChange(of: aiCanReadCalendar) { _, value in
-            Task { await services.syncSetting("aiCanReadCalendar", value) }
-        }
-        .onChange(of: aiCanWriteCalendar) { _, value in
-            Task { await services.syncSetting("aiCanWriteCalendar", value) }
-        }
-        .onChange(of: aiCanReadEmail) { _, value in
-            Task { await services.syncSetting("aiCanReadEmail", value) }
-        }
-        .onChange(of: aiCanSendEmail) { _, value in
-            Task { await services.syncSetting("aiCanSendEmail", value) }
-        }
-        .onChange(of: accentColorKey) { _, value in
-            Task { await services.syncSetting("accentColor", value) }
-        }
-        .onChange(of: defaultTaskViewModeRaw) { _, value in
-            Task { await services.syncSetting("defaultTaskView", value) }
-        }
-        .onChange(of: compactSidebar) { _, value in
-            Task { await services.syncSetting("compactSidebar", value) }
-        }
-        .onChange(of: showUnreadBadge) { _, value in
-            Task { await services.syncSetting("showUnreadBadge", value) }
-        }
-        .onChange(of: focusModeEnabled) { _, value in
-            Task { await services.syncSetting("focusModeEnabled", value) }
-        }
-        .onChange(of: threadGroupingEnabled) { _, value in
-            Task { await services.syncSetting("groupByThread", value) }
-        }
-        .task { await services.emailService.checkConnection() }
-        .task {
-            // Refresh profile data (name, avatar) when settings opens — matches iOS SettingsView
-            await services.authService.fetchUserProfile()
-            await services.loadSharedAIProfile()
-            excludedSenderPatternsText = services.assistantAutomationPolicy.excludedSenderPatterns
-                .joined(separator: "\n")
-        }
-        .task {
-            await loadActiveSessions()
-        }
-        .task {
-            await services.subscriptionService.refresh()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .todusRequestConnectGmail)) { _ in
-            Task { await services.emailService.connectGmail(authService: services.authService) }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .todusRequestReconnectGmail)) { _ in
-            Task { await services.emailService.connectGmail(authService: services.authService) }
-        }
-        .confirmationDialog(
-            "Enable low-risk auto-send?",
-            isPresented: $showAutoSendConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Enable") {
-                services.assistantAutomationPolicy.autoSendExperimentEnabled = true
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Only narrow, high-confidence acknowledgements and confirmations become eligible. Review the experiment notes before turning this on.")
-        }
-        .confirmationDialog(
-            "Replace all Mail Assistant settings with the recommended defaults?",
-            isPresented: $showApplyRecommendedConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Apply recommended", role: .destructive) {
-                services.assistantAutomationPolicy = .recommended
-                excludedSenderPatternsText = services.assistantAutomationPolicy
-                    .excludedSenderPatterns
-                    .joined(separator: "\n")
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This overwrites every Mail Assistant toggle, workday hours, quiet hours, and excluded sender patterns with the recommended values. Your custom values will be lost.")
-        }
-        .confirmationDialog(
-            privacyConsentTitle,
-            isPresented: $showsPrivacyConsentDialog,
-            titleVisibility: .visible
-        ) {
-            Button("Allow") {
-                privacyConsentAccepted = true
-                applyPrivacyPreferenceSelection(true)
-            }
-            Button("Not now", role: .cancel) {
-                pendingPrivacyPreference = nil
-            }
-        } message: {
-            Text(privacyConsentMessage)
-        }
-        // Logout confirmation
-        .confirmationDialog(
-            "Are you sure you want to log out?",
-            isPresented: $showsLogoutConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Log out", role: .destructive) { services.signOut() }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("You can sign back in anytime.")
-        }
-        // Cancel subscription
-        .confirmationDialog(
-            "Cancel your Pro subscription?",
-            isPresented: $showCancelSubscriptionConfirm,
-            titleVisibility: .visible
-        ) {
-            Button("Cancel subscription", role: .destructive) {
-                Task { await performCancelSubscription() }
-            }
-            Button("Keep Pro", role: .cancel) {}
-        } message: {
-            Text("You'll keep access until the end of the current billing period.")
-        }
-        // Delete account — first confirmation
-        .confirmationDialog(
-            "Delete your account?",
-            isPresented: $showsDeleteConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Delete Everything", role: .destructive) { showsDeleteAlert = true }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This will permanently delete your account, tasks, email connections, and all data. This cannot be undone.")
-        }
-        // Delete account — type DELETE
-        .alert("Type DELETE to confirm", isPresented: $showsDeleteAlert) {
-            TextField("DELETE", text: $deleteConfirmText)
-            Button("Delete Account", role: .destructive) {
-                guard deleteConfirmText == "DELETE" else { return }
-                Task { await performDeleteAccount() }
-            }
-            Button("Cancel", role: .cancel) { deleteConfirmText = "" }
-        } message: {
-            Text("This action is irreversible.")
-        }
-        // Disconnect Gmail
-        .confirmationDialog(
-            "Disconnect Gmail?",
-            isPresented: $showsDisconnectGmail,
-            titleVisibility: .visible
-        ) {
-            Button("Disconnect", role: .destructive) {
-                Task { await performDisconnectGmail() }
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("You'll stop receiving emails in Todus. You can reconnect anytime.")
-        }
-        .alert("Error", isPresented: Binding(
-            get: { settingsError != nil },
-            set: { if !$0 { settingsError = nil } }
-        )) {
-            Button("OK", role: .cancel) { settingsError = nil }
-        } message: {
-            Text(settingsError ?? "")
-        }
     }
 
     // MARK: - Header
+
+    private func loadProfileSettings() async {
+        // Refresh profile data (name, avatar) when settings opens — matches iOS SettingsView.
+        await services.authService.fetchUserProfile()
+        await services.loadSharedAIProfile()
+        excludedSenderPatternsText = services.assistantAutomationPolicy.excludedSenderPatterns
+            .joined(separator: "\n")
+    }
+
+    private func connectGmail() async {
+        await services.emailService.connectGmail(authService: services.authService)
+    }
 
     private var headerBar: some View {
         HStack {

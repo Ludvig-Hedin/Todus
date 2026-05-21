@@ -393,6 +393,13 @@
       "when": 1779381878657,
       "tag": "0054_lame_bloodstrike",
       "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1779400235799,
+      "tag": "0055_gifted_sentry",
+      "breakpoints": true
     }
   ]
 }

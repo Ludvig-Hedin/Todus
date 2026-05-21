@@ -400,3 +400,13 @@ These were flagged by the parallel investigators but could not be confirmed with
 - ~~`UnifiedCalendarService.swift:82–93` — Apple/Google tasks "throw and silently lose Apple data".~~ Neither helper is `throws`; the `async let` returns `[]` on failure.
 - ~~`EmailInboxView.swift:627` — pagination success misdetected as failure.~~ Logic correctly checks `if let current` *and* `current \!= priorError`; nil case is handled.
 
+
+## Bug Hunt — 2026-05-21
+
+### Auto-fixed (3 issues)
+- `apps/macos/TodusMac/App/MacAppServices.swift` — moved the dynamic settings-save encoder out of a generic function so Swift 6 can compile `syncSetting`.
+- `apps/macos/TodusMac/Views/Home/MacHomeView.swift` — fixed the misplaced enclosing brace around the nested hover row helper.
+- `apps/macos/TodusMac/Views/Settings/MacSettingsView.swift` — split large SwiftUI modifier chains into smaller helper chains to resolve compiler type-check timeouts.
+
+### Needs human review (0 issues)
+- None.

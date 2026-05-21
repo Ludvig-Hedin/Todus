@@ -781,11 +781,24 @@ struct MacHomeView: View {
                     action: { onNavigate?(.calendar(.all)) }
                 )
             } else {
-                VStack(spacing: MacTheme.spacing4) {
-                    ForEach(Array(todaysEvents.prefix(7).enumerated()), id: \.element.id) { index, event in
-                        eventRow(event, index: index)
+                let events = Array(todaysEvents.prefix(7).enumerated())
+                ScrollView(.vertical, showsIndicators: false) {
+                    VStack(spacing: 0) {
+                        ForEach(events, id: \.element.id) { index, event in
+                            eventRow(event, index: index)
+                            if index < events.count - 1 {
+                                Divider().padding(.leading, MacTheme.spacing12)
+                            }
+                        }
                     }
                 }
+                .frame(maxHeight: 240)
+                .background(MacTheme.surfaceCard, in: RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous)
+                        .stroke(MacTheme.cardBorder, lineWidth: 0.5)
+                )
             }
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -825,14 +838,8 @@ struct MacHomeView: View {
             }
             .padding(.horizontal, MacTheme.spacing12)
             .padding(.vertical, MacTheme.spacing8)
-            .background(
-                RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous)
-                    .fill(isHoveringEventIndex == index ? MacTheme.surfaceHover : MacTheme.surfaceCard)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous)
-                    .stroke(MacTheme.cardBorder, lineWidth: 0.5)
-            )
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(isHoveringEventIndex == index ? MacTheme.surfaceHover : Color.clear)
         }
         .buttonStyle(.plain)
         .focusEffectDisabled()
@@ -931,11 +938,24 @@ struct MacHomeView: View {
             } else if upcomingEvents.isEmpty {
                 emptyCard(message: "No more events in the next two weeks", icon: "calendar")
             } else {
-                VStack(spacing: MacTheme.spacing4) {
-                    ForEach(Array(upcomingEvents.prefix(6).enumerated()), id: \.element.id) { index, event in
-                        upcomingEventRow(event, index: index)
+                let upcoming = Array(upcomingEvents.prefix(6).enumerated())
+                ScrollView(.vertical, showsIndicators: false) {
+                    VStack(spacing: 0) {
+                        ForEach(upcoming, id: \.element.id) { index, event in
+                            upcomingEventRow(event, index: index)
+                            if index < upcoming.count - 1 {
+                                Divider().padding(.leading, MacTheme.spacing12)
+                            }
+                        }
                     }
                 }
+                .frame(maxHeight: 240)
+                .background(MacTheme.surfaceCard, in: RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous)
+                        .stroke(MacTheme.cardBorder, lineWidth: 0.5)
+                )
             }
         }
     }
@@ -1004,14 +1024,8 @@ struct MacHomeView: View {
             }
             .padding(.horizontal, MacTheme.spacing12)
             .padding(.vertical, MacTheme.spacing8)
-            .background(
-                RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous)
-                    .fill(isHoveringUpcomingEventIndex == index ? MacTheme.surfaceHover : MacTheme.surfaceCard)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous)
-                    .stroke(MacTheme.cardBorder, lineWidth: 0.5)
-            )
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(isHoveringUpcomingEventIndex == index ? MacTheme.surfaceHover : Color.clear)
         }
         .buttonStyle(.plain)
         .focusEffectDisabled()
@@ -1119,14 +1133,8 @@ struct MacHomeView: View {
             }
             .padding(.horizontal, MacTheme.spacing12)
             .padding(.vertical, MacTheme.spacing8)
-            .background(
-                RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous)
-                    .fill(isHoveringTaskIndex == index ? MacTheme.surfaceHover : MacTheme.surfaceCard)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous)
-                    .stroke(MacTheme.cardBorder, lineWidth: 0.5)
-            )
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(isHoveringTaskIndex == index ? MacTheme.surfaceHover : Color.clear)
         }
         .buttonStyle(.plain)
         .focusEffectDisabled()
@@ -1261,37 +1269,33 @@ struct MacHomeView: View {
                 onNavigate?(.email(.inbox))
             }
         } label: {
-            HStack(alignment: .top, spacing: MacTheme.spacing8) {
-                // Unread dot — vertically aligned with sender text
-                Circle()
-                    .fill(thread.unread ? MacTheme.accent : Color.clear)
-                    .frame(width: 6, height: 6)
-                    .padding(.top, 5)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: MacTheme.spacing6) {
-                        Text(thread.from.name)
-                            .font(.system(size: 13, weight: thread.unread ? .semibold : .medium))
-                            .foregroundStyle(MacTheme.textPrimary)
-                            .lineLimit(1)
-
-                        Spacer(minLength: 0)
-
-                        Text(thread.date, format: .dateTime.hour().minute())
-                            .font(MacTheme.metaFont())
-                            .foregroundStyle(MacTheme.mutedText)
-                    }
-
-                    Text(thread.subject)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(MacTheme.textPrimary.opacity(0.8))
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: MacTheme.spacing6) {
+                    Text(thread.from.name)
+                        .font(.system(size: 13, weight: thread.unread ? .semibold : .medium))
+                        .foregroundStyle(MacTheme.textPrimary)
                         .lineLimit(1)
 
-                    Text(thread.snippet)
-                        .font(MacTheme.cardSubtitleFont())
-                        .foregroundStyle(MacTheme.textSecondary)
-                        .lineLimit(1)
+                    Circle()
+                        .fill(thread.unread ? MacTheme.accent : Color.clear)
+                        .frame(width: 6, height: 6)
+
+                    Spacer(minLength: 0)
+
+                    Text(thread.date, format: .dateTime.hour().minute())
+                        .font(MacTheme.metaFont())
+                        .foregroundStyle(MacTheme.mutedText)
                 }
+
+                Text(thread.subject)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(MacTheme.textPrimary.opacity(0.8))
+                    .lineLimit(1)
+
+                Text(thread.snippet)
+                    .font(MacTheme.cardSubtitleFont())
+                    .foregroundStyle(MacTheme.textSecondary)
+                    .lineLimit(1)
             }
             .padding(.horizontal, MacTheme.spacing12)
             .padding(.vertical, MacTheme.spacing8)
@@ -1562,8 +1566,6 @@ struct MacHomeView: View {
         todaysEvents = todayList
         upcomingEvents = future
     }
-}
-
 // MARK: - Hover row wrapper
 
 /// Click-through row that yields a hover-state binding to its content builder.
@@ -1588,4 +1590,6 @@ private struct HoverableRow<Content: View>: View {
             isHovering = hovering
         }
     }
+}
+
 }
