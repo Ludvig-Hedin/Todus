@@ -1,8 +1,9 @@
 /* Minimal ProseMirror surface — app chrome matches MacTheme; editor stays readable */
 #editor,
 .todus-prose {
-  min-height: 100%;
+  min-height: 100vh;
   outline: none;
+  cursor: text;
 }
 .ProseMirror {
   min-height: 200px;

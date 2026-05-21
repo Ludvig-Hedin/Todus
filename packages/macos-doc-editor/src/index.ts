@@ -22,10 +22,12 @@ export type TodusEditorApi = {
   getText: () => string;
   setTheme: (mode: 'light' | 'dark') => void;
   run: (command: string) => void;
+  insertAtCursor: (text: string) => void;
 };
 
 let editor: Editor | null = null;
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+let clickHandler: ((e: MouseEvent) => void) | null = null;
 const DEBOUNCE_MS = 350;
 
 function postToNative(message: Record<string, unknown>) {
@@ -76,9 +78,12 @@ function mount() {
       if (!editor) return;
       try {
         editor.commands.setContent(json as Parameters<Editor['commands']['setContent']>[0]);
+        editor.commands.focus('end');
         notifyChange();
       } catch {
         editor.commands.setContent('<p></p>');
+        editor.commands.focus('end');
+        notifyChange();
       }
     },
     getJSON: () => editor?.getJSON() ?? { type: 'doc', content: [] },
@@ -125,9 +130,25 @@ function mount() {
       }
       notifyChange();
     },
+    insertAtCursor: (text: string) => {
+      if (!editor || !text) return;
+      editor.chain().focus().insertContent(text).run();
+      notifyChange();
+    },
   };
 
   window.todusEditor = api;
+
+  // Clicking blank space below content focuses editor at end
+  // Guard against duplicate handlers on re-mount
+  if (clickHandler) document.removeEventListener('click', clickHandler);
+  clickHandler = (e: MouseEvent) => {
+    const target = e.target as HTMLElement;
+    if (!target.closest('.ProseMirror')) {
+      editor?.commands.focus('end');
+    }
+  };
+  document.addEventListener('click', clickHandler);
 }
 
 if (document.readyState === 'loading') {
