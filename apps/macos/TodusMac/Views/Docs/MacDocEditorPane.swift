@@ -27,6 +27,7 @@ struct MacDocEditorPane: View {
     @State private var isSaving = false
     @State private var saveState: SaveState = .idle
     @State private var showInspector = false
+    @State private var revertTask: Task<Void, Never>?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -68,6 +69,7 @@ struct MacDocEditorPane: View {
             if services.docsService.currentOpenDocId == docId {
                 services.docsService.currentOpenDocId = nil
             }
+            revertTask?.cancel()
         }
         .onChange(of: services.docsService.pendingDocInsert) { _, text in
             guard let text, let wk else { return }
@@ -84,6 +86,15 @@ struct MacDocEditorPane: View {
             """
             wk.evaluateJavaScript(js, completionHandler: nil)
             services.docsService.pendingDocInsert = nil
+        }
+        .onChange(of: services.docsService.hasUnrevertedAIEdit) { _, isActive in
+            revertTask?.cancel()
+            guard isActive else { return }
+            revertTask = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 5 * 60 * 1_000_000_000)
+                guard !Task.isCancelled else { return }
+                services.docsService.hasUnrevertedAIEdit = false
+            }
         }
     }
 
@@ -151,6 +162,35 @@ struct MacDocEditorPane: View {
             }
             Spacer()
             saveIndicator
+            if services.docsService.hasUnrevertedAIEdit {
+                Button {
+                    guard let snap = services.docsService.preAIEditSnapshot,
+                          let wk else { return }
+                    guard let data = try? JSONEncoder().encode(snap) else { return }
+                    let b64 = data.base64EncodedString()
+                    let script = """
+                    (function(){
+                      var b64='\(b64)';
+                      var bin=atob(b64);
+                      var bytes=new Uint8Array(bin.length);
+                      for(var i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);
+                      var raw=new TextDecoder('utf-8').decode(bytes);
+                      window.todusEditor && window.todusEditor.setContent(JSON.parse(raw));
+                    })();
+                    """
+                    wk.evaluateJavaScript(script, completionHandler: nil)
+                    services.docsService.hasUnrevertedAIEdit = false
+                    services.docsService.preAIEditSnapshot = nil
+                    revertTask?.cancel()
+                } label: {
+                    Label("Revert AI edit", systemImage: "arrow.uturn.backward")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.orange)
+                }
+                .buttonStyle(.borderless)
+                .help("Revert to the document state before the AI edited it")
+                .transition(.opacity)
+            }
             Button {
                 Task { await toggleStar() }
             } label: {
