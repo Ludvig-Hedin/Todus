@@ -14,6 +14,23 @@ final class MacDocsService {
     private var didAttemptCreatePersonal = false
     private var didLogDocsUnavailable = false
 
+    // MARK: - UI Bridge Properties
+
+    /// Set by MacDocEditorPane when a doc is open; cleared on disappear.
+    /// Allows MacAssistantPanel to show the doc title in the context pill.
+    var currentOpenDocId: String? = nil
+
+    /// Set by MacAssistantPanel when user taps "Insert into doc".
+    /// MacDocEditorPane observes this and inserts via JS, then clears it.
+    var pendingDocInsert: String? = nil
+
+    /// Snapshot of doc content taken before an AI edit.
+    /// Used by the session-level revert button in MacDocEditorPane.
+    var preAIEditSnapshot: DocJSONValue? = nil
+
+    /// True while the revert button should be visible in the editor chrome.
+    var hasUnrevertedAIEdit: Bool = false
+
     init(apiClient: TodosAPIClient) {
         self.apiClient = apiClient
     }
@@ -62,7 +79,9 @@ final class MacDocsService {
             throw URLError(.userAuthenticationRequired)
         }
         if workspaces.isEmpty {
-            didAttemptCreatePersonal = false
+            // Keep `didAttemptCreatePersonal` sticky for the session — refresh() guards
+            // against double-creating a Personal workspace via the same flag. Resetting
+            // it here would race the refresh and yield duplicate workspaces.
             await refresh()
         }
         guard let w = workspaces.first else {
