@@ -1115,7 +1115,7 @@ struct MacAssistantPanel: View {
                                     NSWorkspace.shared.open(url)
                                 }
                             },
-                            onInsertIntoDoc: {
+                            onInsertIntoDoc: { () -> ((String) -> Void)? in
                                 guard currentSelection.category == "docs",
                                       !message.isStreaming,
                                       message.role == .assistant,
@@ -2027,6 +2027,8 @@ private struct MacMessageBubble: View {
                     .help("Insert AI response at cursor position in the open document")
                     Spacer()
                 }
+                .opacity(showActions ? 1 : 0)
+                .animation(.easeIn(duration: 0.3), value: showActions)
                 .padding(.top, 2)
             }
         }
