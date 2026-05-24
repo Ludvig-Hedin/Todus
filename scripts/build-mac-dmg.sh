@@ -17,7 +17,11 @@ R2_BUCKET="todus-releases"
 
 # ── Read version from project ────────────────────────────────────────────────
 VERSION=$(grep -m1 'MARKETING_VERSION' "$MACOS_DIR/TodusMac.xcodeproj/project.pbxproj" \
-  | awk -F '= ' '{print $2}' | tr -d ' ;')
+  | awk -F '[=;]' '{gsub(/ /, "", $2); print $2}')
+if [ -z "$VERSION" ]; then
+  echo "✗ FAIL: Could not read MARKETING_VERSION from project.pbxproj"
+  exit 1
+fi
 DMG_NAME="Todus-${VERSION}.dmg"
 DMG_PATH="$DMG_DIR/$DMG_NAME"
 
@@ -47,15 +51,27 @@ echo "✓ Pre-flight checks passed"
 echo "▶ Archiving $SCHEME ($CONFIGURATION)..."
 rm -rf "$ARCHIVE_PATH"
 
-xcodebuild archive \
-  -project "$MACOS_DIR/TodusMac.xcodeproj" \
-  -scheme "$SCHEME" \
-  -configuration "$CONFIGURATION" \
-  -archivePath "$ARCHIVE_PATH" \
-  -destination "generic/platform=macOS" \
-  CODE_SIGN_STYLE=Automatic \
-  DEVELOPMENT_TEAM=XDBG7P4V96 \
-  | xcpretty || true
+if command -v xcpretty &>/dev/null; then
+  xcodebuild archive \
+    -project "$MACOS_DIR/TodusMac.xcodeproj" \
+    -scheme "$SCHEME" \
+    -configuration "$CONFIGURATION" \
+    -archivePath "$ARCHIVE_PATH" \
+    -destination "generic/platform=macOS" \
+    CODE_SIGN_STYLE=Automatic \
+    DEVELOPMENT_TEAM=XDBG7P4V96 \
+    | xcpretty
+  test "${PIPESTATUS[0]}" -eq 0
+else
+  xcodebuild archive \
+    -project "$MACOS_DIR/TodusMac.xcodeproj" \
+    -scheme "$SCHEME" \
+    -configuration "$CONFIGURATION" \
+    -archivePath "$ARCHIVE_PATH" \
+    -destination "generic/platform=macOS" \
+    CODE_SIGN_STYLE=Automatic \
+    DEVELOPMENT_TEAM=XDBG7P4V96
+fi
 
 if [ ! -d "$ARCHIVE_PATH" ]; then
   echo "✗ FAIL: Archive not created at $ARCHIVE_PATH"
@@ -67,11 +83,19 @@ echo "✓ Archive created: $ARCHIVE_PATH"
 echo "▶ Exporting .app..."
 rm -rf "$EXPORT_PATH"
 
-xcodebuild -exportArchive \
-  -archivePath "$ARCHIVE_PATH" \
-  -exportPath "$EXPORT_PATH" \
-  -exportOptionsPlist "$EXPORT_OPTIONS" \
-  | xcpretty || true
+if command -v xcpretty &>/dev/null; then
+  xcodebuild -exportArchive \
+    -archivePath "$ARCHIVE_PATH" \
+    -exportPath "$EXPORT_PATH" \
+    -exportOptionsPlist "$EXPORT_OPTIONS" \
+    | xcpretty
+  test "${PIPESTATUS[0]}" -eq 0
+else
+  xcodebuild -exportArchive \
+    -archivePath "$ARCHIVE_PATH" \
+    -exportPath "$EXPORT_PATH" \
+    -exportOptionsPlist "$EXPORT_OPTIONS"
+fi
 
 APP_PATH=$(find "$EXPORT_PATH" -name "*.app" -maxdepth 2 | head -1)
 if [ -z "$APP_PATH" ]; then
@@ -82,7 +106,10 @@ echo "✓ Exported: $APP_PATH"
 
 # ── Verify code signature ────────────────────────────────────────────────────
 echo "▶ Verifying code signature..."
-codesign --verify --deep --strict "$APP_PATH" 2>&1
+if ! codesign --verify --deep --strict "$APP_PATH" 2>&1; then
+  echo "✗ FAIL: Code signature verification failed"
+  exit 1
+fi
 echo "✓ Code signature valid"
 
 # ── Create DMG ───────────────────────────────────────────────────────────────
