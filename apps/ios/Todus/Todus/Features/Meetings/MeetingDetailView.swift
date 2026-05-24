@@ -239,20 +239,19 @@ struct MeetingDetailView: View {
         }
     }
 
-    /// Pulls the first Zoom/Meet/Teams/Webex URL out of a free-text field. Used to gate the
-    /// Join button so we don't render it for an empty or malformed `meetUrl`.
+    // Compiled once — not per render. NSRegularExpression is thread-safe for matching.
+    private static let conferencingRegex: NSRegularExpression? = try? NSRegularExpression(
+        pattern: #"https?://(?:[^\s]*\.)?(zoom\.us|meet\.google\.com|teams\.microsoft\.com|webex\.com)/[^\s"')>]+"#,
+        options: .caseInsensitive
+    )
+
+    /// Pulls the first Zoom/Meet/Teams/Webex URL out of a free-text field.
     private static func conferencingURL(in text: String) -> URL? {
-        guard !text.isEmpty else { return nil }
-        // Match the four major providers we currently care about. NSRegularExpression is
-        // used over String.range(of:options:.regularExpression) so we get a stable match
-        // range across Foundation versions.
-        let pattern = #"https?://(?:[^\s]*\.)?(zoom\.us|meet\.google\.com|teams\.microsoft\.com|webex\.com)/[^\s]+"#
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) else { return nil }
+        guard !text.isEmpty, let regex = conferencingRegex else { return nil }
         let nsText = text as NSString
         let range = NSRange(location: 0, length: nsText.length)
         guard let match = regex.firstMatch(in: text, options: [], range: range) else { return nil }
-        let urlString = nsText.substring(with: match.range)
-        return URL(string: urlString)
+        return URL(string: nsText.substring(with: match.range))
     }
 
     private func errorBanner(_ message: String) -> some View {

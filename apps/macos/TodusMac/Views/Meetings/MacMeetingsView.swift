@@ -62,6 +62,8 @@ struct MacMeetingsView: View {
         .onDisappear {
             searchDebounceTask?.cancel()
             searchDebounceTask = nil
+            syncTimeoutTask?.cancel()
+            syncTimeoutTask = nil
         }
         .onAppear {
             updateSyncRotation(isSyncing: services.meetingsService.isSyncing)
@@ -172,6 +174,28 @@ struct MacMeetingsView: View {
             }
 
             Divider()
+
+            // Inline sync-error banner — visible even when meetings are loaded,
+            // so a failed Calendar sync isn't silently dropped.
+            if let syncError = services.meetingsService.loadError,
+               !services.meetingsService.meetings.isEmpty,
+               !services.meetingsService.isLoading {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.orange)
+                    Text(syncError)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.orange.opacity(0.08))
+
+                Divider()
+            }
 
             // Meeting rows
             if services.meetingsService.isLoading {

@@ -185,10 +185,13 @@ struct MacMeetingDetailView: View {
         }
     }
 
+    private static let conferencingRegex: NSRegularExpression? = try? NSRegularExpression(
+        pattern: #"https?://(?:[^\s]*\.)?(zoom\.us|meet\.google\.com|teams\.microsoft\.com|webex\.com)/[^\s"')>]+"#,
+        options: .caseInsensitive
+    )
+
     private static func conferencingURL(in text: String) -> URL? {
-        guard !text.isEmpty else { return nil }
-        let pattern = #"https?://(?:[^\s]*\.)?(zoom\.us|meet\.google\.com|teams\.microsoft\.com|webex\.com)/[^\s]+"#
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) else { return nil }
+        guard !text.isEmpty, let regex = conferencingRegex else { return nil }
         let nsText = text as NSString
         let range = NSRange(location: 0, length: nsText.length)
         guard let match = regex.firstMatch(in: text, options: [], range: range) else { return nil }
