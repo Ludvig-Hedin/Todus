@@ -46,6 +46,9 @@ struct EmailThreadView: View {
     /// so the button reverts to its normal label.
     @State private var recentlyCompletedAction: ThreadAction?
     @State private var isSummarizing = false
+    /// Global email dark mode toggle — applies to all messages in the thread.
+    /// Moved from per-message state so it can be controlled from the header menu.
+    @State private var emailDarkMode = false
 
     /// How long the inline "Created" confirmation persists inside an action
     /// button before reverting to its normal label.
@@ -354,8 +357,7 @@ struct EmailThreadView: View {
 
                     moreOptionsMenu
                 }
-                .background(.ultraThinMaterial, in: Capsule(style: .continuous))
-                .overlay(Capsule(style: .continuous).stroke(AppTheme.cardBorder.opacity(0.5), lineWidth: 0.5))
+                .headerCapsuleGlass()
                 // Light haptic on every top-bar action tap so the user feels a
                 // confirming tactile cue before the dismiss animation runs.
                 .sensoryFeedback(.impact(weight: .light), trigger: topBarActionTick)
@@ -569,8 +571,9 @@ struct EmailThreadView: View {
         // Always allow loading state through so the user sees a skeleton while
         // we fetch. We can't know the thread kind yet at that point.
         if isLoadingAssistant { return true }
-        // Failed loads still surface so the user can retry.
-        if assistantLoadFailed { return true }
+        // Failed loads are silently swallowed — no card, no layout jump.
+        // The AI FAB is always accessible for follow-up questions.
+        if assistantLoadFailed { return false }
         guard let a = assistantThread else { return false }
         guard a.threadKind.isConversational else { return false }
         // `aiLeadLine` is the new primary content path; `summary` is the
@@ -780,6 +783,7 @@ struct EmailThreadView: View {
                 MessageRow(
                     message: message,
                     expandByDefault: index == detail.messages.count - 1,
+                    emailDarkMode: $emailDarkMode,
                     onReply: {
                         composeMode = .reply
                         showCompose = true
@@ -797,14 +801,6 @@ struct EmailThreadView: View {
                 }
             }
         }
-        // Card background so the conversation reads as a single grouped surface in
-        // both light and dark mode. Light: white card on muted gray app bg. Dark:
-        // subtle lift over the near-black background.
-        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.card, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: AppTheme.Radius.card, style: .continuous)
-                .stroke(AppTheme.rowStroke, lineWidth: 1)
-        )
         .padding(.horizontal, 16)
         .padding(.bottom, 24)
     }
@@ -851,6 +847,7 @@ struct EmailThreadView: View {
                 .buttonStyle(.plain)
             }
             .padding(.horizontal, 16)
+            .padding(.vertical, 2)
         }
     }
 
@@ -1093,27 +1090,68 @@ struct EmailThreadView: View {
         Menu {
             Section {
                 Button {
+                    composeMode = .reply
+                    showCompose = true
+                } label: { Label("Reply", systemImage: "arrowshape.turn.up.left") }
+
+                Button {
+                    composeMode = .replyAll
+                    showCompose = true
+                } label: { Label("Reply All", systemImage: "arrowshape.turn.up.left.2") }
+
+                Button {
+                    composeMode = .forward
+                    showCompose = true
+                } label: { Label("Forward", systemImage: "arrowshape.turn.up.right") }
+            }
+
+            Section {
+                Button {
+                    topBarActionTick &+= 1
+                    Task {
+                        let success = await emailService.archiveThreads(ids: [threadId])
+                        if success { dismiss() }
+                        else { actionErrorMessage = emailService.errorMessage ?? "Could not archive. Please try again." }
+                    }
+                } label: { Label("Archive", systemImage: "archivebox") }
+
+                Button {
+                    topBarActionTick &+= 1
+                    Task {
+                        let success = await emailService.markAsUnread(ids: [threadId])
+                        if success { dismiss() }
+                        else { actionErrorMessage = emailService.errorMessage ?? "Could not mark as unread. Please try again." }
+                    }
+                } label: { Label("Mark as Unread", systemImage: "envelope.badge") }
+            }
+
+            Section {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.15)) { emailDarkMode.toggle() }
+                } label: {
+                    Label(
+                        emailDarkMode ? "Render in light mode" : "Render in dark mode",
+                        systemImage: emailDarkMode ? "sun.max" : "moon"
+                    )
+                }
+            }
+
+            Section {
+                Button {
                     showLabelEditor = true
                 } label: { Label("Edit labels", systemImage: "tag") }
 
                 Button {
                     showReminderOptions = true
                 } label: { Label("Set reminder", systemImage: "alarm") }
-
             }
 
             Section {
                 Button {
                     Task {
-                        // Only leave the thread on success — failures stay surfaced
-                        // inline so the user can retry without losing context.
                         let success = await emailService.markAsSpam(ids: [threadId])
-                        if success {
-                            dismiss()
-                        } else {
-                            actionErrorMessage = emailService.errorMessage
-                                ?? "Could not report spam. Please try again."
-                        }
+                        if success { dismiss() }
+                        else { actionErrorMessage = emailService.errorMessage ?? "Could not report spam. Please try again." }
                     }
                 } label: { Label("Report spam", systemImage: "exclamationmark.octagon") }
 
@@ -1601,14 +1639,13 @@ private struct MessageRow: View {
     @State private var showDetails = false
     /// Defers WKWebView creation to avoid blocking the main thread on navigation
     @State private var htmlReady = false
-    /// Email HTML is authored for light backgrounds. Default to a light-card render
-    /// (mirrors Gmail/Apple Mail/Notion). User can flip a single message into the
-    /// dark-mode invert if they prefer it.
-    @State private var emailDarkMode = false
+    /// Controlled by the parent thread view — toggled via the header ellipsis menu.
+    @Binding var emailDarkMode: Bool
 
     init(
         message: EmailMessage,
         expandByDefault: Bool,
+        emailDarkMode: Binding<Bool>,
         onReply: (() -> Void)? = nil,
         onForward: (() -> Void)? = nil
     ) {
@@ -1617,6 +1654,7 @@ private struct MessageRow: View {
         self.onReply = onReply
         self.onForward = onForward
         self._isExpanded = State(initialValue: expandByDefault)
+        self._emailDarkMode = emailDarkMode
     }
 
     private var toNames: String {
@@ -1685,38 +1723,19 @@ private struct MessageRow: View {
                             // Sibling dark/light toggle on the trailing edge so
                             // power users can flip a single message between
                             // light-card and dark-invert render.
-                            HStack(spacing: 4) {
-                                Button {
-                                    withAnimation(.easeInOut(duration: 0.15)) { showDetails.toggle() }
-                                } label: {
-                                    HStack(spacing: 4) {
-                                        Text("To: \(toNames.isEmpty ? "Me" : toNames)")
-                                            .font(.system(size: 12))
-                                            .foregroundStyle(AppTheme.mutedText)
-                                        Image(systemName: showDetails ? "chevron.up" : "chevron.down")
-                                            .font(.system(size: 10))
-                                            .foregroundStyle(AppTheme.mutedText)
-                                    }
-                                }
-                                .buttonStyle(.plain)
-
-                                Spacer(minLength: 8)
-
-                                Button {
-                                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                                    withAnimation(.easeInOut(duration: 0.15)) { emailDarkMode.toggle() }
-                                } label: {
-                                    Image(systemName: emailDarkMode ? "sun.max" : "moon")
-                                        .font(.system(size: 13, weight: .medium))
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.15)) { showDetails.toggle() }
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Text("To: \(toNames.isEmpty ? "Me" : toNames)")
+                                        .font(.system(size: 12))
                                         .foregroundStyle(AppTheme.mutedText)
-                                        .symbolEffect(.bounce, value: emailDarkMode)
-                                        .padding(.horizontal, 10)
-                                        .padding(.vertical, 8)
-                                        .contentShape(Rectangle())
+                                    Image(systemName: showDetails ? "chevron.up" : "chevron.down")
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(AppTheme.mutedText)
                                 }
-                                .buttonStyle(.plain)
-                                .accessibilityLabel(emailDarkMode ? "Switch to light render" : "Switch to dark render")
                             }
+                            .buttonStyle(.plain)
                         }
                     }
                 }
@@ -1962,22 +1981,7 @@ private struct ExpandingEmailHTMLView: View {
             // Clamp the rendered frame as a defense-in-depth — even if measureHeight
             // somehow writes a huge value, the SwiftUI layout stays sane.
             .frame(height: max(min(height, 20_000), 1))
-            // Light card chrome: white background + subtle border + rounded corners
-            // so the email content reads inside its own surface, surrounded by the
-            // dark app shell. Dark render uses no chrome — the invert blends into
-            // the app background.
-            .background {
-                if !darkMode {
-                    RoundedRectangle(cornerRadius: AppTheme.Radius.card, style: .continuous)
-                        .fill(Color.white)
-                }
-            }
-            .overlay {
-                if !darkMode {
-                    RoundedRectangle(cornerRadius: AppTheme.Radius.card, style: .continuous)
-                        .stroke(Color.black.opacity(0.08), lineWidth: 1)
-                }
-            }
+            // Clip rounded corners — the email CSS sets its own background color.
             .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.card, style: .continuous))
             .animation(.easeInOut(duration: 0.2), value: darkMode)
     }
@@ -2148,6 +2152,22 @@ struct EmailHTMLView: UIViewRepresentable {
                 return .cancel
             }
             return .allow
+        }
+    }
+}
+
+// MARK: - Header capsule glass
+
+private extension View {
+    /// Liquid Glass capsule on iOS 26; ultraThinMaterial + stroke on earlier OS.
+    @ViewBuilder
+    func headerCapsuleGlass() -> some View {
+        if #available(iOS 26, *) {
+            self.glassEffect(.regular.interactive(), in: Capsule(style: .continuous))
+        } else {
+            self
+                .background(.ultraThinMaterial, in: Capsule(style: .continuous))
+                .overlay(Capsule(style: .continuous).stroke(AppTheme.cardBorder.opacity(0.5), lineWidth: 0.5))
         }
     }
 }
