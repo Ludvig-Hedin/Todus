@@ -81,6 +81,30 @@ struct MacDocsShellView: View {
 
 // MARK: - All docs (grid / list)
 
+/// Sort modes available in the docs grid/list header. Raw values are stable
+/// across launches because they're persisted via `@AppStorage`.
+enum DocsSortMode: String, CaseIterable, Identifiable {
+    case recent
+    case alphabetical
+    case starredFirst
+
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .recent: return "Most recent"
+        case .alphabetical: return "Alphabetical"
+        case .starredFirst: return "Starred first"
+        }
+    }
+    var systemImage: String {
+        switch self {
+        case .recent: return "clock"
+        case .alphabetical: return "textformat"
+        case .starredFirst: return "star"
+        }
+    }
+}
+
 struct MacDocsAllPane: View {
     @Environment(MacAppServices.self) private var services
     @Binding var selectedDocId: String?
@@ -89,18 +113,34 @@ struct MacDocsAllPane: View {
     var isCreatingDocument: Bool
     var onNewDocument: () -> Void
 
+    @AppStorage("docs.allPane.sortMode") private var sortModeRaw: String = DocsSortMode.recent.rawValue
+    private var sortMode: DocsSortMode { DocsSortMode(rawValue: sortModeRaw) ?? .recent }
+
     private var docs: [DocRecordDTO] {
         let s = services.docsService
         let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let filtered: [DocRecordDTO]
         if q.isEmpty {
-            return s.allDocs.sorted { $0.updatedAt > $1.updatedAt }
-        }
-        return s.allDocs
-            .filter { d in
+            filtered = s.allDocs
+        } else {
+            filtered = s.allDocs.filter { d in
                 d.title.localizedCaseInsensitiveContains(q)
                     || (d.contentText?.localizedCaseInsensitiveContains(q) ?? false)
             }
-            .sorted { $0.updatedAt > $1.updatedAt }
+        }
+        return filtered.sorted { a, b in
+            switch sortMode {
+            case .recent:
+                return a.updatedAt > b.updatedAt
+            case .alphabetical:
+                let at = (a.title.isEmpty ? "Untitled" : a.title)
+                let bt = (b.title.isEmpty ? "Untitled" : b.title)
+                return at.localizedCaseInsensitiveCompare(bt) == .orderedAscending
+            case .starredFirst:
+                if a.isStarred != b.isStarred { return a.isStarred && !b.isStarred }
+                return a.updatedAt > b.updatedAt
+            }
+        }
     }
 
     var body: some View {
@@ -109,13 +149,14 @@ struct MacDocsAllPane: View {
                 Text("All docs")
                     .font(.system(size: 16, weight: .semibold))
                 Spacer()
+                sortMenu
                 Button(action: onNewDocument) {
                     Label("New document", systemImage: "square.and.pencil")
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
                 .disabled(isCreatingDocument)
-                .help("Create a new page")
+                .help("Create a new page (⌘N)")
                 // Segmented grid/list toggle. Matches the visual language of
                 // `viewModePicker` in MacTasksView — selected option gets a pill
                 // on a recessed track instead of a bare borderless button.
@@ -138,6 +179,32 @@ struct MacDocsAllPane: View {
                 list
             }
         }
+    }
+
+    /// Sort picker — Menu instead of Picker so each item shows its system
+    /// image alongside the label, matching the visual treatment of
+    /// `gridListPicker`. The active mode gets a checkmark in the dropdown.
+    private var sortMenu: some View {
+        Menu {
+            ForEach(DocsSortMode.allCases) { mode in
+                Button {
+                    sortModeRaw = mode.rawValue
+                } label: {
+                    Label(mode.label, systemImage: mode.systemImage)
+                    if mode == sortMode {
+                        Image(systemName: "checkmark")
+                    }
+                }
+            }
+        } label: {
+            Label(sortMode.label, systemImage: sortMode.systemImage)
+                .font(.system(size: 12))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help("Sort documents")
     }
 
     /// Centered loading state for the docs list. Mirrors the `loadingCard`
@@ -328,8 +395,15 @@ struct MacDocsSidebarView: View {
                         selectedDocId = nil
                     } label: {
                         Label("All documents", systemImage: "rectangle.grid.2x2")
+                            .padding(.vertical, 3)
+                            .padding(.horizontal, 6)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(
+                                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                    .fill(selectedDocId == nil ? MacTheme.accent.opacity(0.16) : Color.clear)
+                            )
                     }
-                    .buttonStyle(.borderless)
+                    .buttonStyle(.plain)
 
                     if !services.docsService.starredDocs.isEmpty {
                         Text("Starred")
@@ -391,6 +465,13 @@ struct MacDocsSidebarView: View {
                 Text((d.emoji.map { "\($0) " } ?? "") + d.title)
                 Spacer()
             }
+            .padding(.vertical, 3)
+            .padding(.horizontal, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .fill(selectedDocId == d.id ? MacTheme.accent.opacity(0.16) : Color.clear)
+            )
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
@@ -399,7 +480,13 @@ struct MacDocsSidebarView: View {
         let ch = services.docsService.children(ofParentId: d.id, workspaceId: w.id)
         return AnyView(
             VStack(alignment: .leading, spacing: 2) {
-                DocsOutlineRow(doc: d, depth: depth) { selectedDocId = d.id }
+                DocsOutlineRow(
+                    doc: d,
+                    depth: depth,
+                    isSelected: selectedDocId == d.id
+                ) {
+                    selectedDocId = d.id
+                }
                 ForEach(ch) { c in
                     docOutline(c, w: w, depth: depth + 1)
                 }
@@ -408,11 +495,13 @@ struct MacDocsSidebarView: View {
     }
 }
 
-/// Hoverable outline row mirroring `sidebarRow` — button + plain style + link
-/// pointer + a subtle hover fill so each entry feels clickable.
+/// Hoverable + selectable outline row. Hover gives a subtle fill; selected
+/// gets the accent tint at low opacity so the active doc is unambiguous when
+/// the sidebar stays visible alongside the editor.
 private struct DocsOutlineRow: View {
     let doc: DocRecordDTO
     let depth: Int
+    let isSelected: Bool
     let action: () -> Void
 
     @State private var isHovered = false
@@ -429,7 +518,7 @@ private struct DocsOutlineRow: View {
             .padding(.horizontal, 4)
             .background(
                 RoundedRectangle(cornerRadius: 4, style: .continuous)
-                    .fill(isHovered ? MacTheme.surfaceHover : Color.clear)
+                    .fill(rowFill)
             )
             .contentShape(Rectangle())
         }
@@ -451,5 +540,15 @@ private struct DocsOutlineRow: View {
                 Label("Copy title", systemImage: "doc.on.doc")
             }
         }
+    }
+
+    private var rowFill: Color {
+        if isSelected {
+            return MacTheme.accent.opacity(0.16)
+        }
+        if isHovered {
+            return MacTheme.surfaceHover
+        }
+        return .clear
     }
 }
