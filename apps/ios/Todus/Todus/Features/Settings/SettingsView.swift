@@ -1641,43 +1641,42 @@ struct AIAssistantSettingsView: View {
             }
 
             Section {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Excluded senders and topics")
-                        .font(.system(size: 15, weight: .medium))
+                ZStack(alignment: .topLeading) {
+                    if excludedSenderPatternsText.wrappedValue.isEmpty {
+                        Text("e.g. notifications@, no-reply@, newsletter@")
+                            .font(.system(size: 15))
+                            .foregroundStyle(.tertiary)
+                            .padding(.top, 8)
+                            .padding(.leading, 4)
+                            .allowsHitTesting(false)
+                    }
                     TextEditor(text: excludedSenderPatternsText)
                         .frame(minHeight: 100)
                         .scrollContentBackground(.hidden)
-                        .padding(8)
-                        .background(Color.secondary.opacity(0.08))
-                        .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
-                    Text("One pattern per line. Use this to suppress noisy automation, newsletters, and low-value system mail from the assistant queues.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
                 }
-                .padding(.vertical, 4)
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+                .listRowInsets(EdgeInsets(top: 0, leading: 20, trailing: 20, bottom: 12))
             } header: {
                 Text("Noise filtering")
             } footer: {
-                Text("Examples: notifications@, no-reply@, calendar-notification@")
+                Text("One pattern per line. Suppresses noisy automation, newsletters, and low-value system mail from assistant queues.")
             }
 
             Section {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Location")
-                        .font(.system(size: 15, weight: .medium))
-                    TextField(
-                        "e.g. Oslo, Norway",
-                        text: Binding(
-                            get: { services.location },
-                            set: { services.location = $0 }
-                        )
+                TextField(
+                    "e.g. Oslo, Norway",
+                    text: Binding(
+                        get: { services.location },
+                        set: { services.location = $0 }
                     )
-                    .textFieldStyle(.plain)
-                    .padding(8)
-                    .background(Color.secondary.opacity(0.08))
-                    .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
-                }
-                .padding(.vertical, 4)
+                )
+                .textFieldStyle(.plain)
+                .font(.system(size: 15))
+                .padding(.vertical, 10)
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+                .listRowInsets(EdgeInsets(top: 0, leading: 20, trailing: 20, bottom: 12))
             } header: {
                 Text("Location")
             } footer: {
@@ -1685,9 +1684,15 @@ struct AIAssistantSettingsView: View {
             }
 
             Section {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Context about you")
-                        .font(.system(size: 15, weight: .medium))
+                ZStack(alignment: .topLeading) {
+                    if services.contextAboutYou.isEmpty {
+                        Text("Tell the AI about your role, goals, and working style…")
+                            .font(.system(size: 15))
+                            .foregroundStyle(.tertiary)
+                            .padding(.top, 8)
+                            .padding(.leading, 4)
+                            .allowsHitTesting(false)
+                    }
                     TextEditor(
                         text: Binding(
                             get: { services.contextAboutYou },
@@ -1696,11 +1701,10 @@ struct AIAssistantSettingsView: View {
                     )
                     .frame(minHeight: 120)
                     .scrollContentBackground(.hidden)
-                    .padding(8)
-                    .background(Color.secondary.opacity(0.08))
-                    .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
                 }
-                .padding(.vertical, 4)
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+                .listRowInsets(EdgeInsets(top: 0, leading: 20, trailing: 20, bottom: 12))
             } header: {
                 Text("Context about you")
             } footer: {
@@ -1708,9 +1712,15 @@ struct AIAssistantSettingsView: View {
             }
 
             Section {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Custom instructions")
-                        .font(.system(size: 15, weight: .medium))
+                ZStack(alignment: .topLeading) {
+                    if services.customInstructions.isEmpty {
+                        Text("Instructions the AI follows on every response — e.g. tone, format, topics to avoid…")
+                            .font(.system(size: 15))
+                            .foregroundStyle(.tertiary)
+                            .padding(.top, 8)
+                            .padding(.leading, 4)
+                            .allowsHitTesting(false)
+                    }
                     TextEditor(
                         text: Binding(
                             get: { services.customInstructions },
@@ -1719,11 +1729,10 @@ struct AIAssistantSettingsView: View {
                     )
                     .frame(minHeight: 120)
                     .scrollContentBackground(.hidden)
-                    .padding(8)
-                    .background(Color.secondary.opacity(0.08))
-                    .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
                 }
-                .padding(.vertical, 4)
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+                .listRowInsets(EdgeInsets(top: 0, leading: 20, trailing: 20, bottom: 12))
             } header: {
                 Text("Custom instructions")
             } footer: {
@@ -1929,6 +1938,15 @@ private struct SettingsSyncModifier: ViewModifier {
             }
             .onChange(of: services.threadGroupingEnabled) { _, value in
                 Task { await services.syncSetting("groupByThread", value) }
+            }
+            .onChange(of: services.taskRemindersEnabled) { _, value in
+                Task { await services.syncSetting("taskRemindersEnabled", value) }
+            }
+            .onChange(of: services.calendarRemindersEnabled) { _, value in
+                Task { await services.syncSetting("calendarRemindersEnabled", value) }
+            }
+            .onChange(of: services.aiTonePreference) { _, value in
+                Task { await services.syncSetting("aiTone", value.rawValue) }
             }
     }
 }
