@@ -524,8 +524,16 @@ struct MacAssistantPanel: View {
                     emptyStateView
                 } else {
                     conversationView
+                        .overlay(alignment: .bottom) {
+                            LinearGradient(
+                                colors: [.clear, Color(.windowBackgroundColor).opacity(0.85)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                            .frame(height: 40)
+                            .allowsHitTesting(false)
+                        }
                 }
-                Divider().opacity(0.3)
                 inputSection
 
             case .groupList:
@@ -612,11 +620,6 @@ struct MacAssistantPanel: View {
                 movingConversation = nil
             }
         }
-        // History popover
-        .popover(isPresented: $showsHistory, arrowEdge: .bottom) {
-            historyList
-                .frame(width: 300, height: 380)
-        }
         // Prompt library popover
         .popover(isPresented: $showsPromptLibrary, arrowEdge: .bottom) {
             promptLibraryContent
@@ -684,7 +687,7 @@ struct MacAssistantPanel: View {
     private var headerTitleView: some View {
         switch panelContent {
         case .chat:
-            Text(chatService.chatTitle ?? "AI Assistant")
+            Text(chatService.chatTitle ?? "")
         case .groupList:
             Text("Group Chats")
         case .groupChat:
@@ -729,15 +732,24 @@ struct MacAssistantPanel: View {
         HStack(spacing: 8) {
             if panelContent == .chat {
                 Button { showsHistory.toggle() } label: {
-                    Image(systemName: "clock.arrow.trianglehead.counterclockwise.rotate.90")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.primary.opacity(0.7))
-                        .frame(width: 26, height: 26)
+                    HStack(spacing: 4) {
+                        Image(systemName: "clock.arrow.trianglehead.counterclockwise.rotate.90")
+                            .font(.system(size: 12, weight: .semibold))
+                        Text("History")
+                            .font(.system(size: 12, weight: .medium))
+                    }
+                    .foregroundStyle(.primary.opacity(0.7))
+                    .padding(.horizontal, 6)
+                    .frame(height: 28)
                 }
                 .buttonStyle(.plain)
                 .macClickablePointer()
                 .help("Conversation History")
                 .accessibilityLabel("Conversation History")
+                .popover(isPresented: $showsHistory, arrowEdge: .top) {
+                    historyList
+                        .frame(width: 300, height: 380)
+                }
             } else {
                 Button {
                     withAnimation(MacTheme.Motion.base) { panelContent = .chat }
@@ -786,7 +798,7 @@ struct MacAssistantPanel: View {
                     Image(systemName: "person.2")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(.primary.opacity(0.7))
-                        .frame(width: 26, height: 26)
+                        .frame(width: 28, height: 28)
                 }
                 .buttonStyle(.plain)
                 .macClickablePointer()
@@ -801,7 +813,7 @@ struct MacAssistantPanel: View {
                     Image(systemName: "square.and.pencil")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(.primary.opacity(0.7))
-                        .frame(width: 26, height: 26)
+                        .frame(width: 28, height: 28)
                 }
                 .buttonStyle(.plain)
                 .macClickablePointer()
@@ -854,11 +866,12 @@ struct MacAssistantPanel: View {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.primary.opacity(0.7))
-                    .frame(width: 26, height: 26)
+                    .frame(width: 28, height: 28)
             }
             .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
             .macClickablePointer()
-            .frame(width: 26)
+            .frame(width: 28)
             }
 
             // Layout picker — Floating / Side panel / Separate window
@@ -894,13 +907,14 @@ struct MacAssistantPanel: View {
                 .disabled(displayMode == .full)
             } label: {
                 Image(systemName: displayModeIcon)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.primary.opacity(0.5))
-                    .frame(width: 22, height: 22)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.primary.opacity(0.7))
+                    .frame(width: 28, height: 28)
             }
             .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
             .macClickablePointer()
-            .frame(width: 26)
+            .frame(width: 28)
             .help("Panel Layout")
             .accessibilityLabel("Panel Layout")
 
@@ -909,8 +923,8 @@ struct MacAssistantPanel: View {
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(.tertiary)
-                    .frame(width: 22, height: 22)
+                    .foregroundStyle(.primary.opacity(0.5))
+                    .frame(width: 28, height: 28)
             }
             .buttonStyle(.plain)
             .macClickablePointer()
@@ -1165,6 +1179,7 @@ struct MacAssistantPanel: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .textSelection(.enabled)
     }
 
     // MARK: - Thinking Indicator
@@ -1330,13 +1345,7 @@ struct MacAssistantPanel: View {
             .padding(.bottom, 8)
             .animation(MacTheme.Motion.base, value: chatService.isStreaming)
         }
-        .background(MacTheme.surfaceCard, in: RoundedRectangle(cornerRadius: MacTheme.rowRadius, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: MacTheme.rowRadius, style: .continuous)
-                .stroke(MacTheme.cardBorder, lineWidth: 0.5)
-        )
         .padding(.horizontal, 10)
-        .padding(.vertical, 8)
         .animation(MacTheme.Motion.fast, value: pendingAttachments.count)
     }
 
@@ -2160,7 +2169,10 @@ private struct MacMessageBubble: View {
 
     @ViewBuilder
     private var assistantContent: some View {
-        MarkdownView(content: message.content, fontSize: 13)
+        let displayContent = message.isStreaming
+            ? macStripStreamingUISpec(message.content)
+            : message.content
+        MarkdownView(content: displayContent, fontSize: 13)
             .overlay(alignment: .bottomLeading) {
                 if message.isStreaming { MacBlinkingCursor() }
             }
@@ -2381,6 +2393,16 @@ private struct MacMessageBubble: View {
             }
         }
     }
+}
+
+// MARK: - Streaming helpers
+
+/// Strips an in-progress `\`\`\`ui-spec` fenced block so raw JSON never
+/// flashes through MarkdownView during streaming.
+private func macStripStreamingUISpec(_ raw: String) -> String {
+    guard let range = raw.range(of: "```ui-spec", options: .backwards) else { return raw }
+    return String(raw[raw.startIndex..<range.lowerBound])
+        .trimmingCharacters(in: .whitespacesAndNewlines)
 }
 
 // MARK: - MacReasoningBox (matches iOS ReasoningBox)

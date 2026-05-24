@@ -1314,11 +1314,6 @@ final class AIChatService {
             let dueDate = args.dueDate.flatMap { ISO8601DateFormatter().date(from: $0) }
             captureService.capture(rawComposerText: args.title, overrideDueDate: dueDate, in: modelContext)
             appendMutation(AIChatTaskMutation(action: .create, title: args.title, dueDate: dueDate), to: assistantMessageID)
-            appendToolSource(
-                makeToolSource(callId: call.id, kind: .task, platform: .todus,
-                               title: args.title, subtitle: "Task created", timestamp: dueDate),
-                to: assistantMessageID
-            )
             return encodeToolResult(success: true, message: "Task '\(args.title)' created")
 
         case "update_task":
@@ -1333,12 +1328,6 @@ final class AIChatService {
             }
             applyUpdateTask(taskID: taskID, args: args, modelContext: modelContext)
             appendMutation(AIChatTaskMutation(action: .update, taskID: taskID, title: args.title), to: assistantMessageID)
-            appendToolSource(
-                makeToolSource(callId: call.id, kind: .task, platform: .todus,
-                               title: args.title ?? "Task", subtitle: "Task updated",
-                               entityId: taskID.uuidString),
-                to: assistantMessageID
-            )
             return encodeToolResult(success: true, message: "Task updated")
 
         case "delete_task":
@@ -1369,11 +1358,6 @@ final class AIChatService {
             }
             applyDeleteTask(taskID: taskID, modelContext: modelContext)
             appendMutation(AIChatTaskMutation(action: .delete, taskID: taskID, title: titleForChip), to: assistantMessageID)
-            appendToolSource(
-                makeToolSource(callId: call.id, kind: .task, platform: .todus,
-                               title: titleForChip ?? "Task", subtitle: "Task deleted"),
-                to: assistantMessageID
-            )
             return encodeToolResult(success: true, message: "Task deleted")
 
         case "create_calendar_event":
@@ -1398,11 +1382,6 @@ final class AIChatService {
             do {
                 try await cal.createEvent(title: args.title, startDate: startDate, endDate: endDate)
                 appendMutation(AIChatTaskMutation(action: .create, title: "📅 \(args.title)"), to: assistantMessageID)
-                appendToolSource(
-                    makeToolSource(callId: call.id, kind: .calendarEvent, platform: .appleCalendar,
-                                   title: args.title, subtitle: "Calendar event created", timestamp: startDate),
-                    to: assistantMessageID
-                )
                 return encodeToolResult(success: true, message: "Calendar event '\(args.title)' created")
             } catch {
                 appendToolFailureChip(toolName: call.name, message: "Failed to create event: \(error.localizedDescription)", title: "📅 \(args.title)", to: assistantMessageID)
@@ -1450,12 +1429,6 @@ final class AIChatService {
                     notes: args.notes
                 )
                 appendMutation(AIChatTaskMutation(action: .update, title: "📅 \(args.title ?? "Event")"), to: assistantMessageID)
-                appendToolSource(
-                    makeToolSource(callId: call.id, kind: .calendarEvent, platform: .appleCalendar,
-                                   title: args.title ?? "Event", subtitle: "Calendar event updated",
-                                   timestamp: start, entityId: args.id),
-                    to: assistantMessageID
-                )
                 return encodeToolResult(success: true, message: "Event updated")
             } catch {
                 appendToolFailureChip(toolName: call.name, message: "Failed to update event: \(error.localizedDescription)", title: "📅 \(args.title ?? "Event")", to: assistantMessageID)
@@ -1492,12 +1465,6 @@ final class AIChatService {
             do {
                 try await cal.deleteEvent(identifier: args.id)
                 appendMutation(AIChatTaskMutation(action: .delete, title: "📅 Event removed"), to: assistantMessageID)
-                appendToolSource(
-                    makeToolSource(callId: call.id, kind: .calendarEvent, platform: .appleCalendar,
-                                   title: "Event removed", subtitle: "Calendar event deleted",
-                                   entityId: args.id),
-                    to: assistantMessageID
-                )
                 return encodeToolResult(success: true, message: "Event deleted")
             } catch {
                 appendToolFailureChip(toolName: call.name, message: "Failed to delete event: \(error.localizedDescription)", to: assistantMessageID)
@@ -1544,15 +1511,6 @@ final class AIChatService {
             let sent = await email.sendEmail(draft)
             if sent {
                 appendMutation(AIChatTaskMutation(action: .create, title: "✉️ Sent: \(args.subject)"), to: assistantMessageID)
-                let recipients = args.to.joined(separator: ", ")
-                appendToolSource(
-                    makeToolSource(callId: call.id, kind: .email, platform: .gmail,
-                                   title: args.subject,
-                                   subtitle: recipients.isEmpty ? "Email sent" : "Email sent to \(recipients)",
-                                   timestamp: Date(),
-                                   entityId: args.threadId),
-                    to: assistantMessageID
-                )
                 return encodeToolResult(success: true, message: "Email sent: \(args.subject)")
             } else {
                 appendToolFailureChip(toolName: call.name, message: "Failed to send email", title: "✉️ \(args.subject)", to: assistantMessageID)

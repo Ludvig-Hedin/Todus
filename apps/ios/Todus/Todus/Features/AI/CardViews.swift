@@ -172,12 +172,12 @@ struct CalendarEventCardView: View {
         if let p = parsed {
             Button(action: { onAction?("navigate_event", ["eventId": p.eventId], nil) }) {
                 HStack(alignment: .top, spacing: 8) {
-                    // Color bar
+                    // Color bar — no fixed height so it spans the full row regardless of content
                     RoundedRectangle(cornerRadius: 2)
-                        .fill(Color.primary)
-                        .frame(width: 3, height: 36)
+                        .fill(Color.primary.opacity(0.5))
+                        .frame(width: 3)
 
-                    VStack(alignment: .leading, spacing: 3) {
+                    VStack(alignment: .leading, spacing: 2) {
                         Text(p.title)
                             .font(.subheadline)
                             .fontWeight(.medium)
@@ -218,7 +218,8 @@ struct CalendarEventCardView: View {
                         }
                     }
                 }
-                .padding(8)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -512,7 +513,21 @@ struct CalendarEventListCardView: View {
     private var title: String? { props["title"]?.stringValue }
     private var summary: String? { props["summary"]?.stringValue }
     private var eventDicts: [[String: ChatJSONValue]] {
-        (props["events"]?.arrayValue ?? []).compactMap { $0.objectValue }
+        // Deduplicate by eventId when present, otherwise by title + date prefix.
+        // Prevents same holiday / all-day event from multiple subscribed calendars
+        // showing up multiple times in the list.
+        var seen = Set<String>()
+        return (props["events"]?.arrayValue ?? []).compactMap { $0.objectValue }.filter { dict in
+            let key: String
+            if let eid = dict["eventId"]?.stringValue {
+                key = eid
+            } else {
+                let title = dict["title"]?.stringValue ?? ""
+                let datePrefix = String((dict["start"]?.stringValue ?? "").prefix(10))
+                key = "\(title)|\(datePrefix)"
+            }
+            return seen.insert(key).inserted
+        }
     }
 
     var body: some View {

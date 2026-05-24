@@ -1878,6 +1878,14 @@ private enum ContentPart {
     case eventRef(String)
 }
 
+/// Strips an in-progress `\`\`\`ui-spec` fenced block from streaming content
+/// so raw JSON never flashes through MarkdownView before parsing is complete.
+private func stripStreamingUISpec(_ raw: String) -> String {
+    guard let range = raw.range(of: "```ui-spec", options: .backwards) else { return raw }
+    return String(raw[raw.startIndex..<range.lowerBound])
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+}
+
 private func parseMessageContent(_ content: String) -> [ContentPart] {
     guard #available(iOS 16, *) else { return [.text(content)] }
 
@@ -2172,7 +2180,8 @@ private struct MessageBubble: View {
     /// Mixed-content renderer: text runs with live markdown + [task:UUID] cards + generative UI specs.
     @ViewBuilder
     private var assistantContent: some View {
-        let parts = parseMessageContent(message.content)
+        let rawContent = message.isStreaming ? stripStreamingUISpec(message.content) : message.content
+        let parts = parseMessageContent(rawContent)
         let eventCount = parts.reduce(0) { n, p in
             if case .eventRef = p { return n + 1 }
             return n
