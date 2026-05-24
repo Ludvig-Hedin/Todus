@@ -25,7 +25,7 @@ import {
   PanelLeft,
 } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useRef, useEffect, useState, useCallback, useMemo, type FormEvent, type ClipboardEvent } from 'react';
+import { useRef, useEffect, useState, useCallback, useMemo, memo, type FormEvent, type ClipboardEvent } from 'react';
 import { useActiveConnection } from '@/hooks/use-connections';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useTRPC } from '@/providers/query-provider';
@@ -77,6 +77,52 @@ function extractTextContent(content: unknown): string {
     })
     .join('');
 }
+
+type ChatPart = { type: string; text?: string };
+type ChatMsg = ChatMessage & { experimental_attachments?: { name?: string; url?: string }[] };
+
+const ChatMessageBubble = memo(function ChatMessageBubble({ message }: { message: ChatMsg }) {
+  const textParts = (message.parts as ChatPart[] | undefined)?.filter((p) => p.type === 'text') ?? [];
+  const hasText = textParts.some((p) => p.text?.trim());
+  const userAtt = message.experimental_attachments;
+  if (!hasText && !userAtt?.length) return null;
+  const isUser = message.role === 'user';
+  return (
+    <div className={cn('flex', isUser ? 'justify-end' : 'justify-start')}>
+      <div
+        className={cn(
+          'max-w-[82%] rounded-2xl px-4 py-2.5 text-[13px] leading-relaxed',
+          isUser ? 'bg-primary text-primary-foreground' : 'bg-card text-foreground border',
+        )}
+      >
+        {isUser ? (
+          <>
+            {userAtt && userAtt.length > 0 ? (
+              <p className="text-primary-foreground/80 mb-1 text-[11px] font-medium">
+                {userAtt.map((a) => a.name || 'Attachment').filter(Boolean).join(', ')}
+              </p>
+            ) : null}
+            {textParts.map((part, idx) =>
+              part.text ? (
+                <p key={`${message.id}-user-${idx}-${part.text.slice(0, 24)}`} className="whitespace-pre-wrap">
+                  {part.text}
+                </p>
+              ) : null,
+            )}
+          </>
+        ) : (
+          textParts.map((part, idx) =>
+            part.text ? (
+              <p key={`${message.id}-assistant-${idx}-${part.text.slice(0, 24)}`} className="whitespace-pre-wrap">
+                {part.text}
+              </p>
+            ) : null,
+          )
+        )}
+      </div>
+    </div>
+  );
+});
 
 // Stable UUID generator (crypto.randomUUID fallback)
 function newId() {
@@ -722,70 +768,9 @@ export default function ChatPage() {
           ) : (
             <div className="mx-auto max-w-2xl px-4 py-5">
               <div className="flex flex-col gap-3">
-                {messages.map((message, index) => {
-                  const textParts = message.parts?.filter((p) => p.type === 'text') ?? [];
-                  const hasText = textParts.some(
-                    (p) => 'text' in p && (p as { text: string }).text?.trim(),
-                  );
-                  const userAtt = (
-                    message as { experimental_attachments?: { name?: string; url?: string }[] }
-                  ).experimental_attachments;
-                  if (!hasText && !userAtt?.length) return null;
-
-                  const isUser = message.role === 'user';
-
-                  return (
-                    <div
-                      key={`${message.id}-${index}`}
-                      className={cn('flex', isUser ? 'justify-end' : 'justify-start')}
-                    >
-                      <div
-                        className={cn(
-                          'max-w-[82%] rounded-2xl px-4 py-2.5 text-[13px] leading-relaxed',
-                          isUser
-                            ? 'bg-primary text-primary-foreground'
-                            : 'bg-card text-foreground border',
-                        )}
-                      >
-                        {isUser
-                          ? // User messages: plain text with whitespace-pre-wrap
-                            <>
-                              {userAtt && userAtt.length > 0 ? (
-                                <p className="text-primary-foreground/80 mb-1 text-[11px] font-medium">
-                                  {userAtt
-                                    .map((a) => a.name || 'Attachment')
-                                    .filter(Boolean)
-                                    .join(', ')}
-                                </p>
-                              ) : null}
-                              {textParts.map((part, idx) => {
-                                const text = 'text' in part ? (part as { text: string }).text : '';
-                                return text ? (
-                                  <p
-                                    key={`${message.id}-user-${idx}-${text.slice(0, 24)}`}
-                                    className="whitespace-pre-wrap"
-                                  >
-                                    {text}
-                                  </p>
-                                ) : null;
-                              })}
-                            </>
-                          : // AI messages render as plain text in the current web client.
-                            textParts.map((part, idx) => {
-                              const text = 'text' in part ? (part as { text: string }).text : '';
-                              return text ? (
-                                <p
-                                  key={`${message.id}-assistant-${idx}-${text.slice(0, 24)}`}
-                                  className="whitespace-pre-wrap"
-                                >
-                                  {text}
-                                </p>
-                              ) : null;
-                            })}
-                      </div>
-                    </div>
-                  );
-                })}
+                {messages.map((message, index) => (
+                  <ChatMessageBubble key={`${message.id}-${index}`} message={message as ChatMsg} />
+                ))}
 
                 {/* Typing indicator (animated dots) */}
                 {isLoading && (

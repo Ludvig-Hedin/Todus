@@ -10,7 +10,8 @@ import { activeConnectionProcedure } from '../../trpc';
 import { getPrompt } from '../../../lib/brain';
 import { stripHtml } from 'string-strip-html';
 import { EPrompts } from '../../../types';
-import { resolveModel } from '../../../lib/ai-model-resolver';
+import { resolveAutoModelConfig } from '../../../lib/ai-model-resolver';
+import { routeModel } from '../../../lib/model-router';
 import { env } from '../../../env';
 import { generateText } from 'ai';
 import { z } from 'zod';
@@ -111,9 +112,9 @@ export async function composeEmail(input: ComposeEmailInput) {
         ];
 
   const composeModelId = env.OPENAI_MINI_MODEL || 'gpt-4o-mini';
+  const { provider: composeProvider } = resolveAutoModelConfig(env);
   const { text } = await generateText({
-    // Use centralized model resolver — 'auto' preserves existing env-var cascade
-    model: resolveModel({ provider: 'auto', modelId: '', ollamaBaseUrl: '', env }),
+    model: routeModel('compose', composeProvider, '', '', env),
     messages: [
       {
         role: 'system',
@@ -294,9 +295,9 @@ const generateSubject = async (message: string, styleProfile?: WritingStyleMatri
   );
 
   const subjectModelId = env.OPENAI_MODEL || 'gpt-4o';
+  const { provider: subjectProvider } = resolveAutoModelConfig(env);
   const { text } = await generateText({
-    // Use centralized model resolver — 'auto' preserves existing env-var cascade
-    model: resolveModel({ provider: 'auto', modelId: '', ollamaBaseUrl: '', env }),
+    model: routeModel('title', subjectProvider, '', '', env),
     messages: [
       {
         role: 'system',

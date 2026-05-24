@@ -129,7 +129,7 @@ function resolveAutoModel(env: ZeroEnv): LanguageModel {
   }
 }
 
-function resolveAutoModelConfig(env: ZeroEnv): ResolvedModelConfig {
+export function resolveAutoModelConfig(env: ZeroEnv): ResolvedModelConfig {
   const openRouterApiKey = env.OPENROUTER_API_SECRET ?? env.OPENROUTER_API_KEY;
 
   if (openRouterApiKey) {

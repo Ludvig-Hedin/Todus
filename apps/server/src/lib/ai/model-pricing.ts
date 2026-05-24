@@ -16,6 +16,7 @@ const RATES: Record<string, ModelRate> = {
   'anthropic/claude-3.5-sonnet': { input: 3, output: 15 },
   'anthropic/claude-haiku-4-5': { input: 1, output: 5 },
   'anthropic/claude-3.5-haiku': { input: 0.8, output: 4 },
+  'anthropic/claude-haiku-3-5-20241022': { input: 0.8, output: 4 },
 
   // OpenAI
   'openai/gpt-5': { input: 5, output: 15 },

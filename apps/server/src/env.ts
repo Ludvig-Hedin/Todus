@@ -126,6 +126,10 @@ export type ZeroEnv = {
   RECALL_WEBHOOK_SECRET?: string;
   /** Optional shared secret that enables the temporary admin migration endpoint. */
   ADMIN_RUN_MIGRATIONS_TOKEN?: string;
+  /** Fast (cheap) model overrides for low-complexity tasks (compose, title, summary). */
+  FAST_MODEL_ANTHROPIC?: string;
+  FAST_MODEL_OPENAI?: string;
+  FAST_MODEL_GOOGLE?: string;
 };
 
 export const env = new Proxy(_env as ZeroEnv, {

@@ -20,8 +20,10 @@ import {
 import { type Connection, type ConnectionContext, type WSMessage } from 'agents';
 import { EPrompts, type IOutgoingMessage, type ParsedMessage } from '../types';
 import type { IGetThreadResponse, MailManager } from '../lib/driver/types';
-import { resolveModel, resolveModelId } from '../lib/ai-model-resolver';
+import { resolveModel, resolveModelId, resolveAutoModelConfig } from '../lib/ai-model-resolver';
 import { hasAiCredits, trackAiUsage } from '../lib/billing';
+import { buildChatMessages, toTrimmedCoreMessages } from '../lib/chat-context';
+import { estimateLLMCost, logAIUsage, measureStreamTiming } from '../lib/ai-observability';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { createSimpleAuth, type SimpleAuth } from '../lib/auth';
 import { buildAIProfilePrompt } from '../lib/ai-profile';
@@ -367,11 +369,18 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
             throw new Error('Unauthorized no driver or connectionId [2]');
           }
         }
+
+        // Kick off independent reads concurrently with tool setup.
+        const promptPromise = getPrompt(getPromptName(connectionId, EPrompts.Chat), AiChatPrompt());
+        const profilePromise = this.getSharedAIProfilePrompt(connectionId);
+        const userIdPromise = this.getUserId();
+
+        const [resolvedAuthTools, basePrompt, sharedAIProfilePrompt, billingUserId] =
+          await Promise.all([authTools(connectionId), promptPromise, profilePromise, userIdPromise]);
+
         const tools = {
-          ...(await authTools(connectionId)),
-          buildGmailSearchQuery: buildGmailSearchQuery(() =>
-            this.getSharedAIProfilePrompt(connectionId),
-          ),
+          ...resolvedAuthTools,
+          buildGmailSearchQuery: buildGmailSearchQuery(() => Promise.resolve(sharedAIProfilePrompt)),
         };
         const processedMessages = await processToolCalls(
           {
@@ -385,7 +394,6 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
         // Pre-flight billing check — block when the user has no AI credits
         // left. Cached read (~1ms). Fails open if the lookup itself errors so
         // a billing-cache hiccup never takes chat down.
-        const billingUserId = await this.getUserId();
         if (billingUserId) {
           try {
             const allowed = await hasAiCredits(billingUserId);
@@ -398,6 +406,7 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
           }
         }
 
+        const { provider: effectiveProvider } = resolveAutoModelConfig(env);
         const resolvedModelId = resolveModelId({
           provider: 'auto',
           modelId: '',
@@ -405,21 +414,67 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
           env,
         });
 
+        // For Anthropic, put profile AFTER the cache breakpoint so volatile
+        // date/time doesn't invalidate the cached tool schema block.
+        const systemPrompt =
+          effectiveProvider === 'anthropic'
+            ? basePrompt
+            : sharedAIProfilePrompt
+              ? `${sharedAIProfilePrompt}\n\n${basePrompt}`
+              : basePrompt;
+
+        const coreHistory = toTrimmedCoreMessages(processedMessages as any, 30);
+        const chatMessages = buildChatMessages({
+          provider: effectiveProvider,
+          userMemory: effectiveProvider === 'anthropic' ? sharedAIProfilePrompt : '',
+          history: coreHistory,
+        });
+
+        const timing = measureStreamTiming();
+
         const wrappedOnFinish: StreamTextOnFinishCallback<{}> = async (finishEvent) => {
           try {
             await onFinish(finishEvent);
           } finally {
+            const { ttft, total } = timing.getDurations();
             const usage = finishEvent.usage;
+            const provMeta =
+              (finishEvent as any).providerMetadata ??
+              (finishEvent as any).experimental_providerMetadata;
+            const cacheCreate = provMeta?.anthropic?.cacheCreationInputTokens ?? 0;
+            const cacheRead = provMeta?.anthropic?.cacheReadInputTokens ?? 0;
             if (billingUserId && usage && (usage.promptTokens || usage.completionTokens)) {
               this.ctx.waitUntil(
-                trackAiUsage({
-                  userId: billingUserId,
-                  model: resolvedModelId,
-                  inputTokens: usage.promptTokens ?? 0,
-                  outputTokens: usage.completionTokens ?? 0,
-                }).catch((error) => {
-                  console.error('[ZeroAgent] trackAiUsage failed', error);
-                }),
+                Promise.all([
+                  trackAiUsage({
+                    userId: billingUserId,
+                    model: resolvedModelId,
+                    inputTokens: usage.promptTokens ?? 0,
+                    outputTokens: usage.completionTokens ?? 0,
+                  }),
+                  Promise.resolve(
+                    logAIUsage({
+                      provider: effectiveProvider,
+                      model: resolvedModelId,
+                      requestType: 'chat',
+                      userId: billingUserId,
+                      inputTokens: usage.promptTokens ?? 0,
+                      outputTokens: usage.completionTokens ?? 0,
+                      cacheCreationInputTokens: cacheCreate,
+                      cacheReadInputTokens: cacheRead,
+                      estimatedCostUsd: estimateLLMCost(
+                        resolvedModelId,
+                        usage.promptTokens ?? 0,
+                        usage.completionTokens ?? 0,
+                        cacheCreate,
+                        cacheRead,
+                      ),
+                      timeToFirstTokenMs: ttft,
+                      totalLatencyMs: total,
+                      toolCallCount: finishEvent.toolCalls?.length ?? 0,
+                    }),
+                  ),
+                ]).catch((err) => console.error('[ZeroAgent] tracking failed', err)),
               );
             }
           }
@@ -427,17 +482,12 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
 
         const result = streamText({
           model: resolveModel({ provider: 'auto', modelId: '', ollamaBaseUrl: '', env }),
-          messages: processedMessages,
+          messages: chatMessages,
           tools,
           onFinish: wrappedOnFinish,
-          system: await (async () => {
-            const basePrompt = await getPrompt(
-              getPromptName(connectionId, EPrompts.Chat),
-              AiChatPrompt(),
-            );
-            const sharedAIProfilePrompt = await this.getSharedAIProfilePrompt(connectionId);
-            return sharedAIProfilePrompt ? `${sharedAIProfilePrompt}\n\n${basePrompt}` : basePrompt;
-          })(),
+          onChunk: () => timing.markFirstToken(),
+          system: systemPrompt,
+          ...(options?.abortSignal ? { abortSignal: options.abortSignal } : {}),
         });
 
         result.mergeIntoDataStream(dataStream);
