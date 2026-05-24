@@ -1,20 +1,26 @@
 import SwiftUI
 
-/// Native iOS / iPadOS shell for Docs. Renders workspaces and their nested docs
-/// in a sidebar, tapping a doc pushes `DocEditorView` (which wraps the existing
-/// `DocsBrowserView` so the actual editor stays web-backed for now).
+/// Native iOS / iPadOS shell for Docs. On iPhone we use a `NavigationStack` with
+/// an explicit `NavigationPath` so both tap-to-open AND programmatic create-then-push
+/// work. On iPad we keep `NavigationSplitView` driven by `selection:` so the detail
+/// pane stays in sync.
 ///
-/// iPad: `NavigationSplitView` so the sidebar stays visible alongside the editor.
-/// iPhone: `NavigationStack` with a list that pushes the editor.
+/// Tap doc → push doc.id onto path (iPhone) or set selection (iPad).
+/// `+` button → create on server, then push/select the new id.
 struct DocsListView: View {
     @Environment(AppServices.self) private var services
     @Environment(\.horizontalSizeClass) private var sizeClass
 
+    /// iPhone navigation path. Each entry is a doc id we've pushed.
+    @State private var path = NavigationPath()
+    /// iPad split-view selection. Drives the right-hand detail pane.
     @State private var selectedDocID: String?
+
     @State private var pendingCreate = false
     @State private var renamingDoc: DocRecordDTO?
     @State private var renameText: String = ""
     @State private var errorMessage: String?
+    @State private var searchText: String = ""
 
     var body: some View {
         Group {
@@ -29,10 +35,10 @@ struct DocsListView: View {
                     detail
                 }
             } else {
-                NavigationStack {
+                NavigationStack(path: $path) {
                     sidebar
                         .navigationTitle("Docs")
-                        .navigationBarTitleDisplayMode(.inline)
+                        .navigationBarTitleDisplayMode(.large)
                         .navigationDestination(for: String.self) { id in
                             destination(for: id)
                         }
@@ -68,7 +74,7 @@ struct DocsListView: View {
     @ViewBuilder
     private var sidebar: some View {
         let svc = services.docsService
-        List(selection: $selectedDocID) {
+        List {
             if svc.isLoading && svc.allDocs.isEmpty {
                 ProgressView()
                     .frame(maxWidth: .infinity, alignment: .center)
@@ -86,12 +92,15 @@ struct DocsListView: View {
                 emptyState(message: "No documents yet.", showCreate: true)
                     .listRowBackground(Color.clear)
             } else {
+                allDocsSection
+                starredSection
                 ForEach(svc.workspaces) { workspace in
                     workspaceSection(workspace)
                 }
             }
         }
         .listStyle(.insetGrouped)
+        .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .automatic), prompt: "Search docs")
         .refreshable { await svc.refresh() }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -101,7 +110,7 @@ struct DocsListView: View {
                     if pendingCreate {
                         ProgressView().controlSize(.small)
                     } else {
-                        Image(systemName: "plus")
+                        Image(systemName: "square.and.pencil")
                     }
                 }
                 .disabled(pendingCreate)
@@ -111,37 +120,87 @@ struct DocsListView: View {
         }
     }
 
-    @ViewBuilder
-    private func workspaceSection(_ workspace: DocWorkspaceDTO) -> some View {
+    // MARK: - List sections
+
+    private var filteredDocs: [DocRecordDTO] {
         let svc = services.docsService
-        let roots = svc.rootDocs(forWorkspaceId: workspace.id)
-        Section {
-            if roots.isEmpty {
-                Text("No documents")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            } else {
-                ForEach(roots) { doc in
-                    docRow(doc, in: workspace, depth: 0)
+        let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if q.isEmpty { return svc.allDocs }
+        return svc.allDocs.filter { d in
+            d.title.localizedCaseInsensitiveContains(q)
+                || (d.contentText?.localizedCaseInsensitiveContains(q) ?? false)
+        }
+    }
+
+    @ViewBuilder
+    private var allDocsSection: some View {
+        let svc = services.docsService
+        if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            Section("Results") {
+                let results = filteredDocs.sorted { $0.updatedAt > $1.updatedAt }
+                if results.isEmpty {
+                    Text("No matches")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(results) { doc in
+                        flatDocRow(doc)
+                    }
                 }
             }
-        } header: {
-            HStack(spacing: 6) {
-                if let emoji = workspace.emoji { Text(emoji) }
-                Text(workspace.name)
+        } else if svc.allDocs.count > 1 {
+            Section("Recent") {
+                let recent = Array(svc.allDocs.sorted { $0.updatedAt > $1.updatedAt }.prefix(5))
+                ForEach(recent) { doc in
+                    flatDocRow(doc)
+                }
             }
         }
     }
 
-    /// Recursive row for a doc + any children. Uses iOS leading indentation rather
-    /// than a custom outline view so swipe-to-delete and selection still work.
-    /// `AnyView` is required because `@ViewBuilder` cannot infer an opaque
-    /// return type for a self-recursive helper.
-    private func docRow(_ doc: DocRecordDTO, in workspace: DocWorkspaceDTO, depth: Int) -> AnyView {
+    @ViewBuilder
+    private var starredSection: some View {
         let svc = services.docsService
-        let children = svc.children(ofParentId: doc.id, workspaceId: workspace.id)
+        let starred = svc.starredDocs
+        if !starred.isEmpty && searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            Section("Starred") {
+                ForEach(starred) { doc in
+                    flatDocRow(doc)
+                }
+            }
+        }
+    }
 
-        let row = NavigationLink(value: doc.id) {
+    @ViewBuilder
+    private func workspaceSection(_ workspace: DocWorkspaceDTO) -> some View {
+        if searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let svc = services.docsService
+            let roots = svc.rootDocs(forWorkspaceId: workspace.id)
+            Section {
+                if roots.isEmpty {
+                    Text("No documents")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(roots) { doc in
+                        docRow(doc, in: workspace, depth: 0)
+                    }
+                }
+            } header: {
+                HStack(spacing: 6) {
+                    if let emoji = workspace.emoji { Text(emoji) }
+                    Text(workspace.name)
+                }
+            }
+        }
+    }
+
+    // MARK: - Rows
+
+    private func flatDocRow(_ doc: DocRecordDTO) -> some View {
+        Button {
+            open(docID: doc.id)
+        } label: {
             HStack(spacing: 8) {
                 if doc.isStarred {
                     Image(systemName: "star.fill")
@@ -149,12 +208,23 @@ struct DocsListView: View {
                         .font(.system(size: 12))
                 }
                 if let emoji = doc.emoji { Text(emoji) }
-                Text(doc.title.isEmpty ? "Untitled" : doc.title)
-                    .lineLimit(1)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(doc.title.isEmpty ? "Untitled" : doc.title)
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    if let preview = doc.contentText, !preview.isEmpty {
+                        Text(preview)
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
                 Spacer()
             }
-            .padding(.leading, CGFloat(depth) * 12)
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             Button(role: .destructive) {
                 Task { await delete(doc) }
@@ -171,29 +241,49 @@ struct DocsListView: View {
             }
             .tint(.yellow)
         }
-        .contextMenu {
-            Button {
-                renameText = doc.title
-                renamingDoc = doc
-            } label: {
-                Label("Rename", systemImage: "pencil")
+        .contextMenu { docContextMenu(doc) }
+    }
+
+    private func docRow(_ doc: DocRecordDTO, in workspace: DocWorkspaceDTO, depth: Int) -> AnyView {
+        let svc = services.docsService
+        let children = svc.children(ofParentId: doc.id, workspaceId: workspace.id)
+
+        let row = Button {
+            open(docID: doc.id)
+        } label: {
+            HStack(spacing: 8) {
+                if doc.isStarred {
+                    Image(systemName: "star.fill")
+                        .foregroundStyle(.yellow)
+                        .font(.system(size: 12))
+                }
+                if let emoji = doc.emoji { Text(emoji) }
+                Text(doc.title.isEmpty ? "Untitled" : doc.title)
+                    .font(.system(size: 15))
+                    .lineLimit(1)
+                Spacer()
             }
-            Button {
-                UIPasteboard.general.string = doc.title.isEmpty ? "Untitled" : doc.title
-            } label: {
-                Label("Copy title", systemImage: "doc.on.doc")
-            }
-            Button {
-                Task { await toggleStar(doc) }
-            } label: {
-                Label(doc.isStarred ? "Unstar" : "Star", systemImage: doc.isStarred ? "star.slash" : "star")
-            }
+            .padding(.leading, CGFloat(depth) * 12)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             Button(role: .destructive) {
                 Task { await delete(doc) }
             } label: {
                 Label("Delete", systemImage: "trash")
             }
+            Button {
+                Task { await toggleStar(doc) }
+            } label: {
+                Label(
+                    doc.isStarred ? "Unstar" : "Star",
+                    systemImage: doc.isStarred ? "star.slash" : "star"
+                )
+            }
+            .tint(.yellow)
         }
+        .contextMenu { docContextMenu(doc) }
 
         return AnyView(
             Group {
@@ -203,6 +293,31 @@ struct DocsListView: View {
                 }
             }
         )
+    }
+
+    @ViewBuilder
+    private func docContextMenu(_ doc: DocRecordDTO) -> some View {
+        Button {
+            renameText = doc.title
+            renamingDoc = doc
+        } label: {
+            Label("Rename", systemImage: "pencil")
+        }
+        Button {
+            UIPasteboard.general.string = doc.title.isEmpty ? "Untitled" : doc.title
+        } label: {
+            Label("Copy title", systemImage: "doc.on.doc")
+        }
+        Button {
+            Task { await toggleStar(doc) }
+        } label: {
+            Label(doc.isStarred ? "Unstar" : "Star", systemImage: doc.isStarred ? "star.slash" : "star")
+        }
+        Button(role: .destructive) {
+            Task { await delete(doc) }
+        } label: {
+            Label("Delete", systemImage: "trash")
+        }
     }
 
     @ViewBuilder
@@ -231,7 +346,7 @@ struct DocsListView: View {
         .accessibilityIdentifier("docs.list.emptyState")
     }
 
-    // MARK: - Detail (iPad only — iPhone uses navigation push)
+    // MARK: - Detail (iPad split-view detail)
 
     @ViewBuilder
     private func destination(for id: String) -> some View {
@@ -261,13 +376,22 @@ struct DocsListView: View {
 
     // MARK: - Actions
 
+    /// Opens a doc — pushes onto path on iPhone, sets selection on iPad.
+    private func open(docID: String) {
+        if sizeClass == .regular {
+            selectedDocID = docID
+        } else {
+            path.append(docID)
+        }
+    }
+
     private func createDoc() async {
         guard !pendingCreate else { return }
         pendingCreate = true
         defer { pendingCreate = false }
         do {
             let doc = try await services.docsService.createNewDocument()
-            selectedDocID = doc.id
+            open(docID: doc.id)
         } catch {
             errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }

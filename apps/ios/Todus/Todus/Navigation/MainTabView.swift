@@ -112,7 +112,7 @@ struct MainTabView: View {
                 .tabItem { Label(AppTab.email.title, systemImage: AppTab.email.inactiveIcon()) }
                 .tag(AppTab.email)
 
-            NavigationStack { DocsListView() }
+            DocsListView()
                 .id(docsTabId)
                 .tabItem { Label(AppTab.docs.title, systemImage: AppTab.docs.inactiveIcon()) }
                 .tag(AppTab.docs)
