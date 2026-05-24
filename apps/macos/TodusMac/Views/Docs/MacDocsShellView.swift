@@ -139,7 +139,7 @@ struct MacDocsAllPane: View {
                 let bt = (b.title.isEmpty ? "Untitled" : b.title)
                 return at.localizedCaseInsensitiveCompare(bt) == .orderedAscending
             case .starredFirst:
-                if a.isStarred != b.isStarred { return a.isStarred && !b.isStarred }
+                if a.isStarred != b.isStarred { return a.isStarred }
                 return a.updatedAt > b.updatedAt
             }
         }
@@ -223,21 +223,18 @@ struct MacDocsAllPane: View {
         }
     }
 
-    /// Sort picker — Menu instead of Picker so each item shows its system
-    /// image alongside the label, matching the visual treatment of
-    /// `gridListPicker`. The active mode gets a checkmark in the dropdown.
+    /// Sort picker — `Picker` inside a `Menu` so SwiftUI renders the active
+    /// mode with a checkmark automatically (the previous `Button + sibling
+    /// Image` markup didn't render the checkmark on macOS Menus).
     private var sortMenu: some View {
         Menu {
-            ForEach(DocsSortMode.allCases) { mode in
-                Button {
-                    sortModeRaw = mode.rawValue
-                } label: {
+            Picker("Sort", selection: $sortModeRaw) {
+                ForEach(DocsSortMode.allCases) { mode in
                     Label(mode.label, systemImage: mode.systemImage)
-                    if mode == sortMode {
-                        Image(systemName: "checkmark")
-                    }
+                        .tag(mode.rawValue)
                 }
             }
+            .pickerStyle(.inline)
         } label: {
             Label(sortMode.label, systemImage: sortMode.systemImage)
                 .font(.system(size: 12))
@@ -408,6 +405,7 @@ struct MacDocsAllPane: View {
                     }
                 }
                 .buttonStyle(.plain)
+                .help(d.title.isEmpty ? "Untitled" : d.title)
                 .contextMenu {
                     Button { selectedDocId = d.id } label: {
                         Label("Open", systemImage: "arrow.up.right.square")
@@ -419,6 +417,13 @@ struct MacDocsAllPane: View {
                     Button { toggleStar(d) } label: {
                         Label(d.isStarred ? "Unstar" : "Star", systemImage: d.isStarred ? "star.slash" : "star")
                     }
+                    Button {
+                        let pb = NSPasteboard.general
+                        pb.clearContents()
+                        pb.setString(d.title.isEmpty ? "Untitled" : d.title, forType: .string)
+                    } label: {
+                        Label("Copy title", systemImage: "doc.on.doc")
+                    }
                     Divider()
                     Button(role: .destructive) { deletingDoc = d } label: {
                         Label("Delete", systemImage: "trash")
@@ -426,7 +431,7 @@ struct MacDocsAllPane: View {
                 }
             }
             TableColumn("Updated") { d in
-                Text(d.updatedAt.formatted(date: .abbreviated, time: .omitted))
+                Text(d.updatedAt.formatted(.relative(presentation: .named)))
             }
         }
         .tableStyle(.inset(alternatesRowBackgrounds: true))
@@ -800,7 +805,14 @@ struct MacDocsSidebarView: View {
                 Label("Rename", systemImage: "pencil")
             }
             Button { toggleStar(d) } label: {
-                Label("Unstar", systemImage: "star.slash")
+                Label(d.isStarred ? "Unstar" : "Star", systemImage: d.isStarred ? "star.slash" : "star")
+            }
+            Button {
+                let pb = NSPasteboard.general
+                pb.clearContents()
+                pb.setString(d.title.isEmpty ? "Untitled" : d.title, forType: .string)
+            } label: {
+                Label("Copy title", systemImage: "doc.on.doc")
             }
             Divider()
             Button(role: .destructive) { deletingDoc = d } label: {

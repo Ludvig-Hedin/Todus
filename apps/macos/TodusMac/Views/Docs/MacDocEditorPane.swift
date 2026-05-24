@@ -23,11 +23,11 @@ struct MacDocEditorPane: View {
     @State private var wk: WKWebView?
     @State private var saveTask: Task<Void, Never>?
     @State private var titleSaveTask: Task<Void, Never>?
-    @State private var savedRevertTask: Task<Void, Never>?
     @State private var isSaving = false
     @State private var saveState: SaveState = .idle
     @State private var showInspector = false
     @State private var revertTask: Task<Void, Never>?
+    @FocusState private var titleFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -100,13 +100,19 @@ struct MacDocEditorPane: View {
 
     /// Cancel any in-flight debounced save and fire a final detached save of the
     /// current in-memory state. Detached so it survives the View being torn down.
+    /// Skips when the doc was just deleted — avoids issuing an update for a
+    /// row that no longer exists in `allDocs`.
     private func flushPendingSave(forDocId id: String) {
         saveTask?.cancel()
         titleSaveTask?.cancel()
         guard let snapshotDoc = doc, snapshotDoc.id == id else { return }
+        // If the doc was removed from the service cache (delete just landed),
+        // skip the flush — server would 404, error swallowed, request wasted.
+        if services.docsService.allDocs.first(where: { $0.id == id }) == nil { return }
         let json = lastSavedJSON
         let text = lastText
-        let titleSnapshot = titleDraft
+        let titleSnapshotRaw = titleDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let titleSnapshot = titleSnapshotRaw.isEmpty ? "Untitled" : titleDraft
         let titleChanged = titleSnapshot != snapshotDoc.title
         // Fire-and-forget: do not capture `self` state for the result; tolerate failure.
         let docsService = services.docsService
@@ -149,12 +155,14 @@ struct MacDocEditorPane: View {
                 TextField("Title", text: $titleDraft)
                     .textFieldStyle(.plain)
                     .font(.system(size: 18, weight: .semibold))
+                    .focused($titleFocused)
                     .onSubmit { Task { await saveTitle() } }
                     .onChange(of: titleDraft) { _, _ in
                         // Debounce title autosave so users don't have to press Enter.
+                        // 500ms matches iOS for cross-platform parity.
                         titleSaveTask?.cancel()
                         titleSaveTask = Task { @MainActor in
-                            try? await Task.sleep(nanoseconds: 600_000_000)
+                            try? await Task.sleep(nanoseconds: 500_000_000)
                             guard !Task.isCancelled else { return }
                             await saveTitle()
                         }
@@ -195,15 +203,19 @@ struct MacDocEditorPane: View {
                 Task { await toggleStar() }
             } label: {
                 Image(systemName: (doc?.isStarred ?? false) ? "star.fill" : "star")
+                    .foregroundStyle((doc?.isStarred ?? false) ? .yellow : .secondary)
             }
             .buttonStyle(.borderless)
-            .help("Star")
+            .help((doc?.isStarred ?? false) ? "Unstar" : "Star")
+            .accessibilityLabel((doc?.isStarred ?? false) ? "Unstar" : "Star")
+            .disabled(doc == nil)
             Button { showInspector.toggle() } label: {
                 Image(systemName: "info.circle")
             }
             .buttonStyle(.borderless)
             .help("Document info")
             .accessibilityLabel("Document info")
+            .disabled(doc == nil)
             .popover(isPresented: $showInspector) {
                 docInfoPopover
             }
@@ -332,15 +344,19 @@ struct MacDocEditorPane: View {
     /// `.saving`. Auto-revert to `.idle` after 2s was a confidence regression.
     @MainActor
     private func markSaved() {
-        savedRevertTask?.cancel()
         saveState = .saved
     }
 
     @ViewBuilder
     private var docFormatStrip: some View {
         HStack(spacing: MacTheme.spacing6) {
-            tiptapButton("bold", .bold, help: "Bold", shortcut: "b")
-            tiptapButton("italic", .italic, help: "Italic", shortcut: "i")
+            // Bold / italic shortcuts intentionally NOT bound at the SwiftUI
+            // layer — Tiptap inside the WKWebView already owns Cmd+B / Cmd+I
+            // for its own focused editor. Binding here too would either
+            // double-toggle the format when the WebView has focus or steal
+            // the keystroke while the user is typing in the native title.
+            tiptapButton("bold", .bold, help: "Bold (⌘B)")
+            tiptapButton("italic", .italic, help: "Italic (⌘I)")
             tiptapButton("textformat.size", .heading1, help: "Heading 1")
             tiptapButton("textformat", .heading2, help: "Heading 2")
             tiptapButton("list.bullet", .bulletList, help: "Bulleted list")
@@ -359,13 +375,8 @@ struct MacDocEditorPane: View {
     }
 
     @ViewBuilder
-    private func tiptapButton(
-        _ system: String,
-        _ cmd: TiptapRunCommand,
-        help: String,
-        shortcut: KeyEquivalent? = nil
-    ) -> some View {
-        let button = Button {
+    private func tiptapButton(_ system: String, _ cmd: TiptapRunCommand, help: String) -> some View {
+        Button {
             if let w = wk { tiptapRun(cmd, in: w) }
         } label: {
             Image(systemName: system)
@@ -373,12 +384,7 @@ struct MacDocEditorPane: View {
         .buttonStyle(.borderless)
         .help(help)
         .accessibilityLabel(help)
-
-        if let shortcut {
-            button.keyboardShortcut(shortcut, modifiers: .command)
-        } else {
-            button
-        }
+        .disabled(wk == nil)
     }
 
     private func load() async {
@@ -386,20 +392,39 @@ struct MacDocEditorPane: View {
             doc = d
             titleDraft = d.title
             lastSavedJSON = d.content
+            // Apple-Notes / iOS parity: autofocus the title when the doc was
+            // just created from the + button (empty or "Untitled"). Tiny
+            // delay so the WebView mount + window animation settle first.
+            let trimmed = d.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty || trimmed == "Untitled" {
+                try? await Task.sleep(nanoseconds: 150_000_000)
+                titleFocused = true
+            }
         }
     }
 
     private func saveTitle() async {
         guard let d = doc else { return }
-        if titleDraft == d.title { return }
+        // Normalize empty/whitespace-only titles to "Untitled" so the title
+        // never silently disappears from the list (web + iOS do the same).
+        let trimmed = titleDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let finalTitle = trimmed.isEmpty ? "Untitled" : titleDraft
+        if finalTitle == d.title {
+            // Clear stale .failed badge so Retry doesn't no-op after revert.
+            if case .failed = saveState { saveState = .saved }
+            return
+        }
         saveState = .saving
         isSaving = true
         defer { isSaving = false }
         do {
-            let u = try await services.docsService.updateDoc(DocUpdateInput(id: d.id, title: titleDraft))
+            let u = try await services.docsService.updateDoc(DocUpdateInput(id: d.id, title: finalTitle))
             doc = u
             markSaved()
+        } catch is CancellationError {
+            return
         } catch {
+            if (error as? URLError)?.code == .cancelled { return }
             AppLogger.shared.log("[DocEditor] title save: \(error)")
             saveState = .failed(error.localizedDescription)
         }

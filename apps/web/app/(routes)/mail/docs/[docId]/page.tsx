@@ -120,9 +120,14 @@ export default function DocEditorPage() {
   const saveTitle = useCallback(
     (newTitle: string) => {
       if (!docId) return;
+      // Normalize empty/whitespace-only titles to "Untitled" so the title
+      // never silently disappears on other platforms (iOS does the same in
+      // its native shell). Matches the backend default for new docs.
+      const trimmed = newTitle.trim();
+      const finalTitle = trimmed.length === 0 ? 'Untitled' : newTitle;
       const serverTitle = (doc as { title?: string } | undefined)?.title ?? '';
-      if (newTitle !== serverTitle) {
-        updateDoc.mutate({ id: docId, title: newTitle });
+      if (finalTitle !== serverTitle) {
+        updateDoc.mutate({ id: docId, title: finalTitle });
       }
     },
     [docId, doc, updateDoc],
@@ -220,8 +225,10 @@ export default function DocEditorPage() {
             />
           </div>
 
-          {/* Divider between title and body */}
-          <div className="mx-12 mb-2 mt-4 h-px bg-border/50" />
+          {/* Divider between title and body. Tagged data-doc-page-title so
+              native iOS / macOS shells hide it together with the title row
+              — otherwise the orphan rule would float above the editor body. */}
+          <div data-doc-page-title className="mx-12 mb-2 mt-4 h-px bg-border/50" />
 
           {/* Rich text editor */}
           <div className="px-12 pb-16">

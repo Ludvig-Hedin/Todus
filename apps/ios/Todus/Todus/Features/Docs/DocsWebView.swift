@@ -82,6 +82,10 @@ struct DocsBrowserViewRepresentable: UIViewRepresentable {
                 // them. Selectors target the data attributes added to the
                 // web page; if they're not present (older deploys, future
                 // template changes), this is a harmless no-op.
+                //
+                // Dedupe so SPA back/forward navigations don't accumulate
+                // <style> nodes in document.head over a long session.
+                if (document.querySelector('style[data-todus-native-chrome]')) return;
                 var s = document.createElement('style');
                 s.setAttribute('data-todus-native-chrome', '1');
                 s.textContent = [

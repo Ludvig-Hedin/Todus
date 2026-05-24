@@ -24,7 +24,6 @@ struct DocEditorView: View {
     @State private var isStarred: Bool
     @State private var saveState: SaveState = .idle
     @State private var saveTask: Task<Void, Never>?
-    @State private var savedRevertTask: Task<Void, Never>?
     @State private var autofocusTask: Task<Void, Never>?
     @State private var showShare = false
     @State private var showInfo = false
@@ -82,6 +81,7 @@ struct DocEditorView: View {
                 .font(.system(size: 18, weight: .semibold))
                 .focused($titleFocused)
                 .submitLabel(.done)
+                .textInputAutocapitalization(.sentences)
                 .onSubmit {
                     titleFocused = false
                     Task { await saveTitleNow() }
@@ -144,7 +144,7 @@ struct DocEditorView: View {
                 Task { await toggleStar() }
             } label: {
                 Image(systemName: isStarred ? "star.fill" : "star")
-                    .foregroundStyle(isStarred ? .yellow : .accentColor)
+                    .foregroundStyle(isStarred ? .yellow : .secondary)
             }
             .accessibilityLabel(isStarred ? "Unstar" : "Star")
         }
@@ -156,13 +156,10 @@ struct DocEditorView: View {
                     Label("Document info", systemImage: "info.circle")
                 }
                 Button {
-                    // Only present the share sheet when we can actually build a
-                    // URL — otherwise the user gets an empty modal.
-                    if shareURL != nil { showShare = true }
+                    showShare = true
                 } label: {
                     Label("Share link", systemImage: "square.and.arrow.up")
                 }
-                .disabled(shareURL == nil)
                 Button {
                     UIPasteboard.general.string = titleDraft.isEmpty ? "Untitled" : titleDraft
                 } label: {
@@ -207,15 +204,23 @@ struct DocEditorView: View {
 
     private func saveTitleNow() async {
         let trimmed = titleDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Skip when nothing changed vs last persisted value.
-        if trimmed == lastSavedTitle { return }
-        saveState = .saving
         let finalTitle = trimmed.isEmpty ? "Untitled" : trimmed
+        // Skip when nothing changed vs last persisted value — and clear any
+        // stale .failed badge so Retry doesn't no-op after the user reverts.
+        if finalTitle == lastSavedTitle {
+            if case .failed = saveState { saveState = .saved }
+            return
+        }
+        saveState = .saving
         do {
             _ = try await services.docsService.renameDoc(id: doc.id, title: finalTitle)
             lastSavedTitle = finalTitle
             markSaved()
+        } catch is CancellationError {
+            // Debounce cancellation is normal — don't flash 'Save failed'.
+            return
         } catch {
+            if (error as? URLError)?.code == .cancelled { return }
             AppLogger.shared.log("[DocEditor] title save: \(error)")
             saveState = .failed(error.localizedDescription)
         }
@@ -226,7 +231,6 @@ struct DocEditorView: View {
     /// that would otherwise fire on a torn-down @State.
     private func flushPendingSave() {
         saveTask?.cancel()
-        savedRevertTask?.cancel()
         autofocusTask?.cancel()
         let trimmed = titleDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed == lastSavedTitle { return }
@@ -243,7 +247,6 @@ struct DocEditorView: View {
     /// whether their work was actually safe.
     @MainActor
     private func markSaved() {
-        savedRevertTask?.cancel()
         saveState = .saved
     }
 

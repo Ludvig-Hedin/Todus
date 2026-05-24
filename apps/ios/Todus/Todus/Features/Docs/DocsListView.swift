@@ -28,12 +28,12 @@ struct DocsListView: View {
     var body: some View {
         Group {
             if sizeClass == .regular {
+                // iPad: `selectedDocID` drives the detail pane directly; no
+                // push happens on the sidebar column, so the
+                // `navigationDestination` modifier is intentionally absent.
                 NavigationSplitView {
                     sidebar
                         .navigationTitle("Docs")
-                        .navigationDestination(for: String.self) { id in
-                            destination(for: id)
-                        }
                 } detail: {
                     detail
                 }
@@ -67,6 +67,12 @@ struct DocsListView: View {
             set: { if !$0 { renamingDoc = nil; renameText = "" } }
         )) {
             TextField("Title", text: $renameText)
+                .submitLabel(.done)
+                .onSubmit {
+                    if !renameText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        commitRename()
+                    }
+                }
             Button("Save") { commitRename() }
                 .disabled(renameText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             Button("Cancel", role: .cancel) {
@@ -362,7 +368,9 @@ struct DocsListView: View {
             Label(doc.isStarred ? "Unstar" : "Star", systemImage: doc.isStarred ? "star.slash" : "star")
         }
         Button(role: .destructive) {
-            Task { await delete(doc) }
+            // Route through the same confirmation dialog as swipe-delete.
+            // Long-press → Delete is just as fat-fingerable as a swipe.
+            deletingDoc = doc
         } label: {
             Label("Delete", systemImage: "trash")
         }
@@ -429,14 +437,22 @@ struct DocsListView: View {
     // MARK: - Actions
 
     /// Opens a doc — pushes onto path on iPhone, sets selection on iPad.
-    /// Triggers a soft impact so users feel the navigation land.
+    /// Triggers a soft impact only when the open actually navigates somewhere
+    /// (skip re-tap on the already-selected iPad row).
     private func open(docID: String) {
+        let willChange: Bool
         if sizeClass == .regular {
+            willChange = selectedDocID != docID
             selectedDocID = docID
         } else {
+            // iPhone always pushes a fresh editor view — even if the user taps
+            // the same doc twice from different sections, push counts.
+            willChange = true
             path.append(docID)
         }
-        UIImpactFeedbackGenerator(style: .soft).impactOccurred()
+        if willChange {
+            UIImpactFeedbackGenerator(style: .soft).impactOccurred()
+        }
     }
 
     private func createDoc() async {
