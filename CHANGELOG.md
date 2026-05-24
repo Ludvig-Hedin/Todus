@@ -1,5 +1,12 @@
 # Project Changelog
 
+## [Unreleased]
+
+### Added
+- macOS DMG build script (`scripts/build-mac-dmg.sh`) — archives, signs, packages, and uploads to Cloudflare R2 with pre-flight safety checks
+- `apps/macos/ExportOptions.plist` for Xcode Development-signed archive export
+- `/downloads` page updated: Mac download button now serves DMG from Cloudflare R2 with internal tester guidance
+
 ## [2026-05-24] Docs review round 3 — context-menu safety, sort menu rendering, macOS title autofocus
 
 Follow-up round (3rd review pass — review-current-implementation, ux-polish, ux-assesment, bug-hunt).

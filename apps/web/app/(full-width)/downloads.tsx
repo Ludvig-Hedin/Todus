@@ -9,6 +9,10 @@ const AppleIcon = Apple as any;
 const ArrowLeftIcon = ArrowLeft as any;
 const GlobeIcon = Globe as any;
 
+// TODO: Replace REPLACE_WITH_HASH with the actual hash from:
+// `cd apps/server && npx wrangler r2 bucket dev-url get todus-releases`
+const MAC_DMG_URL = 'https://pub-REPLACE_WITH_HASH.r2.dev/mac/Todus-1.0.dmg';
+
 export const meta: MetaFunction = () => {
   return [
     { title: 'Download Todus — Mac, iPhone, and Web' },
@@ -58,18 +62,23 @@ export default function DownloadsPage() {
         <section className="mx-auto grid w-full max-w-6xl grid-cols-1 gap-4 px-4 pb-24 md:grid-cols-3">
           <DownloadCard
             title="Desktop App"
-            description="The full Todus experience on macOS."
+            description="The full Todus experience on macOS 15+."
           >
-            <Button
-              asChild
-              variant="outline"
-              className="w-full h-10 gap-2 border-gray-200 bg-white text-gray-900 hover:bg-gray-50 dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/10"
-            >
-              <a href="https://github.com/Ludvig-Hedin/Todus/releases" target="_blank" rel="noreferrer">
-                <AppleIcon className="h-4 w-4" />
-                Download for Mac
-              </a>
-            </Button>
+            <div className="flex flex-col gap-3">
+              <Button
+                asChild
+                variant="outline"
+                className="w-full h-10 gap-2 border-gray-200 bg-white text-gray-900 hover:bg-gray-50 dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/10"
+              >
+                <a href={MAC_DMG_URL} download="Todus.dmg">
+                  <AppleIcon className="h-4 w-4" />
+                  Download for Mac
+                </a>
+              </Button>
+              <p className="text-xs text-gray-500 dark:text-white/40">
+                First launch: right-click → Open to bypass the security warning.
+              </p>
+            </div>
           </DownloadCard>
 
           <DownloadCard
