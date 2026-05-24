@@ -30,8 +30,6 @@ struct EmailThreadView: View {
     @State private var isStarred = false
     @State private var assistantThread: AssistantThreadContext? = nil
     @State private var isLoadingAssistant = true
-    /// Separate from `isLoadingAssistant` so retrying from the failure UI keeps the error
-    /// state visible with an inline spinner rather than swapping back to the skeleton loader.
     @State private var isRetryingAssistant = false
     @State private var assistantDraftSeed: String? = nil
     @State private var showDeleteConfirmation = false
@@ -640,29 +638,6 @@ struct EmailThreadView: View {
                         .foregroundStyle(AppTheme.mutedText)
                         .lineLimit(2)
                 }
-            } else if assistantLoadFailed {
-                Button {
-                    Task {
-                        isRetryingAssistant = true
-                        defer { isRetryingAssistant = false }
-                        await refreshAssistant()
-                    }
-                } label: {
-                    HStack(spacing: 6) {
-                        if isRetryingAssistant {
-                            ButtonInlineProgressView(tint: AppTheme.mutedText, side: AppTheme.Metrics.compactInlineSpinner)
-                        } else {
-                            Image(systemName: "arrow.clockwise")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(AppTheme.mutedText)
-                        }
-                        Text(isRetryingAssistant ? "Retrying summary…" : "Summary unavailable — retry")
-                            .font(.system(size: 13))
-                            .foregroundStyle(AppTheme.mutedText)
-                    }
-                }
-                .buttonStyle(.plain)
-                .disabled(isRetryingAssistant)
             } else {
                 // Truly empty conversational thread — offer an explicit
                 // summarize CTA so AI feels reachable rather than absent.
@@ -1103,26 +1078,6 @@ struct EmailThreadView: View {
                     composeMode = .forward
                     showCompose = true
                 } label: { Label("Forward", systemImage: "arrowshape.turn.up.right") }
-            }
-
-            Section {
-                Button {
-                    topBarActionTick &+= 1
-                    Task {
-                        let success = await emailService.archiveThreads(ids: [threadId])
-                        if success { dismiss() }
-                        else { actionErrorMessage = emailService.errorMessage ?? "Could not archive. Please try again." }
-                    }
-                } label: { Label("Archive", systemImage: "archivebox") }
-
-                Button {
-                    topBarActionTick &+= 1
-                    Task {
-                        let success = await emailService.markAsUnread(ids: [threadId])
-                        if success { dismiss() }
-                        else { actionErrorMessage = emailService.errorMessage ?? "Could not mark as unread. Please try again." }
-                    }
-                } label: { Label("Mark as Unread", systemImage: "envelope.badge") }
             }
 
             Section {
@@ -1720,9 +1675,6 @@ private struct MessageRow: View {
                                 .lineLimit(1)
                         } else {
                             // "To: names" row — tap to toggle details card.
-                            // Sibling dark/light toggle on the trailing edge so
-                            // power users can flip a single message between
-                            // light-card and dark-invert render.
                             Button {
                                 withAnimation(.easeInOut(duration: 0.15)) { showDetails.toggle() }
                             } label: {
