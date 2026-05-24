@@ -1,5 +1,107 @@
 # Project Changelog
 
+## [2026-05-24] Docs feature overhaul — iOS bug fixes + Apple-Notes / Google-Docs polish (iOS + macOS)
+
+**iOS bug fixes (critical, unblocks users):**
+- Fix: tapping a doc row on iPhone now opens the editor. Root cause was `List(selection:)` on a `NavigationStack` swallowing taps before `NavigationLink` could push (selection is iPad-only). iPhone now uses `NavigationStack(path:)` with explicit `NavigationPath`; rows are buttons that push via `path.append(id)` (iPhone) or set `selectedDocID` (iPad).
+- Fix: `+` button on iPhone now creates **and** opens the new doc. Previously it only mutated `selectedDocID`, which iPhone's stack does not observe — the doc was created on the server but the user stayed on the list.
+- `MainTabView` no longer wraps `DocsListView` in an outer `NavigationStack` (the list owns its own nav via size-class branch; double-stacking was silently swallowing pushes).
+
+**iOS polish (Apple-Notes feel):**
+- Native title `TextField` with debounced (500ms) autosave + save indicator (idle / saving / saved / failed-with-retry). Mirrors `MacDocEditorPane` shell pattern.
+- Title autofocuses on newly-created docs (empty / "Untitled") so the user can start typing immediately.
+- `.searchable()` filters by title + `contentText`. Workspace sections hide during active search; flat "Results" section appears instead.
+- New "Recent" (top 5 by `updatedAt`) and "Starred" sections in the list.
+- Flat row variant shows a one-line content preview.
+- Doc info sheet (created / updated / ID) + share link + copy title in `…` menu.
+- Title save debounce now snapshots `titleDraft` at schedule time so a teardown-time flush can't race against the scheduled task.
+
+**macOS polish (Google-Docs feel):**
+- Persistent sidebar — sidebar is always visible in an `HSplitView`; right pane swaps between `MacDocsAllPane` (no doc selected) and `MacDocEditorPane` (doc selected). Previously the sidebar disappeared during edit.
+- `Cmd+N` creates and opens a new doc from anywhere in the docs view (hidden `Button` + `.keyboardShortcut`).
+- Sidebar entries (workspace outline rows, starred rows, "All documents") get a `MacTheme.accent.opacity(0.16)` fill when their target matches `selectedDocId`.
+- New sort menu (Most recent / Alphabetical / Starred first) in the All-docs header, persisted via `@AppStorage`.
+- Richer doc cards: 15pt semibold title with inline emoji, 12pt secondary preview (falls back to "Empty document"), 10pt muted relative timestamp, top-right yellow star, hover scale (1.01) via `Motion.fast`, selected accent border (1.5px).
+- Skeleton loading state: 6 redacted cards in the same grid layout instead of a bare spinner.
+- "New document" / "No documents yet" copy aligned with iOS (was "New page" / "No pages yet").
+
+**Cross-platform consistency:**
+- Title autosave debounce aligned to 500ms iOS↔macOS.
+- One canonical term: "New document" everywhere (was mixed with "New page").
+- Empty-state copy unified.
+
+**Architecture notes:**
+- iOS editor body still uses the `DocsBrowserView` WKWebView (loads `/mail/docs/<id>` from the web app). Bundling the Tiptap editor into iOS for offline parity is a deferred follow-up project documented in the spec.
+- Web page's title row is hidden via injected CSS in `DocsWebView` so it doesn't duplicate the native iOS title. Selectors are forward-looking — harmless no-op if the web template doesn't expose them yet.
+- Five pre-existing docs bugs (force unwraps in `MacDocEditorPane` AI revert, `WKNavigationDelegate` weak-self gaps, leaked `Task.sleep` timers, silent flush errors, Personal-workspace auto-create races) flagged in `CODE_REVIEW_BACKLOG.md` for follow-up.
+
+**Files touched:**
+- `apps/ios/Todus/Todus/Features/Docs/DocsListView.swift` (rewrite)
+- `apps/ios/Todus/Todus/Features/Docs/DocEditorView.swift` (rewrite)
+- `apps/ios/Todus/Todus/Features/Docs/DocsWebView.swift` (CSS injection)
+- `apps/ios/Todus/Todus/Navigation/MainTabView.swift` (drop outer NavigationStack)
+- `apps/macos/TodusMac/Views/Docs/MacDocsShellView.swift` (layout refactor + sidebar selected state + sort menu + DocCardView + skeleton)
+- `apps/ios/Todus/Todus/Features/Settings/SettingsView.swift` (pre-existing EdgeInsets + type-checker fixes to unblock build verification)
+- `CODE_REVIEW_BACKLOG.md` (5 follow-up entries)
+- `TASK.md`
+- Specs / plans: `docs/superpowers/specs/2026-05-24-docs-feature-overhaul-design.md`, `docs/superpowers/plans/2026-05-24-docs-feature-overhaul.md`
+
+---
+
+## [2026-05-24] Settings cross-platform parity audit — macOS visual polish + AI sheet, web notifications fix, multi-platform sync
+
+Full Settings gap analysis and implementation across macOS, iOS, and web.
+
+**Backend schema** (`apps/server/src/lib/schemas.ts`):
+- Added `aiTone: z.enum(['professional','casual','concise'])` — was `@AppStorage`-only on iOS/macOS, now synced
+- Added `taskRemindersEnabled: z.boolean()` and `calendarRemindersEnabled: z.boolean()` — same, now synced
+
+**macOS Settings** (`MacTheme.swift`, `MacSettingsView.swift`, new `MacAISettingsView.swift`):
+- Spacing tokens: `settingsRowVerticalPadding` 11→13, `settingsSectionSpacing` 28→32, new `settingsSubgroupSpacing = 16`
+- Avatar: 36pt → 44pt (matches iOS baseline)
+- Account card: "Delete account" removed from top card → moved to new **Danger Zone** section at bottom (matches iOS pattern)
+- AI Assistant section: 30-item monolithic wall replaced by a single nav row → opens in a dedicated `MacAISettingsView` sheet with proper sub-grouping (Permissions / Personalization / Mail Assistant with 7 sub-groups / Model)
+- Connected Services: refactored from legacy single-Gmail row → dynamic multi-account list via `connectionsService.connections` + "Add Gmail account" row
+- Active Sessions: row padding 8→10, header font 10.5→11, value font 11.5→12, "This device" accent badge
+- Notifications: `taskRemindersEnabled` / `calendarRemindersEnabled` now sync to backend via `syncSetting`
+- `aiTone` now syncs to backend via `syncSetting`
+
+**iOS Settings** (`SettingsView.swift`):
+- `SettingsSyncModifier` extended: `taskRemindersEnabled`, `calendarRemindersEnabled`, `aiTonePreference` now call `syncSetting` on change
+
+**Web** (`settings/notifications/page.tsx`, `settings/ai/page.tsx`):
+- Notifications page fully rewritten: broken preview-only form (with nonexistent backend fields) replaced with working `taskRemindersEnabled` / `calendarRemindersEnabled` toggles wired to `trpc.settings.save`
+- AI page: Response Tone `SelectRow` (Professional / Casual / Concise) added to Personalization section, wired to new `aiTone` backend key
+
+## [2026-05-24] Design system alignment pass — accent canonicalization, motion + spacing tokens, macOS contrast fixes, screenshot infra
+
+Cross-platform alignment pass closing 6 tracked gaps in `DESIGN_SYSTEM_INCONSISTENCIES.md`. iOS adopted as canonical reference (visually cleanest per user direction). Five parallel slices:
+
+- **Accent palette canonicalized to muted "refined editorial" values.** iOS shipped TWO different accent systems (legacy `accentColor(for:)` function with muted hex `#3873d9`, and the new `AppTheme.Accents` enum with vibrant `#407AFF`). Legacy function deleted; `AppTheme.Accents` updated to canonical muted RGB: blue(0.22,0.45,0.85) indigo(0.35,0.32,0.78) teal(0.18,0.52,0.55) green(0.25,0.55,0.32) orange(0.78,0.48,0.18) rose(0.72,0.28,0.35). Single source of truth. macOS dark-mode brightening normalized to consistent ~7-8% across all 6 colors (was inconsistent 6-17%). Web `ACCENT_COLORS` already at canonical hex.
+- **macOS pill contrast + motion easing fix.** Segmented selected pill dark `white: 0.22 → 0.30` — lifts visibly above track (`0.15`) instead of barely separating. `Motion.fast` switched from `.easeOut` to `.snappy(0.15)` and `Motion.slow` from `.snappy` to `.spring(0.35, 0.85)` so motion feel matches iOS. Added missing `sheetBackground` (light 0.978 / dark 0.135) and `surfaceSecondary` (light 0.96 / dark 0.205) tokens — were referenced by intent across mac code but had no canonical token.
+- **Web motion duration alignment.** `--motion-duration-base: 220ms → 250ms` and `--motion-duration-slow: 320ms → 350ms` to match iOS `Motion.base` / `slow`. `fast: 150ms` already matched.
+- **Web spacing tokens (4 / 8 grid)** — `apps/web/app/globals.css`. New `--space-xs / sm / md / lg / xl / 2xl` (4 / 8 / 12 / 16 / 24 / 32 px) on `:root`, exposed via Tailwind v4 `@theme inline` as `--spacing-*` so `p-md`, `gap-xl`, `mt-2xl` work. Mirrors iOS `Spacing` / macOS `MacTheme.spacing*` scale. Plus semantic surface aliases `--surface-primary / -secondary / -sheet` alongside shadcn's `--card / --accent / --popover` for cross-platform naming clarity. Light-mode parity audit complete — web `:root` runs ~2% lighter than iOS canonical with intentional cool tint from shadcn lineage; documented and accepted in `DESIGN_SYSTEM_INCONSISTENCIES.md`.
+- **Screenshot regression infrastructure for DS viewers** — `scripts/parity/capture-web-playwright.mjs` (new, headless Playwright via the existing `packages/testing` install — no new dep added), `capture-macos-electron.mjs` rewritten for the native `TodusMac` SwiftUI shell (the old Electron path was dead), manifest extended with 7 DS slugs + `macos` platform, `--surface` / `--platform` / `--allow-missing` filters on `check-screenshots.mjs`. Capture commands: `pnpm parity:screenshots:capture:{web,ios,macos:auto} -- --surface design-system`. Three blockers documented (web auth tokens not in CI, iOS deep-link router missing `/settings/*`, macOS DS sidebar not deep-linkable) — infra ready, baselines deferred until those land. No pixel diff yet (presence-only check); `pixelmatch`/`odiff` is the natural next step.
+
+Also resolved in this pass (not visually impactful but tracked):
+- **Naming aliases on web** — `--surface-primary` etc. give cross-platform readers a shared vocab without breaking shadcn names.
+- **Web outline button parity** — `outline` variant dropped opaque `bg-background` for `bg-transparent` so it reads correctly over card surfaces, matching iOS / macOS.
+
+**Two new tracked followups** (not blocking this pass):
+- iOS still has dual accent stores (`@AppStorage("ios_accent_color")` synced to backend + `services.accentPreference` local-only). Both render canonical palette now but don't cross-update. Recommend consolidating around the backend-synced path.
+- iOS typography not centralized like macOS — `.font(.system(...))` literals scatter across views. macOS centralizes via `cardTitleFont` / `metaFont` etc. Worth porting.
+
+Validation: `xcodebuild` succeeded on both Todus (iOS) and TodusMac (macOS); `oxlint --deny-warnings` clean on touched web files; `tsc --noEmit` introduced zero new errors. iOS build has pre-existing errors in `AppServices.swift:940-956` (parallel session work on `syncSetting` / `OneFieldInput` — unrelated to this pass).
+
+## [2026-05-24] Web design system — Liquid Glass button + manifest-driven DS viewer
+
+Closes two yellow gaps in `DESIGN_SYSTEM_INCONSISTENCIES.md`:
+
+- **`Button variant="glass"`** (`apps/web/components/ui/button.tsx`) — sister of iOS `LiquidGlassButtonStyle`. Backdrop-blur + saturation, hairline white border (10% in dark, 20% in light), layered shadow, press = scale 0.97 + brightness lift. Default radius uses `--radius-md` (14px) so corners match iOS `Radius.control`. Transitions use the existing `--motion-duration-fast` + `--motion-easing-standard` tokens.
+- **Outline button is transparent again.** `outline` variant dropped `bg-background` → `bg-transparent` so it stops reading as a filled chip on top of card surfaces. Hover still tints with `bg-accent`. Matches iOS / macOS outline buttons.
+- **DS viewer is manifest-driven.** New `_components-manifest.tsx` exports a typed `COMPONENT_MANIFEST` (name, category, file, variants/render, optional notes). The viewer maps over it grouped by category (buttons / forms / layout / feedback / overlays / navigation). Each entry shows its source file path; a dashed callout at the bottom points the next contributor at the manifest. Glass button renders over a soft gradient stage so the backdrop-blur is visible.
+- **Validation** — `npx oxlint --deny-warnings` clean on the three touched files; `npx tsc --noEmit` introduced zero new errors (the pre-existing 25 errors live in unrelated files: editor, mail composer, settings forms).
+
 ## [2026-05-21] macOS build gate fixes for Home and Settings
 
 - **Home dashboard compile fix** — Kept `HoverableRow` nested inside `MacHomeView` and restored the correct enclosing brace placement after the helper, fixing the Swift syntax error that stopped the macOS build.

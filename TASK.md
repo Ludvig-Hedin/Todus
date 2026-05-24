@@ -1,6 +1,46 @@
 # Migration Backlog
 
-Last updated: 2026-05-20
+Last updated: 2026-05-24
+
+## ✅ 2026-05-24 — Docs feature overhaul (iOS + macOS)
+
+- iOS: fixed tap-doesn't-open + create-doesn't-navigate bugs on iPhone (`NavigationStack(path:)` + remove conflicting outer NavigationStack in `MainTabView`).
+- iOS: native title TextField + autosave + save indicator + autofocus on new docs; search + Recent + Starred sections in list; info sheet, share, copy title.
+- macOS: persistent sidebar (HSplitView never collapses), right pane swaps list↔editor; Cmd+N; sidebar selected state; sort menu (Most recent / Alphabetical / Starred first) persisted; richer doc cards with hover/selected states; skeleton loading.
+- Cross-platform: unified "New document" copy, aligned autosave debounce to 500ms.
+- Pre-existing bug-fixes to unblock build verification: SettingsView EdgeInsets arg order + 11-chain type-checker timeout split with AnyView.
+- Bug hunt + inconsistency hunter ran. 5 pre-existing docs bugs logged to `CODE_REVIEW_BACKLOG.md`.
+- Spec: `docs/superpowers/specs/2026-05-24-docs-feature-overhaul-design.md`
+- Plan: `docs/superpowers/plans/2026-05-24-docs-feature-overhaul.md`
+- **Deferred (follow-up project):** bundling the Tiptap editor into iOS for offline/native parity with macOS.
+
+## Task 16 — Design System screenshot regression suite (2026-05-24) — IN PROGRESS (infra DONE)
+
+Scope: cross-platform screenshot baselines for the gated Design System viewers (web `/settings/design-system`, iOS `Settings → Developer → Design System`, macOS `Settings → Developer → Design System` sheet).
+
+### Done in this pass
+- Extended `parity_screenshots/manifest.json` (v2): added 7 DesignSystem* slugs with `surface: "design-system"` + `gated: true`. Added `macos` to the declared platforms so `check-screenshots.mjs` enforces macOS baselines for non-DS screens too (was previously silently uncovered).
+- `scripts/parity/check-screenshots.mjs`: added `--surface`, `--platform`, `--allow-missing` flags so CI / contributors can scope checks (`pnpm parity:screenshots:check -- --surface design-system`).
+- `scripts/parity/capture-ios-deeplink.mjs`: added `--surface` filter and support for manifest-supplied `iosDeepLink` overrides. **The DesignSystem* slugs are explicitly skipped by this script** because the iOS app has no `/settings/*` deep-link handler today (see `apps/ios/Todus/Todus/App/TodosApp.swift` `.onOpenURL` — only `auth-callback`, `link-callback`, `share`, `mailto` are routed). The script now exits a clear failure rather than capturing whatever the simulator happens to be showing. Use the interactive capture flow for DS slugs.
+- `scripts/parity/capture-ios-interactive.mjs`: added `--surface` filter so the operator can scope an interactive run to DS only.
+- `scripts/parity/capture-macos-electron.mjs`: rewritten end-to-end. The Electron wrapper was retired; the script now builds + launches `apps/macos/TodusMac` via `xcodebuild`, then captures the frontmost window via `screencapture -l <windowId>` (AppleScript resolves the window id). New `--surface`, `--interactive`, `--skip-build` flags. Filename kept for backwards-compat of the `pnpm parity:screenshots:capture:macos:auto` script entry; header docstring explains the rename.
+- `scripts/parity/capture-web-playwright.mjs` (new): headless Playwright capture using the install vendored at `packages/testing` (no new dep). Injects Better-Auth cookies from `PLAYWRIGHT_SESSION_TOKEN` / `PLAYWRIGHT_SESSION_DATA` (same pattern as `packages/testing/e2e/auth.setup.ts`). Detects redirects for gated screens and refuses to overwrite the baseline with the redirect target. Full-page screenshot is the default for `surface: design-system` (the DS page scrolls past one viewport). Wired into `pnpm parity:screenshots:capture:web`.
+- `scripts/README.md`: added a `Parity Screenshots` section covering all commands + a dedicated `Design System Visual Regression` subsection (capture, check, on-intentional-change workflow, known limitations).
+
+### Manual / blocked
+- **Allowlisted account required for all three platforms.** The DS viewers are gated by `TodusDeveloperAccess.isAllowlisted` (Swift) / `isAllowlisted` (web). There is no fake-account mock yet, so:
+  - **Web**: capture needs `PLAYWRIGHT_SESSION_TOKEN` / `PLAYWRIGHT_SESSION_DATA` env vars from a live signed-in session.
+  - **iOS**: the simulator must already have an allowlisted account signed in (the auth path through Apple/Google deep-link is real network; can't be mocked in-process from a capture script).
+  - **macOS**: same — the native app needs to be signed in.
+- **macOS sidebar section-by-section is interactive.** The DS sheet uses a SwiftUI `selection` binding with no AppleScript hook to set it programmatically. Operator runs `pnpm parity:screenshots:capture:macos:auto -- --surface design-system --interactive` and clicks each tab between captures.
+- **iOS auto path is blocked by missing deep-link router.** The `--auto` script skips DS slugs cleanly; until `TodosApp.swift` `.onOpenURL` learns to route `todus://settings/<name>` we have to use `pnpm parity:screenshots:capture:ios -- --surface design-system` (interactive). Quickest unblock is ~30 LOC in `TodosApp.swift` to set `services.navigateTo = .settings` + a pending settings route enum.
+- **No automated pixel-diff yet.** `check-screenshots.mjs` is presence-only. Suggested next step: wire `pixelmatch` or `odiff` for visual regression on the DS slugs specifically (low-risk because that surface is read-only by design — content shouldn't change unless tokens move).
+- **CI integration not added.** `.github/workflows/ci.yml` is `oxlint`-only today. Recommended (deferred to user): add a job that runs `pnpm parity:screenshots:check -- --surface design-system` on PRs touching `apps/web/app/globals.css`, `apps/ios/Todus/Todus/DesignSystem/AppTheme.swift`, `apps/macos/TodusMac/DesignSystem/MacTheme.swift`, or the three DS viewer files. Optional: capture web baselines in CI if we add a CI-only allowlisted seed user.
+
+### To do next
+- Generate the 21 baseline PNGs (`DesignSystem*__{web,ios,macos}.png`) on a local machine with an allowlisted account and commit them.
+- Decide whether to drop the section-specific iOS slugs (collapsed to full form) or keep them as redundant pointers.
+- If we want automated diff: add `pixelmatch` to `packages/testing` and wire a `parity:screenshots:diff` script that runs after `:check`.
 
 ## iOS Ship-Readiness Pass (2026-05-20) — DONE
 
