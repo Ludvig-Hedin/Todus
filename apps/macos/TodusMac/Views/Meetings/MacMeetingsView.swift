@@ -361,7 +361,7 @@ struct MacMeetingRowView: View {
                     HStack(spacing: 4) {
                         Text(relativeTime(meeting.startsAt))
                         Text("·")
-                        Text(meeting.startsAt.formatted(.dateTime.hour(.twoDigits).minute(.twoDigits)))
+                        Text(meeting.startsAt.formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits)))
                     }
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)

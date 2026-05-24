@@ -96,6 +96,7 @@ final class MeetingsService {
     var isLoading = false
     var isSyncing = false
     var loadError: String? = nil
+    var lastSyncedAt: Date? = nil
     private var currentStatusFilter: String? = nil
     private var currentSearchQuery: String? = nil
 
@@ -146,6 +147,7 @@ final class MeetingsService {
         do {
             let _: SyncResponse = try await apiClient.trpcMutation("meet.syncFromCalendar")
             await loadMeetings(status: currentStatusFilter, search: currentSearchQuery)
+            lastSyncedAt = Date()
         } catch {
             logger.error("Failed to sync from calendar: \(String(describing: error), privacy: .public)")
         }
