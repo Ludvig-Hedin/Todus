@@ -139,14 +139,14 @@ struct CreateSheet: View {
         }
         .sheet(isPresented: $isShowingDatePicker) {
             datePickerSheet(isEndDate: false)
-                .presentationDetents([.height(420)])
+                .presentationDetents([.height(520)])
                 .presentationDragIndicator(.visible)
                 .appSheetBackground()
                 .preferredColorScheme(services.appearancePreference.colorScheme)
         }
         .sheet(isPresented: $isShowingEndDatePicker) {
             datePickerSheet(isEndDate: true)
-                .presentationDetents([.height(420)])
+                .presentationDetents([.height(520)])
                 .presentationDragIndicator(.visible)
                 .appSheetBackground()
                 .preferredColorScheme(services.appearancePreference.colorScheme)
@@ -328,9 +328,9 @@ struct CreateSheet: View {
                 onPasteImage: handlePastedImage
             )
             .frame(maxHeight: 120)
-            .padding(.top, (pendingAttachments.isEmpty && selectedType != .email) ? 14 : 10)
+            .padding(.top, (pendingAttachments.isEmpty && selectedType != .email) ? 12 : 8)
             .padding(.bottom, 2)
-            .padding(.horizontal, 14)
+            .padding(.horizontal, 16)
             .onChange(of: text) { _, value in
                 handleTextChange(value)
             }
@@ -582,10 +582,10 @@ struct CreateSheet: View {
                     isShowingDatePicker = true
                 } label: {
                     HStack(spacing: 4) {
-                        Image(systemName: selectedDate == nil ? "clock" : "clock.fill")
+                        Image(systemName: selectedDate == nil ? "calendar" : "calendar.badge.clock")
                             .font(.system(size: 13, weight: .semibold))
                         if let date = selectedDate {
-                            Text(selectedType == .event ? "Starts \(dateLabel(for: date))" : dateLabel(for: date))
+                            Text(compactDateLabel(for: date))
                                 .font(.system(size: 12, weight: .semibold))
                                 .lineLimit(1)
                         }
@@ -611,14 +611,14 @@ struct CreateSheet: View {
                     isShowingEndDatePicker = true
                 } label: {
                     HStack(spacing: 4) {
-                        Image(systemName: selectedEndDate == nil ? "clock.badge.checkmark" : "clock.badge.checkmark.fill")
+                        Image(systemName: selectedEndDate == nil ? "flag" : "flag.fill")
                             .font(.system(size: 13, weight: .semibold))
                         if let end = selectedEndDate {
-                            Text("Ends \(dateLabel(for: end))")
+                            Text(compactDateLabel(for: end))
                                 .font(.system(size: 12, weight: .semibold))
                                 .lineLimit(1)
                         } else {
-                            Text("End time")
+                            Text("End")
                                 .font(.system(size: 12, weight: .semibold))
                         }
                     }
@@ -655,9 +655,9 @@ struct CreateSheet: View {
             .opacity(sendDisabled ? 0.4 : 1)
             .animation(.easeOut(duration: 0.12), value: sendDisabled)
         }
-        .padding(.horizontal, 6)
-        .padding(.top, 2)
-        .padding(.bottom, 6)
+        .padding(.horizontal, 8)
+        .padding(.top, 4)
+        .padding(.bottom, 8)
     }
 
     // MARK: - Type Selector Pill
@@ -896,28 +896,20 @@ struct CreateSheet: View {
         isSimpleCaptureFocus ? 0.68 : 1
     }
 
-    private var isSimpleCaptureFocus: Bool {
-        selectedType == .auto &&
-        text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-        pendingAttachments.isEmpty &&
-        selectedFolder == nil &&
-        selectedDate == nil
-    }
+    private var isSimpleCaptureFocus: Bool { false }
 
-    // Auto mode stays intentionally clean — just text + send. Folder/date
-    // metadata only belongs to explicit task/event intents.
     private var showsFolderPicker: Bool {
-        selectedType == .task || selectedType == .event
+        selectedType == .task || selectedType == .event || selectedType == .auto
     }
 
     private var showsDatePicker: Bool {
-        selectedType == .task || selectedType == .event
+        selectedType == .task || selectedType == .event || selectedType == .auto
     }
 
     // MARK: - Actions
 
     private func close() {
-        withAnimation(.spring(response: 0.28, dampingFraction: 0.88)) {
+        withAnimation(.spring(response: 0.25, dampingFraction: 0.95)) {
             isPresented = false
         }
     }
@@ -993,6 +985,9 @@ struct CreateSheet: View {
                 let eventStart = selectedDate ?? parsed?.dueDate
                 let eventTitle = selectedType == .auto ? (parsed?.title ?? input) : input
                 await createEvent(eventTitle, startDate: eventStart, attachments: attachments)
+                // createEvent may set eventSaveFallbackPrompt on failure (permission denied or
+                // EventKit error). If it did, keep the sheet open so the alert can render.
+                if eventSaveFallbackPrompt != nil { return }
             case .email:
                 services.composeEmailSeedBody = input.isEmpty ? nil : input
                 services.composeEmailSeedTo = recipientText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -1082,6 +1077,13 @@ struct CreateSheet: View {
 
     private func dateLabel(for date: Date) -> String {
         date.formatted(.dateTime.month(.abbreviated).day().hour().minute())
+    }
+
+    private func compactDateLabel(for date: Date) -> String {
+        if Calendar.current.isDateInToday(date) {
+            return date.formatted(.dateTime.hour().minute())
+        }
+        return date.formatted(.dateTime.month(.abbreviated).day().hour().minute())
     }
 
     // MARK: - Slash Command Handling

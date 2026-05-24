@@ -60,6 +60,22 @@ enum AppAppearancePreference: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+private struct _DynamicCodingKeys: CodingKey {
+    var stringValue: String
+    var intValue: Int? { nil }
+    init?(stringValue: String) { self.stringValue = stringValue }
+    init?(intValue: Int) { return nil }
+}
+
+private struct _OneFieldInput<V: Encodable>: Encodable {
+    let key: String
+    let value: V
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: _DynamicCodingKeys.self)
+        try container.encode(value, forKey: _DynamicCodingKeys(stringValue: key)!)
+    }
+}
+
 @MainActor
 @Observable
 final class AppServices {
@@ -905,7 +921,7 @@ final class AppServices {
                 selectedViewMode = mode
             }
             if let value = response.settings.groupByThread {
-                defaults.set(value, forKey: "threadGroupingEnabled")
+                threadGroupingEnabled = value
             }
             lastSharedProfileLoadAt = now
         } catch {
@@ -937,23 +953,9 @@ final class AppServices {
     func syncSetting<T: Encodable>(_ key: String, _ value: T) async {
         guard authService.isAuthenticated else { return }
         do {
-            struct OneFieldInput<V: Encodable>: Encodable {
-                let key: String
-                let value: V
-                func encode(to encoder: Encoder) throws {
-                    var container = encoder.container(keyedBy: DynamicCodingKeys.self)
-                    try container.encode(value, forKey: DynamicCodingKeys(stringValue: key)!)
-                }
-            }
-            struct DynamicCodingKeys: CodingKey {
-                var stringValue: String
-                var intValue: Int? { nil }
-                init?(stringValue: String) { self.stringValue = stringValue }
-                init?(intValue: Int) { return nil }
-            }
             let _: SharedAIProfileSaveResponse = try await apiClient.trpcMutation(
                 "settings.save",
-                input: OneFieldInput(key: key, value: value)
+                input: _OneFieldInput(key: key, value: value)
             )
         } catch {
             print("[AppServices] Failed to sync setting \(key): \(error)")

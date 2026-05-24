@@ -106,34 +106,7 @@ struct SettingsView: View {
                 }
         }
         .presentationDragIndicator(.visible)
-        // Sync AI permission toggles to the backend so iOS / macOS / web stay aligned.
-        .onChange(of: aiCanReadTasks) { _, value in
-            Task { await services.syncSetting("aiCanReadTasks", value) }
-        }
-        .onChange(of: aiCanWriteTasks) { _, value in
-            Task { await services.syncSetting("aiCanWriteTasks", value) }
-        }
-        .onChange(of: aiCanReadCalendar) { _, value in
-            Task { await services.syncSetting("aiCanReadCalendar", value) }
-        }
-        .onChange(of: aiCanWriteCalendar) { _, value in
-            Task { await services.syncSetting("aiCanWriteCalendar", value) }
-        }
-        .onChange(of: aiCanReadEmail) { _, value in
-            Task { await services.syncSetting("aiCanReadEmail", value) }
-        }
-        .onChange(of: aiCanSendEmail) { _, value in
-            Task { await services.syncSetting("aiCanSendEmail", value) }
-        }
-        .onChange(of: accentColorKey) { _, value in
-            Task { await services.syncSetting("accentColor", value) }
-        }
-        .onChange(of: services.preferredStartViewMode) { _, value in
-            Task { await services.syncSetting("defaultTaskView", value.rawValue) }
-        }
-        .onChange(of: threadGroupingEnabled) { _, value in
-            Task { await services.syncSetting("groupByThread", value) }
-        }
+        .modifier(SettingsSyncModifier(services: services))
         .task {
             // Refresh profile data (name, avatar) when settings opens
             await services.authService.fetchUserProfile()
@@ -213,7 +186,7 @@ struct SettingsView: View {
         // Inline error if the user typed something other than DELETE.
         .alert(
             "Confirmation didn't match",
-            isPresented: Binding(
+            isPresented: Binding<Bool>(
                 get: { deleteConfirmError != nil },
                 set: { if !$0 { deleteConfirmError = nil } }
             ),
@@ -783,7 +756,7 @@ struct SettingsView: View {
                         } label: {
                             ZStack {
                                 Circle()
-                                    .fill(AppTheme.accentColor(for: key))
+                                    .fill(AccentPreference(rawValue: key)?.color ?? AppTheme.Accents.blue)
                                     .frame(width: 22, height: 22)
                                 if accentColorKey == key {
                                     Image(systemName: "checkmark")
@@ -1912,5 +1885,50 @@ struct AppearanceSettingsView: View {
         case .light:  return "Always light interface"
         case .dark:   return "Always dark interface"
         }
+    }
+}
+
+// Extracted into a ViewModifier to keep the SettingsView body modifier chain short
+// enough for Swift's type-checker (compiler times out with >~25 chained modifiers).
+private struct SettingsSyncModifier: ViewModifier {
+    let services: AppServices
+
+    @AppStorage("ai_can_read_tasks")    private var aiCanReadTasks: Bool = true
+    @AppStorage("ai_can_write_tasks")   private var aiCanWriteTasks: Bool = true
+    @AppStorage("ai_can_read_calendar") private var aiCanReadCalendar: Bool = true
+    @AppStorage("ai_can_write_calendar") private var aiCanWriteCalendar: Bool = true
+    @AppStorage("ai_can_read_email")    private var aiCanReadEmail: Bool = true
+    @AppStorage("ai_can_send_email")    private var aiCanSendEmail: Bool = true
+    @AppStorage("ios_accent_color")     private var accentColorKey: String = "blue"
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: aiCanReadTasks) { _, value in
+                Task { await services.syncSetting("aiCanReadTasks", value) }
+            }
+            .onChange(of: aiCanWriteTasks) { _, value in
+                Task { await services.syncSetting("aiCanWriteTasks", value) }
+            }
+            .onChange(of: aiCanReadCalendar) { _, value in
+                Task { await services.syncSetting("aiCanReadCalendar", value) }
+            }
+            .onChange(of: aiCanWriteCalendar) { _, value in
+                Task { await services.syncSetting("aiCanWriteCalendar", value) }
+            }
+            .onChange(of: aiCanReadEmail) { _, value in
+                Task { await services.syncSetting("aiCanReadEmail", value) }
+            }
+            .onChange(of: aiCanSendEmail) { _, value in
+                Task { await services.syncSetting("aiCanSendEmail", value) }
+            }
+            .onChange(of: accentColorKey) { _, value in
+                Task { await services.syncSetting("accentColor", value) }
+            }
+            .onChange(of: services.preferredStartViewMode) { _, value in
+                Task { await services.syncSetting("defaultTaskView", value.rawValue) }
+            }
+            .onChange(of: services.threadGroupingEnabled) { _, value in
+                Task { await services.syncSetting("groupByThread", value) }
+            }
     }
 }
