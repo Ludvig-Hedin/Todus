@@ -84,6 +84,10 @@ struct MacMeetingDetailView: View {
                     Text("Meeting not found")
                         .font(.system(size: 13))
                         .foregroundStyle(.secondary)
+                    Button("Retry") {
+                        Task { await loadMeeting(showLoading: true) }
+                    }
+                    .controlSize(.small)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -138,7 +142,7 @@ struct MacMeetingDetailView: View {
                                 Image(systemName: "mic")
                                     .font(.system(size: 11))
                             }
-                            Text("Record Meeting")
+                            Text("Auto-record")
                                 .font(.system(size: 11, weight: .medium))
                         }
                         .padding(.horizontal, 10)
@@ -406,7 +410,7 @@ struct MacMeetingDetailView: View {
                 }
                 .buttonStyle(.plain)
                 .macClickablePointer()
-                .disabled(qaInput.trimmingCharacters(in: .whitespaces).isEmpty || isAskingQuestion)
+                .disabled(qaInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isAskingQuestion)
             }
         }
         .padding(14)
@@ -484,7 +488,7 @@ struct MacMeetingDetailView: View {
     }
 
     private func askQuestion() async {
-        let q = qaInput.trimmingCharacters(in: .whitespaces)
+        let q = qaInput.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else { return }
         qaInput = ""
         qaMessages.append(QAChatMessage(role: "user", content: q))

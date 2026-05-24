@@ -113,7 +113,20 @@ struct MeetingDetailView: View {
                         .padding(16)
                     }
                 } else {
-                    ContentUnavailableView("Meeting not found", systemImage: "exclamationmark.triangle")
+                    VStack(spacing: 12) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(.system(size: 32))
+                            .foregroundStyle(.tertiary)
+                        Text("Meeting not found")
+                            .font(.headline)
+                            .foregroundStyle(.secondary)
+                        Button("Retry") {
+                            Task { await loadMeeting(showLoading: true) }
+                        }
+                        .buttonStyle(AppPrimaryButtonStyle())
+                        .controlSize(.small)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
         }
@@ -154,7 +167,7 @@ struct MeetingDetailView: View {
                     if isSchedulingBot {
                         ButtonInlineProgressView(tint: .primary, side: AppTheme.Metrics.toolbarInlineSpinner)
                     } else {
-                        Label("Record Meeting", systemImage: "mic")
+                        Label("Auto-record", systemImage: "mic")
                             .font(.subheadline.weight(.medium))
                     }
                 }
@@ -169,6 +182,10 @@ struct MeetingDetailView: View {
         let over = Self.isMeetingOver(startsAt: meeting.startsAt, endsAt: meeting.endsAt)
         let displayStatus = (meeting.status == "scheduled" && over) ? "past" : meeting.status
         return VStack(alignment: .leading, spacing: 8) {
+            Text(meeting.title)
+                .font(.title3.weight(.semibold))
+                .fixedSize(horizontal: false, vertical: true)
+
             HStack {
                 Text(statusLabel(displayStatus))
                     .font(.caption)
@@ -256,14 +273,19 @@ struct MeetingDetailView: View {
     }
 
     private func processingView(_ status: String) -> some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 8) {
             ProgressView()
             Text(status == "recording" ? "Recording in progress..." : "Processing recording...")
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(.secondary)
+            Text("The recap will be available once processing completes.")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 40)
+        .padding(.horizontal, 16)
         .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
     }
 
@@ -351,7 +373,7 @@ struct MeetingDetailView: View {
                 Spacer()
 
                 if segments.count > 15 {
-                    Button(showFullTranscript ? "Show less" : "Show all") {
+                    Button(showFullTranscript ? "Show less" : "Show all (\(segments.count))") {
                         withAnimation { showFullTranscript.toggle() }
                     }
                     .font(.caption)
@@ -423,7 +445,7 @@ struct MeetingDetailView: View {
             }
 
             HStack(spacing: 8) {
-                TextField("Ask a question...", text: $qaInput)
+                TextField("What were the key decisions?", text: $qaInput)
                     .textFieldStyle(.roundedBorder)
                     .font(.subheadline)
                     .onSubmit { Task { await askQuestion() } }
@@ -434,7 +456,7 @@ struct MeetingDetailView: View {
                     Image(systemName: "arrow.up.circle.fill")
                         .font(.title2)
                 }
-                .disabled(qaInput.trimmingCharacters(in: .whitespaces).isEmpty || isAskingQuestion)
+                .disabled(qaInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isAskingQuestion)
                 .accessibilityLabel("Send question")
             }
         }
@@ -471,7 +493,7 @@ struct MeetingDetailView: View {
     }
 
     private func askQuestion() async {
-        let q = qaInput.trimmingCharacters(in: .whitespaces)
+        let q = qaInput.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else { return }
         qaInput = ""
         qaMessages.append((role: "user", content: q))

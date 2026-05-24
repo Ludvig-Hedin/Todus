@@ -95,6 +95,12 @@ struct MacMeetingsView: View {
 
                 Spacer()
 
+                if let synced = services.meetingsService.lastSyncedAt, !services.meetingsService.isSyncing {
+                    Text(syncedAgoText(synced))
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                }
+
                 Button {
                     scheduleSyncTimeout()
                     Task { await services.meetingsService.syncFromCalendar() }
@@ -204,7 +210,7 @@ struct MacMeetingsView: View {
                     Text("No meetings")
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(.secondary)
-                    Text("Sync your calendar to import meetings. They'll be recorded automatically when possible.")
+                    Text("Sync your calendar to import meetings. Enable auto-record in settings to capture them automatically.")
                         .font(.system(size: 11))
                         .foregroundStyle(.tertiary)
                 }
@@ -352,9 +358,13 @@ struct MacMeetingRowView: View {
                         .foregroundStyle(.primary)
                         .lineLimit(1)
 
-                    Text(meeting.startsAt.formatted(date: .abbreviated, time: .shortened))
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
+                    HStack(spacing: 4) {
+                        Text(relativeTime(meeting.startsAt))
+                        Text("·")
+                        Text(meeting.startsAt.formatted(.dateTime.hour(.twoDigits).minute(.twoDigits)))
+                    }
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
                 }
 
                 Spacer()
@@ -417,4 +427,29 @@ struct MacMeetingRowView: View {
         default: .secondary
         }
     }
+
+    private func relativeTime(_ date: Date) -> String {
+        let cal = Calendar.current
+        let now = Date()
+        if cal.isDateInToday(date) { return "Today" }
+        if cal.isDateInYesterday(date) { return "Yesterday" }
+        if cal.isDateInTomorrow(date) { return "Tomorrow" }
+        let days = cal.dateComponents([.day], from: cal.startOfDay(for: now), to: cal.startOfDay(for: date)).day ?? 0
+        if days > 0 {
+            return days < 7 ? "In \(days)d" : "In \(days / 7)w"
+        } else {
+            let past = abs(days)
+            if past < 7 { return "\(past)d ago" }
+            if past < 30 { return "\(past / 7)w ago" }
+            return "\(past / 30)mo ago"
+        }
+    }
+}
+
+private func syncedAgoText(_ date: Date) -> String {
+    let diff = Date().timeIntervalSince(date)
+    if diff < 60 { return "Synced just now" }
+    if diff < 3600 { return "Synced \(Int(diff / 60))m ago" }
+    if diff < 86400 { return "Synced \(Int(diff / 3600))h ago" }
+    return "Synced \(date.formatted(.dateTime.month(.abbreviated).day()))"
 }

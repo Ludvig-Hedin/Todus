@@ -99,6 +99,19 @@ struct MeetingsListView: View {
                         }
                     }
                 }
+                if let synced = services.meetingsService.lastSyncedAt {
+                    Section {
+                        HStack {
+                            Spacer()
+                            Label(syncedAgoText(synced), systemImage: "arrow.clockwise")
+                                .font(.caption2)
+                                .foregroundStyle(.quaternary)
+                            Spacer()
+                        }
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                    }
+                }
             }
             .listStyle(.insetGrouped)
             .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y } action: { old, new in
@@ -136,7 +149,7 @@ struct MeetingsListView: View {
             Text("No meetings")
                 .font(.headline)
 
-            Text("Sync your Google Calendar to import meetings. They'll be recorded automatically.")
+            Text("Sync your Google Calendar to import meetings. Enable auto-record in settings to capture them automatically.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -217,9 +230,13 @@ struct MeetingRowView: View {
                     .font(.system(size: 15, weight: .medium))
                     .lineLimit(1)
 
-                Text(meeting.startsAt.formatted(date: .abbreviated, time: .shortened))
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 4) {
+                    Text(relativeTime(meeting.startsAt))
+                    Text("·")
+                    Text(meeting.startsAt.formatted(.dateTime.hour().minute()))
+                }
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
             }
 
             Spacer()
@@ -277,4 +294,29 @@ struct MeetingRowView: View {
         default: .secondary
         }
     }
+
+    private func relativeTime(_ date: Date) -> String {
+        let cal = Calendar.current
+        let now = Date()
+        if cal.isDateInToday(date) { return "Today" }
+        if cal.isDateInYesterday(date) { return "Yesterday" }
+        if cal.isDateInTomorrow(date) { return "Tomorrow" }
+        let days = cal.dateComponents([.day], from: cal.startOfDay(for: now), to: cal.startOfDay(for: date)).day ?? 0
+        if days > 0 {
+            return days < 7 ? "In \(days)d" : "In \(days / 7)w"
+        } else {
+            let past = abs(days)
+            if past < 7 { return "\(past)d ago" }
+            if past < 30 { return "\(past / 7)w ago" }
+            return "\(past / 30)mo ago"
+        }
+    }
+}
+
+private func syncedAgoText(_ date: Date) -> String {
+    let diff = Date().timeIntervalSince(date)
+    if diff < 60 { return "Synced just now" }
+    if diff < 3600 { return "Synced \(Int(diff / 60))m ago" }
+    if diff < 86400 { return "Synced \(Int(diff / 3600))h ago" }
+    return "Synced \(date.formatted(.dateTime.month(.abbreviated).day()))"
 }
