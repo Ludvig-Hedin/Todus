@@ -327,28 +327,25 @@ struct MacDocEditorPane: View {
         lastText.count
     }
 
-    /// Sets `.saved` and schedules a revert to `.idle` after 2s. Cancellable.
+    /// Sets `.saved` and leaves it visible — Google Docs / Apple Notes both
+    /// keep the trust signal persistent until the next edit clears it via
+    /// `.saving`. Auto-revert to `.idle` after 2s was a confidence regression.
     @MainActor
     private func markSaved() {
         savedRevertTask?.cancel()
         saveState = .saved
-        savedRevertTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
-            guard !Task.isCancelled else { return }
-            if case .saved = saveState { saveState = .idle }
-        }
     }
 
     @ViewBuilder
     private var docFormatStrip: some View {
         HStack(spacing: MacTheme.spacing6) {
-            tiptapButton("bold", .bold)
-            tiptapButton("italic", .italic)
-            tiptapButton("textformat.size", .heading1)
-            tiptapButton("textformat", .heading2)
-            tiptapButton("list.bullet", .bulletList)
-            tiptapButton("list.number", .orderedList)
-            tiptapButton("checklist", .taskList)
+            tiptapButton("bold", .bold, help: "Bold", shortcut: "b")
+            tiptapButton("italic", .italic, help: "Italic", shortcut: "i")
+            tiptapButton("textformat.size", .heading1, help: "Heading 1")
+            tiptapButton("textformat", .heading2, help: "Heading 2")
+            tiptapButton("list.bullet", .bulletList, help: "Bulleted list")
+            tiptapButton("list.number", .orderedList, help: "Numbered list")
+            tiptapButton("checklist", .taskList, help: "Task list")
         }
         .padding(MacTheme.spacing8)
         .background(MacTheme.surfaceCard)
@@ -362,13 +359,26 @@ struct MacDocEditorPane: View {
     }
 
     @ViewBuilder
-    private func tiptapButton(_ system: String, _ cmd: TiptapRunCommand) -> some View {
-        Button {
+    private func tiptapButton(
+        _ system: String,
+        _ cmd: TiptapRunCommand,
+        help: String,
+        shortcut: KeyEquivalent? = nil
+    ) -> some View {
+        let button = Button {
             if let w = wk { tiptapRun(cmd, in: w) }
         } label: {
             Image(systemName: system)
         }
         .buttonStyle(.borderless)
+        .help(help)
+        .accessibilityLabel(help)
+
+        if let shortcut {
+            button.keyboardShortcut(shortcut, modifiers: .command)
+        } else {
+            button
+        }
     }
 
     private func load() async {

@@ -238,17 +238,13 @@ struct DocEditorView: View {
         }
     }
 
+    /// Persistent — Google Docs / Apple Notes keep "Saved" visible until the
+    /// next edit triggers .saving. Auto-reverting to .idle made users wonder
+    /// whether their work was actually safe.
     @MainActor
     private func markSaved() {
         savedRevertTask?.cancel()
         saveState = .saved
-        savedRevertTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
-            guard !Task.isCancelled else { return }
-            // Only revert to idle if still .saved — if the user kept typing,
-            // saveState may already be .saving and we shouldn't blow it away.
-            if case .saved = saveState { saveState = .idle }
-        }
     }
 
     private func toggleStar() async {

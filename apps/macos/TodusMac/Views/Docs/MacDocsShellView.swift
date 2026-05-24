@@ -114,6 +114,8 @@ struct MacDocsAllPane: View {
     var onNewDocument: () -> Void
 
     @AppStorage("docs.allPane.sortMode") private var sortModeRaw: String = DocsSortMode.recent.rawValue
+    /// Falls back to `.recent` on corrupt UserDefaults values. Reading via this
+    /// property also heals the stored value on the next sort change.
     private var sortMode: DocsSortMode { DocsSortMode(rawValue: sortModeRaw) ?? .recent }
 
     private var docs: [DocRecordDTO] {
@@ -175,9 +177,49 @@ struct MacDocsAllPane: View {
                 emptyState
             } else if isGrid {
                 grid
+                    .animation(MacTheme.Motion.base, value: sortModeRaw)
             } else {
                 list
+                    .animation(MacTheme.Motion.base, value: sortModeRaw)
             }
+        }
+        .alert("Rename document", isPresented: Binding(
+            get: { renamingDoc != nil },
+            set: { if !$0 { renamingDoc = nil; renameText = "" } }
+        )) {
+            TextField("Title", text: $renameText)
+            Button("Save") { commitRename() }
+                .disabled(renameText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            Button("Cancel", role: .cancel) {
+                renamingDoc = nil
+                renameText = ""
+            }
+        }
+        .confirmationDialog(
+            deletingDoc.map { "Delete “\($0.title.isEmpty ? "Untitled" : $0.title)”?" } ?? "Delete document?",
+            isPresented: Binding(
+                get: { deletingDoc != nil },
+                set: { if !$0 { deletingDoc = nil } }
+            )
+        ) {
+            Button("Delete", role: .destructive) {
+                if let d = deletingDoc { Task { await performDelete(d) } }
+                deletingDoc = nil
+            }
+            Button("Cancel", role: .cancel) { deletingDoc = nil }
+        } message: {
+            Text("This can't be undone.")
+        }
+        .alert(
+            "Couldn't update doc",
+            isPresented: Binding(
+                get: { actionError != nil },
+                set: { if !$0 { actionError = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) { actionError = nil }
+        } message: {
+            Text(actionError ?? "")
         }
     }
 
@@ -346,10 +388,12 @@ struct MacDocsAllPane: View {
     private func docCard(_ d: DocRecordDTO) -> some View {
         DocCardView(
             doc: d,
-            isSelected: selectedDocId == d.id
-        ) {
-            selectedDocId = d.id
-        }
+            isSelected: selectedDocId == d.id,
+            action: { selectedDocId = d.id },
+            onRename: { beginRename(d) },
+            onToggleStar: { toggleStar(d) },
+            onDelete: { deletingDoc = d }
+        )
     }
 
     private var list: some View {
@@ -360,16 +404,82 @@ struct MacDocsAllPane: View {
                 } label: {
                     HStack {
                         if d.isStarred { Image(systemName: "star.fill") }
-                        Text((d.emoji.map { "\($0) " } ?? "") + d.title)
+                        Text((d.emoji.map { "\($0) " } ?? "") + (d.title.isEmpty ? "Untitled" : d.title))
                     }
                 }
                 .buttonStyle(.plain)
+                .contextMenu {
+                    Button { selectedDocId = d.id } label: {
+                        Label("Open", systemImage: "arrow.up.right.square")
+                    }
+                    Divider()
+                    Button { beginRename(d) } label: {
+                        Label("Rename", systemImage: "pencil")
+                    }
+                    Button { toggleStar(d) } label: {
+                        Label(d.isStarred ? "Unstar" : "Star", systemImage: d.isStarred ? "star.slash" : "star")
+                    }
+                    Divider()
+                    Button(role: .destructive) { deletingDoc = d } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                }
             }
             TableColumn("Updated") { d in
                 Text(d.updatedAt.formatted(date: .abbreviated, time: .omitted))
             }
         }
         .tableStyle(.inset(alternatesRowBackgrounds: true))
+    }
+
+    // MARK: - Doc actions shared with cards/list/sidebar via callbacks
+
+    @State private var renamingDoc: DocRecordDTO?
+    @State private var renameText: String = ""
+    @State private var deletingDoc: DocRecordDTO?
+    @State private var actionError: String?
+
+    private func beginRename(_ d: DocRecordDTO) {
+        renameText = d.title
+        renamingDoc = d
+    }
+
+    private func toggleStar(_ d: DocRecordDTO) {
+        Task { @MainActor in
+            do {
+                _ = try await services.docsService.togglePin(id: d.id)
+            } catch {
+                actionError = error.localizedDescription
+            }
+        }
+    }
+
+    private func performDelete(_ d: DocRecordDTO) async {
+        do {
+            try await services.docsService.deleteDoc(id: d.id)
+            if selectedDocId == d.id { selectedDocId = nil }
+        } catch {
+            actionError = error.localizedDescription
+        }
+    }
+
+    private func commitRename() {
+        guard let d = renamingDoc else { return }
+        let trimmed = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            renamingDoc = nil
+            renameText = ""
+            return
+        }
+        Task { @MainActor in
+            do {
+                _ = try await services.docsService.renameDoc(id: d.id, title: trimmed)
+            } catch {
+                actionError = error.localizedDescription
+            }
+        }
+        renamingDoc = nil
+        renameText = ""
     }
 }
 
@@ -382,6 +492,9 @@ private struct DocCardView: View {
     let doc: DocRecordDTO
     let isSelected: Bool
     let action: () -> Void
+    let onRename: () -> Void
+    let onToggleStar: () -> Void
+    let onDelete: () -> Void
 
     @State private var isHovered = false
 
@@ -398,6 +511,7 @@ private struct DocCardView: View {
                         .foregroundStyle(MacTheme.textPrimary)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
+                        .help(doc.title.isEmpty ? "Untitled" : doc.title)
                     Spacer(minLength: 0)
                     if doc.isStarred {
                         Image(systemName: "star.fill")
@@ -435,12 +549,23 @@ private struct DocCardView: View {
             Button(action: action) {
                 Label("Open", systemImage: "arrow.up.right.square")
             }
+            Divider()
+            Button(action: onRename) {
+                Label("Rename", systemImage: "pencil")
+            }
+            Button(action: onToggleStar) {
+                Label(doc.isStarred ? "Unstar" : "Star", systemImage: doc.isStarred ? "star.slash" : "star")
+            }
             Button {
                 let pb = NSPasteboard.general
                 pb.clearContents()
                 pb.setString(doc.title.isEmpty ? "Untitled" : doc.title, forType: .string)
             } label: {
                 Label("Copy title", systemImage: "doc.on.doc")
+            }
+            Divider()
+            Button(role: .destructive, action: onDelete) {
+                Label("Delete", systemImage: "trash")
             }
         }
     }
@@ -478,6 +603,12 @@ struct MacDocsSidebarView: View {
     @Binding var searchText: String
     var isCreatingDocument: Bool
     var onNewDocument: () -> Void
+
+    /// Rename / delete sheets driven by the context menus on sidebar rows.
+    @State private var renamingDoc: DocRecordDTO?
+    @State private var renameText: String = ""
+    @State private var deletingDoc: DocRecordDTO?
+    @State private var actionError: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -528,23 +659,13 @@ struct MacDocsSidebarView: View {
                             ForEach(roots(w.id), id: \.id) { d in
                                 docOutline(d, w: w, depth: 0)
                             }
-                            Button {
-                                Task {
-                                    if let c = try? await services.docsService.createDoc(
-                                        workspaceId: w.id,
-                                        parentId: nil,
-                                        title: "Untitled"
-                                    ) {
-                                        selectedDocId = c.id
-                                    }
-                                }
-                            } label: {
-                                Label("New document", systemImage: "plus.circle")
-                            }
-                            .buttonStyle(.borderless)
-                            .font(.system(size: 12))
                         }
                     }
+                    // The sidebar header "+" + All-docs toolbar button + Cmd+N
+                    // already give three ways to create. An inline per-workspace
+                    // button was using `try?` and silently swallowing errors —
+                    // dropped per the docs UX assessment to reduce affordance
+                    // noise and the silent-failure footgun.
                 }
                 .padding(12)
             }
@@ -557,6 +678,91 @@ struct MacDocsSidebarView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(MacTheme.emptyStateSurface)
+        .alert("Rename document", isPresented: Binding(
+            get: { renamingDoc != nil },
+            set: { if !$0 { renamingDoc = nil; renameText = "" } }
+        )) {
+            TextField("Title", text: $renameText)
+            Button("Save") { commitRename() }
+                .disabled(renameText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            Button("Cancel", role: .cancel) {
+                renamingDoc = nil
+                renameText = ""
+            }
+        }
+        .confirmationDialog(
+            deletingDoc.map { "Delete “\($0.title.isEmpty ? "Untitled" : $0.title)”?" } ?? "Delete document?",
+            isPresented: Binding(
+                get: { deletingDoc != nil },
+                set: { if !$0 { deletingDoc = nil } }
+            )
+        ) {
+            Button("Delete", role: .destructive) {
+                if let d = deletingDoc {
+                    Task { await performDelete(d) }
+                }
+                deletingDoc = nil
+            }
+            Button("Cancel", role: .cancel) { deletingDoc = nil }
+        } message: {
+            Text("This can't be undone.")
+        }
+        .alert(
+            "Couldn't update doc",
+            isPresented: Binding(
+                get: { actionError != nil },
+                set: { if !$0 { actionError = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) { actionError = nil }
+        } message: {
+            Text(actionError ?? "")
+        }
+    }
+
+    // MARK: - Doc actions (context-menu driven)
+
+    private func beginRename(_ d: DocRecordDTO) {
+        renameText = d.title
+        renamingDoc = d
+    }
+
+    private func toggleStar(_ d: DocRecordDTO) {
+        Task { @MainActor in
+            do {
+                _ = try await services.docsService.togglePin(id: d.id)
+            } catch {
+                actionError = error.localizedDescription
+            }
+        }
+    }
+
+    private func performDelete(_ d: DocRecordDTO) async {
+        do {
+            try await services.docsService.deleteDoc(id: d.id)
+            if selectedDocId == d.id { selectedDocId = nil }
+        } catch {
+            actionError = error.localizedDescription
+        }
+    }
+
+    private func commitRename() {
+        guard let d = renamingDoc else { return }
+        let trimmed = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            renamingDoc = nil
+            renameText = ""
+            return
+        }
+        Task { @MainActor in
+            do {
+                _ = try await services.docsService.renameDoc(id: d.id, title: trimmed)
+            } catch {
+                actionError = error.localizedDescription
+            }
+        }
+        renamingDoc = nil
+        renameText = ""
     }
 
     private func roots(_ id: String) -> [DocRecordDTO] {
@@ -568,8 +774,11 @@ struct MacDocsSidebarView: View {
             selectedDocId = d.id
         } label: {
             HStack {
-                Image(systemName: "doc")
-                Text((d.emoji.map { "\($0) " } ?? "") + d.title)
+                Image(systemName: "star.fill")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.yellow)
+                Text((d.emoji.map { "\($0) " } ?? "") + (d.title.isEmpty ? "Untitled" : d.title))
+                    .lineLimit(1)
                 Spacer()
             }
             .padding(.vertical, 3)
@@ -581,6 +790,23 @@ struct MacDocsSidebarView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .help(d.title.isEmpty ? "Untitled" : d.title)
+        .contextMenu {
+            Button { selectedDocId = d.id } label: {
+                Label("Open", systemImage: "arrow.up.right.square")
+            }
+            Divider()
+            Button { beginRename(d) } label: {
+                Label("Rename", systemImage: "pencil")
+            }
+            Button { toggleStar(d) } label: {
+                Label("Unstar", systemImage: "star.slash")
+            }
+            Divider()
+            Button(role: .destructive) { deletingDoc = d } label: {
+                Label("Delete", systemImage: "trash")
+            }
+        }
     }
 
     private func docOutline(_ d: DocRecordDTO, w: DocWorkspaceDTO, depth: Int) -> AnyView {
@@ -590,10 +816,12 @@ struct MacDocsSidebarView: View {
                 DocsOutlineRow(
                     doc: d,
                     depth: depth,
-                    isSelected: selectedDocId == d.id
-                ) {
-                    selectedDocId = d.id
-                }
+                    isSelected: selectedDocId == d.id,
+                    action: { selectedDocId = d.id },
+                    onRename: { beginRename(d) },
+                    onToggleStar: { toggleStar(d) },
+                    onDelete: { deletingDoc = d }
+                )
                 ForEach(ch) { c in
                     docOutline(c, w: w, depth: depth + 1)
                 }
@@ -605,22 +833,33 @@ struct MacDocsSidebarView: View {
 /// Hoverable + selectable outline row. Hover gives a subtle fill; selected
 /// gets the accent tint at low opacity so the active doc is unambiguous when
 /// the sidebar stays visible alongside the editor.
+/// Indentation uses `.padding(.leading)` rather than literal whitespace so
+/// it scales with dynamic type and screen readers don't read the spaces.
 private struct DocsOutlineRow: View {
     let doc: DocRecordDTO
     let depth: Int
     let isSelected: Bool
     let action: () -> Void
+    let onRename: () -> Void
+    let onToggleStar: () -> Void
+    let onDelete: () -> Void
 
     @State private var isHovered = false
 
     var body: some View {
         Button(action: action) {
             HStack(alignment: .top) {
-                Text(String(repeating: "  ", count: min(depth, 5)))
+                if doc.isStarred {
+                    Image(systemName: "star.fill")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.yellow)
+                }
                 Image(systemName: "doc")
-                Text((doc.emoji.map { "\($0) " } ?? "") + doc.title)
+                Text((doc.emoji.map { "\($0) " } ?? "") + (doc.title.isEmpty ? "Untitled" : doc.title))
+                    .lineLimit(1)
                 Spacer(minLength: 0)
             }
+            .padding(.leading, CGFloat(min(depth, 5)) * 12)
             .padding(.vertical, 2)
             .padding(.horizontal, 4)
             .background(
@@ -632,11 +871,17 @@ private struct DocsOutlineRow: View {
         .buttonStyle(.plain)
         .pointerStyle(.link)
         .onHover { isHovered = $0 }
+        .help(doc.title.isEmpty ? "Untitled" : doc.title)
         .contextMenu {
-            Button {
-                action()
-            } label: {
+            Button(action: action) {
                 Label("Open", systemImage: "arrow.up.right.square")
+            }
+            Divider()
+            Button(action: onRename) {
+                Label("Rename", systemImage: "pencil")
+            }
+            Button(action: onToggleStar) {
+                Label(doc.isStarred ? "Unstar" : "Star", systemImage: doc.isStarred ? "star.slash" : "star")
             }
             Button {
                 let display = doc.title.isEmpty ? "Untitled" : doc.title
@@ -645,6 +890,10 @@ private struct DocsOutlineRow: View {
                 pb.setString(display, forType: .string)
             } label: {
                 Label("Copy title", systemImage: "doc.on.doc")
+            }
+            Divider()
+            Button(role: .destructive, action: onDelete) {
+                Label("Delete", systemImage: "trash")
             }
         }
     }

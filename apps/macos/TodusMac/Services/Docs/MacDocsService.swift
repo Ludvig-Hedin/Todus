@@ -164,6 +164,21 @@ final class MacDocsService {
         allDocs.removeAll { $0.id == id }
     }
 
+    // MARK: - Convenience mutators (mirrors iOS DocsService surface)
+
+    /// Title-only rename via `updateDoc`.
+    @discardableResult
+    func renameDoc(id: String, title: String) async throws -> DocRecordDTO {
+        try await updateDoc(DocUpdateInput(id: id, title: title))
+    }
+
+    /// Star toggle based on the cached value.
+    @discardableResult
+    func togglePin(id: String) async throws -> DocRecordDTO {
+        let current = allDocs.first(where: { $0.id == id })?.isStarred ?? false
+        return try await updateDoc(DocUpdateInput(id: id, isStarred: !current))
+    }
+
     func search(_ query: String) async throws -> [DocRecordDTO] {
         guard let client = apiClient else { throw URLError(.userAuthenticationRequired) }
         let r: DocSearchResponse = try await client.trpcQuery("docs.search", input: DocSearchInput(query: query))
