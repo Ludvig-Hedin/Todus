@@ -11,7 +11,7 @@ struct MeetingsListView: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            AppTheme.sheetBackground.ignoresSafeArea()
+            AppTheme.backgroundTop.ignoresSafeArea()
 
             listContent
                 .safeAreaInset(edge: .top) {
@@ -29,7 +29,7 @@ struct MeetingsListView: View {
             } action: { height in
                 headerHeight = height
             }
-            .pageHeaderScrim(color: AppTheme.sheetBackground, scrimHeight: headerHeight + scrimTail)
+            .pageHeaderScrim(color: AppTheme.backgroundTop, scrimHeight: headerHeight + scrimTail)
         }
         .toolbar(.hidden, for: .navigationBar)
         .navigationDestination(for: String.self) { meetingId in

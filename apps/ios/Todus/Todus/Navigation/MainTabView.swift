@@ -80,10 +80,20 @@ struct MainTabView: View {
 
     private var tabView: some View {
         TabView(selection: $selectedTab) {
-            NavigationStack { DocsListView() }
-                .id(docsTabId)
-                .tabItem { Label(AppTab.docs.title, systemImage: AppTab.docs.inactiveIcon()) }
-                .tag(AppTab.docs)
+            // Resolve permission at render time so the tab switches the moment the
+            // user grants/revokes access via Settings or the in-app prompt.
+            NavigationStack {
+                if calendarPermissionGranted || services.calendarService.canReadEvents() {
+                    CalendarTabView()
+                        .toolbar(.hidden, for: .navigationBar)
+                } else {
+                    CalendarPermissionView()
+                        .background(AppTheme.backgroundTop)
+                }
+            }
+            .id(calendarTabId)
+            .tabItem { Label(AppTab.calendar.title, systemImage: AppTab.calendar.inactiveIcon()) }
+            .tag(AppTab.calendar)
 
             NavigationStack { TasksTabView() }
                 .id(tasksTabId)
@@ -100,20 +110,10 @@ struct MainTabView: View {
                 .tabItem { Label(AppTab.email.title, systemImage: AppTab.email.inactiveIcon()) }
                 .tag(AppTab.email)
 
-            // Resolve permission at render time so the tab switches the moment the
-            // user grants/revokes access via Settings or the in-app prompt.
-            NavigationStack {
-                if calendarPermissionGranted || services.calendarService.canReadEvents() {
-                    CalendarTabView()
-                        .toolbar(.hidden, for: .navigationBar)
-                } else {
-                    CalendarPermissionView()
-                        .background(AppTheme.backgroundTop)
-                }
-            }
-            .id(calendarTabId)
-            .tabItem { Label(AppTab.calendar.title, systemImage: AppTab.calendar.inactiveIcon()) }
-            .tag(AppTab.calendar)
+            NavigationStack { DocsListView() }
+                .id(docsTabId)
+                .tabItem { Label(AppTab.docs.title, systemImage: AppTab.docs.inactiveIcon()) }
+                .tag(AppTab.docs)
 
             NavigationStack { MeetingsListView() }
                 .id(meetingsTabId)
@@ -203,7 +203,7 @@ struct MainTabView: View {
         .onChange(of: services.requestCreateSheet) { _, requested in
             guard let requested else { return }
             createSheetInitialType = requested
-            withAnimation(.spring(response: 0.30, dampingFraction: 0.96)) { showCreateSheet = true }
+            withAnimation(.easeOut(duration: 0.22)) { showCreateSheet = true }
             services.requestCreateSheet = nil
         }
         .onAppear {
@@ -237,7 +237,7 @@ struct MainTabView: View {
     private var createFAB: some View {
         Button {
             createSheetInitialType = createType(for: selectedTab)
-            withAnimation(.spring(response: 0.30, dampingFraction: 0.96)) {
+            withAnimation(.easeOut(duration: 0.22)) {
                 showCreateSheet = true
             }
         } label: {
