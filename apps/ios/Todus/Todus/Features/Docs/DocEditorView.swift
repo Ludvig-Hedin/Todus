@@ -187,7 +187,7 @@ struct DocEditorView: View {
         // can't race against this scheduled task reading a mutated `titleDraft`.
         let draft = titleDraft
         saveTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 600_000_000)
+            try? await Task.sleep(nanoseconds: 500_000_000)
             guard !Task.isCancelled else { return }
             // Bail if the draft moved on while we slept — the next keystroke
             // already scheduled a fresh save with the newer value.

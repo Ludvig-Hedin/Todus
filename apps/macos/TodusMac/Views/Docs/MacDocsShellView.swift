@@ -314,7 +314,7 @@ struct MacDocsAllPane: View {
 
     private var emptyState: some View {
         VStack(spacing: 16) {
-            Text("No pages yet")
+            Text("No documents yet")
                 .font(.system(size: 16, weight: .semibold))
             Text("Start with a new document, or add one from the Docs sidebar when your workspace is ready.")
                 .font(.system(size: 12))
@@ -539,7 +539,7 @@ struct MacDocsSidebarView: View {
                                     }
                                 }
                             } label: {
-                                Label("New page", systemImage: "plus.circle")
+                                Label("New document", systemImage: "plus.circle")
                             }
                             .buttonStyle(.borderless)
                             .font(.system(size: 12))
