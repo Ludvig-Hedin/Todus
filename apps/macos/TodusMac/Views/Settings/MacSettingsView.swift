@@ -19,20 +19,19 @@ struct MacSettingsView: View {
     @Environment(MacAppServices.self) private var services
 
     @State private var showsLogoutConfirmation = false
-    @State private var showsLocalModels = false
     @State private var showsDesignSystem = false
     @State private var showsDeleteConfirmation = false
     @State private var showsDeleteAlert = false
     @State private var deleteConfirmText = ""
     @State private var showsDisconnectGmail = false
+    @State private var disconnectingConnectionId: String?
+    @State private var showsAISettings = false
     @State private var activeSessions: [ActiveSessionRecord] = []
     @State private var isLoadingSessions = false
     @State private var isRevokingAllSessions = false
     @State private var revokingSessionIDs: Set<String> = []
     @State private var sessionsLoadError: String? = nil
     @State private var settingsError: String?
-    @State private var showAutoSendConfirmation = false
-    @State private var showApplyRecommendedConfirmation = false
     @State private var excludedSenderPatternsText = ""
     @State private var isConnectingReminders = false
     @State private var isOpeningBillingPortal = false
@@ -158,6 +157,15 @@ struct MacSettingsView: View {
             .onChange(of: threadGroupingEnabled) { _, value in
                 Task { await services.syncSetting("groupByThread", value) }
             }
+            .onChange(of: taskRemindersEnabled) { _, value in
+                Task { await services.syncSetting("taskRemindersEnabled", value) }
+            }
+            .onChange(of: calendarRemindersEnabled) { _, value in
+                Task { await services.syncSetting("calendarRemindersEnabled", value) }
+            }
+            .onChange(of: aiTone) { _, value in
+                Task { await services.syncSetting("aiTone", value) }
+            }
     }
 
     private func settingsLifecycle<Content: View>(_ content: Content) -> some View {
@@ -182,33 +190,6 @@ struct MacSettingsView: View {
 
     private func settingsDialogs<Content: View>(_ content: Content) -> some View {
         content
-            .confirmationDialog(
-                "Enable low-risk auto-send?",
-                isPresented: $showAutoSendConfirmation,
-                titleVisibility: .visible
-            ) {
-                Button("Enable") {
-                    services.assistantAutomationPolicy.autoSendExperimentEnabled = true
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("Only narrow, high-confidence acknowledgements and confirmations become eligible. Review the experiment notes before turning this on.")
-            }
-            .confirmationDialog(
-                "Replace all Mail Assistant settings with the recommended defaults?",
-                isPresented: $showApplyRecommendedConfirmation,
-                titleVisibility: .visible
-            ) {
-                Button("Apply recommended", role: .destructive) {
-                    services.assistantAutomationPolicy = .recommended
-                    excludedSenderPatternsText = services.assistantAutomationPolicy
-                        .excludedSenderPatterns
-                        .joined(separator: "\n")
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("This overwrites every Mail Assistant toggle, workday hours, quiet hours, and excluded sender patterns with the recommended values. Your custom values will be lost.")
-            }
             .confirmationDialog(
                 privacyConsentTitle,
                 isPresented: $showsPrivacyConsentDialog,
@@ -317,6 +298,7 @@ struct MacSettingsView: View {
                         designSystemSection
                     }
                     aboutAndLegalSection
+                    dangerZoneSection
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 14)
@@ -386,7 +368,7 @@ struct MacSettingsView: View {
                 Spacer()
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, 10)
+            .padding(.vertical, 12)
 
             if services.authService.isAuthenticated {
                 cardDivider
@@ -400,23 +382,10 @@ struct MacSettingsView: View {
                             .foregroundStyle(Color(red: 0.82, green: 0.32, blue: 0.32))
                     }
                     .buttonStyle(.plain)
-
-                    // Hard separation between Log out (recoverable) and Delete
-                    // (irreversible) so a stray click can't slide between them.
-                    Spacer().frame(minWidth: 24)
                     Spacer()
-
-                    Button(role: .destructive) {
-                        showsDeleteConfirmation = true
-                    } label: {
-                        Text("Delete account")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(Color(red: 0.82, green: 0.32, blue: 0.32).opacity(0.5))
-                    }
-                    .buttonStyle(.plain)
                 }
                 .padding(.horizontal, 12)
-                .padding(.vertical, 7)
+                .padding(.vertical, 8)
             }
         }
     }
@@ -429,7 +398,7 @@ struct MacSettingsView: View {
                     switch phase {
                     case .success(let image):
                         image.resizable().scaledToFill()
-                            .frame(width: 36, height: 36).clipShape(Circle())
+                            .frame(width: 44, height: 44).clipShape(Circle())
                     default:
                         avatarFallback
                     }
@@ -444,15 +413,15 @@ struct MacSettingsView: View {
         ZStack {
             Circle()
                 .fill(MacTheme.accent.opacity(0.1))
-                .frame(width: 36, height: 36)
+                .frame(width: 44, height: 44)
             if let name = services.authService.userName ?? services.authService.userEmail,
                let first = name.first {
                 Text(String(first).uppercased())
-                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .font(.system(size: 17, weight: .semibold, design: .rounded))
                     .foregroundStyle(MacTheme.accent)
             } else {
                 Image(systemName: "person.fill")
-                    .font(.system(size: 13))
+                    .font(.system(size: 16))
                     .foregroundStyle(MacTheme.mutedText)
             }
         }
@@ -469,7 +438,7 @@ struct MacSettingsView: View {
                     sessionHeader("Action", width: 80)
                 }
                 .padding(.horizontal, 12)
-                .padding(.vertical, 8)
+                .padding(.vertical, 10)
 
                 cardDivider
 
@@ -511,11 +480,18 @@ struct MacSettingsView: View {
                     ForEach(activeSessions) { activeSession in
                         VStack(spacing: 0) {
                             HStack(spacing: 12) {
-                                sessionValue(
-                                    activeSession.device + ((activeSession.isCurrent ?? false) ? " (Current)" : ""),
-                                    width: 170,
-                                    emphasized: true
-                                )
+                                HStack(spacing: 5) {
+                                    sessionValue(activeSession.device, width: 140, emphasized: true)
+                                    if activeSession.isCurrent ?? false {
+                                        Text("This device")
+                                            .font(.system(size: 9.5, weight: .semibold))
+                                            .foregroundStyle(.white)
+                                            .padding(.horizontal, 5)
+                                            .padding(.vertical, 2)
+                                            .background(MacTheme.accent.opacity(0.85), in: Capsule())
+                                    }
+                                }
+                                .frame(width: 170, alignment: .leading)
                                 sessionValue(activeSession.location, width: 140)
                                 sessionValue(formatSessionDate(activeSession.createdAt), width: 140)
                                 sessionValue(formatSessionDate(activeSession.updatedAt), width: 140)
@@ -535,7 +511,7 @@ struct MacSettingsView: View {
                                 .frame(width: 80, alignment: .leading)
                             }
                             .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
+                            .padding(.vertical, 10)
 
                             if activeSession.id != activeSessions.last?.id {
                                 cardDivider
@@ -825,24 +801,57 @@ struct MacSettingsView: View {
     private var connectedServicesSection: some View {
         settingsGroup(title: "Connected Services") {
             settingsCard {
-                // Gmail — uses real Gmail logo
-                brandServiceRow(
-                    icon: { GmailIconView(size: 26) },
-                    name: "Gmail",
-                    status: services.emailService.hasConnection ? "Connected" : "Not connected",
-                    isConnected: services.emailService.hasConnection
-                ) {
-                    if services.emailService.hasConnection {
-                        Button("Disconnect") { showsDisconnectGmail = true }
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(Color(red: 0.82, green: 0.32, blue: 0.32).opacity(0.7))
-                            .buttonStyle(.plain)
-                            .macClickablePointer()
-                    } else {
+                // Gmail — dynamic multi-account list
+                if services.connectionsService.connections.isEmpty {
+                    brandServiceRow(
+                        icon: { GmailIconView(size: 26) },
+                        name: "Gmail",
+                        status: "Not connected",
+                        isConnected: false
+                    ) {
                         connectButton {
                             Task { await services.emailService.connectGmail(authService: services.authService) }
                         }
                     }
+                } else {
+                    ForEach(Array(services.connectionsService.connections.enumerated()), id: \.element.id) { index, connection in
+                        if index > 0 { cardDivider }
+                        brandServiceRow(
+                            icon: { GmailIconView(size: 26) },
+                            name: connection.name ?? connection.email,
+                            status: connection.email,
+                            isConnected: true
+                        ) {
+                            Button("Disconnect") {
+                                disconnectingConnectionId = connection.id
+                                showsDisconnectGmail = true
+                            }
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(Color(red: 0.82, green: 0.32, blue: 0.32).opacity(0.7))
+                            .buttonStyle(.plain)
+                            .macClickablePointer()
+                        }
+                    }
+                    cardDivider
+                    // Add another account
+                    Button {
+                        Task { await services.emailService.connectGmail(authService: services.authService) }
+                    } label: {
+                        rowContainer {
+                            Image(systemName: "plus.circle")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(MacTheme.accent)
+                                .frame(width: 26, height: 26)
+                                .padding(.leading, 2)
+                            Text("Add Gmail account")
+                                .font(.system(size: 12.5))
+                                .foregroundStyle(MacTheme.accent)
+                            Spacer()
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .macClickablePointer()
                 }
 
                 cardDivider
@@ -903,6 +912,11 @@ struct MacSettingsView: View {
                         .disabled(isConnectingReminders)
                     }
                 }
+            }
+        }
+        .task {
+            if services.connectionsService.connections.isEmpty {
+                await services.connectionsService.loadConnections()
             }
         }
     }
@@ -1058,433 +1072,46 @@ struct MacSettingsView: View {
     // MARK: - AI Assistant
 
     private var aiAssistantSection: some View {
-        @Bindable var ai = services.aiChatService
-        return settingsGroup(title: "AI Assistant") {
+        settingsGroup(title: "AI Assistant") {
             settingsCard {
-                settingsToggle(icon: "checklist", label: "Read my tasks", isOn: $aiCanReadTasks)
-
-                cardDivider
-
-                settingsToggle(icon: "square.and.pencil", label: "Create & edit tasks", isOn: $aiCanWriteTasks)
-
-                cardDivider
-
-                settingsToggle(icon: "calendar", label: "Read calendar", isOn: $aiCanReadCalendar)
-
-                cardDivider
-
-                settingsToggle(icon: "calendar.badge.plus", label: "Create calendar events", isOn: $aiCanWriteCalendar)
-
-                cardDivider
-
-                settingsToggle(icon: "envelope", label: "Read email", isOn: $aiCanReadEmail)
-
-                cardDivider
-
-                settingsToggle(icon: "paperplane", label: "Send email", isOn: $aiCanSendEmail)
-
-                cardDivider
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Location")
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(MacTheme.textPrimary)
-                    TextField(
-                        "e.g. Oslo, Norway",
-                        text: Binding(
-                            get: { services.location },
-                            set: { services.location = $0 }
-                        )
-                    )
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 12))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 8)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(MacTheme.inputBackground)
-                    .clipShape(RoundedRectangle(cornerRadius: MacTheme.compactRadius, style: .continuous))
-                    Text("City and country (e.g. \"Oslo, Norway\"). Optional — gives the AI location context.")
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(MacTheme.textSecondary)
-                }
-                .padding(.horizontal, MacTheme.settingsRowHorizontalPadding)
-                .padding(.vertical, MacTheme.settingsRowVerticalPadding)
-
-                cardDivider
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Context about you")
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(MacTheme.textPrimary)
-                    MacPlaceholderTextEditor(
-                        text: Binding(
-                            get: { services.contextAboutYou },
-                            set: { services.contextAboutYou = $0 }
-                        ),
-                        placeholder: "Anything the assistant should know about you — your role, projects, tone, communication style…"
-                    )
-                }
-                .padding(.horizontal, MacTheme.settingsRowHorizontalPadding)
-                .padding(.vertical, MacTheme.settingsRowVerticalPadding)
-
-                cardDivider
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Custom instructions")
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(MacTheme.textPrimary)
-                    MacPlaceholderTextEditor(
-                        text: Binding(
-                            get: { services.customInstructions },
-                            set: { services.customInstructions = $0 }
-                        ),
-                        placeholder: "e.g. Keep replies under 3 sentences. Never use emojis. Always end with “— Ludvig”."
-                    )
-                }
-                .padding(.horizontal, MacTheme.settingsRowHorizontalPadding)
-                .padding(.vertical, MacTheme.settingsRowVerticalPadding)
-
-                cardDivider
-
-                rowContainer {
-                    Text("Mail Assistant")
-                        .font(.system(size: 12.5, weight: .semibold))
-                        .foregroundStyle(MacTheme.textPrimary)
-                    Spacer()
-                    Button("Apply recommended defaults") {
-                        showApplyRecommendedConfirmation = true
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                }
-
-                cardDivider
-
-                settingsToggle(
-                    icon: "rectangle.stack.badge.person.crop",
-                    label: "Enable assistant briefing engine",
-                    isOn: Binding(
-                        get: { services.assistantAutomationPolicy.briefingEnabled },
-                        set: { services.assistantAutomationPolicy.briefingEnabled = $0 }
-                    )
-                )
-
-                cardDivider
-
-                settingsToggle(
-                    icon: "house",
-                    label: "Show Home briefing",
-                    isOn: Binding(
-                        get: { services.assistantAutomationPolicy.showHomeBriefing },
-                        set: { services.assistantAutomationPolicy.showHomeBriefing = $0 }
-                    )
-                )
-
-                cardDivider
-
-                settingsToggle(
-                    icon: "text.append",
-                    label: "Auto summarize long threads",
-                    isOn: Binding(
-                        get: { services.assistantAutomationPolicy.autoSummarizeLongThreads },
-                        set: { services.assistantAutomationPolicy.autoSummarizeLongThreads = $0 }
-                    )
-                )
-
-                cardDivider
-
-                settingsToggle(
-                    icon: "checklist",
-                    label: "Suggest tasks from email",
-                    isOn: Binding(
-                        get: { services.assistantAutomationPolicy.suggestTasksFromEmail },
-                        set: { services.assistantAutomationPolicy.suggestTasksFromEmail = $0 }
-                    )
-                )
-
-                cardDivider
-
-                settingsToggle(
-                    icon: "calendar.badge.plus",
-                    label: "Suggest events from email",
-                    isOn: Binding(
-                        get: { services.assistantAutomationPolicy.suggestEventsFromEmail },
-                        set: { services.assistantAutomationPolicy.suggestEventsFromEmail = $0 }
-                    )
-                )
-
-                cardDivider
-
-                settingsToggle(
-                    icon: "arrowshape.turn.up.left",
-                    label: "Auto draft replies",
-                    isOn: Binding(
-                        get: { services.assistantAutomationPolicy.autoDraftReplies },
-                        set: { services.assistantAutomationPolicy.autoDraftReplies = $0 }
-                    )
-                )
-
-                cardDivider
-
-                settingsToggle(
-                    icon: "tray.full",
-                    label: "Smart reply nudges",
-                    isOn: Binding(
-                        get: { services.assistantAutomationPolicy.smartReplyNudges },
-                        set: { services.assistantAutomationPolicy.smartReplyNudges = $0 }
-                    )
-                )
-
-                cardDivider
-
-                settingsToggle(
-                    icon: "clock.badge.exclamationmark",
-                    label: "Smart deadline nudges",
-                    isOn: Binding(
-                        get: { services.assistantAutomationPolicy.smartDeadlineNudges },
-                        set: { services.assistantAutomationPolicy.smartDeadlineNudges = $0 }
-                    )
-                )
-
-                cardDivider
-
-                settingsToggle(
-                    icon: "sparkles",
-                    label: "Show thread assistant controls",
-                    isOn: Binding(
-                        get: { services.assistantAutomationPolicy.assistantThreadActionsVisible },
-                        set: { services.assistantAutomationPolicy.assistantThreadActionsVisible = $0 }
-                    )
-                )
-
-                cardDivider
-
-                settingsToggle(
-                    icon: "arrow.triangle.branch",
-                    label: "Track waiting-on threads",
-                    isOn: Binding(
-                        get: { services.assistantAutomationPolicy.trackWaitingOnThreads },
-                        set: { services.assistantAutomationPolicy.trackWaitingOnThreads = $0 }
-                    )
-                )
-
-                cardDivider
-
-                settingsToggle(
-                    icon: "person.2",
-                    label: "Build people memory",
-                    isOn: Binding(
-                        get: { services.assistantAutomationPolicy.peopleMemoryEnabled },
-                        set: { services.assistantAutomationPolicy.peopleMemoryEnabled = $0 }
-                    )
-                )
-
-                cardDivider
-
-                settingsToggle(
-                    icon: "square.stack.3d.up",
-                    label: "Batch prepared approvals",
-                    isOn: Binding(
-                        get: { services.assistantAutomationPolicy.batchApprovalEnabled },
-                        set: { services.assistantAutomationPolicy.batchApprovalEnabled = $0 }
-                    )
-                )
-
-                cardDivider
-
-                VStack(alignment: .leading, spacing: 6) {
-                    settingsToggle(
-                        icon: "paperplane",
-                        label: "Enable low-risk auto-send experiment",
-                        isOn: Binding(
-                            get: { services.assistantAutomationPolicy.autoSendExperimentEnabled },
-                            set: { newValue in
-                                if newValue {
-                                    if services.assistantAutomationPolicy.autoSendExperimentEnabled {
-                                        return
-                                    }
-                                    showAutoSendConfirmation = true
-                                } else {
-                                    services.assistantAutomationPolicy.autoSendExperimentEnabled = false
-                                }
-                            }
-                        )
-                    )
-
-                    HStack(spacing: 6) {
-                        Text("Only narrow, high-confidence acknowledgements and confirmations become eligible for automatic send.")
-                            .font(.system(size: 11.5))
-                            .foregroundStyle(MacTheme.textSecondary)
+                Button { showsAISettings = true } label: {
+                    rowContainer {
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(MacTheme.accent)
+                            .frame(width: 18)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("AI Assistant")
+                                .font(.system(size: 12.5))
+                                .foregroundStyle(MacTheme.textPrimary)
+                            Text("Permissions, personalization, mail automation, and model.")
+                                .font(.system(size: 11))
+                                .foregroundStyle(MacTheme.textSecondary)
+                        }
                         Spacer()
-                        Button("Experiment notes") {
-                            guard let url = URL(string: "https://todus.app/blog/ai-email-assistant-guide") else { return }
-                            NSWorkspace.shared.open(url)
-                        }
-                        .buttonStyle(.plain)
-                        .font(.system(size: 11.5, weight: .medium))
-                        .foregroundStyle(MacTheme.accent)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(MacTheme.mutedText)
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 2)
+                    .contentShape(Rectangle())
                 }
-
-                cardDivider
-
-                rowContainer {
-                    Image(systemName: "sun.max")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(MacTheme.mutedText)
-                        .frame(width: 18)
-                    Text("Workday starts")
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(MacTheme.textPrimary)
-                    Spacer()
-                    Picker(
-                        "",
-                        selection: Binding(
-                            get: { services.assistantAutomationPolicy.workdayStartHour },
-                            set: { services.assistantAutomationPolicy.workdayStartHour = $0 }
-                        )
-                    ) {
-                        ForEach(0..<24, id: \.self) { hour in
-                            Text(String(format: "%02d:00", hour)).tag(hour)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .frame(minWidth: 90)
-                }
-
-                cardDivider
-
-                rowContainer {
-                    Image(systemName: "moon")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(MacTheme.mutedText)
-                        .frame(width: 18)
-                    Text("Workday ends")
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(MacTheme.textPrimary)
-                    Spacer()
-                    Picker(
-                        "",
-                        selection: Binding(
-                            get: { services.assistantAutomationPolicy.workdayEndHour },
-                            set: { services.assistantAutomationPolicy.workdayEndHour = $0 }
-                        )
-                    ) {
-                        ForEach(0..<24, id: \.self) { hour in
-                            Text(String(format: "%02d:00", hour)).tag(hour)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .frame(minWidth: 90)
-                }
-
-                cardDivider
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Excluded senders and topics")
-                        .font(.system(size: 12.5, weight: .semibold))
-                        .foregroundStyle(MacTheme.textPrimary)
-
-                    MacPlaceholderTextEditor(
-                        text: Binding(
-                            get: { excludedSenderPatternsText },
-                            set: { newValue in
-                                excludedSenderPatternsText = newValue
-                                services.assistantAutomationPolicy.excludedSenderPatterns = newValue
-                                    .split(separator: "\n")
-                                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                                    .filter { !$0.isEmpty }
-                            }
-                        ),
-                        placeholder: "One pattern per line. e.g. @newsletter., *@noreply.*",
-                        minHeight: 88
-                    )
-
-                    Text("One pattern per line. Use this to suppress newsletters, no-reply mail, and other low-value automation from the assistant queues.")
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(MacTheme.textSecondary)
-                }
-                .padding(.horizontal, MacTheme.settingsRowHorizontalPadding)
-                .padding(.vertical, MacTheme.settingsRowVerticalPadding)
-
-                cardDivider
-
-                // Response tone — matches iOS AITonePreference cases
-                rowContainer {
-                    Image(systemName: "text.quote")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(MacTheme.mutedText)
-                        .frame(width: 18)
-                    Text("Response Tone")
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(MacTheme.textPrimary)
-                    Spacer()
-                    Picker("", selection: $aiTone) {
-                        Text("Professional").tag("professional")
-                        Text("Casual").tag("casual")
-                        Text("Concise").tag("concise")
-                    }
-                    .pickerStyle(.menu)
-                    .frame(minWidth: 110)
-                }
-
-                cardDivider
-
-                // AI model — live-bound to MacAIChatService
-                rowContainer {
-                    Image(systemName: "cpu")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(MacTheme.mutedText)
-                        .frame(width: 18)
-                    Text("AI Model")
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(MacTheme.textPrimary)
-                    Spacer()
-                    Picker("", selection: $ai.selectedModel) {
-                        Text("GPT-5.4").tag("openai/gpt-5.4")
-                        Text("GPT-5.4 Mini").tag("openai/gpt-5.4-mini")
-                        Text("GPT-5.4 Chat").tag("openai/gpt-5.4-chat")
-                        Text("GPT-5.4 Nano").tag("openai/gpt-5.4-nano")
-                        Text("Claude Sonnet 4.5").tag("anthropic/claude-sonnet-4-5")
-                        Text("Claude Haiku 4.5").tag("anthropic/claude-haiku-4-5")
-                        Text("Kimi K2.5").tag("moonshotai/kimi-k2.5")
-                        Text("Gemini 3.1 Pro").tag("google/gemini-3.1-pro-preview")
-                        Text("Gemini 3.1 Flash Lite").tag("google/gemini-3.1-flash-lite-preview")
-                        Text("Gemini 3 Flash").tag("google/gemini-3-flash-preview")
-                    }
-                    .pickerStyle(.menu)
-                    .frame(minWidth: 120)
-                }
-
-                cardDivider
-
-                // Local models — opens the on-device catalog. Local models run
-                // on this Mac and never use plan credits.
-                rowContainer {
-                    Image(systemName: "cpu")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(MacTheme.mutedText)
-                        .frame(width: 18)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("Local Models")
-                            .font(.system(size: 12.5))
-                            .foregroundStyle(MacTheme.textPrimary)
-                        Text("Download and manage on-device models. No plan credits used.")
-                            .font(.system(size: 11))
-                            .foregroundStyle(MacTheme.textSecondary)
-                    }
-                    Spacer()
-                    Button("Manage") { showsLocalModels = true }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                }
+                .buttonStyle(.plain)
+                .macClickablePointer()
             }
         }
-        .sheet(isPresented: $showsLocalModels) {
-            NavigationStack { MacLocalModelsView() }
-                .frame(minWidth: 600, minHeight: 600)
+        .sheet(isPresented: $showsAISettings) {
+            MacAISettingsView(
+                aiTone: $aiTone,
+                aiCanReadTasks: $aiCanReadTasks,
+                aiCanWriteTasks: $aiCanWriteTasks,
+                aiCanReadCalendar: $aiCanReadCalendar,
+                aiCanWriteCalendar: $aiCanWriteCalendar,
+                aiCanReadEmail: $aiCanReadEmail,
+                aiCanSendEmail: $aiCanSendEmail,
+                excludedSenderPatternsText: $excludedSenderPatternsText
+            )
+            .environment(services)
+            .frame(minWidth: 520, minHeight: 680)
         }
     }
 
@@ -1554,6 +1181,38 @@ struct MacSettingsView: View {
                 cardDivider
                 linkRow(icon: "envelope", label: "Contact Us") {
                     openURL("mailto:hello@todus.app")
+                }
+            }
+        }
+    }
+
+    // MARK: - Danger Zone
+
+    private var dangerZoneSection: some View {
+        settingsGroup(title: "Danger Zone") {
+            settingsCard {
+                rowContainer {
+                    Image(systemName: "trash")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.red.opacity(0.7))
+                        .frame(width: 18)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Delete Account")
+                            .font(.system(size: 12.5, weight: .medium))
+                            .foregroundStyle(MacTheme.textPrimary)
+                        Text("Permanently deletes your account, tasks, connections, and all data. Cannot be undone.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(MacTheme.textSecondary)
+                    }
+                    Spacer()
+                    Button(role: .destructive) {
+                        showsDeleteConfirmation = true
+                    } label: {
+                        Text("Delete account")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(Color(red: 0.82, green: 0.32, blue: 0.32))
+                    }
+                    .buttonStyle(.plain)
                 }
             }
         }
@@ -1723,14 +1382,14 @@ struct MacSettingsView: View {
 
     private func sessionHeader(_ text: String, width: CGFloat) -> some View {
         Text(text)
-            .font(.system(size: 10.5, weight: .semibold))
+            .font(.system(size: 11, weight: .semibold))
             .foregroundStyle(MacTheme.mutedText)
             .frame(width: width, alignment: .leading)
     }
 
     private func sessionValue(_ text: String, width: CGFloat, emphasized: Bool = false) -> some View {
         Text(text)
-            .font(.system(size: emphasized ? 12.5 : 11.5, weight: emphasized ? .medium : .regular))
+            .font(.system(size: emphasized ? 13 : 12, weight: emphasized ? .medium : .regular))
             .foregroundStyle(emphasized ? MacTheme.textPrimary : MacTheme.textSecondary)
             .frame(width: width, alignment: .leading)
             .lineLimit(2)
@@ -2122,8 +1781,15 @@ struct MacSettingsView: View {
     }
 
     private func performDisconnectGmail() async {
+        let connectionId = disconnectingConnectionId
+        defer { disconnectingConnectionId = nil }
+
         do {
-            try await services.apiClient.disconnectEmail()
+            if let connectionId {
+                try await services.connectionsService.deleteConnection(connectionId: connectionId)
+            } else {
+                try await services.apiClient.disconnectEmail()
+            }
             await services.emailService.checkConnection()
         } catch {
             AppLogger.shared.log("[Settings] Disconnect Gmail failed: \(error)")
@@ -2264,7 +1930,7 @@ private struct MacSignatureEditorRow: View {
 
 /// Multi-line text input with a placeholder overlay. SwiftUI's `TextEditor` has no native
 /// placeholder, so we render one as an inert overlay when the bound text is empty.
-fileprivate struct MacPlaceholderTextEditor: View {
+struct MacPlaceholderTextEditor: View {
     @Binding var text: String
     let placeholder: String
     var minHeight: CGFloat = 96

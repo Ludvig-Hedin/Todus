@@ -137,6 +137,20 @@ final class ConnectionsService {
         }
     }
 
+    /// Deletes a specific connection from the backend and refreshes the local list.
+    func deleteConnection(connectionId: String) async throws {
+        struct Input: Encodable { let connectionId: String }
+        let _: EmptyResponse = try await api.trpcMutation(
+            "connections.delete",
+            input: Input(connectionId: connectionId)
+        )
+        // Optimistic remove so UI snaps immediately
+        connections.removeAll { $0.id == connectionId }
+        enabledConnectionIds.remove(connectionId)
+        // Full refresh to stay in sync
+        await loadConnections()
+    }
+
     /// Checks whether a connection is in a disconnected state (needs re-auth).
     func isDisconnected(_ connectionId: String) -> Bool {
         disconnectedIds.contains(connectionId)
