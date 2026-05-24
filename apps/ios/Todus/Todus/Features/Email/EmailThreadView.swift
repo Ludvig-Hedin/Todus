@@ -340,18 +340,6 @@ struct EmailThreadView: View {
                     .buttonStyle(.plain)
                     .accessibilityLabel("Archive")
 
-                    Button {
-                        topBarActionTick &+= 1
-                        showDeleteConfirmation = true
-                    } label: {
-                        Image(systemName: "trash")
-                            .font(.system(size: 15, weight: .medium))
-                            .foregroundStyle(AppTheme.danger)
-                            .frame(width: 42, height: 38)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Delete thread")
-
                     moreOptionsMenu
                 }
                 .headerCapsuleGlass()
@@ -603,10 +591,9 @@ struct EmailThreadView: View {
                     Image(systemName: "sparkles")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(aiGradient)
-                    RoundedRectangle(cornerRadius: 4)
-                        .fill(AppTheme.surfaceSecondary)
-                        .frame(height: 12)
-                        .frame(maxWidth: 220)
+                    Text("Summarizing…")
+                        .font(.system(size: 13))
+                        .foregroundStyle(AppTheme.mutedText)
                 }
             } else if let a = assistantThread {
                 // Prefer the smart `aiLeadLine` (meeting time / first question /
@@ -833,11 +820,11 @@ struct EmailThreadView: View {
         HStack(spacing: 8) {
             ForEach([
                 ("arrowshape.turn.up.left", "Reply"),
-                ("arrowshape.turn.up.left.2", "Reply all"),
+                ("arrowshape.turn.up.left.2", "Reply All"),
                 ("arrowshape.turn.up.right", "Forward")
             ], id: \.1) { icon, label in
                 Button {
-                    composeMode = label == "Reply" ? .reply : label == "Reply all" ? .replyAll : .forward
+                    composeMode = label == "Reply" ? .reply : label == "Reply All" ? .replyAll : .forward
                     showCompose = true
                 } label: {
                     HStack(spacing: 5) {
@@ -1062,23 +1049,6 @@ struct EmailThreadView: View {
 
     private var moreOptionsMenu: some View {
         Menu {
-            Section {
-                Button {
-                    composeMode = .reply
-                    showCompose = true
-                } label: { Label("Reply", systemImage: "arrowshape.turn.up.left") }
-
-                Button {
-                    composeMode = .replyAll
-                    showCompose = true
-                } label: { Label("Reply All", systemImage: "arrowshape.turn.up.left.2") }
-
-                Button {
-                    composeMode = .forward
-                    showCompose = true
-                } label: { Label("Forward", systemImage: "arrowshape.turn.up.right") }
-            }
-
             Section {
                 Button {
                     withAnimation(.easeInOut(duration: 0.15)) { emailDarkMode.toggle() }
