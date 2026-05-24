@@ -54,18 +54,12 @@ struct MainTabView: View {
         }
         .animation(.easeInOut(duration: 0.3), value: services.networkMonitor.isConnected)
         .animation(.easeInOut(duration: 0.3), value: services.authService.isSessionExpired)
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            if !services.hideTabBar {
-                customTabBar
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-        }
         .overlay(alignment: .bottomLeading) {
             if !services.hideTabBar && !showCreateSheet {
                 createFAB
                     .ignoresSafeArea(.keyboard)
                     .padding(.leading, 18)
-                    .padding(.bottom, 14)
+                    .padding(.bottom, 68)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
@@ -74,50 +68,12 @@ struct MainTabView: View {
                 aiFAB
                     .ignoresSafeArea(.keyboard)
                     .padding(.trailing, 18)
-                    .padding(.bottom, 14)
+                    .padding(.bottom, 68)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         .animation(.easeOut(duration: 0.15), value: services.hideTabBar)
         .animation(.easeOut(duration: 0.15), value: showCreateSheet)
-    }
-
-    // MARK: - Custom Tab Bar
-
-    private var customTabBar: some View {
-        HStack(spacing: 0) {
-            ForEach([AppTab.docs, .tasks, .home, .email, .calendar, .meetings], id: \.self) { tab in
-                Button {
-                    selectedTab = tab
-                } label: {
-                    Image(systemName: selectedTab == tab ? tab.activeIcon : tab.inactiveIcon())
-                        .font(.system(size: 21, weight: selectedTab == tab ? .semibold : .regular))
-                        .foregroundStyle(
-                            selectedTab == tab
-                                ? AnyShapeStyle(Color(UIColor.label))
-                                : AnyShapeStyle(Color(UIColor.tertiaryLabel))
-                        )
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 44)
-                        .contentShape(Rectangle())
-                        .animation(.easeInOut(duration: 0.15), value: selectedTab)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(tab.title)
-            }
-        }
-        .padding(.horizontal, 8)
-        .background(
-            Rectangle()
-                .fill(.ultraThinMaterial)
-                .overlay(alignment: .top) {
-                    Rectangle()
-                        .fill(Color(UIColor.separator).opacity(0.4))
-                        .frame(height: 0.5)
-                }
-                .ignoresSafeArea(edges: .bottom)
-        )
-        .frame(height: 44)
     }
 
     // MARK: - Tab View
@@ -126,18 +82,22 @@ struct MainTabView: View {
         TabView(selection: $selectedTab) {
             NavigationStack { DocsListView() }
                 .id(docsTabId)
+                .tabItem { Label(AppTab.docs.title, systemImage: AppTab.docs.inactiveIcon()) }
                 .tag(AppTab.docs)
 
             NavigationStack { TasksTabView() }
                 .id(tasksTabId)
+                .tabItem { Label(AppTab.tasks.title, systemImage: AppTab.tasks.inactiveIcon()) }
                 .tag(AppTab.tasks)
 
             NavigationStack { HomeView() }
                 .id(homeTabId)
+                .tabItem { Label(AppTab.home.title, systemImage: AppTab.home.inactiveIcon()) }
                 .tag(AppTab.home)
 
             NavigationStack { EmailInboxView() }
                 .id(emailTabId)
+                .tabItem { Label(AppTab.email.title, systemImage: AppTab.email.inactiveIcon()) }
                 .tag(AppTab.email)
 
             // Resolve permission at render time so the tab switches the moment the
@@ -152,13 +112,14 @@ struct MainTabView: View {
                 }
             }
             .id(calendarTabId)
+            .tabItem { Label(AppTab.calendar.title, systemImage: AppTab.calendar.inactiveIcon()) }
             .tag(AppTab.calendar)
 
             NavigationStack { MeetingsListView() }
                 .id(meetingsTabId)
+                .tabItem { Label(AppTab.meetings.title, systemImage: AppTab.meetings.inactiveIcon()) }
                 .tag(AppTab.meetings)
         }
-        .toolbar(.hidden, for: .tabBar)
         .tint(Color(UIColor.label))
         .onChange(of: selectedTab) { old, new in
             guard new != old else { return }
