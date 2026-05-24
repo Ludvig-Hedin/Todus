@@ -1437,7 +1437,7 @@ struct HomeView: View {
     /// Keeps the tab bar lean while ensuring every part of the app is reachable from Home.
     @ViewBuilder
     private var moreSection: some View {
-        let nativeTabs: Set<AppTab> = [.home, .tasks, .email, .calendar, .meetings]
+        let nativeTabs: Set<AppTab> = [.home, .tasks, .email, .calendar, .meetings, .docs]
         let extraTabs = AppTab.allCases.filter {
             !nativeTabs.contains($0) && $0 != .create && $0 != .ai
         }
@@ -1490,7 +1490,7 @@ struct HomeView: View {
 
     /// Docs is not an AppTab (it's a web view), so it always lives here.
     private var docsCard: some View {
-        Button { showDocsSheet = true } label: {
+        Button { services.navigateTo = .docs } label: {
             moreCardContent(
                 icon: "doc.text",
                 title: "Docs",

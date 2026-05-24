@@ -879,7 +879,7 @@ struct AIChatView: View {
                 ("chart.bar",                  "How productive have I been this week?"),
                 ("pencil",                     "Rename or update outdated tasks"),
             ]
-        case .home, .create, .ai:
+        case .home, .docs, .create, .ai:
             // Always show the universal morning/focus prompts; add service-specific ones conditionally
             pinned = [
                 ("sun.max",                    "Give me a morning briefing"),

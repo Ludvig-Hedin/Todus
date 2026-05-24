@@ -2,10 +2,14 @@ import EventKit
 import SwiftUI
 import UIKit
 
-/// Root navigation shell backed by the native iOS `TabView`.
+/// Root navigation shell backed by the native iOS `TabView` with a custom
+/// compact icon-only tab bar rendered via `safeAreaInset`.
 ///
-/// The legacy floating `CustomTabBar` implementation remains in the codebase,
-/// but it is no longer presented in the live shell.
+/// Tab order: Docs · Tasks · Home · Email · Calendar · Meetings
+///
+/// Two floating action buttons sit above the tab bar:
+///   • Left  — create FAB (plus icon) opens `CreateSheet`
+///   • Right — AI FAB (sparkles) opens `AIChatView`
 struct MainTabView: View {
     @Environment(AppServices.self) private var services
     @Environment(\.scenePhase) private var scenePhase
@@ -13,7 +17,7 @@ struct MainTabView: View {
     // MARK: - State
 
     @SceneStorage("selectedTab") private var selectedTab: AppTab = .home
-    /// Last real (non-create) tab — used as context hint for AI chat.
+    /// Last real tab — used as context hint for AI chat.
     @State private var previousNavigationTab: AppTab = .home
 
     @State private var showCreateSheet = false
@@ -23,15 +27,13 @@ struct MainTabView: View {
 
     @State private var homeTabId = UUID()
     @State private var tasksTabId = UUID()
-    @State private var createTabId = UUID()
     @State private var emailTabId = UUID()
     @State private var calendarTabId = UUID()
+    @State private var docsTabId = UUID()
+    @State private var meetingsTabId = UUID()
 
     @State private var sheetTab: AppTab? = nil
 
-    /// FAB edge length scales with the user's Dynamic Type setting so the AI button
-    /// stays tappable at the largest accessibility sizes (it used to clip the
-    /// sparkles icon and become hard to hit at XXL+).
     @ScaledMetric(relativeTo: .body) private var fabSize: CGFloat = 58
 
     // MARK: - Body
@@ -52,12 +54,27 @@ struct MainTabView: View {
         }
         .animation(.easeInOut(duration: 0.3), value: services.networkMonitor.isConnected)
         .animation(.easeInOut(duration: 0.3), value: services.authService.isSessionExpired)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if !services.hideTabBar {
+                customTabBar
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .overlay(alignment: .bottomLeading) {
+            if !services.hideTabBar && !showCreateSheet {
+                createFAB
+                    .ignoresSafeArea(.keyboard)
+                    .padding(.leading, 18)
+                    .padding(.bottom, 14)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
         .overlay(alignment: .bottomTrailing) {
             if !services.hideTabBar && !showCreateSheet {
                 aiFAB
                     .ignoresSafeArea(.keyboard)
                     .padding(.trailing, 18)
-                    .padding(.bottom, 68)
+                    .padding(.bottom, 14)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
@@ -65,41 +82,66 @@ struct MainTabView: View {
         .animation(.easeOut(duration: 0.15), value: showCreateSheet)
     }
 
+    // MARK: - Custom Tab Bar
+
+    private var customTabBar: some View {
+        HStack(spacing: 0) {
+            ForEach([AppTab.docs, .tasks, .home, .email, .calendar, .meetings], id: \.self) { tab in
+                Button {
+                    selectedTab = tab
+                } label: {
+                    Image(systemName: selectedTab == tab ? tab.activeIcon : tab.inactiveIcon())
+                        .font(.system(size: 21, weight: selectedTab == tab ? .semibold : .regular))
+                        .foregroundStyle(
+                            selectedTab == tab
+                                ? AnyShapeStyle(Color(UIColor.label))
+                                : AnyShapeStyle(Color(UIColor.tertiaryLabel))
+                        )
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 44)
+                        .contentShape(Rectangle())
+                        .animation(.easeInOut(duration: 0.15), value: selectedTab)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(tab.title)
+            }
+        }
+        .padding(.horizontal, 8)
+        .background(
+            Rectangle()
+                .fill(.ultraThinMaterial)
+                .overlay(alignment: .top) {
+                    Rectangle()
+                        .fill(Color(UIColor.separator).opacity(0.4))
+                        .frame(height: 0.5)
+                }
+                .ignoresSafeArea(edges: .bottom)
+        )
+        .frame(height: 44)
+    }
+
     // MARK: - Tab View
 
     private var tabView: some View {
         TabView(selection: $selectedTab) {
-            NavigationStack { HomeView() }
-                .id(homeTabId)
-                .tabItem { Label(AppTab.home.title, systemImage: AppTab.home.inactiveIcon()) }
-                .tag(AppTab.home)
+            NavigationStack { DocsListView() }
+                .id(docsTabId)
+                .tag(AppTab.docs)
 
             NavigationStack { TasksTabView() }
                 .id(tasksTabId)
-                .tabItem { Label(AppTab.tasks.title, systemImage: AppTab.tasks.inactiveIcon()) }
                 .tag(AppTab.tasks)
 
-            Color.clear
-                .id(createTabId)
-                // Hide the empty placeholder from VoiceOver — the tab item itself is
-                // exposed by `TabView` so adding a second focusable element here just
-                // landed users on an empty page when swiping the rotor.
-                .accessibilityHidden(true)
-                .tabItem { Label(AppTab.create.title, systemImage: AppTab.create.inactiveIcon()) }
-                .tag(AppTab.create)
+            NavigationStack { HomeView() }
+                .id(homeTabId)
+                .tag(AppTab.home)
 
             NavigationStack { EmailInboxView() }
                 .id(emailTabId)
-                .tabItem { Label(AppTab.email.title, systemImage: AppTab.email.inactiveIcon()) }
                 .tag(AppTab.email)
 
             // Resolve permission at render time so the tab switches the moment the
-            // user grants/revokes access via Settings or the in-app prompt. The
-            // earlier @State-only flag could go stale if the system callback fired
-            // before the next `scenePhase` transition or `EKEventStoreChangedNotification`
-            // arrival. We keep `calendarPermissionGranted` as a hint so onChange/onAppear
-            // can still trigger refreshes, but use `canReadEvents()` for the actual
-            // branch — same source of truth, no desync.
+            // user grants/revokes access via Settings or the in-app prompt.
             NavigationStack {
                 if calendarPermissionGranted || services.calendarService.canReadEvents() {
                     CalendarTabView()
@@ -110,20 +152,16 @@ struct MainTabView: View {
                 }
             }
             .id(calendarTabId)
-            .tabItem { Label(AppTab.calendar.title, systemImage: AppTab.calendar.inactiveIcon()) }
             .tag(AppTab.calendar)
+
+            NavigationStack { MeetingsListView() }
+                .id(meetingsTabId)
+                .tag(AppTab.meetings)
         }
+        .toolbar(.hidden, for: .tabBar)
         .tint(Color(UIColor.label))
         .onChange(of: selectedTab) { old, new in
             guard new != old else { return }
-
-            if new == .create {
-                createSheetInitialType = createType(for: old)
-                selectedTab = old
-                withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) { showCreateSheet = true }
-                return
-            }
-
             previousNavigationTab = new
             services.currentTab = new
             if new == .calendar {
@@ -183,12 +221,13 @@ struct MainTabView: View {
         }
         .onChange(of: services.navigateTo) { _, newTab in
             guard let tab = newTab else { return }
-            if tab == .meetings {
-                sheetTab = .meetings
-            } else {
-                selectedTab = tab
-            }
+            selectedTab = tab
             services.navigateTo = nil
+        }
+        .onChange(of: services.navigateToSheet) { _, tab in
+            guard let tab else { return }
+            selectedTab = tab
+            services.navigateToSheet = nil
         }
         .onChange(of: services.showsComposeEmail) { _, isPresented in
             if !isPresented {
@@ -203,27 +242,14 @@ struct MainTabView: View {
         .onChange(of: services.requestCreateSheet) { _, requested in
             guard let requested else { return }
             createSheetInitialType = requested
-            withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) { showCreateSheet = true }
+            withAnimation(.spring(response: 0.30, dampingFraction: 0.96)) { showCreateSheet = true }
             services.requestCreateSheet = nil
-        }
-        .onChange(of: services.navigateToSheet) { _, tab in
-            guard let tab else { return }
-            if tab == .meetings {
-                sheetTab = .meetings
-            } else {
-                selectedTab = tab
-                sheetTab = nil
-            }
-            services.navigateToSheet = nil
         }
         .onAppear {
             if !visibleContentTabs.contains(selectedTab) {
                 selectedTab = .home
             }
             calendarPermissionGranted = services.calendarService.canReadEvents()
-            // Positive returning-user signal — see Keys.hasReachedMainTab
-            // doc. Used by the startup-card migration so a fresh install
-            // with a stale Keychain bearer can't silently skip the card.
             if !services.hasReachedMainTab {
                 services.hasReachedMainTab = true
             }
@@ -236,16 +262,34 @@ struct MainTabView: View {
         .onReceive(NotificationCenter.default.publisher(for: .todusCalendarAuthorizationDidChange)) { _ in
             calendarPermissionGranted = services.calendarService.canReadEvents()
         }
-        // Pick up direct EventKit store changes (calendars added/removed, permission
-        // toggled in Settings) so the tab swaps instantly rather than waiting for the
-        // next scene-active transition.
         .onReceive(NotificationCenter.default.publisher(for: .EKEventStoreChanged)) { _ in
             calendarPermissionGranted = services.calendarService.canReadEvents()
         }
     }
 
     private var visibleContentTabs: Set<AppTab> {
-        [.home, .tasks, .email, .calendar]
+        [.home, .tasks, .email, .calendar, .docs, .meetings]
+    }
+
+    // MARK: - FABs
+
+    private var createFAB: some View {
+        Button {
+            createSheetInitialType = createType(for: selectedTab)
+            withAnimation(.spring(response: 0.30, dampingFraction: 0.96)) {
+                showCreateSheet = true
+            }
+        } label: {
+            Image(systemName: "plus")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(Color(UIColor.label))
+                .frame(width: fabSize, height: fabSize)
+                .contentShape(Circle())
+        }
+        .buttonStyle(FABButtonStyle())
+        .fabGlass()
+        .accessibilityLabel("Create new item")
+        .accessibilityIdentifier("create.fab.open")
     }
 
     private var aiFAB: some View {
@@ -308,22 +352,15 @@ struct MainTabView: View {
     @ViewBuilder
     private func sheetContent(for tab: AppTab) -> some View {
         switch tab {
-        case .meetings:
-            MeetingsListView()
-        case .home, .tasks, .email, .calendar, .create:
-            EmptyView()
         case .ai:
             AIChatView(currentTab: previousNavigationTab)
+        default:
+            EmptyView()
         }
     }
 
     // MARK: - Offline Banner
 
-    /// Subtle red-tinted capsule with an inline "Retry" CTA so the user has a clear
-    /// action when the indicator surfaces — the silent grey pill used to read as
-    /// background chrome and got ignored. Pressing Retry asks the path monitor to
-    /// re-check connectivity and pings any registered reconnect handler so queued
-    /// work flushes immediately rather than waiting for the next path change.
     private var offlineBanner: some View {
         HStack(spacing: 8) {
             Image(systemName: "wifi.slash")
@@ -331,9 +368,6 @@ struct MainTabView: View {
             Text("Offline")
                 .font(.system(size: 12, weight: .semibold))
             Button {
-                // Best-effort reconnect: trigger any onReconnect handler so callers
-                // (sync, drafts) get a chance to re-attempt. The actual path status
-                // will update via NWPathMonitor's normal callback.
                 services.networkMonitor.onReconnect?()
             } label: {
                 Text("Retry")
@@ -378,9 +412,6 @@ struct MainTabView: View {
         .buttonStyle(.plain)
         .padding(.top, 4)
         .confirmationDialog("Your session has expired", isPresented: $showSessionExpiredConfirm, titleVisibility: .visible) {
-            // "Sign In Again" is the recommended action — using `.destructive` painted
-            // it red, which read as "delete account" to a fair number of testers. No
-            // role means it gets the default tint and Cancel is the single muted choice.
             Button("Sign In Again") {
                 services.authService.isSessionExpired = false
                 services.signOut()

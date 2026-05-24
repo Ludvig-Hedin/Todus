@@ -167,18 +167,10 @@ enum AppTheme {
 
     /// Cross-device accent color palette. Keys match macOS `MacTheme.accentColorKeys` so
     /// the synced `accentColor` field round-trips identically between iOS / macOS / web.
+    /// Use `AccentPreference(rawValue: key)?.color` (or `AppTheme.Accents.<name>`) to
+    /// resolve a key to a `Color` — the previous `accentColor(for:)` shim has been
+    /// removed so there is a single source of truth for the RGB triples.
     static let accentColorKeys: [String] = ["blue", "indigo", "teal", "green", "orange", "rose"]
-
-    static func accentColor(for key: String) -> Color {
-        switch key {
-        case "indigo": return Color(red: 0.35, green: 0.32, blue: 0.78)
-        case "teal":   return Color(red: 0.18, green: 0.52, blue: 0.55)
-        case "green":  return Color(red: 0.25, green: 0.55, blue: 0.32)
-        case "orange": return Color(red: 0.78, green: 0.48, blue: 0.18)
-        case "rose":   return Color(red: 0.72, green: 0.28, blue: 0.35)
-        default:       return Color(red: 0.22, green: 0.45, blue: 0.85)
-        }
-    }
     static let mutedGray = Color(UIColor { trait in
         trait.userInterfaceStyle == .dark
             ? UIColor(white: 0.55, alpha: 1)
@@ -216,12 +208,12 @@ enum AppTheme {
     // Keep the RGB triples in lockstep with `MacTheme` / web `ACCENT_COLORS`.
 
     enum Accents {
-        static let blue   = Color(red: 0.25, green: 0.48, blue: 1.00)
-        static let indigo = Color(red: 0.35, green: 0.34, blue: 0.84)
-        static let teal   = Color(red: 0.20, green: 0.68, blue: 0.78)
-        static let green  = Color(red: 0.20, green: 0.72, blue: 0.40)
-        static let orange = Color(red: 0.98, green: 0.55, blue: 0.20)
-        static let rose   = Color(red: 0.93, green: 0.32, blue: 0.46)
+        static let blue   = Color(red: 0.22, green: 0.45, blue: 0.85)
+        static let indigo = Color(red: 0.35, green: 0.32, blue: 0.78)
+        static let teal   = Color(red: 0.18, green: 0.52, blue: 0.55)
+        static let green  = Color(red: 0.25, green: 0.55, blue: 0.32)
+        static let orange = Color(red: 0.78, green: 0.48, blue: 0.18)
+        static let rose   = Color(red: 0.72, green: 0.28, blue: 0.35)
         /// Ordered list for swatch pickers and previews.
         static let all: [(String, Color)] = [
             ("blue", blue),
@@ -478,7 +470,7 @@ struct AppTopHeader<CustomTitle: View>: View {
         switch services.currentTab {
         case .home, .tasks, .email, .calendar:
             return true
-        case .meetings, .create, .ai:
+        case .meetings, .docs, .create, .ai:
             return false
         }
     }
@@ -579,7 +571,7 @@ struct AppTopHeader<CustomTitle: View>: View {
                 Label("New Event", systemImage: "calendar.badge.plus")
             }
 
-        case .meetings, .create, .ai:
+        case .meetings, .docs, .create, .ai:
             EmptyView()
         }
     }
