@@ -10,7 +10,7 @@ import { activeConnectionProcedure } from '../../trpc';
 import { getPrompt } from '../../../lib/brain';
 import { stripHtml } from 'string-strip-html';
 import { EPrompts } from '../../../types';
-import { resolveAutoModelConfig } from '../../../lib/ai-model-resolver';
+import { resolveAutoModelConfig, type AIProvider } from '../../../lib/ai-model-resolver';
 import { routeModel } from '../../../lib/model-router';
 import type { UserSettings } from '../../../lib/schemas';
 import { env } from '../../../env';
@@ -60,12 +60,9 @@ async function getSharedProfileAndSettings(
 export async function composeEmail(input: ComposeEmailInput) {
   const { prompt, threadMessages = [], cc, emailSubject, to, username, connectionId } = input;
 
-  const writingStyleMatrix = await getWritingStyleMatrixForConnectionId({
-    connectionId,
-  });
-
-  const [{ profile: sharedAIProfilePrompt, settings: userSettings }, systemPrompt] =
+  const [writingStyleMatrix, { profile: sharedAIProfilePrompt, settings: userSettings }, systemPrompt] =
     await Promise.all([
+      getWritingStyleMatrixForConnectionId({ connectionId }),
       getSharedProfileAndSettings(connectionId),
       getPrompt(`${connectionId}-${EPrompts.Compose}`, StyledEmailAssistantSystemPrompt()),
     ]);
@@ -118,7 +115,7 @@ export async function composeEmail(input: ComposeEmailInput) {
         ];
 
   const composeModelId = env.OPENAI_MINI_MODEL || 'gpt-4o-mini';
-  const composeProvider = (userSettings?.aiProvider ?? 'auto') as import('../../../lib/ai-model-resolver').AIProvider;
+  const composeProvider = (userSettings?.aiProvider ?? 'auto') as AIProvider;
   const resolvedComposeProvider = composeProvider === 'auto' ? resolveAutoModelConfig(env).provider : composeProvider;
   const { text } = await generateText({
     model: routeModel('compose', resolvedComposeProvider, userSettings?.aiModel ?? '', userSettings?.ollamaBaseUrl ?? '', env),
@@ -307,7 +304,7 @@ const generateSubject = async (message: string, styleProfile?: WritingStyleMatri
   );
 
   const subjectModelId = env.OPENAI_MODEL || 'gpt-4o';
-  const subjectProvider = (userSettings?.aiProvider ?? 'auto') as import('../../../lib/ai-model-resolver').AIProvider;
+  const subjectProvider = (userSettings?.aiProvider ?? 'auto') as AIProvider;
   const resolvedSubjectProvider = subjectProvider === 'auto' ? resolveAutoModelConfig(env).provider : subjectProvider;
   const { text } = await generateText({
     model: routeModel('title', resolvedSubjectProvider, userSettings?.aiModel ?? '', userSettings?.ollamaBaseUrl ?? '', env),

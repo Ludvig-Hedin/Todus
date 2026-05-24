@@ -20,7 +20,7 @@ import {
 import { type Connection, type ConnectionContext, type WSMessage } from 'agents';
 import { EPrompts, type IOutgoingMessage, type ParsedMessage } from '../types';
 import type { IGetThreadResponse, MailManager } from '../lib/driver/types';
-import { resolveModel, resolveModelId, resolveAutoModelConfig, resolveModelFromSettings } from '../lib/ai-model-resolver';
+import { resolveModel, resolveModelId, resolveAutoModelConfig, resolveModelFromSettings, isLocalInference, type AIProvider } from '../lib/ai-model-resolver';
 import { hasAiCredits, trackAiUsage } from '../lib/billing';
 import { buildChatMessages, toTrimmedCoreMessages } from '../lib/chat-context';
 import { estimateLLMCost, logAIUsage, measureStreamTiming } from '../lib/ai-observability';
@@ -400,10 +400,25 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
           {},
         );
 
+        const userProvider = (userSettings?.aiProvider ?? 'auto') as AIProvider;
+        const effectiveProvider =
+          userProvider === 'auto' ? resolveAutoModelConfig(env).provider : userProvider;
+        const resolvedModelId = resolveModelId({
+          provider: userProvider,
+          modelId: userSettings?.aiModel ?? '',
+          ollamaBaseUrl: userSettings?.ollamaBaseUrl ?? 'http://localhost:11434',
+          env,
+        });
+        // Local models (Ollama, Apple) run on user's hardware — exempt from billing.
+        const skipBilling = isLocalInference({
+          provider: userProvider,
+          modelId: userSettings?.aiModel,
+        });
+
         // Pre-flight billing check — block when the user has no AI credits
         // left. Cached read (~1ms). Fails open if the lookup itself errors so
         // a billing-cache hiccup never takes chat down.
-        if (billingUserId) {
+        if (!skipBilling && billingUserId) {
           try {
             const allowed = await hasAiCredits(billingUserId);
             if (!allowed) {
@@ -414,16 +429,6 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
             console.error('[ZeroAgent] hasAiCredits failed (allowing through)', err);
           }
         }
-
-        const userProvider = (userSettings?.aiProvider ?? 'auto') as import('../lib/ai-model-resolver').AIProvider;
-        const effectiveProvider =
-          userProvider === 'auto' ? resolveAutoModelConfig(env).provider : userProvider;
-        const resolvedModelId = resolveModelId({
-          provider: userProvider,
-          modelId: userSettings?.aiModel ?? '',
-          ollamaBaseUrl: userSettings?.ollamaBaseUrl ?? 'http://localhost:11434',
-          env,
-        });
 
         // For Anthropic, put profile AFTER the cache breakpoint so volatile
         // date/time doesn't invalidate the cached tool schema block.
@@ -454,7 +459,7 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
               (finishEvent as any).experimental_providerMetadata;
             const cacheCreate = provMeta?.anthropic?.cacheCreationInputTokens ?? 0;
             const cacheRead = provMeta?.anthropic?.cacheReadInputTokens ?? 0;
-            if (billingUserId && usage && (usage.promptTokens || usage.completionTokens)) {
+            if (!skipBilling && billingUserId && usage && (usage.promptTokens || usage.completionTokens)) {
               this.ctx.waitUntil(
                 Promise.all([
                   trackAiUsage({
@@ -896,7 +901,7 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
       this.getSharedAIProfilePrompt(this.name),
     ]);
     const resolvedModelId = resolveModelId({
-      provider: (settings?.aiProvider ?? 'auto') as import('../lib/ai-model-resolver').AIProvider,
+      provider: (settings?.aiProvider ?? 'auto') as AIProvider,
       modelId: settings?.aiModel ?? '',
       ollamaBaseUrl: settings?.ollamaBaseUrl ?? 'http://localhost:11434',
       env,
