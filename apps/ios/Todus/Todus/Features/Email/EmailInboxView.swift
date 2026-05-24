@@ -520,12 +520,17 @@ struct EmailInboxView: View {
                         .foregroundStyle(.secondary)
                 }
                 .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(AppTheme.surfaceSecondary, in: Capsule(style: .continuous))
-                .overlay(
-                    Capsule(style: .continuous)
-                        .stroke(AppTheme.cardBorder, lineWidth: 0.5)
-                )
+                .padding(.vertical, 9)
+                .background {
+                    if #available(iOS 26.0, *) {
+                        Color.clear
+                    } else {
+                        Capsule(style: .continuous)
+                            .fill(AppTheme.surfaceSecondary.opacity(0.6))
+                            .overlay(Capsule(style: .continuous).stroke(AppTheme.cardBorder, lineWidth: 0.5))
+                    }
+                }
+                .modifier(SearchBarGlassModifier())
             }
             .buttonStyle(.plain)
             .fixedSize(horizontal: true, vertical: false)
@@ -555,6 +560,25 @@ struct EmailInboxView: View {
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
+            .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y } action: { old, new in
+                let delta = new - old
+                if delta > 8 && new > 40 {
+                    withAnimation(.easeOut(duration: 0.2)) { services.hideTabBar = true }
+                } else if delta < -8 {
+                    withAnimation(.easeOut(duration: 0.2)) { services.hideTabBar = false }
+                }
+            }
+            // Prefetch next page when 80% scrolled — loads ahead of the visible footer
+            // so there's no spinner stall when the user reaches the bottom.
+            .onScrollGeometryChange(for: Bool.self) { geo in
+                let visibleBottom = geo.contentOffset.y + geo.containerSize.height
+                let contentHeight = geo.contentSize.height
+                return contentHeight > 200 && visibleBottom >= contentHeight * 0.80
+            } action: { _, nearBottom in
+                if nearBottom, emailService.nextPageToken != nil, !isLoadingNextPage, !paginationFailed {
+                    Task { await loadNextPage() }
+                }
+            }
             .refreshable {
                 // Clear any latched badge cap from a previous refresh — without
                 // this the inline "Updating" badge can stay hidden across the
@@ -717,14 +741,14 @@ struct EmailInboxView: View {
                         } label: {
                             Label("Read", systemImage: "envelope.open")
                         }
-                        .tint(.primary)
+                        .tint(Color(UIColor.systemGray3))
                     } else {
                         Button {
                             Task { await emailService.markAsUnread(ids: [thread.id]) }
                         } label: {
                             Label("Unread", systemImage: "envelope.badge")
                         }
-                        .tint(.primary)
+                        .tint(Color(UIColor.systemGray3))
                     }
 
                     Button {
@@ -822,7 +846,7 @@ struct EmailInboxView: View {
                                         .foregroundStyle(.white)
                                         .padding(.horizontal, 6)
                                         .padding(.vertical, 2)
-                                        .background(AppTheme.accentBlue, in: Capsule())
+                                        .background(Color(UIColor.systemBlue), in: Capsule())
                                 }
                             }
 
@@ -1381,13 +1405,45 @@ struct EmailInboxView: View {
             filteredThreads = emailService.threads
             return
         }
-        let query = searchText.lowercased()
-        filteredThreads = emailService.threads.filter {
+        let query = searchText.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !query.isEmpty else {
+            filteredThreads = emailService.threads
+            return
+        }
+
+        // Exact contains — fast path, highest precision
+        let exactMatches = emailService.threads.filter {
             $0.subject.lowercased().contains(query)
             || $0.from.name.lowercased().contains(query)
             || $0.from.email.lowercased().contains(query)
             || $0.snippet.lowercased().contains(query)
         }
+        if !exactMatches.isEmpty {
+            filteredThreads = exactMatches
+            return
+        }
+
+        // Fuzzy fallback — handles 1-char typos (e.g. "hoogle" → "google")
+        // Only runs when exact search finds nothing, so no perf cost on normal queries.
+        guard query.count >= 3 else {
+            filteredThreads = exactMatches
+            return
+        }
+        filteredThreads = emailService.threads.filter { thread in
+            [thread.subject, thread.from.name, thread.from.email, thread.snippet]
+                .contains { fuzzyContains($0.lowercased(), query: query) }
+        }
+    }
+
+    /// Returns true if `text` contains `query` with at most 1 character removed.
+    /// Covers the most common typos: extra char, wrong char, transposed pair.
+    private func fuzzyContains(_ text: String, query: String) -> Bool {
+        for i in query.indices {
+            var variant = query
+            variant.remove(at: i)
+            if text.contains(variant) { return true }
+        }
+        return false
     }
 }
 
@@ -1495,14 +1551,14 @@ struct SenderThreadsView: View {
                         } label: {
                             Label("Read", systemImage: "envelope.open")
                         }
-                        .tint(.primary)
+                        .tint(Color(UIColor.systemGray3))
                     } else {
                         Button {
                             Task { await emailService.markAsUnread(ids: [thread.id]) }
                         } label: {
                             Label("Unread", systemImage: "envelope.badge")
                         }
-                        .tint(.primary)
+                        .tint(Color(UIColor.systemGray3))
                     }
 
                     Button {

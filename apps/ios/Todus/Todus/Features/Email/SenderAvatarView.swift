@@ -465,14 +465,22 @@ struct SenderAvatarView: View {
                         case .success(let image):
                             // Person photos (Google contacts, Gravatar) fill the circle edge-to-edge.
                             // Brand logos (Clearbit, favicon) are fitted with padding on a neutral
-                            // background so transparent-edge logos don't bleed a ring into the UI.
+                            // background. Logos are clipped to Circle before padding so app-icon-style
+                            // favicons (which have their own rounded-square shape) render circular.
                             let isPhoto = Self.isPersonPhoto(currentURL)
                             ZStack {
                                 Circle().fill(isPhoto ? .clear : Color(UIColor.secondarySystemBackground))
-                                image
-                                    .resizable()
-                                    .aspectRatio(contentMode: isPhoto ? .fill : .fit)
-                                    .padding(isPhoto ? 0 : size * 0.10)
+                                if isPhoto {
+                                    image
+                                        .resizable()
+                                        .aspectRatio(contentMode: .fill)
+                                } else {
+                                    image
+                                        .resizable()
+                                        .aspectRatio(contentMode: .fit)
+                                        .clipShape(Circle())
+                                        .padding(size * 0.10)
+                                }
                             }
                             .transition(.opacity)
                             .onAppear {

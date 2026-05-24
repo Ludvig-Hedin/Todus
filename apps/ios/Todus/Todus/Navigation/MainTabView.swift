@@ -54,22 +54,24 @@ struct MainTabView: View {
         }
         .animation(.easeInOut(duration: 0.3), value: services.networkMonitor.isConnected)
         .animation(.easeInOut(duration: 0.3), value: services.authService.isSessionExpired)
-        .overlay(alignment: .bottomLeading) {
+        // Single overlay for both FABs. The VStack + ignoresSafeArea anchors to the
+        // real screen bottom, not the keyboard-adjusted bottom, so FABs stay fixed
+        // in place when the keyboard is shown (e.g. email search bar focused).
+        .overlay {
             if !services.hideTabBar && !showCreateSheet {
-                createFAB
-                    .ignoresSafeArea(.keyboard)
-                    .padding(.leading, 18)
+                VStack {
+                    Spacer()
+                    HStack(alignment: .bottom) {
+                        createFAB
+                            .padding(.leading, 18)
+                        Spacer()
+                        aiFAB
+                            .padding(.trailing, 18)
+                    }
                     .padding(.bottom, 68)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-        }
-        .overlay(alignment: .bottomTrailing) {
-            if !services.hideTabBar && !showCreateSheet {
-                aiFAB
-                    .ignoresSafeArea(.keyboard)
-                    .padding(.trailing, 18)
-                    .padding(.bottom, 68)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+                .ignoresSafeArea(.keyboard, edges: .bottom)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         .animation(.easeOut(duration: 0.15), value: services.hideTabBar)
@@ -121,12 +123,17 @@ struct MainTabView: View {
                 .tag(AppTab.meetings)
         }
         .tint(Color(UIColor.label))
+        .toolbar(services.hideTabBar ? .hidden : .visible, for: .tabBar)
         .onChange(of: selectedTab) { old, new in
             guard new != old else { return }
             previousNavigationTab = new
             services.currentTab = new
             if new == .calendar {
                 calendarPermissionGranted = services.calendarService.canReadEvents()
+            }
+            // Reset tab bar visibility when switching tabs
+            if services.hideTabBar {
+                services.hideTabBar = false
             }
         }
         .overlay {
