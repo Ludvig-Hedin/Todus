@@ -207,17 +207,51 @@ struct MacDocsAllPane: View {
         .help("Sort documents")
     }
 
-    /// Centered loading state for the docs list. Mirrors the `loadingCard`
-    /// pattern in MacHomeView — vertical spinner + label, never a bare spinner.
+    /// Loading state shows a grid of redacted skeleton cards so users get a
+    /// sense of the grid shape before data arrives. Beats a bare spinner.
     private var docsLoadingState: some View {
-        VStack(spacing: MacTheme.spacing8) {
-            ProgressView()
-                .controlSize(.small)
-            Text("Loading docs…")
-                .font(.system(size: 12))
-                .foregroundStyle(MacTheme.mutedText)
+        let cols = [GridItem(.adaptive(minimum: 200), spacing: 16)]
+        return ScrollView {
+            LazyVGrid(columns: cols, spacing: 16) {
+                ForEach(0..<6, id: \.self) { _ in
+                    skeletonCard
+                }
+            }
+            .padding(20)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityLabel("Loading documents")
+    }
+
+    private var skeletonCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                .fill(MacTheme.surfaceHover)
+                .frame(width: 140, height: 14)
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                .fill(MacTheme.surfaceHover.opacity(0.7))
+                .frame(height: 10)
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                .fill(MacTheme.surfaceHover.opacity(0.7))
+                .frame(height: 10)
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                .fill(MacTheme.surfaceHover.opacity(0.7))
+                .frame(width: 100, height: 10)
+            Spacer()
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                .fill(MacTheme.surfaceHover.opacity(0.5))
+                .frame(width: 60, height: 9)
+        }
+        .frame(maxWidth: .infinity, minHeight: 130, alignment: .topLeading)
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous)
+                .fill(MacTheme.surfaceCard)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous)
+                .stroke(MacTheme.cardBorder, lineWidth: 0.5)
+        )
+        .redacted(reason: .placeholder)
     }
 
     private func docsLoadErrorState(message: String) -> some View {
@@ -310,36 +344,12 @@ struct MacDocsAllPane: View {
     }
 
     private func docCard(_ d: DocRecordDTO) -> some View {
-        Button {
+        DocCardView(
+            doc: d,
+            isSelected: selectedDocId == d.id
+        ) {
             selectedDocId = d.id
-        } label: {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    if d.isStarred { Image(systemName: "star.fill").font(.caption2).foregroundStyle(MacTheme.accent) }
-                    Spacer()
-                }
-                Text((d.emoji.map { "\($0) " } ?? "") + d.title)
-                    .font(.system(size: 14, weight: .semibold))
-                    .lineLimit(2)
-                    .foregroundStyle(MacTheme.textPrimary)
-                Text(d.contentText.map { String($0.prefix(120)) } ?? "…")
-                    .font(.system(size: 12))
-                    .lineLimit(4)
-                    .foregroundStyle(MacTheme.textSecondary)
-                Text(d.updatedAt.formatted(.relative(presentation: .named)))
-                    .font(.system(size: 10))
-                    .foregroundStyle(MacTheme.mutedText)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(14)
-            .background(MacTheme.surfaceCard)
-            .clipShape(RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous)
-                    .stroke(MacTheme.cardBorder, lineWidth: 0.5)
-            )
         }
-        .buttonStyle(.plain)
     }
 
     private var list: some View {
@@ -360,6 +370,103 @@ struct MacDocsAllPane: View {
             }
         }
         .tableStyle(.inset(alternatesRowBackgrounds: true))
+    }
+}
+
+// MARK: - Card
+
+/// Hover-aware doc card with stronger hierarchy than the inline version.
+/// Title is the dominant element; preview is 12pt secondary; timestamp is
+/// 10pt muted; star floats top-right. Selected card gets accent border.
+private struct DocCardView: View {
+    let doc: DocRecordDTO
+    let isSelected: Bool
+    let action: () -> Void
+
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .top, spacing: 6) {
+                    if let emoji = doc.emoji {
+                        Text(emoji)
+                            .font(.system(size: 16))
+                    }
+                    Text(doc.title.isEmpty ? "Untitled" : doc.title)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(MacTheme.textPrimary)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                    Spacer(minLength: 0)
+                    if doc.isStarred {
+                        Image(systemName: "star.fill")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.yellow)
+                    }
+                }
+                Text(previewText)
+                    .font(.system(size: 12))
+                    .foregroundStyle(MacTheme.textSecondary)
+                    .lineLimit(4)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Spacer(minLength: 0)
+                Text(doc.updatedAt.formatted(.relative(presentation: .named)))
+                    .font(.system(size: 10))
+                    .foregroundStyle(MacTheme.mutedText)
+            }
+            .frame(maxWidth: .infinity, minHeight: 130, alignment: .topLeading)
+            .padding(14)
+            .background(
+                RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous)
+                    .fill(cardFill)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous)
+                    .stroke(cardBorder, lineWidth: isSelected ? 1.5 : 0.5)
+            )
+            .scaleEffect(isHovered ? 1.01 : 1.0)
+            .animation(MacTheme.Motion.fast, value: isHovered)
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+        .contextMenu {
+            Button(action: action) {
+                Label("Open", systemImage: "arrow.up.right.square")
+            }
+            Button {
+                let pb = NSPasteboard.general
+                pb.clearContents()
+                pb.setString(doc.title.isEmpty ? "Untitled" : doc.title, forType: .string)
+            } label: {
+                Label("Copy title", systemImage: "doc.on.doc")
+            }
+        }
+    }
+
+    private var previewText: String {
+        guard let preview = doc.contentText, !preview.isEmpty else {
+            return "Empty document"
+        }
+        return String(preview.prefix(200))
+    }
+
+    private var cardFill: Color {
+        if isSelected {
+            return MacTheme.accent.opacity(0.06)
+        }
+        if isHovered {
+            return MacTheme.surfaceHover
+        }
+        return MacTheme.surfaceCard
+    }
+
+    private var cardBorder: Color {
+        if isSelected {
+            return MacTheme.accent
+        }
+        return MacTheme.cardBorder
     }
 }
 
