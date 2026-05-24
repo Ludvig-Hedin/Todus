@@ -555,6 +555,9 @@ struct MailAssistantSettingsResponse: Decodable {
         let focusModeEnabled: Bool?
         let groupByThread: Bool?
         let hideAppleSideGmailDuplicates: Bool?
+        let aiTone: String?
+        let taskRemindersEnabled: Bool?
+        let calendarRemindersEnabled: Bool?
     }
 
     let settings: Settings

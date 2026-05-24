@@ -444,6 +444,9 @@ final class MacAppServices {
             if let v = response.settings.showUnreadBadge      { defaults.set(v, forKey: "mac_show_unread_badge") }
             if let v = response.settings.focusModeEnabled     { defaults.set(v, forKey: "mac_focus_mode_enabled") }
             if let v = response.settings.groupByThread        { defaults.set(v, forKey: "threadGroupingEnabled") }
+            if let v = response.settings.aiTone               { defaults.set(v, forKey: "mac_ai_tone") }
+            if let v = response.settings.taskRemindersEnabled  { defaults.set(v, forKey: "taskRemindersEnabled") }
+            if let v = response.settings.calendarRemindersEnabled { defaults.set(v, forKey: "calendarRemindersEnabled") }
         } catch {
             AppLogger.shared.log("[MacAppServices] Failed to load shared AI profile: \(error)")
         }

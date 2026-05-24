@@ -923,6 +923,16 @@ final class AppServices {
             if let value = response.settings.groupByThread {
                 threadGroupingEnabled = value
             }
+            if let value = response.settings.aiTone,
+               let tone = AITonePreference(rawValue: value) {
+                aiTonePreference = tone
+            }
+            if let value = response.settings.taskRemindersEnabled {
+                taskRemindersEnabled = value
+            }
+            if let value = response.settings.calendarRemindersEnabled {
+                calendarRemindersEnabled = value
+            }
             lastSharedProfileLoadAt = now
         } catch {
             print("[AppServices] Failed to load shared AI profile: \(error)")
