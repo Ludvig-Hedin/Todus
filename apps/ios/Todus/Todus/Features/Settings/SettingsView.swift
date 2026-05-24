@@ -1656,7 +1656,7 @@ struct AIAssistantSettingsView: View {
                 }
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
-                .listRowInsets(EdgeInsets(top: 0, leading: 20, trailing: 20, bottom: 12))
+                .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 12, trailing: 20))
             } header: {
                 Text("Noise filtering")
             } footer: {
@@ -1676,7 +1676,7 @@ struct AIAssistantSettingsView: View {
                 .padding(.vertical, 10)
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
-                .listRowInsets(EdgeInsets(top: 0, leading: 20, trailing: 20, bottom: 12))
+                .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 12, trailing: 20))
             } header: {
                 Text("Location")
             } footer: {
@@ -1704,7 +1704,7 @@ struct AIAssistantSettingsView: View {
                 }
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
-                .listRowInsets(EdgeInsets(top: 0, leading: 20, trailing: 20, bottom: 12))
+                .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 12, trailing: 20))
             } header: {
                 Text("Context about you")
             } footer: {
@@ -1732,7 +1732,7 @@ struct AIAssistantSettingsView: View {
                 }
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
-                .listRowInsets(EdgeInsets(top: 0, leading: 20, trailing: 20, bottom: 12))
+                .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 12, trailing: 20))
             } header: {
                 Text("Custom instructions")
             } footer: {
@@ -1911,7 +1911,11 @@ private struct SettingsSyncModifier: ViewModifier {
     @AppStorage("ios_accent_color")     private var accentColorKey: String = "blue"
 
     func body(content: Content) -> some View {
-        content
+        // Chain is split with AnyView in the middle because 11 chained
+        // .onChange modifiers blow past Swift's type-checker budget. AnyView
+        // erases the intermediate type so the second half compiles
+        // independently of the first.
+        let firstHalf = content
             .onChange(of: aiCanReadTasks) { _, value in
                 Task { await services.syncSetting("aiCanReadTasks", value) }
             }
@@ -1930,6 +1934,8 @@ private struct SettingsSyncModifier: ViewModifier {
             .onChange(of: aiCanSendEmail) { _, value in
                 Task { await services.syncSetting("aiCanSendEmail", value) }
             }
+
+        return AnyView(firstHalf)
             .onChange(of: accentColorKey) { _, value in
                 Task { await services.syncSetting("accentColor", value) }
             }
