@@ -20,10 +20,11 @@ import {
 import { type Connection, type ConnectionContext, type WSMessage } from 'agents';
 import { EPrompts, type IOutgoingMessage, type ParsedMessage } from '../types';
 import type { IGetThreadResponse, MailManager } from '../lib/driver/types';
-import { resolveModel, resolveModelId, resolveAutoModelConfig } from '../lib/ai-model-resolver';
+import { resolveModel, resolveModelId, resolveAutoModelConfig, resolveModelFromSettings } from '../lib/ai-model-resolver';
 import { hasAiCredits, trackAiUsage } from '../lib/billing';
 import { buildChatMessages, toTrimmedCoreMessages } from '../lib/chat-context';
 import { estimateLLMCost, logAIUsage, measureStreamTiming } from '../lib/ai-observability';
+import type { UserSettings } from '../lib/schemas';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { createSimpleAuth, type SimpleAuth } from '../lib/auth';
 import { buildAIProfilePrompt } from '../lib/ai-profile';
@@ -324,6 +325,8 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
    *  setupAuth() to avoid a DB lookup on every chat turn. Used for billing
    *  pre-checks and AI usage tracking. */
   private cachedUserId: string | null = null;
+  /** User AI + profile settings, cached per DO lifetime. undefined = not yet fetched. */
+  private cachedUserSettings: UserSettings | null | undefined = undefined;
   constructor(ctx: DurableObjectState, env: ZeroEnv) {
     super(ctx, env);
     if (shouldDropTables) this.dropTables();
@@ -371,16 +374,22 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
         }
 
         // Kick off independent reads concurrently with tool setup.
+        // settingsPromise chains off userIdPromise so they share one userId lookup.
         const promptPromise = getPrompt(getPromptName(connectionId, EPrompts.Chat), AiChatPrompt());
-        const profilePromise = this.getSharedAIProfilePrompt(connectionId);
         const userIdPromise = this.getUserId();
+        const settingsPromise = userIdPromise.then(() => this.getCachedUserSettings());
 
-        const [resolvedAuthTools, basePrompt, sharedAIProfilePrompt, billingUserId] =
-          await Promise.all([authTools(connectionId), promptPromise, profilePromise, userIdPromise]);
+        const [resolvedAuthTools, basePrompt, userSettings, billingUserId] =
+          await Promise.all([authTools(connectionId), promptPromise, settingsPromise, userIdPromise]);
+
+        const sharedAIProfilePrompt = buildAIProfilePrompt(userSettings);
 
         const tools = {
           ...resolvedAuthTools,
-          buildGmailSearchQuery: buildGmailSearchQuery(() => Promise.resolve(sharedAIProfilePrompt)),
+          buildGmailSearchQuery: buildGmailSearchQuery(
+            () => Promise.resolve(sharedAIProfilePrompt),
+            userSettings,
+          ),
         };
         const processedMessages = await processToolCalls(
           {
@@ -406,11 +415,13 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
           }
         }
 
-        const { provider: effectiveProvider } = resolveAutoModelConfig(env);
+        const userProvider = (userSettings?.aiProvider ?? 'auto') as import('../lib/ai-model-resolver').AIProvider;
+        const effectiveProvider =
+          userProvider === 'auto' ? resolveAutoModelConfig(env).provider : userProvider;
         const resolvedModelId = resolveModelId({
-          provider: 'auto',
-          modelId: '',
-          ollamaBaseUrl: '',
+          provider: userProvider,
+          modelId: userSettings?.aiModel ?? '',
+          ollamaBaseUrl: userSettings?.ollamaBaseUrl ?? 'http://localhost:11434',
           env,
         });
 
@@ -481,7 +492,7 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
         };
 
         const result = streamText({
-          model: resolveModel({ provider: 'auto', modelId: '', ollamaBaseUrl: '', env }),
+          model: resolveModelFromSettings(userSettings, env),
           messages: chatMessages,
           tools,
           onFinish: wrappedOnFinish,
@@ -551,6 +562,20 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
     } finally {
       this.ctx.waitUntil(conn.end());
     }
+  }
+
+  /** Fetch user AI settings once per DO lifetime; returns undefined on miss. */
+  private async getCachedUserSettings(): Promise<UserSettings | undefined> {
+    if (this.cachedUserSettings !== undefined) return this.cachedUserSettings ?? undefined;
+    const userId = await this.getUserId();
+    if (!userId) {
+      this.cachedUserSettings = null;
+      return undefined;
+    }
+    const zeroDB = await getZeroDB(userId);
+    const row = await zeroDB.findUserSettings();
+    this.cachedUserSettings = row?.settings ?? null;
+    return row?.settings;
   }
 
   private async tryCatchChat<T>(fn: () => T | Promise<T>) {
@@ -866,15 +891,18 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
   }
 
   async buildGmailSearchQuery(query: string) {
-    const sharedAIProfilePrompt = await this.getSharedAIProfilePrompt(this.name);
+    const [settings, sharedAIProfilePrompt] = await Promise.all([
+      this.getCachedUserSettings(),
+      this.getSharedAIProfilePrompt(this.name),
+    ]);
     const resolvedModelId = resolveModelId({
-      provider: 'auto',
-      modelId: '',
-      ollamaBaseUrl: '',
+      provider: (settings?.aiProvider ?? 'auto') as import('../lib/ai-model-resolver').AIProvider,
+      modelId: settings?.aiModel ?? '',
+      ollamaBaseUrl: settings?.ollamaBaseUrl ?? 'http://localhost:11434',
       env,
     });
     const result = await generateText({
-      model: resolveModel({ provider: 'auto', modelId: '', ollamaBaseUrl: '', env }),
+      model: resolveModelFromSettings(settings, env),
       system: sharedAIProfilePrompt
         ? `${sharedAIProfilePrompt}\n\n${GmailSearchAssistantSystemPrompt()}`
         : GmailSearchAssistantSystemPrompt(),
@@ -1797,7 +1825,10 @@ export class ZeroMCP extends McpAgent<ZeroEnv, {}, { userId: string }> {
   }
 }
 
-const buildGmailSearchQuery = (getSharedAIProfilePrompt: () => Promise<string>) =>
+const buildGmailSearchQuery = (
+  getSharedAIProfilePrompt: () => Promise<string>,
+  userSettings?: UserSettings,
+) =>
   tool({
     description: 'Build a Gmail search query',
     parameters: z.object({
@@ -1806,7 +1837,7 @@ const buildGmailSearchQuery = (getSharedAIProfilePrompt: () => Promise<string>) 
     execute: async ({ query }) => {
       const sharedAIProfilePrompt = await getSharedAIProfilePrompt();
       const result = await generateObject({
-        model: resolveModel({ provider: 'auto', modelId: '', ollamaBaseUrl: '', env }),
+        model: resolveModelFromSettings(userSettings, env),
         system: sharedAIProfilePrompt
           ? `${sharedAIProfilePrompt}\n\n${GmailSearchAssistantSystemPrompt()}`
           : GmailSearchAssistantSystemPrompt(),

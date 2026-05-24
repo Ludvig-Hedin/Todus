@@ -12,6 +12,7 @@ import { stripHtml } from 'string-strip-html';
 import { EPrompts } from '../../../types';
 import { resolveAutoModelConfig } from '../../../lib/ai-model-resolver';
 import { routeModel } from '../../../lib/model-router';
+import type { UserSettings } from '../../../lib/schemas';
 import { env } from '../../../env';
 import { generateText } from 'ai';
 import { z } from 'zod';
@@ -34,18 +35,23 @@ type ComposeEmailInput = {
   connectionId: string;
 };
 
-async function getSharedAIProfilePrompt(connectionId: string) {
+async function getSharedProfileAndSettings(
+  connectionId: string,
+): Promise<{ profile: string; settings: UserSettings | undefined }> {
   const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
   try {
     const connectionRow = await db.query.connection.findFirst({
       where: (table, { eq }) => eq(table.id, connectionId),
     });
 
-    if (!connectionRow?.userId) return '';
+    if (!connectionRow?.userId) return { profile: '', settings: undefined };
 
     const zeroDB = await getZeroDB(connectionRow.userId);
-    const settings = await zeroDB.findUserSettings();
-    return buildAIProfilePrompt(settings?.settings);
+    const row = await zeroDB.findUserSettings();
+    return {
+      profile: buildAIProfilePrompt(row?.settings),
+      settings: row?.settings,
+    };
   } finally {
     await conn.end();
   }
@@ -58,12 +64,12 @@ export async function composeEmail(input: ComposeEmailInput) {
     connectionId,
   });
 
-  const sharedAIProfilePrompt = await getSharedAIProfilePrompt(connectionId);
+  const [{ profile: sharedAIProfilePrompt, settings: userSettings }, systemPrompt] =
+    await Promise.all([
+      getSharedProfileAndSettings(connectionId),
+      getPrompt(`${connectionId}-${EPrompts.Compose}`, StyledEmailAssistantSystemPrompt()),
+    ]);
 
-  const systemPrompt = await getPrompt(
-    `${connectionId}-${EPrompts.Compose}`,
-    StyledEmailAssistantSystemPrompt(),
-  );
   const systemPromptWithProfile = sharedAIProfilePrompt
     ? `${sharedAIProfilePrompt}\n\n${systemPrompt}`
     : systemPrompt;
@@ -112,9 +118,10 @@ export async function composeEmail(input: ComposeEmailInput) {
         ];
 
   const composeModelId = env.OPENAI_MINI_MODEL || 'gpt-4o-mini';
-  const { provider: composeProvider } = resolveAutoModelConfig(env);
+  const composeProvider = (userSettings?.aiProvider ?? 'auto') as import('../../../lib/ai-model-resolver').AIProvider;
+  const resolvedComposeProvider = composeProvider === 'auto' ? resolveAutoModelConfig(env).provider : composeProvider;
   const { text } = await generateText({
-    model: routeModel('compose', composeProvider, '', '', env),
+    model: routeModel('compose', resolvedComposeProvider, userSettings?.aiModel ?? '', userSettings?.ollamaBaseUrl ?? '', env),
     messages: [
       {
         role: 'system',
@@ -183,11 +190,16 @@ export const generateEmailSubject = activeConnectionProcedure
     const { activeConnection } = ctx;
     const { message } = input;
 
-    const writingStyleMatrix = await getWritingStyleMatrixForConnectionId({
-      connectionId: activeConnection.id,
-    });
+    const [writingStyleResult, { settings: subjectUserSettings }] = await Promise.all([
+      getWritingStyleMatrixForConnectionId({ connectionId: activeConnection.id }),
+      getSharedProfileAndSettings(activeConnection.id),
+    ]);
 
-    const subject = await generateSubject(message, writingStyleMatrix?.style as WritingStyleMatrix);
+    const subject = await generateSubject(
+      message,
+      writingStyleResult?.style as WritingStyleMatrix,
+      subjectUserSettings,
+    );
 
     return {
       subject,
@@ -276,7 +288,7 @@ const EmailAssistantPrompt = ({
   return parts.join('\n\n');
 };
 
-const generateSubject = async (message: string, styleProfile?: WritingStyleMatrix | null) => {
+const generateSubject = async (message: string, styleProfile?: WritingStyleMatrix | null, userSettings?: UserSettings) => {
   const parts: string[] = [];
 
   parts.push('# Email Subject Generation Task');
@@ -295,9 +307,10 @@ const generateSubject = async (message: string, styleProfile?: WritingStyleMatri
   );
 
   const subjectModelId = env.OPENAI_MODEL || 'gpt-4o';
-  const { provider: subjectProvider } = resolveAutoModelConfig(env);
+  const subjectProvider = (userSettings?.aiProvider ?? 'auto') as import('../../../lib/ai-model-resolver').AIProvider;
+  const resolvedSubjectProvider = subjectProvider === 'auto' ? resolveAutoModelConfig(env).provider : subjectProvider;
   const { text } = await generateText({
-    model: routeModel('title', subjectProvider, '', '', env),
+    model: routeModel('title', resolvedSubjectProvider, userSettings?.aiModel ?? '', userSettings?.ollamaBaseUrl ?? '', env),
     messages: [
       {
         role: 'system',
