@@ -513,19 +513,15 @@ struct CalendarEventListCardView: View {
     private var title: String? { props["title"]?.stringValue }
     private var summary: String? { props["summary"]?.stringValue }
     private var eventDicts: [[String: ChatJSONValue]] {
-        // Deduplicate by eventId when present, otherwise by title + date prefix.
-        // Prevents same holiday / all-day event from multiple subscribed calendars
-        // showing up multiple times in the list.
+        // Deduplicate by title + date prefix (first 10 chars of ISO start, i.e. "YYYY-MM-DD").
+        // Events from multiple subscribed Apple calendars (e.g. Swedish + Norwegian holidays)
+        // share the same title and date but have *different* eventIds, so deduplicating
+        // by eventId alone would miss duplicates. Title+date catches all same-day duplicates.
         var seen = Set<String>()
         return (props["events"]?.arrayValue ?? []).compactMap { $0.objectValue }.filter { dict in
-            let key: String
-            if let eid = dict["eventId"]?.stringValue {
-                key = eid
-            } else {
-                let title = dict["title"]?.stringValue ?? ""
-                let datePrefix = String((dict["start"]?.stringValue ?? "").prefix(10))
-                key = "\(title)|\(datePrefix)"
-            }
+            let title = dict["title"]?.stringValue ?? ""
+            let datePrefix = String((dict["start"]?.stringValue ?? "").prefix(10))
+            let key = "\(title)|\(datePrefix)"
             return seen.insert(key).inserted
         }
     }

@@ -1258,39 +1258,6 @@ final class AIChatService {
     }
 
     /// Builds an `AISource` row for a client-side tool call (`tool:<callId>` ids match server contract).
-    private func makeToolSource(
-        callId: String,
-        kind: AISource.Kind,
-        platform: AISource.Platform,
-        title: String,
-        subtitle: String? = nil,
-        timestamp: Date? = nil,
-        url: String? = nil,
-        entityId: String? = nil,
-        snippet: String? = nil,
-        iconHint: String? = nil
-    ) -> AISource {
-        AISource(
-            id: "tool:\(callId)",
-            kind: kind,
-            platform: platform,
-            title: title,
-            subtitle: subtitle,
-            timestamp: timestamp,
-            url: url,
-            entityId: entityId,
-            snippet: snippet,
-            iconHint: iconHint
-        )
-    }
-
-    /// Appends a tool-derived source to the assistant message if not already present.
-    private func appendToolSource(_ source: AISource, to assistantMessageID: UUID) {
-        guard let idx = messages.firstIndex(where: { $0.id == assistantMessageID }) else { return }
-        if messages[idx].sources.contains(where: { $0.id == source.id }) { return }
-        messages[idx].sources.append(source)
-    }
-
     private func executeSingleToolCall(
         _ call: AccumulatedToolCall,
         assistantMessageID: UUID,
