@@ -64,10 +64,26 @@ struct DocsBrowserViewRepresentable: UIViewRepresentable {
                 }
             }
 
+            function hideWebTitleForNativeChrome() {
+                // The native iOS shell renders its own title TextField above
+                // the WebView, so the web doc page's title input would
+                // visually duplicate it. Selectors are forward-looking — if
+                // the web template doesn't expose any of them yet, the rule
+                // is a harmless no-op.
+                var s = document.createElement('style');
+                s.setAttribute('data-todus-native-chrome', '1');
+                s.textContent = '[data-doc-page-title], .doc-page-title, .docs-title-bar { display: none !important; }';
+                document.head && document.head.appendChild(s);
+            }
+
             if (document.readyState === 'loading') {
-                document.addEventListener('DOMContentLoaded', applyDarkMode, { once: true });
+                document.addEventListener('DOMContentLoaded', function() {
+                    applyDarkMode();
+                    hideWebTitleForNativeChrome();
+                }, { once: true });
             } else {
                 applyDarkMode();
+                hideWebTitleForNativeChrome();
             }
         """
         let script = WKUserScript(
