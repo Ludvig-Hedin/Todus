@@ -46,6 +46,10 @@ struct EmailThreadView: View {
     /// Global email dark mode toggle — applies to all messages in the thread.
     /// Moved from per-message state so it can be controlled from the header menu.
     @State private var emailDarkMode = false
+    /// Guards top-bar archive + mark-as-unread from double-tap while async op is in flight.
+    @State private var isTopBarBusy = false
+    /// Guards star toggle from double-tap while mutation is pending.
+    @State private var isStarBusy = false
 
     /// How long the inline "Created" confirmation persists inside an action
     /// button before reverting to its normal label.
@@ -162,7 +166,7 @@ struct EmailThreadView: View {
             AppTheme.backgroundTop.ignoresSafeArea()
 
             if isLoading {
-                ProgressView().tint(.secondary)
+                ProgressView("Loading…").controlSize(.small).tint(.secondary)
             } else if let detail, !detail.messages.isEmpty {
                 mainContent(detail)
             } else {
@@ -301,9 +305,12 @@ struct EmailThreadView: View {
                         // diffing the shared `errorMessage` — that approach is fragile
                         // because unrelated calls can mutate `errorMessage` between
                         // the snapshot and the check.
+                        guard !isTopBarBusy else { return }
+                        isTopBarBusy = true
                         topBarActionTick &+= 1
                         Task {
                             let success = await emailService.markAsUnread(ids: [threadId])
+                            isTopBarBusy = false
                             if success {
                                 dismiss()
                             } else {
@@ -318,12 +325,16 @@ struct EmailThreadView: View {
                             .frame(width: 42, height: 38)
                     }
                     .buttonStyle(.plain)
+                    .disabled(isTopBarBusy)
                     .accessibilityLabel("Mark as unread")
 
                     Button {
+                        guard !isTopBarBusy else { return }
+                        isTopBarBusy = true
                         topBarActionTick &+= 1
                         Task {
                             let success = await emailService.archiveThreads(ids: [threadId])
+                            isTopBarBusy = false
                             if success {
                                 dismiss()
                             } else {
@@ -338,6 +349,7 @@ struct EmailThreadView: View {
                             .frame(width: 42, height: 38)
                     }
                     .buttonStyle(.plain)
+                    .disabled(isTopBarBusy)
                     .accessibilityLabel("Archive")
 
                     moreOptionsMenu
@@ -506,10 +518,13 @@ struct EmailThreadView: View {
             // local state, then await the mutation — if the server says no, roll
             // back so the icon doesn't lie about the actual star state.
             Button {
+                guard !isStarBusy else { return }
+                isStarBusy = true
                 let prior = isStarred
                 isStarred.toggle()
                 Task {
                     let success = await emailService.toggleStar(ids: [threadId])
+                    isStarBusy = false
                     if !success {
                         isStarred = prior
                         actionErrorMessage = emailService.errorMessage
@@ -522,6 +537,7 @@ struct EmailThreadView: View {
                     .foregroundStyle(isStarred ? Color.yellow : AppTheme.mutedText)
             }
             .buttonStyle(.plain)
+            .disabled(isStarBusy)
             .padding(.top, 3)
             // Spoken state for VoiceOver — the icon alone doesn't convey "starred"
             // vs "not starred" clearly. The label updates whenever `isStarred`
@@ -1216,7 +1232,7 @@ private struct EditLabelsSheet: View {
         NavigationStack {
             Group {
                 if isLoading {
-                    ProgressView().tint(.secondary)
+                    ProgressView("Loading…").controlSize(.small).tint(.secondary)
                 } else if let errorMessage {
                     VStack(spacing: 8) {
                         Image(systemName: "exclamationmark.triangle")
@@ -1637,8 +1653,10 @@ private struct MessageRow: View {
                         }
 
                         if !isExpanded {
-                            // Collapsed preview snippet
-                            Text(message.plainText ?? message.subject)
+                            // Collapsed preview snippet — fall back to subject, then a
+                            // placeholder so the row never renders blank.
+                            let snippet = (message.plainText.flatMap { $0.isEmpty ? nil : $0 }) ?? (message.subject.isEmpty ? "(no preview)" : message.subject)
+                            Text(snippet)
                                 .font(.system(size: 13))
                                 .foregroundStyle(AppTheme.mutedText)
                                 .lineLimit(1)
