@@ -30,7 +30,6 @@ struct EmailThreadView: View {
     @State private var isStarred = false
     @State private var assistantThread: AssistantThreadContext? = nil
     @State private var isLoadingAssistant = true
-    @State private var isRetryingAssistant = false
     @State private var assistantDraftSeed: String? = nil
     @State private var showDeleteConfirmation = false
     /// Visible transient toast for assistant action results (success or failure).
@@ -599,7 +598,7 @@ struct EmailThreadView: View {
     /// thread to read the messages, the card is a hint not a dossier.
     private var summaryCard: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if isLoadingAssistant && !assistantLoadFailed {
+            if isLoadingAssistant {
                 HStack(spacing: 8) {
                     Image(systemName: "sparkles")
                         .font(.system(size: 12, weight: .semibold))
