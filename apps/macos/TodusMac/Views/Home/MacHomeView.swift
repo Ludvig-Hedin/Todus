@@ -40,6 +40,7 @@ struct MacHomeView: View {
     @State private var selectedUpcomingEvent: CalendarEvent? = nil
     @State private var selectedTask: TaskRecord? = nil
     @State private var selectedMeetingId: IdentifiableString? = nil
+    @State private var setupBannerDismissed = false
 
     private var isAssistantBriefingRefreshing: Bool {
         isLoadingAssistantBriefing && services.emailService.assistantBriefing != nil
@@ -50,7 +51,8 @@ struct MacHomeView: View {
     }
 
     private var isEmailRefreshing: Bool {
-        services.emailService.isLoadingThreads && !services.emailService.threads.isEmpty
+        (services.emailService.isLoadingThreads || services.emailService.isReconciling)
+            && !services.emailService.threads.isEmpty
     }
 
     var body: some View {
@@ -74,17 +76,17 @@ struct MacHomeView: View {
             if shouldShowGetStarted {
                 getStartedSection
             } else {
-                HStack(alignment: .top, spacing: MacTheme.spacing20) {
-                    tasksColumn
-                    VStack(alignment: .leading, spacing: MacTheme.spacing20) {
+                VStack(alignment: .leading, spacing: MacTheme.spacing20) {
+                    HStack(alignment: .top, spacing: MacTheme.spacing20) {
+                        tasksColumn
                         eventsColumn
+                    }
+                    HStack(alignment: .top, spacing: MacTheme.spacing20) {
+                        emailsSection
                         scheduleSidebar
                     }
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
                 }
                 .padding(.bottom, MacTheme.spacing24)
-
-                emailsSection
             }
         }
         .task {
@@ -199,7 +201,8 @@ struct MacHomeView: View {
     }
 
     private var showSetupBanner: Bool {
-        !(todaysEvents.isEmpty && orderedPreviewTasks.isEmpty && !services.emailService.hasConnection)
+        !setupBannerDismissed
+            && !(todaysEvents.isEmpty && orderedPreviewTasks.isEmpty && !services.emailService.hasConnection)
             && (needsEmailSetup || needsCalendarSetup)
     }
 
@@ -277,12 +280,7 @@ struct MacHomeView: View {
         if services.emailService.threads.isEmpty {
             return "Threads from your inbox will show here after the first sync."
         }
-        let total = services.emailService.threads.count
-        let shown = min(5, total)
-        if total <= shown {
-            return "Latest threads from your inbox."
-        }
-        return "Showing the \(shown) most recent of \(total) loaded threads — use Open inbox for everything."
+        return "Latest threads from your inbox."
     }
 
     private var setupBanner: some View {
@@ -312,6 +310,17 @@ struct MacHomeView: View {
                     }
                 }
             }
+
+            Button {
+                setupBannerDismissed = true
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(MacTheme.mutedText)
+                    .frame(width: 20, height: 20)
+            }
+            .buttonStyle(.plain)
+            .focusEffectDisabled()
         }
         .padding(MacTheme.spacing16)
         .background(MacTheme.surfaceCard, in: RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous))
@@ -562,6 +571,8 @@ struct MacHomeView: View {
         .help(tooltip)
     }
 
+    // TODO(bug-hunt): Dead code — assistantPriorityStrip is never called. Was part of an older
+    // three-card priority strip UI replaced by macTodayRow. Safe to delete.
     private func assistantPriorityStrip(_ briefing: AssistantBriefing) -> some View {
         HStack(spacing: MacTheme.spacing8) {
             if let urgentReply = briefing.today.urgentReply {
@@ -598,6 +609,8 @@ struct MacHomeView: View {
         )
     }
 
+    // TODO(bug-hunt): Dead code — assistantQueueColumn and macBriefingRowCard are never called.
+    // Remnants of the previous three-column briefing layout. Safe to delete both.
     private func assistantQueueColumn(title: String, rows: [MacBriefingRow]) -> some View {
         VStack(alignment: .leading, spacing: MacTheme.spacing8) {
             HStack(spacing: MacTheme.spacing6) {
@@ -768,7 +781,8 @@ struct MacHomeView: View {
                 count: todaysEvents.isEmpty ? nil : todaysEvents.count,
                 isUpdating: isEventsRefreshing,
                 linkTitle: "Full calendar",
-                linkAction: { onNavigate?(.calendar(.all)) }
+                linkAction: { onNavigate?(.calendar(.all)) },
+                addAction: { onNavigate?(.calendar(.all)) }
             )
 
             if isLoadingEvents && todaysEvents.isEmpty {
@@ -861,7 +875,8 @@ struct MacHomeView: View {
                 subtitle: "Open items, overdue and due dates first",
                 count: orderedPreviewTasks.isEmpty ? nil : orderedPreviewTasks.count,
                 linkTitle: "All tasks",
-                linkAction: { onNavigate?(.tasks) }
+                linkAction: { onNavigate?(.tasks) },
+                addAction: { onNavigate?(.tasks) }
             )
 
             if orderedPreviewTasks.isEmpty {
@@ -883,7 +898,7 @@ struct MacHomeView: View {
                         }
                     }
                 }
-                .frame(maxHeight: 280)
+                .frame(maxHeight: 240)
                 .background(MacTheme.surfaceCard, in: RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous))
                 .clipShape(RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous))
                 .overlay(
@@ -903,7 +918,7 @@ struct MacHomeView: View {
     private var scheduleSidebar: some View {
         VStack(alignment: .leading, spacing: MacTheme.spacing16) {
             upcomingEventsSection
-            // meetingsSection
+            meetingsSection
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .popover(item: $selectedUpcomingEvent, arrowEdge: .leading) { event in
@@ -1250,7 +1265,7 @@ struct MacHomeView: View {
                         }
                     }
                 }
-                .frame(maxHeight: 280)
+                .frame(maxHeight: 240)
                 .background(MacTheme.surfaceCard, in: RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous))
                 .clipShape(RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous))
                 .overlay(
@@ -1282,7 +1297,7 @@ struct MacHomeView: View {
 
                     Spacer(minLength: 0)
 
-                    Text(thread.date, format: .dateTime.hour().minute())
+                    Text(emailTimeLabel(thread.date))
                         .font(MacTheme.metaFont())
                         .foregroundStyle(MacTheme.mutedText)
                 }
@@ -1424,7 +1439,8 @@ struct MacHomeView: View {
         count: Int? = nil,
         isUpdating: Bool = false,
         linkTitle: String? = nil,
-        linkAction: (() -> Void)? = nil
+        linkAction: (() -> Void)? = nil,
+        addAction: (() -> Void)? = nil
     ) -> some View {
         VStack(alignment: .leading, spacing: MacTheme.spacing6) {
             HStack(alignment: .firstTextBaseline, spacing: MacTheme.spacing8) {
@@ -1453,6 +1469,20 @@ struct MacHomeView: View {
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(MacTheme.accent)
                         .pointerStyle(.link)
+                }
+
+                if let addAction {
+                    Button(action: addAction) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(MacTheme.textSecondary)
+                            .frame(width: 24, height: 24)
+                            .background(MacTheme.badgeSurface, in: RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .focusEffectDisabled()
+                    .pointerStyle(.link)
+                    .help("Add new item")
                 }
             }
 
@@ -1506,6 +1536,10 @@ struct MacHomeView: View {
                 .buttonStyle(.plain)
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(MacTheme.accent)
+                .padding(.horizontal, MacTheme.spacing12)
+                .padding(.vertical, MacTheme.spacing4)
+                .background(MacTheme.accent.opacity(0.08), in: Capsule(style: .continuous))
+                .pointerStyle(.link)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, MacTheme.spacing16)
@@ -1566,6 +1600,21 @@ struct MacHomeView: View {
         todaysEvents = todayList
         upcomingEvents = future
     }
+
+    /// Relative time label matching iOS — "5m ago", "2h ago", "Yesterday", "Apr 23".
+    private func emailTimeLabel(_ date: Date) -> String {
+        let cal = Calendar.current
+        if cal.isDateInToday(date) {
+            let seconds = Int(Date().timeIntervalSince(date))
+            if seconds < 90 { return "Just now" }
+            let mins = seconds / 60
+            if mins < 60 { return "\(mins)m ago" }
+            return "\(mins / 60)h ago"
+        }
+        if cal.isDateInYesterday(date) { return "Yesterday" }
+        return date.formatted(.dateTime.month(.abbreviated).day())
+    }
+
 // MARK: - Hover row wrapper
 
 /// Click-through row that yields a hover-state binding to its content builder.

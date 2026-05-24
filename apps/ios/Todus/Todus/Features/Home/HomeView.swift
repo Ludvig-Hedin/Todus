@@ -85,6 +85,14 @@ struct HomeView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .scrollDismissesKeyboard(.interactively)
             .contentMargins(.bottom, 32, for: .scrollContent)
+            .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y } action: { old, new in
+                let delta = new - old
+                if delta > 8 && new > 40 {
+                    withAnimation(.easeOut(duration: 0.2)) { services.hideTabBar = true }
+                } else if delta < -8 {
+                    withAnimation(.easeOut(duration: 0.2)) { services.hideTabBar = false }
+                }
+            }
             .safeAreaInset(edge: .top) {
                 Color.clear.frame(height: headerHeight + scrimTail)
             }
@@ -400,6 +408,8 @@ struct HomeView: View {
         }
     }
 
+    // TODO(bug-hunt): heroStatChips is computed but never rendered. Planned hero chip UI
+    // was removed when slimGreeting replaced the card-based header. Safe to delete.
     private var heroStatChips: [HomeStatChip] {
         var chips: [HomeStatChip] = []
         let needsYouCount = services.emailService.assistantBriefing?.needsYou.count ?? 0
@@ -699,7 +709,7 @@ struct HomeView: View {
                     .tracking(0.5)
                 Spacer()
                 if briefingFeedItems.count > 5 {
-                    Button("Mail") {
+                    Button("See all in Mail") {
                         services.navigateTo = .email
                     }
                     .font(.system(size: 12, weight: .semibold))
@@ -973,7 +983,7 @@ struct HomeView: View {
             sectionHeader(
                 title: "This Week",
                 icon: "calendar",
-                count: totalCount,
+                count: sections.count,
                 actionTitle: "Open",
                 isUpdating: isEventsRefreshing,
                 onOpen: { services.navigateTo = .calendar },
@@ -1215,7 +1225,17 @@ struct HomeView: View {
         }()
 
         return VStack(alignment: .leading, spacing: 12) {
-            meetingsSectionHeader(count: allMeetings.count)
+            sectionHeader(
+                title: "Meetings",
+                icon: "video.fill",
+                count: allMeetings.count,
+                actionTitle: "View all",
+                isUpdating: services.meetingsService.isSyncing,
+                onOpen: { services.navigateToSheet = .meetings },
+                onAdd: {
+                    Task { await services.meetingsService.syncFromCalendar() }
+                }
+            )
 
             if services.meetingsService.isLoading && allMeetings.isEmpty {
                 loadingState(message: "Loading meetings")
@@ -1255,51 +1275,6 @@ struct HomeView: View {
                     }
                 }
             }
-        }
-    }
-
-    private func meetingsSectionHeader(count: Int) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: "video.fill")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.secondary)
-            Text("Meetings")
-                .font(.system(size: 15, weight: .semibold))
-            if count > 0 {
-                Text("\(count)")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(AppTheme.surfaceSecondary, in: Capsule())
-            }
-            if services.meetingsService.isSyncing {
-                InlineRefreshBadge()
-            }
-            Spacer()
-
-            Button("View all") {
-                services.navigateToSheet = .meetings
-            }
-            .font(.system(size: 12, weight: .semibold))
-            .foregroundStyle(AppTheme.accent)
-
-            Button {
-                Task { await services.meetingsService.syncFromCalendar() }
-            } label: {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 28, height: 28)
-                    .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.inline, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: AppTheme.Radius.inline, style: .continuous)
-                            .stroke(AppTheme.cardBorder, lineWidth: 1)
-                    )
-            }
-            .buttonStyle(.plain)
-            .minTouchTarget()
-            .disabled(services.meetingsService.isSyncing)
         }
     }
 
@@ -1628,17 +1603,24 @@ struct HomeView: View {
     /// Tappable empty state card — tapping triggers a navigation action.
     private func emptyState(message: String, onTap: @escaping () -> Void) -> some View {
         Button(action: onTap) {
-            Text(message)
-                .font(.system(size: 14))
-                .foregroundStyle(.tertiary)
-                .frame(maxWidth: .infinity)
-                .padding(20)
-                .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous)
-                        .stroke(AppTheme.cardBorder, lineWidth: 1)
-                )
-                .contentShape(Rectangle())
+            HStack {
+                Spacer()
+                Text(message)
+                    .font(.system(size: 14))
+                    .foregroundStyle(.tertiary)
+                    .multilineTextAlignment(.center)
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.quaternary)
+            }
+            .padding(20)
+            .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous)
+                    .stroke(AppTheme.cardBorder, lineWidth: 1)
+            )
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
