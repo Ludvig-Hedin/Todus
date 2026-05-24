@@ -33,10 +33,16 @@ struct MoreSheetView: View {
                         }
                     }
 
-                    NavigationLink {
-                        DocsListView()
+                    // Docs owns its own NavigationStack/Split view internally —
+                    // pushing it inside this sheet's NavigationStack would
+                    // double-nest and swallow internal pushes. Jump to the
+                    // tab instead, matching how Calendar is handled above.
+                    Button {
+                        onNavigate(.docs)
+                        dismiss()
                     } label: {
                         Label("Docs", systemImage: "doc.text")
+                            .foregroundStyle(.primary)
                     }
 
                     // Legacy web shim — kept as an opt-in fallback so users who

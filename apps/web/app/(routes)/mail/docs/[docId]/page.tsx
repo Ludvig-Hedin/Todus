@@ -53,11 +53,20 @@ function SidebarPanel({
   navigate: (path: string) => void;
 }) {
   return (
-    <ResizablePanel defaultSize={22} minSize={16} maxSize={35} className="border-r">
-      <DocTree
-        selectedDocId={docId}
-        onSelectDoc={(id) => navigate(`/mail/docs/${id}`)}
-      />
+    <ResizablePanel
+      defaultSize={22}
+      minSize={16}
+      maxSize={35}
+      className="border-r"
+    >
+      {/* data-doc-sidebar lets native iOS / macOS shells inject CSS to hide
+          this panel when they render their own sidebar above the WebView. */}
+      <div data-doc-sidebar className="h-full">
+        <DocTree
+          selectedDocId={docId}
+          onSelectDoc={(id) => navigate(`/mail/docs/${id}`)}
+        />
+      </div>
     </ResizablePanel>
   );
 }
@@ -191,8 +200,10 @@ export default function DocEditorPage() {
       <ResizablePanel className="flex min-h-0 flex-col overflow-hidden">
         {/* Scrollable content area: title + editor together */}
         <div className="min-h-0 flex-1 overflow-y-auto">
-          {/* Title — Affine-style large h1 */}
-          <div className="px-12 pb-0 pt-10">
+          {/* Title — Affine-style large h1.
+              data-doc-page-title lets native iOS / macOS shells inject CSS to
+              hide this row when they render their own title TextField. */}
+          <div data-doc-page-title className="px-12 pb-0 pt-10">
             <input
               type="text"
               value={title}

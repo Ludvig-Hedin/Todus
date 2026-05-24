@@ -21,6 +21,9 @@ struct DocsListView: View {
     @State private var renameText: String = ""
     @State private var errorMessage: String?
     @State private var searchText: String = ""
+    /// Doc the user requested to delete via swipe. Drives the confirmation
+    /// dialog so a fat-finger swipe doesn't immediately destroy data.
+    @State private var deletingDoc: DocRecordDTO?
 
     var body: some View {
         Group {
@@ -61,11 +64,31 @@ struct DocsListView: View {
         )
         .alert("Rename document", isPresented: Binding(
             get: { renamingDoc != nil },
-            set: { if !$0 { renamingDoc = nil } }
+            set: { if !$0 { renamingDoc = nil; renameText = "" } }
         )) {
             TextField("Title", text: $renameText)
             Button("Save") { commitRename() }
-            Button("Cancel", role: .cancel) { renamingDoc = nil }
+                .disabled(renameText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            Button("Cancel", role: .cancel) {
+                renamingDoc = nil
+                renameText = ""
+            }
+        }
+        .confirmationDialog(
+            deletingDoc.map { "Delete “\($0.title.isEmpty ? "Untitled" : $0.title)”?" } ?? "Delete document?",
+            isPresented: Binding(
+                get: { deletingDoc != nil },
+                set: { if !$0 { deletingDoc = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                if let d = deletingDoc { Task { await delete(d) } }
+                deletingDoc = nil
+            }
+            Button("Cancel", role: .cancel) { deletingDoc = nil }
+        } message: {
+            Text("This can't be undone.")
         }
     }
 
@@ -149,10 +172,25 @@ struct DocsListView: View {
                 }
             }
         } else if svc.allDocs.count > 1 {
-            Section("Recent") {
-                let recent = Array(svc.allDocs.sorted { $0.updatedAt > $1.updatedAt }.prefix(5))
-                ForEach(recent) { doc in
-                    flatDocRow(doc)
+            // Recent skips docs that are already in the Starred section to avoid
+            // showing the same row twice in the same list. Workspace section
+            // duplication is intentional (it's the home view of the doc) but
+            // top-of-list redundancy is noise.
+            let starredIDs = Set(svc.starredDocs.map(\.id))
+            let recent = Array(
+                svc.allDocs
+                    .filter { !starredIDs.contains($0.id) }
+                    .sorted { $0.updatedAt > $1.updatedAt }
+                    .prefix(5)
+            )
+            if !recent.isEmpty {
+                Section("Recent") {
+                    ForEach(recent, id: \.id) { doc in
+                        flatDocRow(doc)
+                            // Compound id keeps SwiftUI from merging swipe / hover
+                            // state with this doc's other appearance in a workspace.
+                            .id("recent-\(doc.id)")
+                    }
                 }
             }
         }
@@ -164,8 +202,9 @@ struct DocsListView: View {
         let starred = svc.starredDocs
         if !starred.isEmpty && searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             Section("Starred") {
-                ForEach(starred) { doc in
+                ForEach(starred, id: \.id) { doc in
                     flatDocRow(doc)
+                        .id("starred-\(doc.id)")
                 }
             }
         }
@@ -197,6 +236,13 @@ struct DocsListView: View {
 
     // MARK: - Rows
 
+    /// True when the row's doc is the active doc in the iPad detail pane.
+    /// iPhone NavigationStack pushes don't need a sticky highlight (the editor
+    /// is full-screen anyway), so we gate on size class.
+    private func isActive(_ docID: String) -> Bool {
+        sizeClass == .regular && selectedDocID == docID
+    }
+
     private func flatDocRow(_ doc: DocRecordDTO) -> some View {
         Button {
             open(docID: doc.id)
@@ -225,9 +271,10 @@ struct DocsListView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .listRowBackground(isActive(doc.id) ? Color.accentColor.opacity(0.12) : nil)
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             Button(role: .destructive) {
-                Task { await delete(doc) }
+                deletingDoc = doc
             } label: {
                 Label("Delete", systemImage: "trash")
             }
@@ -267,9 +314,10 @@ struct DocsListView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .listRowBackground(isActive(doc.id) ? Color.accentColor.opacity(0.12) : nil)
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             Button(role: .destructive) {
-                Task { await delete(doc) }
+                deletingDoc = doc
             } label: {
                 Label("Delete", systemImage: "trash")
             }
@@ -351,7 +399,10 @@ struct DocsListView: View {
     @ViewBuilder
     private func destination(for id: String) -> some View {
         if let doc = services.docsService.allDocs.first(where: { $0.id == id }) {
+            // .id(doc.id) so SwiftUI rebuilds state when navigating between docs
+            // — without it the previous doc's title can briefly show.
             DocEditorView(doc: doc)
+                .id(doc.id)
         } else {
             ProgressView()
                 .task { _ = await services.docsService.getDoc(id: id) }
@@ -362,6 +413,7 @@ struct DocsListView: View {
     private var detail: some View {
         if let id = selectedDocID, let doc = services.docsService.allDocs.first(where: { $0.id == id }) {
             DocEditorView(doc: doc)
+                .id(doc.id)
         } else {
             VStack(spacing: 12) {
                 Image(systemName: "doc.text.magnifyingglass")
@@ -377,12 +429,14 @@ struct DocsListView: View {
     // MARK: - Actions
 
     /// Opens a doc — pushes onto path on iPhone, sets selection on iPad.
+    /// Triggers a soft impact so users feel the navigation land.
     private func open(docID: String) {
         if sizeClass == .regular {
             selectedDocID = docID
         } else {
             path.append(docID)
         }
+        UIImpactFeedbackGenerator(style: .soft).impactOccurred()
     }
 
     private func createDoc() async {
@@ -393,6 +447,7 @@ struct DocsListView: View {
             let doc = try await services.docsService.createNewDocument()
             open(docID: doc.id)
         } catch {
+            UINotificationFeedbackGenerator().notificationOccurred(.error)
             errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
     }
@@ -400,8 +455,10 @@ struct DocsListView: View {
     private func delete(_ doc: DocRecordDTO) async {
         do {
             try await services.docsService.deleteDoc(id: doc.id)
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
             if selectedDocID == doc.id { selectedDocID = nil }
         } catch {
+            UINotificationFeedbackGenerator().notificationOccurred(.error)
             errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
     }
@@ -409,7 +466,9 @@ struct DocsListView: View {
     private func toggleStar(_ doc: DocRecordDTO) async {
         do {
             _ = try await services.docsService.togglePin(id: doc.id)
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
         } catch {
+            UINotificationFeedbackGenerator().notificationOccurred(.error)
             errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
     }
@@ -417,17 +476,23 @@ struct DocsListView: View {
     private func commitRename() {
         guard let doc = renamingDoc else { return }
         let trimmed = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Save-disabled keeps this unreachable through the alert button, but
+        // guard anyway in case rename is triggered programmatically later.
         guard !trimmed.isEmpty else {
             renamingDoc = nil
+            renameText = ""
             return
         }
         Task {
             do {
                 _ = try await services.docsService.renameDoc(id: doc.id, title: trimmed)
+                UIImpactFeedbackGenerator(style: .soft).impactOccurred()
             } catch {
+                UINotificationFeedbackGenerator().notificationOccurred(.error)
                 errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             }
         }
         renamingDoc = nil
+        renameText = ""
     }
 }

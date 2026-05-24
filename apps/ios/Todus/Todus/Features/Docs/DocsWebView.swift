@@ -59,31 +59,52 @@ struct DocsBrowserViewRepresentable: UIViewRepresentable {
         let contentController = WKUserContentController()
         let darkModeScript = """
             function applyDarkMode() {
-                if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches && document.documentElement) {
-                    document.documentElement.classList.add('dark');
+                if (!document.documentElement || !window.matchMedia) return;
+                var isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+                document.documentElement.classList.toggle('dark', isDark);
+            }
+
+            function listenForAppearanceChanges() {
+                if (!window.matchMedia) return;
+                var mq = window.matchMedia('(prefers-color-scheme: dark)');
+                // Older WebKit uses addListener; newer uses addEventListener.
+                if (mq.addEventListener) {
+                    mq.addEventListener('change', applyDarkMode);
+                } else if (mq.addListener) {
+                    mq.addListener(applyDarkMode);
                 }
             }
 
-            function hideWebTitleForNativeChrome() {
+            function hideWebChromeForNativeShell() {
                 // The native iOS shell renders its own title TextField above
-                // the WebView, so the web doc page's title input would
-                // visually duplicate it. Selectors are forward-looking — if
-                // the web template doesn't expose any of them yet, the rule
-                // is a harmless no-op.
+                // the WebView and its own sidebar in the list view, so the
+                // web page's title row and sidebar would visually duplicate
+                // them. Selectors target the data attributes added to the
+                // web page; if they're not present (older deploys, future
+                // template changes), this is a harmless no-op.
                 var s = document.createElement('style');
                 s.setAttribute('data-todus-native-chrome', '1');
-                s.textContent = '[data-doc-page-title], .doc-page-title, .docs-title-bar { display: none !important; }';
+                s.textContent = [
+                    '[data-doc-page-title]{display:none!important;}',
+                    '[data-doc-sidebar]{display:none!important;}',
+                    // Older selector fallbacks — keep until we've shipped
+                    // data attributes everywhere docs render.
+                    '.doc-page-title{display:none!important;}',
+                    '.docs-title-bar{display:none!important;}'
+                ].join('');
                 document.head && document.head.appendChild(s);
             }
 
             if (document.readyState === 'loading') {
                 document.addEventListener('DOMContentLoaded', function() {
                     applyDarkMode();
-                    hideWebTitleForNativeChrome();
+                    listenForAppearanceChanges();
+                    hideWebChromeForNativeShell();
                 }, { once: true });
             } else {
                 applyDarkMode();
-                hideWebTitleForNativeChrome();
+                listenForAppearanceChanges();
+                hideWebChromeForNativeShell();
             }
         """
         let script = WKUserScript(

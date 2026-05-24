@@ -25,6 +25,7 @@ struct DocEditorView: View {
     @State private var saveState: SaveState = .idle
     @State private var saveTask: Task<Void, Never>?
     @State private var savedRevertTask: Task<Void, Never>?
+    @State private var autofocusTask: Task<Void, Never>?
     @State private var showShare = false
     @State private var showInfo = false
     @State private var errorMessage: String?
@@ -88,7 +89,10 @@ struct DocEditorView: View {
                 .onChange(of: titleDraft) { _, _ in
                     scheduleDebouncedTitleSave()
                 }
+            // Reserved min-width stops the indicator from shifting the title
+            // edge on every keystroke when state flips between saving/saved.
             saveIndicator
+                .frame(minWidth: 70, alignment: .trailing)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -152,10 +156,13 @@ struct DocEditorView: View {
                     Label("Document info", systemImage: "info.circle")
                 }
                 Button {
-                    showShare = true
+                    // Only present the share sheet when we can actually build a
+                    // URL — otherwise the user gets an empty modal.
+                    if shareURL != nil { showShare = true }
                 } label: {
                     Label("Share link", systemImage: "square.and.arrow.up")
                 }
+                .disabled(shareURL == nil)
                 Button {
                     UIPasteboard.general.string = titleDraft.isEmpty ? "Untitled" : titleDraft
                 } label: {
@@ -171,13 +178,15 @@ struct DocEditorView: View {
 
     /// Autofocus the title when the doc was just created (default title or empty).
     /// Apple-Notes / Google-Docs feel — user lands and can immediately rename.
+    /// Cancellable so a fast push/pop doesn't fire focus on a torn-down view.
     private func autofocusIfNew() {
         let trimmed = titleDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty || trimmed == "Untitled" {
-            // Tiny delay so the keyboard/animation settles before focus moves.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                titleFocused = true
-            }
+        guard trimmed.isEmpty || trimmed == "Untitled" else { return }
+        autofocusTask?.cancel()
+        autofocusTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            guard !Task.isCancelled else { return }
+            titleFocused = true
         }
     }
 
@@ -213,9 +222,12 @@ struct DocEditorView: View {
     }
 
     /// Fire-and-forget final save when the view goes away — captures the title
-    /// snapshot so it survives the View being torn down.
+    /// snapshot so it survives the View being torn down. Also cancels timers
+    /// that would otherwise fire on a torn-down @State.
     private func flushPendingSave() {
         saveTask?.cancel()
+        savedRevertTask?.cancel()
+        autofocusTask?.cancel()
         let trimmed = titleDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed == lastSavedTitle { return }
         let svc = services.docsService
@@ -242,10 +254,12 @@ struct DocEditorView: View {
     private func toggleStar() async {
         let newValue = !isStarred
         isStarred = newValue
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
         do {
             _ = try await services.docsService.setStarred(id: doc.id, isStarred: newValue)
         } catch {
             isStarred = !newValue
+            UINotificationFeedbackGenerator().notificationOccurred(.error)
             errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
     }
