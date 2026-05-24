@@ -401,6 +401,19 @@ These were flagged by the parallel investigators but could not be confirmed with
 - ~~`EmailInboxView.swift:627` — pagination success misdetected as failure.~~ Logic correctly checks `if let current` *and* `current \!= priorError`; nil case is handled.
 
 
+## Bug Hunt + UX Assessment — 2026-05-24 (iOS + macOS Home pages)
+
+### Auto-fixed (3 issues)
+- `apps/macos/TodusMac/Views/Home/MacHomeView.swift:52` — `isEmailRefreshing` missing `|| isReconciling`; "Updating" badge was absent during post-forceSync reconciliation on macOS while iOS showed it correctly
+- `apps/macos/TodusMac/Views/Home/MacHomeView.swift:1281` — email timestamp hardcoded as `hour().minute()` showing "14:32" even for week-old threads; replaced with `emailTimeLabel()` helper (same logic as iOS: "5m ago" / "Yesterday" / "Apr 23")
+- `apps/macos/TodusMac/Views/Home/MacHomeView.swift:280-284` — `emailSectionSubtitle` unreachable branch (`total <= shown` always true since `shown = min(5,total)`); dead branch removed
+
+### Needs human review (4 issues)
+- `apps/macos/TodusMac/Views/Home/MacHomeView.swift:902` — `meetingsSection` commented out in `scheduleSidebar`; iOS renders it. Re-enable once desktop layout is confirmed. TODO comment added.
+- `apps/macos/TodusMac/Views/Home/MacHomeView.swift:565,601,640` — `assistantPriorityStrip`, `assistantQueueColumn`, `macBriefingRowCard` are dead code from old three-column briefing UI. Safe to delete. TODO comments added.
+- `apps/ios/Todus/Todus/Features/Home/HomeView.swift:411` — `heroStatChips` computed but never rendered (planned hero chip UI was removed). TODO comment added.
+- `apps/macos/TodusMac/Views/Home/MacHomeView.swift:52` (**NOTE: fixed**) but also verify `isEventsRefreshing` only checks `todaysEvents` (line 48) while iOS checks `upcomingEvents` — may be intentional given macOS splits sections.
+
 ## Bug Hunt — 2026-05-21
 
 ### Auto-fixed (3 issues)
@@ -410,3 +423,15 @@ These were flagged by the parallel investigators but could not be confirmed with
 
 ### Needs human review (0 issues)
 - None.
+
+## Bug Hunt — 2026-05-24 — Docs feature overhaul
+
+### Auto-fixed (1 issue, in files touched this session)
+- `apps/ios/Todus/Todus/Features/Docs/DocEditorView.swift:scheduleDebouncedTitleSave` — debounced title save now snapshots `titleDraft` at schedule time and bails if the draft moved on while sleeping; previously a teardown-time `flushPendingSave` could race against the scheduled task reading a mutated draft.
+
+### Needs human review (5 issues, in pre-existing files NOT touched this session)
+- `apps/macos/TodusMac/Views/Docs/MacDocEditorPane.swift:167-168` (Critical) — `services.docsService.preAIEditSnapshot` and `wk` are force-unwrapped on AI revert. Crash if either nil. Fix: `guard let snap = …, let wk = …`.
+- `apps/ios/Todus/Todus/Features/Docs/DocsWebView.swift:103-115,158-178` (Important) — WKNavigationDelegate callbacks dispatch via `Task { @MainActor in }` without weak self / cancellation token; stale reads possible if the WebView deallocs. Also no 401 retry: if the token rotates mid-load the page sticks.
+- `apps/macos/TodusMac/Views/Docs/MacDocEditorPane.swift:93-97` (Important) — 5-minute `Task.sleep` revert timer not cancelled on `.onDisappear` — long-running background tasks accumulate.
+- `apps/macos/TodusMac/Views/Docs/MacDocEditorPane.swift:156-160` (Important) — `flushPendingSave` swallows errors silently; if the doc was deleted while the editor was open, the user gets no signal. Log + surface.
+- `apps/ios/Todus/Todus/Services/Docs/DocsService.swift:85-97` & `apps/macos/TodusMac/Services/Docs/MacDocsService.swift:128-139` (Minor) — Personal-workspace auto-create races + flag never resets across sign-out. Make idempotent server-side or via observable state.

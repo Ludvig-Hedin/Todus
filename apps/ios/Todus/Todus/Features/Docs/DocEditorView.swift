@@ -183,9 +183,15 @@ struct DocEditorView: View {
 
     private func scheduleDebouncedTitleSave() {
         saveTask?.cancel()
+        // Snapshot the draft inside the task so a teardown-time `flushPendingSave`
+        // can't race against this scheduled task reading a mutated `titleDraft`.
+        let draft = titleDraft
         saveTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 600_000_000)
             guard !Task.isCancelled else { return }
+            // Bail if the draft moved on while we slept — the next keystroke
+            // already scheduled a fresh save with the newer value.
+            if titleDraft != draft { return }
             await saveTitleNow()
         }
     }
@@ -227,6 +233,8 @@ struct DocEditorView: View {
         savedRevertTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 2_000_000_000)
             guard !Task.isCancelled else { return }
+            // Only revert to idle if still .saved — if the user kept typing,
+            // saveState may already be .saving and we shouldn't blow it away.
             if case .saved = saveState { saveState = .idle }
         }
     }
