@@ -10,32 +10,28 @@ struct MacDocsShellView: View {
     @State private var isCreatingDocument = false
 
     var body: some View {
-        Group {
-            if let id = selectedDocId {
-                MacDocEditorPane(docId: id) {
-                    selectedDocId = nil
-                }
-            } else {
-                HSplitView {
-                    MacDocsSidebarView(
-                        selectedDocId: $selectedDocId,
-                        searchText: $searchText,
-                        isCreatingDocument: isCreatingDocument,
-                        onNewDocument: { Task { await newDocumentTapped() } }
-                    )
-                    .frame(minWidth: 200, idealWidth: 240, maxWidth: 300)
-                    MacDocsAllPane(
-                        selectedDocId: $selectedDocId,
-                        isGrid: $isGrid,
-                        searchText: $searchText,
-                        isCreatingDocument: isCreatingDocument,
-                        onNewDocument: { Task { await newDocumentTapped() } }
-                    )
-                }
-            }
+        HSplitView {
+            MacDocsSidebarView(
+                selectedDocId: $selectedDocId,
+                searchText: $searchText,
+                isCreatingDocument: isCreatingDocument,
+                onNewDocument: { Task { await newDocumentTapped() } }
+            )
+            .frame(minWidth: 200, idealWidth: 240, maxWidth: 300)
+            rightPane
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(MacTheme.contentBackground)
+        // Cmd+N triggers "New document" anywhere inside the docs shell.
+        // Hidden Button with .keyboardShortcut is the standard SwiftUI pattern
+        // for window-scoped shortcuts that don't belong in the menu bar.
+        .background(
+            Button("") { Task { await newDocumentTapped() } }
+                .keyboardShortcut("n", modifiers: .command)
+                .opacity(0)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        )
         .task {
             await services.docsService.refresh()
         }
@@ -46,6 +42,26 @@ struct MacDocsShellView: View {
             Button("OK", role: .cancel) { createError = nil }
         } message: {
             Text(createError ?? "")
+        }
+    }
+
+    /// Right pane swaps between the grid/list of all docs and the editor for
+    /// the selected doc. Sidebar stays put — this is the Google-Docs layout:
+    /// sidebar persistent, content area changes mode.
+    @ViewBuilder
+    private var rightPane: some View {
+        if let id = selectedDocId {
+            MacDocEditorPane(docId: id) {
+                selectedDocId = nil
+            }
+        } else {
+            MacDocsAllPane(
+                selectedDocId: $selectedDocId,
+                isGrid: $isGrid,
+                searchText: $searchText,
+                isCreatingDocument: isCreatingDocument,
+                onNewDocument: { Task { await newDocumentTapped() } }
+            )
         }
     }
 
