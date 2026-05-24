@@ -12,6 +12,7 @@ struct MacMeetingsView: View {
     @State private var rotationAngle = 0.0
     /// Watchdog that force-resets `isSyncing` if a sync hangs (e.g. silent network failure).
     @State private var syncTimeoutTask: Task<Void, Never>? = nil
+    @State private var searchDebounceTask: Task<Void, Never>? = nil
 
     private func updateSyncRotation(isSyncing: Bool) {
         if isSyncing {
@@ -57,6 +58,10 @@ struct MacMeetingsView: View {
         }
         .task {
             await services.meetingsService.loadMeetings()
+        }
+        .onDisappear {
+            searchDebounceTask?.cancel()
+            searchDebounceTask = nil
         }
         .onAppear {
             updateSyncRotation(isSyncing: services.meetingsService.isSyncing)
@@ -135,7 +140,10 @@ struct MacMeetingsView: View {
             .padding(.horizontal, 14)
             .padding(.bottom, 8)
             .onChange(of: searchText) { _, newValue in
-                Task {
+                searchDebounceTask?.cancel()
+                searchDebounceTask = Task {
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    guard !Task.isCancelled else { return }
                     await services.meetingsService.loadMeetings(
                         status: statusFilter,
                         search: newValue.isEmpty ? nil : newValue
@@ -320,6 +328,14 @@ struct MacMeetingRowView: View {
     let isSelected: Bool
     let action: () -> Void
 
+    private var displayStatus: String {
+        if meeting.status == "scheduled" {
+            let end = meeting.endsAt ?? meeting.startsAt.addingTimeInterval(3600)
+            if end < Date() { return "past" }
+        }
+        return meeting.status
+    }
+
     var body: some View {
         Button(action: action) {
             HStack(spacing: 10) {
@@ -363,8 +379,9 @@ struct MacMeetingRowView: View {
     }
 
     private var statusIcon: String {
-        switch meeting.status {
+        switch displayStatus {
         case "scheduled": "calendar"
+        case "past": "clock.badge.xmark"
         case "bot_joining", "processing": "arrow.triangle.2.circlepath"
         case "recording": "record.circle"
         case "ready": "checkmark.circle"
@@ -375,8 +392,9 @@ struct MacMeetingRowView: View {
     }
 
     private var statusLabel: String {
-        switch meeting.status {
+        switch displayStatus {
         case "scheduled": "Scheduled"
+        case "past": "Past"
         case "bot_joining": "Starting"
         case "recording": "Recording"
         case "processing": "Processing"
@@ -388,8 +406,9 @@ struct MacMeetingRowView: View {
     }
 
     private var statusColor: Color {
-        switch meeting.status {
+        switch displayStatus {
         case "scheduled": .primary
+        case "past": .secondary
         case "bot_joining", "processing": .orange
         case "recording": .red
         case "ready": .green

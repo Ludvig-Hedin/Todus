@@ -75,6 +75,21 @@ struct MeetingsListView: View {
             emptyState
         } else {
             List {
+                // Inline error banner — shown even when meetings are already loaded so
+                // a failed sync doesn't silently disappear.
+                if let error = services.meetingsService.loadError {
+                    Section {
+                        HStack(spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                                .font(.subheadline)
+                            Text(error)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
                 ForEach(groupedSections) { section in
                     Section(section.title) {
                         ForEach(section.meetings) { meeting in
@@ -86,6 +101,14 @@ struct MeetingsListView: View {
                 }
             }
             .listStyle(.insetGrouped)
+            .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y } action: { old, new in
+                let delta = new - old
+                if delta > 8 && new > 40 {
+                    withAnimation(.easeOut(duration: 0.2)) { services.hideTabBar = true }
+                } else if delta < -8 {
+                    withAnimation(.easeOut(duration: 0.2)) { services.hideTabBar = false }
+                }
+            }
             // Pull-to-refresh syncs from Google Calendar — replaces the old toolbar button
             .refreshable {
                 await services.meetingsService.syncFromCalendar()
@@ -172,6 +195,14 @@ private struct MeetingSection: Identifiable {
 struct MeetingRowView: View {
     let meeting: MeetingItem
 
+    private var displayStatus: String {
+        if meeting.status == "scheduled" {
+            let end = meeting.endsAt ?? meeting.startsAt.addingTimeInterval(3600)
+            if end < Date() { return "past" }
+        }
+        return meeting.status
+    }
+
     var body: some View {
         HStack(spacing: 12) {
             // Status icon
@@ -208,8 +239,9 @@ struct MeetingRowView: View {
     }
 
     private var statusIcon: String {
-        switch meeting.status {
+        switch displayStatus {
         case "scheduled": "calendar"
+        case "past": "clock.badge.xmark"
         case "bot_joining", "processing": "arrow.triangle.2.circlepath"
         case "recording": "record.circle"
         case "ready": "checkmark.circle"
@@ -220,8 +252,9 @@ struct MeetingRowView: View {
     }
 
     private var statusLabel: String {
-        switch meeting.status {
+        switch displayStatus {
         case "scheduled": "Scheduled"
+        case "past": "Past"
         case "bot_joining": "Starting"
         case "recording": "Recording"
         case "processing": "Processing"
@@ -233,8 +266,9 @@ struct MeetingRowView: View {
     }
 
     private var statusColor: Color {
-        switch meeting.status {
+        switch displayStatus {
         case "scheduled": .primary
+        case "past": .secondary
         case "bot_joining", "processing": .orange
         case "recording": .red
         case "ready": .green

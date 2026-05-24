@@ -104,8 +104,15 @@ struct MacMeetingDetailView: View {
 
     // MARK: - Sections
 
+    private static func isMeetingOver(startsAt: Date, endsAt: Date?) -> Bool {
+        let end = endsAt ?? startsAt.addingTimeInterval(3600)
+        return end < Date()
+    }
+
     private func headerSection(_ meeting: MeetingDetailResponse) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        let over = Self.isMeetingOver(startsAt: meeting.startsAt, endsAt: meeting.endsAt)
+        let displayStatus = (meeting.status == "scheduled" && over) ? "past" : meeting.status
+        return VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text(meeting.title)
                     .font(.system(size: 18, weight: .semibold))
@@ -113,14 +120,14 @@ struct MacMeetingDetailView: View {
                 Spacer()
 
                 // Status badge
-                Text(statusLabel(meeting.status))
+                Text(statusLabel(displayStatus))
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(statusColor(meeting.status))
+                    .foregroundStyle(statusColor(displayStatus))
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
-                    .background(statusColor(meeting.status).opacity(0.1), in: Capsule())
+                    .background(statusColor(displayStatus).opacity(0.1), in: Capsule())
 
-                if meeting.status == "scheduled" && meeting.recallBotId == nil {
+                if meeting.status == "scheduled" && meeting.recallBotId == nil && !over {
                     Button {
                         Task { await scheduleBot() }
                     } label: {
@@ -153,7 +160,35 @@ struct MacMeetingDetailView: View {
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
             }
+
+            // Join button — only for upcoming meetings with a known conferencing URL
+            if !over, let joinURL = Self.conferencingURL(in: meeting.meetUrl) {
+                Link(destination: joinURL) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "video.fill")
+                            .font(.system(size: 11))
+                        Text("Join meeting")
+                            .font(.system(size: 12, weight: .semibold))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+                    .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: MacTheme.compactRadius, style: .continuous))
+                    .foregroundStyle(Color.accentColor)
+                }
+                .buttonStyle(.plain)
+                .macClickablePointer()
+            }
         }
+    }
+
+    private static func conferencingURL(in text: String) -> URL? {
+        guard !text.isEmpty else { return nil }
+        let pattern = #"https?://(?:[^\s]*\.)?(zoom\.us|meet\.google\.com|teams\.microsoft\.com|webex\.com)/[^\s]+"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) else { return nil }
+        let nsText = text as NSString
+        let range = NSRange(location: 0, length: nsText.length)
+        guard let match = regex.firstMatch(in: text, options: [], range: range) else { return nil }
+        return URL(string: nsText.substring(with: match.range))
     }
 
     private func errorBanner(_ message: String) -> some View {
@@ -475,6 +510,7 @@ struct MacMeetingDetailView: View {
     private func statusLabel(_ status: String) -> String {
         switch status {
         case "scheduled": "Scheduled"
+        case "past": "Past"
         case "bot_joining": "Starting"
         case "recording": "Recording"
         case "processing": "Processing"
@@ -488,6 +524,7 @@ struct MacMeetingDetailView: View {
     private func statusColor(_ status: String) -> Color {
         switch status {
         case "scheduled": .primary
+        case "past": .secondary
         case "bot_joining", "processing": .orange
         case "recording": .red
         case "ready": .green

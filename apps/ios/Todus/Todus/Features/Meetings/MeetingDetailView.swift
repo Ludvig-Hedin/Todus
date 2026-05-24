@@ -4,6 +4,7 @@ import AVKit
 /// Meeting detail — video player, AI recap, action items, transcript, Q&A.
 struct MeetingDetailView: View {
     @Environment(AppServices.self) private var services
+    @Environment(\.dismiss) private var dismiss
 
     let meetingId: String
 
@@ -25,6 +26,11 @@ struct MeetingDetailView: View {
     // Transcript
     @State private var showFullTranscript = false
 
+    private static func isMeetingOver(startsAt: Date, endsAt: Date?) -> Bool {
+        let end = endsAt ?? startsAt.addingTimeInterval(3600)
+        return end < Date()
+    }
+
     private var videoURL: URL? {
         guard let rawURL = meeting?.media?.first(where: { $0.mediaType == "video_mixed" })?.url else {
             return nil
@@ -33,81 +39,86 @@ struct MeetingDetailView: View {
     }
 
     var body: some View {
-        Group {
-            if isLoading {
-                ProgressView()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if let meeting {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 20) {
-                        headerSection(meeting)
+        VStack(spacing: 0) {
+            // Back button always visible so user can navigate away during loading or error
+            if isLoading || meeting == nil {
+                HStack {
+                    Button { dismiss() } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 15, weight: .semibold))
+                            .frame(width: 32, height: 32)
+                            .background(AppTheme.surfacePrimary, in: Circle())
+                            .foregroundStyle(.primary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Back")
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+            }
 
-                        // Error
-                        if meeting.status == "failed", let error = meeting.errorMessage {
-                            errorBanner(error)
-                        }
+            Group {
+                if isLoading {
+                    ProgressView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if let meeting {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 20) {
+                            navRow(meeting)
+                            headerSection(meeting)
 
-                        // Video — AVPlayer stored in state so it survives re-renders
-                        if let url = videoURL {
-                            VideoPlayer(player: player)
-                                .aspectRatio(16/9, contentMode: .fit)
-                                .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
-                                .onAppear {
-                                    if playerUrl != url {
-                                        playerUrl = url
-                                        player = AVPlayer(url: url)
+                            // Error
+                            if meeting.status == "failed", let error = meeting.errorMessage {
+                                errorBanner(error)
+                            }
+
+                            // Video — AVPlayer stored in state so it survives re-renders
+                            if let url = videoURL {
+                                VideoPlayer(player: player)
+                                    .aspectRatio(16/9, contentMode: .fit)
+                                    .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
+                                    .onAppear {
+                                        if playerUrl != url {
+                                            playerUrl = url
+                                            player = AVPlayer(url: url)
+                                        }
                                     }
-                                }
-                                .onChange(of: videoURL) { _, newValue in
-                                    guard playerUrl != newValue else { return }
-                                    playerUrl = newValue
-                                    player = newValue.map(AVPlayer.init(url:))
-                                }
-                        }
+                                    .onChange(of: videoURL) { _, newValue in
+                                        guard playerUrl != newValue else { return }
+                                        playerUrl = newValue
+                                        player = newValue.map(AVPlayer.init(url:))
+                                    }
+                            }
 
-                        // Processing placeholder
-                        if meeting.status == "recording" || meeting.status == "processing" {
-                            processingView(meeting.status)
-                        }
+                            // Processing placeholder
+                            if meeting.status == "recording" || meeting.status == "processing" {
+                                processingView(meeting.status)
+                            }
 
-                        // AI Summary
-                        summarySection(meeting)
+                            // AI Summary
+                            summarySection(meeting)
 
-                        // Action items
-                        if let items = meeting.actionItems, !items.isEmpty {
-                            actionItemsSection(items)
-                        }
+                            // Action items
+                            if let items = meeting.actionItems, !items.isEmpty {
+                                actionItemsSection(items)
+                            }
 
-                        // Transcript
-                        if let segments = meeting.transcript, !segments.isEmpty {
-                            transcriptSection(segments)
-                            qaSection
+                            // Transcript
+                            if let segments = meeting.transcript, !segments.isEmpty {
+                                transcriptSection(segments)
+                                qaSection
+                            }
                         }
+                        .padding(16)
                     }
-                    .padding(16)
-                }
-            } else {
-                ContentUnavailableView("Meeting not found", systemImage: "exclamationmark.triangle")
-            }
-        }
-        .navigationTitle(meeting?.title ?? "Meeting")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            if let meeting, meeting.status == "scheduled", meeting.recallBotId == nil {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        Task { await scheduleBot() }
-                    } label: {
-                        if isSchedulingBot {
-                            ButtonInlineProgressView(tint: .primary, side: AppTheme.Metrics.toolbarInlineSpinner)
-                        } else {
-                            Label("Record Meeting", systemImage: "mic")
-                        }
-                    }
-                    .disabled(isSchedulingBot)
+                } else {
+                    ContentUnavailableView("Meeting not found", systemImage: "exclamationmark.triangle")
                 }
             }
         }
+        .toolbar(.hidden, for: .navigationBar)
+        .background { SwipeBackEnabler() }
         .alert("Error", isPresented: Binding(
             get: { actionError != nil },
             set: { if !$0 { actionError = nil } }
@@ -121,16 +132,51 @@ struct MeetingDetailView: View {
 
     // MARK: - Sections
 
+    private func navRow(_ meeting: MeetingDetailResponse) -> some View {
+        HStack(spacing: 12) {
+            Button { dismiss() } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 15, weight: .semibold))
+                    .frame(width: 32, height: 32)
+                    .background(AppTheme.surfacePrimary, in: Circle())
+                    .foregroundStyle(.primary)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Back")
+
+            Spacer()
+
+            let over = Self.isMeetingOver(startsAt: meeting.startsAt, endsAt: meeting.endsAt)
+            if meeting.status == "scheduled", meeting.recallBotId == nil, !over {
+                Button {
+                    Task { await scheduleBot() }
+                } label: {
+                    if isSchedulingBot {
+                        ButtonInlineProgressView(tint: .primary, side: AppTheme.Metrics.toolbarInlineSpinner)
+                    } else {
+                        Label("Record Meeting", systemImage: "mic")
+                            .font(.subheadline.weight(.medium))
+                    }
+                }
+                .buttonStyle(AppPrimaryButtonStyle())
+                .controlSize(.small)
+                .disabled(isSchedulingBot)
+            }
+        }
+    }
+
     private func headerSection(_ meeting: MeetingDetailResponse) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        let over = Self.isMeetingOver(startsAt: meeting.startsAt, endsAt: meeting.endsAt)
+        let displayStatus = (meeting.status == "scheduled" && over) ? "past" : meeting.status
+        return VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text(statusLabel(meeting.status))
+                Text(statusLabel(displayStatus))
                     .font(.caption)
                     .fontWeight(.medium)
-                    .foregroundStyle(statusColor(meeting.status))
+                    .foregroundStyle(statusColor(displayStatus))
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
-                    .background(statusColor(meeting.status).opacity(0.12), in: Capsule())
+                    .background(statusColor(displayStatus).opacity(0.12), in: Capsule())
 
                 Spacer()
             }
@@ -143,9 +189,8 @@ struct MeetingDetailView: View {
             .foregroundStyle(.secondary)
 
             // "Join" button — shown only when the meeting has a known conferencing URL
-            // (Zoom, Google Meet, Teams, Webex). Filtering by provider regex avoids
-            // surfacing arbitrary links that happen to be in the `meetUrl` field.
-            if let joinURL = Self.conferencingURL(in: meeting.meetUrl) {
+            // (Zoom, Google Meet, Teams, Webex) AND the meeting has not ended.
+            if !over, let joinURL = Self.conferencingURL(in: meeting.meetUrl) {
                 Link(destination: joinURL) {
                     Label("Join meeting", systemImage: "video.fill")
                         .font(.subheadline.weight(.semibold))
@@ -450,6 +495,7 @@ struct MeetingDetailView: View {
     private func statusLabel(_ status: String) -> String {
         switch status {
         case "scheduled": "Scheduled"
+        case "past": "Past"
         case "bot_joining": "Starting"
         case "recording": "Recording"
         case "processing": "Processing"
@@ -463,6 +509,7 @@ struct MeetingDetailView: View {
     private func statusColor(_ status: String) -> Color {
         switch status {
         case "scheduled": .primary
+        case "past": .secondary
         case "bot_joining", "processing": .orange
         case "recording": .red
         case "ready": .green
