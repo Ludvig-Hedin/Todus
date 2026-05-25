@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import UIKit
 
 fileprivate struct CalendarDateBucket: Identifiable {
     let id: String
@@ -248,66 +249,92 @@ private struct CalendarTaskCard: View {
     let onMoveRequested: () -> Void
     let onOpenDetails: () -> Void
 
+    @State private var showDeleteConfirmation = false
+
     var body: some View {
-        Button {
-            onOpenDetails()
-        } label: {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(task.title)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.primary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-
-                    CalendarMetaPill(
-                        text: task.status.title,
-                        systemImage: task.status.systemImage,
-                        tint: task.status.tintColor
-                    )
+        HStack(alignment: .top, spacing: 0) {
+            Button {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                withAnimation(AppTheme.Motion.base) {
+                    services.captureService.toggleCompletion(task, in: modelContext)
                 }
-
-                if !task.taskDescription.isEmpty && task.taskDescription != task.title {
-                    Text(task.taskDescription)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(AppTheme.mutedText)
-                        .lineLimit(1)
+                if !task.completed {
+                    UINotificationFeedbackGenerator().notificationOccurred(.success)
                 }
-
-                HStack(spacing: 6) {
-                    if let dueDate = task.dueDate {
-                        CalendarMetaPill(
-                            text: TaskDateFormatter.dueFormatter.string(from: dueDate),
-                            systemImage: "calendar",
-                            tint: bucket.tint
-                        )
-                    }
-
-                    if task.priority != .none {
-                        CalendarMetaPill(
-                            text: task.priority.title,
-                            systemImage: "flag.fill",
-                            tint: priorityColor(task.priority)
-                        )
-                    }
-
-                    if let folder = task.folder {
-                        CalendarMetaPill(
-                            text: folder.name,
-                            systemImage: "folder",
-                            tint: AppTheme.mutedText
-                        )
-                    }
-                }
+            } label: {
+                Image(systemName: task.completed ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(task.completed ? task.status.tintColor : AppTheme.mutedText)
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.card, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: AppTheme.Radius.card, style: .continuous)
-                    .stroke(AppTheme.cardBorder, lineWidth: 1)
-            )
+            .buttonStyle(.plain)
+            .accessibilityLabel(task.completed ? "Mark task incomplete" : "Mark task complete")
+            .padding(.leading, 14)
+            .padding(.top, 14)
+
+            Button {
+                onOpenDetails()
+            } label: {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(task.title)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(.primary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                        CalendarMetaPill(
+                            text: task.status.title,
+                            systemImage: task.status.systemImage,
+                            tint: task.status.tintColor
+                        )
+                    }
+
+                    if !task.taskDescription.isEmpty && task.taskDescription != task.title {
+                        Text(task.taskDescription)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(AppTheme.mutedText)
+                            .lineLimit(1)
+                    }
+
+                    HStack(spacing: 6) {
+                        if let dueDate = task.dueDate {
+                            CalendarMetaPill(
+                                text: TaskDateFormatter.dueFormatter.string(from: dueDate),
+                                systemImage: "calendar",
+                                tint: bucket.tint
+                            )
+                        }
+
+                        if task.priority != .none {
+                            CalendarMetaPill(
+                                text: task.priority.title,
+                                systemImage: "flag.fill",
+                                tint: priorityColor(task.priority)
+                            )
+                        }
+
+                        if let folder = task.folder {
+                            CalendarMetaPill(
+                                text: folder.name,
+                                systemImage: "folder",
+                                tint: AppTheme.mutedText
+                            )
+                        }
+                    }
+                }
+                .padding(.leading, 8)
+                .padding(.trailing, 14)
+                .padding(.vertical, 12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
         }
-        .buttonStyle(.plain)
+        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.card, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppTheme.Radius.card, style: .continuous)
+                .stroke(AppTheme.cardBorder, lineWidth: 1)
+        )
         .contextMenu {
             // Brought to parity with TaskRowView's context-menu actions
             // (complete / snooze / move / delete) so calendar bucket cards
@@ -336,10 +363,22 @@ private struct CalendarTaskCard: View {
             }
             Divider()
             Button(role: .destructive) {
-                services.captureService.delete(task, in: modelContext)
+                showDeleteConfirmation = true
             } label: {
                 Label("Delete", systemImage: "trash")
             }
+        }
+        .confirmationDialog(
+            "Delete this task?",
+            isPresented: $showDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                services.captureService.delete(task, in: modelContext)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("\"\(task.title)\" will be removed.")
         }
     }
 

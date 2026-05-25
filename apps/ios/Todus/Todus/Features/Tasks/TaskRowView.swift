@@ -51,7 +51,7 @@ struct TaskRowView: View {
                                         Image(systemName: "sparkle")
                                             .font(.system(size: 9, weight: .semibold))
                                             .symbolEffect(.pulse.wholeSymbol, options: .repeating)
-                                        Text("Parsing…")
+                                        Text("Setting up…")
                                             .font(.system(size: 10, weight: .semibold))
                                             .tracking(-0.1)
                                     }

@@ -18,6 +18,9 @@ struct TaskDetailSheet: View {
     @State private var priority: AppTaskPriority
     @State private var hasDueDate: Bool
     @State private var dueDate: Date
+    /// Preserves the previously set due date when the toggle is switched off,
+    /// so toggling back on restores the user's intended date instead of snapping to .now.
+    @State private var savedDueDate: Date?
     @State private var selectedFolderID: UUID?
     @State private var newFolderName = ""
     @State private var isCreatingFolder = false
@@ -177,13 +180,13 @@ struct TaskDetailSheet: View {
             Toggle("Due date", isOn: $hasDueDate)
                 .tint(AppTheme.switchTint)
                 .onChange(of: hasDueDate) { _, isOn in
-                    // When the user toggles Due date OFF and then back ON, we
-                    // want a fresh "today" anchor in the date picker rather
-                    // than reviving the previously-selected date. Resetting
-                    // here means the field always opens at "now" on re-enable.
-                    // (UX P12.)
                     if !isOn {
+                        // Preserve a future date so toggling back on restores it.
+                        savedDueDate = dueDate.timeIntervalSinceNow > 0 ? dueDate : nil
                         dueDate = .now
+                    } else if let saved = savedDueDate, saved.timeIntervalSinceNow > 0 {
+                        dueDate = saved
+                        savedDueDate = nil
                     }
                 }
 

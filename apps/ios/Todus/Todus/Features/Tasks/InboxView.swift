@@ -44,7 +44,7 @@ struct InboxView<Footer: View>: View {
     var body: some View {
         ZStack {
             List {
-                if visibleTasks.isEmpty && completedTasks.isEmpty {
+                if visibleTasks.isEmpty && completedTasks.isEmpty && olderCompletedTasks.isEmpty {
                     Section {
                         emptyState
                             .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
@@ -292,10 +292,11 @@ struct InboxView<Footer: View>: View {
                         .tracking(-0.1)
                         .foregroundStyle(AppTheme.mutedText)
                     Spacer()
-                    Button("Clear") {
+                    Button("Clear all") {
                         showsClearCompletedConfirmation = true
                     }
                     .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Color(red: 0.85, green: 0.30, blue: 0.25))
                 }
                 .padding(.top, 12)
                 .padding(.bottom, 4)

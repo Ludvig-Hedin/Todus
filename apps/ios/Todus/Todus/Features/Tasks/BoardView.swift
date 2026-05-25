@@ -60,15 +60,17 @@ struct BoardView: View {
         .onChange(of: restrictToInbox) { recomputeTasksByStatus() }
     }
 
-    private var boardChangeDigest: [BoardTaskDigest] {
-        allTasks.map { task in
-            BoardTaskDigest(
-                id: task.id,
-                status: task.status,
-                folderID: task.folderID,
-                updatedAt: task.updatedAt
-            )
+    private var boardChangeDigest: TasksDigest {
+        var latest: Date = .distantPast
+        for task in allTasks where task.updatedAt > latest {
+            latest = task.updatedAt
         }
+        return TasksDigest(count: allTasks.count, latestUpdate: latest)
+    }
+
+    private struct TasksDigest: Equatable {
+        let count: Int
+        let latestUpdate: Date
     }
 
     private func recomputeTasksByStatus() {
@@ -138,9 +140,3 @@ struct BoardView: View {
     }
 }
 
-private struct BoardTaskDigest: Equatable {
-    let id: UUID
-    let status: TaskStatus
-    let folderID: UUID?
-    let updatedAt: Date
-}

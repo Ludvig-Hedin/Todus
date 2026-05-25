@@ -1,6 +1,6 @@
 # Code Review Backlog
 
-Last updated: 2026-05-20
+Last updated: 2026-05-26
 
 ---
 
@@ -451,3 +451,24 @@ Includes context-menu parity, persistent saved badge, web data attributes, iPad 
 - `apps/macos/TodusMac/Views/Docs/MacDocEditorPane.swift:93-97` (Important) — 5-minute `Task.sleep` revert timer not cancelled on `.onDisappear` — long-running background tasks accumulate.
 - `apps/macos/TodusMac/Views/Docs/MacDocEditorPane.swift:156-160` (Important) — `flushPendingSave` swallows errors silently; if the doc was deleted while the editor was open, the user gets no signal. Log + surface.
 - `apps/ios/Todus/Todus/Services/Docs/DocsService.swift:85-97` & `apps/macos/TodusMac/Services/Docs/MacDocsService.swift:128-139` (Minor) — Personal-workspace auto-create races + flag never resets across sign-out. Make idempotent server-side or via observable state.
+
+---
+
+## Bug Hunt — 2026-05-26 — iOS Tasks page
+
+Scope: `apps/ios/Todus/Todus/Features/Tasks/` + `Services/Tasks/TaskCaptureService.swift` + domain models.
+
+### Auto-fixed (3 issues)
+
+| File:line | Severity | What changed |
+|-----------|----------|--------------|
+| `InboxView.swift:47` | error | `emptyState` branch fired when `visibleTasks.isEmpty && completedTasks.isEmpty` even if `olderCompletedTasks` had entries — those older completed tasks were rendered by no view in this branch. Users with recently-cleared recent completeds but retained older ones saw "Inbox is empty" and had no way to access older work. Fixed: added `&& olderCompletedTasks.isEmpty` to the condition. |
+| `BoardView.swift:63` | warning | `boardChangeDigest` returned `[BoardTaskDigest]` — O(N) array equality check on every SwiftUI body re-evaluation. Every other view uses a `(count, latestUpdate)` digest (O(1)). Replaced with identical `TasksDigest` struct pattern. Removed now-unused `BoardTaskDigest` struct. All mutations bump `updatedAt`, so O(1) digest is safe. |
+| `CalendarTaskView.swift:339` | error | Context-menu Delete in `CalendarTaskCard` fired immediately without confirmation, inconsistent with `TaskRowView` and `TaskTableView` which both show a `confirmationDialog`. Added `@State private var showDeleteConfirmation` and a `.confirmationDialog` matching the pattern in `TaskRowView`. |
+
+### Needs human review (2 issues)
+
+| File:line | Severity | Issue | Suggested fix |
+|-----------|----------|-------|---------------|
+| `BoardColumnView.swift:44` | warning | `@Query(sort: \TaskRecord.createdAt, order: .reverse) private var tasksInApp: [TaskRecord]` inside `BoardColumnView` fetches ALL tasks independently of the `tasks: [TaskRecord]` prop already passed by `BoardView`. Only used in `handleDrop` for a single task lookup by UUID. This means every task mutation triggers an O(N) SwiftUI re-render of ALL `BoardColumnView` instances, not just the affected column. | Replace the `@Query` with a `@Query`-free `modelContext.fetch(FetchDescriptor<TaskRecord>(predicate: #Predicate { $0.id == taskID }))` call inside `handleDrop` at drop time. |
+| `TaskDetailSheet.swift:72` | info | `isSaving` is set to `true` before `saveTask()` and never reset to `false`. `saveTask()` always calls `dismiss()`, which destroys the view, so the state reset doesn't matter in practice. But if a future code path calls `saveTask()` without dismissing (e.g., inline editing), the Save button would be permanently disabled. | Reset `isSaving = false` at the start of the `catch` or error path, or after any non-dismissing code path. |

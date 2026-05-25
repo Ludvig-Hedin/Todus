@@ -158,7 +158,7 @@ struct BoardColumnView: View {
             HStack(spacing: 6) {
                 Image(systemName: "plus")
                     .font(.system(size: 11, weight: .semibold))
-                Text("Add or drop a task")
+                Text("Tap + or drag here")
                     .font(.system(size: 12, weight: .regular))
             }
             .foregroundStyle(AppTheme.mutedText)
