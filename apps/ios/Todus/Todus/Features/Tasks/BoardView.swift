@@ -16,6 +16,12 @@ struct BoardView: View {
     var restrictToInbox: Bool = false
     let searchText: String
     let sortOrder: TaskSortOrder
+    /// Top inset in points — passed by the parent to account for the pinned
+    /// header height. Applied as `.padding(.top, topInset)` on the HStack so
+    /// the board content starts below the header without the safeAreaInset gap
+    /// that vertical scroll views absorb automatically but horizontal-only
+    /// scroll views cannot (the gap would be permanent, not scroll-away-able).
+    var topInset: CGFloat = 0
     @State private var selectedTask: TaskRecord?
 
     @State private var tasksByStatus: [TaskStatus: [TaskRecord]] = [:]
@@ -32,15 +38,10 @@ struct BoardView: View {
                         ) { task in
                             selectedTask = task
                         }
-                        // Columns share the visible scroll height so each card
-                        // surface fills the page instead of collapsing to its
-                        // own intrinsic height (which caused horizontal-scroll
-                        // content to vertical-center within the available area,
-                        // producing a huge gap between the search bar and the
-                        // column headers).
-                        .frame(height: geo.size.height)
+                        .frame(height: geo.size.height - topInset)
                     }
                 }
+                .padding(.top, topInset)
                 .padding(.horizontal, 16)
                 .padding(.bottom, 10)
             }

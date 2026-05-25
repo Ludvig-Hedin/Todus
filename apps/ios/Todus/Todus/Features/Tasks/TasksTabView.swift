@@ -24,9 +24,8 @@ struct TasksTabView: View {
     @Namespace private var taskViewModeSegmentNamespace
 
     @State private var headerHeight: CGFloat = 100
-    /// Visual gap between the pinned search bar and the first row of content
-    /// (16–20pt is the standard breathing room across all four task views).
-    private let scrimTail: CGFloat = 18
+    /// Visual gap between the pinned search bar and the first row of content.
+    private let scrimTail: CGFloat = 6
 
     /// Holds the in-flight deep-nav task so a rapid second `pendingTaskId` arrival
     /// cancels the previous delayed presentation instead of stacking sheets.
@@ -55,6 +54,12 @@ struct TasksTabView: View {
             // Scrollable task content fills the full screen; inset below the pinned header.
             // List mode renders the Folders section below the tasks so the whole page
             // scrolls together as one continuous surface.
+            //
+            // safeAreaInset is applied per-case rather than on the Group so BoardView
+            // (a horizontal-only ScrollView) is excluded. A safeAreaInset on a
+            // horizontal scroll view creates a permanent top gap that cannot be
+            // scrolled away — the board receives the header height as `topInset`
+            // instead and applies it as padding/frame-reduction directly.
             Group {
                 switch services.selectedViewMode {
                 case .list:
@@ -66,14 +71,17 @@ struct TasksTabView: View {
                         sortOrder: services.taskSortOrder,
                         footer: { foldersFooter }
                     )
-                        .padding(.horizontal, 10)
+                    .safeAreaInset(edge: .top) {
+                        Color.clear.frame(height: headerHeight + scrimTail)
+                    }
                 case .board:
                     BoardView(
                         captureService: services.captureService,
                         selectedFolderID: nil,
                         restrictToInbox: true,
                         searchText: searchText,
-                        sortOrder: services.taskSortOrder
+                        sortOrder: services.taskSortOrder,
+                        topInset: headerHeight + scrimTail
                     )
                 case .table:
                     TaskTableView(
@@ -83,15 +91,26 @@ struct TasksTabView: View {
                         searchText: searchText,
                         sortOrder: services.taskSortOrder
                     )
+                    .safeAreaInset(edge: .top) {
+                        Color.clear.frame(height: headerHeight + scrimTail)
+                    }
                 case .calendar:
                     CalendarTaskView(searchText: searchText, sortOrder: services.taskSortOrder)
                         .padding(.horizontal, 16)
+                        .safeAreaInset(edge: .top) {
+                            Color.clear.frame(height: headerHeight + scrimTail)
+                        }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .contentMargins(.bottom, 130, for: .scrollContent)
-            .safeAreaInset(edge: .top) {
-                Color.clear.frame(height: headerHeight + scrimTail)
+            .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y } action: { old, new in
+                let delta = new - old
+                if delta > 8 && new > 40 {
+                    withAnimation(.easeOut(duration: 0.2)) { services.hideTabBar = true }
+                } else if delta < -8 {
+                    withAnimation(.easeOut(duration: 0.2)) { services.hideTabBar = false }
+                }
             }
             .refreshable {
                 await reload()
@@ -113,26 +132,6 @@ struct TasksTabView: View {
                         // Empty state is "Clear" — celebrates the inbox-zero moment.
                         todayHeaderChips
                         Spacer()
-                        // Discoverable + button on iOS — previously only macOS had a
-                        // visible "+ Add Task" affordance; iOS users had to find the
-                        // composer via the central tab-bar create action.
-                        // (UX assessment QW11.)
-                        Button {
-                            services.requestCreateSheet = .task
-                        } label: {
-                            Image(systemName: "plus")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(.primary)
-                                .frame(width: 28, height: 28)
-                                .background(AppTheme.surfaceSecondary, in: Circle())
-                                .overlay(Circle().stroke(AppTheme.strongBorder, lineWidth: 1))
-                        }
-                        .buttonStyle(.plain)
-                        // Expands hit-area to ≥44pt without enlarging the
-                        // visible 28pt affordance, matching other icon
-                        // buttons across the app. (UX P4.)
-                        .minTouchTarget()
-                        .accessibilityLabel("Add task")
                     }
                 }
                 .padding(.horizontal, 16)

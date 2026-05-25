@@ -348,19 +348,18 @@ struct MacEmailComposeView: View {
 
                     Divider().opacity(0.15).padding(.horizontal, MacTheme.spacing16)
 
-                    // Body
-                    ZStack(alignment: .topLeading) {
-                        Color.clear
-                            .frame(maxWidth: .infinity, minHeight: 260)
-                            .contentShape(Rectangle())
-                            .onTapGesture { focusedField = .body }
-                        TextEditor(text: $draft.body)
-                            .font(.system(size: 13))
-                            .scrollContentBackground(.hidden)
-                            .padding(MacTheme.spacing16)
-                            .frame(maxHeight: .infinity)
-                            .focused($focusedField, equals: .body)
-                    }
+                    // Body — NSTextView wrapper with live markdown rendering
+                    MacMarkdownBodyEditor(
+                        text: $draft.body,
+                        placeholder: "Write your message",
+                        isFocused: focusedField == .body,
+                        font: .systemFont(ofSize: 13),
+                        onFocusChange: { focused in
+                            if focused { focusedField = .body }
+                            else if focusedField == .body { focusedField = nil }
+                        }
+                    )
+                    .frame(maxWidth: .infinity, minHeight: 260, maxHeight: .infinity)
                 }
             }
         }

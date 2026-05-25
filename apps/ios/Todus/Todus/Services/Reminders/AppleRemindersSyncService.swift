@@ -383,10 +383,10 @@ final class AppleRemindersSyncService {
     /// Mirrors `importFromReminders` but is called explicitly from views — `importFromReminders`
     /// is intended for the onboarding path and is no longer the only way to refresh.
     func refreshFromReminders(in context: ModelContext) async {
-        // First, mirror completion state back from Apple Reminders to local
-        // tasks (#6) — without this, checking a reminder off in the Reminders
-        // app silently leaves the corresponding TaskRecord open in Todus.
-        await reconcileCompletionFromReminders(in: context)
+        // Import-only: never auto-complete tasks based on Reminders state.
+        // reconcileCompletionFromReminders was removed from this path because it
+        // silently marked Todus-only tasks as done when the manual sync button
+        // was tapped, causing tasks to "disappear" from the active list.
         await importFromReminders(in: context)
     }
 

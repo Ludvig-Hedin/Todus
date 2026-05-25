@@ -600,6 +600,66 @@ struct PasteHandlingTextInput: UIViewRepresentable {
             textView.invalidateIntrinsicContentSize()
         }
 
+        // MARK: - Markdown regex (compiled once; NSRegularExpression is thread-safe)
+        private static let mdBoldRegex = try? NSRegularExpression(pattern: #"\*\*(.+?)\*\*"#)
+        private static let mdItalicRegex = try? NSRegularExpression(pattern: #"(?<![_*])_([^_\n]+)_(?![_*])"#)
+        private static let mdHeadingRegex = try? NSRegularExpression(pattern: #"^(#{1,3}) (.+)$"#, options: .anchorsMatchLines)
+        private static let mdQuoteRegex = try? NSRegularExpression(pattern: #"^> (.+)$"#, options: .anchorsMatchLines)
+
+        /// Applies live markdown rendering to `attributed` in-place.
+        /// Delimiters (**  _ # >) are dimmed; the enclosed text gets the
+        /// matching font/color so users see formatted output while retaining
+        /// the raw markdown that feeds the send pipeline.
+        private func applyMarkdownStyling(to attributed: NSMutableAttributedString) {
+            let str = attributed.string
+            let len = attributed.length
+            guard len > 0 else { return }
+            let fullRange = NSRange(location: 0, length: len)
+            let dimColor = UIColor.tertiaryLabel
+
+            // Bold: **text**
+            Coordinator.mdBoldRegex?.enumerateMatches(in: str, range: fullRange) { match, _, _ in
+                guard let match, match.numberOfRanges == 2 else { return }
+                let content = match.range(at: 1)
+                let full = match.range(at: 0)
+                guard full.length >= 4 else { return }
+                attributed.addAttribute(.font, value: UIFont.boldSystemFont(ofSize: 16), range: content)
+                attributed.addAttribute(.foregroundColor, value: dimColor, range: NSRange(location: full.location, length: 2))
+                attributed.addAttribute(.foregroundColor, value: dimColor, range: NSRange(location: full.location + full.length - 2, length: 2))
+            }
+
+            // Italic: _text_
+            Coordinator.mdItalicRegex?.enumerateMatches(in: str, range: fullRange) { match, _, _ in
+                guard let match, match.numberOfRanges == 2 else { return }
+                let content = match.range(at: 1)
+                let full = match.range(at: 0)
+                guard full.length >= 3 else { return }
+                attributed.addAttribute(.font, value: UIFont.italicSystemFont(ofSize: 16), range: content)
+                attributed.addAttribute(.foregroundColor, value: dimColor, range: NSRange(location: full.location, length: 1))
+                attributed.addAttribute(.foregroundColor, value: dimColor, range: NSRange(location: full.location + full.length - 1, length: 1))
+            }
+
+            // Headings: # H1 / ## H2 / ### H3
+            Coordinator.mdHeadingRegex?.enumerateMatches(in: str, range: fullRange) { match, _, _ in
+                guard let match, match.numberOfRanges == 3 else { return }
+                let levelRange = match.range(at: 1)
+                let contentRange = match.range(at: 2)
+                let level = min(levelRange.length, 3)
+                let size: CGFloat = level == 1 ? 22 : level == 2 ? 18 : 15
+                attributed.addAttribute(.font, value: UIFont.boldSystemFont(ofSize: size), range: contentRange)
+                let prefixLen = min(level + 1, match.range(at: 0).length)
+                attributed.addAttribute(.foregroundColor, value: dimColor, range: NSRange(location: match.range(at: 0).location, length: prefixLen))
+            }
+
+            // Blockquote: > text
+            Coordinator.mdQuoteRegex?.enumerateMatches(in: str, range: fullRange) { match, _, _ in
+                guard let match, match.numberOfRanges == 2 else { return }
+                let full = match.range(at: 0)
+                attributed.addAttribute(.foregroundColor, value: dimColor, range: NSRange(location: full.location, length: min(2, full.length)))
+                attributed.addAttribute(.foregroundColor, value: UIColor.secondaryLabel, range: match.range(at: 1))
+            }
+        }
+
         func applyHighlights(to textView: UITextView) {
             guard textView.textColor != UIColor.placeholderText else { return }
 
@@ -610,6 +670,9 @@ struct PasteHandlingTextInput: UIViewRepresentable {
                 .font: UIFont.systemFont(ofSize: 16, weight: .medium),
                 .foregroundColor: UIColor.label,
             ], range: NSRange(location: 0, length: attributed.length))
+
+            // Render markdown syntax as live formatting (bold, italic, headings, quotes)
+            applyMarkdownStyling(to: attributed)
 
             for term in highlightTerms where !term.isEmpty {
                 let nsText = currentText as NSString

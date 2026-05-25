@@ -100,6 +100,9 @@ struct InboxView<Footer: View>: View {
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
             .scrollDismissesKeyboard(.interactively)
+            // Horizontal content margin keeps padding inside the scroll content
+            // so the scroll indicator renders at the screen edge, not 10 pt in.
+            .contentMargins(.horizontal, 10, for: .scrollContent)
         }
         .contentShape(Rectangle())
         .onTapGesture {
