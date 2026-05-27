@@ -182,6 +182,11 @@ struct AIChatMessage: Identifiable {
     /// (network drop, rate limit). Distinct from a clobbered `content` value
     /// so retry can pick up where the stream left off without losing context.
     var errorMessage: String?
+    /// Optional context chip label — shown as an attachment-style pill above the user bubble
+    /// when the message was sent with an email thread or page context attached.
+    var contextLabel: String?
+    /// SF Symbol name for the context chip pill (e.g. "envelope.fill", "house.fill").
+    var contextIcon: String?
 
     init(
         id: UUID = UUID(),
@@ -198,7 +203,9 @@ struct AIChatMessage: Identifiable {
         reasoningDurationMs: Int? = nil,
         mentions: [RichInputMentionRef] = [],
         attachmentFileNames: [String] = [],
-        errorMessage: String? = nil
+        errorMessage: String? = nil,
+        contextLabel: String? = nil,
+        contextIcon: String? = nil
     ) {
         self.id = id
         self.role = role
@@ -215,6 +222,8 @@ struct AIChatMessage: Identifiable {
         self.mentions = mentions
         self.attachmentFileNames = attachmentFileNames
         self.errorMessage = errorMessage
+        self.contextLabel = contextLabel
+        self.contextIcon = contextIcon
     }
 
     /// Extracts and caches the UI spec from message content.

@@ -91,6 +91,9 @@ struct AIChatView: View {
     @State private var lastTruncatedHistory: [AIChatMessage] = []
     /// True while the composer holds the text of a message being edited (cleared on send or cancel).
     @State private var isEditingMessage: Bool = false
+    /// ID of the message being edited — truncation is deferred until the user presses Send,
+    /// so the full conversation remains visible while they refine the edit.
+    @State private var editingMessageID: UUID?
 
     private var chatService: AIChatService { services.aiChatService }
 
@@ -1064,6 +1067,16 @@ struct AIChatView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 16)
                 .padding(.bottom, 120)
+                // Tap anywhere on the message list to dismiss the keyboard —
+                // `simultaneousGesture` lets child button taps still fire normally.
+                .simultaneousGesture(
+                    TapGesture().onEnded {
+                        UIApplication.shared.sendAction(
+                            #selector(UIResponder.resignFirstResponder),
+                            to: nil, from: nil, for: nil
+                        )
+                    }
+                )
             }
             .scrollDismissesKeyboard(.interactively)
             // Pin input section directly above keyboard — 8 pt gap above keyboard for breathing room
@@ -1336,15 +1349,11 @@ struct AIChatView: View {
                             HStack(spacing: 6) {
                                 Image(systemName: "pencil")
                                     .font(.system(size: 12, weight: .semibold))
-                                Text("Edit")
+                                Text("Editing")
                                     .font(.system(size: 13, weight: .semibold))
                                 Button {
                                     withAnimation(.snappy(duration: 0.15)) {
-                                        undoEditTruncation()
-                                        isEditingMessage = false
-                                        inputText = ""
-                                        inputMentions = []
-                                        pendingAttachments = []
+                                        cancelEdit()
                                     }
                                 } label: {
                                     Image(systemName: "xmark")
@@ -1497,9 +1506,9 @@ struct AIChatView: View {
                             .font(.system(size: 13, weight: .bold))
                             .foregroundStyle(.white)
                             .frame(width: 30, height: 30)
+                            .background(Color.accentColor, in: Circle())
                     }
-                    .buttonStyle(AppPrimaryButtonStyle())
-                    .clipShape(Circle())
+                    .buttonStyle(.plain)
                     .accessibilityIdentifier("ai.chat.stopButton")
                     .transition(.scale.combined(with: .opacity))
                 } else {
@@ -1508,9 +1517,9 @@ struct AIChatView: View {
                             .font(.system(size: 15, weight: .bold))
                             .foregroundStyle(.white)
                             .frame(width: 30, height: 30)
+                            .background(Color.accentColor, in: Circle())
                     }
-                    .buttonStyle(AppPrimaryButtonStyle())
-                    .clipShape(Circle())
+                    .buttonStyle(.plain)
                     .disabled(isEmpty)
                     .opacity(isEmpty ? 0.4 : 1)
                     .accessibilityIdentifier("ai.chat.sendButton")
@@ -1649,7 +1658,21 @@ struct AIChatView: View {
         let mentions = inputMentions
         inputMentions = []
         pendingAttachments = []
+
+        // Capture context chip label/icon BEFORE clearing state so we can attach
+        // them to the outgoing AIChatMessage as a visible pill above the bubble.
+        let sentContextLabel: String? = pageContextAttached ? contextPillTitle : nil
+        let sentContextIcon: String? = pageContextAttached ? contextPillIcon : nil
+
+        // Deferred edit truncation — we kept the conversation intact while the user
+        // was editing; now that they're actually sending we truncate at the edited
+        // message ID before inserting the replacement.
+        if let editID = editingMessageID {
+            chatService.truncateBefore(messageID: editID)
+            editingMessageID = nil
+        }
         isEditingMessage = false
+        lastTruncatedHistory = []
         // Clear persisted draft since the message was sent
         UserDefaults.standard.removeObject(forKey: "ai_draft_input")
         // Set the current page context so the AI knows where the user is.
@@ -1670,37 +1693,41 @@ struct AIChatView: View {
             mentions: mentions,
             attachmentFileNames: filesToSend,
             allTasks: Array(allTasks),
-            modelContext: modelContext
+            modelContext: modelContext,
+            contextLabel: sentContextLabel,
+            contextIcon: sentContextIcon
         )
     }
 
     /// Long-press "Edit" on a user bubble: load its content + mentions + attachments back
-    /// into the composer, drop the edited turn and everything after it, and focus the input.
-    /// User then tweaks the text and presses send — the turn re-runs with the new wording.
+    /// into the composer and focus the input. The conversation stays fully visible so the
+    /// user can read the AI's reply while refining their message. Truncation is deferred
+    /// until the user actually presses Send — at that point we cut from `editingMessageID`
+    /// and re-run the turn with the updated wording.
     private func editMessage(_ message: AIChatMessage) {
         guard message.role == .user, !chatService.isStreaming else { return }
         inputText = message.content
         inputMentions = message.mentions
         pendingAttachments = message.attachmentFileNames
         isEditingMessage = true
-        // Capture the messages we're about to drop so the user can restore them
-        // via the Edit chip × button if they tapped Edit by accident.
-        if let idx = chatService.messages.firstIndex(where: { $0.id == message.id }) {
-            lastTruncatedHistory = Array(chatService.messages[idx...])
-        }
-        chatService.truncateBefore(messageID: message.id)
+        // Remember WHICH message is being edited so sendMessage() can truncate at the
+        // right point. We no longer truncate here — the conversation stays intact.
+        editingMessageID = message.id
         isInputFocused = true
         UserDefaults.standard.set(message.content, forKey: "ai_draft_input")
         UINotificationFeedbackGenerator().notificationOccurred(.success)
     }
 
-    /// Re-append the messages captured when the user last tapped Edit so they can
-    /// recover from an accidental edit/truncation.
-    private func undoEditTruncation() {
-        guard !lastTruncatedHistory.isEmpty else { return }
-        chatService.messages.append(contentsOf: lastTruncatedHistory)
-        lastTruncatedHistory = []
+    /// Cancel an in-progress edit — restore input to blank and clear edit state.
+    /// No history restoration needed because we never truncated the conversation.
+    private func cancelEdit() {
         isEditingMessage = false
+        editingMessageID = nil
+        lastTruncatedHistory = []
+        inputText = ""
+        inputMentions = []
+        pendingAttachments = []
+        UserDefaults.standard.removeObject(forKey: "ai_draft_input")
     }
 
     /// Keeps the most recent user message near the top of the scroll view so long assistant replies
@@ -2072,6 +2099,22 @@ private struct MessageBubble: View {
 
     private var userBubble: some View {
         VStack(alignment: .trailing, spacing: 8) {
+            // Context chip — shows which email/page was attached when the message was sent
+            if let label = message.contextLabel {
+                HStack(spacing: 5) {
+                    Image(systemName: message.contextIcon ?? "doc.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text(label)
+                        .font(.system(size: 12, weight: .medium))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(Color.primary.opacity(0.07), in: Capsule())
+                .frame(maxWidth: 260, alignment: .trailing)
+            }
             if !message.attachmentFileNames.isEmpty {
                 HStack(alignment: .top, spacing: 8) {
                     ForEach(Array(message.attachmentFileNames.enumerated()), id: \.offset) { index, name in

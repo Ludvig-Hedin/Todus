@@ -277,7 +277,9 @@ final class AIChatService {
         mentions: [RichInputMentionRef] = [],
         attachmentFileNames: [String] = [],
         allTasks: [TaskRecord],
-        modelContext: ModelContext
+        modelContext: ModelContext,
+        contextLabel: String? = nil,
+        contextIcon: String? = nil
     ) {
         let trimmed = userMessage.trimmingCharacters(in: .whitespacesAndNewlines)
         guard (!trimmed.isEmpty || !attachmentFileNames.isEmpty), !isStreaming else { return }
@@ -305,7 +307,9 @@ final class AIChatService {
             role: .user,
             content: trimmed,
             mentions: mentions,
-            attachmentFileNames: attachmentFileNames
+            attachmentFileNames: attachmentFileNames,
+            contextLabel: contextLabel,
+            contextIcon: contextIcon
         ))
 
         // Append an empty placeholder the streaming response will fill
