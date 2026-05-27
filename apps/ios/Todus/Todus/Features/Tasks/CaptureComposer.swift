@@ -471,11 +471,15 @@ struct PasteHandlingTextInput: UIViewRepresentable {
             }
         }
 
-        // Only sync when text is changed externally (e.g. after submit clears it)
-        guard text != context.coordinator.lastKnownText else {
-            context.coordinator.applyHighlights(to: uiView)
-            return
-        }
+        // Only sync when text is changed externally (e.g. after submit clears it).
+        // CRITICAL: do NOT call applyHighlights on every render — it writes a fresh
+        // NSAttributedString to `attributedText`, which interrupts the active input
+        // session on iOS 17+. Symptom: keyboard dismisses on every keystroke because
+        // the textView briefly resigns first responder during the attributed write.
+        // Highlights are already re-applied from textViewDidChange (internal edits)
+        // and from the non-guard branch below (external text changes), so the guard
+        // branch can be a pure no-op.
+        guard text != context.coordinator.lastKnownText else { return }
         context.coordinator.lastKnownText = text
 
         if text.isEmpty {
@@ -588,7 +592,12 @@ struct PasteHandlingTextInput: UIViewRepresentable {
 
             lastKnownText = updatedText
             text = updatedText
-            applyHighlights(to: textView)
+            // Only re-style when something stylable is in the buffer. Skipping the
+            // attributed-text rewrite on plain typing keeps the iOS 17+ input session
+            // intact (writing attributedText mid-edit causes the keyboard to dismiss).
+            if needsHighlights(text: updatedText) {
+                applyHighlights(to: textView)
+            }
 
             // Toggle scrolling based on whether content exceeds max height threshold
             if maxHeight > 0 {
@@ -658,6 +667,24 @@ struct PasteHandlingTextInput: UIViewRepresentable {
                 attributed.addAttribute(.foregroundColor, value: dimColor, range: NSRange(location: full.location, length: min(2, full.length)))
                 attributed.addAttribute(.foregroundColor, value: UIColor.secondaryLabel, range: match.range(at: 1))
             }
+        }
+
+        /// True iff `text` contains anything that `applyHighlights` would actually style.
+        /// Used to skip the attributed-text rewrite during plain typing (no @mentions,
+        /// no markdown). The rewrite resets the UITextView's input session on iOS 17+,
+        /// which manifests as the keyboard dismissing on every keystroke.
+        func needsHighlights(text: String) -> Bool {
+            if !highlightTerms.isEmpty {
+                for term in highlightTerms where !term.isEmpty {
+                    if text.contains(term) { return true }
+                }
+            }
+            // Cheap markdown sniff — same patterns applyMarkdownStyling renders.
+            return text.contains("**")
+                || text.contains("_")
+                || text.contains("# ")
+                || text.contains("\n> ")
+                || text.hasPrefix("> ")
         }
 
         func applyHighlights(to textView: UITextView) {

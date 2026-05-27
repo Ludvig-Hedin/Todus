@@ -115,26 +115,38 @@ final class MLXInferenceService: LocalAIService {
             }
         }
 
-        // MLX expects a `[Chat.Message]` for the structured-chat path. The
-        // processor turns these into the model-specific dict shape. Tool
-        // results from earlier turns get the dedicated `.tool` role; most
-        // chat templates that ignore it just skip it without erroring.
-        let mlxMessages: [Chat.Message] = request.messages.map { msg in
+        // MLX's processor accepts a `[[String: String]]` shape that mirrors the
+        // HuggingFace chat template. Using the plain-dict shape (over the
+        // `[Chat.Message]` API) sidesteps a Swift 6 Sendable gap in mlx-swift-
+        // examples 2.29.1 — closures capturing `Chat.Message` arrays fail to
+        // compile under strict concurrency. Tool results from earlier turns
+        // collapse into a `user` message so non-tool chat templates don't
+        // crash on an unknown role.
+        let mlxMessages: [[String: String]] = request.messages.map { msg in
             switch msg.role {
-            case .system:    return .system(msg.content)
-            case .user:      return .user(msg.content)
-            case .assistant: return .assistant(msg.content)
-            case .tool:      return .tool(msg.content)
+            case .system:    return ["role": "system", "content": msg.content]
+            case .user:      return ["role": "user", "content": msg.content]
+            case .assistant: return ["role": "assistant", "content": msg.content]
+            case .tool:      return ["role": "user", "content": "[tool result] \(msg.content)"]
             }
         }
 
-        let parameters = GenerateParameters(
-            temperature: Float(request.temperature)
-        )
+        // Use the native token cap on `GenerateParameters` instead of decrementing
+        // a per-`.chunk` counter — `.chunk` yields a detokenized string that can
+        // span multiple tokens, so a manual `-= 1` over-runs the budget by 2-4×
+        // on common tokenizers. Guard against a zero / negative caller value so
+        // we don't pin generation at 0 tokens.
+        // Build the parameters struct fully before handing it to the @Sendable closure.
+        // Capturing a mutable `var` here triggers Swift 6's strict-concurrency check.
+        let parameters: GenerateParameters = {
+            var p = GenerateParameters(temperature: Float(request.temperature))
+            p.maxTokens = max(request.maxOutputTokens, 1)
+            return p
+        }()
 
         let outputStream = try await container.perform { context in
             let lmInput = try await context.processor.prepare(
-                input: UserInput(chat: mlxMessages)
+                input: .init(messages: mlxMessages)
             )
             return try MLXLMCommon.generate(
                 input: lmInput,
@@ -146,31 +158,27 @@ final class MLXInferenceService: LocalAIService {
         var promptTokens = 0
         var generationTokens = 0
         var producedAny = false
-        var maxTokenBudget = request.maxOutputTokens
         for await event in outputStream {
             try Task.checkCancellation()
             switch event {
             case .chunk(let text):
                 continuation.yield(.token(text))
                 producedAny = true
-                generationTokens += 1
-                maxTokenBudget -= 1
-                if maxTokenBudget <= 0 {
-                    continuation.yield(.done(usage: LocalTokenUsage(
-                        inputTokens: promptTokens, outputTokens: generationTokens
-                    )))
-                    continuation.finish()
-                    return
-                }
             case .info(let info):
                 promptTokens = info.promptTokenCount
                 generationTokens = info.generationTokenCount
-            case .toolCall(let call):
-                // MLX surfaces structured tool calls when the model uses the
-                // chat template's tool format. We don't yet support local
-                // tool execution (Phase 7 follow-up); forward as a token so
-                // the user at least sees the model's intent.
-                continuation.yield(.token("[tool: \(call.function.name)]"))
+            case .toolCall:
+                // We don't expose tools to the local model today (`tools: []`),
+                // so a `.toolCall` is unexpected. Surface a placeholder token
+                // so the UI doesn't show a frozen stream, and continue — the
+                // structured tool-call wiring lands when the chat service grows
+                // a local tool surface.
+                continue
+            @unknown default:
+                // mlx-swift-examples may add new event cases beyond the three
+                // we know (.chunk / .info / .toolCall). Skip silently rather
+                // than crash; we'll render them once we wire explicit handling.
+                continue
             }
         }
 

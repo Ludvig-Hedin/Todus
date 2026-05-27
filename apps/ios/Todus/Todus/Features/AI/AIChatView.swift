@@ -21,6 +21,11 @@ private struct EventDetailSheetID: Identifiable {
 struct AIChatView: View {
     /// The tab the user was on when they opened the AI sheet — pre-fills the context pill.
     var currentTab: AppTab = .home
+    /// Optional pre-filled prompt. Set when AIChatView is opened from a focused context
+    /// (e.g. the email composer's AI button) so the input starts with a task-specific
+    /// question instead of an empty field. Cleared by the persisted-draft restore in
+    /// `onAppear` if a more recent saved draft exists.
+    var initialPrompt: String? = nil
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
@@ -418,9 +423,16 @@ struct AIChatView: View {
             if !isStreaming { chatService.autosave() }
         }
         .onAppear {
-            // Restore draft input
-            let draft = UserDefaults.standard.string(forKey: "ai_draft_input") ?? ""
-            if inputText.isEmpty { inputText = draft }
+            // Restore draft input — but the caller-supplied `initialPrompt` wins when
+            // the field is empty (avoids the autosaved generic draft overwriting a
+            // task-specific prompt seeded by the email composer's AI button).
+            if inputText.isEmpty {
+                if let initialPrompt, !initialPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    inputText = initialPrompt
+                } else {
+                    inputText = UserDefaults.standard.string(forKey: "ai_draft_input") ?? ""
+                }
+            }
             // Re-attach context pill when sheet re-opens
             pageContextAttached = true
             loadEventMentions()

@@ -36,6 +36,16 @@ struct MainTabView: View {
 
     @ScaledMetric(relativeTo: .body) private var fabSize: CGFloat = 58
 
+    /// Vertical room a scroll view needs at its bottom edge so the last row stays
+    /// tappable above the floating FABs. Imported by `HomeView` (and any future
+    /// FAB-overlapping tab) via `MainTabView.fabClearance` so the two layouts
+    /// can't drift apart.
+    ///
+    /// Math: `fabSize` (58) + the overlay's `.padding(.bottom, 68)` separation
+    /// from the native tab bar = 126, rounded down to 120 for a tight look with
+    /// a small visual buffer above the FABs.
+    static let fabClearance: CGFloat = 120
+
     // MARK: - Body
 
     var body: some View {
@@ -394,7 +404,7 @@ struct MainTabView: View {
 
 // MARK: - FAB helpers
 
-private extension View {
+extension View {
     /// Liquid Glass on iOS 26; ultraThinMaterial circle with shadow on earlier OS.
     @ViewBuilder
     func fabGlass() -> some View {
@@ -409,7 +419,7 @@ private extension View {
     }
 }
 
-private struct FABButtonStyle: ButtonStyle {
+struct FABButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .scaleEffect(configuration.isPressed ? 0.90 : 1.0)

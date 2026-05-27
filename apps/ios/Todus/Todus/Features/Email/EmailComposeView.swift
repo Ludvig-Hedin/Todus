@@ -138,7 +138,7 @@ struct EmailComposeView: View {
 
     var body: some View {
         NavigationStack {
-            ZStack {
+            ZStack(alignment: .bottomTrailing) {
                 AppTheme.sheetBackground.ignoresSafeArea()
 
                 ScrollView {
@@ -195,23 +195,19 @@ struct EmailComposeView: View {
                         bodyArea
                     }
                 }
+
+                // Floating AI assistant — bottom-right, glass capsule, matches the
+                // global AI FAB style elsewhere in the app. Was previously a tiny
+                // gradient sparkle in the nav bar title slot, which was easy to miss
+                // and easy to misread as a logo.
+                aiFAB
+                    .padding(.trailing, 18)
+                    .padding(.bottom, 24)
             }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                         .font(.system(size: 16, weight: .medium))
-                }
-                // AI draft button — opens the AI drafting assistant with current compose context
-                ToolbarItem(placement: .principal) {
-                    Button {
-                        showAIDraft = true
-                    } label: {
-                        Image(systemName: "lasso.badge.sparkles")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(aiGradient)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Draft with AI")
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button {
@@ -263,27 +259,16 @@ struct EmailComposeView: View {
             }
             .navigationTitle(draft.replyToThreadId != nil ? "Reply" : "New Email")
             .navigationBarTitleDisplayMode(.inline)
-            // AI draft assistant — compact sheet that streams a draft into the body
+            // AI assistant — opens the full AI chat sheet on top of the composer, with
+            // the email context pre-seeded into the input. The user asks naturally
+            // ("make it shorter", "rewrite friendlier", "draft a reply to this") and
+            // copies/long-presses the AI's response back into the body. Replaces the
+            // previous one-shot AIDraftSheet which routed through a broken endpoint.
             .sheet(isPresented: $showAIDraft) {
-                EmailAIDraftSheet(
-                    to: draft.to,
-                    subject: draft.subject,
-                    currentBody: draft.body,
-                    onInsert: { generated, mode in
-                        switch mode {
-                        case .replace:
-                            draft.body = generated
-                        case .append:
-                            if !draft.body.isEmpty, !draft.body.hasSuffix("\n") {
-                                draft.body.append("\n")
-                            }
-                            draft.body.append(generated)
-                        }
-                        focusedField = .body
-                    }
+                AIChatView(
+                    currentTab: .email,
+                    initialPrompt: aiChatSeedPrompt
                 )
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.visible)
                 .appSheetBackground()
                 .preferredColorScheme(services.appearancePreference.colorScheme)
             }
@@ -334,6 +319,52 @@ struct EmailComposeView: View {
             // though the sheet is about to tear down.
             .sensoryFeedback(.success, trigger: sendSuccessTick)
         }
+    }
+
+    // MARK: - AI FAB
+
+    /// Floating AI button anchored to bottom-right. Same glass treatment and gradient
+    /// sparkles as the global AI FAB in MainTabView so it reads as the same affordance.
+    private var aiFAB: some View {
+        Button {
+            showAIDraft = true
+        } label: {
+            Image(systemName: "sparkles")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(aiGradient)
+                .frame(width: 56, height: 56)
+                .contentShape(Circle())
+        }
+        .buttonStyle(FABButtonStyle())
+        .fabGlass()
+        .accessibilityLabel("Ask AI about this draft")
+    }
+
+    /// Builds a context-aware prompt the AI chat starts pre-filled with. Reply drafts
+    /// get a "draft a reply to <recipient> about <subject>" seed; brand-new emails get
+    /// a "draft an email to <recipient> about <subject>" seed. The user can edit before
+    /// sending — the field is just a starting point, not auto-submitted.
+    private var aiChatSeedPrompt: String {
+        let recipient = draft.to.first.flatMap { $0.isEmpty ? nil : $0 } ?? "the recipient"
+        let subject = draft.subject.trimmingCharacters(in: .whitespacesAndNewlines)
+        let subjectPhrase = subject.isEmpty ? "" : " about \"\(subject)\""
+        let bodyTrim = draft.body.trimmingCharacters(in: .whitespacesAndNewlines)
+        let isReply = draft.replyToThreadId != nil
+
+        var lines: [String] = []
+        if isReply {
+            lines.append("Help me draft a reply to \(recipient)\(subjectPhrase).")
+        } else {
+            lines.append("Help me draft an email to \(recipient)\(subjectPhrase).")
+        }
+        if !bodyTrim.isEmpty {
+            lines.append("")
+            lines.append("Current draft:")
+            lines.append(bodyTrim)
+        }
+        lines.append("")
+        lines.append("Return just the email body — no preamble.")
+        return lines.joined(separator: "\n")
     }
 
     // MARK: - Formatting Toolbar
@@ -404,7 +435,10 @@ struct EmailComposeView: View {
         Button(action: action) {
             Image(systemName: icon)
                 .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(AppTheme.mutedText)
+                // Was `AppTheme.mutedText` (= .secondary × 0.65 opacity), which was
+                // nearly invisible against the light sheet background. `.secondary`
+                // gives ~60% contrast — readable in both light and dark.
+                .foregroundStyle(.secondary)
                 .frame(width: 36, height: 32)
                 .background(Color.clear)
                 .contentShape(Rectangle())
@@ -501,7 +535,7 @@ struct EmailComposeView: View {
                     get: { draft.to.first ?? "" },
                     set: { draft.to = $0.isEmpty ? [] : [$0] }
                 ),
-                prompt: Text("recipient@example.com").foregroundColor(.secondary)
+                prompt: Text("Add recipients").foregroundColor(.secondary)
             ) {
                 EmptyView()
             }
@@ -543,7 +577,10 @@ struct EmailComposeView: View {
                     get: { draft.cc.first ?? "" },
                     set: { draft.cc = $0.isEmpty ? [] : [$0] }
                 ),
-                prompt: Text("cc@example.com").foregroundColor(.secondary)
+                // Plain placeholder text — an email-shaped placeholder ("cc@example.com")
+                // gets auto-styled blue by iOS data detectors, making the empty field
+                // look like it's prefilled with a tappable link in light mode.
+                prompt: Text("Add Cc recipients").foregroundColor(.secondary)
             ) {
                 EmptyView()
             }
@@ -570,7 +607,7 @@ struct EmailComposeView: View {
                     get: { draft.bcc.first ?? "" },
                     set: { draft.bcc = $0.isEmpty ? [] : [$0] }
                 ),
-                prompt: Text("bcc@example.com").foregroundColor(.secondary)
+                prompt: Text("Add Bcc recipients").foregroundColor(.secondary)
             ) {
                 EmptyView()
             }
@@ -644,12 +681,18 @@ struct EmailComposeView: View {
 
     /// Body area — the full minHeight region is tappable to focus the text input.
     /// Content is anchored top-left via ZStack alignment rather than defaulting to center.
+    ///
+    /// `minHeight` is sized to the *visible* screen height (minus the form rows above
+    /// and the keyboard) so the user can tap anywhere in the empty space below their
+    /// last line of text to focus the body. Previously capped at 300pt, which meant
+    /// tapping the lower half of the visible body area silently did nothing because
+    /// it landed outside the tap target.
     private var bodyArea: some View {
         ZStack(alignment: .topLeading) {
-            // Transparent tap target covers the full minimum area so tapping
-            // anywhere below the text still focuses the body field
+            // Transparent tap target — fills the remaining visible space so the user
+            // can tap anywhere in the body region to focus the input.
             Color.clear
-                .frame(maxWidth: .infinity, minHeight: 300)
+                .frame(maxWidth: .infinity, minHeight: 700)
                 .contentShape(Rectangle())
                 .onTapGesture { focusedField = .body }
 
