@@ -12,12 +12,16 @@ struct MoreSheetView: View {
             List {
                 // Pages section — mirrors what the Home "More" section shows
                 Section("Pages") {
-                    // Meetings — only shown here when not in the tab bar
+                    // Meetings — only shown here when not in the tab bar.
+                    // Navigate to the meetings tab directly (same pattern as Calendar/Docs)
+                    // to avoid nesting MeetingsListView inside this sheet's NavigationStack.
                     if !services.tabBarTabs.contains(.meetings) {
-                        NavigationLink {
-                            MeetingsListView()
+                        Button {
+                            onNavigate(.meetings)
+                            dismiss()
                         } label: {
                             Label("Meetings", systemImage: "video")
+                                .foregroundStyle(.primary)
                         }
                     }
 

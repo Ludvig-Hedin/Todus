@@ -32,6 +32,7 @@ struct MeetingsListView: View {
             .pageHeaderScrim(color: AppTheme.backgroundTop, scrimHeight: headerHeight + scrimTail)
         }
         .toolbar(.hidden, for: .navigationBar)
+        .navigationBarBackButtonHidden(true)
         .navigationDestination(for: String.self) { meetingId in
             MeetingDetailView(meetingId: meetingId)
         }

@@ -95,6 +95,18 @@ struct MeetingDetailView: View {
                                 transcriptSection(segments)
                                 qaSection
                             }
+
+                            // Empty state — past meeting with nothing recorded
+                            let over = Self.isMeetingOver(startsAt: meeting.startsAt, endsAt: meeting.endsAt)
+                            let derivedStatus = (meeting.status == "scheduled" && over) ? "past" : meeting.status
+                            let hasContent = videoURL != nil
+                                || !(meeting.transcript?.isEmpty ?? true)
+                                || meeting.aiSummary != nil
+                                || meeting.status == "recording"
+                                || meeting.status == "processing"
+                            if derivedStatus == "past", !hasContent, meeting.status != "failed" {
+                                notRecordedCard
+                            }
                         }
                         .padding(16)
                     }
@@ -117,6 +129,7 @@ struct MeetingDetailView: View {
             }
         }
         .toolbar(.hidden, for: .navigationBar)
+        .navigationBarBackButtonHidden(true)
         .background(AppTheme.backgroundTop.ignoresSafeArea())
         .background { SwipeBackEnabler() }
         .alert("Error", isPresented: Binding(
@@ -235,6 +248,25 @@ struct MeetingDetailView: View {
                 }
             }
         }
+    }
+
+    private var notRecordedCard: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "video.slash")
+                .font(.system(size: 24))
+                .foregroundStyle(.tertiary)
+            Text("No recording")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.secondary)
+            Text("This meeting wasn't recorded. Enable auto-record in Settings to capture future meetings.")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 36)
+        .padding(.horizontal, 16)
+        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
     }
 
     // Compiled once — not per render. NSRegularExpression is thread-safe for matching.
