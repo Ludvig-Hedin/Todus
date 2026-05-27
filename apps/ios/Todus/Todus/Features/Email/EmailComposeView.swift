@@ -101,8 +101,8 @@ struct EmailComposeView: View {
         _draftStorageKey = State(initialValue: "compose.\(threadId)")
     }
 
-    /// Create compose with pre-filled to, cc, bcc, subject, body, and/or attachments (from CreateSheet)
-    init(to: String? = nil, cc: String? = nil, bcc: String? = nil, subject: String? = nil, body: String? = nil, seededAttachments: [String] = []) {
+    /// Create compose with pre-filled to, cc, bcc, subject, body, attachments, and/or sender (from CreateSheet)
+    init(to: String? = nil, cc: String? = nil, bcc: String? = nil, subject: String? = nil, body: String? = nil, seededAttachments: [String] = [], fromConnectionId: String? = nil) {
         var d = EmailDraft()
         if let to, !to.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             d.to = [to.trimmingCharacters(in: .whitespacesAndNewlines)]
@@ -115,6 +115,8 @@ struct EmailComposeView: View {
         }
         if let subject { d.subject = subject }
         if let body { d.body = body }
+        // Pre-select the sender chosen in CreateSheet's From picker.
+        if let fromConnectionId { d.fromConnectionId = fromConnectionId }
         _draft = State(initialValue: d)
         _seededAttachmentNames = State(initialValue: seededAttachments)
         // The autosaved "new email" slot must NOT be reused when the caller
@@ -124,7 +126,7 @@ struct EmailComposeView: View {
         // wrong message without noticing.
         let calledWithSeed =
             to != nil || cc != nil || bcc != nil || subject != nil || body != nil
-            || !seededAttachments.isEmpty
+            || !seededAttachments.isEmpty || fromConnectionId != nil
         _draftStorageKey = State(
             initialValue: calledWithSeed ? "new.\(UUID().uuidString)" : Self.newComposeStorageKey
         )

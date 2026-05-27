@@ -28,6 +28,7 @@ struct CreateSheet: View {
     @State private var bccText = ""
     @State private var subjectText = ""
     @State private var showEmailCcBcc = false
+    @State private var fromConnectionId: String? = nil
 
     // Event-specific secondary fields
     @State private var locationText = ""
@@ -131,6 +132,7 @@ struct CreateSheet: View {
         }
         .onAppear {
             selectedType = initialType
+            fromConnectionId = services.connectionsService.connections.first?.id
             // Auto-set start date for events if none selected
             if initialType == .event, selectedDate == nil {
                 selectedDate = Date()
@@ -235,9 +237,9 @@ struct CreateSheet: View {
                     LinearGradient(
                         stops: [
                             .init(color: .clear,               location: 0.00),
-                            .init(color: .clear,               location: 0.30),
-                            .init(color: .black.opacity(0.6),  location: 0.55),
-                            .init(color: .black,               location: 0.80),
+                            .init(color: .clear,               location: 0.20),
+                            .init(color: .black.opacity(0.6),  location: 0.45),
+                            .init(color: .black,               location: 0.65),
                         ],
                         startPoint: .top,
                         endPoint: .bottom
@@ -251,9 +253,9 @@ struct CreateSheet: View {
                     LinearGradient(
                         stops: [
                             .init(color: .clear,               location: 0.00),
-                            .init(color: .clear,               location: 0.50),
-                            .init(color: .black.opacity(0.7),  location: 0.75),
-                            .init(color: .black,               location: 0.90),
+                            .init(color: .clear,               location: 0.35),
+                            .init(color: .black.opacity(0.7),  location: 0.60),
+                            .init(color: .black,               location: 0.80),
                         ],
                         startPoint: .top,
                         endPoint: .bottom
@@ -267,22 +269,22 @@ struct CreateSheet: View {
                     LinearGradient(
                         stops: [
                             .init(color: .clear,               location: 0.00),
-                            .init(color: .clear,               location: 0.65),
-                            .init(color: .black.opacity(0.8),  location: 0.85),
-                            .init(color: .black,               location: 0.95),
+                            .init(color: .clear,               location: 0.50),
+                            .init(color: .black.opacity(0.8),  location: 0.72),
+                            .init(color: .black,               location: 0.88),
                         ],
                         startPoint: .top,
                         endPoint: .bottom
                     )
                 )
 
-            // Dim wash — heavier than before so foreground content really sits.
+            // Dim wash — heavier so the modal stands out from content behind it.
             LinearGradient(
                 stops: [
                     .init(color: .black.opacity(0.00), location: 0.00),
-                    .init(color: .black.opacity(0.10), location: 0.40),
-                    .init(color: .black.opacity(0.30), location: 0.70),
-                    .init(color: .black.opacity(0.45), location: 1.00),
+                    .init(color: .black.opacity(0.20), location: 0.30),
+                    .init(color: .black.opacity(0.45), location: 0.65),
+                    .init(color: .black.opacity(0.65), location: 1.00),
                 ],
                 startPoint: .top,
                 endPoint: .bottom
@@ -361,13 +363,15 @@ struct CreateSheet: View {
     /// Email-specific: To + CC/BCC + Subject + formatting toolbar, rendered above the body input.
     private var emailSecondaryFields: some View {
         VStack(spacing: 0) {
+            fromEmailRow
+
             // To row with CC/BCC chevron
             HStack(spacing: 6) {
                 Text("To")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(AppTheme.mutedText)
                     .frame(width: 52, alignment: .trailing)
-                TextField("recipient@example.com", text: $recipientText)
+                TextField("", text: $recipientText, prompt: Text("recipient@example.com").foregroundStyle(AppTheme.mutedText))
                     .font(.system(size: 14))
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
@@ -394,7 +398,7 @@ struct CreateSheet: View {
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(AppTheme.mutedText)
                         .frame(width: 52, alignment: .trailing)
-                    TextField("cc@example.com", text: $ccText)
+                    TextField("", text: $ccText, prompt: Text("cc@example.com").foregroundStyle(AppTheme.mutedText))
                         .font(.system(size: 14))
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
@@ -409,7 +413,7 @@ struct CreateSheet: View {
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(AppTheme.mutedText)
                         .frame(width: 52, alignment: .trailing)
-                    TextField("bcc@example.com", text: $bccText)
+                    TextField("", text: $bccText, prompt: Text("bcc@example.com").foregroundStyle(AppTheme.mutedText))
                         .font(.system(size: 14))
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
@@ -440,6 +444,48 @@ struct CreateSheet: View {
             Divider().opacity(0.25).padding(.horizontal, 14)
         }
         .padding(.top, 6)
+    }
+
+    /// From account row — only shown when user has multiple connected email accounts.
+    /// Mirrors EmailComposeView.fromRow but drives `fromConnectionId` local state.
+    @ViewBuilder
+    private var fromEmailRow: some View {
+        let connections = services.connectionsService.connections
+        if connections.count > 1 {
+            HStack(spacing: 6) {
+                Text("From")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(AppTheme.mutedText)
+                    .frame(width: 52, alignment: .trailing)
+                Menu {
+                    ForEach(connections, id: \.id) { account in
+                        Button {
+                            fromConnectionId = account.id
+                        } label: {
+                            if fromConnectionId == account.id {
+                                Label(account.email, systemImage: "checkmark")
+                            } else {
+                                Text(account.email)
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(connections.first(where: { $0.id == fromConnectionId })?.email ?? "")
+                            .font(.system(size: 14))
+                            .foregroundStyle(.primary)
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(AppTheme.mutedText)
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 9)
+
+            Divider().opacity(0.25).padding(.horizontal, 14)
+        }
     }
 
     private var emailFormattingToolbar: some View {
@@ -999,6 +1045,7 @@ struct CreateSheet: View {
                 services.composeEmailSeedSubject = subjectText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                     ? nil : subjectText.trimmingCharacters(in: .whitespacesAndNewlines)
                 services.composeEmailSeedAttachments = attachments
+                services.composeEmailSeedFromConnectionId = fromConnectionId
                 services.showsComposeEmail = true
             case .auto:
                 createTask(input, attachments: attachments)

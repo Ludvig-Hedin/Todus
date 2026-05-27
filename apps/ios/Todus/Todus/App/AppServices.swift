@@ -250,6 +250,8 @@ final class AppServices {
     /// EmailComposeView. Surfaced as chips so the user keeps a record even
     /// though the send pipeline does not yet upload binary attachments.
     var composeEmailSeedAttachments: [String] = []
+    /// Connection ID pre-selected in CreateSheet's From picker, forwarded to EmailComposeView.
+    var composeEmailSeedFromConnectionId: String? = nil
     var showsAIChat = false
 
     /// Set by detail views (e.g. EmailThreadView) to hide the custom floating tab bar

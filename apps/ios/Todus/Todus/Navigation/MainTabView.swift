@@ -167,6 +167,7 @@ struct MainTabView: View {
             services.composeEmailSeedBcc = nil
             services.composeEmailSeedSubject = nil
             services.composeEmailSeedAttachments = []
+            services.composeEmailSeedFromConnectionId = nil
         }) {
             EmailComposeView(
                 to: services.composeEmailSeedTo,
@@ -174,7 +175,8 @@ struct MainTabView: View {
                 bcc: services.composeEmailSeedBcc,
                 subject: services.composeEmailSeedSubject,
                 body: services.composeEmailSeedBody,
-                seededAttachments: services.composeEmailSeedAttachments
+                seededAttachments: services.composeEmailSeedAttachments,
+                fromConnectionId: services.composeEmailSeedFromConnectionId
             )
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
@@ -205,6 +207,7 @@ struct MainTabView: View {
                 services.composeEmailSeedBcc = nil
                 services.composeEmailSeedSubject = nil
                 services.composeEmailSeedAttachments = []
+                services.composeEmailSeedFromConnectionId = nil
             }
         }
         .onChange(of: services.requestCreateSheet) { _, requested in
