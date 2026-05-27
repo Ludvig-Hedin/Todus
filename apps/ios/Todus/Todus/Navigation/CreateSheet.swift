@@ -471,7 +471,9 @@ struct CreateSheet: View {
                     }
                 } label: {
                     HStack(spacing: 4) {
-                        Text(connections.first(where: { $0.id == fromConnectionId })?.email ?? "")
+                        Text(connections.first(where: { $0.id == fromConnectionId })?.email
+                            ?? connections.first?.email
+                            ?? "Loading…")
                             .font(.system(size: 14))
                             .foregroundStyle(.primary)
                         Image(systemName: "chevron.up.chevron.down")
@@ -1007,6 +1009,7 @@ struct CreateSheet: View {
                             if !services.showsComposeEmail {
                                 services.composeEmailSeedBody = intent.title
                                 services.composeEmailSeedAttachments = itemAttachments
+                                services.composeEmailSeedFromConnectionId = fromConnectionId
                                 services.showsComposeEmail = true
                             }
                         }
