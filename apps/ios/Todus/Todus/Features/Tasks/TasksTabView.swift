@@ -55,11 +55,12 @@ struct TasksTabView: View {
             // List mode renders the Folders section below the tasks so the whole page
             // scrolls together as one continuous surface.
             //
-            // safeAreaInset is applied per-case rather than on the Group so BoardView
-            // (a horizontal-only ScrollView) is excluded. A safeAreaInset on a
-            // horizontal scroll view creates a permanent top gap that cannot be
-            // scrolled away — the board receives the header height as `topInset`
-            // instead and applies it as padding/frame-reduction directly.
+            // All scroll modifiers (safeAreaInset, contentMargins, refreshable,
+            // onScrollGeometryChange) are applied PER-CASE rather than on the Group.
+            // BoardView is a horizontal-only ScrollView — `.refreshable` and a top
+            // safeAreaInset both reserve permanent unscrollable top space on it,
+            // which is what produced the massive gap. Board receives the header
+            // height as `topInset` and applies padding inside the HStack instead.
             Group {
                 switch services.selectedViewMode {
                 case .list:
@@ -74,6 +75,9 @@ struct TasksTabView: View {
                     .safeAreaInset(edge: .top) {
                         Color.clear.frame(height: headerHeight + scrimTail)
                     }
+                    .contentMargins(.bottom, 130, for: .scrollContent)
+                    .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y } action: hideTabBarOnScroll
+                    .refreshable { await reload() }
                 case .board:
                     BoardView(
                         captureService: services.captureService,
@@ -94,27 +98,21 @@ struct TasksTabView: View {
                     .safeAreaInset(edge: .top) {
                         Color.clear.frame(height: headerHeight + scrimTail)
                     }
+                    .contentMargins(.bottom, 130, for: .scrollContent)
+                    .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y } action: hideTabBarOnScroll
+                    .refreshable { await reload() }
                 case .calendar:
                     CalendarTaskView(searchText: searchText, sortOrder: services.taskSortOrder)
                         .padding(.horizontal, 16)
                         .safeAreaInset(edge: .top) {
                             Color.clear.frame(height: headerHeight + scrimTail)
                         }
+                        .contentMargins(.bottom, 130, for: .scrollContent)
+                        .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y } action: hideTabBarOnScroll
+                        .refreshable { await reload() }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .contentMargins(.bottom, 130, for: .scrollContent)
-            .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y } action: { old, new in
-                let delta = new - old
-                if delta > 8 && new > 40 {
-                    withAnimation(.easeOut(duration: 0.2)) { services.hideTabBar = true }
-                } else if delta < -8 {
-                    withAnimation(.easeOut(duration: 0.2)) { services.hideTabBar = false }
-                }
-            }
-            .refreshable {
-                await reload()
-            }
 
             // Pinned header overlay with transparent scrim — content scrolls under it.
             VStack(spacing: 8) {
@@ -214,6 +212,19 @@ struct TasksTabView: View {
             Button("Cancel", role: .cancel) {
                 folderToDelete = nil
             }
+        }
+    }
+
+    /// Hides the tab bar on downward scroll and reveals on upward. Shared across
+    /// list / table / calendar cases so each scroll observer behaves identically.
+    /// Parameter labels are unlabeled (`_`) to match the `(T, T) -> Void` shape
+    /// `onScrollGeometryChange` expects when passed as a function reference.
+    private func hideTabBarOnScroll(_ old: CGFloat, _ new: CGFloat) {
+        let delta = new - old
+        if delta > 8 && new > 40 {
+            withAnimation(.easeOut(duration: 0.2)) { services.hideTabBar = true }
+        } else if delta < -8 {
+            withAnimation(.easeOut(duration: 0.2)) { services.hideTabBar = false }
         }
     }
 

@@ -138,8 +138,8 @@ struct TaskTableView: View {
         .tracking(0.4)
         .textCase(.uppercase)
         .foregroundStyle(AppTheme.mutedText)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 9)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 7)
     }
 
     // MARK: - Table Row
@@ -164,31 +164,29 @@ struct TaskTableView: View {
             .buttonStyle(.plain)
             .accessibilityLabel(task.completed ? "Mark as incomplete" : "Mark complete")
 
-            HStack(spacing: 8) {
-                Image(systemName: task.status.systemImage)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(task.status.tintColor)
-
-                VStack(alignment: .leading, spacing: 1) {
-                    HStack(spacing: 4) {
-                        if task.priority != .none {
-                            Circle()
-                                .fill(priorityColor(task.priority))
-                                .frame(width: 5, height: 5)
-                        }
-                        Text(task.title)
-                            .font(.system(size: 13, weight: .medium))
-                            .tracking(-0.15)
-                            .foregroundStyle(.primary.opacity(0.88))
-                            .lineLimit(1)
+            // Inner status icon removed — TaskStatus.todo's symbol is `circle`,
+            // which collided with the checkbox column to render as a double-circle.
+            // The trailing Status pill already shows the same icon + label, so the
+            // duplicate was pure noise.
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    if task.priority != .none {
+                        Circle()
+                            .fill(priorityColor(task.priority))
+                            .frame(width: 5, height: 5)
                     }
+                    Text(task.title)
+                        .font(.system(size: 13, weight: .medium))
+                        .tracking(-0.15)
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                }
 
-                    if !task.taskDescription.isEmpty && task.taskDescription != task.title {
-                        Text(task.taskDescription)
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(AppTheme.mutedText)
-                            .lineLimit(1)
-                    }
+                if !task.taskDescription.isEmpty && task.taskDescription != task.title {
+                    Text(task.taskDescription)
+                        .font(.system(size: 11, weight: .regular))
+                        .foregroundStyle(AppTheme.mutedText)
+                        .lineLimit(1)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -208,8 +206,8 @@ struct TaskTableView: View {
             .font(.system(size: 11, weight: .medium))
             .frame(width: 72, alignment: .leading)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 6)
         .contentShape(Rectangle())
         .onTapGesture { selectedTask = task }
         .contextMenu {

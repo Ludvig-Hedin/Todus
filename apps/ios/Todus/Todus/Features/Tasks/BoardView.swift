@@ -28,6 +28,11 @@ struct BoardView: View {
 
     var body: some View {
         GeometryReader { geo in
+            // Effective board height = full geometry minus the header (topInset)
+            // and minus the tab-bar overlay (~130pt). Columns must clear both so
+            // their inner vertical ScrollView doesn't hide content behind chrome.
+            let bottomReserve: CGFloat = 130
+            let columnHeight = max(120, geo.size.height - topInset - bottomReserve)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(alignment: .top, spacing: 12) {
                     ForEach(TaskStatus.allCases) { status in
@@ -38,12 +43,12 @@ struct BoardView: View {
                         ) { task in
                             selectedTask = task
                         }
-                        .frame(height: geo.size.height - topInset)
+                        .frame(height: columnHeight)
                     }
                 }
                 .padding(.top, topInset)
                 .padding(.horizontal, 16)
-                .padding(.bottom, 10)
+                .padding(.bottom, bottomReserve)
             }
             .scrollDismissesKeyboard(.interactively)
         }

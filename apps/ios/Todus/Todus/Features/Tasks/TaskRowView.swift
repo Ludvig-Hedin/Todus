@@ -19,28 +19,27 @@ struct TaskRowView: View {
         Button {
             onOpenDetails()
         } label: {
-            HStack(alignment: .center, spacing: 6) {
+            HStack(alignment: .center, spacing: 4) {
                 // Checkbox — isolated tap target, vertically centered with the text block.
-                // Frame is 44×44 to meet the HIG minimum hit area without shrinking the
-                // glyph (the SF symbol is still rendered at 16pt — only the touch region grows).
+                // Frame stays 44×44 for the HIG minimum hit area; only the glyph size
+                // changes. Outer padding tightened so the row is visibly compact.
                 Button(action: { toggleCheckbox() }) {
                     Image(systemName: task.completed ? "checkmark.circle.fill" : "circle")
                         .font(.system(size: 16, weight: .medium))
                         .foregroundStyle(task.completed ? task.status.tintColor : AppTheme.subtleText)
                 }
                 .buttonStyle(.plain)
-                .frame(width: 44, height: 44)
+                .frame(width: 36, height: 36)
                 .contentShape(Rectangle())
                 .accessibilityLabel(task.completed ? "Mark task incomplete" : "Mark task complete")
 
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 3) {
                     HStack(alignment: .center, spacing: 8) {
-                        VStack(alignment: .leading, spacing: 2) {
+                        VStack(alignment: .leading, spacing: 1) {
                             HStack(alignment: .firstTextBaseline, spacing: 5) {
                                 Text(task.title)
                                     .font(.system(size: 14, weight: .medium))
                                     .tracking(-0.2)
-                                    .lineSpacing(2)
                                     .lineLimit(2)
                                     .multilineTextAlignment(.leading)
                                     .foregroundStyle(.primary.opacity(task.completed ? 0.45 : 1.0))
@@ -61,7 +60,7 @@ struct TaskRowView: View {
 
                             if !task.taskDescription.isEmpty && task.taskDescription != task.title {
                                 Text(task.taskDescription)
-                                    .font(.system(size: 12, weight: .medium))
+                                    .font(.system(size: 12, weight: .regular))
                                     .foregroundStyle(AppTheme.mutedText.opacity(0.95))
                                     .lineLimit(1)
                             }
@@ -74,8 +73,8 @@ struct TaskRowView: View {
                     metaChipsRow
                 }
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

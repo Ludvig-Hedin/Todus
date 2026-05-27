@@ -252,7 +252,10 @@ private struct CalendarTaskCard: View {
     @State private var showDeleteConfirmation = false
 
     var body: some View {
-        HStack(alignment: .top, spacing: 0) {
+        // Center alignment so the checkbox lines up vertically with the title row,
+        // matching List view parity. Padding tightened: vertical 8pt (was 12pt+14pt
+        // mixed), uniform horizontal 10pt instead of split leading/trailing values.
+        HStack(alignment: .center, spacing: 6) {
             Button {
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 withAnimation(AppTheme.Motion.base) {
@@ -265,22 +268,22 @@ private struct CalendarTaskCard: View {
                 Image(systemName: task.completed ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 16, weight: .medium))
                     .foregroundStyle(task.completed ? task.status.tintColor : AppTheme.mutedText)
-                    .frame(width: 28, height: 28)
+                    .frame(width: 32, height: 32)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel(task.completed ? "Mark task incomplete" : "Mark task complete")
-            .padding(.leading, 14)
-            .padding(.top, 14)
 
             Button {
                 onOpenDetails()
             } label: {
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 4) {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Text(task.title)
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(.system(size: 14, weight: .medium))
+                            .tracking(-0.2)
                             .foregroundStyle(.primary)
+                            .lineLimit(2)
                             .frame(maxWidth: .infinity, alignment: .leading)
 
                         CalendarMetaPill(
@@ -297,43 +300,45 @@ private struct CalendarTaskCard: View {
                             .lineLimit(1)
                     }
 
-                    HStack(spacing: 6) {
-                        if let dueDate = task.dueDate {
-                            CalendarMetaPill(
-                                text: TaskDateFormatter.dueFormatter.string(from: dueDate),
-                                systemImage: "calendar",
-                                tint: bucket.tint
-                            )
-                        }
+                    if task.dueDate != nil || task.priority != .none || task.folder != nil {
+                        HStack(spacing: 5) {
+                            if let dueDate = task.dueDate {
+                                CalendarMetaPill(
+                                    text: TaskDateFormatter.dueFormatter.string(from: dueDate),
+                                    systemImage: "calendar",
+                                    tint: bucket.tint
+                                )
+                            }
 
-                        if task.priority != .none {
-                            CalendarMetaPill(
-                                text: task.priority.title,
-                                systemImage: "flag.fill",
-                                tint: priorityColor(task.priority)
-                            )
-                        }
+                            if task.priority != .none {
+                                CalendarMetaPill(
+                                    text: task.priority.title,
+                                    systemImage: "flag.fill",
+                                    tint: priorityColor(task.priority)
+                                )
+                            }
 
-                        if let folder = task.folder {
-                            CalendarMetaPill(
-                                text: folder.name,
-                                systemImage: "folder",
-                                tint: AppTheme.mutedText
-                            )
+                            if let folder = task.folder {
+                                CalendarMetaPill(
+                                    text: folder.name,
+                                    systemImage: "folder",
+                                    tint: AppTheme.mutedText
+                                )
+                            }
                         }
                     }
                 }
-                .padding(.leading, 8)
-                .padding(.trailing, 14)
-                .padding(.vertical, 12)
+                .padding(.trailing, 10)
+                .padding(.vertical, 8)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .buttonStyle(.plain)
         }
-        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.card, style: .continuous))
+        .padding(.leading, 8)
+        .background(AppTheme.rowFill, in: RoundedRectangle(cornerRadius: AppTheme.Radius.row, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: AppTheme.Radius.card, style: .continuous)
-                .stroke(AppTheme.cardBorder, lineWidth: 1)
+            RoundedRectangle(cornerRadius: AppTheme.Radius.row, style: .continuous)
+                .stroke(AppTheme.rowStroke, lineWidth: 0.5)
         )
         .contextMenu {
             // Brought to parity with TaskRowView's context-menu actions

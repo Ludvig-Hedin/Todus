@@ -298,8 +298,9 @@ struct InboxView<Footer: View>: View {
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(Color(red: 0.85, green: 0.30, blue: 0.25))
                 }
-                .padding(.top, 12)
+                .padding(.top, 14)
                 .padding(.bottom, 4)
+                .padding(.horizontal, 4)
                 .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
@@ -309,53 +310,41 @@ struct InboxView<Footer: View>: View {
                     ? (completedTasks + olderCompletedTasks)
                     : completedTasks
 
-                ForEach(visibleCompleted) { task in
-                    HStack(spacing: 12) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(AppTheme.mutedText)
-                        Text(task.title)
-                            .font(.system(size: 14, weight: .medium))
-                            .tracking(-0.2)
-                            .foregroundStyle(AppTheme.mutedText)
-                            .strikethrough()
-                        Spacer()
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .background(
-                        AppTheme.surfacePrimary,
-                        in: RoundedRectangle(cornerRadius: AppTheme.Radius.row, style: .continuous)
-                    )
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        withAnimation(.snappy(duration: 0.22)) {
-                            captureService.toggleCompletion(task, in: modelContext)
-                        }
-                    }
-                    .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                        Button {
-                            withAnimation(.snappy(duration: 0.22)) {
-                                captureService.toggleCompletion(task, in: modelContext)
+                // Tight list with dividers instead of card-per-item: removes the
+                // big card backgrounds + stacked 2pt row insets that were producing
+                // ~16pt of dead space between every completed row.
+                ForEach(Array(visibleCompleted.enumerated()), id: \.element.id) { index, task in
+                    completedRow(task)
+                        .overlay(alignment: .bottom) {
+                            if index < visibleCompleted.count - 1 {
+                                Divider()
+                                    .padding(.leading, 32)
+                                    .opacity(0.5)
                             }
-                        } label: {
-                            Label("Restore", systemImage: "arrow.uturn.backward")
                         }
-                        .tint(Color.primary)
-                    }
-                    // Disable full-swipe on the completed-row Delete action — a
-                    // long horizontal swipe in the busy "Recently completed"
-                    // section was the leading source of mistaken deletes.
-                    // (UX P6.)
-                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                        Button(role: .destructive) {
-                            captureService.delete(task, in: modelContext)
-                        } label: {
-                            Label("Delete", systemImage: "trash")
+                        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                            Button {
+                                withAnimation(.snappy(duration: 0.22)) {
+                                    captureService.toggleCompletion(task, in: modelContext)
+                                }
+                            } label: {
+                                Label("Restore", systemImage: "arrow.uturn.backward")
+                            }
+                            .tint(Color.primary)
                         }
-                    }
-                    .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 2, trailing: 0))
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
+                        // Disable full-swipe on Delete in the completed list — a
+                        // long horizontal swipe here was the leading source of
+                        // mistaken deletes. (UX P6.)
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button(role: .destructive) {
+                                captureService.delete(task, in: modelContext)
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
+                        .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
                 }
 
                 if !olderCompletedTasks.isEmpty {
@@ -370,13 +359,40 @@ struct InboxView<Footer: View>: View {
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundStyle(AppTheme.mutedText)
                             .padding(.vertical, 8)
+                            .padding(.leading, 32)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .buttonStyle(.plain)
-                    .listRowInsets(EdgeInsets(top: 0, leading: 8, bottom: 0, trailing: 8))
+                    .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
                 }
+            }
+        }
+    }
+
+    /// Single row in the recently-completed list — no card background, no extra
+    /// vertical padding, just a checkmark + strikethrough title. Dividers are
+    /// added by the caller via overlay so they don't ride the swipe action.
+    private func completedRow(_ task: TaskRecord) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(AppTheme.mutedText.opacity(0.7))
+                .frame(width: 24, height: 24)
+            Text(task.title)
+                .font(.system(size: 13, weight: .regular))
+                .foregroundStyle(AppTheme.mutedText)
+                .strikethrough(color: AppTheme.mutedText.opacity(0.45))
+                .lineLimit(1)
+            Spacer()
+        }
+        .padding(.horizontal, 4)
+        .padding(.vertical, 6)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            withAnimation(.snappy(duration: 0.22)) {
+                captureService.toggleCompletion(task, in: modelContext)
             }
         }
     }
