@@ -682,43 +682,80 @@ final class TaskCaptureService {
             let limit: Int
         }
 
+        let allTasks = (try? context.fetch(FetchDescriptor<TaskRecord>())) ?? []
+        let tasksByID = Dictionary(uniqueKeysWithValues: allTasks.map { ($0.id.uuidString, $0) })
+
+        var items: [FolderContentItem] = []
+        var seenIDs = Set<String>()
+
         do {
             let response: FolderContentsResponse = try await apiClient.trpcQuery(
                 "folders.listContents",
                 input: ContentsInput(folderId: folder.id.uuidString, limit: 200)
             )
 
-            let allTasks = (try? context.fetch(FetchDescriptor<TaskRecord>())) ?? []
-            let tasksByID = Dictionary(uniqueKeysWithValues: allTasks.map { ($0.id.uuidString, $0) })
-
-            var items: [FolderContentItem] = []
             for raw in response.items {
                 switch raw.type {
                 case "task":
                     if let task = tasksByID[raw.id] {
                         items.append(.task(task))
+                        seenIDs.insert("task-\(raw.id)")
                     }
                 case "chat":
                     items.append(.chat(id: raw.id, title: raw.title, updatedAt: raw.sortAt))
+                    seenIDs.insert("chat-\(raw.id)")
                 case "email":
-                    items.append(.email(
-                        threadId: raw.id,
-                        subject: raw.title,
-                        sender: raw.subtitle,
-                        date: raw.sortAt
-                    ))
+                    items.append(.email(threadId: raw.id, subject: raw.title, sender: raw.subtitle, date: raw.sortAt))
+                    seenIDs.insert("email-\(raw.id)")
                 case "event":
                     items.append(.event(eventId: raw.id, title: raw.title, start: raw.sortAt))
+                    seenIDs.insert("event-\(raw.id)")
                 case "doc":
                     items.append(.doc(docId: raw.id, title: raw.title, updatedAt: raw.sortAt))
+                    seenIDs.insert("doc-\(raw.id)")
                 default:
                     break
                 }
             }
-            return items
         } catch {
-            return []
+            // Backend unavailable — fall through to local-only data below.
         }
+
+        // Merge any locally-saved items not yet reflected in the backend response.
+        // This makes newly-added items appear immediately without waiting for sync.
+        let folderID = folder.id
+        let localFolderItems = (try? context.fetch(FetchDescriptor<FolderItemRecord>())) ?? []
+        for record in localFolderItems where record.folder?.id == folderID {
+            let key = "\(record.itemType)-\(record.itemId)"
+            guard !seenIDs.contains(key) else { continue }
+            switch record.itemType {
+            case "email":
+                items.append(.email(
+                    threadId: record.itemId,
+                    subject: record.titleCache ?? "",
+                    sender: record.subtitleCache,
+                    date: record.createdAt
+                ))
+            case "event":
+                items.append(.event(eventId: record.itemId, title: record.titleCache ?? "", start: record.createdAt))
+            case "doc":
+                items.append(.doc(docId: record.itemId, title: record.titleCache ?? "", updatedAt: record.createdAt))
+            default:
+                break
+            }
+            seenIDs.insert(key)
+        }
+
+        // Include local tasks assigned to this folder but not yet visible on backend.
+        for task in allTasks where task.folder?.id == folderID {
+            let key = "task-\(task.id.uuidString)"
+            if !seenIDs.contains(key) {
+                items.append(.task(task))
+                seenIDs.insert(key)
+            }
+        }
+
+        return items.sorted { $0.sortDate > $1.sortDate }
     }
 
     // MARK: - Folder items (emails / events / docs)
