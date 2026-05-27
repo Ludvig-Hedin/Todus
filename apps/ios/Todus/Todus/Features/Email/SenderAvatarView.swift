@@ -464,12 +464,12 @@ struct SenderAvatarView: View {
                         switch phase {
                         case .success(let image):
                             // Person photos (Google contacts, Gravatar) fill the circle edge-to-edge.
-                            // Brand logos (Clearbit, favicon) are fitted with padding on a neutral
-                            // background. Logos are clipped to Circle before padding so app-icon-style
-                            // favicons (which have their own rounded-square shape) render circular.
+                            // Brand logos (Clearbit, favicon) get a white background so dark/monochrome
+                            // logos (e.g. Quiksilver, GitHub black) remain visible in dark mode.
+                            // A white circle is the standard treatment in Gmail, Outlook, and Apple Mail.
                             let isPhoto = Self.isPersonPhoto(currentURL)
                             ZStack {
-                                Circle().fill(isPhoto ? .clear : Color(UIColor.secondarySystemBackground))
+                                Circle().fill(isPhoto ? Color.clear : Color.white)
                                 if isPhoto {
                                     image
                                         .resizable()
@@ -478,8 +478,7 @@ struct SenderAvatarView: View {
                                     image
                                         .resizable()
                                         .aspectRatio(contentMode: .fit)
-                                        .clipShape(Circle())
-                                        .padding(size * 0.10)
+                                        .padding(size * 0.16)
                                 }
                             }
                             .transition(.opacity)

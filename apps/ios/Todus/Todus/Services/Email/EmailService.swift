@@ -103,16 +103,14 @@ final class EmailService {
     /// UserDefaults keys for the inbox thread cache.
     /// Only inbox is cached — other folders are small/infrequent enough to skip.
     ///
-    /// Bumped to v2 in 2026-05-21: legacy v1 caches written while the backend's Gmail
-    /// continuous sync was disabled (`DISABLE_WORKFLOWS=true`) contained threads that
-    /// were stuck at the top of the inbox because their cached `date` field came from
-    /// a stale receivedOn that no longer matches reality. v1 keys are explicitly cleared
-    /// in `init` so returning users land on a clean cache built from the fresh backend
-    /// response.
-    private static let cacheDataKey      = "email_inbox_threads_v2"
-    private static let cacheTimestampKey = "email_inbox_threads_v2_ts"
-    private static let legacyCacheDataKey      = "email_inbox_threads_v1"
-    private static let legacyCacheTimestampKey = "email_inbox_threads_v1_ts"
+    /// Bumped to v2 in 2026-05-21: threads stuck at top due to stale receivedOn dates.
+    /// Bumped to v3 in 2026-05-27: one-shot bust to clear any lingering stale threads
+    /// (e.g. "Make's access to your Google Account" pinned at top for months). v2 is
+    /// explicitly cleared in `init` so all users get a fresh load from the backend.
+    private static let cacheDataKey      = "email_inbox_threads_v3"
+    private static let cacheTimestampKey = "email_inbox_threads_v3_ts"
+    private static let legacyCacheDataKey      = "email_inbox_threads_v2"
+    private static let legacyCacheTimestampKey = "email_inbox_threads_v2_ts"
     /// Stale-after duration: refresh from network after 5 minutes, but still show cached data instantly
     private static let cacheMaxAge: TimeInterval = 300
 
@@ -120,12 +118,15 @@ final class EmailService {
 
     init(api: TodosAPIClient) {
         self.api = api
-        // One-shot migration: drop the v1 inbox cache so users who saw the
-        // "stale 2-month-old threads pinned at the top" symptom get a clean
-        // first paint from the fresh v2 cache. Safe to run on every launch —
+        // One-shot migration: drop legacy inbox caches so returning users get a clean
+        // first paint from the current backend response. Safe to run on every launch —
         // UserDefaults.removeObject is a no-op when the key is absent.
+        // v1 → v2: stale receivedOn dates caused threads stuck at top (2026-05-21)
+        // v2 → v3: one-shot bust for any other lingering stale threads (2026-05-27)
         UserDefaults.standard.removeObject(forKey: Self.legacyCacheDataKey)
         UserDefaults.standard.removeObject(forKey: Self.legacyCacheTimestampKey)
+        UserDefaults.standard.removeObject(forKey: "email_inbox_threads_v1")
+        UserDefaults.standard.removeObject(forKey: "email_inbox_threads_v1_ts")
         // Trust the prior session's verdict for the very first paint. The background
         // `checkConnection` call still runs and corrects the state if it changed, but
         // we avoid flashing "Connect Gmail" for users who are already linked.
