@@ -24,6 +24,9 @@ struct DocsListView: View {
     /// Doc the user requested to delete via swipe. Drives the confirmation
     /// dialog so a fat-finger swipe doesn't immediately destroy data.
     @State private var deletingDoc: DocRecordDTO?
+    /// ID of the doc most recently created via `+`. Used to autofocus the title
+    /// field only when the editor opens for a brand-new doc.
+    @State private var newlyCreatedDocID: String?
 
     var body: some View {
         Group {
@@ -50,7 +53,7 @@ struct DocsListView: View {
         }
         .task { await services.docsService.refresh() }
         .alert(
-            "Couldn't update doc",
+            "Action failed",
             isPresented: Binding(
                 get: { errorMessage != nil },
                 set: { if !$0 { errorMessage = nil } }
@@ -143,7 +146,7 @@ struct DocsListView: View {
                     }
                 }
                 .disabled(pendingCreate)
-                .accessibilityLabel("New document")
+                .accessibilityLabel(pendingCreate ? "Creating document" : "New document")
                 .accessibilityIdentifier("docs.list.newDocButton")
             }
         }
@@ -409,8 +412,9 @@ struct DocsListView: View {
         if let doc = services.docsService.allDocs.first(where: { $0.id == id }) {
             // .id(doc.id) so SwiftUI rebuilds state when navigating between docs
             // — without it the previous doc's title can briefly show.
-            DocEditorView(doc: doc)
+            DocEditorView(doc: doc, isNewDoc: newlyCreatedDocID == id)
                 .id(doc.id)
+                .onAppear { newlyCreatedDocID = nil }
         } else {
             ProgressView()
                 .task { _ = await services.docsService.getDoc(id: id) }
@@ -420,8 +424,9 @@ struct DocsListView: View {
     @ViewBuilder
     private var detail: some View {
         if let id = selectedDocID, let doc = services.docsService.allDocs.first(where: { $0.id == id }) {
-            DocEditorView(doc: doc)
+            DocEditorView(doc: doc, isNewDoc: newlyCreatedDocID == id)
                 .id(doc.id)
+                .onAppear { newlyCreatedDocID = nil }
         } else {
             VStack(spacing: 12) {
                 Image(systemName: "doc.text.magnifyingglass")
@@ -461,6 +466,8 @@ struct DocsListView: View {
         defer { pendingCreate = false }
         do {
             let doc = try await services.docsService.createNewDocument()
+            // Mark as newly created so DocEditorView autofocuses the title field.
+            newlyCreatedDocID = doc.id
             open(docID: doc.id)
         } catch {
             UINotificationFeedbackGenerator().notificationOccurred(.error)

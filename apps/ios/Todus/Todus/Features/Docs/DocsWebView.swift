@@ -38,10 +38,14 @@ struct DocsBrowserView: View {
                 isLoading: $isLoading
             )
             if isLoading {
-                ProgressView()
-                    .controlSize(.regular)
-                    .padding(12)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                VStack(spacing: 6) {
+                    ProgressView().controlSize(.regular)
+                    Text("Loading…")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(14)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
         }
         .ignoresSafeArea()
@@ -89,12 +93,26 @@ struct DocsBrowserViewRepresentable: UIViewRepresentable {
                 var s = document.createElement('style');
                 s.setAttribute('data-todus-native-chrome', '1');
                 s.textContent = [
+                    // --- Doc-specific chrome ---
+                    // Title row: native iOS shell renders its own title TextField above
+                    // the WebView, so hiding the web title avoids a duplicate heading.
                     '[data-doc-page-title]{display:none!important;}',
-                    '[data-doc-sidebar]{display:none!important;}',
-                    // Older selector fallbacks — keep until we've shipped
-                    // data attributes everywhere docs render.
+                    // Older class-based fallbacks — keep until all deploys use data attrs.
                     '.doc-page-title{display:none!important;}',
-                    '.docs-title-bar{display:none!important;}'
+                    '.docs-title-bar{display:none!important;}',
+
+                    // --- ResizablePanelGroup layout repair ---
+                    // The sidebar panel content is hidden via [data-doc-sidebar], but the
+                    // React ResizablePanel *container* still occupies 22% of the viewport.
+                    // Use CSS :has() (supported iOS 15.4+ / WebKit 604+, our min is iOS 18)
+                    // to hide the whole panel and the resize drag handle, then force the
+                    // editor panel to fill the remaining 100% width.
+                    '[data-panel]:has([data-doc-sidebar]){display:none!important;}',
+                    '[data-doc-sidebar]{display:none!important;}',
+                    '[data-panel-resize-handle-id]{display:none!important;}',
+                    // Override the inline flex-basis set by react-resizable-panels so the
+                    // editor panel expands to fill the full group width.
+                    '[data-panel]:not(:has([data-doc-sidebar])){flex:1 1 0%!important;min-width:0!important;overflow:hidden!important;}',
                 ].join('');
                 document.head && document.head.appendChild(s);
             }

@@ -18,6 +18,10 @@ struct DocEditorView: View {
     }
 
     let doc: DocRecordDTO
+    /// True when the doc was just created via the `+` button. Autofocuses the
+    /// title so the user can rename immediately — without hijacking keyboard
+    /// focus when navigating to an existing doc that happens to be titled "Untitled".
+    let isNewDoc: Bool
 
     @State private var titleDraft: String
     @State private var lastSavedTitle: String
@@ -30,8 +34,9 @@ struct DocEditorView: View {
     @State private var errorMessage: String?
     @FocusState private var titleFocused: Bool
 
-    init(doc: DocRecordDTO) {
+    init(doc: DocRecordDTO, isNewDoc: Bool = false) {
         self.doc = doc
+        self.isNewDoc = isNewDoc
         _titleDraft = State(initialValue: doc.title)
         _lastSavedTitle = State(initialValue: doc.title)
         _isStarred = State(initialValue: doc.isStarred)
@@ -43,7 +48,13 @@ struct DocEditorView: View {
             Divider()
             DocsBrowserView(docId: doc.id)
         }
+        // Show the doc title in the nav bar (drives the back-button label on deeper
+        // pushes and confirms to the user which document is open).
+        .navigationTitle(titleDraft.isEmpty ? "Untitled" : titleDraft)
         .navigationBarTitleDisplayMode(.inline)
+        // Force an opaque nav bar background so iOS 26's glass/transparent nav bar
+        // doesn't bleed the dark web-page background through the navigation area.
+        .toolbarBackground(.visible, for: .navigationBar)
         .toolbar { toolbarContent }
         .onAppear { autofocusIfNew() }
         .onDisappear { flushPendingSave() }
@@ -51,6 +62,17 @@ struct DocEditorView: View {
             if let url = shareURL {
                 ShareSheet(items: [url])
                     .presentationDetents([.medium])
+            } else {
+                ContentUnavailableView(
+                    "Link unavailable",
+                    systemImage: "link.badge.plus",
+                    description: Text("Couldn't generate a share link for this document.")
+                )
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Close") { showShare = false }
+                    }
+                }
             }
         }
         .sheet(isPresented: $showInfo) {
@@ -81,6 +103,7 @@ struct DocEditorView: View {
                 .font(.system(size: 18, weight: .semibold))
                 .focused($titleFocused)
                 .submitLabel(.done)
+                .autocorrectionDisabled()
                 .textInputAutocapitalization(.sentences)
                 .onSubmit {
                     titleFocused = false
@@ -89,10 +112,10 @@ struct DocEditorView: View {
                 .onChange(of: titleDraft) { _, _ in
                     scheduleDebouncedTitleSave()
                 }
-            // Reserved min-width stops the indicator from shifting the title
-            // edge on every keystroke when state flips between saving/saved.
+            // Reserve width only when the indicator is visible — avoids a layout
+            // shift that would continuously shrink the TextField while typing.
             saveIndicator
-                .frame(minWidth: 70, alignment: .trailing)
+                .frame(minWidth: saveState == .idle ? 0 : 70, alignment: .trailing)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -162,6 +185,7 @@ struct DocEditorView: View {
                 }
                 Button {
                     UIPasteboard.general.string = titleDraft.isEmpty ? "Untitled" : titleDraft
+                    UINotificationFeedbackGenerator().notificationOccurred(.success)
                 } label: {
                     Label("Copy title", systemImage: "doc.on.doc")
                 }
@@ -173,10 +197,13 @@ struct DocEditorView: View {
 
     // MARK: - Behaviors
 
-    /// Autofocus the title when the doc was just created (default title or empty).
+    /// Autofocus the title only when the doc was *just created* via the `+` button
+    /// (`isNewDoc == true`). Avoids hijacking keyboard focus when the user navigates
+    /// to an existing doc that happens to be titled "Untitled".
     /// Apple-Notes / Google-Docs feel — user lands and can immediately rename.
     /// Cancellable so a fast push/pop doesn't fire focus on a torn-down view.
     private func autofocusIfNew() {
+        guard isNewDoc else { return }
         let trimmed = titleDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.isEmpty || trimmed == "Untitled" else { return }
         autofocusTask?.cancel()
@@ -274,6 +301,7 @@ struct DocEditorView: View {
 
 private struct DocInfoSheet: View {
     let doc: DocRecordDTO
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
@@ -296,6 +324,11 @@ private struct DocInfoSheet: View {
             }
             .navigationTitle("Info")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
         }
     }
 }
