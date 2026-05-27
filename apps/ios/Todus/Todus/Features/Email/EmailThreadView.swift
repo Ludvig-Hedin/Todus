@@ -371,7 +371,9 @@ struct EmailThreadView: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: showTitleInHeader)
-        .padding(.horizontal, 12)
+        // 16pt matches the subject + message card horizontal padding so the back button
+        // aligns vertically with the email body card edge.
+        .padding(.horizontal, 16)
         .padding(.vertical, 8)
         // Pure gradient fade — no solid fill, content smoothly fades out under the bar
         .background(
@@ -882,6 +884,17 @@ struct EmailThreadView: View {
     // MARK: - Action Handlers
 
     private func loadThread() async {
+        // Cache hit → paint instantly, skip the skeleton. The async loadThread below still
+        // runs and silently refreshes in the background so a stale entry self-heals.
+        if let cached = emailService.cachedThreadDetail(id: threadId), detail == nil {
+            detail = cached
+            isLoading = false
+            isStarred = cached.labels?.contains(where: {
+                let n = $0.name.uppercased()
+                return n == "STARRED" || n == "\\STARRED"
+            }) ?? false
+        }
+
         // Run the thread fetch, the assistant context fetch, and markAsRead in parallel.
         // Previously the assistant call only started after the thread had returned, doubling
         // the time-to-summary. With Gmail's API + Cloudflare round-trip both calls together
@@ -1987,8 +2000,8 @@ struct EmailHTMLView: UIViewRepresentable {
         <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src * data: blob:; style-src 'unsafe-inline'; script-src 'none'; font-src *;">
         <style>
             :root { color-scheme: only light; }
-            * { box-sizing: border-box; }
-            html, body { margin: 0; padding: 0; overflow-x: hidden; }
+            * { box-sizing: border-box; max-width: 100%; }
+            html, body { margin: 0; padding: 0; overflow-x: hidden; max-width: 100vw; }
             body {
                 font-family: -apple-system, system-ui, sans-serif;
                 font-size: 15px; line-height: 1.6;
@@ -1996,11 +2009,15 @@ struct EmailHTMLView: UIViewRepresentable {
                 word-wrap: break-word; overflow-wrap: break-word;
                 padding: 14px 16px;
             }
-            a { color: #1a73e8; }
+            a { color: #1a73e8; word-break: break-word; }
             img { max-width: 100% !important; height: auto !important; }
-            pre, code { overflow-x: auto; max-width: 100%; white-space: pre-wrap; }
+            pre, code { overflow-x: auto; max-width: 100%; white-space: pre-wrap; word-break: break-word; }
             blockquote { border-left: 2px solid #ddd; margin: 8px 0; padding-left: 12px; color: #666; }
-            table { max-width: 100%; }
+            /* Transactional emails ship fixed-width tables (often 600px). Force them to
+               collapse and scroll horizontally rather than overflowing the card edge. */
+            table { max-width: 100% !important; display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+            /* Defeat width="..." HTML attributes that bypass max-width CSS rules. */
+            *[width], *[height] { max-width: 100% !important; }
         </style>
         </head>
         <body>\(html)</body>
@@ -2021,8 +2038,8 @@ struct EmailHTMLView: UIViewRepresentable {
         <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src * data: blob:; style-src 'unsafe-inline'; script-src 'none'; font-src *;">
         <style>
             :root { color-scheme: only dark; }
-            * { box-sizing: border-box; }
-            html, body { margin: 0; padding: 0; overflow-x: hidden; }
+            * { box-sizing: border-box; max-width: 100%; }
+            html, body { margin: 0; padding: 0; overflow-x: hidden; max-width: 100vw; }
             body {
                 font-family: -apple-system, system-ui, sans-serif;
                 font-size: 15px; line-height: 1.6;
@@ -2033,11 +2050,12 @@ struct EmailHTMLView: UIViewRepresentable {
             body, body *:not(a):not(img):not(svg):not(picture):not(video):not(button) {
                 color: #e0e0e0 !important;
             }
-            a { color: #5B9FFF !important; }
+            a { color: #5B9FFF !important; word-break: break-word; }
             img { max-width: 100% !important; height: auto !important; }
-            pre, code { overflow-x: auto; max-width: 100%; white-space: pre-wrap; }
+            pre, code { overflow-x: auto; max-width: 100%; white-space: pre-wrap; word-break: break-word; }
             blockquote { border-left: 2px solid #555 !important; margin: 8px 0; padding-left: 12px; color: #aaa !important; }
-            table { max-width: 100%; display: block; overflow-x: auto; }
+            table { max-width: 100% !important; display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+            *[width], *[height] { max-width: 100% !important; }
         </style>
         </head>
         <body>\(html)</body>

@@ -76,7 +76,7 @@ struct TasksTabView: View {
                         Color.clear.frame(height: headerHeight + scrimTail)
                     }
                     .contentMargins(.bottom, 130, for: .scrollContent)
-                    .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y } action: hideTabBarOnScroll
+                    .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y } action: { old, new in hideTabBarOnScroll(old, new) }
                     .refreshable { await reload() }
                 case .board:
                     BoardView(
@@ -99,7 +99,7 @@ struct TasksTabView: View {
                         Color.clear.frame(height: headerHeight + scrimTail)
                     }
                     .contentMargins(.bottom, 130, for: .scrollContent)
-                    .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y } action: hideTabBarOnScroll
+                    .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y } action: { old, new in hideTabBarOnScroll(old, new) }
                     .refreshable { await reload() }
                 case .calendar:
                     CalendarTaskView(searchText: searchText, sortOrder: services.taskSortOrder)
@@ -108,7 +108,7 @@ struct TasksTabView: View {
                             Color.clear.frame(height: headerHeight + scrimTail)
                         }
                         .contentMargins(.bottom, 130, for: .scrollContent)
-                        .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y } action: hideTabBarOnScroll
+                        .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y } action: { old, new in hideTabBarOnScroll(old, new) }
                         .refreshable { await reload() }
                 }
             }

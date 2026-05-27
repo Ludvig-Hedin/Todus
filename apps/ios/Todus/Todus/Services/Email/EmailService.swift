@@ -14,6 +14,15 @@ final class EmailService {
     // MARK: - State
 
     var threads: [EmailThread] = []
+    /// The folder whose threads are currently in `threads`. Used to decide whether an
+    /// incoming refresh result should be guarded against "stale (older than current)"
+    /// rejection. When switching folders (inbox → archive), the archive's newest thread is
+    /// virtually always older than the inbox's newest, so the stale-guard would otherwise
+    /// drop the entire folder switch.
+    private(set) var loadedFolder: String?
+    /// The query whose results are currently in `threads` (nil = no search). Same role as
+    /// `loadedFolder` for the search → no-search transition.
+    private(set) var loadedQuery: String?
     var isLoadingThreads = false
     /// True while a background reconciliation poll is running after a forceSync that
     /// returned empty. The inbox keeps showing the prior threads while this is true,
@@ -307,9 +316,15 @@ final class EmailService {
                 // then refresh and it's old again" regression). Comparison is on the newest
                 // message date — Gmail history strictly grows, so a refresh whose newest is
                 // older than ours is, by definition, a stale workflow snapshot.
+                //
+                // Skip the guard on folder/query transitions: an Archive listing is
+                // legitimately older than the Inbox; comparing across them would silently
+                // drop every folder switch (the "folder picker does nothing" bug).
+                let isSameContext = (loadedFolder == folder) && (loadedQuery == query)
                 let currentNewest = threads.map(\.date).max()
                 let incomingNewest = enrichedThreads.map(\.date).max()
                 let isStaleRefresh: Bool = {
+                    guard isSameContext else { return false }
                     guard let cur = currentNewest, let inc = incomingNewest else { return false }
                     return inc < cur
                 }()
@@ -337,8 +352,17 @@ final class EmailService {
                     AppLogger.shared.log("[EmailService] dropped stale refresh: incoming=\(inc) current=\(cur)")
                     // Treat as no-op — keep the displayed inbox, no error noise.
                     errorMessage = nil
+                } else if !isSameContext {
+                    // Folder/query switch — always replace, even with an empty list, so the
+                    // user sees the correct (possibly empty) folder content rather than the
+                    // prior folder's threads bleeding through.
+                    threads = enrichedThreads
+                    loadedFolder = folder
+                    loadedQuery = query
                 } else if !enrichedThreads.isEmpty {
                     threads = enrichedThreads
+                    loadedFolder = folder
+                    loadedQuery = query
                 } else if threads.isEmpty {
                     errorMessage = "Couldn't load emails. Pull to refresh to try again."
                 } else {
@@ -351,10 +375,16 @@ final class EmailService {
                 }
             } else {
                 threads = EmailService.mergePages(existing: threads, incoming: enrichedThreads)
+                loadedFolder = folder
+                loadedQuery = query
             }
             // Pre-warm avatar cache for the threads we just received so rows render with
             // the real avatar on first paint instead of flashing initials → avatar.
             prewarmAvatars(for: enrichedThreads)
+            // Pre-fetch full thread details for the top of the list so tapping a row paints
+            // instantly instead of waiting on a 500ms–2s `mail.get` round trip. Fire-and-
+            // forget — failures are silent and re-tried on actual user open.
+            prefetchThreadDetails(ids: enrichedThreads.map(\.id))
             nextPageToken = response.nextPageToken
             if query == nil {
                 await loadAssistantNudges(folder: folder)
@@ -672,7 +702,11 @@ final class EmailService {
         // threads.isEmpty`, so having cached threads bypasses the skeleton entirely.
         if threads.isEmpty {
             threads = loadCachedThreads() ?? []
-            if !threads.isEmpty { prewarmAvatars(for: threads) }
+            if !threads.isEmpty {
+                loadedFolder = "inbox"
+                loadedQuery = nil
+                prewarmAvatars(for: threads)
+            }
         }
 
         // Always re-read the backend DB on app entry — Gmail-style behaviour. The previous
@@ -712,6 +746,11 @@ final class EmailService {
         avatarPrewarmTask?.cancel()
         avatarPrewarmTask = nil
         threads = []
+        loadedFolder = nil
+        loadedQuery = nil
+        threadDetailCache.removeAll()
+        for (_, task) in inflightDetailFetches { task.cancel() }
+        inflightDetailFetches.removeAll()
         isLoadingThreads = false
         isReconciling = false
         isLoadingThread = false
@@ -844,37 +883,99 @@ final class EmailService {
     /// is a thread-detail fetch that the user has zero feedback on. We pair the
     /// request with a 20s watchdog and surface a more honest error message so
     /// users can retry instead of waiting 90s on a stale network.
+    /// In-memory thread detail cache. Lets EmailThreadView paint instantly on second open
+    /// and lets `prefetchThreadDetails` warm the top of the inbox so the user's most
+    /// likely taps are zero-latency.
+    private var threadDetailCache: [String: (detail: EmailThreadDetail, at: Date)] = [:]
+    /// Track in-flight detail fetches to dedupe (prefetch + user tap landing on same id).
+    private var inflightDetailFetches: [String: Task<EmailThreadDetail?, Never>] = [:]
+    private static let threadDetailTTL: TimeInterval = 60 * 5   // 5 min
+
+    func cachedThreadDetail(id: String) -> EmailThreadDetail? {
+        guard let entry = threadDetailCache[id] else { return nil }
+        if Date().timeIntervalSince(entry.at) > Self.threadDetailTTL {
+            threadDetailCache.removeValue(forKey: id)
+            return nil
+        }
+        return entry.detail
+    }
+
     func loadThread(id: String) async -> EmailThreadDetail? {
+        // Instant return on cache hit — the EmailThreadView refreshes silently if it wants.
+        if let cached = cachedThreadDetail(id: id) {
+            // Fire a background refresh so the cached copy doesn't grow stale during
+            // a long-open thread session. Errors are swallowed; the cached view stays.
+            Task { [weak self] in _ = await self?.fetchThreadDetail(id: id, updateLoadingState: false) }
+            return cached
+        }
+
         isLoadingThread = true
         errorMessage = nil
-
         defer { isLoadingThread = false }
 
-        let fetchTask = Task { () -> GetThreadResponse in
-            let input = GetThreadInput(id: id)
-            return try await api.trpcQuery("mail.get", input: input)
-        }
-        let watchdog = Task { [fetchTask] in
-            try? await Task.sleep(nanoseconds: 20 * 1_000_000_000)
-            fetchTask.cancel()
-        }
-        defer { watchdog.cancel() }
+        return await fetchThreadDetail(id: id, updateLoadingState: false)
+    }
 
-        do {
-            return try await fetchTask.value
-        } catch is CancellationError {
-            AppLogger.shared.log("[EmailService] loadThread(\(id)) cancelled — likely 20s watchdog timeout")
-            errorMessage = "Thread is taking too long to load. Pull to retry."
-            return nil
-        } catch let urlError as URLError where urlError.code == .cancelled {
-            AppLogger.shared.log("[EmailService] loadThread(\(id)) URLSession cancelled by watchdog")
-            errorMessage = "Thread is taking too long to load. Pull to retry."
-            return nil
-        } catch {
-            AppLogger.shared.log("[EmailService] loadThread(\(id)) failed: \(error)")
-            errorMessage = friendlyThreadLoadMessage(for: error)
-            return nil
+    /// Warms the in-memory cache for the first N inbox threads so user taps land on
+    /// pre-fetched data. Fire-and-forget; failures are silently ignored.
+    /// Called after a successful `loadThreads` for the inbox.
+    func prefetchThreadDetails(ids: [String], limit: Int = 8) {
+        let toFetch = ids
+            .prefix(limit)
+            .filter { cachedThreadDetail(id: $0) == nil && inflightDetailFetches[$0] == nil }
+        for id in toFetch {
+            Task { [weak self] in _ = await self?.fetchThreadDetail(id: id, updateLoadingState: false) }
         }
+    }
+
+    /// Shared fetch path used by both `loadThread` and prefetch. Dedupes concurrent fetches
+    /// of the same id so a prefetch and a user-driven open don't fire two API calls.
+    @discardableResult
+    private func fetchThreadDetail(id: String, updateLoadingState: Bool) async -> EmailThreadDetail? {
+        if let existing = inflightDetailFetches[id] {
+            return await existing.value
+        }
+
+        let task = Task<EmailThreadDetail?, Never> { [weak self] in
+            guard let self else { return nil }
+            let fetchTask = Task { () -> GetThreadResponse in
+                let input = GetThreadInput(id: id)
+                return try await self.api.trpcQuery("mail.get", input: input)
+            }
+            let watchdog = Task { [fetchTask] in
+                try? await Task.sleep(nanoseconds: 20 * 1_000_000_000)
+                fetchTask.cancel()
+            }
+            defer { watchdog.cancel() }
+
+            do {
+                let detail = try await fetchTask.value
+                self.threadDetailCache[id] = (detail, Date())
+                return detail
+            } catch is CancellationError {
+                AppLogger.shared.log("[EmailService] loadThread(\(id)) cancelled — likely 20s watchdog timeout")
+                if updateLoadingState {
+                    self.errorMessage = "Thread is taking too long to load. Pull to retry."
+                }
+                return nil
+            } catch let urlError as URLError where urlError.code == .cancelled {
+                AppLogger.shared.log("[EmailService] loadThread(\(id)) URLSession cancelled by watchdog")
+                if updateLoadingState {
+                    self.errorMessage = "Thread is taking too long to load. Pull to retry."
+                }
+                return nil
+            } catch {
+                AppLogger.shared.log("[EmailService] loadThread(\(id)) failed: \(error)")
+                if updateLoadingState {
+                    self.errorMessage = self.friendlyThreadLoadMessage(for: error)
+                }
+                return nil
+            }
+        }
+        inflightDetailFetches[id] = task
+        let result = await task.value
+        inflightDetailFetches.removeValue(forKey: id)
+        return result
     }
 
     private func friendlyThreadLoadMessage(for error: Error) -> String {
