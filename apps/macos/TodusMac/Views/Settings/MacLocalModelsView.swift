@@ -1,4 +1,7 @@
+import OSLog
 import SwiftUI
+
+private let hfBridgeLog = Logger(subsystem: "com.todus.macos", category: "HFBridge")
 
 // MARK: - MacLocalModelsView
 //
@@ -10,6 +13,12 @@ import SwiftUI
 struct MacLocalModelsView: View {
     @Environment(MacAppServices.self) private var services
     @State private var detailModel: LocalModel?
+    /// HF repo ids whose external→app-cache symlink bridge is currently
+    /// running. Used to disable the row's "Use" button so a fast double-tap
+    /// doesn't spawn duplicate bridge tasks (the bridge is idempotent — the
+    /// second one would log an `EEXIST` and no-op — but disabling avoids the
+    /// noisy error log and gives the user real feedback).
+    @State private var bridgingHFIds: Set<String> = []
 
     private var profile: DeviceProfile { .current }
 
@@ -20,6 +29,7 @@ struct MacLocalModelsView: View {
                 recommendedSection
                 installedSection
                 ollamaSection
+                huggingFaceSection
                 allModelsSection
             }
             .padding(20)
@@ -33,8 +43,10 @@ struct MacLocalModelsView: View {
         }
         .task {
             // Re-probe whenever the screen opens so a daemon started after
-            // launch shows up without a relaunch.
+            // launch shows up without a relaunch. HF cache scan is cheap and
+            // catches models the user pulled outside the app in another tool.
             services.ollamaConnector.refresh()
+            services.huggingFaceCacheConnector.refresh()
         }
     }
 
@@ -172,11 +184,108 @@ struct MacLocalModelsView: View {
                 }
             }
             Spacer(minLength: 8)
-            Button("Use") {
+            let inUse = services.aiChatService.selectedModel == tag.id
+            Button(inUse ? "In use" : "Use") {
                 services.aiChatService.selectedModel = tag.id
+                MacHaptic.levelChange.play()
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
+            .disabled(inUse)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+    }
+
+    @ViewBuilder
+    private var huggingFaceSection: some View {
+        // Exclude HF entries whose repo already maps to a curated catalog
+        // model that is shown in the Installed section above. Without this
+        // filter a catalog model the app downloaded into
+        // `Documents/huggingface/models/<repo>` shows up in BOTH "Installed"
+        // (via `LocalModelStateStore.installedModels()`) and "Connected
+        // (HuggingFace)" (via the connector's `collectAppCache()`), with
+        // two different control affordances for the same model.
+        let installedCatalogRepos: Set<String> = Set(
+            services.localModelStateStore.installedModels()
+                .compactMap { $0.mlxRepo }
+        )
+        let hfModels = services.huggingFaceCacheConnector.installedModels
+            .filter { !installedCatalogRepos.contains($0.id) }
+        if !hfModels.isEmpty {
+            sectionGroup(title: "Connected (HuggingFace)") {
+                settingsCard {
+                    ForEach(Array(hfModels.enumerated()), id: \.element.id) { idx, entry in
+                        if idx > 0 { cardDivider }
+                        hfRow(entry)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func hfRow(_ entry: HuggingFaceInstalledModel) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "shippingbox")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(MacTheme.mutedText)
+                .frame(width: 22, height: 22)
+                .padding(.top, 2)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(entry.displayName)
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .foregroundStyle(MacTheme.textPrimary)
+                Text(entry.id)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(MacTheme.textSecondary)
+                HStack(spacing: 6) {
+                    Text(entry.source.label)
+                        .font(.caption)
+                        .foregroundStyle(MacTheme.textSecondary)
+                    if entry.sizeBytes > 0 {
+                        Text("·")
+                            .font(.caption)
+                            .foregroundStyle(MacTheme.textSecondary)
+                        Text(ByteCountFormatter.string(fromByteCount: entry.sizeBytes, countStyle: .file))
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(MacTheme.textSecondary)
+                    }
+                }
+            }
+            Spacer(minLength: 8)
+            let inUse = services.aiChatService.selectedModel == entry.id
+            let bridging = bridgingHFIds.contains(entry.id)
+            Button(inUse ? "In use" : (bridging ? "Linking…" : "Use")) {
+                // External-cache entries live under `~/.cache/huggingface/hub`
+                // but `MLXInferenceService` only reads `Documents/huggingface/
+                // models`. Symlink the external snapshot into the app cache
+                // BEFORE assigning `selectedModel` — otherwise a fast user
+                // could trigger inference between this main-thread assignment
+                // and the detached bridge landing, and MLX would re-download
+                // multi-GB weights the user already has on disk. Bridge first,
+                // hop back to the main actor to assign + refresh + haptic.
+                let chatService = services.aiChatService
+                let connector = services.huggingFaceCacheConnector
+                let id = entry.id
+                bridgingHFIds.insert(id)
+                Task { @MainActor in
+                    defer { bridgingHFIds.remove(id) }
+                    await Task.detached(priority: .userInitiated) {
+                        // Pass the shared logger so silent re-download
+                        // failures surface in Console.app for support
+                        // diagnosis — without this, the bridge's diagnostic
+                        // calls were dead code.
+                        HuggingFaceCacheConnector.bridgeIntoAppCacheIfPossible(entry, log: hfBridgeLog)
+                    }.value
+                    chatService.selectedModel = id
+                    connector.refresh()
+                    MacHaptic.levelChange.play()
+                }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(inUse || bridging)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
@@ -189,9 +298,16 @@ struct MacLocalModelsView: View {
                 settingsCard {
                     ForEach(Array(models.enumerated()), id: \.element.id) { idx, model in
                         if idx > 0 { cardDivider }
-                        MacLocalModelRow(model: model, reason: nil)
-                            .contentShape(Rectangle())
-                            .onTapGesture { detailModel = model }
+                        // Real Button (not onTapGesture) so keyboard focus and
+                        // VoiceOver treat the row as activatable, matching the
+                        // Recommended/Installed sections.
+                        Button {
+                            detailModel = model
+                        } label: {
+                            MacLocalModelRow(model: model, reason: nil)
+                        }
+                        .buttonStyle(.plain)
+                        .pointerStyle(.link)
                     }
                 }
             }
@@ -256,6 +372,23 @@ private struct MacLocalModelRow: View {
     let model: LocalModel
     let reason: String?
     @Environment(MacAppServices.self) private var services
+    @State private var modelPendingDelete: LocalModel?
+
+    /// Whether this model is the one the chat service will use.
+    private var isSelected: Bool {
+        services.aiChatService.selectedModel == model.id
+    }
+
+    /// Approx GB the weights occupy on disk — used to gate Download so the user
+    /// can't kick off a multi-GB transfer the volume can't hold.
+    private var requiredDiskGB: Int { Int((Double(model.downloadSizeMB) / 1000.0).rounded(.up)) }
+    private var hasEnoughDisk: Bool {
+        model.runtime == .appleFM || DeviceProfile.current.freeDiskGB >= requiredDiskGB + 2
+    }
+    private var isNotInstalled: Bool {
+        if case .notInstalled = state { return true }
+        return false
+    }
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -272,8 +405,14 @@ private struct MacLocalModelRow: View {
                     if model.runtime == .appleFM {
                         MacBadge(text: "Built-in", tint: .green)
                     }
-                    if state.isInstalled {
+                    // Apple FM is always "installed" in the store but shows
+                    // "Built-in" — don't also render the redundant "Installed"
+                    // capsule for it.
+                    if model.runtime != .appleFM, state.isInstalled {
                         MacBadge(text: "Installed", tint: .blue)
+                    }
+                    if isSelected {
+                        MacBadge(text: "Active", tint: .accentColor)
                     }
                 }
                 if let reason {
@@ -293,6 +432,13 @@ private struct MacLocalModelRow: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
+        .confirmDestructive(
+            item: $modelPendingDelete,
+            title: "Delete weights?",
+            message: { "This removes the downloaded weights for \($0.displayName) from this Mac. You can re-download anytime." },
+            confirmLabel: "Delete",
+            perform: { services.modelDownloadService.delete($0) }
+        )
     }
 
     private var state: LocalModelInstallState {
@@ -332,14 +478,21 @@ private struct MacLocalModelRow: View {
                 .font(.caption2)
                 .foregroundStyle(.red)
         default:
-            HStack(spacing: 6) {
-                Text(sizeLabel)
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(MacTheme.textSecondary)
-                if model.ramRequiredGB > 0 {
-                    Text("· needs ~\(formatGB(model.ramRequiredGB)) RAM")
-                        .font(.caption)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(sizeLabel)
+                        .font(.caption.monospacedDigit())
                         .foregroundStyle(MacTheme.textSecondary)
+                    if model.ramRequiredGB > 0 {
+                        Text("· needs ~\(formatGB(model.ramRequiredGB)) RAM")
+                            .font(.caption)
+                            .foregroundStyle(MacTheme.textSecondary)
+                    }
+                }
+                if isNotInstalled, !hasEnoughDisk {
+                    Text("Not enough free space · needs ~\(requiredDiskGB) GB")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
                 }
             }
         }
@@ -382,6 +535,10 @@ private struct MacLocalModelRow: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                .disabled(!hasEnoughDisk)
+                .help(hasEnoughDisk
+                      ? "Download \(model.displayName)"
+                      : "Needs ~\(requiredDiskGB) GB free — free up space to download")
             }
         case .downloading:
             Button("Cancel") { services.modelDownloadService.cancelDownload(model.id) }
@@ -392,19 +549,42 @@ private struct MacLocalModelRow: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
         case .installed:
-            Menu {
-                Button("Use this model") { useModel() }
-                Button("Delete weights", role: .destructive) {
-                    services.modelDownloadService.delete(model)
+            if model.runtime == .appleFM {
+                // Apple Foundation Models have no downloadable weights — the
+                // store returns `.installed(diskBytes: 0)` unconditionally so
+                // the chat service's readiness check is uniform. There's
+                // nothing to delete here; offering a destructive menu would
+                // either be a no-op or mutate the store into a fake
+                // `.deleting` / `.notInstalled` for a model that's always
+                // available on this Mac.
+                Button(isSelected ? "In use" : "Use") { useModel() }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(isSelected)
+            } else {
+                Menu {
+                    Button { useModel() } label: {
+                        if isSelected {
+                            Label("In use", systemImage: "checkmark")
+                        } else {
+                            Text("Use this model")
+                        }
+                    }
+                    .disabled(isSelected)
+                    Button("Delete weights", role: .destructive) {
+                        modelPendingDelete = model
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .font(.system(size: 13))
+                        .foregroundStyle(MacTheme.mutedText)
+                        .frame(width: 24, height: 24)
                 }
-            } label: {
-                Image(systemName: "ellipsis.circle")
-                    .font(.system(size: 13))
-                    .foregroundStyle(MacTheme.mutedText)
-                    .frame(width: 24, height: 24)
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .accessibilityLabel("Options for \(model.displayName)")
+                .help("More options")
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
         case .deleting:
             ProgressView().controlSize(.small)
         case .failed:
@@ -416,6 +596,7 @@ private struct MacLocalModelRow: View {
 
     private func useModel() {
         services.aiChatService.selectedModel = model.id
+        MacHaptic.levelChange.play()
     }
 }
 

@@ -10,6 +10,12 @@ struct MacEmailComposeView: View {
 
     @State private var draft: EmailDraft
     @State private var showSendError = false
+    /// Local flag for the attachment-bearing send path. `EmailService.isSending`
+    /// only flips when `sendEmail` is called; the `MacDraftService.send` path used
+    /// for attachments bypasses it, leaving the Send button enabled mid-send.
+    /// A fast double-click → two real `mail.send` round-trips → two delivered
+    /// emails. This flag closes that window.
+    @State private var isSendingAttachments = false
     @State private var showCcBcc = false
     @State private var autosaveTask: Task<Void, Never>?
     @State private var draftStorageKey: String
@@ -105,12 +111,23 @@ struct MacEmailComposeView: View {
     }
 
     /// Reply all — To includes sender + original To; Cc holds other parties from Cc.
-    init(replyAllTo message: EmailMessage, threadId: String, body: String = "", onClose: (() -> Void)? = nil) {
+    /// `ownedAddresses` is the signed-in user's own addresses (across connected
+    /// accounts + aliases). Any address in that set is filtered out of To and Cc
+    /// so the user doesn't reply-all to themselves on every send.
+    init(
+        replyAllTo message: EmailMessage,
+        threadId: String,
+        body: String = "",
+        ownedAddresses: Set<String> = [],
+        onClose: (() -> Void)? = nil
+    ) {
         var d = EmailDraft()
+        let owned = Set(ownedAddresses.map { $0.lowercased() })
         var toEmails: [String] = []
         func pushTo(_ raw: String) {
             let e = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !e.isEmpty else { return }
+            if owned.contains(e.lowercased()) { return }
             if toEmails.contains(where: { $0.caseInsensitiveCompare(e) == .orderedSame }) { return }
             toEmails.append(e)
         }
@@ -122,6 +139,7 @@ struct MacEmailComposeView: View {
             for r in extras {
                 let x = r.email.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !x.isEmpty else { continue }
+                if owned.contains(x.lowercased()) { continue }
                 if toEmails.contains(where: { $0.caseInsensitiveCompare(x) == .orderedSame }) { continue }
                 if ccList.contains(where: { $0.caseInsensitiveCompare(x) == .orderedSame }) { continue }
                 ccList.append(x)
@@ -277,9 +295,13 @@ struct MacEmailComposeView: View {
                     showRecipientValidationError = false
                     Task { await performSend() }
                 } label: {
-                    if services.emailService.isSending {
-                        ProgressView()
-                            .controlSize(.small)
+                    if services.emailService.isSending || isSendingAttachments {
+                        HStack(spacing: MacTheme.spacing4) {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("Sending…")
+                                .font(.system(size: 13, weight: .semibold))
+                        }
                     } else {
                         HStack(spacing: MacTheme.spacing4) {
                             Image(systemName: "paperplane.fill")
@@ -289,7 +311,7 @@ struct MacEmailComposeView: View {
                         }
                     }
                 }
-                .disabled(!canSend || services.emailService.isSending || !services.networkMonitor.isConnected)
+                .disabled(!canSend || services.emailService.isSending || isSendingAttachments || !services.networkMonitor.isConnected)
                 .macClickablePointer()
                 .keyboardShortcut(.return, modifiers: .command)
             }
@@ -445,6 +467,9 @@ struct MacEmailComposeView: View {
     /// reasonable time (inlining all of this into the Button action caused
     /// "the compiler is unable to type-check this expression" failures).
     private func performSend() async {
+        // Resolve the picked From account to an email — `mail.send` routes by
+        // `fromEmail`, not by connection id.
+        draft.fromEmail = selectedFromEmail(connections: services.connectionsService.connections)
         let success: Bool
         if attachments.isEmpty {
             // Legacy path: `EmailService.sendEmail` already refreshes inbox
@@ -453,6 +478,10 @@ struct MacEmailComposeView: View {
         } else {
             // Attachment path: route through MacDraftService so `mail.send`
             // is called exactly once with the attachment payload inline.
+            // `isSendingAttachments` covers the entire round-trip so the Send
+            // button stays disabled — double-clicking the Send button (or
+            // hitting ⌘↩ twice) used to fire two `mail.send` calls in a row.
+            isSendingAttachments = true
             success = await sendViaDraftServiceWithAttachments()
             if success {
                 if let threadId = draft.replyToThreadId {
@@ -460,6 +489,7 @@ struct MacEmailComposeView: View {
                 }
                 await services.emailService.loadThreads(folder: "inbox", refresh: true)
             }
+            isSendingAttachments = false
         }
         if success {
             clearAutosavedDraft()
@@ -938,6 +968,7 @@ struct MacEmailComposeView: View {
                 payload: payload,
                 threadId: draft.replyToThreadId,
                 connectionId: draft.fromConnectionId,
+                fromEmail: draft.fromEmail,
                 attachments: attachmentPayloads
             )
             return true

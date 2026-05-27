@@ -89,6 +89,10 @@ final class MacDraftService {
         let threadId: String?
         /// Which connected account to send from. Optional — older backends ignore it.
         let connectionId: String?
+        /// Email of the account to send from. This is the field `mail.send` reads
+        /// to select the sending account (`connectionId` is not in its schema and
+        /// is dropped), so multi-account sends need this set.
+        let fromEmail: String?
         /// Optional inline attachments. Older backends that don't understand this field
         /// simply ignore it, so adding the field never breaks the existing wire format.
         let attachments: [AttachmentPayload]?
@@ -99,20 +103,23 @@ final class MacDraftService {
         payload: DraftPayload,
         threadId: String? = nil,
         connectionId: String? = nil,
+        fromEmail: String? = nil,
         attachments: [AttachmentPayload]? = nil
     ) async throws {
         // Collapse empty attachment lists to nil so we don't emit `"attachments": []`
         // to a backend that doesn't care — keeps the wire payload minimal.
         let normalizedAttachments = (attachments?.isEmpty ?? true) ? nil : attachments
+        let trimmedFromEmail = fromEmail?.trimmingCharacters(in: .whitespacesAndNewlines)
         let input = SendInput(
             to: payload.to,
             cc: payload.cc.isEmpty ? nil : payload.cc,
             bcc: payload.bcc.isEmpty ? nil : payload.bcc,
             subject: payload.subject,
-            message: payload.body,
+            message: EmailBodyHTML.render(payload.body),
             draftId: draftId,
             threadId: threadId,
             connectionId: connectionId,
+            fromEmail: (trimmedFromEmail?.isEmpty ?? true) ? nil : trimmedFromEmail,
             attachments: normalizedAttachments
         )
         let _: EmptyResult = try await api.trpcMutation("mail.send", input: input)

@@ -80,6 +80,13 @@ public final class AuthService: NSObject {
     /// UI shows a "Session expired" banner when true.
     public var isSessionExpired = false
 
+    /// Set true by `_uiTesting_seedAuthenticatedSession`. When a seeded XCUITest
+    /// session is active, the silent-refresh and profile-fetch paths skip the
+    /// network and never sign out — the fake bearer the harness injects is
+    /// rejected by the real backend, which would otherwise bounce the test back
+    /// to the login screen the moment any tab fires an authenticated request.
+    public var isUITestingSession = false
+
     /// Whether the onboarding/login screen should be shown
     public var showsOnboarding: Bool {
         !hasSeenOnboarding && !isAuthenticated
@@ -1063,6 +1070,14 @@ public final class AuthService: NSObject {
     /// also calls `signOut()` so the app routes back to the login screen instead
     /// of looping a banner indefinitely on every API call (#10).
     public func attemptSilentRefresh() async -> Bool {
+        // A seeded UI-testing session carries a fake bearer the real backend
+        // rejects. Skip the network round-trip and never sign out so the
+        // deterministic session survives any 401 a tab's data load triggers.
+        if isUITestingSession {
+            isSessionExpired = false
+            return true
+        }
+
         // Try the access+refresh pattern first
         switch await refreshAccessTokenResult() {
         case .refreshed:
@@ -1260,7 +1275,18 @@ public final class AuthService: NSObject {
         }
     }
 
+    /// Invoked at the very start of `signOut()` — before any auth state is
+    /// cleared — so the host app can tear down per-user state (sync queues,
+    /// caches, voice) while the session is still valid. Set by the macOS app;
+    /// nil on other platforms (no-op). `@ObservationIgnored` because it's a
+    /// callback, not observable UI state.
+    @ObservationIgnored public var onSignOut: (() -> Void)?
+
     public func signOut() {
+        // Let the host app tear down per-user state first (manual sign-out and
+        // the automatic session-expiry paths both funnel through here, so this
+        // is the single place that guarantees cleanup runs).
+        onSignOut?()
         // Capture tokens BEFORE clearing local state so we can fire a best-effort
         // server-side revoke. Sign-out is a security-critical action; do not
         // strand tokens valid on the backend after the user explicitly logs out.
@@ -1296,6 +1322,7 @@ public final class AuthService: NSObject {
     /// real flow uses, which would corrupt a real account if invoked at
     /// runtime. AppServices guards the call site behind a launch-arg check.
     public func _uiTesting_seedAuthenticatedSession(bearer: String, email: String) {
+        isUITestingSession = true
         bearerToken = bearer
         userEmail = email
         authState = .authenticated
@@ -1333,6 +1360,10 @@ public final class AuthService: NSObject {
     /// whether the session is truly gone. Confirmed-invalid sessions are cleared;
     /// transient refresh failures are left intact so the next request can retry.
     public func fetchUserProfile() async {
+        // No-op for a seeded UI-testing session — see `isUITestingSession`.
+        // The fake bearer would 401 against the real backend and sign the test out.
+        if isUITestingSession { return }
+
         // Proactively refresh the JWT if it's expiring. This avoids the common
         // post-idle race where the first /auth/me call ships an expired token,
         // gets 401, and tears down the session before the concurrent refresh path

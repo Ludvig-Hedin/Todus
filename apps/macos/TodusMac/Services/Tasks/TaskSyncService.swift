@@ -83,12 +83,14 @@ final class TaskSyncService {
     /// Re-enqueues all tasks in `pendingUpload` or `failed` state and flushes.
     /// Called on network reconnect so locally-created tasks eventually reach the server.
     func retryUnsyncedTasks(in context: ModelContext) async {
-        let descriptor = FetchDescriptor<TaskRecord>(
-            predicate: #Predicate {
-                $0.syncStateRawValue == "pendingUpload" || $0.syncStateRawValue == "failed"
-            }
-        )
-        let tasks = (try? context.fetch(descriptor)) ?? []
+        // Fetch all, then filter in memory. A compound `||` string-equality
+        // `#Predicate` traps inside SwiftData here (EXC_BREAKPOINT on fetch),
+        // and this now runs on every launch/foreground via `flushPendingSync`,
+        // so the predicate form crashed the app at startup.
+        let descriptor = FetchDescriptor<TaskRecord>()
+        let tasks = ((try? context.fetch(descriptor)) ?? []).filter {
+            $0.syncStateRawValue == "pendingUpload" || $0.syncStateRawValue == "failed"
+        }
         guard !tasks.isEmpty else { return }
         let mutations = tasks.map { task in
             TaskMutation(

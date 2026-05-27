@@ -1925,6 +1925,11 @@ struct MacTaskDetailSheet: View {
         task.checklistItems = checklistItems
         task.attachmentPaths = attachmentPaths
         task.updatedAt = .now
+        // Mark dirty so the sync flush uploads the edit — without this, edits to
+        // an already-`.synced` task stay local forever (retry only picks up
+        // `.pendingUpload`/`.failed`). The launch/foreground/reconnect flush
+        // (`MacAppServices.flushPendingSync`) then uploads it.
+        task.syncState = .pendingUpload
         try? modelContext.save()
     }
 

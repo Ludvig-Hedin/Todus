@@ -47,6 +47,14 @@ final class MacAppServices {
         static let hasConfiguredStartupViewPrompt = "MacApp.hasConfiguredStartupViewPrompt"
         static let hasConfiguredNotificationsPrompt = "MacApp.hasConfiguredNotificationsPrompt"
         static let hasConfiguredDefaultMailPrompt = "MacApp.hasConfiguredDefaultMailPrompt"
+        /// One-shot flag — true after the user has taken or skipped the optional
+        /// product tour shown right before the main shell. Defaulted to true for
+        /// returning users via the migration in `init` so the tour never
+        /// ambushes an existing session.
+        static let hasSeenWelcomeTour = "MacApp.hasSeenWelcomeTour"
+        /// Positive proof the user reached the main shell at least once. Used
+        /// by the welcome-tour migration the same way iOS uses `hasReachedMainTab`.
+        static let hasReachedMainShell = "MacApp.hasReachedMainShell"
         static let emailNotificationsEnabled = "MacApp.emailNotificationsEnabled"
         static let remindersSyncEnabled = "mac_reminders_enabled"
         static let remindersSyncDirection = "MacApp.remindersSyncDirection"
@@ -99,6 +107,10 @@ final class MacAppServices {
     let ollamaConnector: OllamaConnector
     /// Streams chat completions from the user's local Ollama daemon.
     let ollamaInferenceService: OllamaInferenceService
+    /// Scans the user's HuggingFace caches (app + `~/.cache/huggingface/hub`) and
+    /// surfaces every MLX-shaped model it finds. Lets users adopt models they
+    /// already downloaded via `huggingface_hub` / `mlx_lm` without re-pulling.
+    let huggingFaceCacheConnector: HuggingFaceCacheConnector
     /// MLX-Swift inference (Apple Silicon). Loads quantized weights from the
     /// HuggingFace cache populated by `modelDownloadService`.
     let mlxInferenceService: MLXInferenceService
@@ -220,6 +232,18 @@ final class MacAppServices {
         didSet { defaults.set(hasConfiguredDefaultMailPrompt, forKey: Keys.hasConfiguredDefaultMailPrompt) }
     }
 
+    /// True after the user has taken or skipped the optional product tour.
+    /// Persists to UserDefaults so the tour appears exactly once per fresh install.
+    var hasSeenWelcomeTour: Bool {
+        didSet { defaults.set(hasSeenWelcomeTour, forKey: Keys.hasSeenWelcomeTour) }
+    }
+
+    /// True after the user has landed on the main app shell at least once.
+    /// Returning users skip the welcome tour based on this flag.
+    var hasReachedMainShell: Bool {
+        didSet { defaults.set(hasReachedMainShell, forKey: Keys.hasReachedMainShell) }
+    }
+
     var emailNotificationsEnabled: Bool {
         didSet { defaults.set(emailNotificationsEnabled, forKey: Keys.emailNotificationsEnabled) }
     }
@@ -299,6 +323,15 @@ final class MacAppServices {
         self.hasConfiguredStartupViewPrompt = defaults.bool(forKey: Keys.hasConfiguredStartupViewPrompt)
         self.hasConfiguredNotificationsPrompt = defaults.bool(forKey: Keys.hasConfiguredNotificationsPrompt)
         self.hasConfiguredDefaultMailPrompt = defaults.bool(forKey: Keys.hasConfiguredDefaultMailPrompt)
+        // Welcome-tour gate — returning users (who already reached the main
+        // shell) get migrated to "seen" so the new tour doesn't ambush them.
+        let reachedShellBefore = defaults.bool(forKey: Keys.hasReachedMainShell)
+        let storedTourFlag = defaults.bool(forKey: Keys.hasSeenWelcomeTour)
+        self.hasSeenWelcomeTour = storedTourFlag || reachedShellBefore
+        if !storedTourFlag && reachedShellBefore {
+            defaults.set(true, forKey: Keys.hasSeenWelcomeTour)
+        }
+        self.hasReachedMainShell = reachedShellBefore
         self.emailNotificationsEnabled = defaults.object(forKey: Keys.emailNotificationsEnabled) as? Bool ?? true
         if let dir = defaults.string(forKey: Keys.remindersSyncDirection),
            let parsed = RemindersSyncDirection(rawValue: dir) {
@@ -374,6 +407,7 @@ final class MacAppServices {
         let ollamaConnector = OllamaConnector()
         self.ollamaConnector = ollamaConnector
         self.ollamaInferenceService = OllamaInferenceService(connector: ollamaConnector)
+        self.huggingFaceCacheConnector = HuggingFaceCacheConnector()
         let mlxService = MLXInferenceService()
         self.mlxInferenceService = mlxService
         self.modelDownloadService = ModelDownloadService(
@@ -835,28 +869,77 @@ final class MacAppServices {
     /// are ready.
     func setupNetworkSync() {
         networkMonitor.onReconnect = { [weak self] in
-            guard let self, let context = self.modelContainer?.mainContext else { return }
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                await self.taskSyncService.retryUnsyncedTasks(in: context)
-                await self.folderSyncService.retryPending()
-                await self.draftService.flushPending(in: context)
-            }
+            self?.flushPendingSync()
+        }
+        // Run per-user teardown for EVERY sign-out, including the automatic
+        // session-expiry paths inside AuthService that call `authService.signOut()`
+        // directly (those previously bypassed this cleanup, leaving stale email
+        // threads / queued mutations / AI history under the next account).
+        authService.onSignOut = { [weak self] in
+            self?.performSignOutCleanup()
+        }
+    }
+
+    /// Flushes any pending/failed task, folder, and draft mutations to the
+    /// backend. Previously this only ran on network reconnect — so a task
+    /// created or edited during a normal, already-online session was marked
+    /// `.pendingUpload` and then never uploaded (silent data loss, and the
+    /// "changes sync when reconnected" banner was a false promise). Now also
+    /// called on app launch and when the app returns to the foreground.
+    func flushPendingSync() {
+        guard let context = modelContainer?.mainContext else { return }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.taskSyncService.retryUnsyncedTasks(in: context)
+            await self.folderSyncService.retryPending()
+            await self.draftService.flushPending(in: context)
+        }
+    }
+
+    /// Applies task completions queued from a widget's "complete" button (handed
+    /// off via the App Group) to SwiftData and queues them for sync. The widget
+    /// AppIntent can't touch SwiftData directly, so this is where the tap takes
+    /// effect. Called on launch + foreground.
+    func drainWidgetTaskCompletions() {
+        guard let context = modelContainer?.mainContext else { return }
+        let ids = WidgetSnapshotStore.shared.consumePendingCompletions()
+        guard !ids.isEmpty else { return }
+        var changed = false
+        for idString in ids {
+            guard let uuid = UUID(uuidString: idString) else { continue }
+            let descriptor = FetchDescriptor<TaskRecord>(predicate: #Predicate { $0.id == uuid })
+            guard let task = (try? context.fetch(descriptor))?.first, !task.completed else { continue }
+            task.status = .done
+            task.completed = true
+            task.updatedAt = .now
+            task.syncState = .pendingUpload
+            changed = true
+        }
+        if changed {
+            try? context.save()
+            flushPendingSync()
         }
     }
 
     func signOut() {
+        // Cleanup runs via `authService.onSignOut` (wired in setupNetworkSync) so
+        // both this manual path and AuthService's automatic session-expiry
+        // sign-outs get the same teardown. `onSignOut` fires at the start of
+        // `authService.signOut()`, before auth state is cleared.
+        authService.signOut()
+        closeSettingsWindowIfPresent()
+    }
+
+    /// Per-user teardown shared by manual and automatic sign-out. Idempotent.
+    private func performSignOutCleanup() {
         // Clear in-memory sync queues so a reconnect after re-login does not
         // replay the previous user's offline mutations under the new session.
         taskSyncService.clearQueue()
         folderSyncService.clearQueue()
         emailService.resetForSignOut()
+        aiChatService.resetForSignOut()
         // Tear down voice triggers so the new user's hotkey/wake start fresh.
-        // Must happen BEFORE authService.signOut() so the coordinator can
-        // still send a final disconnect over the (now-stale) auth.
         Task { await voiceCoordinator.stop() }
-        authService.signOut()
-        closeSettingsWindowIfPresent()
     }
 
     /// Closes the dedicated Settings window (`Window(id: "settings")`) if it is open.

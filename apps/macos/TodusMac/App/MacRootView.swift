@@ -4,8 +4,11 @@ import SwiftData
 // MARK: - Navigation Model
 
 enum EmailSection: String, CaseIterable, Hashable {
-    // Primary folders — shown at the top of the expanded email group
-    case inbox, drafts, sent
+    // Primary folders — shown at the top of the expanded email group.
+    // `drafts` maps to the backend folder key "draft" (singular, matches
+    // FOLDERS.DRAFT + iOS); the implicit "drafts" raw value silently bypassed
+    // the backend's draft-listing special case and showed an empty/wrong list.
+    case inbox, drafts = "draft", sent
     // Secondary folders — archive, snoozed, spam, bin (matches backend FOLDERS constant)
     case archive, snoozed, spam, bin
 
@@ -132,6 +135,7 @@ private struct FloatingPanelShell<Content: View>: View {
     @ViewBuilder let content: () -> Content
 
     @State private var resizeDragStart: CGSize?
+    @State private var isResizing: Bool = false
 
     private let minW: CGFloat = 320, maxW: CGFloat = 800
     private let minH: CGFloat = 400, maxH: CGFloat = 900
@@ -154,7 +158,10 @@ private struct FloatingPanelShell<Content: View>: View {
     private func resizeGesture(_ part: ResizePart) -> some Gesture {
         DragGesture()
             .onChanged { v in
-                if resizeDragStart == nil { resizeDragStart = geo.liveSize }
+                if resizeDragStart == nil {
+                    resizeDragStart = geo.liveSize
+                    isResizing = true
+                }
                 let s = resizeDragStart ?? geo.liveSize
                 let t = v.translation
                 let new: CGSize
@@ -169,11 +176,16 @@ private struct FloatingPanelShell<Content: View>: View {
                 case .bottomTrailing:new = CGSize(width: s.width + t.width, height: s.height + t.height)
                 }
                 let clamped = clamp(new)
-                if clamped != geo.liveSize { geo.liveSize = clamped }
+                if clamped != geo.liveSize {
+                    var t = Transaction(animation: nil)
+                    t.disablesAnimations = true
+                    withTransaction(t) { geo.liveSize = clamped }
+                }
             }
             .onEnded { _ in
                 floatingSize = geo.liveSize
                 resizeDragStart = nil
+                isResizing = false
                 onCommit?()
             }
     }
@@ -183,8 +195,10 @@ private struct FloatingPanelShell<Content: View>: View {
             switch part {
             case .top, .bottom:                             NSCursor.resizeUpDown.set()
             case .leading, .trailing:                       NSCursor.resizeLeftRight.set()
-            case .topLeading, .bottomTrailing:              NSCursor.crosshair.set()
-            case .topTrailing, .bottomLeading:              NSCursor.crosshair.set()
+            case .topLeading:     NSCursor.frameResize(position: .topLeft, directions: .all).set()
+            case .bottomTrailing: NSCursor.frameResize(position: .bottomRight, directions: .all).set()
+            case .topTrailing:    NSCursor.frameResize(position: .topRight, directions: .all).set()
+            case .bottomLeading:  NSCursor.frameResize(position: .bottomLeft, directions: .all).set()
             }
         } else {
             NSCursor.arrow.set()
@@ -214,7 +228,7 @@ private struct FloatingPanelShell<Content: View>: View {
     var body: some View {
         content()
             .frame(width: geo.liveSize.width, height: geo.liveSize.height)
-            .shadow(color: .black.opacity(0.18), radius: 20, x: 0, y: 8)
+            .shadow(color: .black.opacity(isResizing ? 0 : 0.18), radius: 20, x: 0, y: 8)
             // Edge resize strips (corners excluded so they don't overlap)
             .overlay(alignment: .top) {
                 HStack(spacing: 0) {
@@ -389,12 +403,27 @@ struct MacRootView: View {
             } else if !services.hasConfiguredNotificationsPrompt {
                 MacNotificationsOnboardingView()
                     .transition(.opacity.combined(with: .move(edge: .trailing)))
+            } else if !services.hasSeenWelcomeTour {
+                // Optional product explainer with prominent Skip — one-shot per
+                // install. Final step before the main shell.
+                MacWelcomeTourView()
+                    .transition(.opacity.combined(with: .move(edge: .trailing)))
             } else {
                 // Authenticated or guest → show main app shell
                 mainAppView
                     .transition(.opacity)
+                    .onAppear {
+                        // Mark the user as having reached the main shell so the
+                        // welcome-tour migration in MacAppServices.init can flag
+                        // returning users on the next launch.
+                        if !services.hasReachedMainShell {
+                            services.hasReachedMainShell = true
+                        }
+                    }
             }
         }
+        // Allow users to select and copy text anywhere in the app.
+        .textSelection(.enabled)
         // Disable system focus rings on buttons/cards — keeps keyboard focus without blue chrome.
         .focusEffectDisabled()
         // Primary text tint so symbols and controls are not system / accent blue.
@@ -407,6 +436,7 @@ struct MacRootView: View {
         .animation(MacTheme.Motion.slow, value: services.hasConfiguredStartupViewPrompt)
         .animation(MacTheme.Motion.slow, value: services.hasConfiguredNotificationsPrompt)
         .animation(MacTheme.Motion.slow, value: services.hasConfiguredDefaultMailPrompt)
+        .animation(MacTheme.Motion.slow, value: services.hasSeenWelcomeTour)
         .safeAreaInset(edge: .top, spacing: 0) {
             if let onboardingStep = onboardingStep {
                 HStack {
@@ -575,7 +605,7 @@ struct MacRootView: View {
                 ZStack {
                     Color.clear.frame(width: 8)
                     Rectangle()
-                        .fill(Color.primary.opacity(0.04))
+                        .fill(MacTheme.cardBorder)
                         .frame(width: 1)
                 }
                 .contentShape(Rectangle())
@@ -1037,13 +1067,14 @@ struct MacRootView: View {
         if !services.hasConfiguredRemindersPrompt { return 3 }
         if !services.hasConfiguredStartupViewPrompt { return 4 }
         if !services.hasConfiguredNotificationsPrompt { return 5 }
+        if !services.hasSeenWelcomeTour { return 6 }
         return nil
     }
 
     /// Total number of onboarding steps shown — keep in sync with the if/else chain
     /// in `body` and the numbered branches in `onboardingStep`. Currently: Gmail,
     /// Calendar, Reminders, Startup view, Notifications.
-    private var onboardingTotalSteps: Int { 5 }
+    private var onboardingTotalSteps: Int { 6 }
 
     private var startupSelection: MacPrimarySelection {
         switch services.startupView {

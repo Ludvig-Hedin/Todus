@@ -68,13 +68,22 @@ struct TodusMacApp: App {
                             }
                         }
                         .onChange(of: scenePhase) { oldPhase, newPhase in
-                            if newPhase == .background {
+                            // Refresh widgets on .inactive too — a windowed macOS
+                            // app rarely reaches .background (only when all windows
+                            // close), so .background-only left widgets stale on every
+                            // focus change.
+                            if newPhase == .background || newPhase == .inactive {
                                 Task {
                                     MacWidgetUpdateManager.shared.updateWidgets(
                                         context: sharedModelContainer.mainContext,
-                                        emailService: services.emailService
+                                        services: services
                                     )
                                 }
+                            } else if newPhase == .active {
+                                // Push any mutations queued while inactive/offline,
+                                // and apply widget-tapped task completions.
+                                services.flushPendingSync()
+                                services.drainWidgetTaskCompletions()
                             }
                         }
                 } else {
@@ -214,6 +223,12 @@ struct TodusMacApp: App {
             self.sharedModelContainer = container
             services.modelContainer = container
             services.setupNetworkSync()
+            // Flush any task/folder/draft mutations left `.pendingUpload` from a
+            // previous online session (they used to wait for a reconnect event
+            // that never comes if the user is already online).
+            services.flushPendingSync()
+            // Apply any task completions tapped on a widget while the app was closed.
+            services.drainWidgetTaskCompletions()
             // Wire the delegate so UNUserNotificationCenter callbacks can resolve tasks
             // (SwiftData) and reach email/AI services for routing + actions.
             appDelegate.modelContainer = container
@@ -302,6 +317,15 @@ struct TodusMacApp: App {
                     object: slug
                 )
             }
+
+        case "tasks", "today":
+            // Widget deep links (`todus://tasks`, `todus://today`). Navigation
+            // only — just selects the view, so there's no injection surface.
+            NotificationCenter.default.post(name: .todusNavigateToTasks, object: nil)
+
+        case "email":
+            // Widget deep link (`todus://email/inbox`).
+            NotificationCenter.default.post(name: .todusNavigateToEmail, object: nil)
 
         default:
             // Silently ignore — unknown host, not something we recognize.

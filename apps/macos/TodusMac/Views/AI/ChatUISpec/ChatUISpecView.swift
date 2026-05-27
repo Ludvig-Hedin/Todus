@@ -14,18 +14,21 @@ struct ChatUISpecView: View {
     var onAction: MacChatUISpecOnAction? = nil
 
     var body: some View {
-        renderElement(id: spec.root)
+        renderElement(id: spec.root, depth: 0)
     }
 
-    private func renderElement(id: String) -> AnyView {
+    private func renderElement(id: String, depth: Int) -> AnyView {
+        // Guard against a cyclic or pathologically deep spec — this is untrusted
+        // model output, and unbounded recursion here stack-overflows the app.
+        guard depth < 24 else { return AnyView(EmptyView()) }
         if let element = spec.elements[id] {
-            elementView(for: element)
+            return elementView(for: element, depth: depth)
         } else {
-            AnyView(EmptyView())
+            return AnyView(EmptyView())
         }
     }
 
-    private func elementView(for element: UIElement) -> AnyView {
+    private func elementView(for element: UIElement, depth: Int) -> AnyView {
         switch element.type {
         case "EmailCard":
             return AnyView(MacEmailCardView(props: element.props, onAction: onAction))
@@ -81,7 +84,7 @@ struct ChatUISpecView: View {
             return AnyView(MacStackView(props: element.props) {
                 if let children = element.children {
                     ForEach(children, id: \.self) { childId in
-                        renderElement(id: childId)
+                        renderElement(id: childId, depth: depth + 1)
                     }
                 }
             })
@@ -89,7 +92,7 @@ struct ChatUISpecView: View {
             return AnyView(MacCardContainerView(props: element.props) {
                 if let children = element.children {
                     ForEach(children, id: \.self) { childId in
-                        renderElement(id: childId)
+                        renderElement(id: childId, depth: depth + 1)
                     }
                 }
             })

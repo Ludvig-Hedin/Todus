@@ -20,6 +20,11 @@ struct CalendarEvent: Identifiable, Sendable {
     /// Apple calendar (Home, Work, Holidays, etc.) can be toggled independently.
     /// Optional + defaulted to nil to preserve back-compat with existing call sites.
     let calendarIdentifier: String?
+    /// Whether the underlying calendar accepts edits. Google (backend) events are
+    /// read-only here — editing routes through EKEventStore and would 404, so the
+    /// UI must show a read-only summary instead of an editor. Defaults to true so
+    /// existing Apple/EventKit call sites keep their writable behavior.
+    let isWritable: Bool
 
     init(
         id: String,
@@ -32,7 +37,8 @@ struct CalendarEvent: Identifiable, Sendable {
         calendarColorBlue: Double,
         calendarName: String,
         folderID: UUID?,
-        calendarIdentifier: String? = nil
+        calendarIdentifier: String? = nil,
+        isWritable: Bool = true
     ) {
         self.id = id
         self.title = title
@@ -45,6 +51,7 @@ struct CalendarEvent: Identifiable, Sendable {
         self.calendarName = calendarName
         self.folderID = folderID
         self.calendarIdentifier = calendarIdentifier
+        self.isWritable = isWritable
     }
 }
 

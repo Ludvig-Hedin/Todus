@@ -36,9 +36,28 @@ struct TiptapDocEditorWebView: NSViewRepresentable {
             AppLogger.shared.log(
                 "[TiptapDocEditor] DocEditor/index.html missing — pnpm --filter @zero/macos-doc-editor build"
             )
+            // Show a visible failure instead of a permanently blank white pane.
+            web.loadHTMLString(Self.editorMissingHTML, baseURL: nil)
         }
         return web
     }
+
+    /// Shown when the bundled editor resource is absent (build step skipped).
+    private static let editorMissingHTML = """
+    <!doctype html><html><head><meta charset="utf-8">
+    <style>
+      html,body{height:100%;margin:0;background:transparent;
+        font-family:-apple-system,system-ui,sans-serif;color:#8a8a8e;}
+      .wrap{height:100%;display:flex;align-items:center;justify-content:center;
+        text-align:center;padding:24px;box-sizing:border-box;}
+      .title{font-size:14px;font-weight:600;color:#c7c7cc;margin-bottom:6px;}
+      .sub{font-size:12px;line-height:1.4;max-width:360px;}
+    </style></head>
+    <body><div class="wrap"><div>
+      <div class="title">Editor failed to load</div>
+      <div class="sub">The document editor isn’t available in this build.</div>
+    </div></div></body></html>
+    """
 
     func updateNSView(_ webView: WKWebView, context: Context) {
         context.coordinator.parent = self

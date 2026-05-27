@@ -156,6 +156,10 @@ struct EmailDraft {
     var replyToMessageId: String?
     /// Which connected account to send from (nil = first/default account).
     var fromConnectionId: String?
+    /// Email address of the picked From account. `mail.send` selects the sending
+    /// account by `fromEmail` (the `connectionId` field is not in its schema and
+    /// is silently dropped), so this is what actually routes a multi-account send.
+    var fromEmail: String?
     /// Passed through to `mail.send` for forward threading semantics.
     var isForward: Bool = false
 }

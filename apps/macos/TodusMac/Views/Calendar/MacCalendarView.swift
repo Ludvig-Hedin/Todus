@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import SwiftData
 import EventKit
@@ -203,13 +204,23 @@ struct MacCalendarView: View {
                     .font(MacTheme.cardSubtitleFont())
                     .foregroundStyle(MacTheme.textSecondary)
                     .multilineTextAlignment(.center)
+                // Once the user has denied access, `requestAccess()` can no
+                // longer re-prompt (the OS only asks once) — so the button would
+                // silently no-op. Send them to System Settings instead.
+                let isDenied = services.calendarService.authorizationStatus() == .denied
                 Button {
-                    Task {
-                        hasAccess = await services.calendarService.requestAccess()
-                        if hasAccess { await loadEvents() }
+                    if isDenied {
+                        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    } else {
+                        Task {
+                            hasAccess = await services.calendarService.requestAccess()
+                            if hasAccess { await loadEvents() }
+                        }
                     }
                 } label: {
-                    Text("Grant Access")
+                    Text(isDenied ? "Open System Settings" : "Grant Access")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(MacTheme.primaryButtonForeground)
                         .padding(.horizontal, 20)
@@ -1309,6 +1320,13 @@ struct MacCalendarView: View {
     /// Opens the native in-app event sheet in edit mode for an existing event.
     /// Closes the read-only popover first so we don't stack two surfaces.
     private func openEditEvent(_ event: CalendarEvent) {
+        // Read-only (e.g. Google) events can't be edited via EKEventStore — saving
+        // would 404. Show the read-only summary popover instead of the editor.
+        guard event.isWritable else {
+            eventSheetRequest = nil
+            selectedEvent = event
+            return
+        }
         selectedEvent = nil
         eventSheetRequest = EventSheetRequest(mode: .edit(event: event))
     }

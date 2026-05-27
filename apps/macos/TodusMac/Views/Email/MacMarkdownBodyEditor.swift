@@ -41,6 +41,23 @@ struct MacMarkdownBodyEditor: NSViewRepresentable {
         textView.allowsUndo = true
         textView.textContainerInset = NSSize(width: 16, height: 12)
 
+        // Placeholder — NSTextView has no built-in one. A non-interactive label
+        // pinned at the text origin, toggled by emptiness, so an empty compose
+        // body reads as "Write your message" instead of looking broken/blank.
+        let placeholderLabel = NSTextField(labelWithString: placeholder)
+        placeholderLabel.font = font
+        placeholderLabel.textColor = .tertiaryLabelColor
+        placeholderLabel.drawsBackground = false
+        placeholderLabel.isBordered = false
+        placeholderLabel.isEditable = false
+        placeholderLabel.isSelectable = false
+        placeholderLabel.sizeToFit()
+        // x = inset + default line-fragment padding (5) to align with the caret.
+        placeholderLabel.frame.origin = NSPoint(x: 16 + 5, y: 12)
+        placeholderLabel.isHidden = !text.isEmpty
+        textView.addSubview(placeholderLabel)
+        context.coordinator.placeholderLabel = placeholderLabel
+
         scrollView.documentView = textView
 
         context.coordinator.applyText(text, to: textView)
@@ -50,14 +67,19 @@ struct MacMarkdownBodyEditor: NSViewRepresentable {
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         guard let textView = scrollView.documentView as? NSTextView else { return }
 
-        if isFocused {
+        // Only grab first responder on the rising edge of `isFocused` — doing it
+        // every update pass would repeatedly yank focus away from other fields.
+        if isFocused, !context.coordinator.lastIsFocused {
             DispatchQueue.main.async {
                 textView.window?.makeFirstResponder(textView)
             }
         }
+        context.coordinator.lastIsFocused = isFocused
 
-        guard text != context.coordinator.lastKnownText else { return }
-        context.coordinator.applyText(text, to: textView)
+        if text != context.coordinator.lastKnownText {
+            context.coordinator.applyText(text, to: textView)
+        }
+        context.coordinator.placeholderLabel?.isHidden = !text.isEmpty
     }
 
     func makeCoordinator() -> Coordinator {
@@ -66,11 +88,17 @@ struct MacMarkdownBodyEditor: NSViewRepresentable {
 
     // MARK: - Coordinator
 
+    @MainActor
     final class Coordinator: NSObject, NSTextViewDelegate {
         @Binding var text: String
         let font: NSFont
         let onFocusChange: ((Bool) -> Void)?
         var lastKnownText: String = ""
+        /// Tracks the previous external focus request so we only steal first
+        /// responder on the rising edge, not on every `updateNSView` pass.
+        var lastIsFocused: Bool = false
+        /// Placeholder label shown while the body is empty (NSTextView has none).
+        weak var placeholderLabel: NSTextField?
 
         lazy var textView = NSTextView()
 
@@ -91,6 +119,7 @@ struct MacMarkdownBodyEditor: NSViewRepresentable {
             let newText = tv.string
             lastKnownText = newText
             text = newText
+            placeholderLabel?.isHidden = !newText.isEmpty
             reapplyMarkdown(to: tv)
         }
 
@@ -117,21 +146,33 @@ struct MacMarkdownBodyEditor: NSViewRepresentable {
         }
 
         private func reapplyMarkdown(to textView: NSTextView) {
-            let currentText = textView.string
-            let selectedRange = textView.selectedRange()
-            let attributed = buildAttributed(currentText)
-            textView.textStorage?.setAttributedString(attributed)
-            textView.setSelectedRange(selectedRange)
+            guard let storage = textView.textStorage else { return }
+            // Restyle attributes in place — no string/selection replacement — so
+            // native undo coalescing and the cursor stay intact and we avoid an
+            // O(n) full-document rebuild + reselect on every keystroke.
+            storage.beginEditing()
+            applyStyling(to: storage)
+            storage.endEditing()
         }
 
         private func buildAttributed(_ str: String) -> NSAttributedString {
             let attributed = NSMutableAttributedString(string: str)
+            applyStyling(to: attributed)
+            return attributed
+        }
+
+        /// Applies base + markdown attributes to `attributed` in place. The
+        /// source text is read from `attributed.string`, so this works on a
+        /// freshly built string and on a live `NSTextStorage` alike.
+        private func applyStyling(to attributed: NSMutableAttributedString) {
+            let str = attributed.string
             let len = attributed.length
-            guard len > 0 else { return attributed }
+            guard len > 0 else { return }
             let fullRange = NSRange(location: 0, length: len)
 
-            // Base attributes
-            attributed.addAttributes([
+            // Base attributes — `setAttributes` clears stale styling from a prior
+            // pass so re-applied markdown never leaves orphaned bold/italic runs.
+            attributed.setAttributes([
                 .font: font,
                 .foregroundColor: NSColor.labelColor,
             ], range: fullRange)
@@ -181,8 +222,6 @@ struct MacMarkdownBodyEditor: NSViewRepresentable {
                 attributed.addAttribute(.foregroundColor, value: dimColor, range: NSRange(location: full.location, length: min(2, full.length)))
                 attributed.addAttribute(.foregroundColor, value: NSColor.secondaryLabelColor, range: match.range(at: 1))
             }
-
-            return attributed
         }
     }
 }

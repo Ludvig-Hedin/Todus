@@ -277,7 +277,15 @@ struct MacEmailThreadView: View {
                     case .reply:
                         MacEmailComposeView(replyTo: lastMessage, threadId: threadId, body: assistantDraftSeed)
                     case .replyAll:
-                        MacEmailComposeView(replyAllTo: lastMessage, threadId: threadId, body: assistantDraftSeed)
+                        // Pass the signed-in user's addresses so reply-all doesn't
+                        // CC the user themselves. Covers both the active mailbox
+                        // and any connected accounts/aliases.
+                        MacEmailComposeView(
+                            replyAllTo: lastMessage,
+                            threadId: threadId,
+                            body: assistantDraftSeed,
+                            ownedAddresses: ownedAddressesForReplyAll()
+                        )
                     case .forward:
                         MacEmailComposeView(forwarding: lastMessage)
                     }
@@ -739,8 +747,80 @@ struct MacEmailThreadView: View {
                         .italic()
                         .padding(MacTheme.spacing16)
                 }
+
+                // Attachments were decoded but never shown — a user couldn't tell
+                // an email had any. Mirrors the iOS chip list (display only;
+                // download needs a backend fetch endpoint).
+                if let attachments = message.attachments, !attachments.isEmpty {
+                    attachmentsView(attachments)
+                        .padding(.horizontal, MacTheme.spacing16)
+                        .padding(.top, MacTheme.spacing8)
+                }
             }
         }
+    }
+
+    // MARK: - Attachments
+
+    @ViewBuilder
+    private func attachmentsView(_ attachments: [EmailAttachment]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(attachments) { attachment in
+                HStack(spacing: 10) {
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(attachmentColor(for: attachment.mimeType))
+                        .frame(width: 34, height: 34)
+                        .overlay(
+                            Text(attachmentLabel(for: attachment.mimeType))
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundStyle(.white)
+                        )
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(attachment.filename)
+                            .font(.system(size: 12.5, weight: .medium))
+                            .foregroundStyle(MacTheme.textPrimary)
+                            .lineLimit(1)
+                            .help(attachment.filename)
+                        let sizeLabel = formatAttachmentSize(attachment.size)
+                        if !sizeLabel.isEmpty {
+                            Text(sizeLabel)
+                                .font(.system(size: 11))
+                                .foregroundStyle(MacTheme.textSecondary)
+                        }
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(10)
+                .background(MacTheme.surfaceCard, in: RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous)
+                        .stroke(MacTheme.cardBorder, lineWidth: 1)
+                )
+            }
+        }
+    }
+
+    private func attachmentColor(for mimeType: String) -> Color {
+        if mimeType.contains("pdf") { return .red }
+        if mimeType.contains("image") { return .blue }
+        if mimeType.contains("word") || mimeType.contains("document") { return Color(red: 0.18, green: 0.44, blue: 0.78) }
+        if mimeType.contains("sheet") || mimeType.contains("excel") { return .green }
+        return .gray
+    }
+
+    private func attachmentLabel(for mimeType: String) -> String {
+        if mimeType.contains("pdf") { return "PDF" }
+        if mimeType.contains("image") { return "IMG" }
+        if mimeType.contains("word") { return "DOC" }
+        if mimeType.contains("sheet") || mimeType.contains("excel") { return "XLS" }
+        return "FILE"
+    }
+
+    private func formatAttachmentSize(_ bytes: Int) -> String {
+        if bytes <= 0 { return "" }
+        if bytes < 1024 { return "\(bytes) B" }
+        if bytes < 1024 * 1024 { return "\(bytes / 1024) KB" }
+        return String(format: "%.1f MB", Double(bytes) / (1024 * 1024))
     }
 
     // MARK: - Reply Bar
@@ -1239,6 +1319,25 @@ struct MacEmailThreadView: View {
               m.numberOfRanges >= 2,
               let r = Range(m.range(at: 1), in: text) else { return nil }
         return String(text[r])
+    }
+
+    /// Builds the set of "this is me" addresses used to filter the user out of
+    /// reply-all Cc lists. Covers the primary signed-in account plus every
+    /// connected mailbox the user has authorized — multi-account users who
+    /// reply-all to a thread where one of their other accounts is on Cc no
+    /// longer end up CC'ing themselves.
+    /// (Relocated here from MacMailAssistantCard — it uses `services` and is
+    /// called from this view, but was placed in a struct with no `services`.)
+    private func ownedAddressesForReplyAll() -> Set<String> {
+        var owned = Set<String>()
+        if let primary = services.authService.userEmail?.lowercased(), !primary.isEmpty {
+            owned.insert(primary)
+        }
+        for connection in services.connectionsService.connections {
+            let lowered = connection.email.lowercased()
+            if !lowered.isEmpty { owned.insert(lowered) }
+        }
+        return owned
     }
 
 }

@@ -37,9 +37,9 @@ final class MacVoiceChatViewModel {
 
     private var captureEngine: AVAudioEngine?
     private var audioSendTimer: DispatchSourceTimer?
-    nonisolated(unsafe) private var pcmBuffer = Data()
+    @ObservationIgnored nonisolated(unsafe) private var pcmBuffer = Data()
     let pcmBufferLock = NSLock()
-    nonisolated(unsafe) private var _micMutedAtomic = false
+    @ObservationIgnored nonisolated(unsafe) private var _micMutedAtomic = false
     let micMutedLock = NSLock()
 
     // MARK: - Tasks
@@ -426,6 +426,8 @@ struct MacVoiceChatPanel: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var viewModel: MacVoiceChatViewModel?
+    /// Drives the breathing pulse on the "assistant speaking" rings.
+    @State private var ringPulse = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -596,6 +598,13 @@ struct MacVoiceChatPanel: View {
                             .stroke(aiGradient, lineWidth: 2)
                             .frame(width: CGFloat(70 + i * 20), height: CGFloat(70 + i * 20))
                             .opacity(0.3 - Double(i) * 0.1)
+                            .scaleEffect(ringPulse ? 1.06 : 0.94)
+                            .animation(
+                                .easeInOut(duration: 1.1)
+                                    .repeatForever(autoreverses: true)
+                                    .delay(Double(i) * 0.15),
+                                value: ringPulse
+                            )
                     }
                 }
 
@@ -612,6 +621,21 @@ struct MacVoiceChatPanel: View {
                 .foregroundStyle(MacTheme.mutedText)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 24)
+
+            // A failed session would otherwise strand the user on a dead panel
+            // (only the X works). The view model permits reconnecting from
+            // .failed, so offer an explicit retry.
+            if let vm = viewModel, case .failed = vm.connectionState {
+                Button("Try again") {
+                    Task { await viewModel?.connect() }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .padding(.top, 2)
+            }
+        }
+        .onChange(of: viewModel?.isAssistantSpeaking ?? false) { _, speaking in
+            ringPulse = speaking
         }
     }
 
@@ -679,6 +703,8 @@ struct MacVoiceChatPanel: View {
                 }
             }
             .buttonStyle(.plain)
+            .disabled(viewModel == nil)
+            .opacity(viewModel == nil ? 0.5 : 1)
             .help(viewModel?.isMicMuted == true ? "Unmute" : "Mute")
             .accessibilityLabel(viewModel?.isMicMuted == true ? "Unmute microphone" : "Mute microphone")
 

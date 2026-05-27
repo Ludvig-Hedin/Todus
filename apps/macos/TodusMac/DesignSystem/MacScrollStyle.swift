@@ -44,6 +44,8 @@ enum MacScrollStyle {
         scroll.backgroundColor = .clear
         scroll.borderType = .noBorder
         scroll.autohidesScrollers = true
+        // Prevent horizontal elastic bounce that causes week-view content overflow instead of navigation.
+        scroll.horizontalScrollElasticity = .none
 
         // The "track" strip in SwiftUI-embedded scroll views is often the clip view background.
         let clip = scroll.contentView
@@ -73,12 +75,15 @@ enum MacScrollStyle {
         }
     }
 
-    private static func applyToScrollableViews(in view: NSView) {
+    private static func applyToScrollableViews(in view: NSView, depth: Int = 0) {
+        // Cap recursion so a deep view tree doesn't get fully re-walked on every
+        // key-window change (mirrors ChromeAnchorView's 32-level superview cap).
+        guard depth < 32 else { return }
         for sub in view.subviews {
             if let scroll = sub as? NSScrollView {
                 applyChrome(to: scroll)
             }
-            applyToScrollableViews(in: sub)
+            applyToScrollableViews(in: sub, depth: depth + 1)
         }
     }
 }

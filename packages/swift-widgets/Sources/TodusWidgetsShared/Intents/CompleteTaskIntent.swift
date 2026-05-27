@@ -17,14 +17,23 @@ struct CompleteTaskIntent: AppIntent {
 
     func perform() async throws -> some IntentResult {
         // Since we are using SwiftData in the main app, and AppIntents run in the extension,
-        // we can either configure a shared SwiftData container, or write the intended action
-        // to UserDefaults, then let the main app handle it.
-        // For Phase 3: We will implement basic shared SwiftData container access if configured,
-        // otherwise simply update the local snapshot temporarily to show it as completed
-        // until the main app wakes up.
-
-        // TODO: Actually complete the task in the shared store.
-        // For now, we just pretend it was completed.
+        // AppIntents run in the widget extension and can't touch the main app's
+        // SwiftData store, so we hand the completion off via the App Group: queue
+        // the id for the main app to apply + sync, and optimistically drop it from
+        // the snapshot so the widget reflects completion immediately.
+        let store = WidgetSnapshotStore.shared
+        store.addPendingCompletion(taskId)
+        store.updateSnapshot { snapshot in
+            guard let tasks = snapshot.tasks else { return }
+            let remaining = tasks.topTasks.filter { $0.id != taskId }
+            guard remaining.count != tasks.topTasks.count else { return }
+            snapshot.tasks = TaskWidgetSnapshot(
+                todayProgress: tasks.todayProgress,
+                topTasks: remaining,
+                overdueCount: tasks.overdueCount
+            )
+        }
+        WidgetCenter.shared.reloadAllTimelines()
         return .result()
     }
 }

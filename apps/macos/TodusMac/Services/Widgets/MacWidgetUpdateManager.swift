@@ -10,7 +10,7 @@ final class MacWidgetUpdateManager {
     
     func updateWidgets(
         context: ModelContext,
-        emailService: EmailService
+        services: MacAppServices
     ) {
         // 1. Fetch Tasks
         let tasksDescriptor = FetchDescriptor<TaskRecord>(predicate: #Predicate { !$0.completed }, sortBy: [SortDescriptor(\.createdAt, order: .reverse)])
@@ -56,7 +56,7 @@ final class MacWidgetUpdateManager {
         )
         
         // 2. Fetch Emails (from cached EmailService state)
-        let unreadEmails = emailService.threads.filter { $0.unread }
+        let unreadEmails = services.emailService.threads.filter { $0.unread }
         let topEmails = unreadEmails.prefix(5).map { thread in
             EmailWidgetSnapshot.EmailInfo(
                 id: thread.id,
@@ -71,20 +71,97 @@ final class MacWidgetUpdateManager {
         )
         
         Task {
-            let store = WidgetSnapshotStore.shared.readSnapshot() ?? WidgetDataStore()
-            var newStore = store
-            newStore.lastUpdated = Date()
-            newStore.tasks = taskSnapshot
-            newStore.email = emailSnapshot
-            
-            newStore.overview = DailyOverviewWidgetSnapshot(
-                nextEvent: newStore.calendar?.upcomingEvents.first,
-                urgentTaskCount: urgentTasks.count,
-                unreadImportantEmailCount: unreadEmails.count
+            // Calendar — upcoming events over the next 7 days. Previously never
+            // written, so the Calendar widget and the Daily Overview "next event"
+            // were permanently empty.
+            let weekEnd = Calendar.current.date(byAdding: .day, value: 7, to: now) ?? now.addingTimeInterval(7 * 86400)
+            let unifiedEvents = await services.unifiedCalendarService.events(
+                from: now,
+                to: weekEnd,
+                preferences: services.calendarPreferences
             )
-            
-            WidgetSnapshotStore.shared.writeSnapshot(newStore)
+            let upcoming: [CalendarWidgetSnapshot.Event] = unifiedEvents
+                .filter { $0.endDate >= now }
+                .sorted { $0.startDate < $1.startDate }
+                .prefix(8)
+                .map { ev in
+                    CalendarWidgetSnapshot.Event(
+                        id: ev.providerEventId,
+                        title: ev.title,
+                        startDate: ev.startDate,
+                        endDate: ev.endDate,
+                        isAllDay: ev.isAllDay,
+                        colorHex: Self.packColor(r: ev.colorRed, g: ev.colorGreen, b: ev.colorBlue),
+                        url: URL(string: "todus://calendar")
+                    )
+                }
+            let calendarSnapshot = CalendarWidgetSnapshot(upcomingEvents: upcoming)
+            let nextEvent = upcoming.first
+            let insight = Self.buildInsight(
+                overdueCount: overdueTasks.count,
+                urgentCount: urgentTasks.count,
+                nextEvent: nextEvent,
+                unreadImportant: unreadEmails.count
+            )
+
+            // Atomic transform avoids clobbering fields written by a concurrent
+            // update (e.g. a widget-completion snapshot edit).
+            WidgetSnapshotStore.shared.updateSnapshot { newStore in
+                newStore.lastUpdated = Date()
+                newStore.tasks = taskSnapshot
+                newStore.email = emailSnapshot
+                newStore.calendar = calendarSnapshot
+                newStore.insight = insight
+                newStore.overview = DailyOverviewWidgetSnapshot(
+                    nextEvent: nextEvent,
+                    urgentTaskCount: urgentTasks.count,
+                    unreadImportantEmailCount: unreadEmails.count
+                )
+            }
             WidgetCenter.shared.reloadAllTimelines()
         }
+    }
+
+    private static func packColor(r: Double, g: Double, b: Double) -> UInt {
+        let ri = UInt(max(0, min(255, r * 255)))
+        let gi = UInt(max(0, min(255, g * 255)))
+        let bi = UInt(max(0, min(255, b * 255)))
+        return (ri << 16) | (gi << 8) | bi
+    }
+
+    private static func buildInsight(
+        overdueCount: Int,
+        urgentCount: Int,
+        nextEvent: CalendarWidgetSnapshot.Event?,
+        unreadImportant: Int
+    ) -> SmartInsightWidgetSnapshot {
+        if overdueCount > 0 {
+            return SmartInsightWidgetSnapshot(
+                insightText: "\(overdueCount) task\(overdueCount == 1 ? "" : "s") overdue.",
+                recommendedActionText: "Review overdue tasks"
+            )
+        }
+        if let next = nextEvent {
+            let f = DateFormatter()
+            f.timeStyle = .short
+            f.dateStyle = .none
+            return SmartInsightWidgetSnapshot(
+                insightText: "Next: \(next.title) at \(f.string(from: next.startDate)).",
+                recommendedActionText: nil
+            )
+        }
+        if urgentCount > 0 {
+            return SmartInsightWidgetSnapshot(
+                insightText: "\(urgentCount) urgent task\(urgentCount == 1 ? "" : "s") to tackle.",
+                recommendedActionText: nil
+            )
+        }
+        if unreadImportant > 0 {
+            return SmartInsightWidgetSnapshot(
+                insightText: "\(unreadImportant) unread email\(unreadImportant == 1 ? "" : "s") waiting.",
+                recommendedActionText: nil
+            )
+        }
+        return SmartInsightWidgetSnapshot(insightText: "You're all caught up.", recommendedActionText: nil)
     }
 }

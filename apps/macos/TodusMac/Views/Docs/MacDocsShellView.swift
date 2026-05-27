@@ -54,6 +54,10 @@ struct MacDocsShellView: View {
             MacDocEditorPane(docId: id) {
                 selectedDocId = nil
             }
+            // Recreate the pane per doc — without this the reused instance leaks
+            // @State across docs (stale Saved/Save-failed badge + word counts, and
+            // a Retry that could write one doc's content against another's id).
+            .id(id)
         } else {
             MacDocsAllPane(
                 selectedDocId: $selectedDocId,

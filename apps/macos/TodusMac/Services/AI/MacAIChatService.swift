@@ -61,7 +61,10 @@ final class MacAIChatService {
 
     // Token batching — flush every 40ms for smooth typewriter animation
     private var tokenBuffer = ""
-    private var flushScheduled = false
+    /// Pending coalesced flush of `tokenBuffer`. Held so finalise/cancel can
+    /// cancel it — otherwise a stale flush fires ~40ms later and writes the
+    /// *next* stream's buffered tokens into the *previous* message bubble.
+    private var pendingFlush: DispatchWorkItem?
 
     // Tracks whether the current conversation has been persisted
     private var isConversationSaved = true
@@ -134,6 +137,7 @@ final class MacAIChatService {
         isStreaming = true
         errorMessage = nil
 
+        let generation = cancelGeneration
         streamingTask = Task { [weak self] in
             guard let self else { return }
             await self.streamResponse(
@@ -141,6 +145,10 @@ final class MacAIChatService {
                 allTasks: allTasks,
                 modelContext: modelContext
             )
+            // Clear the slot on normal completion so the next `send()` isn't
+            // blocked by the `streamingTask == nil` guard. Skip if a cancel
+            // started a newer turn meanwhile — the cancel drain owns that case.
+            if self.cancelGeneration == generation { self.streamingTask = nil }
         }
     }
 
@@ -193,6 +201,7 @@ final class MacAIChatService {
         isStreaming = true
         let requestMessages = Array(messages.prefix(idx))
 
+        let generation = cancelGeneration
         streamingTask = Task { [weak self] in
             guard let self else { return }
             await self.streamResponse(
@@ -201,6 +210,7 @@ final class MacAIChatService {
                 allTasks: allTasks,
                 modelContext: modelContext
             )
+            if self.cancelGeneration == generation { self.streamingTask = nil }
         }
     }
 
@@ -234,7 +244,8 @@ final class MacAIChatService {
             finaliseStream(messageID: id)
         } else {
             isStreaming = false
-            flushScheduled = false
+            pendingFlush?.cancel()
+            pendingFlush = nil
             tokenBuffer = ""
         }
         // Drain in the background so a follow-up `send()` only proceeds after
@@ -278,6 +289,12 @@ final class MacAIChatService {
 
     /// Restore a saved conversation.
     func loadConversation(_ conversation: MacChatConversation) {
+        // Persist the current in-progress chat before swapping it out (mirrors
+        // `clearHistory`) — otherwise switching history entries silently discards
+        // an unsaved live conversation.
+        if !messages.isEmpty && !isConversationSaved {
+            saveCurrentConversation()
+        }
         if isStreaming { cancelStream() }
         messages = conversation.messages.map { saved in
             MacChatMessage(
@@ -340,6 +357,36 @@ final class MacAIChatService {
             await streamLocalResponse(
                 assistantMessageID: assistantMessageID,
                 model: local,
+                requestMessages: requestMessages
+            )
+            finaliseStream(messageID: assistantMessageID)
+            return
+        }
+        // Uncurated HuggingFace MLX repo (e.g. "mlx-community/SomeNewModel-4bit")
+        // surfaced by `HuggingFaceCacheConnector`. Synthesize a LocalModel so the
+        // MLX runtime can load it directly via `LLMModelFactory.loadContainer`.
+        if selectedModel.hasPrefix("mlx-community/") && mlxInferenceService != nil {
+            let synthetic = LocalModel(
+                id: selectedModel,
+                displayName: selectedModel.split(separator: "/").last.map(String.init) ?? selectedModel,
+                family: .qwen,
+                parameters: "",
+                tagline: "",
+                description: "",
+                strengths: [],
+                runtime: .mlx,
+                mlxRepo: selectedModel,
+                ollamaTag: nil,
+                downloadSizeMB: 0,
+                ramRequiredGB: 0,
+                platforms: [.macOS],
+                supportsToolUse: false,
+                goodFor: [.chat],
+                license: ""
+            )
+            await streamLocalResponse(
+                assistantMessageID: assistantMessageID,
+                model: synthetic,
                 requestMessages: requestMessages
             )
             finaliseStream(messageID: assistantMessageID)
@@ -629,7 +676,7 @@ final class MacAIChatService {
             if Task.isCancelled {
                 return Self.encodeToolResult(success: false, message: "Cancelled")
             }
-            let dueDate = args.dueDate.flatMap { ISO8601DateFormatter().date(from: $0) }
+            let dueDate = args.dueDate.flatMap { Self.parseISODate($0) }
             let task = TaskRecord(rawInput: args.title, title: args.title)
             task.dueDate = dueDate
             if let priorityStr = args.priority {
@@ -654,7 +701,9 @@ final class MacAIChatService {
             if Task.isCancelled {
                 return Self.encodeToolResult(success: false, message: "Cancelled")
             }
-            applyUpdateTask(taskID: taskID, args: args, modelContext: modelContext)
+            guard applyUpdateTask(taskID: taskID, args: args, modelContext: modelContext) else {
+                return Self.encodeToolResult(success: false, message: "Task not found")
+            }
             appendMutation(MacTaskMutation(action: .update, taskID: taskID, title: args.title), to: assistantMessageID)
             return Self.encodeToolResult(success: true, message: "Task updated")
 
@@ -666,7 +715,9 @@ final class MacAIChatService {
             if Task.isCancelled {
                 return Self.encodeToolResult(success: false, message: "Cancelled")
             }
-            applyDeleteTask(taskID: taskID, modelContext: modelContext)
+            guard applyDeleteTask(taskID: taskID, modelContext: modelContext) else {
+                return Self.encodeToolResult(success: false, message: "Task not found")
+            }
             appendMutation(MacTaskMutation(action: .delete, taskID: taskID), to: assistantMessageID)
             return Self.encodeToolResult(success: true, message: "Task deleted")
 
@@ -674,8 +725,7 @@ final class MacAIChatService {
             guard let args = try? JSONDecoder().decode(MacCreateCalendarEventArgs.self, from: argsData) else {
                 return Self.encodeToolResult(success: false, message: "Invalid create_calendar_event arguments")
             }
-            let iso = ISO8601DateFormatter()
-            guard let startDate = iso.date(from: args.startDate) else {
+            guard let startDate = Self.parseISODate(args.startDate) else {
                 return Self.encodeToolResult(success: false, message: "Invalid startDate — expected ISO 8601")
             }
             guard let cal = calendarService, cal.canCreateEvents() else {
@@ -684,7 +734,7 @@ final class MacAIChatService {
             if Task.isCancelled {
                 return Self.encodeToolResult(success: false, message: "Cancelled")
             }
-            let endDate = args.endDate.flatMap { iso.date(from: $0) }
+            let endDate = args.endDate.flatMap { Self.parseISODate($0) }
             do {
                 try await cal.createEvent(title: args.title, startDate: startDate, endDate: endDate)
                 appendMutation(MacTaskMutation(action: .create, title: "📅 \(args.title)"), to: assistantMessageID)
@@ -700,9 +750,8 @@ final class MacAIChatService {
             guard let cal = calendarService else {
                 return Self.encodeToolResult(success: false, message: "Calendar not available")
             }
-            let iso = ISO8601DateFormatter()
-            let start = args.startDate.flatMap { iso.date(from: $0) }
-            let end = args.endDate.flatMap { iso.date(from: $0) }
+            let start = args.startDate.flatMap { Self.parseISODate($0) }
+            let end = args.endDate.flatMap { Self.parseISODate($0) }
             if Task.isCancelled {
                 return Self.encodeToolResult(success: false, message: "Cancelled")
             }
@@ -769,6 +818,22 @@ final class MacAIChatService {
         default:
             return Self.encodeToolResult(success: false, message: "Unknown tool '\(call.name)'")
         }
+    }
+
+    // Two cached parsers: the default ISO8601DateFormatter rejects fractional
+    // seconds, so an LLM emitting millisecond precision (…T10:00:00.000Z) would
+    // otherwise yield a nil due date / fail event creation *silently*. Try the
+    // fractional variant first, then plain. ISO8601DateFormatter is thread-safe.
+    private nonisolated(unsafe) static let isoFractional: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+    private nonisolated(unsafe) static let isoPlain = ISO8601DateFormatter()
+
+    /// Parses an ISO-8601 string with or without fractional seconds.
+    nonisolated static func parseISODate(_ string: String) -> Date? {
+        isoFractional.date(from: string) ?? isoPlain.date(from: string)
     }
 
     private static func encodeToolResult(success: Bool, message: String) -> String {
@@ -859,7 +924,7 @@ final class MacAIChatService {
             switch fn.name ?? "" {
             case "create_task":
                 if let args = try? JSONDecoder().decode(MacCreateTaskArgs.self, from: argsData) {
-                    let dueDate = args.dueDate.flatMap { ISO8601DateFormatter().date(from: $0) }
+                    let dueDate = args.dueDate.flatMap { Self.parseISODate($0) }
                     // Create task in SwiftData
                     let task = TaskRecord(rawInput: args.title, title: args.title)
                     task.dueDate = dueDate
@@ -924,23 +989,29 @@ final class MacAIChatService {
         }
     }
 
-    private func applyUpdateTask(taskID: UUID, args: MacUpdateTaskArgs, modelContext: ModelContext) {
+    /// Returns false when no task matches `taskID` so callers can report an
+    /// honest tool result instead of a false "Task updated".
+    @discardableResult
+    private func applyUpdateTask(taskID: UUID, args: MacUpdateTaskArgs, modelContext: ModelContext) -> Bool {
         let descriptor = FetchDescriptor<TaskRecord>(predicate: #Predicate { $0.id == taskID })
-        guard let task = (try? modelContext.fetch(descriptor))?.first else { return }
+        guard let task = (try? modelContext.fetch(descriptor))?.first else { return false }
         if let title = args.title { task.title = title }
-        if let dueDateStr = args.dueDate { task.dueDate = ISO8601DateFormatter().date(from: dueDateStr) }
+        if let dueDateStr = args.dueDate { task.dueDate = Self.parseISODate(dueDateStr) }
         if let statusStr = args.status { task.status = TaskStatus(rawValue: statusStr) ?? task.status }
         if let priorityStr = args.priority { task.priority = AppTaskPriority(rawValue: priorityStr) ?? task.priority }
         task.updatedAt = .now
         task.syncState = .pendingUpload
         try? modelContext.save()
+        return true
     }
 
-    private func applyDeleteTask(taskID: UUID, modelContext: ModelContext) {
+    @discardableResult
+    private func applyDeleteTask(taskID: UUID, modelContext: ModelContext) -> Bool {
         let descriptor = FetchDescriptor<TaskRecord>(predicate: #Predicate { $0.id == taskID })
-        guard let task = (try? modelContext.fetch(descriptor))?.first else { return }
+        guard let task = (try? modelContext.fetch(descriptor))?.first else { return false }
         modelContext.delete(task)
         try? modelContext.save()
+        return true
     }
 
     // MARK: - Voice tool execution
@@ -970,7 +1041,7 @@ final class MacAIChatService {
             guard let args = try? JSONDecoder().decode(MacCreateTaskArgs.self, from: argsData) else {
                 return Self.encodeToolResult(success: false, message: "Invalid create_task arguments")
             }
-            let dueDate = args.dueDate.flatMap { ISO8601DateFormatter().date(from: $0) }
+            let dueDate = args.dueDate.flatMap { Self.parseISODate($0) }
             let task = TaskRecord(rawInput: args.title, title: args.title)
             task.dueDate = dueDate
             if let priorityStr = args.priority {
@@ -991,7 +1062,9 @@ final class MacAIChatService {
                   let taskID = UUID(uuidString: args.id) else {
                 return Self.encodeToolResult(success: false, message: "Invalid update_task arguments")
             }
-            applyUpdateTask(taskID: taskID, args: args, modelContext: modelContext)
+            guard applyUpdateTask(taskID: taskID, args: args, modelContext: modelContext) else {
+                return Self.encodeToolResult(success: false, message: "Task not found")
+            }
             return Self.encodeToolResult(success: true, message: "Task updated")
 
         case "delete_task":
@@ -999,7 +1072,9 @@ final class MacAIChatService {
                   let taskID = UUID(uuidString: args.id) else {
                 return Self.encodeToolResult(success: false, message: "Invalid delete_task arguments")
             }
-            applyDeleteTask(taskID: taskID, modelContext: modelContext)
+            guard applyDeleteTask(taskID: taskID, modelContext: modelContext) else {
+                return Self.encodeToolResult(success: false, message: "Task not found")
+            }
             return Self.encodeToolResult(success: true, message: "Task deleted")
 
         default:
@@ -1178,7 +1253,18 @@ final class MacAIChatService {
             }
         }()
         guard let runtime else {
-            errorMessage = "Local runtime for \(model.displayName) is unavailable on this Mac."
+            // Write into the bubble (not just `errorMessage`, which only shows on
+            // the empty state) so a mid-conversation local failure isn't a blank
+            // dead-end and the retry row appears.
+            appendError("Local runtime for \(model.displayName) is unavailable on this Mac.", to: assistantMessageID)
+            return
+        }
+        // Gate on readiness BEFORE streaming. Without this, an un-downloaded MLX
+        // model would silently kick off a multi-GB HuggingFace download inside
+        // the chat turn — the bubble just sits "thinking" for minutes with no
+        // progress, indistinguishable from a hang. Tell the user where to go.
+        guard runtime.isReady(for: model) else {
+            appendError("\(model.displayName) isn't ready yet — open Settings → Local Models to download it (or start Ollama / enable Apple Intelligence), then try again.", to: assistantMessageID)
             return
         }
 
@@ -1225,9 +1311,9 @@ final class MacAIChatService {
         } catch is CancellationError {
             // User stopped the stream — keep partial output.
         } catch let err as LocalAIError {
-            errorMessage = err.errorDescription ?? "On-device generation failed."
+            appendError(err.errorDescription ?? "On-device generation failed.", to: assistantMessageID)
         } catch {
-            errorMessage = error.localizedDescription
+            appendError(error.localizedDescription, to: assistantMessageID)
         }
     }
 
@@ -1235,13 +1321,14 @@ final class MacAIChatService {
 
     private func appendToken(_ token: String, to messageID: UUID) {
         tokenBuffer += token
-        guard !flushScheduled else { return }
-        flushScheduled = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.04) { [weak self] in
+        guard pendingFlush == nil else { return }
+        let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
+            self.pendingFlush = nil
             self.flushTokenBuffer(to: messageID)
-            self.flushScheduled = false
         }
+        pendingFlush = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.04, execute: work)
     }
 
     private func flushTokenBuffer(to messageID: UUID) {
@@ -1267,7 +1354,8 @@ final class MacAIChatService {
 
     private func finaliseStream(messageID: UUID) {
         isStreaming = false
-        flushScheduled = false
+        pendingFlush?.cancel()
+        pendingFlush = nil
         if let idx = messages.firstIndex(where: { $0.id == messageID }) {
             if !tokenBuffer.isEmpty {
                 messages[idx].content += tokenBuffer
@@ -1339,6 +1427,26 @@ final class MacAIChatService {
     /// Persist to Keychain as a local cache (fast, survives reinstall)
     private static let chatHistoryKey = "com.todus.mac.ai.chatHistory"
     private static let deletedConversationIDsKey = "com.todus.mac.ai.deletedConversationIDs"
+
+    /// Wipes all chat state + on-disk caches on sign-out so the next account on
+    /// this Mac can't see the previous user's AI conversations. The history is
+    /// keyed by a static, non-user-scoped Keychain entry, so without this a new
+    /// sign-in would load the prior user's `savedConversations`.
+    func resetForSignOut() {
+        cancelStream()
+        messages.removeAll()
+        savedConversations.removeAll()
+        locallyDeletedConversationIDs.removeAll()
+        currentConversationID = nil
+        currentConversationFolderID = nil
+        chatTitle = nil
+        isConversationSaved = false
+        tokenBuffer = ""
+        // Overwrite the caches with the now-empty arrays (KeychainHelper has no
+        // delete; an empty payload is equivalent for our read path).
+        persistConversationsLocally()
+        persistDeletedConversationIDs()
+    }
 
     private func persistConversationsLocally() {
         guard let data = try? JSONEncoder().encode(savedConversations) else { return }

@@ -17,6 +17,33 @@ public final class WidgetSnapshotStore: @unchecked Sendable {
 
     private init() {}
 
+    // MARK: - Pending task completions (widget → main app)
+
+    private let pendingCompletionsKey = "pendingTaskCompletions"
+    private var appGroupDefaults: UserDefaults? { UserDefaults(suiteName: appGroupID) }
+
+    /// Queues a task id completed from a widget so the main app can apply it to
+    /// SwiftData + sync on next launch/foreground. The AppIntent extension can't
+    /// touch the main app's SwiftData store directly, so it hands off here.
+    public func addPendingCompletion(_ taskId: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let defaults = appGroupDefaults else { return }
+        var ids = defaults.stringArray(forKey: pendingCompletionsKey) ?? []
+        if !ids.contains(taskId) { ids.append(taskId) }
+        defaults.set(ids, forKey: pendingCompletionsKey)
+    }
+
+    /// Returns and clears the queued completions (called by the main app).
+    public func consumePendingCompletions() -> [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let defaults = appGroupDefaults else { return [] }
+        let ids = defaults.stringArray(forKey: pendingCompletionsKey) ?? []
+        if !ids.isEmpty { defaults.removeObject(forKey: pendingCompletionsKey) }
+        return ids
+    }
+
     /// Reads the current snapshot from the App Group container
     public func readSnapshot() -> WidgetDataStore? {
         lock.lock()

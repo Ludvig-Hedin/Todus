@@ -979,6 +979,12 @@ struct MacSearchView: View {
         calendarSearchTask?.cancel()
 
         guard !trimmedQuery.isEmpty, services.calendarService.canReadEvents() else {
+            // Query cleared (or no calendar access) — restore the initial wide
+            // window so the "Recent events" recommendations don't stay stuck on
+            // the last search's narrower result set.
+            if trimmedQuery.isEmpty, services.calendarService.canReadEvents() {
+                calendarSearchTask = Task { await loadInitialCalendarEvents() }
+            }
             return
         }
 

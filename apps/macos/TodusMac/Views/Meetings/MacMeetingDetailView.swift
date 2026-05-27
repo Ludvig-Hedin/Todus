@@ -468,7 +468,12 @@ struct MacMeetingDetailView: View {
         if showLoading {
             isLoading = true
         }
-        meeting = await services.meetingsService.getMeeting(id: meetingId)
+        // Only overwrite on a successful fetch. `getMeeting` returns nil on ANY
+        // thrown error, so a transient blip on a post-action refresh would
+        // otherwise wipe a fully-loaded detail to the "Meeting not found" state.
+        if let fresh = await services.meetingsService.getMeeting(id: meetingId) {
+            meeting = fresh
+        }
         isLoading = false
     }
 

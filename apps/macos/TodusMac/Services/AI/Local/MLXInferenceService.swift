@@ -165,6 +165,9 @@ final class MLXInferenceService: LocalAIService {
             case .info(let info):
                 promptTokens = info.promptTokenCount
                 generationTokens = info.generationTokenCount
+            case .toolCall:
+                // Local v1 doesn't surface tool calls — ignore and keep streaming.
+                continue
             @unknown default:
                 continue
             }

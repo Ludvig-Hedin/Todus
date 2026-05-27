@@ -148,8 +148,12 @@ final class MeetingsService {
             let _: SyncResponse = try await apiClient.trpcMutation("meet.syncFromCalendar")
             await loadMeetings(status: currentStatusFilter, search: currentSearchQuery)
             lastSyncedAt = Date()
+            loadError = nil
         } catch {
             logger.error("Failed to sync from calendar: \(String(describing: error), privacy: .public)")
+            // Surface the failure — previously a failed sync looked identical to
+            // "nothing new" (spinner just stopped), so the user got no feedback.
+            loadError = "Couldn't sync from calendar. Please try again."
         }
     }
 

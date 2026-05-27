@@ -1,6 +1,66 @@
 import Foundation
 import Observation
 
+/// Converts the compose editor's markdown into the HTML `mail.send` expects.
+/// The compose body is always plain text (the editor stores raw markdown and the
+/// signature block is plain), so escaping then converting is safe — there's no
+/// existing HTML to clobber. Without this the backend wraps the raw markdown as
+/// `text/html`, so recipients saw literal `**bold**` / `# heading` tokens and the
+/// whole message collapsed onto one line (HTML eats newlines). Conservative
+/// subset matching `MacMarkdownBodyEditor`: headings, bold, italic, blockquote,
+/// bullet lists, links, and line breaks. Worst case the output is still valid,
+/// escaped HTML — never worse than the raw-markdown status quo.
+enum EmailBodyHTML {
+    static func render(_ markdown: String) -> String {
+        func escape(_ s: String) -> String {
+            s.replacingOccurrences(of: "&", with: "&amp;")
+                .replacingOccurrences(of: "<", with: "&lt;")
+                .replacingOccurrences(of: ">", with: "&gt;")
+        }
+        func inlineFormat(_ s: String) -> String {
+            var t = escape(s)
+            t = t.replacingOccurrences(of: #"\*\*(.+?)\*\*"#, with: "<strong>$1</strong>", options: .regularExpression)
+            t = t.replacingOccurrences(of: #"(?<![\w*])_([^_\n]+)_(?![\w*])"#, with: "<em>$1</em>", options: .regularExpression)
+            t = t.replacingOccurrences(of: #"\[([^\]]+)\]\((https?://[^\s)]+)\)"#, with: "<a href=\"$2\">$1</a>", options: .regularExpression)
+            return t
+        }
+
+        var html = ""
+        var inList = false
+        func closeListIfNeeded() {
+            if inList { html += "</ul>"; inList = false }
+        }
+
+        for line in markdown.components(separatedBy: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("- ") || trimmed.hasPrefix("• ") {
+                if !inList { html += "<ul>"; inList = true }
+                html += "<li>\(inlineFormat(String(trimmed.dropFirst(2))))</li>"
+                continue
+            }
+            closeListIfNeeded()
+            if trimmed.isEmpty {
+                html += "<br>"
+            } else if trimmed.hasPrefix("> ") {
+                html += "<blockquote>\(inlineFormat(String(trimmed.dropFirst(2))))</blockquote>"
+            } else if trimmed.first == "#" {
+                var level = 0
+                for ch in trimmed { if ch == "#" { level += 1 } else { break } }
+                if (1...3).contains(level), trimmed.dropFirst(level).first == " " {
+                    let content = String(trimmed.dropFirst(level + 1))
+                    html += "<h\(level)>\(inlineFormat(content))</h\(level)>"
+                } else {
+                    html += "\(inlineFormat(line))<br>"
+                }
+            } else {
+                html += "\(inlineFormat(line))<br>"
+            }
+        }
+        closeListIfNeeded()
+        return html
+    }
+}
+
 /// Email service that wraps TodosAPIClient for email-specific TRPC calls.
 /// Manages inbox state, thread loading, and email actions (send, archive, read/unread).
 ///
@@ -1054,15 +1114,18 @@ final class EmailService {
             // same normalization MacDraftService applies for the compose flow.
             let normalizedConnectionId = draft.fromConnectionId?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
+            let normalizedFromEmail = draft.fromEmail?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
             let input = SendEmailInput(
                 to: draft.to.map { SendRecipient(email: $0) },
                 cc: draft.cc.isEmpty ? nil : draft.cc.map { SendRecipient(email: $0) },
                 bcc: draft.bcc.isEmpty ? nil : draft.bcc.map { SendRecipient(email: $0) },
                 subject: draft.subject,
-                message: draft.body,
+                message: EmailBodyHTML.render(draft.body),
                 threadId: draft.replyToThreadId,
                 isForward: draft.isForward ? true : nil,
-                connectionId: (normalizedConnectionId?.isEmpty ?? true) ? nil : normalizedConnectionId
+                connectionId: (normalizedConnectionId?.isEmpty ?? true) ? nil : normalizedConnectionId,
+                fromEmail: (normalizedFromEmail?.isEmpty ?? true) ? nil : normalizedFromEmail
             )
             let _: SendResponse = try await api.trpcMutation("mail.send", input: input)
             return true
@@ -1295,6 +1358,10 @@ private struct SendEmailInput: Encodable {
     /// Matches the field name `MacDraftService.SendInput` uses on the wire so both
     /// send paths stay aligned for multi-account users.
     let connectionId: String?
+    /// Email of the account to send from. This is the field `mail.send` reads to
+    /// select the sending account (`connectionId` is not in its schema), so this
+    /// is what actually routes a multi-account send.
+    let fromEmail: String?
 }
 
 private struct AssistantThreadInput: Encodable {

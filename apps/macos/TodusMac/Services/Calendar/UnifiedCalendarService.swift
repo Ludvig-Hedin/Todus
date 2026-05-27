@@ -21,7 +21,10 @@ struct UnifiedCalendarEvent: Identifiable, Sendable, Equatable {
 extension UnifiedCalendarEvent {
     var legacyCalendarEvent: CalendarEvent {
         CalendarEvent(
-            id: id,
+            // Use the raw provider id, not the composite `apple:`/`google:` id —
+            // edit/delete pass this straight to `EKEventStore.event(withIdentifier:)`,
+            // which never matches a prefixed id (every grid edit/delete 404'd).
+            id: providerEventId,
             title: title,
             startDate: startDate,
             endDate: endDate,
@@ -30,7 +33,8 @@ extension UnifiedCalendarEvent {
             calendarColorGreen: colorGreen,
             calendarColorBlue: colorBlue,
             calendarName: calendarName,
-            folderID: nil
+            folderID: nil,
+            isWritable: isWritable
         )
     }
 }
