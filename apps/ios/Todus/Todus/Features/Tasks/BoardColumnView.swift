@@ -22,7 +22,7 @@ struct BoardColumnView: View {
         VStack(alignment: .leading, spacing: 0) {
             header
                 .padding(.horizontal, 12)
-                .padding(.top, 10)
+                .padding(.top, 6)
                 .padding(.bottom, 8)
 
             ScrollView(.vertical, showsIndicators: false) {

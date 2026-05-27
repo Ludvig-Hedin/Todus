@@ -139,7 +139,8 @@ struct TaskTableView: View {
         .textCase(.uppercase)
         .foregroundStyle(AppTheme.mutedText)
         .padding(.horizontal, 14)
-        .padding(.vertical, 7)
+        .padding(.top, 4)
+        .padding(.bottom, 7)
     }
 
     // MARK: - Table Row
