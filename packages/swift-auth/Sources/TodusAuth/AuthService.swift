@@ -552,6 +552,13 @@ public final class AuthService: NSObject {
         // ref leaks until the next link/sign-in attempt overwrites it.
         defer { webAuthSession = nil }
 
+        // Proactively refresh the JWT before making the raw URLSession request.
+        // linkSocialAccount bypasses TodosAPIClient's 401-retry logic, so an expired
+        // JWT would silently 401 at native-link-social with no recovery path.
+        if isJWTExpiredOrExpiring(bearerToken) {
+            _ = await refreshAccessTokenResult()
+        }
+
         // Step 1: Get the OAuth URL from the native link bridge, passing our
         // Bearer token so the backend knows which user to link the new account to.
         let linkURL = backendURL.appending(path: "api/auth/native-link-social")

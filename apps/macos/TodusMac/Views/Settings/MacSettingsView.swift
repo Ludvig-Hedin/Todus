@@ -33,6 +33,8 @@ struct MacSettingsView: View {
     @State private var sessionsLoadError: String? = nil
     @State private var settingsError: String?
     @State private var excludedSenderPatternsText = ""
+    @State private var isConnectingGmail = false
+    @State private var connectGmailError: String?
     @State private var isConnectingReminders = false
     @State private var isOpeningBillingPortal = false
     @State private var isCancelingSubscription = false
@@ -181,10 +183,10 @@ struct MacSettingsView: View {
                 await services.subscriptionService.refresh()
             }
             .onReceive(NotificationCenter.default.publisher(for: .todusRequestConnectGmail)) { _ in
-                Task { await connectGmail() }
+                Task { await performConnectGmail() }
             }
             .onReceive(NotificationCenter.default.publisher(for: .todusRequestReconnectGmail)) { _ in
-                Task { await connectGmail() }
+                Task { await performConnectGmail() }
             }
     }
 
@@ -318,8 +320,20 @@ struct MacSettingsView: View {
             .joined(separator: "\n")
     }
 
-    private func connectGmail() async {
-        await services.emailService.connectGmail(authService: services.authService)
+    private func performConnectGmail() async {
+        guard !isConnectingGmail else { return }
+        isConnectingGmail = true
+        connectGmailError = nil
+        defer { isConnectingGmail = false }
+
+        let didConnect = await services.emailService.connectGmail(authService: services.authService)
+        await services.connectionsService.loadConnections()
+
+        if !didConnect {
+            connectGmailError = services.emailService.errorMessage
+                ?? services.authService.lastErrorMessage
+                ?? "Could not open Google sign-in. Please try again."
+        }
     }
 
     private var headerBar: some View {
@@ -806,11 +820,13 @@ struct MacSettingsView: View {
                     brandServiceRow(
                         icon: { GmailIconView(size: 26) },
                         name: "Gmail",
-                        status: "Not connected",
+                        status: isConnectingGmail ? "Connecting…" : "Not connected",
                         isConnected: false
                     ) {
-                        connectButton {
-                            Task { await services.emailService.connectGmail(authService: services.authService) }
+                        if !isConnectingGmail {
+                            connectButton {
+                                Task { await performConnectGmail() }
+                            }
                         }
                     }
                 } else {
@@ -835,23 +851,40 @@ struct MacSettingsView: View {
                     cardDivider
                     // Add another account
                     Button {
-                        Task { await services.emailService.connectGmail(authService: services.authService) }
+                        guard !isConnectingGmail else { return }
+                        Task { await performConnectGmail() }
                     } label: {
                         rowContainer {
-                            Image(systemName: "plus.circle")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(MacTheme.accent)
-                                .frame(width: 26, height: 26)
-                                .padding(.leading, 2)
-                            Text("Add Gmail account")
+                            if isConnectingGmail {
+                                ProgressView()
+                                    .scaleEffect(0.6)
+                                    .frame(width: 26, height: 26)
+                                    .padding(.leading, 2)
+                            } else {
+                                Image(systemName: "plus.circle")
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundStyle(MacTheme.accent)
+                                    .frame(width: 26, height: 26)
+                                    .padding(.leading, 2)
+                            }
+                            Text(isConnectingGmail ? "Connecting…" : "Add Gmail account")
                                 .font(.system(size: 12.5))
-                                .foregroundStyle(MacTheme.accent)
+                                .foregroundStyle(isConnectingGmail ? MacTheme.mutedText : MacTheme.accent)
                             Spacer()
                         }
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .macClickablePointer()
+                    .disabled(isConnectingGmail)
+
+                    if let connectGmailError {
+                        Text(connectGmailError)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.red.opacity(0.8))
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 2)
+                    }
                 }
 
                 cardDivider
