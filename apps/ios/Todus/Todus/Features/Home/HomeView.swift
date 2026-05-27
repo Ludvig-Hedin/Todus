@@ -26,7 +26,7 @@ struct HomeView: View {
     @Query private var allTasksIncludingCompleted: [TaskRecord]
 
     @State private var upcomingEvents: [CalendarEvent] = []
-    @State private var isLoadingEvents = false
+    @State private var isLoadingEvents = true
     @State private var hasLoadedEmailState = false
     @State private var isLoadingAssistantBriefing = false
 
@@ -1715,6 +1715,28 @@ struct HomeView: View {
         await services.emailService.checkConnection()
         hasLoadedEmailState = true
 
+        // Fire briefing concurrently right after we know hasConnection — it's a slow AI API call
+        // that shouldn't block events/email from rendering. Guard on hasConnection so we never
+        // show "Preparing your day…" when there's no email account connected.
+        let shouldLoadBriefing = services.emailService.hasConnection
+            && services.assistantAutomationPolicy.briefingEnabled
+            && services.assistantAutomationPolicy.showHomeBriefing
+        if shouldLoadBriefing {
+            let hasCached = services.emailService.assistantBriefing != nil
+            if !hasCached { isLoadingAssistantBriefing = true }
+            Task {
+                _ = await services.emailService.loadAssistantBriefing()
+                isLoadingAssistantBriefing = false
+            }
+            if !hasCached {
+                // Safety timeout — clears spinner after 8s even if the API never responds
+                Task {
+                    try? await Task.sleep(nanoseconds: 8_000_000_000)
+                    isLoadingAssistantBriefing = false
+                }
+            }
+        }
+
         if services.emailService.hasConnection {
             await services.emailService.ensureInitialInboxLoaded()
         }
@@ -1729,13 +1751,6 @@ struct HomeView: View {
            services.assistantAutomationPolicy.assistantThreadActionsVisible,
            services.assistantAutomationPolicy.briefingEnabled {
             await services.emailService.loadAssistantNudges()
-        }
-
-        if services.assistantAutomationPolicy.briefingEnabled
-            && services.assistantAutomationPolicy.showHomeBriefing {
-            isLoadingAssistantBriefing = true
-            _ = await services.emailService.loadAssistantBriefing()
-            isLoadingAssistantBriefing = false
         }
     }
 }
