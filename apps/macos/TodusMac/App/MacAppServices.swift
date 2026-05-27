@@ -391,6 +391,13 @@ final class MacAppServices {
         self.aiChatService.customInstructions = customInstructions
         self.remindersSyncState.isEnabled = self.remindersSyncEnabled
         self.remindersSyncState.direction = self.remindersSyncDirection
+
+        // Hydrate the avatar URL cache off-main so the first inbox row body
+        // evaluation doesn't synchronously decode up to 5000 JSON entries.
+        // Without this, avatars on cold start stall behind the disk read and
+        // every row paints initials → real avatar instead of going straight to
+        // the cached URL.
+        Task { @MainActor in await MacAvatarCache.shared.bootstrap() }
     }
 
     /// Reflect the current `voiceAssistantEnabled` / `voiceWakeWordEnabled`

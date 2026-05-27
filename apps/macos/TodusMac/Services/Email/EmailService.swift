@@ -63,6 +63,16 @@ final class EmailService {
     private static let rewatchCooldown: TimeInterval = 6 * 60 * 60
     private static let rewatchStaleThreshold: TimeInterval = 24 * 60 * 60
 
+    /// In-memory thread detail cache. Populated during inbox enrichment (every
+    /// `mail.get` response is stashed) AND on explicit thread open. Lets
+    /// `MacEmailThreadView` paint instantly on second open and on first open
+    /// when the row was prefetched during inbox load — matches iOS behavior.
+    private var threadDetailCache: [String: (detail: EmailThreadDetail, at: Date)] = [:]
+    /// Tracks in-flight detail fetches so a prefetch + user tap on the same id
+    /// don't fire two backend round-trips.
+    private var inflightDetailFetches: [String: Task<EmailThreadDetail?, Never>] = [:]
+    private static let threadDetailTTL: TimeInterval = 60 * 5   // 5 min
+
     // MARK: - Init
 
     init(api: TodosAPIClient) {
@@ -94,6 +104,9 @@ final class EmailService {
         lastConnectionCheckAt = nil
         lastForceSyncAt = nil
         lastRewatchAt = nil
+        threadDetailCache.removeAll()
+        for (_, task) in inflightDetailFetches { task.cancel() }
+        inflightDetailFetches.removeAll()
     }
 
     /// Asks the backend to re-arm the Gmail PubSub watch + push subscription for the
@@ -440,6 +453,15 @@ final class EmailService {
                 threads = mergedThreads
                 nextPageToken = response.nextPageToken
             }
+            // Pre-warm avatar URL cache for the threads we just received so the
+            // rows render with the real avatar on first paint instead of
+            // flashing initials → avatar.
+            prewarmAvatars(for: enrichedThreads)
+            // The inbox enrichment already populated `threadDetailCache` for
+            // every thread it could load (via `assembleThreads`), so explicit
+            // prefetch is only useful for the per-thread concurrent fallback
+            // path. Still cheap — dedupe filters out anything already cached.
+            prefetchThreadDetails(ids: enrichedThreads.map(\.id))
             if query == nil {
                 await loadAssistantNudges(folder: folder)
             }
@@ -479,9 +501,12 @@ final class EmailService {
     private func assembleThreads(ids: [String], results: [Result<GetThreadResponse, Error>]) -> [EmailThread] {
         var threads: [EmailThread] = []
         threads.reserveCapacity(ids.count)
+        let now = Date()
         for (i, result) in results.enumerated() {
             switch result {
             case .success(let detail):
+                // Stash full detail so opening the thread is zero-latency.
+                threadDetailCache[ids[i]] = (detail, now)
                 guard let latest = detail.latest ?? detail.messages.last else { continue }
                 threads.append(EmailThread(
                     id: ids[i],
@@ -536,6 +561,9 @@ final class EmailService {
             let input = GetThreadInput(id: id)
             let detail: GetThreadResponse = try await api.trpcQuery("mail.get", input: input)
 
+            // Stash full detail so opening the thread is zero-latency.
+            threadDetailCache[id] = (detail, Date())
+
             // Use the latest non-draft message for the thread summary
             guard let latest = detail.latest ?? detail.messages.last else {
                 return (index, nil)
@@ -558,21 +586,114 @@ final class EmailService {
         }
     }
 
-    /// Fetches a single thread with all messages.
+    /// Returns a cached thread detail when present and fresh enough. Lets
+    /// `MacEmailThreadView` paint instantly on second open without waiting on
+    /// the `mail.get` round-trip.
+    func cachedThreadDetail(id: String) -> EmailThreadDetail? {
+        guard let entry = threadDetailCache[id] else { return nil }
+        if Date().timeIntervalSince(entry.at) > Self.threadDetailTTL {
+            threadDetailCache.removeValue(forKey: id)
+            return nil
+        }
+        return entry.detail
+    }
+
+    /// Fetches a single thread with all messages. Cache-first: a fresh hit
+    /// returns immediately and kicks a silent background refresh so the cached
+    /// copy self-heals if it grew stale during a long-open thread session.
     func loadThread(id: String) async -> EmailThreadDetail? {
+        if let cached = cachedThreadDetail(id: id) {
+            // Self-heal in background so a slightly-stale entry doesn't linger
+            // across a long thread view session. Errors swallowed; the cached
+            // view stays on screen.
+            Task { [weak self] in _ = await self?.fetchThreadDetail(id: id, updateLoadingState: false) }
+            return cached
+        }
+
         isLoadingThread = true
         errorMessage = nil
-
         defer { isLoadingThread = false }
 
-        do {
-            let input = GetThreadInput(id: id)
-            let response: GetThreadResponse = try await api.trpcQuery("mail.get", input: input)
-            return response
-        } catch {
-            AppLogger.shared.log("[EmailService] loadThread(\(id)) failed: \(error)")
-            errorMessage = Self.friendlyThreadLoadMessage(for: error)
-            return nil
+        return await fetchThreadDetail(id: id, updateLoadingState: true)
+    }
+
+    /// Warms the in-memory cache for the first N inbox threads so user clicks
+    /// land on pre-fetched data. Fire-and-forget; failures are silently
+    /// ignored. Called after a successful `loadThreads` for the inbox.
+    func prefetchThreadDetails(ids: [String], limit: Int = 8) {
+        let toFetch = ids
+            .prefix(limit)
+            .filter { cachedThreadDetail(id: $0) == nil && inflightDetailFetches[$0] == nil }
+        for id in toFetch {
+            Task { [weak self] in _ = await self?.fetchThreadDetail(id: id, updateLoadingState: false) }
+        }
+    }
+
+    /// Shared fetch path used by both `loadThread` and prefetch. Dedupes
+    /// concurrent fetches of the same id so a prefetch and a user-driven open
+    /// don't fire two API calls. 20s watchdog so a hung backend cannot keep
+    /// the thread spinner alive past a sane ceiling.
+    @discardableResult
+    private func fetchThreadDetail(id: String, updateLoadingState: Bool) async -> EmailThreadDetail? {
+        if let existing = inflightDetailFetches[id] {
+            return await existing.value
+        }
+
+        let task = Task<EmailThreadDetail?, Never> { [weak self] in
+            guard let self else { return nil }
+            let fetchTask = Task { () -> GetThreadResponse in
+                let input = GetThreadInput(id: id)
+                return try await self.api.trpcQuery("mail.get", input: input)
+            }
+            let watchdog = Task { [fetchTask] in
+                try? await Task.sleep(nanoseconds: 20 * 1_000_000_000)
+                fetchTask.cancel()
+            }
+            defer { watchdog.cancel() }
+
+            do {
+                let detail = try await fetchTask.value
+                self.threadDetailCache[id] = (detail, Date())
+                return detail
+            } catch is CancellationError {
+                AppLogger.shared.log("[EmailService] loadThread(\(id)) cancelled — likely 20s watchdog timeout")
+                if updateLoadingState {
+                    self.errorMessage = "Thread is taking too long to load. Try again."
+                }
+                return nil
+            } catch let urlError as URLError where urlError.code == .cancelled {
+                AppLogger.shared.log("[EmailService] loadThread(\(id)) URLSession cancelled by watchdog")
+                if updateLoadingState {
+                    self.errorMessage = "Thread is taking too long to load. Try again."
+                }
+                return nil
+            } catch {
+                AppLogger.shared.log("[EmailService] loadThread(\(id)) failed: \(error)")
+                if updateLoadingState {
+                    self.errorMessage = Self.friendlyThreadLoadMessage(for: error)
+                }
+                return nil
+            }
+        }
+        inflightDetailFetches[id] = task
+        let result = await task.value
+        inflightDetailFetches.removeValue(forKey: id)
+        return result
+    }
+
+    /// Pre-warms the avatar cache for a slice of inbox threads. Fire-and-
+    /// forget. Mirrors iOS so rows render with the real avatar on first paint
+    /// instead of flashing initials → avatar.
+    func prewarmAvatars(for threads: [EmailThread], limit: Int = 50) {
+        let slice = Array(threads.prefix(limit))
+        Task { @MainActor in
+            for thread in slice {
+                await MacAvatarCache.shared.resolveIfNeeded(
+                    email: thread.from.email,
+                    name: thread.from.name,
+                    api: api
+                )
+            }
         }
     }
 
@@ -972,6 +1093,33 @@ final class EmailService {
         cachedThreadsByFolder[currentFolder] = cache
     }
 
+    /// Optimistically toggle the STARRED label per thread so the star UI flips
+    /// immediately (the row reads `labels.contains("STARRED")`).
+    private func applyStarState(ids: [String]) {
+        let mutate: (EmailThread) -> EmailThread = { t in
+            var labels = t.labels
+            if labels.contains("STARRED") {
+                labels.removeAll { $0 == "STARRED" }
+            } else {
+                labels.append("STARRED")
+            }
+            return EmailThread(
+                id: t.id, subject: t.subject,
+                snippet: t.snippet, from: t.from,
+                date: t.date, unread: t.unread,
+                messageCount: t.messageCount, labels: labels
+            )
+        }
+        for i in threads.indices where ids.contains(threads[i].id) {
+            threads[i] = mutate(threads[i])
+        }
+        var cache = cachedThreadsByFolder[currentFolder] ?? []
+        for i in cache.indices where ids.contains(cache[i].id) {
+            cache[i] = mutate(cache[i])
+        }
+        cachedThreadsByFolder[currentFolder] = cache
+    }
+
     func markAsRead(ids: [String]) async {
         // Optimistic apply, rollback on failure.
         let snapshot = threads.filter { ids.contains($0.id) }
@@ -1062,9 +1210,23 @@ final class EmailService {
     }
 
     func toggleStar(ids: [String]) async {
+        // Optimistic apply, rollback on failure — previously the star only
+        // changed after a full refresh, so the action looked like a no-op.
+        let snapshot = threads.filter { ids.contains($0.id) }
+        applyStarState(ids: ids)
         do {
             let _: SuccessResponse = try await api.trpcMutation("mail.toggleStar", input: IdsInput(ids: ids))
         } catch {
+            for s in snapshot {
+                if let i = threads.firstIndex(where: { $0.id == s.id }) {
+                    threads[i] = s
+                }
+                if var cache = cachedThreadsByFolder[currentFolder],
+                   let j = cache.firstIndex(where: { $0.id == s.id }) {
+                    cache[j] = s
+                    cachedThreadsByFolder[currentFolder] = cache
+                }
+            }
             errorMessage = "Could not update star. Please try again."
             AppLogger.shared.log("[EmailService] toggleStar error: \(error)")
         }

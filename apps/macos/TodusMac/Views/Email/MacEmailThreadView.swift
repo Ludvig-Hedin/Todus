@@ -113,21 +113,44 @@ struct MacEmailThreadView: View {
             header
             Divider().opacity(0.3)
 
-            if isLoading {
-                Spacer()
-                ProgressView().controlSize(.regular)
-                Spacer()
-            } else if let error = errorMessage {
-                Spacer()
+            if isLoading && detail == nil {
+                // Centered inside a max-height frame so the transition from
+                // spinner → loaded content doesn't shove the surrounding chrome
+                // around. Using `controlSize(.small)` + secondary tint matches
+                // the iOS thread loader so a brief spinner reads as a hint, not
+                // a full-screen wait.
                 VStack(spacing: MacTheme.spacing8) {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(.secondary)
+                    Text("Loading…")
+                        .font(MacTheme.cardSubtitleFont())
+                        .foregroundStyle(MacTheme.textSecondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let error = errorMessage, detail == nil {
+                VStack(spacing: MacTheme.spacing12) {
                     Image(systemName: "exclamationmark.triangle")
                         .font(.system(size: 24, weight: .light))
                         .foregroundStyle(MacTheme.mutedText)
                     Text(error)
                         .font(MacTheme.cardSubtitleFont())
                         .foregroundStyle(MacTheme.textSecondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 320)
+                    Button {
+                        errorMessage = nil
+                        isLoading = true
+                        Task { await loadThread() }
+                    } label: {
+                        Text("Try Again")
+                            .font(.system(size: 13, weight: .medium))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(MacTheme.accent)
+                    .padding(.top, 2)
                 }
-                Spacer()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let detail {
                 // Single scrollable area — the outer ScrollView handles all scrolling.
                 // Messages use PassthroughWKWebView which forwards scroll events upward
@@ -759,7 +782,18 @@ struct MacEmailThreadView: View {
     // MARK: - Data Loading
 
     private func loadThread() async {
-        isLoading = true
+        // Cache hit → paint instantly, skip the spinner. The async loadThread
+        // below still runs and silently refreshes in the background so a stale
+        // entry self-heals. Same pattern as the iOS thread view.
+        if let cached = services.emailService.cachedThreadDetail(id: threadId), detail == nil {
+            detail = cached
+            isLoading = false
+            errorMessage = nil
+            recomputeFallbackChips(from: cached)
+        } else if detail == nil {
+            isLoading = true
+            errorMessage = nil
+        }
         isLoadingAssistant = true
 
         async let threadDetail = services.emailService.loadThread(id: threadId)
@@ -768,8 +802,16 @@ struct MacEmailThreadView: View {
         // Show the email body as soon as the thread arrives, even if the assistant
         // call is still pending. Previously we waited for both, doubling the perceived
         // load time when the assistant call was the slower of the two.
-        detail = await threadDetail
-        if detail == nil { errorMessage = "Could not load thread." }
+        let resolved = await threadDetail
+        if let resolved {
+            detail = resolved
+            errorMessage = nil
+        } else if detail == nil {
+            // Prefer the friendlier message the service already computed
+            // (translates auth / 404 / timeout / offline into copy a user can
+            // act on) instead of the generic "Could not load thread." fallback.
+            errorMessage = services.emailService.errorMessage ?? "Could not load thread."
+        }
         isLoading = false
 
         // Compute client-side fallbacks (verification code / tracking) as

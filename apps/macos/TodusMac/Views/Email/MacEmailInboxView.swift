@@ -173,6 +173,13 @@ struct MacEmailInboxView: View {
             Task { await services.emailService.loadThreads(folder: folder, refresh: true) }
         }
         .onChange(of: services.emailService.threads) { recomputeFiltered() }
+        .onChange(of: folder) {
+            // The inbox view is reused across folder switches (no .id(folder)),
+            // so clear the open-thread selection — otherwise the detail pane keeps
+            // showing the previous folder's thread next to the new folder's list.
+            selectedThreadId = nil
+            selectedSenderEmail = nil
+        }
         .onChange(of: searchText) {
             recomputeFiltered()
             debounceServerSearch()
@@ -1044,21 +1051,31 @@ private struct MacAvatarResponse: Decodable {
 /// Why persistent: avatar URL resolution is expensive (backend API + favicon HEAD requests).
 /// Without persistence, every cold start re-resolves every sender. With it, we hit zero
 /// network on cold start for senders we've seen before.
+///
+/// PERFORMANCE NOTE (mirrors iOS): Only `resolvedURLs` is observable. `lastSuccessful`,
+/// `resolvedAt`, `inFlight`, and `saveTask` are `@ObservationIgnored` so the per-row
+/// `recordSuccess(...)` write fired from `AsyncImage.onAppear` does NOT invalidate every
+/// email row that previously read `candidates(for:)`. Before this change every scroll-
+/// induced image success caused a full inbox re-render cascade — a measured main-thread
+/// hang source on macOS. Disk I/O is dispatched to a background queue so JSON encode/
+/// decode never blocks the UI.
 @MainActor
 @Observable
 final class MacAvatarCache {
     static let shared = MacAvatarCache()
 
     /// email → ordered list of image URLs to try, best source first.
+    /// The only property that SHOULD invalidate views — new sender resolved →
+    /// row picks up URL.
     var resolvedURLs: [String: [URL]] = [:]
 
     /// email → URL that successfully rendered last time. Tried first on next render.
-    private var lastSuccessful: [String: URL] = [:]
+    @ObservationIgnored private var lastSuccessful: [String: URL] = [:]
 
     /// email → when this entry was resolved. Used to apply TTL.
-    private var resolvedAt: [String: Date] = [:]
+    @ObservationIgnored private var resolvedAt: [String: Date] = [:]
 
-    private var inFlight: Set<String> = []
+    @ObservationIgnored private var inFlight: Set<String> = []
 
     /// Successful resolutions stick around for 30 days.
     private static let successTTL: TimeInterval = 60 * 60 * 24 * 30
@@ -1069,9 +1086,18 @@ final class MacAvatarCache {
 
     private static let maxEntries = 5000
 
-    private var saveTask: Task<Void, Never>?
+    @ObservationIgnored private var saveTask: Task<Void, Never>?
+    @ObservationIgnored private var dirty = false
+    @ObservationIgnored private var didBootstrap = false
 
-    private static let cacheFileURL: URL? = {
+    /// Serial background queue for all disk I/O. JSON encode/decode and atomic
+    /// file writes run here, never on the main thread. Mirrors the iOS impl.
+    nonisolated private static let diskQueue = DispatchQueue(
+        label: "com.todus.macAvatarCache.disk",
+        qos: .utility
+    )
+
+    nonisolated private static let cacheFileURL: URL? = {
         guard let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else {
             return nil
         }
@@ -1079,7 +1105,11 @@ final class MacAvatarCache {
     }()
 
     private init() {
-        loadFromDisk()
+        // Disk hydration is deferred to `bootstrap()` — calling `loadFromDisk`
+        // here synchronously decodes up to 5000 JSON entries on first access of
+        // `MacAvatarCache.shared` (which happens during the first inbox row body
+        // evaluation). That's a visible hang. `bootstrap()` is called from
+        // `MacAppServices.init` so hydration happens once, off-main.
     }
 
     // MARK: - Public API
@@ -1292,47 +1322,70 @@ final class MacAvatarCache {
 
     // MARK: - Persistence
 
-    private struct PersistedShape: Codable {
+    /// `Sendable` so the snapshot can cross from the main actor to `diskQueue` without
+    /// touching the live mutable dicts on the actor.
+    fileprivate struct PersistedShape: Codable, Sendable {
         let resolvedURLs: [String: [URL]]
         let lastSuccessful: [String: URL]
         let resolvedAt: [String: Date]
     }
 
-    private func loadFromDisk() {
-        guard let url = Self.cacheFileURL,
-              let data = try? Data(contentsOf: url),
-              let decoded = try? JSONDecoder().decode(PersistedShape.self, from: data) else {
-            return
+    /// Hydrate the in-memory cache from disk. Decodes the persisted blob off
+    /// the main thread, then publishes a single mutation to `resolvedURLs` so
+    /// SwiftUI sees one invalidation instead of N. Idempotent — second call is
+    /// a no-op. Called from `MacAppServices.init`.
+    func bootstrap() async {
+        guard !didBootstrap else { return }
+        didBootstrap = true
+
+        let snapshot = await withCheckedContinuation { (cont: CheckedContinuation<PersistedShape?, Never>) in
+            Self.diskQueue.async {
+                cont.resume(returning: Self.readFromDisk())
+            }
         }
+
+        guard let snapshot else { return }
 
         let now = Date()
         var validURLs: [String: [URL]] = [:]
         var validAt: [String: Date] = [:]
-        for (email, when) in decoded.resolvedAt {
-            let urls = decoded.resolvedURLs[email] ?? []
+        for (email, when) in snapshot.resolvedAt {
+            let urls = snapshot.resolvedURLs[email] ?? []
             let ttl = urls.isEmpty ? Self.emptyTTL : Self.successTTL
             if now.timeIntervalSince(when) < ttl {
                 validURLs[email] = urls
                 validAt[email] = when
             }
         }
-        self.resolvedURLs = validURLs
-        self.resolvedAt = validAt
-        self.lastSuccessful = decoded.lastSuccessful.filter { validURLs[$0.key] != nil }
+
+        // Single observable write so SwiftUI rerenders only once for the whole hydration.
+        resolvedURLs = validURLs
+        resolvedAt = validAt
+        lastSuccessful = snapshot.lastSuccessful.filter { validURLs[$0.key] != nil }
     }
 
     private func scheduleSave() {
-        saveTask?.cancel()
+        dirty = true
+        // Reuse the in-flight debounce window instead of cancelling +
+        // reallocating — a busy inbox refresh fires `scheduleSave()` ~100 times
+        // per second and the cancel-and-recreate pattern produced unbounded
+        // Task churn on the main actor.
+        guard saveTask == nil else { return }
         saveTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(1))
-            guard !Task.isCancelled, let self else { return }
-            self.persistToDisk()
+            guard let self, !Task.isCancelled else { return }
+            self.saveTask = nil
+            guard self.dirty else { return }
+            self.dirty = false
+            self.persistOffMain()
         }
     }
 
-    private func persistToDisk() {
-        guard let fileURL = Self.cacheFileURL else { return }
-
+    /// Capture an in-memory snapshot on main, hand it off to `diskQueue` for
+    /// the expensive JSON encode + atomic write. The trim step mutates the
+    /// live dicts (so the cap is enforced) but only does cheap dictionary work
+    /// on main.
+    private func persistOffMain() {
         if resolvedURLs.count > Self.maxEntries {
             let sorted = resolvedAt.sorted { $0.value < $1.value }
             let toDrop = sorted.prefix(resolvedURLs.count - Self.maxEntries)
@@ -1348,7 +1401,21 @@ final class MacAvatarCache {
             lastSuccessful: lastSuccessful,
             resolvedAt: resolvedAt
         )
-        guard let data = try? JSONEncoder().encode(snapshot) else { return }
+        Self.diskQueue.async {
+            Self.writeToDisk(snapshot)
+        }
+    }
+
+    /// Background-queue helpers. Both run off the main thread.
+    nonisolated private static func readFromDisk() -> PersistedShape? {
+        guard let url = Self.cacheFileURL,
+              let data = try? Data(contentsOf: url) else { return nil }
+        return try? JSONDecoder().decode(PersistedShape.self, from: data)
+    }
+
+    nonisolated private static func writeToDisk(_ snapshot: PersistedShape) {
+        guard let fileURL = Self.cacheFileURL,
+              let data = try? JSONEncoder().encode(snapshot) else { return }
         try? data.write(to: fileURL, options: [.atomic])
     }
 }
