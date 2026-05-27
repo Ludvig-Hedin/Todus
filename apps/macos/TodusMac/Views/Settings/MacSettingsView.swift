@@ -485,7 +485,7 @@ struct MacSettingsView: View {
                                     if activeSession.isCurrent ?? false {
                                         Text("This device")
                                             .font(.system(size: 9.5, weight: .semibold))
-                                            .foregroundStyle(.white)
+                                            .foregroundStyle(MacTheme.primaryButtonForeground)
                                             .padding(.horizontal, 5)
                                             .padding(.vertical, 2)
                                             .background(MacTheme.accent.opacity(0.85), in: Capsule())
@@ -1469,7 +1469,7 @@ struct MacSettingsView: View {
     private static let billingPlanIncludes: [MacSubscriptionService.Plan: [String]] = [
         .free: [
             "1 email connection",
-            "7.5 credits / month of AI chat",
+            "75 credits / month of AI chat",
             "Basic AI email assistance",
         ],
         .pro: [
@@ -1586,20 +1586,17 @@ struct MacSettingsView: View {
                     HStack(alignment: .lastTextBaseline) {
                         VStack(alignment: .leading, spacing: 1) {
                             HStack(alignment: .firstTextBaseline, spacing: 5) {
-                                Text(sub.aiUsageUnlimited ? "Unlimited" : formatCredits(sub.aiUsageRemaining))
+                                Text(sub.aiUsageUnlimited ? "Unlimited" : "\(billingPercentRemaining)%")
                                     .font(.system(size: 28, weight: .semibold).monospacedDigit())
                                     .foregroundStyle(MacTheme.textPrimary)
-                                Text(sub.aiUsageUnlimited
-                                     ? "AI credits"
-                                     : "of \(formatCredits(sub.aiUsageLimit))")
+                                Text(sub.aiUsageUnlimited ? "AI credits" : "remaining")
                                     .font(.system(size: 11))
                                     .foregroundStyle(MacTheme.textSecondary)
-                                    .monospacedDigit()
                             }
                             Text(sub.aiUsageUnlimited
                                  ? "Unlimited AI usage on this plan"
                                  : sub.aiUsageLimit > 0
-                                 ? "\(billingPercentRemaining)% remaining this period"
+                                 ? "Used \(formatCredits(sub.aiUsageUsed)) of \(formatCredits(sub.aiUsageLimit)) credits"
                                  : "No credits on this plan")
                                 .font(.system(size: 10.5))
                                 .foregroundStyle(MacTheme.textSecondary)

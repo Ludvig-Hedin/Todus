@@ -96,10 +96,8 @@ struct SettingsView: View {
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button("Done") {
-                            Task { @MainActor in
-                                await services.saveSharedAIProfile()
-                                dismiss()
-                            }
+                            dismiss()
+                            Task { await services.saveSharedAIProfile() }
                         }
                         .fontWeight(.semibold)
                     }
@@ -515,7 +513,7 @@ struct SettingsView: View {
                             } label: {
                                 Text(isConnectingGmail ? "Connecting…" : "Connect")
                                     .font(.system(size: 13, weight: .semibold))
-                                    .foregroundStyle(.white)
+                                    .foregroundStyle(AppTheme.primaryButtonForeground)
                                     .padding(.horizontal, 12)
                                     .padding(.vertical, 6)
                                     .background(Color.accentColor, in: Capsule())
@@ -600,7 +598,7 @@ struct SettingsView: View {
                     } label: {
                         Text(isConnectingCalendar ? "Connecting…" : "Connect")
                             .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(AppTheme.primaryButtonForeground)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 6)
                             .background(Color.accentColor, in: Capsule())
@@ -652,7 +650,7 @@ struct SettingsView: View {
                         } label: {
                             Text(isConnectingReminders ? "Connecting…" : "Connect")
                                 .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(AppTheme.primaryButtonForeground)
                                 .padding(.horizontal, 12)
                                 .padding(.vertical, 6)
                                 .background(Color.accentColor, in: Capsule())

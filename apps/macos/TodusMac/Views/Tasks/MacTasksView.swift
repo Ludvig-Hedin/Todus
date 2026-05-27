@@ -371,11 +371,12 @@ struct MacTasksView: View {
                             .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
                         Text(mode.shortTitle)
                             .font(.system(size: 11, weight: isSelected ? .semibold : .regular))
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
                     }
                     .foregroundStyle(isSelected ? MacTheme.textPrimary : MacTheme.mutedText)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
-                    .frame(minWidth: 64)
                     .background {
                         if isSelected {
                             Capsule(style: .continuous)
@@ -842,7 +843,7 @@ struct MacTasksView: View {
                     Text(searchText.isEmpty ? "Add Task" : "Clear search")
                         .font(.system(size: 12, weight: .semibold))
                 }
-                .foregroundStyle(.white)
+                .foregroundStyle(MacTheme.primaryButtonForeground)
                 .padding(.horizontal, MacTheme.spacing16)
                 .padding(.vertical, MacTheme.spacing8)
                 .background(MacTheme.accent, in: Capsule(style: .continuous))

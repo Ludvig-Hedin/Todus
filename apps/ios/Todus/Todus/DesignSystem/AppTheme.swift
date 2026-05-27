@@ -161,6 +161,11 @@ enum AppTheme {
     /// Tint for tab bar, badges, and chrome that should read as primary content — not system blue.
     static let accentBlue = Color.primary
 
+    /// Foreground for pill/circle buttons whose background is `AppTheme.accent` / `Color.primary`.
+    /// Inverts with appearance: light mode → accent is near-black → white foreground;
+    /// dark mode → accent resolves to white → dark foreground (prevents white-on-white).
+    static let primaryButtonForeground = Color(UIColor.systemBackground)
+
     /// `Toggle` / `UISwitch` on-state — system blue so the track is visible in light and dark mode.
     /// Never use `.tint(.primary)` on switches; it can render as white-on-white in dark mode.
     static let switchTint = Color(UIColor.systemBlue)
@@ -660,7 +665,7 @@ struct AppPrimaryButtonStyle: ButtonStyle {
             if #available(iOS 26.0, *) {
                 configuration.label
                     .interactiveHitTarget(expansion: 6)
-                    .foregroundStyle(Color.white.opacity(configuration.isPressed ? 0.85 : 1))
+                    .foregroundStyle(AppTheme.primaryButtonForeground.opacity(configuration.isPressed ? 0.85 : 1))
                     .glassEffect(
                         .regular.tint(Color.accentColor.opacity(configuration.isPressed ? 0.72 : 0.88)),
                         in: Capsule()
@@ -668,7 +673,7 @@ struct AppPrimaryButtonStyle: ButtonStyle {
             } else {
                 configuration.label
                     .interactiveHitTarget(expansion: 6)
-                    .foregroundStyle(Color.white.opacity(configuration.isPressed ? 0.9 : 1))
+                    .foregroundStyle(AppTheme.primaryButtonForeground.opacity(configuration.isPressed ? 0.9 : 1))
                     .background(
                         Capsule()
                             .fill(Color.accentColor.opacity(configuration.isPressed ? 0.82 : 1.0))

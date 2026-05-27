@@ -52,6 +52,8 @@ struct MacCalendarView: View {
     @State private var isMovingEvent = false
     /// Measured width of the week view container — used for rubber-band and snap thresholds.
     @State private var weekViewWidth: CGFloat = 400
+    /// Day-keyed event lookup for month view — avoids O(N) filter per cell during scroll.
+    @State private var cachedEventsByDay: [String: [CalendarEvent]] = [:]
 
     /// Re-binds the trackpad / pinch handler when mode or focus date changes.
     private var trackpadActionSyncKey: String {
@@ -209,7 +211,7 @@ struct MacCalendarView: View {
                 } label: {
                     Text("Grant Access")
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(MacTheme.primaryButtonForeground)
                         .padding(.horizontal, 20)
                         .padding(.vertical, 9)
                         .background(MacTheme.accent, in: Capsule(style: .continuous))
@@ -250,7 +252,7 @@ struct MacCalendarView: View {
             } label: {
                 Text("Reconnect Google")
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(MacTheme.primaryButtonForeground)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 5)
                     .background(MacTheme.accent, in: Capsule(style: .continuous))
@@ -1055,8 +1057,7 @@ struct MacCalendarView: View {
     private func monthDayCell(_ date: Date, rowHeight: CGFloat, isMuted: Bool = false) -> some View {
         let cal = Calendar.current
         let isToday = cal.isDateInToday(date)
-        let dayEvents = events.filter { cal.isDate($0.startDate, inSameDayAs: date) }
-            .sorted { $0.startDate < $1.startDate }
+        let dayEvents = cachedEventsByDay[monthDayKey(date)] ?? []
 
         return VStack(alignment: .leading, spacing: 2) {
             // Day number — top-right aligned like Apple Calendar
@@ -1432,7 +1433,25 @@ struct MacCalendarView: View {
             preferences: services.calendarPreferences
         )
         events = unified.map { $0.legacyCalendarEvent }
+        rebuildEventCache()
         isLoading = false
+    }
+
+    private func monthDayKey(_ date: Date) -> String {
+        let c = Calendar.current.dateComponents([.year, .month, .day], from: date)
+        return "\(c.year ?? 0)-\(c.month ?? 0)-\(c.day ?? 0)"
+    }
+
+    private func rebuildEventCache() {
+        var dict: [String: [CalendarEvent]] = [:]
+        for event in events {
+            let key = monthDayKey(event.startDate)
+            dict[key, default: []].append(event)
+        }
+        for key in dict.keys {
+            dict[key]?.sort { $0.startDate < $1.startDate }
+        }
+        cachedEventsByDay = dict
     }
 
     private func moveEvent(_ event: CalendarEvent, to folderID: UUID?) {

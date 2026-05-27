@@ -20,11 +20,13 @@ enum MacTheme {
 
     // MARK: - Settings layout tokens
     /// Section gap inside the Settings window — matches the breathing room of iOS insetGrouped lists.
-    static let settingsSectionSpacing: CGFloat = 28
+    static let settingsSectionSpacing: CGFloat = 32
     /// Vertical padding inside a Settings row.
-    static let settingsRowVerticalPadding: CGFloat = 11
+    static let settingsRowVerticalPadding: CGFloat = 13
     /// Horizontal padding inside a Settings row.
     static let settingsRowHorizontalPadding: CGFloat = 14
+    /// Spacing between visual sub-groups within a section (e.g. AI permission sub-headers).
+    static let settingsSubgroupSpacing: CGFloat = 16
     /// Adaptive background for TextField / TextEditor inside Settings — legible in both light and dark mode.
     static let inputBackground = Color(light: Color.black.opacity(0.04), dark: Color.white.opacity(0.05))
 
@@ -74,6 +76,11 @@ enum MacTheme {
     /// so this getter always matches it.
     static var accent: Color { .accentColor }
 
+    /// Foreground for pill/circle buttons whose background is `MacTheme.accent` / `Color.primary`.
+    /// Root uses `.tint(Color.primary)` → dark mode accent = white → white-on-white without this.
+    /// `Color(light: .white, dark: Color(white: 0.08))` stays legible on white pill in dark mode.
+    static let primaryButtonForeground = Color(light: .white, dark: Color(white: 0.08))
+
     /// Badge / count background
     static let badgeSurface = Color(light: Color(white: 0.88), dark: Color(white: 0.18))
 
@@ -84,12 +91,21 @@ enum MacTheme {
     /// Empty state / onboarding card background
     static let emptyStateSurface = Color(light: Color(white: 0.93), dark: Color(white: 0.125))
 
+    /// Sheet / modal surface — lifted between `contentBackground` and `surfaceCard`.
+    /// Mirrors iOS `AppTheme.sheetBackground` for cross-platform parity on modal chrome.
+    static let sheetBackground = Color(light: Color(white: 0.978), dark: Color(white: 0.135))
+
+    /// Secondary surface — for badges, recessed elements within a surface.
+    /// Mirrors iOS `AppTheme.surfaceSecondary`.
+    static let surfaceSecondary = Color(light: Color(white: 0.96), dark: Color(white: 0.205))
+
     // MARK: - Segmented control (Calendar-style glass track + selected pill)
 
     /// Outer track — matches `CalendarViewModePicker` in `MacCalendarView`.
     static let segmentedTrack = Color(light: Color(white: 0.88), dark: Color(white: 0.15))
     /// Selected segment fill — strong contrast on the track in light and dark mode.
-    static let segmentedSelectedPill = Color(light: Color.white, dark: Color(white: 0.22))
+    /// Dark value lifted to 0.30 (0.15 above `segmentedTrack` 0.15) to match iOS canonical contrast.
+    static let segmentedSelectedPill = Color(light: Color.white, dark: Color(white: 0.30))
 
     // MARK: - Accent Color Palette
 
@@ -97,7 +113,9 @@ enum MacTheme {
     static let accentColorKeys = ["blue", "indigo", "teal", "green", "orange", "rose"]
 
     /// Resolves an accent color key to a light/dark adaptive Color.
-    /// All colors are intentionally muted — not screaming neon. Fits the refined editorial aesthetic.
+    /// Light values match iOS `AppTheme.accentColor(for:)` exactly (canonical).
+    /// Dark variants apply a consistent ~5-8% lift for legibility on the dark surface,
+    /// keeping cross-platform parity while remaining muted (not screaming neon).
     static func accentColor(for key: String) -> Color {
         switch key {
         case "blue":
@@ -105,22 +123,22 @@ enum MacTheme {
                          dark: Color(red: 0.30, green: 0.50, blue: 0.88))
         case "indigo":
             return Color(light: Color(red: 0.35, green: 0.32, blue: 0.78),
-                         dark: Color(red: 0.5, green: 0.47, blue: 0.9))
+                         dark: Color(red: 0.43, green: 0.40, blue: 0.83))
         case "teal":
             return Color(light: Color(red: 0.18, green: 0.52, blue: 0.55),
-                         dark: Color(red: 0.32, green: 0.68, blue: 0.72))
+                         dark: Color(red: 0.26, green: 0.58, blue: 0.61))
         case "green":
             return Color(light: Color(red: 0.25, green: 0.55, blue: 0.32),
-                         dark: Color(red: 0.38, green: 0.72, blue: 0.45))
+                         dark: Color(red: 0.33, green: 0.61, blue: 0.40))
         case "orange":
             return Color(light: Color(red: 0.78, green: 0.48, blue: 0.18),
-                         dark: Color(red: 0.9, green: 0.6, blue: 0.3))
+                         dark: Color(red: 0.84, green: 0.54, blue: 0.26))
         case "rose":
             return Color(light: Color(red: 0.72, green: 0.28, blue: 0.35),
-                         dark: Color(red: 0.88, green: 0.42, blue: 0.48))
+                         dark: Color(red: 0.79, green: 0.35, blue: 0.42))
         default:
             return Color(light: Color(red: 0.22, green: 0.45, blue: 0.85),
-                         dark: Color(red: 0.38, green: 0.58, blue: 0.95))
+                         dark: Color(red: 0.30, green: 0.50, blue: 0.88))
         }
     }
 
@@ -240,11 +258,11 @@ enum MacTheme {
     /// Use these everywhere instead of inline `.snappy(duration:)` / `.easeOut(duration:)`.
     enum Motion {
         /// Fast (~150ms) — hover, fade, micro-feedback
-        static let fast = Animation.easeOut(duration: 0.15)
+        static let fast = Animation.snappy(duration: 0.15)
         /// Base (~250ms) — dropdowns, sheets, panel toggles
         static let base = Animation.snappy(duration: 0.25)
         /// Slow (~350ms) — major view transitions, onboarding steps
-        static let slow = Animation.snappy(duration: 0.35)
+        static let slow = Animation.spring(response: 0.35, dampingFraction: 0.85)
         /// Spring — toasts, contextual surfaces with bounce
         static let spring = Animation.spring(response: 0.32, dampingFraction: 0.85)
     }

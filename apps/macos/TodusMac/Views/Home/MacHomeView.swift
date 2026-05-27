@@ -1222,7 +1222,7 @@ struct MacHomeView: View {
                             Text(isConnectingGmail ? "Connecting…" : "Connect Gmail")
                                 .font(.system(size: 12, weight: .semibold))
                         }
-                        .foregroundStyle(.white)
+                        .foregroundStyle(MacTheme.primaryButtonForeground)
                         .padding(.horizontal, MacTheme.spacing16)
                         .padding(.vertical, MacTheme.spacing6)
                         .background(MacTheme.accent, in: Capsule(style: .continuous))

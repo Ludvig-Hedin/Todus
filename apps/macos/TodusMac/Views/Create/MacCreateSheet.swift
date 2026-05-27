@@ -89,7 +89,7 @@ struct MacCreateSheet: View {
                         Text("Create \(resolvedTypeName)")
                             .font(.system(size: 13, weight: .semibold))
                     }
-                    .foregroundStyle(.white)
+                    .foregroundStyle(MacTheme.primaryButtonForeground)
                     .padding(.horizontal, MacTheme.spacing16)
                     .padding(.vertical, MacTheme.spacing8)
                     .background(MacTheme.accent, in: Capsule(style: .continuous))

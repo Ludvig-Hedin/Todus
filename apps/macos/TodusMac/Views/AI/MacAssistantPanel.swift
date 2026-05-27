@@ -1326,7 +1326,7 @@ struct MacAssistantPanel: View {
                     Button(action: sendMessage) {
                         Image(systemName: "arrow.up")
                             .font(.system(size: 11, weight: .bold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(isEmpty ? Color.secondary : MacTheme.primaryButtonForeground)
                             .frame(width: 24, height: 24)
                             .background(
                                 isEmpty ? Color.secondary.opacity(0.3) : Color.accentColor,
