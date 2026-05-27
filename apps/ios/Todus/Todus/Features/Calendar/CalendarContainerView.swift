@@ -54,7 +54,13 @@ struct CalendarContainerView: UIViewControllerRepresentable {
         // Day timeline uses the SwiftUI AppTopHeader overlay; the system nav bar is
         // unhidden later (in the delegate) only when EKEventViewController is on top.
         nav.setNavigationBarHidden(true, animated: false)
-        nav.view.backgroundColor = .systemBackground
+        // Match the AppTheme.backgroundTop dynamic color so the navigation
+        // container doesn't flash a different shade from the CalendarKit timeline.
+        nav.view.backgroundColor = UIColor { trait in
+            trait.userInterfaceStyle == .dark
+                ? UIColor(white: 0.109, alpha: 1)
+                : UIColor(white: 0.94, alpha: 1)
+        }
         nav.delegate = context.coordinator
         // Transparent nav bar so the event detail's grouped-background blends with it
         // — matches Apple Calendar where the back/Edit row sits flush with the page.

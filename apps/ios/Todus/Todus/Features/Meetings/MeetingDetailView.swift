@@ -40,23 +40,10 @@ struct MeetingDetailView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Back button always visible so user can navigate away during loading or error
-            if isLoading || meeting == nil {
-                HStack {
-                    Button { dismiss() } label: {
-                        Image(systemName: "chevron.left")
-                            .font(.system(size: 15, weight: .semibold))
-                            .frame(width: 32, height: 32)
-                            .background(AppTheme.surfacePrimary, in: Circle())
-                            .foregroundStyle(.primary)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Back")
-                    Spacer()
-                }
-                .padding(.horizontal, 16)
-                .padding(.top, 8)
-            }
+            // Permanent nav row — always visible so the back button never disappears
+            // during loading or transitions, and so there is never more than one
+            // back button on screen at the same time.
+            permanentNavRow
 
             Group {
                 if isLoading {
@@ -65,7 +52,6 @@ struct MeetingDetailView: View {
                 } else if let meeting {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 20) {
-                            navRow(meeting)
                             headerSection(meeting)
 
                             // Error
@@ -131,6 +117,7 @@ struct MeetingDetailView: View {
             }
         }
         .toolbar(.hidden, for: .navigationBar)
+        .background(AppTheme.backgroundTop.ignoresSafeArea())
         .background { SwipeBackEnabler() }
         .alert("Error", isPresented: Binding(
             get: { actionError != nil },
@@ -145,7 +132,10 @@ struct MeetingDetailView: View {
 
     // MARK: - Sections
 
-    private func navRow(_ meeting: MeetingDetailResponse) -> some View {
+    /// Single, always-visible nav row with a back button on the left and optional
+    /// meeting-specific action buttons on the right. Extracted from the body so
+    /// there is never more than one back button visible regardless of loading state.
+    private var permanentNavRow: some View {
         HStack(spacing: 12) {
             Button { dismiss() } label: {
                 Image(systemName: "chevron.left")
@@ -159,8 +149,12 @@ struct MeetingDetailView: View {
 
             Spacer()
 
-            let over = Self.isMeetingOver(startsAt: meeting.startsAt, endsAt: meeting.endsAt)
-            if meeting.status == "scheduled", meeting.recallBotId == nil, !over {
+            // Show the auto-record action only when meeting data is available and
+            // the meeting qualifies (scheduled + no bot + not yet over).
+            if let meeting,
+               meeting.status == "scheduled",
+               meeting.recallBotId == nil,
+               !Self.isMeetingOver(startsAt: meeting.startsAt, endsAt: meeting.endsAt) {
                 Button {
                     Task { await scheduleBot() }
                 } label: {
@@ -176,7 +170,11 @@ struct MeetingDetailView: View {
                 .disabled(isSchedulingBot)
             }
         }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 4)
     }
+
 
     private func headerSection(_ meeting: MeetingDetailResponse) -> some View {
         let over = Self.isMeetingOver(startsAt: meeting.startsAt, endsAt: meeting.endsAt)
