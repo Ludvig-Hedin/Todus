@@ -13,10 +13,12 @@ import SwiftUI
 struct DesignSystemView: View {
     @Environment(AppServices.self) private var services
 
-    /// Local state for the motion demo block — taps animate a swatch sliding
+    /// Per-row state for the motion demo block — taps animate a swatch sliding
     /// across the row so the user can feel the difference between `.fast`,
-    /// `.base`, and `.slow`.
-    @State private var motionDemoState: Int = 0
+    /// `.base`, `.slow`, and `.interactive`. Keyed by token so a tap on one
+    /// row plays only that row's animation; a single shared `Int` would tie
+    /// every row to the most recently tapped timing and defeat the comparison.
+    @State private var motionDemoState: [String: Int] = [:]
 
     var body: some View {
         Form {
@@ -207,7 +209,7 @@ struct DesignSystemView: View {
             }
             DSHowToChangeNote(
                 path: "DesignSystem/AppTheme.swift",
-                lineRange: "L197–L219",
+                lineRange: "L210–L226",
                 detail: "Edit the RGB triples in `enum Accents`. Mirror the change to `MacTheme` and web `ACCENT_COLORS`."
             )
         } header: {
@@ -217,12 +219,12 @@ struct DesignSystemView: View {
 
     private func rgbDescription(for preference: AccentPreference) -> String {
         switch preference {
-        case .blue:   return "0.25, 0.48, 1.00"
-        case .indigo: return "0.35, 0.34, 0.84"
-        case .teal:   return "0.20, 0.68, 0.78"
-        case .green:  return "0.20, 0.72, 0.40"
-        case .orange: return "0.98, 0.55, 0.20"
-        case .rose:   return "0.93, 0.32, 0.46"
+        case .blue:   return "0.22, 0.45, 0.85"
+        case .indigo: return "0.35, 0.32, 0.78"
+        case .teal:   return "0.18, 0.52, 0.55"
+        case .green:  return "0.25, 0.55, 0.32"
+        case .orange: return "0.78, 0.48, 0.18"
+        case .rose:   return "0.72, 0.28, 0.35"
         }
     }
 
@@ -496,7 +498,7 @@ struct DesignSystemView: View {
                     .foregroundStyle(.secondary)
             }
             GeometryReader { proxy in
-                let isShifted = motionDemoState != 0
+                let isShifted = (motionDemoState[token] ?? 0) != 0
                 let travel = max(proxy.size.width - 28, 0)
                 ZStack(alignment: .leading) {
                     Capsule()
@@ -511,7 +513,7 @@ struct DesignSystemView: View {
                 .contentShape(Rectangle())
                 .onTapGesture {
                     withAnimation(animation) {
-                        motionDemoState = (motionDemoState + 1) % 2
+                        motionDemoState[token] = ((motionDemoState[token] ?? 0) + 1) % 2
                     }
                 }
             }

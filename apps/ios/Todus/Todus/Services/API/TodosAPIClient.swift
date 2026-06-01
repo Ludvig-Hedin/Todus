@@ -379,7 +379,11 @@ final class TodosAPIClient {
                         let refreshed = await authService.attemptSilentRefresh()
                         if refreshed { continue } // retry with the refreshed token on the next attempt
                     }
-                    authService.isSessionExpired = true
+                    // A seeded UI-testing session legitimately 401s against the real
+                    // backend; don't raise the global "Session expired" banner for it.
+                    if !authService.isUITestingSession {
+                        authService.isSessionExpired = true
+                    }
                     throw APIError.unauthorized
                 }
 

@@ -97,7 +97,7 @@ export default function HomeContent() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, delay: 0.4 }}
-          className="mx-auto mb-4 max-w-2xl text-center text-base font-medium text-[#B7B7B7] md:text-lg"
+          className="mx-auto mb-4 w-full max-w-[42rem] text-center text-base font-medium text-[#B7B7B7] md:text-lg"
         >
           {`${APP_NAME} is an AI-native email client that manages your inbox, so you don't have to.`}
         </motion.p>

@@ -274,6 +274,19 @@ export default function AISettingsPage() {
             />
           </Field>
         </div>
+        <RowList>
+          <SelectRow
+            label="Response tone"
+            value={s?.aiTone ?? 'professional'}
+            options={[
+              { value: 'professional', label: 'Professional' },
+              { value: 'casual', label: 'Casual' },
+              { value: 'concise', label: 'Concise' },
+            ]}
+            onChange={(v) => patch({ aiTone: v })}
+            width={160}
+          />
+        </RowList>
       </Section>
 
       <Section

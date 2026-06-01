@@ -1,6 +1,134 @@
 # Code Review Backlog
 
-Last updated: 2026-05-26
+Last updated: 2026-06-01
+
+---
+
+# 2026-06-01 — Bug hunt (iOS screenshots: bg color / alignment / thread-load)
+
+Scope: iOS changed files, driven by reported screenshot symptoms (inconsistent background, misalignment, thread-load glitches). 2 parallel sub-agents (color tokens / layout) + direct read of thread-loading code. Screenshots were not attached to the session — used the symptom descriptions as the guide.
+
+## Auto-fixed (1)
+
+| File:line | Severity | What changed |
+|-----------|----------|--------------|
+| `apps/ios/Todus/Todus/Features/Email/EmailInboxView.swift:~1196` (loadingState skeleton) | 🟡 medium (visible) | Skeleton row geometry didn't match the real row, so every cold inbox load "jumped" when the skeleton swapped to content. Skeleton was `HStack(spacing: 12)` + 36×36 avatar + `vpad 12`; `EmailRowView` is `spacing 10` + 40×40 (`SenderAvatarView` default) + `vpad 11`. Matched the skeleton to the real row (10 / 40 / 11). Pure placeholder geometry — no logic touched. |
+
+## Needs attention (not auto-fixed)
+
+| ID | Area | Where | Severity | Problem | Suggested fix |
+|----|------|-------|----------|---------|---------------|
+| BH-0601b-1 | iOS compose | `apps/ios/Todus/Todus/Features/Email/EmailComposeView.swift:538` (to), cc/bcc same pattern | ⚠️ high (user-facing) | Recipient TextFields tokenize in the Binding `set` on every keystroke. Typing a separator eats it: `"a@b.com,"` → `tokenizeRecipients` → `["a@b.com"]` → `get` re-joins `"a@b.com"`, so the comma/semicolon vanishes and a **2nd recipient cannot be typed** (paste of a full list still works). Classic transform-in-binding SwiftUI anti-pattern. TODO added in code. | Bind each field to a raw `@State` string; tokenize on `.onSubmit` and immediately before send, not on every change. Needs simulator verification — not safely testable in this sandbox. |
+| BH-0601b-2 | iOS search | `apps/ios/Todus/Todus/Features/Search/GlobalSearchView.swift:342-351` (`personRow`) | 🔵 low | Person results render a custom 34pt gray-initials ZStack, while the inbox People tab uses 40pt `SenderAvatarView` (real photos / brand logos). Same person shows different size + no real avatar in search. | Replace the ZStack with `SenderAvatarView(email:name:size: 40)` for parity. (Behavior change: adds network avatar resolution to search rows — deferred, out of stated scope.) |
+| BH-0601b-3 | iOS thread | `EmailThreadView.swift:1655` vs `EmailRowView.swift:29` | 🔵 low | Same sender renders at 40pt in the inbox list but 36pt in thread detail (`MessageRow`). Avatar visibly shrinks on open. Internally consistent within the thread (the divider inset `16+36+10` matches 36), so likely intentional. | Pick one diameter for both, or leave as documented-intentional. |
+
+> Cleared false positives (verified NOT bugs): (1) `EmailInboxView.swift:858` People unread-count badge uses `Color(UIColor.systemBlue)` — a color sub-agent suggested `AppTheme.accentBlue`, but `EmailRowView.swift:57` shows the inbox unread dot was **deliberately** moved off `accentBlue` (= `Color.primary` = black, invisible) to `systemBlue`; both use systemBlue → already consistent. (2) `AvatarCache.bootstrap()` IS wired (`RootView.swift:139`) — the deferred-disk-hydration refactor is safe. (3) People view DOES refresh on new mail (`.onChange(of: emailService.threads)` → `recomputeFilteredThreads` → `recomputeSenderGroupsIfPeopleMode`, `EmailInboxView.swift:337`). (4) Backend `mail.send` accepts the new `headers`/`isForward`/`originalMessage` (`apps/server/src/trpc/routes/mail.ts:857-864`) — the reply-threading + forward changes won't break sends.
+
+---
+
+# 2026-06-01 — Bug hunt (uncommitted + last 3 commits)
+
+Scope: all uncommitted changes + the 3 latest commits (`ed8eb057`, `fcdf9b0b`, `c0f779cf`). Reviewers: 3 parallel platform sub-agents (web / iOS / macOS) + direct server review. Focus: user-breaking bugs; auth left untouched (recently fixed, working).
+
+## Auto-fixed (1)
+
+| File:line | Severity | What changed |
+|-----------|----------|--------------|
+| `apps/web/components/mail/reply-composer.tsx:92-101` | ⚠️ high (build) | Added `fromEmail?: string;` to the `handleSendEmail` `data` param type. The body reads `data.fromEmail` (lines 111/113) to honor the composer's From picker, but the inline param type omitted the field → `TS2339 Property 'fromEmail' does not exist`. Caller (`EmailComposer.onSendEmail`) already passes it, so this was a pure type gap, not a logic change. |
+
+## Needs attention (not auto-fixed)
+
+| ID | Area | Where | Severity | Problem | Suggested fix |
+|----|------|-------|----------|---------|---------------|
+| BH-0601-1 | DB migration | `apps/server/src/db/migrations/0056_slack_connection.sql` + `meta/_journal.json` | ⚠️ high (future), 🔵 none today | Migration 0056 is **orphaned**: not registered in `_journal.json` (last idx = 55) and has no `0056_snapshot.json`. `drizzle-kit migrate` reads the journal, not the directory, so it silently **skips** 0056 — `mail0_slack_connection` is never created. The `slackConnection` schema is currently queried **nowhere** (dormant scaffold), so there is **no user impact today**. | Before shipping any Slack feature: run `pnpm --filter @zero/server db:generate` (only schema drift since 0055 is `slackConnection`, so it should regenerate cleanly) to produce the journal entry + snapshot, then `db:migrate`. Did NOT auto-run regen — mid-flight schema, risk of picking up unrelated drift; needs a human to eyeball the generated diff. |
+| BH-0601-2 | macOS email | `apps/macos/TodusMac/Services/Email/EmailService.swift:698` | 🟡 medium | `fetchThreadDetail` dedup: a foreground tap (`updateLoadingState:true`) that joins an in-flight **prefetch** (`updateLoadingState:false`) via `return await existing.value` inherits the prefetch's error handling — on failure `errorMessage` is never set, so the view shows the generic "Could not load thread." instead of the friendly auth/404/timeout copy. Not a crash. | Track the friendliest required `updateLoadingState` per id, or set `errorMessage` in `loadThread` when the joined result is nil. |
+| BH-0601-3 | macOS calendar | `apps/macos/TodusMac/Services/Calendar/UnifiedCalendarService.swift:24` | 🟡 medium | `legacyCalendarEvent.id` switched from composite (`apple:`/`google:`) to raw `providerEventId`. SwiftUI lists key on `id`; if an Apple and Google event ever share a provider id, duplicate `Identifiable` ids drop/duplicate rows. Cross-provider collision is unlikely (matches iOS) but unguarded. | Keep a composite id for list identity; expose `providerEventId` separately for EKEventStore lookups. |
+| BH-0601-4 | macOS local AI | `HuggingFaceCacheConnector.swift:330` / `LocalModelStateStore.swift:131` | 🔵 low | `hasWeightFile`/`directorySize` recursively walk multi-GB HF caches with no depth/count cap and no mid-walk `Task.isCancelled` check (only checked after `collect()` returns). No crash; can be slow on large external caches. | Add a depth/entry cap and periodic cancellation checks inside the enumerator loop. |
+
+> Note: the iOS sub-agent flagged `TodosAPIClient.swift:384 isUITestingSession` as an undefined-symbol build break — **false positive**. It is defined `public` in `packages/swift-auth/Sources/TodusAuth/AuthService.swift:88`; the agent only searched `apps/ios`. No action needed.
+
+---
+
+# 2026-05-28 — macOS QA deferred features (found, not yet fixed)
+
+Surfaced during the multi-round macOS flow QA (commit `ed8eb057`). The critical/high
+flow bugs were fixed + committed; the items below were deferred because they need a
+backend change, are net-new features, or aren't safely verifiable in this environment
+(no GUI / notification / widget runtime). Each has a concrete entry point + fix.
+
+## Deferred — needs backend
+
+| Area | Where | Severity | Problem | Suggested fix |
+|------|-------|----------|---------|---------------|
+| Subscription cancel | `MacSettingsView.performCancelSubscription` (`productId: "pro_monthly"`) + `apps/server/src/trpc/routes/subscription.ts` `getStatus` | ⚠️ high | Cancel hardcodes `pro_monthly`, so an annual (`pro_annual`) subscriber cancels the wrong product. `getStatus` returns only `plan`/`status`/`aiUsage` — no active product id — so the client can't pick the right one. | Backend `getStatus` must return the active `productId` (and ideally interval). Client then passes the real id to `subscription.cancel`. Backend change required. |
+| iOS markdown email send | `apps/ios/Todus/Todus/Services/Email/EmailService` send path | 🟡 medium | macOS now converts the compose markdown body → HTML before send (commit `ed8eb057`), but iOS still sends raw markdown wrapped as `text/html`, so recipients see literal `**bold**` / `# heading` and the body collapses onto one line. | Share the `EmailBodyHTML.render` converter cross-platform (move to `packages/shared` or convert once on the backend) and apply it in the iOS send path too. |
+| Email attachment download | `MacEmailThreadView.attachmentsView` (chips are display-only) | 🟡 medium | Attachment chips now render (filename/type/size) but tapping does nothing — there's no fetch/download. | Add a backend attachment-fetch endpoint (`mail.getAttachment`), then wire tap → download/save to disk + open. |
+
+## Deferred — net-new feature
+
+| Area | Where | Severity | Problem | Suggested fix |
+|------|-------|----------|---------|---------------|
+| Reminder scheduling | `MacNotificationService.scheduleTaskReminder` / `scheduleDueTodayDigest` (never called); Settings toggles `taskRemindersEnabled` / `calendarRemindersEnabled` | ⚠️ high (dead control) | The reminder toggles persist + sync but schedule nothing — no local notification ever fires for a due task. Net-new on iOS too. | Request `UNUserNotificationCenter` auth; schedule a `UNCalendarNotificationTrigger` on task create/update when there's a future due date (gated by `taskRemindersEnabled`); cancel the request on complete/delete; schedule the due-today digest on launch. |
+| Move to folder | `MacEmailInboxView` / `MacEmailThreadView` context menus + `EmailService`; backend `mail.modifyLabels` already exists | 🟡 medium | No UI to move/label a thread — only Archive (→archive) and Delete (→bin) exist. | Add a "Move to…" context-menu submenu listing folders; add `EmailService.move(ids:toFolder:)` calling `mail.modifyLabels` with a folder→label-id mapping; optimistic apply + rollback like the other actions. |
+| Compose-card CC/BCC input | `Views/AI/ChatUISpec/CardViews.swift` `MacInlineComposeCardView` (CC/BCC rows ~630–649) | 🟡 medium | CC/BCC rows render existing recipients but provide no field to add any — `addRecipient(target:)` is only ever called with `"to"`, so the `cc`/`bcc` branches are dead. | Add `TextField`s bound to per-field input (or a target selector) calling `addRecipient(target: "cc" / "bcc")`. |
+
+## Deferred — medium / low (client, but untestable here)
+
+| Area | Where | Severity | Problem | Suggested fix |
+|------|-------|----------|---------|---------------|
+| Notification cold-launch | `TodusMacApp` notification delegate, default-tap branch (`guard let services = self.services else { return }`) | 🟡 medium | A notification tapped during cold launch is dropped — `services` is nil until `initializeApp`, and (unlike deep links) the tap isn't queued/replayed. | Queue the routing intent (category + payload) on the app delegate when `services`/`modelContainer` is nil; replay at the end of `initializeApp` (mirror `pendingDeepLinks`). |
+| Event-edit prefill | `MacEventEditSheet.swift` (~409, edit mode) | 🟡 medium | In edit mode `location`/`notes` are hardcoded to `""` because `CalendarEvent` doesn't carry them; the user sees empty fields and any typed Location is silently discarded on save (`updateEvent` has no location param). | Carry `location`/`notes` on `CalendarEvent` (or fetch the `EKEvent`) and round-trip them through `CalendarService.updateEvent`. |
+| In-chat model menu | `MacAssistantPanel` model menu (~1738) | 🔵 low | The menu lists only the cloud models with a checkmark; a local model selected from Settings shows no checkmark/indicator and can't be seen/switched from chat. | Surface the active local model (name + checkmark) in the menu, or a "Local: <name>" row. |
+| Dead `.paused` UI | `MacLocalModelsView` (`.paused` branches in `detailLine`/`actionView`) | 🔵 low | The `.paused` state (caption + "Resume") is rendered but never produced — `ModelDownloadService` has no pause; `cancelDownload` always goes to `.notInstalled`. | Implement pause/resume (URLSession resume data) or remove the `.paused` UI (needs a `default` so the switches stay exhaustive). |
+
+---
+
+# 2026-05-27 — Multi-skill review of cross-platform local diff
+
+Scope: ~1.5k LOC across iOS / macOS / web / server / scripts. Reviewers: 4 parallel platform sub-agents + `claude-review` × 5 chunks + `bug-hunt` skill + fresh adversarial sub-agent. Caveman-review skill consolidated the consensus.
+
+## Auto-fixed (25)
+
+| File:line | Severity | What changed |
+|-----------|----------|--------------|
+| `apps/web/components/ui/button.tsx:74-92` | 🔴 critical | Destructured `disabled` out of `...props` so caller's `disabled={false}` no longer overrides the loading lock; suppressed spinner + `disabled` forwarding when `asChild` so a `<Link>` inside `<Button asChild>` isn't (a) crashed by Radix `Slot`'s `Children.only` on a Fragment, or (b) left clickable with a no-op anchor `disabled` attribute. |
+| `apps/web/app/(routes)/settings/billing/page.tsx:11-31, 197` | 🔴 critical | Restored `'75 credits / month'` on Free + `'150 credits / month'` on Pro to match iOS linter's 10× display scaling intent; added `CREDITS_DISPLAY_SCALE = 10` to web `formatCredits`. Fixed "100% remaining" headline rendering when `limit === 0`. Removed unused `remaining` local. |
+| `apps/ios/Todus/Todus/Features/Settings/BillingSettingsView.swift:17, 70` | 🔴 critical | Restored `"75 credits / month"` on Free so it aligns with the linter's Pro=150 + `creditsDisplayScale = 10`. Changed `percentRemaining` from `round` → `ceil` so any non-zero usage drops the headline below 100% (was reporting "100% remaining" for 0.4% consumption alongside "Used X of Y" subtitle). |
+| `apps/macos/TodusMac/Services/AI/Local/HuggingFaceCacheConnector.swift:73-156, 160-181` | 🔴 critical | Wired `bridgeIntoAppCacheIfPossible(_:)` so clicking "Use" on an external-cache HF model symlinks `~/.cache/huggingface/hub/.../snapshots/<sha>` into `Documents/huggingface/models/<repo>` — `MLXInferenceService` is hard-wired to the app cache, so without the bridge "Use" silently re-downloaded multi-GB weights the user already had on disk. Marked `nonisolated`, picks the most-recent snapshot by mtime when `refs/main` is missing, gates on `hasWeightFile`, handles dangling symlinks via `isSymbolicLinkKey`, logs failures, and `collect()` now de-dupes by `id` (preferring `.app`) so a bridged model doesn't show twice and trip SwiftUI's duplicate-`id` ForEach. Added cancellation check after detached `collect()` so back-to-back `refresh()` calls don't clobber. |
+| `apps/macos/TodusMac/Services/AI/Local/LocalModelStateStore.swift:139-194` | ⚠️ high | Hopped `initialScan` to `Task.detached(priority: .userInitiated)` (matched iOS) so launch no longer hitches on multi-GB HF caches walked synchronously on `@MainActor`. Gated `.installed` on `hasWeightFile` (shared with HF connector) so partial / failed downloads aren't reported ready. Merge-on-scan now lets live in-flight states win, but lets `.failed` yield to a real on-disk `.installed`. Dropped the `bytes > 0` gate since `hasWeightFile` already proves presence (FS oddities can return 0 for real installs). |
+| `apps/ios/Todus/Todus/Services/AI/Local/LocalModelStateStore.swift:131-176` | ⚠️ high | Same merge + `hasWeightFile` + `max(bytes, 0)` fixes as macOS. Pre-fix `init { Task { await initialScan() } }` clobbered `apply(...)` calls that landed during the detached walk. |
+| `apps/ios/Todus/Todus/Services/AI/Local/MLXInferenceService.swift:35-76, 100-119, 130-148, 158-200` | ⚠️ high | Use `GenerateParameters.maxTokens` instead of decrementing `maxTokenBudget -= 1` per `.chunk` (chunk = multi-token string, so manual counter overshot the cap 2-4×). Made the switch exhaustive with explicit `.toolCall: continue` (no longer silently swallowed by `@unknown default`). Enforced single-resident `loaded` cache in both `warmUp` and `runStream` (matches doc claim, avoids jetsam OOM on model switch). Mirrored `hasWeightFile` in `isReady` so partial downloads aren't reported ready. Fall back to chunk count when `.info` doesn't fire on `maxTokens`-truncate (usage no longer reports 0/0 for streams the user clearly saw produce tokens). |
+| `apps/ios/Todus/Todus/Features/DesignSystem/DesignSystemView.swift:19-22, 488-522` | ⚠️ high | Switched `motionDemoState` from a shared `Int` to `[String: Int]` keyed by token. Pre-fix a tap on any of the 4 motion rows played the shared swatch state at the tapped row's timing — defeating the comparison the demo exists to enable. |
+| `apps/macos/TodusMac/Views/Settings/MacLocalModelsView.swift:237-262, 500-528` | ⚠️ high | HF "Use" button now hops the symlink bridge off the main thread and refreshes the connector so the bridged entry doesn't show twice. Apple FM `.installed` branch now renders a simple "Use" button instead of a Menu with "Delete weights" — Apple Foundation Models have nothing to delete, the destructive action was either a no-op or could push the store into a fake `.deleting` state. |
+| `apps/web/app/(routes)/settings/notifications/page.tsx` | ⚠️ high | Typed-out the `as any` on `data.settings`, send only `changes` to `saveUserSettings` (was spreading the entire client cache → multi-device clobber risk for unrelated server-managed fields), per-key rollback instead of full-snapshot restore (won't undo unrelated patches that landed between this call's optimistic write and its rejection), `onSettled: invalidate` so the cache converges on server truth after each save. |
+| `apps/web/app/(routes)/settings/design-system/page.tsx:161-163` | 🟡 medium | Motion duration labels now match `globals.css`: `Base 250ms`, `Slow 350ms` (was `220` / `320`). The viewer that exists to catch cross-platform drift was actively misreporting it. |
+| `scripts/parity/capture-ios-deeplink.mjs:121-127` | 🟡 medium | Stripped leading slash so `${scheme}://${route}` no longer yields `todus:///login` (triple slash = empty host) which iOS `.onOpenURL` parses with a different host/path split. |
+| `apps/web/app/(routes)/settings/billing/page.tsx:21-29` | ⚠️ high | `getPlanKey` now resolves `team` / `team_*` / `enterprise` to `pro` so paying customers on those tiers don't see the "Free" label + "Upgrade" CTA. Dedicated team / enterprise copy can land later. |
+| `apps/web/app/(routes)/settings/billing/page.tsx:91` | ⚠️ high | `pct` now uses `Math.ceil` instead of `Math.round` — pre-fix `0.4%` consumption rounded down to 0, so the headline reported "100% remaining" while the subtitle simultaneously showed real usage. Mirrors the iOS `percentRemaining` fix. |
+| `apps/macos/TodusMac/Views/Settings/MacLocalModelsView.swift:237-257` | ⚠️ high | HF "Use" now `await`s the symlink bridge before assigning `selectedModel`, so a fast user can't trigger inference between assignment and bridge landing (which would force a multi-GB re-download). |
+| `apps/macos/TodusMac/Views/Settings/MacLocalModelsView.swift:350-358` | 🟡 medium | Apple FM rows no longer render redundant "Installed" capsule alongside "Built-in" — the store reports `.installed` unconditionally for `.appleFM`, but UI gated only on `state.isInstalled` showed both. |
+| `scripts/parity/capture-ios-deeplink.mjs:26-31` | 🔵 low | `PARITY_IOS_SETTLE_MS` non-numeric env value no longer coerces to `NaN` → `setTimeout(_, 0)`; falls back to 1200ms when not finite or negative. |
+| `apps/macos/TodusMac/Views/Settings/MacLocalModelsView.swift:11-19, 237-263` | 🟡 medium | Added `@State bridgingHFIds: Set<String>` so HF row's "Use" button disables + shows "Linking…" while the symlink bridge runs. Pre-fix a fast double-tap spawned duplicate bridge tasks; the bridge is idempotent (second call's `createSymbolicLink` throws `EEXIST` and is swallowed) but the double-task wastes work and pollutes the log. |
+| `apps/macos/TodusMac/Services/AI/Local/HuggingFaceCacheConnector.swift:330-352` + `apps/macos/TodusMac/Services/AI/Local/LocalModelStateStore.swift:204-228` | ⚠️ high | `directorySize` now skips symlinks. HF's external cache stores each weight as a real file under `blobs/<sha>` and a symlink alias under `snapshots/<commit>/`. `URLResourceValues` follows symlinks by default, so without this skip every external-cache weight was counted twice — the row showed ~2× real disk usage and `totalDiskBytes()` over-reported the Settings header. App-cache entries (plain files written by mlx-swift-examples) are unaffected. |
+| `apps/macos/TodusMac/Services/AI/Local/HuggingFaceCacheConnector.swift:129-152` | ⚠️ high | Dangling-symlink detection now requests **only** `.isSymbolicLinkKey` (lstat semantics) instead of also asking for `.isDirectoryKey`. Pre-fix the latter required `stat()`-ing the (missing) destination, so `try?` returned nil for a dangling link → the cleanup branch was skipped → `createSymbolicLink` threw `EEXIST` → bridge silently failed and MLX re-downloaded multi-GB weights. |
+| `apps/macos/TodusMac/Views/Settings/MacLocalModelsView.swift:1-7, 256-262` | 🔵 low | Now passes a shared `Logger(subsystem: "com.todus.macos", category: "HFBridge")` into `bridgeIntoAppCacheIfPossible(entry, log:)` so its diagnostic logs actually fire — pre-fix the caller passed no logger, every `log?.error/.warning/.info` was a no-op, and the intended support-ticket visibility was dead code. |
+
+## Needs human review (5)
+
+Pre-existing bugs in `apps/server/src/main.ts` that are adjacent to the diff but were **not introduced by this batch of changes**. Surface here because `claude-review` flagged them during a full-file pass; fix in a separate PR with proper queue-semantics testing.
+
+| File:line | Severity | Problem | Suggested fix |
+|-----------|----------|---------|---------------|
+| `apps/server/src/main.ts:1010` | 🔴 critical | `send-email-queue` catch deletes `statusKV` + `payloadKV` after a send failure without rethrowing. Cloudflare Queues then acks the message and the payload is gone — a transient error (network blip, Gmail rate limit, DO hiccup) silently drops a scheduled email the user thinks was sent. | Distinguish permanent vs transient errors; rethrow on transient so the queue retries, only delete on a final / non-retryable failure. |
+| `apps/server/src/main.ts:772` | ⚠️ high | `.get('.well-known/oauth-authorization-server', ...)` is registered without a leading slash. Hono pathnames always start with `/`, so the OAuth / MCP discovery endpoint 404s. | `.get('/.well-known/oauth-authorization-server', ...)`. |
+| `apps/server/src/main.ts:1180` | ⚠️ high | `processExpiredSubscriptions` does `const { db, conn } = createDb(...)`, then `await db.query.connection.findMany(...)`, then `await conn.end()`. If `findMany` rejects, `conn.end()` never runs and the Hyperdrive / Postgres connection leaks. | Wrap the query in `try { … } finally { await conn.end() }`. |
+| `apps/server/src/main.ts:1240` | 🟡 medium | `\`[SCHEDULED] Processed ${allAccounts.keys.length} accounts\`` — `allAccounts.keys` resolves to `Array.prototype.keys` (a function with `.length === 0`), so the log always reports 0 accounts. | `allAccounts.length`. |
+| `apps/server/src/main.ts:1295` | 🟡 medium | `.post('/a8n/notify/:providerId')` returns a response only when `providerId === EProviders.google`. Other providers exit the try block, run `finally { span.end() }`, and the handler returns `undefined` → Hono surfaces a 500 / 404 instead of a meaningful status. | `return c.json({ message: 'ignored' }, 200)` as a fallback so callers don't retry forever. |
+
+## Investigated, not bugs (false positives from re-review pass)
+
+- `apps/web/app/(routes)/settings/notifications/page.tsx:17` — `claude-review` warned that `useSettings` may not write to `trpc.settings.get`. Verified in `apps/web/hooks/use-settings.ts`: `useSettings` is `useQuery(trpc.settings.get.queryOptions(...))`, same key. Optimistic write lands on the right cache.
+- `apps/macos/TodusMac/Views/Settings/MacLocalModelsView.swift:205` — A curated MLX model the user downloaded in-app could appear in both Installed and Connected (HuggingFace). Confirmed acceptable: Installed shows the curated catalog entry with full controls, HF section shows raw on-disk entries; product team to decide whether to dedupe (architectural).
 
 ---
 

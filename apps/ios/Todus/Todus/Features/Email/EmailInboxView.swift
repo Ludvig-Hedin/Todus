@@ -102,6 +102,10 @@ struct EmailInboxView: View {
     @State private var searchText = ""
     @State private var selectedThreadId: String?
     @State private var filteredThreads: [EmailThread] = []
+    /// Cached sender grouping for the People view. Recomputed only when `filteredThreads`
+    /// changes — previously the computed property rebuilt the entire group-by + sort on
+    /// every body evaluation, including when the user was in Threads mode.
+    @State private var cachedSenderGroups: [SenderGroup] = []
     /// Debounce task for server-side search — cancelled on each new keystroke.
     @State private var searchDebounceTask: Task<Void, Never>?
     /// Active in-flight search Task. Held separately so a stale request can be cancelled
@@ -320,8 +324,12 @@ struct EmailInboxView: View {
         }
         .onChange(of: viewMode) { _, newMode in
             let shouldGroupByThread = newMode == .threads
-            guard services.threadGroupingEnabled != shouldGroupByThread else { return }
-            services.threadGroupingEnabled = shouldGroupByThread
+            if services.threadGroupingEnabled != shouldGroupByThread {
+                services.threadGroupingEnabled = shouldGroupByThread
+            }
+            // Rebuild the People grouping the first time the user enters People mode
+            // (the cache is otherwise only refilled by `recomputeFilteredThreads`).
+            recomputeSenderGroupsIfPeopleMode()
         }
         .onChange(of: services.threadGroupingEnabled) { _, _ in
             syncViewModeFromPreference()
@@ -775,9 +783,10 @@ struct EmailInboxView: View {
     // MARK: - People View
 
     /// Groups threads by sender email for People view (most recent activity first).
-    private var senderGroups: [SenderGroup] {
-        Self.buildSenderGroups(from: filteredThreads)
-    }
+    /// Returns the @State cache; refilled by `recomputeSenderGroupsIfPeopleMode`
+    /// when threads change. Avoids rebuilding the full group-by + sort tree on
+    /// every body evaluation, which previously hit on every scroll-driven re-render.
+    private var senderGroups: [SenderGroup] { cachedSenderGroups }
 
     /// Builds `SenderGroup` rows: one per sender, with unread counts and latest thread date.
     private static func buildSenderGroups(from threads: [EmailThread]) -> [SenderGroup] {
@@ -1185,10 +1194,12 @@ struct EmailInboxView: View {
             // Skeleton rows — visual hint that content is loading
             VStack(spacing: 0) {
                 ForEach(0..<6, id: \.self) { index in
-                    HStack(spacing: 12) {
+                    // Geometry must match EmailRowView (spacing 10, 40pt avatar, vpad 11)
+                    // so rows don't shift/jump when the skeleton swaps to real content.
+                    HStack(spacing: 10) {
                         Circle()
                             .fill(AppTheme.surfaceSecondary)
-                            .frame(width: 36, height: 36)
+                            .frame(width: 40, height: 40)
                         VStack(alignment: .leading, spacing: 6) {
                             RoundedRectangle(cornerRadius: 4)
                                 .fill(AppTheme.surfaceSecondary)
@@ -1201,7 +1212,7 @@ struct EmailInboxView: View {
                         Spacer()
                     }
                     .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
+                    .padding(.vertical, 11)
                     Divider().foregroundStyle(AppTheme.divider)
                 }
             }
@@ -1403,11 +1414,13 @@ struct EmailInboxView: View {
     private func recomputeFilteredThreads() {
         guard !searchText.isEmpty else {
             filteredThreads = emailService.threads
+            recomputeSenderGroupsIfPeopleMode()
             return
         }
         let query = searchText.trimmingCharacters(in: .whitespaces).lowercased()
         guard !query.isEmpty else {
             filteredThreads = emailService.threads
+            recomputeSenderGroupsIfPeopleMode()
             return
         }
 
@@ -1420,6 +1433,7 @@ struct EmailInboxView: View {
         }
         if !exactMatches.isEmpty {
             filteredThreads = exactMatches
+            recomputeSenderGroupsIfPeopleMode()
             return
         }
 
@@ -1427,12 +1441,25 @@ struct EmailInboxView: View {
         // Only runs when exact search finds nothing, so no perf cost on normal queries.
         guard query.count >= 3 else {
             filteredThreads = exactMatches
+            recomputeSenderGroupsIfPeopleMode()
             return
         }
         filteredThreads = emailService.threads.filter { thread in
             [thread.subject, thread.from.name, thread.from.email, thread.snippet]
                 .contains { fuzzyContains($0.lowercased(), query: query) }
         }
+        recomputeSenderGroupsIfPeopleMode()
+    }
+
+    /// Rebuild the cached People grouping only when the user is actually viewing
+    /// People mode. Skipping the work in Threads mode keeps inbox refreshes cheap.
+    private func recomputeSenderGroupsIfPeopleMode() {
+        guard viewMode == .people else {
+            // Drop stale cache so the next switch into People rebuilds from current data.
+            if !cachedSenderGroups.isEmpty { cachedSenderGroups = [] }
+            return
+        }
+        cachedSenderGroups = Self.buildSenderGroups(from: filteredThreads)
     }
 
     /// Returns true if `text` contains `query` with at most 1 character removed.

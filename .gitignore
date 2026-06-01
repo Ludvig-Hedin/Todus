@@ -97,3 +97,7 @@ packages/swift-auth/.build/
 CLAUDE_TEMP_INPUT.md
 .playwright-mcp/
 screenshot*.png
+
+# Local tool working dirs + runtime caches (never commit)
+.xcodebuildmcp/
+apps/macos/todus-url-cache/

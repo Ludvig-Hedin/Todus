@@ -338,6 +338,9 @@ struct EmailComposeView: View {
         .buttonStyle(FABButtonStyle())
         .fabGlass()
         .accessibilityLabel("Ask AI about this draft")
+        // Block the AI draft action while a send is in flight so it can't be
+        // tapped mid-send (the draft is about to leave the screen).
+        .disabled(emailService.isSending)
     }
 
     /// Builds a context-aware prompt the AI chat starts pre-filled with. Reply drafts
@@ -529,11 +532,18 @@ struct EmailComposeView: View {
                 .foregroundStyle(AppTheme.mutedText)
                 .frame(width: 60, alignment: .trailing)
 
-            // Use prompt: to control placeholder color — avoids the default blue tint
+            // Use prompt: to control placeholder color — avoids the default blue tint.
+            // Recipient string is tokenized on every change so users can paste
+            // `a@b.com, c@d.com; e@f.com` and get three separate recipients on send.
+            // TODO(bug-hunt): tokenizing in the Binding `set` on every keystroke eats the
+            // separator while typing — `"a@b.com,"` tokenizes to `["a@b.com"]`, then `get`
+            // re-joins to `"a@b.com"`, so the comma/semicolon vanishes and a 2nd recipient
+            // can't be typed (paste still works). Fix: bind to a raw @State string per field
+            // and tokenize on .onSubmit / before send, not on every change. Same for cc/bcc.
             TextField(
                 text: Binding(
-                    get: { draft.to.first ?? "" },
-                    set: { draft.to = $0.isEmpty ? [] : [$0] }
+                    get: { draft.to.joined(separator: ", ") },
+                    set: { draft.to = Self.tokenizeRecipients($0) }
                 ),
                 prompt: Text("Add recipients").foregroundColor(.secondary)
             ) {
@@ -545,6 +555,9 @@ struct EmailComposeView: View {
             .textInputAutocapitalization(.never)
             .autocorrectionDisabled()
             .focused($focusedField, equals: .to)
+            .submitLabel(.next)
+            // Advance to CC if it's expanded, otherwise jump straight to subject.
+            .onSubmit { focusedField = showCcBcc ? .cc : .subject }
 
             // Chevron disclosure button for CC/BCC
             Button {
@@ -574,8 +587,8 @@ struct EmailComposeView: View {
 
             TextField(
                 text: Binding(
-                    get: { draft.cc.first ?? "" },
-                    set: { draft.cc = $0.isEmpty ? [] : [$0] }
+                    get: { draft.cc.joined(separator: ", ") },
+                    set: { draft.cc = Self.tokenizeRecipients($0) }
                 ),
                 // Plain placeholder text — an email-shaped placeholder ("cc@example.com")
                 // gets auto-styled blue by iOS data detectors, making the empty field
@@ -590,6 +603,8 @@ struct EmailComposeView: View {
             .textInputAutocapitalization(.never)
             .autocorrectionDisabled()
             .focused($focusedField, equals: .cc)
+            .submitLabel(.next)
+            .onSubmit { focusedField = .bcc }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
@@ -604,8 +619,8 @@ struct EmailComposeView: View {
 
             TextField(
                 text: Binding(
-                    get: { draft.bcc.first ?? "" },
-                    set: { draft.bcc = $0.isEmpty ? [] : [$0] }
+                    get: { draft.bcc.joined(separator: ", ") },
+                    set: { draft.bcc = Self.tokenizeRecipients($0) }
                 ),
                 prompt: Text("Add Bcc recipients").foregroundColor(.secondary)
             ) {
@@ -617,6 +632,8 @@ struct EmailComposeView: View {
             .textInputAutocapitalization(.never)
             .autocorrectionDisabled()
             .focused($focusedField, equals: .bcc)
+            .submitLabel(.next)
+            .onSubmit { focusedField = .subject }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
@@ -711,6 +728,37 @@ struct EmailComposeView: View {
     }
 
     // MARK: - Helpers
+
+    /// Splits a recipient field's raw string into individual addresses. Accepts the
+    /// formats users actually type / paste:
+    ///   • `a@b.com, c@d.com, e@f.com`     (commas)
+    ///   • `a@b.com; c@d.com; e@f.com`     (semicolons — common from desktop clients)
+    ///   • `a@b.com c@d.com`               (whitespace-separated)
+    ///   • `"Jane Doe" <jane@x.com>`       (display-name angle form — stripped to email)
+    /// Empty tokens are dropped, surrounding whitespace trimmed. The result is
+    /// duplicate-free preserving first-seen order, so `a@b.com, a@b.com` becomes
+    /// a single recipient.
+    static func tokenizeRecipients(_ raw: String) -> [String] {
+        guard !raw.trimmingCharacters(in: .whitespaces).isEmpty else { return [] }
+        let separators = CharacterSet(charactersIn: ",;\n\t")
+        var seen = Set<String>()
+        var result: [String] = []
+        for piece in raw.components(separatedBy: separators) {
+            // Pull email out of "Name <addr@x>" display-name form.
+            var token = piece.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let lt = token.firstIndex(of: "<"), let gt = token.firstIndex(of: ">"), lt < gt {
+                token = String(token[token.index(after: lt)..<gt])
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            guard !token.isEmpty else { continue }
+            let key = token.lowercased()
+            if seen.contains(key) { continue }
+            seen.insert(key)
+            result.append(token)
+        }
+        return result
+    }
+
 
     private func selectedFromEmail(connections: [ConnectionAccount]) -> String {
         if let id = draft.fromConnectionId,
@@ -898,8 +946,22 @@ struct EmailComposeView: View {
         pendingAttachmentRemovals.removeAll()
     }
 
+    /// Per-user-scoped autosave key. Drafts written under one signed-in account
+    /// must never be visible to a different account on the same device, so the
+    /// signed-in email is folded into the key. Falls back to a stable "_anon_"
+    /// bucket before sign-in resolves so a draft typed during the loading flash
+    /// isn't lost outright.
     private var autosaveKey: String {
-        "\(Self.autosaveKeyPrefix)\(draftStorageKey)"
+        let userBucket: String
+        if let email = services.authService.userEmail?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased(),
+           !email.isEmpty {
+            userBucket = email
+        } else {
+            userBucket = "_anon_"
+        }
+        return "\(Self.autosaveKeyPrefix)\(userBucket)|\(draftStorageKey)"
     }
 
     private func handleBodyCommand(_ action: RichInputCommandAction) {

@@ -13,12 +13,36 @@ if (!fs.existsSync(manifestPath)) {
   process.exit(1);
 }
 
+// CLI: --surface <name>    Only capture screens with surface === <name>
+const args = process.argv.slice(2);
+function flag(name) {
+  const idx = args.indexOf(name);
+  if (idx === -1) return undefined;
+  return args[idx + 1];
+}
+const surfaceFilter = flag('--surface');
+
 const appScheme = process.env.PARITY_IOS_SCHEME ?? 'todus';
-const settleMs = Number(process.env.PARITY_IOS_SETTLE_MS ?? 1200);
+// `Number("foo")` is `NaN`, and `setTimeout(_, NaN)` coerces to 0 — a
+// non-numeric `PARITY_IOS_SETTLE_MS` would skip the settle delay silently
+// and screenshot a mid-transition UI. Guard with `Number.isFinite`.
+const settleMsRaw = Number(process.env.PARITY_IOS_SETTLE_MS);
+const settleMs = Number.isFinite(settleMsRaw) && settleMsRaw >= 0 ? settleMsRaw : 1200;
 
 const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-const screens = manifest.screens ?? [];
+const allScreens = manifest.screens ?? [];
+const screens = surfaceFilter
+  ? allScreens.filter((s) => s.surface === surfaceFilter)
+  : allScreens;
 
+if (screens.length === 0) {
+  console.log(`No screens match filter (surface=${surfaceFilter ?? '*'}).`);
+  process.exit(0);
+}
+
+// Route mapping. Manifest entries may include `iosDeepLink` to override the
+// derived route directly (e.g. for sheet-style surfaces or developer-gated
+// screens that don't have a 1:1 web route). When set, that wins.
 const routeBySlug = {
   Login: '/login',
   Signup: '/signup',
@@ -43,7 +67,26 @@ const routeBySlug = {
   SettingsShortcuts: '/settings/shortcuts',
   SettingsDangerZone: '/settings/danger-zone',
   NotFound: '/missing-route-for-not-found',
+  // DesignSystem*: the iOS app does NOT yet implement a settings deep-link
+  // handler (see `.onOpenURL` in `apps/ios/Todus/Todus/App/TodosApp.swift` —
+  // only `auth-callback`, `link-callback`, `share`, `mailto` are routed). The
+  // deep-link auto path therefore can't navigate into the DS view; use the
+  // `pnpm parity:screenshots:capture:ios` interactive flow instead, or wire a
+  // `todus://settings/<name>` handler in TodosApp.swift to unblock automation.
 };
+
+// Slugs we deliberately refuse to capture via deep link until the iOS app
+// gains a settings router. Skipping is safer than capturing whatever the
+// simulator happens to be showing.
+const slugsRequiringInteractiveCapture = new Set([
+  'DesignSystem',
+  'DesignSystemColors',
+  'DesignSystemTypography',
+  'DesignSystemRadius',
+  'DesignSystemSpacing',
+  'DesignSystemComponents',
+  'DesignSystemMotion',
+]);
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -64,14 +107,28 @@ let skipped = 0;
 const failures = [];
 
 for (const screen of screens) {
-  const route = routeBySlug[screen.slug];
+  if (slugsRequiringInteractiveCapture.has(screen.slug)) {
+    skipped += 1;
+    failures.push(
+      `${screen.slug}: iOS deep-link router has no /settings/* handler — use \`pnpm parity:screenshots:capture:ios\` (interactive) instead`,
+    );
+    continue;
+  }
+
+  const route = screen.iosDeepLink ?? routeBySlug[screen.slug];
   if (!route) {
     skipped += 1;
     failures.push(`${screen.slug}: missing route mapping`);
     continue;
   }
 
-  const deepLink = `${appScheme}://${route}`;
+  // Allow manifest to supply a fully-qualified deep link (e.g. todus://...).
+  // Strip a leading slash so `${scheme}://${route}` doesn't become
+  // `todus:///login` (triple slash = empty host) which iOS `.onOpenURL`
+  // parses with a different host/path split than `todus://login`.
+  const deepLink = route.includes('://')
+    ? route
+    : `${appScheme}://${route.replace(/^\/+/, '')}`;
   const target = path.join(parityDir, `${screen.slug}__ios.png`);
 
   const openResult = run('xcrun', ['simctl', 'openurl', 'booted', deepLink]);

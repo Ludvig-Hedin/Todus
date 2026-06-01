@@ -51,7 +51,11 @@ struct MacHomeView: View {
     }
 
     private var isEmailRefreshing: Bool {
-        (services.emailService.isLoadingThreads || services.emailService.isReconciling)
+        // Only show the inline spinner during full reconciliation (forceSync /
+        // re-import) so a routine background poll doesn't read as "still loading
+        // more rows" — the original behaviour confused users who saw the "50"
+        // thread count next to a spinning indicator and assumed more was coming.
+        services.emailService.isReconciling
             && !services.emailService.threads.isEmpty
     }
 

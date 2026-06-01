@@ -219,7 +219,15 @@ struct EmailThreadView: View {
             }
         }
         .task { await loadThread() }
-        .sheet(isPresented: $showCompose) { composeSheet }
+        .sheet(isPresented: $showCompose, onDismiss: {
+            // Drop the AI-generated reply seed when the compose sheet closes so
+            // the next Reply / Reply-All in this thread doesn't silently
+            // reuse a stale assistant draft as the starting body. Symptom
+            // before this clear: user runs "Draft reply" → AI generates →
+            // user edits and sends → second Reply on the same open thread
+            // session shows the previously-sent AI text again.
+            assistantDraftSeed = nil
+        }) { composeSheet }
         .sheet(isPresented: $showLabelEditor) {
             EditLabelsSheet(
                 threadId: threadId,
@@ -858,6 +866,9 @@ struct EmailThreadView: View {
                 // Fully pill-shaped — radius matches the button half-height so it
                 // remains a true Capsule on every device size.
                 .buttonStyle(LiquidGlassButtonStyle(cornerRadius: 22))
+                // Don't allow Reply/Reply All/Forward before the thread detail
+                // has loaded — composeMode would open against an empty thread.
+                .disabled(isLoading || detail == nil)
             }
         }
         .padding(.horizontal, 16)

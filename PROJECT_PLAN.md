@@ -1,17 +1,19 @@
 # Todus - Project Plan
 
-> **Goal**: Deploy a fully functional email client accessible via **Web**, **iOS (TestFlight)**, and **macOS (TestFlight)**.
+> **⚠️ HISTORICAL — do not act on this file.** Describes the original deploy plan from when iOS was still Expo-WebView and macOS was an Electron wrapper. Both have since been replaced by native SwiftUI apps. Kept for context only.
+>
+> **For current state, read [AGENT_CONTEXT.md](AGENT_CONTEXT.md) and [APPS_ARCHITECTURE.md](APPS_ARCHITECTURE.md).** For active sprint work see [TASK.md](TASK.md). For shipped/recent work see [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
-## Progress Overview
+## Progress Overview (snapshot — outdated)
 
 | Platform | Status | URL/Distribution |
 |----------|--------|------------------|
 | Local Dev | ✅ Complete | `http://localhost:3000` |
 | Web (Production) | ✅ Live | `https://todus.app` |
-| iOS App | 🟡 In Progress | Expo + TestFlight |
-| macOS App | 🟡 In Progress | Electron Wrapper |
+| iOS App | 🟡 In Progress | Expo + TestFlight ← **superseded by native SwiftUI** |
+| macOS App | 🟡 In Progress | Electron Wrapper ← **superseded by native SwiftUI + DMG via R2** |
 
 ---
 

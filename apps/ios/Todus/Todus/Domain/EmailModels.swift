@@ -157,4 +157,10 @@ struct EmailDraft {
     var replyToMessageId: String?
     /// Optional connection ID to send from a specific account (uses default if nil)
     var fromConnectionId: String?
+    /// True when this draft is a Forward — the backend uses `originalMessage` to
+    /// build the quoted block instead of sending it inline in `body`.
+    var isForward: Bool = false
+    /// HTML/plaintext of the message being forwarded. Backend wraps it as the
+    /// quoted "----- Forwarded message -----" block.
+    var originalMessage: String?
 }

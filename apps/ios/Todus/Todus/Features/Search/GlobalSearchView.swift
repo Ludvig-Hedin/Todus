@@ -118,6 +118,8 @@ struct GlobalSearchView: View {
                 .autocorrectionDisabled()
                 .textInputAutocapitalization(.never)
                 .focused($isSearchFocused)
+                .submitLabel(.search)
+                .onSubmit { isSearchFocused = false }
 
             if !query.isEmpty {
                 Button {
@@ -183,6 +185,7 @@ struct GlobalSearchView: View {
             .padding(.horizontal, 16)
             .padding(.top, 16)
         }
+        .scrollDismissesKeyboard(.interactively)
     }
 
     // MARK: - Section Header

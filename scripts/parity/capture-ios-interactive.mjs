@@ -23,11 +23,27 @@ if (xcrunCheck.status !== 0 || !xcrunCheck.stdout.includes('Booted')) {
   process.exit(1);
 }
 
+// CLI: --surface <name>    Only capture screens with surface === <name>
+const args = process.argv.slice(2);
+function flag(name) {
+  const idx = args.indexOf(name);
+  if (idx === -1) return undefined;
+  return args[idx + 1];
+}
+const surfaceFilter = flag('--surface');
+
 const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-const screens = manifest.screens ?? [];
+const allScreens = manifest.screens ?? [];
+const screens = surfaceFilter
+  ? allScreens.filter((s) => s.surface === surfaceFilter)
+  : allScreens;
 
 if (screens.length === 0) {
-  console.log('No screens in manifest.');
+  console.log(
+    surfaceFilter
+      ? `No screens match filter (surface=${surfaceFilter}).`
+      : 'No screens in manifest.',
+  );
   process.exit(0);
 }
 

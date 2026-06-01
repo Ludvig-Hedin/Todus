@@ -41,6 +41,7 @@
 		23F46E6FABE3EC58A83BF139 /* DocsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 141FA2CFD0E28AE2385B23C6 /* DocsService.swift */; };
 		25ABD811A3EAC259F20B0EFB /* MoveToFolderSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C8C4DE10C7F7D48D71A2B16 /* MoveToFolderSheet.swift */; };
 		25C680E7367CBD499BF09EC0 /* NotificationsOnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 437E7022BAA2CA13EB5CA993 /* NotificationsOnboardingView.swift */; };
+		A8B9C0D1E2F3041523647581 /* WelcomeTourView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91A2B3C4D5E6F708192A3B4C /* WelcomeTourView.swift */; };
 		26A91E357914AE723CE3BD4D /* BillingSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC6519DCE3CDBB82FA7E2A3E /* BillingSettingsView.swift */; };
 		27FA36E4CE710580FA9CA16C /* CalendarTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 941FC825317F217EE9CA1190 /* CalendarTabView.swift */; };
 		2944DCA029C65F3789681CC2 /* ParseState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CAF89510E1151AB2BDBE9F3 /* ParseState.swift */; };
@@ -186,6 +187,8 @@
 		D7D04E0746F32DCC16548E84 /* AppServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CF0758DFD583BED9A96112A /* AppServices.swift */; };
 		D815A9565FDA6FB264FF5176 /* VoiceTokenService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A37A23542A473CA73357CA7A /* VoiceTokenService.swift */; };
 		DA3F204F3F83B785D19D1641 /* CalendarKit in Frameworks */ = {isa = PBXBuildFile; productRef = 7978801AC9A3B60DE91B3AAF /* CalendarKit */; };
+		541908A12F9F4DB700D01412 /* MLXLLM in Frameworks */ = {isa = PBXBuildFile; productRef = 5419089F2F9F4DB700D01410 /* MLXLLM */; };
+		541908A22F9F4DB700D01413 /* MLXLMCommon in Frameworks */ = {isa = PBXBuildFile; productRef = 541908A02F9F4DB700D01411 /* MLXLMCommon */; };
 		DC5AC71BA7291B067AD80FFB /* AudioPlayerManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B103472BC1EC84AFB420A470 /* AudioPlayerManager.swift */; };
 		DD7AF0C7CBDA1864A52C917B /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11BAF286D87FA8A349E6B439 /* SettingsView.swift */; };
 		DE3ADE89FC83F92A2E739DF2 /* DraftRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1EA5D92655F2C4BDE92703C /* DraftRecord.swift */; };
@@ -265,6 +268,7 @@
 		02FCC08F5CB47A7DA98D8DE0 /* ModelRecommender.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelRecommender.swift; sourceTree = "<group>"; };
 		0382F63DAC80FCC285BA63B7 /* GroupChatService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupChatService.swift; sourceTree = "<group>"; };
 		03B7E91D0F2610017F7B60B3 /* StartupOnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StartupOnboardingView.swift; sourceTree = "<group>"; };
+		91A2B3C4D5E6F708192A3B4C /* WelcomeTourView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WelcomeTourView.swift; sourceTree = "<group>"; };
 		044CB7D988EE526D230F0C77 /* AppleSignInDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleSignInDelegate.swift; sourceTree = "<group>"; };
 		056835622DB127253111B077 /* AIChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChatView.swift; sourceTree = "<group>"; };
 		063BE5C86CEEFE3C80C0720E /* SmartInsightWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmartInsightWidget.swift; sourceTree = "<group>"; };
@@ -480,6 +484,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				DA3F204F3F83B785D19D1641 /* CalendarKit in Frameworks */,
+				541908A12F9F4DB700D01412 /* MLXLLM in Frameworks */,
+				541908A22F9F4DB700D01413 /* MLXLMCommon in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -496,6 +502,7 @@
 				734026A8312EA48B3C903595 /* RemindersSyncDirection.swift */,
 				88E079F48D17AEC17219D96F /* RootView.swift */,
 				03B7E91D0F2610017F7B60B3 /* StartupOnboardingView.swift */,
+				91A2B3C4D5E6F708192A3B4C /* WelcomeTourView.swift */,
 				D837D4D5B5A51B1720E6FD22 /* TodosApp.swift */,
 			);
 			path = App;
@@ -1222,6 +1229,8 @@
 			name = Todus;
 			packageProductDependencies = (
 				7978801AC9A3B60DE91B3AAF /* CalendarKit */,
+				5419089F2F9F4DB700D01410 /* MLXLLM */,
+				541908A02F9F4DB700D01411 /* MLXLMCommon */,
 			);
 			productName = Todus;
 			productReference = 84DD6EFBB2FA08B17733DB28 /* Todus.app */;
@@ -1266,6 +1275,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				005C1BE658F77F64EB044435 /* XCRemoteSwiftPackageReference "CalendarKit" */,
+				5419089E2F9F4DB700D0140F /* XCRemoteSwiftPackageReference "mlx-swift-examples" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = CEBCA60C5AEA2468F57BF306 /* Products */;
@@ -1456,6 +1466,7 @@
 				6630F6813CD04AF8F49743FA /* NotificationDigestService.swift in Sources */,
 				BD1BCF4E2931728E0E5A4931 /* NotificationService.swift in Sources */,
 				25C680E7367CBD499BF09EC0 /* NotificationsOnboardingView.swift in Sources */,
+				A8B9C0D1E2F3041523647581 /* WelcomeTourView.swift in Sources */,
 				32AAE885DEDDDBA5CB96D4D2 /* OnboardingAuthSheet.swift in Sources */,
 				2944DCA029C65F3789681CC2 /* ParseState.swift in Sources */,
 				DF6E9FC5F464199D16C7DCD1 /* PreviewData.swift in Sources */,
@@ -1876,6 +1887,14 @@
 				version = 1.1.7;
 			};
 		};
+		5419089E2F9F4DB700D0140F /* XCRemoteSwiftPackageReference "mlx-swift-examples" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/ml-explore/mlx-swift-examples";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.29.1;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -1883,6 +1902,16 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 005C1BE658F77F64EB044435 /* XCRemoteSwiftPackageReference "CalendarKit" */;
 			productName = CalendarKit;
+		};
+		5419089F2F9F4DB700D01410 /* MLXLLM */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5419089E2F9F4DB700D0140F /* XCRemoteSwiftPackageReference "mlx-swift-examples" */;
+			productName = MLXLLM;
+		};
+		541908A02F9F4DB700D01411 /* MLXLMCommon */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5419089E2F9F4DB700D0140F /* XCRemoteSwiftPackageReference "mlx-swift-examples" */;
+			productName = MLXLMCommon;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

@@ -34,12 +34,26 @@ final class MLXInferenceService: LocalAIService {
 
     func isReady(for model: LocalModel) -> Bool {
         guard model.runtime == .mlx, let repo = model.mlxRepo else { return false }
-        // "Ready" without a load = the weights are on disk somewhere the
-        // factory will find them. Conservative check: the canonical HF cache
-        // path under our app's documents dir contains the repo.
+        // "Ready" without a load = real weights are on disk where the factory
+        // will find them. Mirror `LocalModelStateStore.hasWeightFile` so a
+        // partial / failed download isn't reported as ready (which would
+        // crash MLX on first turn).
+        let fm = FileManager.default
         let candidate = Self.huggingFaceCachePath()
             .appendingPathComponent(repo, isDirectory: true)
-        return FileManager.default.fileExists(atPath: candidate.path)
+        guard fm.fileExists(atPath: candidate.path) else { return false }
+        guard let enumerator = fm.enumerator(
+            at: candidate,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else { return false }
+        for case let fileURL as URL in enumerator {
+            let ext = fileURL.pathExtension.lowercased()
+            if ext == "safetensors" || ext == "npz" || ext == "gguf" {
+                return true
+            }
+        }
+        return false
     }
 
     func unloadAll() {
@@ -71,6 +85,11 @@ final class MLXInferenceService: LocalAIService {
         let container = try await LLMModelFactory.shared.loadContainer(
             configuration: ModelConfiguration(id: repo)
         )
+        // Single-resident cache: drop the previously loaded container before
+        // inserting the new one so switching between multi-GB MLX models
+        // doesn't accumulate residency that the jetsam killer trips on. The
+        // doc comment on `loaded` promises this behavior — enforce it.
+        loaded.removeAll(keepingCapacity: true)
         loaded[model.id] = container
         log.info("[MLX] Warm-loaded \(model.id, privacy: .public)")
     }
@@ -106,6 +125,9 @@ final class MLXInferenceService: LocalAIService {
                 container = try await LLMModelFactory.shared.loadContainer(
                     configuration: ModelConfiguration(id: repo)
                 )
+                // Match `warmUp`'s single-resident policy so a model switch
+                // inside `runStream` doesn't leak the prior container.
+                loaded.removeAll(keepingCapacity: true)
                 loaded[request.model.id] = container
             } catch {
                 continuation.finish(throwing: LocalAIError.modelLoadFailed(
@@ -157,6 +179,7 @@ final class MLXInferenceService: LocalAIService {
 
         var promptTokens = 0
         var generationTokens = 0
+        var chunkCount = 0
         var producedAny = false
         for await event in outputStream {
             try Task.checkCancellation()
@@ -164,15 +187,16 @@ final class MLXInferenceService: LocalAIService {
             case .chunk(let text):
                 continuation.yield(.token(text))
                 producedAny = true
+                chunkCount += 1
             case .info(let info):
                 promptTokens = info.promptTokenCount
                 generationTokens = info.generationTokenCount
             case .toolCall:
-                // We don't expose tools to the local model today (`tools: []`),
-                // so a `.toolCall` is unexpected. Surface a placeholder token
-                // so the UI doesn't show a frozen stream, and continue — the
-                // structured tool-call wiring lands when the chat service grows
-                // a local tool surface.
+                // We don't expose tools to the local model today (`tools: []`).
+                // A `.toolCall` would only arrive if a future model emits one
+                // unprompted; skip rather than render a confusing artifact.
+                // The structured tool-call wiring lands when the chat service
+                // grows a local tool surface.
                 continue
             @unknown default:
                 // mlx-swift-examples may add new event cases beyond the three
@@ -188,9 +212,14 @@ final class MLXInferenceService: LocalAIService {
             continuation.yield(.token(""))
         }
 
+        // Fall back to the chunk count when MLX truncates on `maxTokens`
+        // before emitting `.info` (some versions don't flush the trailing
+        // info event on cap-hit), so usage telemetry doesn't report 0/0
+        // for a stream the user clearly saw produce tokens.
+        let reportedGeneration = generationTokens > 0 ? generationTokens : chunkCount
         continuation.yield(.done(usage: LocalTokenUsage(
             inputTokens: promptTokens,
-            outputTokens: generationTokens
+            outputTokens: reportedGeneration
         )))
         continuation.finish()
     }

@@ -12,15 +12,7 @@
  */
 
 import { redirect } from 'react-router';
-import { useEffect, useState, type ReactNode } from 'react';
-import {
-  ChevronDown,
-  Loader2,
-  Mail,
-  MoreHorizontal,
-  Plus,
-  Settings as SettingsIcon,
-} from 'lucide-react';
+import { useEffect, useState } from 'react';
 
 import { SettingsCard } from '@/components/settings/settings-card';
 import { authProxy } from '@/lib/auth-proxy';
@@ -28,43 +20,22 @@ import { isAllowlisted } from '@/lib/developer-access';
 import { cn } from '@/lib/utils';
 
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Switch } from '@/components/ui/switch';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from '@/components/ui/dialog';
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from '@/components/ui/sheet';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import {
   Accordion,
   AccordionContent,
   AccordionItem,
   AccordionTrigger,
 } from '@/components/ui/accordion';
+import { TooltipProvider } from '@/components/ui/tooltip';
+
+import {
+  CATEGORY_LABELS,
+  CATEGORY_ORDER,
+  COMPONENT_MANIFEST,
+  MANIFEST_FILE_PATH,
+  type ComponentCategory,
+  type ComponentEntry,
+} from './_components-manifest';
 
 import type { Route } from './+types/page';
 
@@ -188,8 +159,8 @@ const MOTION_DEMOS: ReadonlyArray<{
   ms: string;
 }> = [
   { label: 'Fast', durationVar: 'var(--motion-duration-fast)', ms: '150ms' },
-  { label: 'Base', durationVar: 'var(--motion-duration-base)', ms: '220ms' },
-  { label: 'Slow', durationVar: 'var(--motion-duration-slow)', ms: '320ms' },
+  { label: 'Base', durationVar: 'var(--motion-duration-base)', ms: '250ms' },
+  { label: 'Slow', durationVar: 'var(--motion-duration-slow)', ms: '350ms' },
 ];
 
 export async function clientLoader({ request }: Route.ClientLoaderArgs) {
@@ -487,292 +458,100 @@ function MotionDemo() {
 }
 
 function ComponentGallerySection() {
+  // Group entries by category. The empty-category branches stay collapsed so
+  // adding a new category just means adding entries to the manifest.
+  const grouped = new Map<ComponentCategory, ComponentEntry[]>();
+  for (const entry of COMPONENT_MANIFEST) {
+    const bucket = grouped.get(entry.category) ?? [];
+    bucket.push(entry);
+    grouped.set(entry.category, bucket);
+  }
+
   return (
     <SettingsCard
       title="Component gallery"
       description="Every variant of the shipped shadcn/ui primitives. If a component renders inconsistently here, it will render inconsistently in the app."
     >
       <TooltipProvider delayDuration={120}>
-        <div className="space-y-8">
-          <ButtonsGallery />
-          <BadgesGallery />
-          <CardGallery />
-          <InputGallery />
-          <SwitchGallery />
-          <DropdownGallery />
-          <DialogGallery />
-          <SheetGallery />
-          <TabsGallery />
-          <PopoverGallery />
-          <TooltipGallery />
-          <AccordionGallery />
+        <div className="space-y-10">
+          {CATEGORY_ORDER.map((category) => {
+            const entries = grouped.get(category);
+            if (!entries || entries.length === 0) return null;
+            return (
+              <CategorySection
+                key={category}
+                title={CATEGORY_LABELS[category]}
+                entries={entries}
+              />
+            );
+          })}
+          <AddNewComponentCallout />
         </div>
       </TooltipProvider>
     </SettingsCard>
   );
 }
 
-function GalleryRow({
+function CategorySection({
   title,
-  children,
-  notes,
+  entries,
 }: {
   title: string;
-  children: ReactNode;
-  notes?: string;
+  entries: ComponentEntry[];
 }) {
   return (
+    <section className="space-y-5">
+      <h2 className="text-muted-foreground text-[11px] font-semibold uppercase tracking-wider">
+        {title}
+      </h2>
+      <div className="space-y-6">
+        {entries.map((entry) => (
+          <GalleryEntry key={`${entry.category}-${entry.name}`} entry={entry} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function GalleryEntry({ entry }: { entry: ComponentEntry }) {
+  return (
     <div className="border-border/60 border-b pb-5 last:border-0 last:pb-0">
-      <h3 className="mb-3 text-sm font-medium">{title}</h3>
-      <div className="flex flex-wrap items-center gap-3">{children}</div>
-      {notes ? <p className="text-muted-foreground mt-3 text-[11px]">{notes}</p> : null}
+      <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+        <h3 className="text-sm font-medium">{entry.name}</h3>
+        <code className="text-muted-foreground font-mono text-[11px]">{entry.file}</code>
+      </div>
+      <div className="flex flex-wrap items-center gap-3">
+        {entry.variants
+          ? entry.variants.map((variant) => (
+              <div key={variant.name} className="flex flex-col items-start gap-1">
+                {variant.render()}
+                <span className="text-muted-foreground font-mono text-[10px]">
+                  {variant.name}
+                </span>
+              </div>
+            ))
+          : entry.render?.()}
+      </div>
+      {entry.notes ? (
+        <p className="text-muted-foreground mt-3 text-[11px]">{entry.notes}</p>
+      ) : null}
     </div>
   );
 }
 
-function ButtonsGallery() {
+function AddNewComponentCallout() {
   return (
-    <GalleryRow title="Buttons">
-      <Button>Default</Button>
-      <Button variant="secondary">Secondary</Button>
-      <Button variant="outline">Outline</Button>
-      <Button variant="ghost">Ghost</Button>
-      <Button variant="destructive">Destructive</Button>
-      <Button variant="link">Link</Button>
-      <Button size="sm">Small</Button>
-      <Button size="xs">Extra small</Button>
-      <Button size="lg">Large</Button>
-      <Button size="icon" aria-label="Settings">
-        <SettingsIcon />
-      </Button>
-      <Button disabled>Disabled</Button>
-      <Button aria-busy="true">
-        <Loader2 className="animate-spin" /> Loading
-      </Button>
-    </GalleryRow>
-  );
-}
-
-function BadgesGallery() {
-  return (
-    <GalleryRow title="Badges">
-      <Badge>Default</Badge>
-      <Badge variant="secondary">Secondary</Badge>
-      <Badge variant="outline">Outline</Badge>
-      <Badge variant="destructive">Destructive</Badge>
-      <Badge variant="important">Important</Badge>
-      <Badge variant="promotions">Promotions</Badge>
-      <Badge variant="personal">Personal</Badge>
-      <Badge variant="updates">Updates</Badge>
-      <Badge variant="forums">Forums</Badge>
-    </GalleryRow>
-  );
-}
-
-function CardGallery() {
-  return (
-    <GalleryRow title="Card">
-      <Card className="w-full max-w-sm">
-        <CardHeader>
-          <CardTitle>Inbox today</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="text-muted-foreground text-sm">
-            12 unread messages across 4 conversations. Two waiting on a reply from you.
-          </p>
-        </CardContent>
-      </Card>
-    </GalleryRow>
-  );
-}
-
-function InputGallery() {
-  return (
-    <GalleryRow title="Input">
-      <div className="w-full max-w-sm space-y-2">
-        <Input placeholder="Standard input" />
-        <Input placeholder="Disabled" disabled />
-        <Input type="email" placeholder="you@example.com" />
-      </div>
-    </GalleryRow>
-  );
-}
-
-function SwitchGallery() {
-  const [on, setOn] = useState(true);
-  return (
-    <GalleryRow title="Switch">
-      <div className="flex items-center gap-3">
-        <Switch checked={on} onCheckedChange={setOn} aria-label="Toggle preview" />
-        <span className="text-sm">{on ? 'On' : 'Off'}</span>
-      </div>
-      <Switch disabled aria-label="Disabled toggle" />
-    </GalleryRow>
-  );
-}
-
-function DropdownGallery() {
-  return (
-    <GalleryRow title="Dropdown menu">
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant="outline">
-            Actions <ChevronDown className="ml-1 h-3.5 w-3.5" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start">
-          <DropdownMenuLabel>Quick actions</DropdownMenuLabel>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem>
-            <Mail className="mr-2 h-4 w-4" /> New message
-          </DropdownMenuItem>
-          <DropdownMenuItem>
-            <Plus className="mr-2 h-4 w-4" /> New folder
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem>
-            <MoreHorizontal className="mr-2 h-4 w-4" /> More
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </GalleryRow>
-  );
-}
-
-function DialogGallery() {
-  return (
-    <GalleryRow title="Dialog">
-      <Dialog>
-        <DialogTrigger asChild>
-          <Button variant="outline">Open dialog</Button>
-        </DialogTrigger>
-        <DialogContent showOverlay className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Confirm reschedule</DialogTitle>
-            <DialogDescription>
-              This will move the meeting to tomorrow at 09:00 and notify all attendees.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex justify-end gap-2 pt-2">
-            <Button variant="ghost">Cancel</Button>
-            <Button>Reschedule</Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-    </GalleryRow>
-  );
-}
-
-function SheetGallery() {
-  return (
-    <GalleryRow title="Sheet">
-      <Sheet>
-        <SheetTrigger asChild>
-          <Button variant="outline">Open sheet</Button>
-        </SheetTrigger>
-        <SheetContent side="right" className="w-[320px] sm:w-[420px]">
-          <SheetHeader>
-            <SheetTitle>Conversation details</SheetTitle>
-            <SheetDescription>
-              Side panel renders with the slow + emphasized motion token.
-            </SheetDescription>
-          </SheetHeader>
-        </SheetContent>
-      </Sheet>
-    </GalleryRow>
-  );
-}
-
-function TabsGallery() {
-  return (
-    <GalleryRow title="Tabs">
-      <Tabs defaultValue="inbox" className="w-full max-w-sm">
-        <TabsList>
-          <TabsTrigger value="inbox">Inbox</TabsTrigger>
-          <TabsTrigger value="drafts">Drafts</TabsTrigger>
-          <TabsTrigger value="sent">Sent</TabsTrigger>
-        </TabsList>
-        <TabsContent value="inbox">
-          <p className="text-muted-foreground text-sm">12 unread</p>
-        </TabsContent>
-        <TabsContent value="drafts">
-          <p className="text-muted-foreground text-sm">3 drafts</p>
-        </TabsContent>
-        <TabsContent value="sent">
-          <p className="text-muted-foreground text-sm">128 sent</p>
-        </TabsContent>
-      </Tabs>
-    </GalleryRow>
-  );
-}
-
-function PopoverGallery() {
-  return (
-    <GalleryRow title="Popover">
-      <Popover>
-        <PopoverTrigger asChild>
-          <Button variant="outline">Open popover</Button>
-        </PopoverTrigger>
-        <PopoverContent>
-          <p className="text-sm">
-            Popovers use the standard motion token for enter / exit. Avoid for content over ~80
-            characters — use a Sheet instead.
-          </p>
-        </PopoverContent>
-      </Popover>
-    </GalleryRow>
-  );
-}
-
-function TooltipGallery() {
-  return (
-    <GalleryRow title="Tooltip" notes="Hover any button below to render a tooltip variant.">
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button variant="outline" size="sm">
-            Default
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>Default tooltip</TooltipContent>
-      </Tooltip>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button variant="outline" size="sm">
-            Destructive
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent variant="destructive">Destructive tooltip</TooltipContent>
-      </Tooltip>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button variant="outline" size="sm">
-            Important
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent variant="important">Important tooltip</TooltipContent>
-      </Tooltip>
-    </GalleryRow>
-  );
-}
-
-function AccordionGallery() {
-  return (
-    <GalleryRow title="Accordion">
-      <Accordion type="single" collapsible className="w-full max-w-md">
-        <AccordionItem value="item-1">
-          <AccordionTrigger>What is the design system viewer?</AccordionTrigger>
-          <AccordionContent>
-            A dogfood-only surface for spotting cross-platform drift early.
-          </AccordionContent>
-        </AccordionItem>
-        <AccordionItem value="item-2">
-          <AccordionTrigger>How do I add a new token?</AccordionTrigger>
-          <AccordionContent>
-            Add it to globals.css :root, expose it inside @theme inline, then surface it here.
-          </AccordionContent>
-        </AccordionItem>
-      </Accordion>
-    </GalleryRow>
+    <div className="border-border/60 bg-muted/30 rounded-lg border border-dashed p-4">
+      <h3 className="text-sm font-medium">Add a new component</h3>
+      <p className="text-muted-foreground mt-1 text-[12px]">
+        When a new shadcn/ui primitive lands under{' '}
+        <code className="font-mono">components/ui/</code>, add an entry to{' '}
+        <code className="bg-muted rounded px-1 py-0.5 font-mono text-[11px]">
+          {MANIFEST_FILE_PATH}
+        </code>
+        . The viewer maps over the manifest grouped by category, so a new entry is all it takes.
+      </p>
+    </div>
   );
 }
 

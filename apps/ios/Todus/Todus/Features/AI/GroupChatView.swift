@@ -12,6 +12,9 @@ struct GroupListView: View {
     @State private var joinToken: String = ""
     @State private var showJoinAlert = false
     @State private var joinError: String? = nil
+    /// Tracks the first load so the empty-state copy doesn't flash while the
+    /// initial fetch is still in flight.
+    @State private var hasLoadedGroups = false
 
     private var groupService: GroupChatService { services.groupChatService }
 
@@ -49,7 +52,17 @@ struct GroupListView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
 
-            if groupService.myGroups.isEmpty {
+            if groupService.myGroups.isEmpty && !hasLoadedGroups {
+                // First load still in flight — show a spinner instead of the
+                // "No groups yet" copy so it doesn't flash before data arrives.
+                HStack {
+                    Spacer()
+                    ProgressView()
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+            } else if groupService.myGroups.isEmpty {
                 Text("No groups yet — create one or join with an invite link.")
                     .font(.system(size: 13))
                     .foregroundStyle(.tertiary)
@@ -94,6 +107,7 @@ struct GroupListView: View {
         }
         .task {
             try? await groupService.loadMyGroups()
+            hasLoadedGroups = true
         }
         // Create group sheet
         .sheet(isPresented: $showCreateSheet) {
@@ -233,6 +247,9 @@ struct GroupChatView: View {
     @State private var showInviteCopied = false
     @State private var showLeaveConfirm = false
     @State private var leaveError: String? = nil
+    /// Gate for the first message load so we can show a spinner during the
+    /// initial fetch and an empty state only once we know there are no messages.
+    @State private var hasLoadedMessages = false
 
     private var groupService: GroupChatService { services.groupChatService }
     private var groupName: String { groupService.currentGroupDetails?.name ?? "Group" }
@@ -261,6 +278,10 @@ struct GroupChatView: View {
         }
         .task {
             try? await groupService.loadGroupDetails(groupId: groupId)
+            // Fetch the first page of messages before starting the poller so the
+            // initial-loading spinner resolves to either messages or the empty state.
+            try? await groupService.loadMessages(groupId: groupId)
+            hasLoadedMessages = true
             groupService.startPolling(groupId: groupId)
         }
         .onDisappear {
@@ -314,21 +335,45 @@ struct GroupChatView: View {
 
     // MARK: - Messages
 
+    @ViewBuilder
     private var messagesView: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(spacing: 8) {
-                    ForEach(groupService.currentMessages) { msg in
-                        GroupMessageBubbleView(message: msg)
-                            .id(msg.id)
-                    }
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
+        if groupService.currentMessages.isEmpty && !hasLoadedMessages {
+            // First load still in flight — show a spinner instead of the
+            // empty state so it doesn't flash before messages arrive.
+            VStack {
+                Spacer()
+                ProgressView()
+                Spacer()
             }
-            .onChange(of: groupService.currentMessages.count) {
-                if let last = groupService.currentMessages.last {
-                    withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if groupService.currentMessages.isEmpty {
+            VStack(spacing: 8) {
+                Spacer()
+                Image(systemName: "bubble.left.and.bubble.right")
+                    .font(.system(size: 34, weight: .light))
+                    .foregroundStyle(.tertiary)
+                Text("No messages yet")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(spacing: 8) {
+                        ForEach(groupService.currentMessages) { msg in
+                            GroupMessageBubbleView(message: msg)
+                                .id(msg.id)
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                }
+                .onChange(of: groupService.currentMessages.count) {
+                    if let last = groupService.currentMessages.last {
+                        withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
+                    }
                 }
             }
         }
@@ -352,6 +397,7 @@ struct GroupChatView: View {
                 .padding(.vertical, 8)
                 .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
                 .font(.system(size: 15))
+                .submitLabel(.send)
 
                 Button {
                     Task { await sendMessage() }
@@ -362,6 +408,7 @@ struct GroupChatView: View {
                 }
                 .disabled(messageText.trimmingCharacters(in: .whitespaces).isEmpty || isSending)
                 .buttonStyle(.plain)
+                .accessibilityLabel("Send message")
             }
             .padding(.horizontal, 12)
             .padding(.top, 8)

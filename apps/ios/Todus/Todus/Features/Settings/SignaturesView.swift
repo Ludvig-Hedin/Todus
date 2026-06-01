@@ -219,6 +219,12 @@ struct SignatureEditorView: View {
                     .fontWeight(.semibold)
                     .disabled(!canSave)
             }
+            // Keyboard accessory — the multiline TextEditor in a List has no
+            // return-to-dismiss, so give the user an explicit Done button.
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") { bodyFocused = false }
+            }
         }
         .confirmationDialog(
             "Delete this signature?",

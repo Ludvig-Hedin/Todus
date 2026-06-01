@@ -1507,7 +1507,7 @@ struct MacSettingsView: View {
         ],
         .pro: [
             "Unlimited email connections",
-            "15 credits / month of AI chat & voice",
+            "150 credits / month of AI chat & voice",
             "Auto-labeling, thread summaries, priority models",
             "Manage payment & cancel anytime",
         ],
@@ -1523,11 +1523,18 @@ struct MacSettingsView: View {
         ],
     ]
 
+    /// Credits are shown at 10× their internal (dollar-denominated) value so plan
+    /// tiers read as round, motivating numbers (Free 75, Pro 150) while actual
+    /// billing/limits stay unchanged. Keep in sync with iOS `BillingSettingsView`
+    /// and the web billing page (`CREDITS_DISPLAY_SCALE`).
+    private static let creditsDisplayScale: Double = 10
+
     private func formatCredits(_ value: Double) -> String {
-        if value == 0 { return "0" }
-        if value < 1 { return String(format: "%.2f", value) }
-        if value < 10 { return String(format: "%.1f", value) }
-        return String(Int(value.rounded()))
+        let scaled = value * Self.creditsDisplayScale
+        if scaled == 0 { return "0" }
+        if scaled < 1 { return String(format: "%.2f", scaled) }
+        if scaled < 10 { return String(format: "%.1f", scaled) }
+        return String(Int(scaled.rounded()))
     }
 
     private func formatUsageTotal(_ value: Double, unlimited: Bool) -> String {

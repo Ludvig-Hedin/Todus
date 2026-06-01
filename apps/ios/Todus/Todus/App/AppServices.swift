@@ -121,6 +121,11 @@ final class AppServices {
         /// any prior onboarding flag (which could be a transient skip) or a
         /// persisted Keychain bearer (Keychain survives uninstall on iOS).
         static let hasReachedMainTab = "TaskApp.hasReachedMainTab"
+        /// One-shot flag — true after the user has either taken or skipped the
+        /// optional product tour shown right before the tab-bar onboarding step.
+        /// Stored separately from `hasSeenStartupCard` so the tour can be
+        /// reintroduced without re-triggering the branded entry view.
+        static let hasSeenWelcomeTour = "TaskApp.hasSeenWelcomeTour"
     }
 
     let configuration: AppConfiguration
@@ -333,10 +338,21 @@ final class AppServices {
         didSet { defaults.set(hasConfiguredGmailPrompt, forKey: Keys.hasConfiguredGmailPrompt) }
     }
 
-    /// Legacy onboarding flag for the hidden floating tab-bar customization step.
-    /// Forced to `true` so users never see the retired step again.
+    /// Whether the user has finished (or skipped) the iOS tab-bar customization
+    /// step. Re-introduced as an explicit onboarding screen: iOS exposes only 4
+    /// configurable slots (+1 for the create FAB), so giving the user an early
+    /// chance to pick their main pages is the only realistic surface to do so.
+    /// Returning users (`hasReachedMainTab == true`) get this flag set to true
+    /// at boot time so the step never appears for them.
     var hasConfiguredTabBarPrompt: Bool {
         didSet { defaults.set(hasConfiguredTabBarPrompt, forKey: Keys.hasConfiguredTabBarPrompt) }
+    }
+
+    /// One-shot flag — true after the user has either taken or skipped the
+    /// product tour. Defaulted to true for returning users so the new tour
+    /// doesn't ambush anyone mid-session.
+    var hasSeenWelcomeTour: Bool {
+        didSet { defaults.set(hasSeenWelcomeTour, forKey: Keys.hasSeenWelcomeTour) }
     }
 
     /// Whether the user has seen the notifications permission onboarding step.
@@ -523,6 +539,7 @@ final class AppServices {
                 Keys.hasConfiguredNotificationsPrompt,
                 Keys.hasConfiguredDefaultMailPrompt,
                 Keys.hasConfiguredTabBarPrompt,
+                Keys.hasSeenWelcomeTour,
             ] {
                 defaults.removeObject(forKey: key)
             }
@@ -716,8 +733,26 @@ final class AppServices {
         } else {
             self.tabBarTabs = AppTab.defaultNavTabs
         }
-        self.hasConfiguredTabBarPrompt = true
-        defaults.set(true, forKey: Keys.hasConfiguredTabBarPrompt)
+        // Tab-bar onboarding gate.
+        //   • If the user previously dismissed (or completed) the step, honor that.
+        //   • Returning users who already reached MainTabView are migrated to "done"
+        //     so the new prompt never ambushes them mid-session.
+        //   • Fresh installs land on the prompt as part of the onboarding chain.
+        let storedTabBarFlag = defaults.bool(forKey: Keys.hasConfiguredTabBarPrompt)
+        let reachedMainTabBefore = defaults.bool(forKey: Keys.hasReachedMainTab)
+        self.hasConfiguredTabBarPrompt = storedTabBarFlag || reachedMainTabBefore
+        if !storedTabBarFlag && reachedMainTabBefore {
+            defaults.set(true, forKey: Keys.hasConfiguredTabBarPrompt)
+        }
+
+        // Welcome tour gate — same migration story: returning users skip it; new
+        // installs see the consent screen as part of the onboarding chain.
+        let storedTourFlag = defaults.bool(forKey: Keys.hasSeenWelcomeTour)
+        self.hasSeenWelcomeTour = storedTourFlag || reachedMainTabBefore
+        if !storedTourFlag && reachedMainTabBefore {
+            defaults.set(true, forKey: Keys.hasSeenWelcomeTour)
+        }
+
         self.hasConfiguredNotificationsPrompt = defaults.bool(forKey: Keys.hasConfiguredNotificationsPrompt)
         self.hasConfiguredDefaultMailPrompt = defaults.bool(forKey: Keys.hasConfiguredDefaultMailPrompt)
         self.emailNotificationsEnabled = defaults.object(forKey: Keys.emailNotificationsEnabled) as? Bool ?? true
@@ -801,12 +836,30 @@ final class AppServices {
         folderSyncService.clearQueue()
         emailService.resetForSignOut()
         clearProfileScopedPreferences()
+        // Compose drafts live in UserDefaults under `email_compose_autosave_v1.*`.
+        // They contain recipient addresses, subject lines, and body text — PII for
+        // the prior account. Wipe every key so the next signed-in user cannot
+        // resume the prior user's drafts on the same device.
+        wipeComposeDraftAutosaves()
         // Wipe SwiftData rows from the previous account BEFORE clearing auth —
         // otherwise the previous user's tasks/folders remain on disk and would
         // be presented to whoever signs in next on the same device.
         wipeLocalAccountData()
         authService.signOut()
         authStore.signOutToGuest()
+    }
+
+    /// Removes every autosaved compose draft from UserDefaults so a different
+    /// account signing in on this device can't resume the previous user's
+    /// in-progress emails. Matches every key prefixed with the autosave prefix
+    /// used by `EmailComposeView` — historical bare-`compose.*` keys (pre user
+    /// scoping) are also caught.
+    private func wipeComposeDraftAutosaves() {
+        let defaults = UserDefaults.standard
+        let composePrefix = "email_compose_autosave_v1."
+        for key in defaults.dictionaryRepresentation().keys where key.hasPrefix(composePrefix) {
+            defaults.removeObject(forKey: key)
+        }
     }
 
     /// Deletes SwiftData TaskRecord/FolderRecord rows so a sign-in by a
@@ -835,7 +888,10 @@ final class AppServices {
         hasConfiguredGmailPrompt = false
         hasConfiguredNotificationsPrompt = false
         hasConfiguredDefaultMailPrompt = false
-        // hasConfiguredTabBarPrompt is forced true (retired step); leave as-is.
+        // Tab-bar customization step is per-account — a new user should see it
+        // again with the default layout.
+        hasConfiguredTabBarPrompt = false
+        hasSeenWelcomeTour = false
 
         // Profile content — outgoing-mail signatures and AI prompts.
         signatures = []

@@ -240,6 +240,13 @@ export const userSettingsSchema = z.object({
   focusModeEnabled: z.boolean().default(false),
   groupByThread: z.boolean().default(true),
   hideAppleSideGmailDuplicates: z.boolean().default(true),
+
+  // AI response tone — synced across web/macOS/iOS (was @AppStorage-only before)
+  aiTone: z.enum(['professional', 'casual', 'concise']).default('professional'),
+
+  // Notification preferences — synced across platforms (was @AppStorage-only before)
+  taskRemindersEnabled: z.boolean().default(true),
+  calendarRemindersEnabled: z.boolean().default(true),
 });
 
 export type UserSettings = z.infer<typeof userSettingsSchema>;
@@ -283,6 +290,9 @@ export const defaultUserSettings: UserSettings = {
   focusModeEnabled: false,
   groupByThread: true,
   hideAppleSideGmailDuplicates: true,
+  aiTone: 'professional',
+  taskRemindersEnabled: true,
+  calendarRemindersEnabled: true,
 };
 
 type DeepPartial<T> = T extends Array<infer U>

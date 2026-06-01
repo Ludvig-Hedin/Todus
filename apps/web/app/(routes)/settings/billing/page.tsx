@@ -8,10 +8,10 @@ import { useNavigate } from 'react-router';
 import { toast } from 'sonner';
 
 const PLAN_INCLUDES: Record<string, string[]> = {
-  free: ['1 email connection', '7.5 credits / month of AI chat', 'Basic AI email assistance'],
+  free: ['1 email connection', '75 credits / month of AI chat', 'Basic AI email assistance'],
   pro: [
     'Unlimited email connections',
-    '15 credits / month of AI chat & voice',
+    '150 credits / month of AI chat & voice',
     'Auto-labeling, thread summaries, priority models',
     'Manage payment method, invoices, and cancel anytime',
   ],
@@ -19,16 +19,30 @@ const PLAN_INCLUDES: Record<string, string[]> = {
 
 /** Map Stripe / subscription product ids to keys used in `PLAN_INCLUDES`. */
 function getPlanKey(planId: string): string {
-  if (planId === 'pro' || planId === 'pro_monthly' || planId === 'pro_annual') return 'pro';
+  // Treat any `pro_*` / `team_*` / `enterprise` tier as a paid plan so a
+  // paying team / enterprise customer doesn't see the Free label + Upgrade
+  // button on this page. Dedicated team/enterprise copy can land later;
+  // until then they get the Pro feature list which is a superset.
+  if (planId === 'pro' || planId.startsWith('pro_')) return 'pro';
+  if (planId === 'team' || planId.startsWith('team_') || planId === 'enterprise') return 'pro';
   if (Object.prototype.hasOwnProperty.call(PLAN_INCLUDES, planId)) return planId;
   return 'free';
 }
 
+/**
+ * Credits are shown to users at 10× their internal (dollar-denominated) value
+ * so plan tiers read as round, motivating numbers (Free 75, Pro 150) while
+ * actual billing/limits stay unchanged. Keep this constant in sync with iOS
+ * `BillingSettingsView.creditsDisplayScale` and the `PLAN_INCLUDES` copy above.
+ */
+const CREDITS_DISPLAY_SCALE = 10;
+
 const formatCredits = (n: number) => {
-  if (n === 0) return '0';
-  if (n < 1) return n.toFixed(2);
-  if (n < 10) return n.toFixed(1);
-  return Math.round(n).toString();
+  const scaled = n * CREDITS_DISPLAY_SCALE;
+  if (scaled === 0) return '0';
+  if (scaled < 1) return scaled.toFixed(2);
+  if (scaled < 10) return scaled.toFixed(1);
+  return Math.round(scaled).toString();
 };
 
 const formatUsageTotal = (n: number, unlimited: boolean) =>
@@ -82,9 +96,12 @@ export default function BillingSettingsPage() {
   const usage = status?.aiUsage;
   const used = usage?.used ?? 0;
   const limit = usage?.limit ?? 0;
-  const remaining = usage?.remaining ?? 0;
   const unlimited = usage?.unlimited ?? false;
-  const pct = !unlimited && limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0;
+  // Use `Math.ceil` so any non-zero usage drops the headline below 100% —
+  // `Math.round` would report "100% remaining" for 0.4% consumption while
+  // the "Used X of Y credits" subtitle simultaneously shows real usage.
+  // Mirrors iOS `BillingSettingsView.percentRemaining`.
+  const pct = !unlimited && limit > 0 ? Math.min(100, Math.ceil((used / limit) * 100)) : 0;
   const resetLabel = formatResetDate(usage?.resetAt ?? null);
 
   return (
@@ -194,17 +211,17 @@ export default function BillingSettingsPage() {
             <div className="flex flex-col items-center gap-1 text-center">
               <div className="flex items-baseline gap-2 tabular-nums">
                 <span className="text-5xl font-semibold leading-none">
-                  {unlimited ? 'Unlimited' : formatCredits(remaining)}
+                  {unlimited ? 'Unlimited' : limit > 0 ? `${Math.max(0, 100 - pct)}%` : '0'}
                 </span>
                 <span className="text-muted-foreground text-base">
-                  {unlimited ? 'AI credits' : `/ ${formatCredits(limit)} credits left`}
+                  {unlimited ? 'AI credits' : limit > 0 ? 'remaining' : 'credits'}
                 </span>
               </div>
               <div className="text-muted-foreground text-xs">
                 {unlimited
                   ? 'Unlimited AI usage on this plan.'
                   : limit > 0
-                    ? `${Math.max(0, 100 - pct)}% remaining this period`
+                    ? `Used ${formatCredits(used)} of ${formatCredits(limit)} credits`
                     : 'No credits available on this plan.'}
               </div>
             </div>

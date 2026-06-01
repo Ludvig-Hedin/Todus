@@ -78,10 +78,29 @@
      across platforms. `standard` is the workhorse easing; `emphasized` is
      reserved for enter / exit on larger surfaces (sheets, drawers). */
   --motion-duration-fast: 150ms;
-  --motion-duration-base: 220ms;
-  --motion-duration-slow: 320ms;
+  --motion-duration-base: 250ms;
+  --motion-duration-slow: 350ms;
   --motion-easing-standard: cubic-bezier(0.2, 0, 0, 1);
   --motion-easing-emphasized: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* Spacing — explicit semantic scale on the 4/8 grid. Mirrors iOS / macOS
+     (xs 4 / sm 8 / md 12 / lg 16 / xl 24 / 2xl 32) so cross-platform layout
+     code can target the same rhythm. Use `--space-*` directly or the
+     `--spacing-*` Tailwind aliases (`p-md`, `gap-xl`, etc.). */
+  --space-xs: 0.25rem;   /* 4px */
+  --space-sm: 0.5rem;    /* 8px */
+  --space-md: 0.75rem;   /* 12px */
+  --space-lg: 1rem;      /* 16px */
+  --space-xl: 1.5rem;    /* 24px */
+  --space-2xl: 2rem;     /* 32px */
+
+  /* Semantic surface aliases — mirror iOS naming (surfacePrimary /
+     surfaceSecondary / sheetBackground) without breaking the shadcn token
+     ramp. Use `bg-surface-primary` / `bg-surface-secondary` / `bg-surface-sheet`
+     in new code for cross-platform clarity. */
+  --surface-primary: var(--card);
+  --surface-secondary: var(--accent);
+  --surface-sheet: var(--popover);
 
   /* Static colors — softer palette, no pure black */
   --darkBackground: #161618;
@@ -135,6 +154,11 @@
   --sidebar-border: hsl(240 3% 15%);
   --sidebar-ring: hsl(217 70% 55%);
   --panel: hsl(240 3% 10%);
+
+  /* Semantic surface aliases — keep dark parity with light ramp. */
+  --surface-primary: var(--card);
+  --surface-secondary: var(--accent);
+  --surface-sheet: var(--popover);
 }
 
 @theme inline {
@@ -158,6 +182,11 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+
+  /* Semantic surface aliases — cross-platform parity with iOS / macOS. */
+  --color-surface-primary: var(--surface-primary);
+  --color-surface-secondary: var(--surface-secondary);
+  --color-surface-sheet: var(--surface-sheet);
   
   /* Chart colors */
   --color-chart-1: var(--chart-1);
@@ -196,6 +225,15 @@
   --radius-lg: var(--radius);
   --radius-md: calc(var(--radius) - 2px);
   --radius-sm: calc(var(--radius) - 4px);
+
+  /* Spacing — expose the semantic ladder to Tailwind v4 so utilities like
+     `p-md`, `gap-xl`, `mt-2xl` resolve to the iOS / macOS-aligned scale. */
+  --spacing-xs: var(--space-xs);
+  --spacing-sm: var(--space-sm);
+  --spacing-md: var(--space-md);
+  --spacing-lg: var(--space-lg);
+  --spacing-xl: var(--space-xl);
+  --spacing-2xl: var(--space-2xl);
 
   /* Motion — exposes the design tokens to Tailwind v4 utilities so
      `duration-(--motion-duration-fast)`, `ease-(--motion-easing-standard)`,

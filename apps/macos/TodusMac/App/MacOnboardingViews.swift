@@ -594,3 +594,242 @@ private func onboardingMessage(text: String, tint: Color) -> some View {
             .stroke(tint.opacity(0.12), lineWidth: 1)
     )
 }
+
+// MARK: - Welcome tour
+
+/// Optional product tour shown right before the main shell appears.
+///
+/// Mirrors the iOS `WelcomeTourView` UX but without the tab-bar customization
+/// step — macOS exposes a sidebar with unlimited navigation slots, so the
+/// "pick your main pages" framing doesn't apply. Two phases:
+///   • `.consent`  — single screen with a prominent Skip and a smaller "Show me around".
+///   • `.pages`    — three compact paginated cards explaining the headline features.
+///                   A persistent Skip link sits in the top-right at all times.
+struct MacWelcomeTourView: View {
+    @Environment(MacAppServices.self) private var services
+
+    private enum Phase { case consent, pages }
+
+    @State private var phase: Phase = .consent
+    @State private var pageIndex: Int = 0
+
+    private struct TourPage: Identifiable {
+        let id: Int
+        let symbol: String
+        let title: String
+        let body: String
+    }
+
+    private let pages: [TourPage] = [
+        TourPage(
+            id: 0,
+            symbol: "tray.full",
+            title: "One workspace for mail, tasks, and your day",
+            body: "Triage your inbox, capture tasks, and check today's events without app-switching."
+        ),
+        TourPage(
+            id: 1,
+            symbol: "sparkles",
+            title: "AI that reads your day, not your data",
+            body: "The assistant panel on the right writes briefings, drafts replies, and triages tasks on demand."
+        ),
+        TourPage(
+            id: 2,
+            symbol: "sidebar.left",
+            title: "Navigate fast",
+            body: "Everything lives in the sidebar — Home, Tasks, Email, Meetings, Docs, Calendar. Click around once and you'll know your way."
+        ),
+    ]
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            MacTheme.contentBackground.ignoresSafeArea()
+
+            switch phase {
+            case .consent:
+                consent
+                    .transition(.opacity.combined(with: .move(edge: .leading)))
+            case .pages:
+                explainer
+                    .transition(.opacity.combined(with: .move(edge: .trailing)))
+            }
+
+            if phase == .pages {
+                // Quiet pill — the user is mid-tour; a loud accent button would
+                // pull more attention than the actual content card.
+                Button { finish() } label: {
+                    Text("Skip")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(MacTheme.textSecondary)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(.ultraThinMaterial, in: Capsule())
+                        .overlay(Capsule().stroke(MacTheme.cardBorder.opacity(0.6), lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .pointerStyle(.link)
+                .padding(.top, 16)
+                .padding(.trailing, 18)
+                .transition(.opacity)
+                .accessibilityLabel("Skip the product tour")
+            }
+        }
+        .animation(MacTheme.Motion.base, value: phase)
+    }
+
+    private var consent: some View {
+        VStack(spacing: 0) {
+            Spacer()
+
+            VStack(spacing: 14) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .fill(MacTheme.surfaceCard)
+                        .frame(width: 88, height: 88)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                                .stroke(MacTheme.cardBorder, lineWidth: 1)
+                        )
+                    Image(systemName: "wand.and.stars")
+                        .font(.system(size: 32, weight: .regular))
+                        .foregroundStyle(MacTheme.textPrimary)
+                }
+
+                VStack(spacing: 8) {
+                    Text("Want a 30-second tour?")
+                        .font(.system(size: 24, weight: .semibold))
+                        .tracking(-0.3)
+
+                    Text("Three quick cards on what Todus does. You can always skip — most people do.")
+                        .font(.system(size: 14))
+                        .foregroundStyle(MacTheme.textSecondary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: 360)
+                }
+            }
+
+            Spacer().frame(height: 26)
+
+            VStack(spacing: 8) {
+                Button { finish() } label: {
+                    Text("Skip")
+                }
+                .buttonStyle(MacOnboardingPrimaryButtonStyle())
+
+                Button {
+                    withAnimation(MacTheme.Motion.base) {
+                        phase = .pages
+                        pageIndex = 0
+                    }
+                } label: {
+                    Text("Show me around")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(MacTheme.textSecondary)
+                        .padding(.vertical, 4)
+                }
+                .buttonStyle(.plain)
+            }
+            .frame(maxWidth: 360)
+
+            Spacer()
+        }
+        .padding(.vertical, 32)
+        .padding(.horizontal, 24)
+    }
+
+    private var explainer: some View {
+        VStack(spacing: 0) {
+            Spacer().frame(height: 56)
+
+            // macOS doesn't have a native paginated TabView, so swap cards on
+            // index change. Page dots double as clickable navigation.
+            pageCard(pages[pageIndex])
+                .transition(.opacity.combined(with: .move(edge: .trailing)))
+                .id(pageIndex)
+
+            Spacer().frame(height: 14)
+
+            pageDots
+
+            Spacer()
+
+            Button {
+                if pageIndex < pages.count - 1 {
+                    withAnimation(MacTheme.Motion.base) { pageIndex += 1 }
+                } else {
+                    finish()
+                }
+            } label: {
+                Text(pageIndex < pages.count - 1 ? "Next" : "Get started")
+            }
+            .buttonStyle(MacOnboardingPrimaryButtonStyle())
+            .frame(maxWidth: 360)
+
+            Spacer().frame(height: 32)
+        }
+        .padding(.horizontal, 24)
+        .animation(MacTheme.Motion.base, value: pageIndex)
+    }
+
+    private func pageCard(_ page: TourPage) -> some View {
+        VStack(spacing: 14) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(MacTheme.surfaceCard)
+                    .frame(width: 72, height: 72)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .stroke(MacTheme.cardBorder, lineWidth: 1)
+                    )
+                Image(systemName: page.symbol)
+                    .font(.system(size: 26, weight: .regular))
+                    .foregroundStyle(MacTheme.textPrimary)
+            }
+
+            VStack(spacing: 8) {
+                Text(page.title)
+                    .font(.system(size: 20, weight: .semibold))
+                    .tracking(-0.2)
+                    .multilineTextAlignment(.center)
+
+                Text(page.body)
+                    .font(.system(size: 13))
+                    .foregroundStyle(MacTheme.textSecondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: 360)
+            }
+        }
+    }
+
+    private var pageDots: some View {
+        HStack(spacing: 6) {
+            ForEach(pages.indices, id: \.self) { i in
+                Button {
+                    withAnimation(MacTheme.Motion.base) { pageIndex = i }
+                } label: {
+                    // 6pt dot sits inside an 18pt invisible hit area so users
+                    // can land the tap without pixel-precise aim.
+                    ZStack {
+                        Rectangle().fill(Color.clear)
+                            .frame(width: 18, height: 18)
+                        Circle()
+                            .fill(i == pageIndex ? MacTheme.textPrimary : MacTheme.textSecondary.opacity(0.3))
+                            .frame(width: 6, height: 6)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .pointerStyle(.link)
+                .accessibilityLabel("Go to page \(i + 1) of \(pages.count)")
+            }
+        }
+    }
+
+    /// One-shot completion path — flips `hasSeenWelcomeTour` so MacRootView
+    /// advances to the main shell and the tour never re-appears.
+    private func finish() {
+        services.hasSeenWelcomeTour = true
+    }
+}

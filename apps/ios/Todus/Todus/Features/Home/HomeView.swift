@@ -29,6 +29,10 @@ struct HomeView: View {
     @State private var isLoadingEvents = true
     @State private var hasLoadedEmailState = false
     @State private var isLoadingAssistantBriefing = false
+    /// True when the briefing fetch finished (or timed out) with no payload AND the user
+    /// has email connected. Distinguishes a real failure from "nothing to brief on" so we
+    /// can show a retry CTA instead of "You're caught up." which would mislead the user.
+    @State private var briefingDidFail = false
 
     // Sheet state
     @State private var selectedTask: TaskRecord? = nil
@@ -84,7 +88,10 @@ struct HomeView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .scrollDismissesKeyboard(.interactively)
-            .contentMargins(.bottom, 32, for: .scrollContent)
+            // Pull the inset from `MainTabView.fabClearance` so the two layouts
+            // can't drift apart. Previously a literal 32 → last Recent Emails
+            // row was obscured by the create / AI FAB overlay.
+            .contentMargins(.bottom, MainTabView.fabClearance, for: .scrollContent)
             .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y } action: { old, new in
                 let delta = new - old
                 if delta > 8 && new > 40 {
@@ -112,6 +119,14 @@ struct HomeView: View {
             .pageHeaderScrim(scrimHeight: headerHeight + scrimTail)
         }
         .toolbar(.hidden, for: .navigationBar)
+        // Auto-clear the fail flag whenever a fresh briefing materialises (e.g. a
+        // background poll succeeds after the user already dismissed the spinner)
+        // so the retry card doesn't ghost over valid data on the next render.
+        .onChange(of: services.emailService.assistantBriefing?.generatedAt) { _, _ in
+            if services.emailService.assistantBriefing != nil, briefingDidFail {
+                briefingDidFail = false
+            }
+        }
         .task {
             // EmailService restores `hasConnection` from UserDefaults in init. If it's
             // already resolved (true on prior launch), trust that for the first paint
@@ -341,13 +356,6 @@ struct HomeView: View {
         let threadId: String?
     }
 
-    private struct HomeStatChip: Identifiable {
-        let id: String
-        let icon: String
-        let label: String
-        let action: () -> Void
-    }
-
     // MARK: - Unified timeline model
 
     private enum UpcomingTimelineItem: Identifiable {
@@ -406,22 +414,6 @@ struct HomeView: View {
             let sorted = (byDay[day] ?? []).sorted { $0.sortDate < $1.sortDate }
             return UpcomingDaySection(id: day, dayName: dayName, shortDate: shortDate, isToday: isToday, items: sorted)
         }
-    }
-
-    // TODO(bug-hunt): heroStatChips is computed but never rendered. Planned hero chip UI
-    // was removed when slimGreeting replaced the card-based header. Safe to delete.
-    private var heroStatChips: [HomeStatChip] {
-        var chips: [HomeStatChip] = []
-        let needsYouCount = services.emailService.assistantBriefing?.needsYou.count ?? 0
-        if needsYouCount > 0 {
-            chips.append(HomeStatChip(
-                id: "needs-reply",
-                icon: "arrowshape.turn.up.left",
-                label: "\(needsYouCount) repl\(needsYouCount == 1 ? "y" : "ies")",
-                action: { services.navigateTo = .email }
-            ))
-        }
-        return chips
     }
 
     /// Quiet greeting line. No card, no chips, no summary count — the Today list
@@ -692,6 +684,9 @@ struct HomeView: View {
         if isLoadingAssistantBriefing && services.emailService.assistantBriefing == nil {
             return true
         }
+        // Surface the failure card with a Retry CTA so the user isn't stranded behind
+        // an empty Today section after a timeout.
+        if briefingDidFail { return true }
         return false
     }
 
@@ -719,6 +714,10 @@ struct HomeView: View {
 
             if isLoadingAssistantBriefing && services.emailService.assistantBriefing == nil {
                 loadingState(message: "Preparing your day")
+            } else if briefingDidFail && briefingFeedItems.isEmpty {
+                // Briefing fetch timed out or errored — surface a calm retry CTA instead
+                // of "You're caught up", which would lie to the user.
+                briefingFailureCard
             } else if briefingFeedItems.isEmpty {
                 HStack(spacing: 10) {
                     Image(systemName: "checkmark.seal")
@@ -1632,6 +1631,80 @@ struct HomeView: View {
         ProgressiveLoadingRow(initialMessage: message)
     }
 
+    /// Compact failure card shown when the AI briefing times out. Offers a single
+    /// Retry button and a quiet hint about which raw lists below still work — so the
+    /// user is never stuck staring at a stale spinner with no escape.
+    private var briefingFailureCard: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "exclamationmark.bubble")
+                .font(.system(size: 16, weight: .regular))
+                .foregroundStyle(.secondary)
+                .padding(.top, 2)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Couldn't prep your day.")
+                    .font(.system(size: 14, weight: .semibold))
+                Text("Your calendar and inbox below are still live — tap retry to try the AI summary again.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button {
+                    Task { await retryBriefing() }
+                } label: {
+                    Text("Retry")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(AppTheme.accent)
+                        .padding(.top, 2)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Retry loading today's briefing")
+            }
+            Spacer()
+        }
+        .padding(14)
+        .background(AppTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppTheme.Radius.control, style: .continuous)
+                .stroke(AppTheme.cardBorder, lineWidth: 1)
+        )
+    }
+
+    /// Re-runs the briefing fetch with the same 8s safety timeout used on first load.
+    /// Clears the fail flag so the loading card re-appears immediately on tap.
+    @MainActor
+    private func retryBriefing() async {
+        // Guard against rapid double-tap: a second invocation while a first is
+        // still in flight would stack parallel briefing requests.
+        guard !isLoadingAssistantBriefing else { return }
+        briefingDidFail = false
+        isLoadingAssistantBriefing = true
+        await runBriefingFetchWithTimeout()
+    }
+
+    /// Race a briefing fetch against an 8s timeout. Whichever wins resolves the
+    /// loading state — and we cancel the loser so its branch can't fire later
+    /// and stomp on the live UI state (which was the original double-Task race).
+    @MainActor
+    private func runBriefingFetchWithTimeout() async {
+        let fetchTask = Task<Void, Never> {
+            _ = await services.emailService.loadAssistantBriefing()
+        }
+        let timeoutTask = Task<Void, Never> {
+            try? await Task.sleep(nanoseconds: 8_000_000_000)
+        }
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { await fetchTask.value }
+            group.addTask { await timeoutTask.value }
+            _ = await group.next()
+            group.cancelAll()
+        }
+        fetchTask.cancel()
+        timeoutTask.cancel()
+        isLoadingAssistantBriefing = false
+        if services.emailService.assistantBriefing == nil {
+            briefingDidFail = true
+        }
+    }
+
     /// Three faint placeholder rows shaped roughly like real email rows. Pure
     /// SwiftUI — no animation library required. The gentle redraw pulse from
     /// `RoundedRectangle.fill(.secondary.opacity(...))` plus the cached blur
@@ -1700,7 +1773,7 @@ struct HomeView: View {
         }
         if services.calendarService.canReadEvents() {
             let now = Date()
-            upcomingEvents = await services.calendarService.upcomingEvents(days: 7)
+            let raw = await services.calendarService.upcomingEvents(days: 7)
                 .filter { event in
                     // All-day events span the full day — always keep them
                     if event.isAllDay { return true }
@@ -1708,6 +1781,26 @@ struct HomeView: View {
                     return event.endDate > now
                 }
                 .sorted { $0.startDate < $1.startDate }
+
+            // Dedup: the same event often surfaces from multiple subscribed calendars
+            // (e.g. "Mors dag" from system Holidays + Google + iCloud). Collapse them
+            // by (title, startDate, isAllDay) so the week view stays scannable. First
+            // occurrence wins so the user's primary calendar color is preserved.
+            // Lowercase via the POSIX locale so an "I"-heavy title doesn't get a
+            // different fold in tr-TR (Turkish dotted/dotless I) and silently miss
+            // a duplicate that would have matched in en-US.
+            let posix = Locale(identifier: "en_US_POSIX")
+            var seen = Set<String>()
+            var deduped: [CalendarEvent] = []
+            deduped.reserveCapacity(raw.count)
+            for event in raw {
+                let titleKey = event.title.lowercased(with: posix)
+                let key = "\(titleKey)|\(Int(event.startDate.timeIntervalSince1970))|\(event.isAllDay ? 1 : 0)"
+                if seen.insert(key).inserted {
+                    deduped.append(event)
+                }
+            }
+            upcomingEvents = deduped
         }
     }
 
@@ -1723,17 +1816,18 @@ struct HomeView: View {
             && services.assistantAutomationPolicy.showHomeBriefing
         if shouldLoadBriefing {
             let hasCached = services.emailService.assistantBriefing != nil
-            if !hasCached { isLoadingAssistantBriefing = true }
-            Task {
-                _ = await services.emailService.loadAssistantBriefing()
-                isLoadingAssistantBriefing = false
-            }
             if !hasCached {
-                // Safety timeout — clears spinner after 8s even if the API never responds
-                Task {
-                    try? await Task.sleep(nanoseconds: 8_000_000_000)
-                    isLoadingAssistantBriefing = false
-                }
+                isLoadingAssistantBriefing = true
+                briefingDidFail = false
+                // Detached from loadHomeData so the other Home data fetches below
+                // (events, meetings, capture) aren't blocked by the AI call.
+                Task { await runBriefingFetchWithTimeout() }
+            } else {
+                // Already have a cached briefing — refresh in the background
+                // without flipping the loading flag (no spinner). Failure here
+                // is silent: the stale cache is better than a fail card on top
+                // of valid-looking content.
+                Task { _ = await services.emailService.loadAssistantBriefing() }
             }
         }
 

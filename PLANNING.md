@@ -1,5 +1,9 @@
 # React Web -> Native Migration Plan (iOS + Android + macOS) for Todus/Zero
 
+> **⚠️ HISTORICAL.** This document captures the migration plan from React Native shells (Expo iOS + Electron macOS) to native SwiftUI. The migration is largely complete — `apps/ios/Todus` and `apps/macos/TodusMac` are the live native targets; the old wrappers are archived under `apps/archived/`. Keep for context only.
+>
+> **For current state, read [AGENT_CONTEXT.md](AGENT_CONTEXT.md) and [APPS_ARCHITECTURE.md](APPS_ARCHITECTURE.md).** For active work, see [TASK.md](TASK.md) and [CHANGELOG.md](CHANGELOG.md).
+
 Last updated: 2026-02-21
 
 ## Summary

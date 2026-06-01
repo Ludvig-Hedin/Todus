@@ -66,15 +66,14 @@ final class LocalModelStateStore {
 
     private let log = Logger(subsystem: "com.todus.ios", category: "LocalModelStateStore")
 
-    /// Root directory for downloaded model weights. Same shape on iOS and
-    /// macOS: Application Support / LocalModels / <model id> / ...
+    /// Root directory for downloaded model weights. `mlx-swift-examples` writes
+    /// to `Documents/huggingface/models/<org>/<name>/` — we mirror that path so
+    /// installed weights interop with any other MLX tool the user might run.
     nonisolated static var modelsDirectory: URL {
         let fm = FileManager.default
-        // Application Support is created lazily by the system; create it if
-        // missing so first-run reads don't trip on the directory not existing.
-        let support = (try? fm.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true))
+        let docs = (try? fm.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true))
             ?? URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
-        let dir = support.appendingPathComponent("LocalModels", isDirectory: true)
+        let dir = docs.appendingPathComponent("huggingface/models", isDirectory: true)
         if !fm.fileExists(atPath: dir.path) {
             try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
         }
@@ -123,11 +122,12 @@ final class LocalModelStateStore {
 
     // MARK: - Disk scan
 
-    /// Walks `modelsDirectory` and seeds `.installed` for each top-level
-    /// subfolder whose name matches a known catalog id and that contains at
-    /// least one weight file. Best-effort — the real
-    /// `ModelDownloadService` (Phase 3) writes a `manifest.json` per model
-    /// for stronger validation.
+    /// Walks the HuggingFace cache root and seeds `.installed` for any catalog
+    /// model whose `mlxRepo` matches a `<org>/<name>` subtree containing weight
+    /// files. The download service writes there, so this is the source of
+    /// truth for "what's actually on disk." Best-effort: weight integrity is
+    /// validated later by the runtime — a corrupt download surfaces as
+    /// `.failed` when loading.
     private func initialScan() async {
         defer { hasScanned = true }
         // FileManager work hops to a background priority so a user with several
@@ -136,7 +136,25 @@ final class LocalModelStateStore {
         let seeded = await Task.detached(priority: .userInitiated) {
             Self.scanDisk()
         }.value
-        self.stateById = seeded
+        // Merge instead of replace: while the scan ran, `apply(...)` may have
+        // recorded in-flight `.downloading` / `.paused` / `.failed` entries
+        // (e.g. user started a download right after launch). Wholesale assigning
+        // `self.stateById = seeded` would silently drop them.
+        //
+        // Live in-flight states (`.downloading` / `.paused` / `.deleting`)
+        // always win — the download service has the freshest info. But a
+        // stale `.failed` from a previous attempt should yield to a real
+        // on-disk `.installed`, otherwise a successful retry that completed
+        // outside the store (or a download from a prior session that happens
+        // to be on disk) keeps showing the old error.
+        for (id, scannedState) in seeded {
+            switch self.stateById[id] {
+            case .none, .notInstalled, .failed:
+                self.stateById[id] = scannedState
+            case .downloading, .paused, .deleting, .installed:
+                continue
+            }
+        }
         log.info("[LocalModels] Initial scan found \(seeded.count, privacy: .public) installed model(s)")
     }
 
@@ -144,29 +162,43 @@ final class LocalModelStateStore {
         let fm = FileManager.default
         let root = Self.modelsDirectory
 
-        guard let entries = try? fm.contentsOfDirectory(
-            at: root,
-            includingPropertiesForKeys: [.fileSizeKey, .totalFileAllocatedSizeKey, .isDirectoryKey],
-            options: [.skipsHiddenFiles, .skipsSubdirectoryDescendants]
-        ) else {
-            return [:]
-        }
-
         var seeded: [String: LocalModelInstallState] = [:]
-        for url in entries {
-            let id = url.lastPathComponent
-            guard LocalModelCatalog.model(forId: id) != nil else { continue }
-
-            // Sum the size of every regular file inside the model dir. We
-            // intentionally don't try to validate weight integrity here —
-            // a corrupt download surfaces later when the runtime fails to
-            // load it, and we transition to `.failed` at that point.
-            let totalBytes = directorySize(at: url, fileManager: fm)
-            if totalBytes > 0 {
-                seeded[id] = .installed(diskBytes: totalBytes)
-            }
+        for model in LocalModelCatalog.all {
+            guard model.runtime == .mlx, let repo = model.mlxRepo else { continue }
+            let candidate = root.appendingPathComponent(repo, isDirectory: true)
+            guard fm.fileExists(atPath: candidate.path) else { continue }
+            // Refuse to mark partial / failed downloads as `.installed`:
+            // a `models--…/` dir with only `.lock` / `refs/` files yields
+            // `directorySize > 0` but no actual weight file. The MLX runtime
+            // would then crash on first turn. Gate on a real weight artifact.
+            guard hasWeightFile(at: candidate, fileManager: fm) else { continue }
+            // Presence is already proven by `hasWeightFile`. Don't drop the
+            // entry when `directorySize` returns 0 — that can happen when
+            // `totalFileAllocatedSize` is unavailable for every file
+            // (sandboxed FS, network volumes), and a 0-byte report would
+            // re-offer the model for download.
+            let bytes = max(directorySize(at: candidate, fileManager: fm), 0)
+            seeded[model.id] = .installed(diskBytes: bytes)
         }
         return seeded
+    }
+
+    /// True when the directory tree contains at least one MLX-compatible weight
+    /// file (`*.safetensors`, `*.npz`, or `*.gguf`). Used by the disk scan to
+    /// reject partial downloads that would crash the runtime on load.
+    private nonisolated static func hasWeightFile(at url: URL, fileManager fm: FileManager) -> Bool {
+        guard let enumerator = fm.enumerator(
+            at: url,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else { return false }
+        for case let fileURL as URL in enumerator {
+            let ext = fileURL.pathExtension.lowercased()
+            if ext == "safetensors" || ext == "npz" || ext == "gguf" {
+                return true
+            }
+        }
+        return false
     }
 
     private nonisolated static func directorySize(at url: URL, fileManager: FileManager) -> Int64 {

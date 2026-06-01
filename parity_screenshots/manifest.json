@@ -1,7 +1,7 @@
 {
-  "version": 1,
-  "generatedAt": "2026-03-01",
-  "platforms": ["web", "ios"],
+  "version": 2,
+  "generatedAt": "2026-05-24",
+  "platforms": ["web", "ios", "macos"],
   "screens": [
     { "slug": "Login", "webRoute": "/login" },
     { "slug": "Signup", "webRoute": "/signup" },
@@ -25,6 +25,63 @@
     { "slug": "SettingsSecurity", "webRoute": "/settings/security" },
     { "slug": "SettingsShortcuts", "webRoute": "/settings/shortcuts" },
     { "slug": "SettingsDangerZone", "webRoute": "/settings/danger-zone" },
-    { "slug": "NotFound", "webRoute": "/404" }
+    { "slug": "NotFound", "webRoute": "/404" },
+    {
+      "slug": "DesignSystem",
+      "webRoute": "/settings/design-system",
+      "macosNavigation": "Settings → Developer → Design System (opens MacDesignSystemView as a sheet)",
+      "surface": "design-system",
+      "gated": true,
+      "notes": "Allowlist-gated: web needs VITE_TODUS_ALLOWLISTED_EMAILS, native shells use TodusDeveloperAccess (TODUS_ALLOWLISTED_EMAILS). Capture full page; the page is long — full-page screenshot is required, not a viewport crop."
+    },
+    {
+      "slug": "DesignSystemColors",
+      "webRoute": "/settings/design-system#colors",
+      "macosNavigation": "Settings → Developer → Design System → Colors tab",
+      "surface": "design-system",
+      "gated": true,
+      "section": "colors",
+      "notes": "Colors / Static colors / Accent palette on web. Sidebar selection on macOS sheet."
+    },
+    {
+      "slug": "DesignSystemTypography",
+      "webRoute": "/settings/design-system#typography",
+      "macosNavigation": "Settings → Developer → Design System → Typography tab",
+      "surface": "design-system",
+      "gated": true,
+      "section": "typography"
+    },
+    {
+      "slug": "DesignSystemRadius",
+      "webRoute": "/settings/design-system#radius",
+      "macosNavigation": "Settings → Developer → Design System → Radius tab",
+      "surface": "design-system",
+      "gated": true,
+      "section": "radius"
+    },
+    {
+      "slug": "DesignSystemSpacing",
+      "webRoute": "/settings/design-system#spacing",
+      "macosNavigation": "Settings → Developer → Design System → Spacing tab",
+      "surface": "design-system",
+      "gated": true,
+      "section": "spacing"
+    },
+    {
+      "slug": "DesignSystemComponents",
+      "webRoute": "/settings/design-system#components",
+      "macosNavigation": "Settings → Developer → Design System → Components tab",
+      "surface": "design-system",
+      "gated": true,
+      "section": "components"
+    },
+    {
+      "slug": "DesignSystemMotion",
+      "webRoute": "/settings/design-system#motion",
+      "macosNavigation": "Settings → Developer → Design System → Motion tab",
+      "surface": "design-system",
+      "gated": true,
+      "section": "motion"
+    }
   ]
 }

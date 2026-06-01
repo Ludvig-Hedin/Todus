@@ -51,24 +51,34 @@ private let freeEmailProviderDomains: Set<String> = [
 /// Why @Observable: SwiftUI views read `resolvedURLs` directly and re-render automatically
 /// when a new entry arrives — the view transitions from initials → real avatar without any
 /// manual signaling.
+///
+/// PERFORMANCE NOTE: Only `resolvedURLs` is observable. `lastSuccessful`, `resolvedAt`,
+/// `inFlight`, and `saveTask` are explicitly `@ObservationIgnored` so the per-row
+/// `recordSuccess(...)` write fired from `AsyncImage.onAppear` does NOT invalidate every
+/// email row that previously read `candidates(for:)`. Before this fix every scroll-induced
+/// image success caused a full inbox re-render cascade — a measured main-thread hang source.
+/// Disk I/O is dispatched to a background queue so JSON encode/decode never blocks the UI.
 @MainActor
 @Observable
 final class AvatarCache {
     static let shared = AvatarCache()
 
     /// email → ordered list of image URLs to try, best source first.
-    /// Reading this property triggers a SwiftUI re-render when it changes.
+    /// Reading this property triggers a SwiftUI re-render when it changes — this is the
+    /// only dict that SHOULD invalidate views (new sender resolved → row picks up URL).
     var resolvedURLs: [String: [URL]] = [:]
 
     /// email → URL that successfully rendered last time. Tried first on next render so
     /// repeat displays skip the failing prefix of the candidate list.
-    private var lastSuccessful: [String: URL] = [:]
+    /// `@ObservationIgnored` — mutations here must NOT invalidate every consumer of
+    /// `candidates(for:)`; that would re-render every visible email row.
+    @ObservationIgnored private var lastSuccessful: [String: URL] = [:]
 
-    /// email → when this entry was resolved. Used to apply TTL.
-    private var resolvedAt: [String: Date] = [:]
+    /// email → when this entry was resolved. Used to apply TTL. Not observed.
+    @ObservationIgnored private var resolvedAt: [String: Date] = [:]
 
     /// Tracks in-progress fetches so concurrent rows for the same sender don't double-fetch.
-    private var inFlight: Set<String> = []
+    @ObservationIgnored private var inFlight: Set<String> = []
 
     /// Successful resolutions stick around for 30 days. Long enough to survive vacation;
     /// short enough that brand logo refreshes propagate.
@@ -82,9 +92,26 @@ final class AvatarCache {
     private static let maxEntries = 5000
 
     /// Debounced disk write — coalesces rapid updates (e.g. 50 row appearances on inbox load).
-    private var saveTask: Task<Void, Never>?
+    /// One task at a time: while it's sleeping, `scheduleSave()` just flips `dirty` instead
+    /// of cancelling + reallocating a new Task. Avoids ~100 Task allocations per inbox refresh.
+    @ObservationIgnored private var saveTask: Task<Void, Never>?
+    @ObservationIgnored private var dirty = false
 
-    private static let cacheFileURL: URL? = {
+    /// True once `bootstrap()` has hydrated the in-memory cache from disk. Used to make
+    /// `bootstrap()` idempotent so we don't re-decode the cache on every call.
+    @ObservationIgnored private var didBootstrap = false
+
+    /// Serial background queue for all disk I/O. JSON encode/decode and atomic file
+    /// writes run here, never on the main thread. Mirrors the pattern in `AppLogger`.
+    /// `nonisolated` so the queue can be dispatched onto from any actor context.
+    nonisolated private static let diskQueue = DispatchQueue(
+        label: "com.todus.avatarCache.disk",
+        qos: .utility
+    )
+
+    /// Marked `nonisolated` so the background `diskQueue` helpers can read the URL
+    /// without crossing back to the MainActor.
+    nonisolated private static let cacheFileURL: URL? = {
         guard let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else {
             return nil
         }
@@ -92,7 +119,9 @@ final class AvatarCache {
     }()
 
     private init() {
-        loadFromDisk()
+        // Disk hydration is deferred to `bootstrap()` so first access of `AvatarCache.shared`
+        // (e.g. during inbox row body evaluation) does not synchronously decode up to
+        // 5000 JSON entries on the main thread.
     }
 
     // MARK: - Public API
@@ -149,7 +178,60 @@ final class AvatarCache {
     func flushPendingSaves() {
         saveTask?.cancel()
         saveTask = nil
-        persistToDisk()
+        dirty = false
+        let snapshot = makeSnapshot()
+        Self.diskQueue.async {
+            Self.writeToDisk(snapshot)
+        }
+    }
+
+    /// Hydrate the in-memory cache from disk. Decodes the persisted blob off the main
+    /// thread, then publishes a single mutation to `resolvedURLs` so SwiftUI sees one
+    /// invalidation instead of N. Safe to call multiple times — second call is a no-op.
+    ///
+    /// Call this from app startup (after the first interactive frame) and from background
+    /// → foreground transitions if you suspect the in-memory copy went stale.
+    func bootstrap() async {
+        guard !didBootstrap else { return }
+        didBootstrap = true
+
+        let trace = PerformanceTrace.beginInterval(
+            PerformanceTrace.avatarCacheBootstrap,
+            message: "AvatarCache.bootstrap begin"
+        )
+        defer {
+            PerformanceTrace.endInterval(
+                PerformanceTrace.avatarCacheBootstrap,
+                trace,
+                message: "AvatarCache.bootstrap end"
+            )
+        }
+
+        let snapshot = await withCheckedContinuation { (cont: CheckedContinuation<PersistedShape?, Never>) in
+            Self.diskQueue.async {
+                cont.resume(returning: Self.readFromDisk())
+            }
+        }
+
+        guard let snapshot else { return }
+
+        // Drop expired entries before publishing.
+        let now = Date()
+        var validURLs: [String: [URL]] = [:]
+        var validAt: [String: Date] = [:]
+        for (email, when) in snapshot.resolvedAt {
+            let urls = snapshot.resolvedURLs[email] ?? []
+            let ttl = urls.isEmpty ? Self.emptyTTL : Self.successTTL
+            if now.timeIntervalSince(when) < ttl {
+                validURLs[email] = urls
+                validAt[email] = when
+            }
+        }
+
+        // Single observable write so SwiftUI rerenders only once for the whole hydration.
+        resolvedURLs = validURLs
+        resolvedAt = validAt
+        lastSuccessful = snapshot.lastSuccessful.filter { validURLs[$0.key] != nil }
     }
 
     // MARK: - Backend fetch
@@ -334,49 +416,34 @@ final class AvatarCache {
 
     // MARK: - Persistence
 
-    private struct PersistedShape: Codable {
+    /// `Sendable` so the snapshot can cross from the main actor to `diskQueue` without
+    /// touching the live mutable dicts on the actor.
+    fileprivate struct PersistedShape: Codable, Sendable {
         let resolvedURLs: [String: [URL]]
         let lastSuccessful: [String: URL]
         let resolvedAt: [String: Date]
     }
 
-    private func loadFromDisk() {
-        guard let url = Self.cacheFileURL,
-              let data = try? Data(contentsOf: url),
-              let decoded = try? JSONDecoder().decode(PersistedShape.self, from: data) else {
-            return
-        }
-
-        // Drop expired entries on load — keeps the in-memory state honest from the start.
-        let now = Date()
-        var validURLs: [String: [URL]] = [:]
-        var validAt: [String: Date] = [:]
-        for (email, when) in decoded.resolvedAt {
-            let urls = decoded.resolvedURLs[email] ?? []
-            let ttl = urls.isEmpty ? Self.emptyTTL : Self.successTTL
-            if now.timeIntervalSince(when) < ttl {
-                validURLs[email] = urls
-                validAt[email] = when
-            }
-        }
-        self.resolvedURLs = validURLs
-        self.resolvedAt = validAt
-        self.lastSuccessful = decoded.lastSuccessful.filter { validURLs[$0.key] != nil }
-    }
-
     private func scheduleSave() {
-        saveTask?.cancel()
+        dirty = true
+        // Reuse the in-flight debounce window instead of cancelling + reallocating —
+        // a busy inbox refresh fires `scheduleSave()` ~100 times per second and the
+        // old cancel-and-recreate pattern produced unbounded Task churn on main.
+        guard saveTask == nil else { return }
         saveTask = Task { @MainActor [weak self] in
-            // Coalesce rapid successive writes into a single disk hit.
             try? await Task.sleep(for: .seconds(1))
-            guard !Task.isCancelled, let self else { return }
-            self.persistToDisk()
+            guard let self, !Task.isCancelled else { return }
+            self.saveTask = nil
+            guard self.dirty else { return }
+            self.dirty = false
+            self.persistOffMain()
         }
     }
 
-    private func persistToDisk() {
-        guard let fileURL = Self.cacheFileURL else { return }
-
+    /// Capture an in-memory snapshot on main, hand it off to `diskQueue` for the
+    /// expensive JSON encode + atomic write. The trim step still mutates the live
+    /// dicts (so the cap is enforced) but only does cheap dictionary work on main.
+    private func persistOffMain() {
         // Trim if over cap — drop oldest by resolvedAt timestamp.
         if resolvedURLs.count > Self.maxEntries {
             let sorted = resolvedAt.sorted { $0.value < $1.value }
@@ -388,12 +455,30 @@ final class AvatarCache {
             }
         }
 
-        let snapshot = PersistedShape(
+        let snapshot = makeSnapshot()
+        Self.diskQueue.async {
+            Self.writeToDisk(snapshot)
+        }
+    }
+
+    private func makeSnapshot() -> PersistedShape {
+        PersistedShape(
             resolvedURLs: resolvedURLs,
             lastSuccessful: lastSuccessful,
             resolvedAt: resolvedAt
         )
-        guard let data = try? JSONEncoder().encode(snapshot) else { return }
+    }
+
+    /// Background-queue helpers. Both run off the main thread — never call from main.
+    nonisolated private static func readFromDisk() -> PersistedShape? {
+        guard let url = Self.cacheFileURL,
+              let data = try? Data(contentsOf: url) else { return nil }
+        return try? JSONDecoder().decode(PersistedShape.self, from: data)
+    }
+
+    nonisolated private static func writeToDisk(_ snapshot: PersistedShape) {
+        guard let fileURL = Self.cacheFileURL,
+              let data = try? JSONEncoder().encode(snapshot) else { return }
         try? data.write(to: fileURL, options: [.atomic])
     }
 }

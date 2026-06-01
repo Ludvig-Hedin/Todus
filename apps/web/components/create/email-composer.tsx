@@ -32,6 +32,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useTRPC } from '@/providers/query-provider';
 import { useMutation } from '@tanstack/react-query';
 import { useSettings } from '@/hooks/use-settings';
+import { useNetworkStatus } from '@/app/hooks/use-network-status';
 
 import { cn, formatFileSize } from '@/lib/utils';
 import { useThread } from '@/hooks/use-threads';
@@ -119,6 +120,7 @@ export function EmailComposer({
   const { data: aliases } = useEmailAliases();
   const { data: connectionsData } = useConnections();
   const { data: settings } = useSettings();
+  const { isOnline } = useNetworkStatus();
   const [showCc, setShowCc] = useState(initialCc.length > 0);
   const [showBcc, setShowBcc] = useState(initialBcc.length > 0);
   const [isLoading, setIsLoading] = useState(false);
@@ -875,16 +877,42 @@ export function EmailComposer({
         <div className="flex flex-col items-start justify-start gap-2">
           {toggleToolbar && <Toolbar editor={editor} />}
           <div className="flex items-center justify-start gap-2">
-            <Button size={'xs'} onClick={handleSend} disabled={isLoading || settingsLoading || !isScheduleValid}>
+            <Button
+              size={'xs'}
+              onClick={handleSend}
+              // Disabled while a send is in flight, while settings are still
+              // resolving, when the user has scheduled an invalid time, and
+              // when the device is offline (matches iOS behaviour — Send is
+              // never tappable without connectivity).
+              disabled={isLoading || settingsLoading || !isScheduleValid || !isOnline}
+              aria-label={
+                !isOnline
+                  ? 'Offline — connect to send'
+                  : isLoading
+                    ? 'Sending'
+                    : 'Send message'
+              }
+            >
               <div className="flex items-center justify-center">
-                <div className="text-center text-sm leading-none text-white dark:text-black">
-                  <span>Send </span>
+                {isLoading ? (
+                  // Spinner + label so the button reads as actively working
+                  // instead of merely greyed out.
+                  <div className="flex items-center gap-1.5 text-sm leading-none text-white dark:text-black">
+                    <Loader className="h-3.5 w-3.5 animate-spin" />
+                    <span>Sending…</span>
+                  </div>
+                ) : (
+                  <div className="text-center text-sm leading-none text-white dark:text-black">
+                    <span>Send </span>
+                  </div>
+                )}
+              </div>
+              {!isLoading && (
+                <div className="flex h-5 items-center justify-center gap-1 rounded-sm bg-white/10 px-1 dark:bg-black/10">
+                  <Command className="h-3.5 w-3.5 text-white dark:text-black" />
+                  <CurvedArrow className="mt-1.5 h-4 w-4 fill-white dark:fill-black" />
                 </div>
-              </div>
-              <div className="flex h-5 items-center justify-center gap-1 rounded-sm bg-white/10 px-1 dark:bg-black/10">
-                <Command className="h-3.5 w-3.5 text-white dark:text-black" />
-                <CurvedArrow className="mt-1.5 h-4 w-4 fill-white dark:fill-black" />
-              </div>
+              )}
             </Button>
             <ScheduleSendPicker
               value={scheduleAt}

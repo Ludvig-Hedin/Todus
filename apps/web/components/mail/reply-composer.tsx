@@ -97,6 +97,7 @@ export default function ReplyCompose({ messageId }: ReplyComposeProps) {
     message: string;
     attachments: File[];
     scheduleAt?: string;
+    fromEmail?: string;
   }) => {
     if (!replyToMessage || !activeConnection?.email) return;
 
@@ -104,9 +105,13 @@ export default function ReplyCompose({ messageId }: ReplyComposeProps) {
       const userEmail = activeConnection.email.toLowerCase();
       const userName = activeConnection.name || session?.user?.name || '';
 
-      let fromEmail = userEmail;
+      // Honor an explicit From picked in the composer first — alias-matching is
+      // only the fallback when the user didn't choose. Previously the form's
+      // `data.fromEmail` was discarded and every reply sent from the
+      // alias-matched address, ignoring the picker.
+      let fromEmail = data.fromEmail?.trim() || userEmail;
 
-      if (aliases && aliases.length > 0 && replyToMessage) {
+      if (!data.fromEmail && aliases && aliases.length > 0 && replyToMessage) {
         const allRecipients = [
           ...(replyToMessage.to || []),
           ...(replyToMessage.cc || []),
@@ -150,7 +155,10 @@ export default function ReplyCompose({ messageId }: ReplyComposeProps) {
         }))
         : undefined;
 
-      const todusSignature = settings?.settings.zeroSignature
+      // Field renamed `zeroSignature` → `todusSignature` on the server schema
+      // (see apps/server/src/lib/schemas.ts:204). The old key returns undefined,
+      // which is falsy, so the signature footer used to silently never render.
+      const todusSignature = settings?.settings.todusSignature
         ? '<p style="color: #666; font-size: 12px;">Sent via <a href="https://todus.app/" style="color: #0066cc; text-decoration: none;">Todus</a></p>'
         : '';
 

@@ -1463,6 +1463,16 @@ final class EmailService {
         defer { isSending = false }
 
         do {
+            // RFC 5322 `In-Reply-To` / `References` headers chain replies into the
+            // original thread on every mail client — without them, non-Gmail
+            // recipients (Apple Mail, Outlook, plain SMTP) see a brand-new thread.
+            // Wraps in angle brackets if the source id doesn't already have them.
+            var headers: [String: String] = [:]
+            if let mid = draft.replyToMessageId, !mid.isEmpty {
+                let wrapped = mid.hasPrefix("<") ? mid : "<\(mid)>"
+                headers["In-Reply-To"] = wrapped
+                headers["References"] = wrapped
+            }
             let input = SendEmailInput(
                 to: draft.to.map { SendRecipient(email: $0) },
                 cc: draft.cc.isEmpty ? nil : draft.cc.map { SendRecipient(email: $0) },
@@ -1470,12 +1480,30 @@ final class EmailService {
                 subject: draft.subject,
                 message: draft.body,
                 threadId: draft.replyToThreadId,
-                fromEmail: fromEmail
+                fromEmail: fromEmail,
+                headers: headers.isEmpty ? nil : headers,
+                isForward: draft.isForward ? true : nil,
+                originalMessage: draft.isForward ? draft.originalMessage : nil
             )
             let _: SendResponse = try await api.trpcMutation("mail.send", input: input)
             return true
         } catch {
-            errorMessage = "Failed to send email."
+            // Surface the underlying message if available — saves the user from
+            // guessing whether the failure was network, validation, or backend.
+            if let apiError = error as? APIError {
+                switch apiError {
+                case .httpError(_, let body):
+                    if let body, !body.isEmpty {
+                        errorMessage = "Failed to send: \(body.prefix(140))"
+                    } else {
+                        errorMessage = "Failed to send email."
+                    }
+                default:
+                    errorMessage = "Failed to send email."
+                }
+            } else {
+                errorMessage = "Failed to send email."
+            }
             return false
         }
     }
@@ -1786,6 +1814,13 @@ private struct SendEmailInput: Encodable {
     /// uses the active connection — but multi-account users picking a
     /// non-default From in the composer rely on this being plumbed through.
     let fromEmail: String?
+    /// Outgoing MIME headers. Used to inject `In-Reply-To` / `References` on
+    /// replies so non-Gmail recipients (Apple Mail, Outlook, plain SMTP) chain
+    /// the reply into the original thread instead of starting a new one.
+    let headers: [String: String]?
+    /// Forward marker — server adds the quoted original via `originalMessage`.
+    let isForward: Bool?
+    let originalMessage: String?
 }
 
 private struct AssistantThreadInput: Encodable {

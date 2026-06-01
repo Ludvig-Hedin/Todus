@@ -1,6 +1,8 @@
 # Todus Roadmap 🛤️
 
-This document outlines the development roadmap for Todus. Our vision is to create a powerful, user-friendly, and privacy-focused email experience.
+> **High-level product wishlist.** Active sprint work lives in [TASK.md](TASK.md); shipped work in [CHANGELOG.md](CHANGELOG.md). For the current architecture see [AGENT_CONTEXT.md](AGENT_CONTEXT.md).
+
+This document outlines the high-level development roadmap for Todus. Our vision is to create a powerful, user-friendly, and privacy-focused email experience.
 
 ## Current Development Focus
 

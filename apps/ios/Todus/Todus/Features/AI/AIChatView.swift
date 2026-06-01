@@ -1474,6 +1474,7 @@ struct AIChatView: View {
                 .buttonStyle(.plain)
                 .frame(width: 30, height: 30)
                 .contentShape(Rectangle())
+                .accessibilityLabel("Chat settings")
 
                 Spacer()
 
@@ -1501,6 +1502,7 @@ struct AIChatView: View {
                 .buttonStyle(.plain)
                 .frame(width: 30, height: 30)
                 .contentShape(Rectangle())
+                .accessibilityLabel("Start voice chat")
 
                 // Transcribe mic button
                 VoiceInputButton(onTranscribed: { transcribed in

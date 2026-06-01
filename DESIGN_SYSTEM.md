@@ -68,18 +68,22 @@ Web light values follow shadcn defaults; see `globals.css` `:root` block.
 
 ## Accent palette
 
-Six muted accent options, identical hex across platforms. User-selectable via Settings → Appearance.
+Six muted "refined editorial" accents. Hex identical across platforms in **light mode**. iOS canonical source: `AppTheme.Accents` enum.
 
 | Name | RGB (0-1) | Hex | Web file:line | iOS | macOS |
 |------|-----------|-----|---------------|-----|-------|
-| Blue | (0.25, 0.48, 1.00) | `#407AFF` | `appearance/page.tsx:36` | `AppTheme.Accents.blue` | `MacTheme.accentColor(for: .blue)` |
-| Indigo | (0.35, 0.34, 0.84) | `#5957D6` | `appearance/page.tsx:37` | `AppTheme.Accents.indigo` | `MacTheme.accentColor(for: .indigo)` |
-| Teal | (0.20, 0.68, 0.78) | `#33ADC7` | `appearance/page.tsx:38` | `AppTheme.Accents.teal` | `MacTheme.accentColor(for: .teal)` |
-| Green | (0.20, 0.72, 0.40) | `#33B866` | `appearance/page.tsx:39` | `AppTheme.Accents.green` | `MacTheme.accentColor(for: .green)` |
-| Orange | (0.98, 0.55, 0.20) | `#FA8C33` | `appearance/page.tsx:40` | `AppTheme.Accents.orange` | `MacTheme.accentColor(for: .orange)` |
-| Rose | (0.93, 0.32, 0.46) | `#ED5275` | `appearance/page.tsx:41` | `AppTheme.Accents.rose` | `MacTheme.accentColor(for: .rose)` |
+| Blue | (0.22, 0.45, 0.85) | `#3873d9` | `appearance/page.tsx:36` | `AppTheme.Accents.blue` | `MacTheme.accentColor(for: .blue)` |
+| Indigo | (0.35, 0.32, 0.78) | `#5952c7` | `appearance/page.tsx:37` | `AppTheme.Accents.indigo` | `MacTheme.accentColor(for: .indigo)` |
+| Teal | (0.18, 0.52, 0.55) | `#2e858c` | `appearance/page.tsx:38` | `AppTheme.Accents.teal` | `MacTheme.accentColor(for: .teal)` |
+| Green | (0.25, 0.55, 0.32) | `#408c52` | `appearance/page.tsx:39` | `AppTheme.Accents.green` | `MacTheme.accentColor(for: .green)` |
+| Orange | (0.78, 0.48, 0.18) | `#c77a2e` | `appearance/page.tsx:40` | `AppTheme.Accents.orange` | `MacTheme.accentColor(for: .orange)` |
+| Rose | (0.72, 0.28, 0.35) | `#b84759` | `appearance/page.tsx:41` | `AppTheme.Accents.rose` | `MacTheme.accentColor(for: .rose)` |
+
+**Dark mode lift:** macOS brightens each accent ~7-8% in dark mode for readability against dark surfaces (e.g. blue dark `(0.30, 0.50, 0.88)`). iOS uses the same canonical RGB in both modes (system contrast handles it). Web uses light values across both modes via `--accent` CSS var.
 
 Storage keys: web — `ACCENT_COLOR_STORAGE_KEY` in `localStorage`. iOS / macOS — `accentPreference: AccentPreference` on `AppServices` / `MacAppServices` (UserDefaults-backed).
+
+**Known followup:** iOS has two parallel accent stores (`@AppStorage("ios_accent_color")` synced to backend + `services.accentPreference` local-only). Both render the same canonical palette but don't sync to each other. Tracked in [DESIGN_SYSTEM_INCONSISTENCIES.md](DESIGN_SYSTEM_INCONSISTENCIES.md).
 
 ---
 
@@ -139,16 +143,21 @@ Font families:
 
 ## Motion tokens
 
-Unified naming across platforms. Map ad-hoc durations to these tokens whenever you touch animation code.
+Unified naming AND timing across platforms. Map ad-hoc durations to these tokens whenever you touch animation code.
 
 | Token | Web | iOS | macOS |
 |-------|-----|-----|-------|
-| `fast` | `--motion-duration-fast: 150ms` | `Motion.fast = .snappy(0.15)` | `Motion.fast = .easeOut(0.15)` |
-| `base` | `--motion-duration-base: 220ms` | `Motion.base = .snappy(0.25)` | `Motion.base = .snappy(0.25)` |
-| `slow` | `--motion-duration-slow: 320ms` | `Motion.slow = .spring(0.35, 0.85)` | `Motion.slow = .snappy(0.35)` |
+| `fast` | `--motion-duration-fast: 150ms` | `Motion.fast = .snappy(0.15)` | `Motion.fast = .snappy(0.15)` |
+| `base` | `--motion-duration-base: 250ms` | `Motion.base = .snappy(0.25)` | `Motion.base = .snappy(0.25)` |
+| `slow` | `--motion-duration-slow: 350ms` | `Motion.slow = .spring(0.35, 0.85)` | `Motion.slow = .spring(0.35, 0.85)` |
 | `spring` | — | (use `Motion.slow`) | `Motion.spring = .spring(0.32, 0.85)` |
-| Standard easing | `--motion-easing-standard: cubic-bezier(0.2, 0, 0, 1)` | (implicit in `snappy`) | (implicit) |
+| `interactive` | (use `fast`) | `Motion.interactive = .easeOut(0.18)` | — |
+| Standard easing | `--motion-easing-standard: cubic-bezier(0.2, 0, 0, 1)` | (implicit in `snappy`) | (implicit in `snappy`) |
 | Emphasized easing | `--motion-easing-emphasized: cubic-bezier(0.16, 1, 0.3, 1)` | — | — |
+
+**Spacing tokens** (added 2026-05-24) — web now exposes `--space-xs/sm/md/lg/xl/2xl` matching iOS/macOS 4/8/12/16/24/32px grid, plus Tailwind utilities `gap-xs`, `p-md`, etc.
+
+**Semantic surface aliases** (added 2026-05-24) — web exposes `--surface-primary` / `--surface-secondary` / `--surface-sheet` as aliases over the shadcn `--card` / `--accent` / `--popover` tokens. Use `bg-surface-primary` in new code for cross-platform clarity.
 
 **When to use:**
 - `fast` — hover transitions, micro press feedback, tooltip fades
@@ -163,7 +172,7 @@ Unified naming across platforms. Map ad-hoc durations to these tokens whenever y
 |-----------|-----|-----|-------|
 | Primary button | `components/ui/button.tsx` (variant: `default`) | `AppPrimaryButtonStyle` in `AppTheme.swift:596` | (use system Button + `.tint`) |
 | Secondary button | `button.tsx` (`secondary`) | `AppSecondaryButtonStyle` in `AppTheme.swift:623` | — |
-| Liquid glass button | — | `LiquidGlassButtonStyle` in `AppTheme.swift:675` | — |
+| Liquid glass button | `button.tsx` (`glass`) | `LiquidGlassButtonStyle` in `AppTheme.swift:744` | — |
 | Card | `components/ui/card.tsx` | (compose w/ `rowFill` + `cardBorder` + `Radius.card`) | (compose w/ `surfaceCard` + `cardBorder` + `cardRadius`) |
 | Dropdown menu | `components/ui/dropdown-menu.tsx` | SwiftUI `Menu` | SwiftUI `Menu` |
 | Dialog / modal | `components/ui/dialog.tsx` | SwiftUI `.sheet` | SwiftUI `.sheet` |

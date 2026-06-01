@@ -872,8 +872,8 @@ const api = new Hono<HonoContext>()
     // through long redirect chains (Google → better-auth → mobile-token → todus://).
     // A JS-based redirect from an HTML page is the standard workaround.
     const auth = c.var.auth;
-    const session = await auth.api.getSession({ headers: c.req.raw.headers });
-    if (!session?.session?.token) {
+    const webAuthSession = await auth.api.getSession({ headers: c.req.raw.headers });
+    if (!webAuthSession?.session?.token) {
       return c.redirect(`${env.VITE_PUBLIC_APP_URL}/login?error=no_session`);
     }
     const jwtToken = await auth.api.getToken({
@@ -884,9 +884,38 @@ const api = new Hono<HonoContext>()
       return c.redirect(`${env.VITE_PUBLIC_APP_URL}/login?error=no_native_token`);
     }
 
-    // Raw session token as refresh token — 90-day sliding window via updateAge.
-    // Stored in Keychain on native apps, used only to obtain fresh JWTs.
-    const refreshToken = session.session.token;
+    // Create a dedicated native session for the iOS/macOS app so it appears as a
+    // separate entry in "Active Sessions" instead of sharing the web OAuth session.
+    // Falls back to the web session token if DB insert fails.
+    let refreshToken = webAuthSession.session.token;
+    let resolvedSessionId = webAuthSession.session.id;
+
+    const now = new Date();
+    const nativeSessionId = crypto.randomUUID();
+    const nativeSessionToken = createNativeSessionToken();
+    const nativeExpiresAt = new Date(now.getTime() + NATIVE_SESSION_MAX_AGE_SECONDS * 1000);
+    const { db: nativeDb, conn: nativeConn } = createDb(env.HYPERDRIVE.connectionString);
+    try {
+      await nativeDb.insert(session).values({
+        id: nativeSessionId,
+        token: nativeSessionToken,
+        userId: webAuthSession.user.id,
+        expiresAt: nativeExpiresAt,
+        createdAt: now,
+        updatedAt: now,
+        ipAddress: c.req.header('CF-Connecting-IP') ?? null,
+        userAgent: c.req.header('User-Agent') ?? null,
+      });
+      refreshToken = nativeSessionToken;
+      resolvedSessionId = nativeSessionId;
+    } catch (err) {
+      console.error(
+        '[auth/mobile-token] Failed to create native session, falling back to web session token',
+        err,
+      );
+    } finally {
+      await nativeConn.end();
+    }
 
     // Build the deep link URL with both tokens for the native app.
     // SECURITY: validate redirect against an allowlist. Without this an attacker
@@ -936,8 +965,8 @@ const api = new Hono<HonoContext>()
         ? requestedRedirect
         : 'todus://auth-callback';
     const separator = redirectUrl.includes('?') ? '&' : '?';
-    const sessionIdParam = session.session.id
-      ? `&sessionId=${encodeURIComponent(session.session.id)}`
+    const sessionIdParam = resolvedSessionId
+      ? `&sessionId=${encodeURIComponent(resolvedSessionId)}`
       : '';
     const deepLink = `${redirectUrl}${separator}token=${encodeURIComponent(jwtToken.token)}&refreshToken=${encodeURIComponent(refreshToken)}${sessionIdParam}`;
 

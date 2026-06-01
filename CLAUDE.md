@@ -2,22 +2,26 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+> **New here? Read [AGENT_CONTEXT.md](AGENT_CONTEXT.md) first.** It's the canonical agent reference — repo layout, feature map, where every doc lives, recent work. This file is the Claude-specific delta on top of that.
+
 ## Monorepo Structure
 
 This is a **pnpm + Turborepo** monorepo. The active apps are:
 
 | App | Path | Stack | Purpose |
 |-----|------|-------|---------|
-| Mail product | `apps/web` | React Router v7 + Vite + Cloudflare Workers | The deployed email client UI (primary — all frontend work goes here) |
-| ~~Mail product (legacy)~~ | `apps/mail` | React Router v7 + Vite + Cloudflare Workers | **READ-ONLY. Do not edit.** Superseded by `apps/web`. |
-| Backend | `apps/server` | Cloudflare Worker (Hono + tRPC + Durable Objects) | Auth, mail APIs, AI workflows |
-| iOS | `apps/ios/Todus` | Native SwiftUI (Xcode) | iPhone app |
-| macOS | `apps/macos` | Native SwiftUI (Xcode, Swift 6) | Desktop shell with sidebar navigation |
+| Frontend (active) | `apps/web` | React Router v7 + Vite + Cloudflare Workers | Marketing + mail product + settings — the whole user-facing surface |
+| ~~Frontend (legacy)~~ | `apps/mail` | React Router v7 + Vite + Cloudflare Workers | **READ-ONLY. Do not edit.** Superseded by `apps/web`. |
+| Backend | `apps/server` | Cloudflare Worker (Hono + tRPC + Durable Objects + Workflows) | Auth, mail APIs, AI workflows, Postgres via Hyperdrive |
+| iOS | `apps/ios/Todus` | Native SwiftUI (Xcode, Swift 6, iOS 18+) | iPhone app |
+| macOS | `apps/macos/TodusMac` | Native SwiftUI (Xcode, Swift 6, macOS 15+) | Desktop app (DMG via Cloudflare R2) |
 
 **Do not use** anything under `apps/archived/` — those are reference-only legacy implementations.
 
 > **IMPORTANT — `apps/mail/` is READ-ONLY.**
 > All frontend work now lives in `apps/web/`. Never edit any file under `apps/mail/`. Treat it as an archived reference. If you need to make a frontend change, make it in `apps/web/` instead.
+>
+> ⚠️ `pnpm build:frontend` and `pnpm deploy:frontend` in root `package.json` still target `@zero/mail` (the legacy archive). To actually ship `apps/web`, run `pnpm --filter=@zero/web build` and `pnpm --filter=@zero/web deploy` directly until those scripts are fixed.
 
 ## Design System
 
@@ -99,32 +103,37 @@ pnpm test -- -t "test name"     # Single test
 - **NEVER run project-wide lint/format commands** (`pnpm check`, `pnpm lint`, `pnpm format`) — these touch the entire codebase. Only lint/format specific files you changed.
 
 ### Current Workflow Notes
-- `pnpm dev` / `pnpm web` starts the **marketing site** (`apps/web`) + backend. Use `pnpm mail` to develop the mail product UI (`apps/mail`).
+- `pnpm dev` / `pnpm web` starts `apps/web` (marketing + mail + settings — the full frontend) + the backend.
+- `pnpm mail` starts the **legacy** `apps/mail` archive — only use if you need to compare against the old code. Never edit it.
 - Prefer `pnpm go` when you need the full local stack; it brings up Docker Postgres before the app processes.
 - Use `pnpm ios:simulator` for simulator debugging, but `pnpm ios` is the lighter app-start command.
-- Use `pnpm macos` for the native macOS shell; the old Electron-based flow is obsolete.
+- Use `pnpm macos` for the native macOS app; the old Electron flow is obsolete.
 - When adding schema changes, keep the order `db:generate` → review migration → `db:migrate` or `db:push` as appropriate.
 - Keep progress docs current: update `CHANGELOG.md`, `TASK.md`, `PLANNING.md`, or `ROADMAP.md` when work changes behavior or architecture.
 
-## Architecture: `apps/mail` (Mail Product UI)
+## Architecture: `apps/web` (Active Frontend)
 
-- **Framework**: React Router v7 (routes defined in `app/routes.ts`)
+This is the single React app that serves marketing, auth, the mail product, settings, and the developer surface.
+
+- **Framework**: React Router v7 (routes defined in `apps/web/app/routes.ts`)
+- **Runtime**: Vite + Cloudflare Workers (SSR)
 - **State**: Jotai (atoms) + TanStack Query (server state)
-- **Styling**: Tailwind CSS v4 — CSS-first config via `@theme` directive in CSS, not `tailwind.config.js`
+- **Styling**: Tailwind CSS v4 — CSS-first config via `@theme` directive in `apps/web/app/globals.css`
+- **Components**: shadcn/ui–derived in `apps/web/components/ui/`
 - **Rich text**: Tiptap editor
-- **i18n**: Paraglide JS (`apps/mail/messages/`, compiled to `paraglide/`)
-- **Auth client**: `apps/mail/lib/auth-client.ts` — exports `signIn`, `signUp`, `signOut`, `useSession`
-- **API calls**: tRPC client via `@trpc/tanstack-react-query`
+- **i18n**: Paraglide JS (`apps/web/messages/` compiled to `paraglide/`)
+- **Auth client**: `apps/web/lib/auth-client.ts` — exports `signIn`, `signUp`, `signOut`, `useSession`
+- **API calls**: tRPC client via `@trpc/tanstack-react-query` against `apps/server`
 - **Env vars**: Vite prefix `VITE_PUBLIC_*`; `VITE_PUBLIC_BACKEND_URL` points to the server
-- **Build/deploy**: `pnpm build:frontend`, `pnpm deploy:frontend`, `pnpm sentry:sourcemaps`
+- **Build/deploy**: `pnpm --filter=@zero/web build`, `pnpm --filter=@zero/web deploy` (see warning above re: stale root scripts)
 
-Routes are defined in `app/routes.ts`. The main mail UI lives under `/mail/:folder`.
-
-## Architecture: `apps/web` (Marketing Site)
-
-- **Framework**: React Router v7 (same stack as `apps/mail`)
-- **Routes**: Landing (`/`), `/home`, `/about`, `/pricing`, `/terms`, `/privacy`, `/blog/:slug`, `/compare/:competitor`
-- Started by `pnpm dev` / `pnpm web`; **not** deployed by `deploy:frontend` (which targets `apps/mail`)
+Key route surfaces (from `apps/web/app/routes.ts`):
+- `/` → landing, `/home`, `/about`, `/pricing`, `/terms`, `/privacy`, `/downloads`, `/contact`, `/faq`, `/hr`
+- `/blog`, `/blog/:slug`, `/compare/:competitor`, `/share/:slug`, `/g/:token`
+- `/login`, `/signup`
+- `/developer`
+- `/mail` (inbox), `/mail/:folder`, `/mail/compose`, `/mail/create`, `/mail/search`, `/mail/home`, `/mail/tasks`, `/mail/calendar`, `/mail/meetings`, `/mail/meetings/:id`, `/mail/docs`, `/mail/docs/:id`, `/mail/under-construction/:path`
+- `/settings/*` — `general`, `appearance`, `ai`, `billing`, `calendars`, `categories`, `connections`, `danger-zone`, `design-system`, `labels`, `local-models`, `meetings`, `notifications`, `privacy`, `security`, `sharing`, `shortcuts`, `signatures`
 
 ## Architecture: `apps/server` (Backend)
 
@@ -139,7 +148,7 @@ Routes are defined in `app/routes.ts`. The main mail UI lives under `/mail/:fold
 - **Deploy**: `pnpm deploy:backend` → Wrangler (`wrangler.jsonc`)
 - **Dev utilities**: `pnpm test:ai`, `pnpm eval`, `pnpm eval:dev`, `pnpm eval:ci`
 
-tRPC routers in `src/trpc/routes/`: `assistant`, `ai`, `avatar`, `bimi`, `brain`, `calendar`, `categories`, `connections`, `cookiePreferences`, `drafts`, `folders`, `groups`, `labels`, `logging`, `mail`, `mailAssistant`, `meet`, `mentions`, `notes`, `sessions`, `settings`, `sharing`, `shortcut`, `subscription`, `tasks`, `templates`, `user`, `docs`.
+tRPC routers in `src/trpc/routes/` (file → router): `ai`, `assistant`, `avatar`, `bimi`, `brain`, `calendar`, `categories`, `connections`, `contact`, `cookies`, `docs`, `drafts`, `groups`, `label`, `logging`, `mail`, `mail-assistant`, `meet`, `mentions`, `notes`, `sessions`, `settings`, `sharing`, `shortcut`, `subscription`, `tasks`, `templates`, `user`.
 
 ## Architecture: `apps/ios` (Native iOS)
 
@@ -192,21 +201,30 @@ tRPC routers in `src/trpc/routes/`: `assistant`, `ai`, `avatar`, `bimi`, `brain`
 
 - **Provider**: Better Auth (server: `apps/server/src/lib/auth.ts`)
 - **Providers enabled**: Google OAuth, Apple Sign In, Email OTP (via Resend), phone number (via Twilio), email/password (with email verification required). Microsoft commented out.
-- **Client (web)**: `apps/mail/lib/auth-client.ts`
+- **Client (web)**: `apps/web/lib/auth-client.ts`
 - **Client (iOS)**: `apps/ios/Todus/Todus/Services/Auth/AuthService.swift`
+- **Client (macOS)**: `apps/macos/TodusMac/Services/Auth/AuthService.swift`
 - **`trustedOrigins`**: Hardcoded in `createAuthConfig()` — must be updated when adding new origins
 - **Production domain**: `todus.app`; `COOKIE_DOMAIN=todus.app` in `apps/server/wrangler.jsonc`
+- **Native session separation**: `/api/auth/mobile-token` creates a dedicated DB `session` row for the iOS/macOS app so it appears separately under "Active Sessions" instead of sharing the web OAuth session (falls back to the web token if the DB insert fails).
 
 ## Environment Variables
 
-Frontend (`apps/mail`, `apps/web`): use `VITE_PUBLIC_` prefix.
+Frontend (`apps/web`): use `VITE_PUBLIC_` prefix.
 Backend (`apps/server`): defined in `wrangler.jsonc`; type-safe via `src/env.ts`.
 Local dev: use a `.env` file at root (loaded via `dotenv-cli`).
 
 ## Documentation Files
 
-Several `.md` files track ongoing work — keep them updated when making architectural changes:
-- `CHANGELOG.md` — log all significant changes
-- `TASK.md` — current task status
-- `PLANNING.md` / `ROADMAP.md` — feature planning
-- `APPS_ARCHITECTURE.md` — canonical app surface (update if adding/removing apps)
+`.md` files to keep current when making architectural changes:
+- `AGENT_CONTEXT.md` — canonical agent reference (this file's mirror, broader audience)
+- `AGENTS.md` — agent-agnostic mirror
+- `CHANGELOG.md` — log all significant changes (append to `[Unreleased]`)
+- `TASK.md` — current sprint task status
+- `PRD.md` — product requirements (user flows, screens, empty states)
+- `APPS_ARCHITECTURE.md` — canonical app surface (update when adding/removing apps)
+- `DESIGN_SYSTEM.md` / `DESIGN_SYSTEM_INCONSISTENCIES.md` — design tokens + drift
+- `CODE_REVIEW_BACKLOG.md` — deferred fixes
+- `PLANNING.md` / `ROADMAP.md` — feature planning (mostly historical)
+
+See [AGENT_CONTEXT.md §10](AGENT_CONTEXT.md#10-documentation-map) for the full doc map and which files to ignore.

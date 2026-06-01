@@ -33,6 +33,19 @@ struct RootView: View {
             } else if !services.hasConfiguredNotificationsPrompt {
                 NotificationsOnboardingView()
                     .transition(hasAppeared ? .opacity.combined(with: .move(edge: .trailing)) : .opacity)
+            } else if !services.hasSeenWelcomeTour {
+                // Optional product explainer with prominent Skip — runs once per
+                // install. Surfaces what the app does before we ask the user to
+                // customise the tab bar.
+                WelcomeTourView()
+                    .transition(hasAppeared ? .opacity.combined(with: .move(edge: .trailing)) : .opacity)
+            } else if !services.hasConfiguredTabBarPrompt {
+                // Tab-bar customization — iOS only because the native TabView is
+                // capped at 4 configurable slots (+ the create FAB). The user
+                // can always come back via Settings, so this step is also
+                // skippable.
+                TabBarOnboardingView()
+                    .transition(hasAppeared ? .opacity.combined(with: .move(edge: .trailing)) : .opacity)
             } else {
                 MainTabView()
                     .transition(hasAppeared ? .opacity : .identity)
@@ -40,7 +53,7 @@ struct RootView: View {
         }
         .safeAreaInset(edge: .top, spacing: 0) {
             if let onboardingStep = onboardingStep {
-                let onboardingTotal = 3
+                let onboardingTotal = 5
                 let progressText = String(
                     localized: "\(onboardingStep) of \(onboardingTotal)",
                     comment: "Compact onboarding progress label showing current step and total steps"
@@ -80,6 +93,8 @@ struct RootView: View {
         .animation(hasAppeared ? .snappy(duration: 0.3) : nil, value: services.hasConfiguredRemindersPrompt)
         .animation(hasAppeared ? .snappy(duration: 0.3) : nil, value: services.hasConfiguredGmailPrompt)
         .animation(hasAppeared ? .snappy(duration: 0.3) : nil, value: services.hasConfiguredNotificationsPrompt)
+        .animation(hasAppeared ? .snappy(duration: 0.3) : nil, value: services.hasSeenWelcomeTour)
+        .animation(hasAppeared ? .snappy(duration: 0.3) : nil, value: services.hasConfiguredTabBarPrompt)
         .animation(hasAppeared ? .snappy(duration: 0.3) : nil, value: services.authService.isAuthenticated)
         .onAppear {
             // Enable transitions only after the first frame renders.
@@ -117,6 +132,11 @@ struct RootView: View {
 
         // Let the first interactive frame settle before kicking off background work.
         try? await Task.sleep(for: .milliseconds(350))
+        // Hydrate the persistent avatar URL cache off the main thread. The cache used
+        // to JSON-decode up to 5000 entries synchronously on first access from a view
+        // body — a measured cold-start hang. Doing it here as part of deferred startup
+        // keeps it off the splash → first-tab transition.
+        await AvatarCache.shared.bootstrap()
         await services.authService.fetchUserProfile()
         // Note: loadSharedAIProfile() is intentionally NOT called here on a
         // signed-in launch — the `.task(id: services.authService.isAuthenticated)`
@@ -134,6 +154,8 @@ struct RootView: View {
         if !services.hasConfiguredGmailPrompt { return 1 }
         if !services.hasConfiguredRemindersPrompt { return 2 }
         if !services.hasConfiguredNotificationsPrompt { return 3 }
+        if !services.hasSeenWelcomeTour { return 4 }
+        if !services.hasConfiguredTabBarPrompt { return 5 }
         return nil
     }
 }

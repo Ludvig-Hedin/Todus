@@ -14,12 +14,12 @@ struct BillingSettingsView: View {
     private static let planIncludes: [SubscriptionService.Plan: [String]] = [
         .free: [
             "1 email connection",
-            "7.5 credits / month of AI chat",
+            "75 credits / month of AI chat",
             "Basic AI email assistance",
         ],
         .pro: [
             "Unlimited email connections",
-            "15 credits / month of AI chat & voice",
+            "150 credits / month of AI chat & voice",
             "Auto-labeling, thread summaries, priority models",
             "Manage payment & cancel anytime",
         ],
@@ -43,13 +43,21 @@ struct BillingSettingsView: View {
         return f.string(from: date)
     }
 
+    /// Credits are shown to users at 10× their internal (dollar-denominated)
+    /// value so plan tiers read as round, motivating numbers (Free 75, Pro 150)
+    /// while actual billing/limits stay unchanged. The static `planIncludes`
+    /// copy below uses the same scale; keep it in sync with the web billing page.
+    private static let creditsDisplayScale: Double = 10
+
     /// Tighter than NumberFormatter for our specific case: hide decimals on
-    /// integer-ish values so "10 credits" doesn't render as "10.00".
+    /// integer-ish values so "10 credits" doesn't render as "10.00". Applies the
+    /// display scale so the usage meter matches the scaled plan copy.
     private func formatCredits(_ value: Double) -> String {
-        if value == 0 { return "0" }
-        if value < 1 { return String(format: "%.2f", value) }
-        if value < 10 { return String(format: "%.1f", value) }
-        return String(Int(value.rounded()))
+        let scaled = value * Self.creditsDisplayScale
+        if scaled == 0 { return "0" }
+        if scaled < 1 { return String(format: "%.2f", scaled) }
+        if scaled < 10 { return String(format: "%.1f", scaled) }
+        return String(Int(scaled.rounded()))
     }
 
     private func formatUsageTotal(_ value: Double, unlimited: Bool) -> String {
@@ -59,7 +67,11 @@ struct BillingSettingsView: View {
     private var percentRemaining: Int {
         guard !subscription.aiUsageUnlimited else { return 100 }
         guard subscription.aiUsageLimit > 0 else { return 0 }
-        return max(0, 100 - Int((subscription.aiUsagePercent * 100).rounded()))
+        // Use `ceil` for the consumed slice so any non-zero usage drops the
+        // headline below 100% — `.rounded()` would report "100% remaining"
+        // for small (e.g. 0.4%) consumption while the "Used X of Y" subtitle
+        // simultaneously shows real consumption.
+        return max(0, 100 - Int(ceil(subscription.aiUsagePercent * 100)))
     }
 
     var body: some View {
@@ -168,7 +180,7 @@ struct BillingSettingsView: View {
             Text("Plan")
         } footer: {
             if !subscription.plan.isPaid {
-                Text("Pro unlocks 15 credits per month, unlimited connections, priority models, and more.")
+                Text("Pro unlocks 150 credits per month, unlimited connections, priority models, and more.")
             }
         }
     }
@@ -196,20 +208,17 @@ struct BillingSettingsView: View {
                 // Big number — credits remaining
                 VStack(spacing: 2) {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text(subscription.aiUsageUnlimited ? "Unlimited" : formatCredits(subscription.aiUsageRemaining))
+                        Text(subscription.aiUsageUnlimited ? "Unlimited" : "\(percentRemaining)%")
                             .font(.system(size: 44, weight: .semibold).monospacedDigit())
                             .foregroundStyle(.primary)
-                        Text(subscription.aiUsageUnlimited
-                             ? "AI credits"
-                             : "of \(formatCredits(subscription.aiUsageLimit))")
+                        Text(subscription.aiUsageUnlimited ? "AI credits" : "remaining")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
-                            .monospacedDigit()
                     }
                     Text(subscription.aiUsageUnlimited
                          ? "Unlimited AI usage on this plan"
                          : subscription.aiUsageLimit > 0
-                         ? "\(percentRemaining)% remaining this period"
+                         ? "Used \(formatCredits(subscription.aiUsageUsed)) of \(formatCredits(subscription.aiUsageLimit)) credits"
                          : "No credits on this plan")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -221,6 +230,10 @@ struct BillingSettingsView: View {
                     .tint(progressTint)
                     .scaleEffect(x: 1, y: 1.6, anchor: .center)
                     .padding(.horizontal, 4)
+                    .accessibilityLabel("AI credits used")
+                    .accessibilityValue(subscription.aiUsageUnlimited
+                                        ? "Unlimited"
+                                        : "\(percentRemaining)% remaining")
 
                 HStack {
                     Text("Used: \(formatCredits(subscription.aiUsageUsed))")

@@ -1,8 +1,10 @@
 # Todus — Agent Configuration
 
-> For all AI coding agents (Claude, Cursor, Gemini, Copilot, etc.). Last updated: March 31, 2026.
+> For all AI coding agents (Claude, Cursor, Gemini, Copilot, Codex, etc.). Last updated: 2026-05-27.
+>
+> **New here?** Start with [AGENT_CONTEXT.md](AGENT_CONTEXT.md) — fuller repo map, feature index, recent shipped work, doc map. This file is the shorter agent-config primer.
 
-Todus is a unified productivity app — email, calendar, tasks, and AI assistant in one app. Built as a **pnpm + Turborepo** monorepo.
+Todus is a unified productivity app — email, calendar, tasks, docs, meetings, AI assistant — in one product. Built as a **pnpm + Turborepo** monorepo with a single Cloudflare Workers backend serving web + iOS + macOS clients.
 
 ---
 
@@ -10,12 +12,14 @@ Todus is a unified productivity app — email, calendar, tasks, and AI assistant
 
 | App | Path | Stack | Purpose |
 |-----|------|-------|---------|
-| **Web** | `apps/web` | React Router v7 + Vite + Cloudflare Workers | Main web product at todus.app |
-| **Backend** | `apps/server` | Cloudflare Worker (Hono + tRPC + Durable Objects) | Auth, mail APIs, AI, task sync |
-| **iOS** | `apps/ios/Todus` | Native SwiftUI (Xcode, Swift 6) | iPhone app |
-| **macOS** | `apps/macos` | Native SwiftUI (Xcode, Swift 6) | Desktop shell scaffold with sidebar navigation |
+| **Web** | `apps/web` | React Router v7 + Vite + Cloudflare Workers | Full frontend (marketing + auth + mail product + settings + developer surface) at todus.app |
+| **Backend** | `apps/server` | Cloudflare Worker (Hono + tRPC + Durable Objects + Workflows) | Auth, mail APIs, AI, task sync, sync workflows |
+| **iOS** | `apps/ios/Todus` | Native SwiftUI (Xcode, Swift 6, iOS 18+) | iPhone app |
+| **macOS** | `apps/macos/TodusMac` | Native SwiftUI (Xcode, Swift 6, macOS 15+) | Desktop app, DMG distributed via Cloudflare R2 |
 
-**Do not use** anything under `apps/archived/` — reference-only legacy code.
+**Legacy / read-only**:
+- `apps/mail/` — superseded by `apps/web/`. **Do not edit.** Older `pnpm build:frontend` / `pnpm deploy:frontend` root scripts still target this — use `pnpm --filter=@zero/web build|deploy` to ship the active app.
+- `apps/archived/` — old RN-CLI / Electron / SwiftUI-WebView implementations. Reference only.
 
 ---
 
@@ -66,11 +70,14 @@ pnpm db:push                    # Push schema changes directly
 pnpm db:studio                  # Drizzle Studio GUI
 
 # Build & Deploy
-pnpm build                      # Build all packages
-pnpm build:frontend             # Build the web app only
-pnpm deploy:frontend            # Deploy web to Cloudflare
-pnpm deploy:backend             # Deploy backend to Cloudflare Workers
-pnpm sentry:sourcemaps          # Upload frontend source maps
+pnpm build                                # Turbo build all packages
+pnpm --filter=@zero/web build             # Build apps/web (active frontend)
+pnpm --filter=@zero/web deploy            # Deploy apps/web to Cloudflare
+pnpm build:frontend                       # ⚠️ Builds the LEGACY apps/mail (root script not yet retargeted)
+pnpm deploy:frontend                      # ⚠️ Deploys the LEGACY apps/mail
+pnpm deploy:backend                       # Deploy backend to Cloudflare Workers
+pnpm sentry:sourcemaps                    # Upload frontend source maps
+./scripts/build-mac-dmg.sh                # macOS DMG: archive → sign → R2 upload
 
 # Evaluations and parity
 pnpm test:ai                    # Run backend AI tests
@@ -102,12 +109,12 @@ pnpm test -- -t "name"         # Single test
 
 ### Current Workflow Notes
 - Prefer `pnpm go` when you need the full local stack; it brings up Docker Postgres before the app processes.
-- Use `pnpm dev` for the web/backend loop when the database is already running.
-- Use `pnpm mail` when only the web frontend needs to move.
+- Use `pnpm dev` for the web/backend loop when the database is already running. This runs `apps/web`, not `apps/mail`.
+- `pnpm mail` runs the **legacy archive** `apps/mail` — only use to compare against the old code, never edit it.
 - Use `pnpm ios:simulator` for simulator debugging, but `pnpm ios` is the lighter app-start command.
-- Use `pnpm macos` for the native macOS shell; the old Electron-based flow is obsolete.
+- Use `pnpm macos` for the native macOS app; the old Electron flow is obsolete.
 - When adding schema changes, keep the order `db:generate` -> review migration -> `db:migrate` or `db:push` as appropriate.
-- Keep progress docs current: update `CHANGELOG.md`, `TASK.md`, `PLANNING.md`, or `ROADMAP.md` when work changes behavior or architecture.
+- Keep progress docs current: update `CHANGELOG.md`, `TASK.md`, `PRD.md`, or `APPS_ARCHITECTURE.md` when work changes behavior or architecture. See [AGENT_CONTEXT.md §10](AGENT_CONTEXT.md#10-documentation-map) for the full doc map.
 
 ---
 
@@ -124,26 +131,33 @@ pnpm test -- -t "name"         # Single test
 - **Dev utilities:** `pnpm test:ai`, `pnpm eval`, `pnpm eval:dev`, `pnpm eval:ci`
 
 ### tRPC Routes
-Routes mirror filenames in `src/trpc/routes/`: `mail`, `ai`, `settings`, `connections`, `labels`, `categories`, `drafts`, `notes`, `tasks`, `templates`, `user`, `avatar`, `bimi`, `brain`, `cookies`, `label`, `logging`, `meet`, `shortcut`
+Routers in `src/trpc/routes/` (one file per domain): `ai`, `assistant`, `avatar`, `bimi`, `brain`, `calendar`, `categories`, `connections`, `contact`, `cookies`, `docs`, `drafts`, `groups`, `label`, `logging`, `mail`, `mail-assistant`, `meet`, `mentions`, `notes`, `sessions`, `settings`, `sharing`, `shortcut`, `subscription`, `tasks`, `templates`, `user`.
 
 ### Database Schema (Key Tables)
-`user`, `session`, `account`, `verification`, `connection`, `task`, `taskFolder`, `emailTemplate`, `userSettings`, `userHotkeys`, `note`, `oauthApplication`, `oauthAccessToken`, `oauthConsent`, `earlyAccess`, `jwks`, `summary`, `writingStyleMatrix`
+`user`, `session`, `account`, `verification`, `connection`, `task`, `taskFolder`, `emailTemplate`, `userSettings`, `userHotkeys`, `note`, `oauthApplication`, `oauthAccessToken`, `oauthConsent`, `earlyAccess`, `jwks`, `summary`, `writingStyleMatrix`. Schema lives in `apps/server/src/db/schema.ts`; Zod validators in `apps/server/src/lib/schemas.ts`.
 
 ---
 
-## Web Frontend Architecture (`apps/mail`)
+## Web Frontend Architecture (`apps/web`)
+
+The active frontend. Serves marketing pages, auth, the mail product, the settings surface, the developer view, and gated dev tools — all in one React Router v7 app.
 
 - **Framework:** React Router v7 (file-based routes in `app/routes.ts`)
+- **Runtime:** Vite + Cloudflare Workers (SSR via Wrangler)
 - **State:** Jotai (atoms) + TanStack Query (server state)
-- **Styling:** Tailwind CSS v4 + shadcn/ui components
+- **Styling:** Tailwind CSS v4 (CSS-first `@theme` config in `app/globals.css`) + shadcn/ui-derived components
 - **Rich text:** Tiptap editor
 - **i18n:** Paraglide JS (`messages/` → compiled to `paraglide/`)
-- **Auth client:** `lib/auth-client.ts` — exports `signIn`, `signUp`, `signOut`, `useSession`
-- **API calls:** tRPC client via `@trpc/tanstack-react-query`
+- **Auth client:** `apps/web/lib/auth-client.ts` — exports `signIn`, `signUp`, `signOut`, `useSession`
+- **API calls:** tRPC client via `@trpc/tanstack-react-query` pointed at `apps/server`
 - **Env vars:** Vite prefix `VITE_PUBLIC_*`; `VITE_PUBLIC_BACKEND_URL` points to the server
-- **Build/deploy:** `pnpm build:frontend`, `pnpm deploy:frontend`, `pnpm sentry:sourcemaps`
+- **Build/deploy:** `pnpm --filter=@zero/web build` and `pnpm --filter=@zero/web deploy` (the root `build:frontend` / `deploy:frontend` scripts still target the legacy `apps/mail` archive)
 
-Main mail UI route: `/mail/:folder`
+Main route surfaces:
+- `/` (landing), `/home`, `/about`, `/pricing`, `/terms`, `/privacy`, `/downloads`, `/contact`, `/faq`, `/hr`, `/blog`, `/blog/:slug`, `/compare/:competitor`, `/share/:slug`, `/g/:token`
+- `/login`, `/signup`, `/developer`
+- `/mail` → `/mail/:folder` (inbox/folders), `/mail/compose`, `/mail/create`, `/mail/search`, `/mail/home`, `/mail/tasks`, `/mail/calendar`, `/mail/meetings(/:id)`, `/mail/docs(/:id)`, `/mail/under-construction/:path`
+- `/settings/*` (subpages: general, appearance, ai, billing, calendars, categories, connections, danger-zone, design-system, labels, local-models, meetings, notifications, privacy, security, sharing, shortcuts, signatures)
 
 ---
 
@@ -164,25 +178,33 @@ Todus/
   Features/
     Home/        → HomeView.swift (today dashboard)
     Tasks/       → TasksTabView, InboxView, BoardView, TaskTableView, CalendarTaskView, TaskRowView, TaskDetailSheet, CaptureComposer
-    Email/       → EmailInboxView, EmailThreadView, EmailComposeView, EmailConnectView, EmailRowView, SenderAvatarView
+    Email/       → EmailInboxView, EmailThreadView, EmailComposeView, EmailConnectView, EmailRowView, SenderAvatarView, From picker
     Calendar/    → CalendarContainerView (UIKit bridge), CalendarViewController, EKWrapper
-    AI/          → AIChatView (streaming chat sheet), AIChatMessage
+    AI/          → AIChatView (streaming chat sheet), AIChatMessage, model picker, local-models settings
     Auth/        → AuthView (Google + Apple sign-in), OnboardingAuthSheet
-    Settings/    → SettingsView, RemindersSetupView, GmailOnboardingView
+    Settings/    → SettingsView, BillingSettingsView, DesignSystem viewer, RemindersSetupView, GmailOnboardingView, AutomationPolicyView
     Folders/     → FolderManagementView, MoveToFolderSheet
-    Voice/       → VoiceInputButton
+    Voice/       → VoiceInputButton, VoiceChatView (modal)
+    Docs/        → DocsListView, DocEditorView (DocsWebView wrapper around Tiptap)
+    Meetings/    → MeetingsListView, MeetingDetailView
+    Notifications/, Search/, MoreSheetView.swift, DesignSystem viewer
   Services/
-    Auth/        → AuthService (Better-Auth, Keychain token), AuthSessionStore (legacy)
-    API/         → TodosAPIClient (unified TRPC-over-HTTP with Bearer auth)
+    Auth/        → AuthService (Better-Auth, Keychain token)
+    API/         → TodosAPIClient (unified tRPC-over-HTTP with Bearer auth)
     Email/       → EmailService (inbox state, thread loading, actions)
-    AI/          → AIChatService (SSE streaming, tool calls, conversation history)
+    AI/          → AIChatService (SSE streaming, tool calls, conversation history), Local/ (MLXInferenceService, LocalModelStateStore)
     Calendar/    → CalendarService (shared EKEventStore)
-    Tasks/       → TaskCaptureService, SupabaseSyncService (legacy)
+    Tasks/       → TaskCaptureService
     Reminders/   → AppleRemindersSyncService, RemindersSyncState
-    Parsing/     → LocalTaskParsingService, RemoteFirstTaskParsingService
-  Domain/        → EmailModels, TaskStatus, AppTaskPriority, TaskViewMode, SyncModels, AIChatConversation, etc.
+    Parsing/     → LocalTaskParsingService, RemoteFirstTaskParsingService, CompoundIntentParser
+    Docs/        → DocsService (CRUD + search + workspace dedup)
+    Drafts/      → Drafts service
+    Voice/       → VoiceSessionCoordinator, VoiceSystemPromptClient, VoiceToolRegistry, VoiceAudioCapture, VoiceMicLock, VoiceIntent
+    Meetings/    → Meetings service
+    Subscription/, Notifications/, Widgets/, AppLogger.swift, NetworkMonitor.swift
+  Domain/        → EmailModels, TaskStatus, AppTaskPriority, TaskViewMode, SyncModels, AIChatConversation, DocTypes, AssistantAutomationPolicy, etc.
   Data/          → TaskRecord (SwiftData), FolderRecord (SwiftData), AppConfiguration
-  DesignSystem/  → AppTheme (colors, typography), BrandIcons, Formatters
+  DesignSystem/  → AppTheme (colors, typography, motion, spacing), BrandIcons, Formatters
 ```
 
 ### Key Patterns
@@ -197,14 +219,16 @@ Todus/
 ## Auth System
 
 - **Provider:** Better Auth (server: `apps/server/src/lib/auth.ts`)
-- **Sign-in methods:** Google OAuth, Apple Sign In (native), Email OTP (via Resend)
+- **Sign-in methods:** Google OAuth, Apple Sign In (native), Email OTP (via Resend), Phone (via Twilio), email/password (verification required)
 - **Plugins:** Bearer, JWT, Phone Number (adapted for email OTP)
-- **Client (web):** `apps/mail/lib/auth-client.ts`
-- **Client (iOS):** `AuthService.swift` → Keychain for Bearer token
+- **Client (web):** `apps/web/lib/auth-client.ts`
+- **Client (iOS):** `apps/ios/Todus/Todus/Services/Auth/AuthService.swift` → Keychain for Bearer token
+- **Client (macOS):** `apps/macos/TodusMac/Services/Auth/AuthService.swift` → Keychain
 - **`trustedOrigins`:** Hardcoded in `createAuthConfig()` — must update when adding new origins
 - **Production domain:** `todus.app`; `COOKIE_DOMAIN=todus.app` in `wrangler.jsonc`
-- **iOS deep link:** `todus://auth-callback` (for Google OAuth token handoff)
+- **Native deep link:** `todus://auth-callback` (Google OAuth token handoff)
 - **Bundle ID:** `com.ludvighedin.todus` (configured in Better Auth Apple provider)
+- **Native session row:** `/api/auth/mobile-token` creates a dedicated `session` row for the native app so it appears as a separate "Active Session" in settings (falls back to the web session token if the insert fails).
 
 ---
 
@@ -222,8 +246,15 @@ Key variables: `BETTER_AUTH_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`,
 
 | Package | Purpose |
 |---------|---------|
-| `packages/shared` | Types and utilities shared across web + server |
-| `packages/testing` | Vitest test suite |
+| `packages/shared` | Types + utilities shared web ↔ server |
+| `packages/api-client` | HTTP client for tRPC API calls |
+| `packages/design-tokens` | Cross-platform design constants |
+| `packages/ui-native` | Shared React Native UI components (legacy holdover) |
+| `packages/macos-doc-editor` | Tiptap editor bundle embedded by macOS docs view |
+| `packages/cli` | `nizzy` CLI — workspace sync utilities (runs as postinstall) |
+| `packages/swift-auth` | SPM package — shared iOS/macOS auth + developer-access allowlist |
+| `packages/swift-widgets` | SPM package — shared iOS/macOS widget extensions |
+| `packages/testing` | Vitest test suite + Playwright E2E setup |
 | `packages/tsconfig` | Shared TypeScript configs |
 | `packages/eslint-config` | Shared ESLint config |
 
@@ -243,9 +274,17 @@ Key variables: `BETTER_AUTH_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`,
 
 | File | Purpose |
 |------|---------|
-| `PRD.md` | Product requirements (user flows, screen specs, empty states, notifications) |
-| `CLAUDE.md` | Claude Code-specific instructions + architecture details |
+| `AGENT_CONTEXT.md` | **Canonical agent reference** — read first |
+| `CLAUDE.md` | Claude Code–specific instructions + architecture details |
 | `AGENTS.md` | This file — agent-agnostic architecture reference |
-| `APPS_ARCHITECTURE.md` | Canonical app surface map |
-| `CHANGELOG.md` | Change log |
-| `TASK.md` / `PLANNING.md` / `ROADMAP.md` | Current work tracking |
+| `APPS_ARCHITECTURE.md` | Canonical app surface map (runtime targets, build entry points) |
+| `FEATURES.md` / `FEATURE_TEST_PLAN.md` | Per-surface feature catalog + companion test checklist |
+| `DESIGN_SYSTEM.md` / `DESIGN_SYSTEM_INCONSISTENCIES.md` | Design tokens + drift tracker |
+| `PRD.md` | Product requirements (user flows, screen specs, empty states, notifications) |
+| `CHANGELOG.md` | Change log (append to `[Unreleased]`) |
+| `TASK.md` | Sprint task tracking |
+| `CODE_REVIEW_BACKLOG.md` | Deferred fixes from bug hunts / reviews |
+| `SELF_HOSTING.md`, `SECURITY.md`, `MCP.md`, `SCRIPTS_GUIDE.md` | Operational guides |
+| `PLANNING.md` / `ROADMAP.md` | Historical migration + roadmap snapshots |
+
+See [AGENT_CONTEXT.md §10](AGENT_CONTEXT.md#10-documentation-map) for the full doc map (active vs historical).

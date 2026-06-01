@@ -66,19 +66,27 @@ final class LocalModelStateStore {
 
     private let log = Logger(subsystem: "com.todus.macos", category: "LocalModelStateStore")
 
-    /// Root directory for downloaded model weights. Same shape on iOS and
-    /// macOS: Application Support / LocalModels / <model id> / ...
-    static var modelsDirectory: URL {
+    /// Root directory for downloaded model weights. `mlx-swift-examples` writes
+    /// to `Documents/huggingface/models/<org>/<name>/`. We mirror that path so
+    /// downloads interop with any other MLX tool the user runs.
+    nonisolated static var modelsDirectory: URL {
         let fm = FileManager.default
-        // Application Support is created lazily by the system; create it if
-        // missing so first-run reads don't trip on the directory not existing.
-        let support = (try? fm.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true))
+        let docs = (try? fm.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true))
             ?? URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
-        let dir = support.appendingPathComponent("LocalModels", isDirectory: true)
+        let dir = docs.appendingPathComponent("huggingface/models", isDirectory: true)
         if !fm.fileExists(atPath: dir.path) {
             try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
         }
         return dir
+    }
+
+    /// External HuggingFace user cache, where the Python `huggingface_hub`
+    /// CLI and `mlx_lm` write. macOS-only: the app is unsandboxed for DMG
+    /// distribution, so we can probe `~/.cache/huggingface/hub/`. The standard
+    /// layout is `models--<org>--<name>/snapshots/<sha>/`.
+    nonisolated static var externalHuggingFaceCache: URL {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        return home.appendingPathComponent(".cache/huggingface/hub", isDirectory: true)
     }
 
     init() {
@@ -123,57 +131,119 @@ final class LocalModelStateStore {
 
     // MARK: - Disk scan
 
-    /// Walks `modelsDirectory` and seeds `.installed` for each top-level
-    /// subfolder whose name matches a known catalog id and that contains at
-    /// least one weight file. Best-effort — the real
-    /// `ModelDownloadService` (Phase 3) writes a `manifest.json` per model
-    /// for stronger validation.
+    /// Walks the HuggingFace cache (and the user's external HF cache on macOS)
+    /// and seeds `.installed` for any catalog model whose `mlxRepo` matches a
+    /// `<org>/<name>` subtree containing weight files. Best-effort: weight
+    /// integrity is validated later by the runtime — a corrupt download
+    /// surfaces as `.failed` when loading.
     private func initialScan() async {
         defer { hasScanned = true }
-        let fm = FileManager.default
-        let root = Self.modelsDirectory
-
-        guard let entries = try? fm.contentsOfDirectory(
-            at: root,
-            includingPropertiesForKeys: [.fileSizeKey, .totalFileAllocatedSizeKey, .isDirectoryKey],
-            options: [.skipsHiddenFiles, .skipsSubdirectoryDescendants]
-        ) else {
-            log.info("[LocalModels] No models directory yet at \(root.path, privacy: .public)")
-            return
-        }
-
-        var seeded: [String: LocalModelInstallState] = [:]
-        for url in entries {
-            let id = url.lastPathComponent
-            guard LocalModelCatalog.model(forId: id) != nil else { continue }
-
-            // Sum the size of every regular file inside the model dir. We
-            // intentionally don't try to validate weight integrity here —
-            // a corrupt download surfaces later when the runtime fails to
-            // load it, and we transition to `.failed` at that point.
-            let totalBytes = directorySize(at: url, fileManager: fm)
-            if totalBytes > 0 {
-                seeded[id] = .installed(diskBytes: totalBytes)
+        // Hop the FileManager walk off the main actor — iOS already does this
+        // and macOS regressed to a synchronous walk on @MainActor that stutters
+        // launch when the user has multi-GB caches on disk.
+        let seeded = await Task.detached(priority: .userInitiated) {
+            Self.scanDisk()
+        }.value
+        // Merge instead of replace: while the scan ran, `apply(...)` may have
+        // recorded in-flight `.downloading` / `.paused` / `.failed` entries
+        // (e.g. user started a download right after launch). Wholesale assigning
+        // `self.stateById = seeded` would silently drop them.
+        //
+        // Live in-flight states win over the scan, but a stale `.failed`
+        // yields to a real on-disk `.installed` so a successful retry isn't
+        // pinned to the old error message.
+        for (id, scannedState) in seeded {
+            switch self.stateById[id] {
+            case .none, .notInstalled, .failed:
+                self.stateById[id] = scannedState
+            case .downloading, .paused, .deleting, .installed:
+                continue
             }
         }
-        self.stateById = seeded
         log.info("[LocalModels] Initial scan found \(seeded.count, privacy: .public) installed model(s)")
     }
 
-    private func directorySize(at url: URL, fileManager: FileManager) -> Int64 {
-        guard let enumerator = fileManager.enumerator(
+    private nonisolated static func scanDisk() -> [String: LocalModelInstallState] {
+        let fm = FileManager.default
+        let appCache = Self.modelsDirectory
+        let externalCache = Self.externalHuggingFaceCache
+
+        var seeded: [String: LocalModelInstallState] = [:]
+        for model in LocalModelCatalog.all {
+            guard model.runtime == .mlx, let repo = model.mlxRepo else { continue }
+
+            // Primary: app's Documents/huggingface/models/<repo>. Gate on a
+            // real weight artifact so a `models--…/` dir with only `.lock` /
+            // `refs/` (failed download) isn't reported as `.installed` and
+            // then crash the runtime on first turn — match the iOS gate and
+            // `HuggingFaceCacheConnector.hasWeightFile`.
+            let appCandidate = appCache.appendingPathComponent(repo, isDirectory: true)
+            if fm.fileExists(atPath: appCandidate.path),
+               hasWeightFile(at: appCandidate, fileManager: fm) {
+                // Presence proven by `hasWeightFile`; don't drop on 0 size.
+                let bytes = max(directorySize(at: appCandidate, fileManager: fm), 0)
+                seeded[model.id] = .installed(diskBytes: bytes)
+                continue
+            }
+
+            // Fallback: external HF cache, models--<org>--<name>/snapshots/<sha>/
+            // Used by `huggingface_hub`, `transformers`, `mlx_lm`, and any other
+            // tool the user might already have on disk.
+            let externalDir = repo.replacingOccurrences(of: "/", with: "--")
+            let externalCandidate = externalCache
+                .appendingPathComponent("models--\(externalDir)", isDirectory: true)
+            if fm.fileExists(atPath: externalCandidate.path),
+               hasWeightFile(at: externalCandidate, fileManager: fm) {
+                let bytes = max(directorySize(at: externalCandidate, fileManager: fm), 0)
+                seeded[model.id] = .installed(diskBytes: bytes)
+            }
+        }
+        return seeded
+    }
+
+    private nonisolated static func directorySize(at url: URL, fileManager fm: FileManager) -> Int64 {
+        // Resolve each enumerated URL to its canonical path and de-dupe.
+        // Without this the external-cache walk double-counts every blob (its
+        // real file under `blobs/<sha>` and its symlink alias under
+        // `snapshots/<commit>/`), AND a bridged app-cache entry (which is a
+        // symlink to a snapshot of symlinks-to-blobs) reports 0 bytes when
+        // we simply skip symlinks. Resolving paths and de-duping handles
+        // both layouts correctly. Mirror in `HuggingFaceCacheConnector`.
+        guard let enumerator = fm.enumerator(
             at: url,
             includingPropertiesForKeys: [.totalFileAllocatedSizeKey, .isRegularFileKey],
             options: [.skipsHiddenFiles]
         ) else { return 0 }
 
         var total: Int64 = 0
+        var seen = Set<String>()
         for case let fileURL as URL in enumerator {
-            let values = try? fileURL.resourceValues(forKeys: [.totalFileAllocatedSizeKey, .isRegularFileKey])
+            let resolvedPath = fileURL.resolvingSymlinksInPath().standardizedFileURL.path
+            if !seen.insert(resolvedPath).inserted { continue }
+            let resolvedURL = URL(fileURLWithPath: resolvedPath)
+            let values = try? resolvedURL.resourceValues(forKeys: [.totalFileAllocatedSizeKey, .isRegularFileKey])
             if values?.isRegularFile == true {
                 total += Int64(values?.totalFileAllocatedSize ?? 0)
             }
         }
         return total
+    }
+
+    /// True when the directory tree contains at least one MLX-compatible
+    /// weight file. Mirrors `HuggingFaceCacheConnector.hasWeightFile` so a
+    /// partial / failed download isn't reported as `.installed`.
+    private nonisolated static func hasWeightFile(at url: URL, fileManager fm: FileManager) -> Bool {
+        guard let enumerator = fm.enumerator(
+            at: url,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else { return false }
+        for case let fileURL as URL in enumerator {
+            let ext = fileURL.pathExtension.lowercased()
+            if ext == "safetensors" || ext == "npz" || ext == "gguf" {
+                return true
+            }
+        }
+        return false
     }
 }

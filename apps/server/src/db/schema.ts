@@ -1024,3 +1024,72 @@ export const doc = createTable(
     index('doc_updated_at_idx').on(t.updatedAt),
   ],
 );
+
+/**
+ * Slack workspace integrations.
+ *
+ * Slack is a third-party integration, not an identity provider — users are already
+ * signed in via Better Auth (Google/Apple/Email OTP) and separately authorize one or
+ * more Slack workspaces. We deliberately do NOT reuse `mail0_connection`:
+ *   1. `connection.email` is NOT NULL + unique with `userId`; Slack workspace user
+ *      email is optional (restricted users can hide it).
+ *   2. `connection.providerId` is typed `'google' | 'microsoft'` — widening forces
+ *      TS changes across every consumer.
+ *   3. Slack needs `team_id`, `team_domain`, `slack_user_id`, etc. that don't fit
+ *      the email-centric shape.
+ *
+ * Multi-workspace per user is supported. `(userId, teamId, slackUserId)` is the
+ * dedup key — a user reinstalling into the same workspace updates in place.
+ */
+export const slackConnection = createTable(
+  'slack_connection',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    /** Slack team identifier (e.g. "T01234567"). */
+    teamId: text('team_id').notNull(),
+    /** Human-readable workspace name (e.g. "Anthropic"). */
+    teamName: text('team_name').notNull(),
+    /** Workspace subdomain (e.g. "anthropic" for anthropic.slack.com). */
+    teamDomain: text('team_domain'),
+    /** Workspace icon URL (132px from Slack). */
+    teamIcon: text('team_icon'),
+    /** Enterprise Grid ID, null for standalone workspaces. */
+    enterpriseId: text('enterprise_id'),
+    /** Slack user ID inside the workspace (e.g. "U01234567"). */
+    slackUserId: text('slack_user_id').notNull(),
+    slackUserName: text('slack_user_name'),
+    /** Optional — Slack admins can restrict email visibility for some users. */
+    slackUserEmail: text('slack_user_email'),
+    /** xoxp- prefixed user OAuth token. */
+    accessToken: text('access_token').notNull(),
+    /** Present only if Slack token rotation is enabled in the app config. */
+    refreshToken: text('refresh_token'),
+    /** "user" today; reserved for future "bot" support without schema change. */
+    tokenType: text('token_type').notNull().default('user'),
+    /** Space-delimited list of granted scopes. */
+    scope: text('scope').notNull(),
+    /** Reserved for future bot-scope support. */
+    botUserId: text('bot_user_id'),
+    /** Reserved for future bot-scope support. */
+    botAccessToken: text('bot_access_token'),
+    /** Null when token rotation is disabled (Slack default). */
+    expiresAt: timestamp('expires_at'),
+    /** Whether the AI is allowed to send messages from this workspace (default off). */
+    sendEnabled: boolean('send_enabled').notNull().default(false),
+    /** Hex color for multi-workspace visual differentiation (e.g. "#4A154B"). */
+    color: text('color'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at')
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (t) => [
+    unique('slack_connection_user_team_user_unique').on(t.userId, t.teamId, t.slackUserId),
+    index('slack_connection_user_id_idx').on(t.userId),
+    index('slack_connection_team_id_idx').on(t.teamId),
+  ],
+);

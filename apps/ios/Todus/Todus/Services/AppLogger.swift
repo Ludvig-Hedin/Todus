@@ -101,6 +101,10 @@ enum PerformanceTrace {
     static let sharedFolderSync: StaticString = "SharedFolderSync"
     static let taskListRecompute: StaticString = "TaskListRecompute"
     static let attachmentDecode: StaticString = "AttachmentDecode"
+    /// Hydration of the persistent sender-avatar URL cache from disk. Was a synchronous
+    /// JSON decode (up to 5000 entries) on the main thread inside `AvatarCache.shared.init`;
+    /// moved off main and traced here so the cost is visible in Instruments.
+    static let avatarCacheBootstrap: StaticString = "AvatarCacheBootstrap"
 
     typealias IntervalState = OSSignpostIntervalState
 

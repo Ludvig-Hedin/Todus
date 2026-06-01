@@ -165,6 +165,7 @@ struct CalendarAccountsView: View {
                         .foregroundStyle(isDefault ? .yellow : .secondary)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Set as default for new events")
             }
 
             Toggle(
@@ -175,6 +176,7 @@ struct CalendarAccountsView: View {
                 )
             )
             .labelsHidden()
+            .accessibilityLabel("Show \(source.displayName)")
         }
         .padding(.vertical, 2)
     }
