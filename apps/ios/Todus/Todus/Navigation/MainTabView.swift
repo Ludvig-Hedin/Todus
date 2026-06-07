@@ -261,6 +261,12 @@ struct MainTabView: View {
             if !visibleContentTabs.contains(selectedTab) {
                 selectedTab = .home
             }
+            // Seed tab context from the restored `selectedTab` (@SceneStorage).
+            // `onChange(of: selectedTab)` only fires on a *change*, not on the
+            // restored initial value, so without this the AI chat context chip
+            // and suggestions stayed `.home` after a relaunch onto another tab.
+            previousNavigationTab = selectedTab
+            services.currentTab = selectedTab
             calendarPermissionGranted = services.calendarService.canReadEvents()
             if !services.hasReachedMainTab {
                 services.hasReachedMainTab = true

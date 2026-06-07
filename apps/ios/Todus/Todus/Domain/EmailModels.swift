@@ -98,20 +98,40 @@ struct EmailMessage: Decodable, Identifiable {
         self.attachments = try container.decodeIfPresent([EmailAttachment].self, forKey: .attachments)
     }
 
-    /// Parse various date formats the backend might send
+    // Cached formatters — `parseDate` runs once per message decode, so a 50-thread
+    // batch with multi-message threads previously allocated hundreds of formatters
+    // (each ~expensive) on the decode thread. ISO8601DateFormatter / DateFormatter
+    // are thread-safe for parsing once configured, so sharing them is safe.
+    // `nonisolated(unsafe)`: ISO8601DateFormatter / DateFormatter are thread-safe
+    // for parsing once their config is set (Apple docs), but aren't `Sendable`, so
+    // Swift 6 strict concurrency rejects a plain `static let`. Same pattern the
+    // codebase already uses for shared formatters/stubs.
+    private nonisolated(unsafe) static let isoFractional: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+    private nonisolated(unsafe) static let isoPlain: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
+    private nonisolated(unsafe) static let rfcFormatters: [DateFormatter] = {
+        ["EEE, dd MMM yyyy HH:mm:ss Z", "dd MMM yyyy HH:mm:ss Z", "yyyy-MM-dd'T'HH:mm:ss.SSSZ"].map { fmt in
+            let f = DateFormatter()
+            f.locale = Locale(identifier: "en_US_POSIX")
+            f.dateFormat = fmt
+            return f
+        }
+    }()
+
+    /// Parse various date formats the backend might send. Uses cached formatters.
     private static func parseDate(_ string: String) -> Date? {
-        // Try ISO 8601 with fractional seconds
-        let iso = ISO8601DateFormatter()
-        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = iso.date(from: string) { return date }
-        iso.formatOptions = [.withInternetDateTime]
-        if let date = iso.date(from: string) { return date }
+        if let date = isoFractional.date(from: string) { return date }
+        if let date = isoPlain.date(from: string) { return date }
         // Try RFC 2822 style dates (e.g. "Mon, 24 Mar 2025 10:30:00 +0000")
-        let rfc = DateFormatter()
-        rfc.locale = Locale(identifier: "en_US_POSIX")
-        for format in ["EEE, dd MMM yyyy HH:mm:ss Z", "dd MMM yyyy HH:mm:ss Z", "yyyy-MM-dd'T'HH:mm:ss.SSSZ"] {
-            rfc.dateFormat = format
-            if let date = rfc.date(from: string) { return date }
+        for formatter in rfcFormatters {
+            if let date = formatter.date(from: string) { return date }
         }
         return nil
     }

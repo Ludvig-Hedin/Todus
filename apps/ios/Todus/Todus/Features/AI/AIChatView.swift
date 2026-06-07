@@ -1809,7 +1809,11 @@ struct AIChatView: View {
         // also strip them.
         let text = conversationAsMarkdown(redactPII: true)
         let av = UIActivityViewController(activityItems: [text], applicationActivities: nil)
-        if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+        // Prefer the foreground-active scene; `connectedScenes.first` is unordered
+        // and can present on a background window on iPad / multi-window.
+        let activeScene = (UIApplication.shared.connectedScenes.first { $0.activationState == .foregroundActive }
+            ?? UIApplication.shared.connectedScenes.first) as? UIWindowScene
+        if let scene = activeScene,
            let root = scene.windows.first?.rootViewController {
             // Find the top-most presented controller to avoid presentation conflicts
             var top = root
@@ -2600,7 +2604,11 @@ private struct MessageBubble: View {
     /// log when the chat sheet itself is the top-most controller.
     private func presentShareSheet(for text: String) {
         let activity = UIActivityViewController(activityItems: [text], applicationActivities: nil)
-        if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+        // Prefer the foreground-active scene; `connectedScenes.first` is unordered
+        // and can present on a background window on iPad / multi-window.
+        let activeScene = (UIApplication.shared.connectedScenes.first { $0.activationState == .foregroundActive }
+            ?? UIApplication.shared.connectedScenes.first) as? UIWindowScene
+        if let scene = activeScene,
            let root = scene.windows.first?.rootViewController {
             var top = root
             while let presented = top.presentedViewController { top = presented }

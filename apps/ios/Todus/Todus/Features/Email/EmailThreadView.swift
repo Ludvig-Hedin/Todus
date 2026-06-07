@@ -1592,15 +1592,22 @@ private struct ReceiptInfoChip: View {
         )
     }
 
-    private var formattedDate: String? {
-        guard
-            let raw = receipt.receivedAt,
-            let date = ISO8601DateFormatter().date(from: raw)
-        else { return nil }
+    // Cached — `formattedDate` is a computed `body` dependency, so these were
+    // re-allocated on every render of the chip.
+    // nonisolated(unsafe): thread-safe for parsing once configured, but not Sendable.
+    private nonisolated(unsafe) static let receiptISOParser = ISO8601DateFormatter()
+    private nonisolated(unsafe) static let receiptDateFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateStyle = .medium
         f.timeStyle = .none
-        return f.string(from: date)
+        return f
+    }()
+    private var formattedDate: String? {
+        guard
+            let raw = receipt.receivedAt,
+            let date = Self.receiptISOParser.date(from: raw)
+        else { return nil }
+        return Self.receiptDateFormatter.string(from: date)
     }
 }
 
@@ -2028,7 +2035,7 @@ struct EmailHTMLView: UIViewRepresentable {
         <head>
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
         <meta name="color-scheme" content="only light">
-        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src * data: blob:; style-src 'unsafe-inline'; script-src 'none'; font-src *;">
+        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src * data: blob:; style-src 'unsafe-inline'; script-src 'none'; font-src *; form-action 'none'; base-uri 'none';">
         <style>
             :root { color-scheme: only light; }
             * { box-sizing: border-box; max-width: 100%; }
@@ -2066,7 +2073,7 @@ struct EmailHTMLView: UIViewRepresentable {
         <head>
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
         <meta name="color-scheme" content="only dark">
-        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src * data: blob:; style-src 'unsafe-inline'; script-src 'none'; font-src *;">
+        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src * data: blob:; style-src 'unsafe-inline'; script-src 'none'; font-src *; form-action 'none'; base-uri 'none';">
         <style>
             :root { color-scheme: only dark; }
             * { box-sizing: border-box; max-width: 100%; }

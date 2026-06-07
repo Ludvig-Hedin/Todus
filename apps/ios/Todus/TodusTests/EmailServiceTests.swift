@@ -158,6 +158,108 @@ final class EmailServiceTests: XCTestCase {
         XCTAssertEqual(thread, copy)
         XCTAssertEqual(thread.id, "t-1")
     }
+
+    // MARK: - toggleStar optimistic update + rollback (IOS-0608-3)
+
+    private func seededThread(labels: [String]) -> EmailThread {
+        EmailThread(
+            id: "t1", subject: "s", snippet: "x",
+            from: EmailSender(name: "A", email: "a@x.com"),
+            date: Date(timeIntervalSince1970: 1_000_000_000),
+            unread: false, messageCount: 1, labels: labels
+        )
+    }
+
+    private func okResponder(_ request: URLRequest) -> (HTTPURLResponse, Data) {
+        let body = Data(#"{"result":{"data":{"json":{}}}}"#.utf8)
+        let resp = HTTPURLResponse(
+            url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1",
+            headerFields: ["Content-Type": "application/json"]
+        )!
+        return (resp, body)
+    }
+
+    func testToggleStarAddsStarLocallyOnSuccess() async {
+        let svc = makeStubbedService { self.okResponder($0) }
+        defer { EmailServiceURLProtocolStub.unregister() }
+        svc.threads = [seededThread(labels: ["INBOX"])]
+
+        let ok = await svc.toggleStar(ids: ["t1"])
+
+        XCTAssertTrue(ok)
+        XCTAssertTrue(svc.threads[0].labels.contains("STARRED"),
+            "A successful toggle must reflect the STARRED label locally so the row updates without a reload.")
+    }
+
+    func testToggleStarRemovesStarWhenAlreadyStarred() async {
+        let svc = makeStubbedService { self.okResponder($0) }
+        defer { EmailServiceURLProtocolStub.unregister() }
+        svc.threads = [seededThread(labels: ["INBOX", "STARRED"])]
+
+        let ok = await svc.toggleStar(ids: ["t1"])
+
+        XCTAssertTrue(ok)
+        XCTAssertFalse(svc.threads[0].labels.contains("STARRED"),
+            "Toggling an already-starred thread must remove STARRED.")
+    }
+
+    func testToggleStarRollsBackOptimisticUpdateOnFailure() async {
+        // Stub fails every request with 500 → server reject.
+        let svc = makeStubbedService { request in
+            let resp = HTTPURLResponse(
+                url: request.url!, statusCode: 500, httpVersion: "HTTP/1.1", headerFields: nil
+            )!
+            return (resp, Data())
+        }
+        defer { EmailServiceURLProtocolStub.unregister() }
+        svc.threads = [seededThread(labels: ["INBOX"])]
+
+        let ok = await svc.toggleStar(ids: ["t1"])
+
+        XCTAssertFalse(ok)
+        XCTAssertEqual(svc.threads[0].labels, ["INBOX"],
+            "A failed toggle must roll back to the exact original labels — not leave a phantom star.")
+    }
+
+    // MARK: - EmailMessage date parsing (cached formatters — IOS perf)
+
+    private func decodeMessage(receivedOn: String) throws -> EmailMessage {
+        let json = Data(#"{"id":"m1","sender":{"name":"A","email":"a@x.com"},"receivedOn":"\#(receivedOn)"}"#.utf8)
+        return try JSONDecoder().decode(EmailMessage.self, from: json)
+    }
+
+    private func utcComponents(_ date: Date) -> DateComponents {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "UTC")!
+        return cal.dateComponents([.year, .month, .day, .hour, .minute], from: date)
+    }
+
+    func testParsesISO8601WithFractionalSeconds() throws {
+        let msg = try decodeMessage(receivedOn: "2025-03-24T10:30:00.500Z")
+        XCTAssertNotEqual(msg.date, .distantPast, "ISO-8601 fractional-seconds date must parse.")
+        let c = utcComponents(msg.date)
+        XCTAssertEqual(c.year, 2025); XCTAssertEqual(c.month, 3); XCTAssertEqual(c.day, 24)
+        XCTAssertEqual(c.hour, 10); XCTAssertEqual(c.minute, 30)
+    }
+
+    func testParsesISO8601WithoutFractionalSeconds() throws {
+        let msg = try decodeMessage(receivedOn: "2025-03-24T10:30:00Z")
+        XCTAssertNotEqual(msg.date, .distantPast, "Plain ISO-8601 date must parse.")
+        XCTAssertEqual(utcComponents(msg.date).day, 24)
+    }
+
+    func testParsesRFC2822Date() throws {
+        let msg = try decodeMessage(receivedOn: "Mon, 24 Mar 2025 10:30:00 +0000")
+        XCTAssertNotEqual(msg.date, .distantPast, "RFC-2822 date must parse via the cached fallback formatters.")
+        let c = utcComponents(msg.date)
+        XCTAssertEqual(c.year, 2025); XCTAssertEqual(c.month, 3); XCTAssertEqual(c.day, 24)
+    }
+
+    func testUnparseableDateFallsBackToDistantPast() throws {
+        let msg = try decodeMessage(receivedOn: "not-a-date")
+        XCTAssertEqual(msg.date, .distantPast,
+            "An unparseable date must sort to the bottom (distantPast), not silently become 'now'.")
+    }
 }
 
 // MARK: - URLProtocol stub for EmailService tests

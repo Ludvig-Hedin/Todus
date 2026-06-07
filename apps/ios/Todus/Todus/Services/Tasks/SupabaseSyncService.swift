@@ -158,7 +158,31 @@ final class SupabaseSyncService: SyncService {
                 )
                 markTasks(taskIDs: response.syncedTaskIDs, syncState: .synced, in: context)
             } catch {
-                markTasks(taskIDs: batch.taskIDs, syncState: .failed, in: context)
+                // `TaskCaptureService` rolls back (DELETES) `.failed` tasks, so we
+                // must only mark `.failed` when the server actively rejected the
+                // batch — never when we simply couldn't reach it, or it would
+                // delete a task the user captured while offline. Keep those
+                // `.localOnly` so they stay in the list and re-upload on reconnect
+                // via `retryUnsyncedTasks` (wired through `NetworkMonitor.onReconnect`).
+                let keepLocal: Bool
+                switch error {
+                case is URLError:
+                    // Offline / timeout / DNS / cannot-connect.
+                    keepLocal = true
+                case BackendClientError.backendNotConfigured:
+                    // No usable Supabase endpoint — same as the no-remote-backend
+                    // path; the task has nowhere to sync, so keep it, don't delete.
+                    keepLocal = true
+                default:
+                    // Server reached and rejected (non-2xx / bad payload) — the
+                    // case the rollback was designed for.
+                    keepLocal = false
+                }
+                markTasks(
+                    taskIDs: batch.taskIDs,
+                    syncState: keepLocal ? .localOnly : .failed,
+                    in: context
+                )
             }
             batch.continuation.resume()
         }

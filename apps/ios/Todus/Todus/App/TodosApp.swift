@@ -406,6 +406,19 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         scroll.isDirectionalLockEnabled = true
         scroll.alwaysBounceHorizontal = false
 
+        // The native iOS "More" tab list (shown because the TabView has >5 tabs;
+        // here it holds Docs/Meetings) is a UIKit UITableView that paints pure
+        // black in dark mode — inconsistent with the app's #1c1c1e. The app uses
+        // no other UITableView (SwiftUI `List` is UICollectionView-backed on
+        // iOS 16+), so this global appearance only affects that More list.
+        let moreListBackground = UIColor { traits in
+            traits.userInterfaceStyle == .dark
+                ? UIColor(white: 0.109, alpha: 1.0)   // #1c1c1e, matches AppTheme.backgroundTop
+                : UIColor.systemBackground
+        }
+        UITableView.appearance().backgroundColor = moreListBackground
+        UITableViewCell.appearance().backgroundColor = .clear
+
         return true
     }
 }

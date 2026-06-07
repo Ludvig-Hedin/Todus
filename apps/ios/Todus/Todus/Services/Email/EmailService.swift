@@ -1631,13 +1631,34 @@ final class EmailService {
     /// star button) can roll itself back when the mutation fails.
     @discardableResult
     func toggleStar(ids: [String]) async -> Bool {
-        // No local star field on EmailThread today; nothing to roll back from
-        // the list. Surface the error if the call fails so callers can revert
-        // their own per-row visual state.
+        // Optimistically flip the Gmail STARRED label in the local cache so the
+        // star icon / swipe label updates immediately (`EmailThread.isStarredInLabels`
+        // reads `labels`); roll back if the server call fails. Mirrors
+        // markAsRead/markAsUnread. Previously this only hit the server, so the
+        // star never changed in the list until a full reload.
+        let snapshots = threads.filter { ids.contains($0.id) }
+        let isStarredLabel: (String) -> Bool = { name in
+            let n = name.uppercased(); return n == "STARRED" || n == "\\STARRED"
+        }
+        for i in threads.indices where ids.contains(threads[i].id) {
+            var newLabels = threads[i].labels
+            if newLabels.contains(where: isStarredLabel) {
+                newLabels.removeAll(where: isStarredLabel)
+            } else {
+                newLabels.append("STARRED")
+            }
+            threads[i] = EmailThread(
+                id: threads[i].id, subject: threads[i].subject,
+                snippet: threads[i].snippet, from: threads[i].from,
+                date: threads[i].date, unread: threads[i].unread,
+                messageCount: threads[i].messageCount, labels: newLabels
+            )
+        }
         do {
             let _: SuccessResponse = try await api.trpcMutation("mail.toggleStar", input: IdsInput(ids: ids))
             return true
         } catch {
+            restoreThreadSnapshots(snapshots)
             errorMessage = "Could not update star. Please try again."
             AppLogger.shared.log("[EmailService] toggleStar error: \(error)")
             return false
