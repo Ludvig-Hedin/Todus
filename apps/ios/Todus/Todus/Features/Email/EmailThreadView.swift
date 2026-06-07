@@ -187,6 +187,26 @@ struct EmailThreadView: View {
                 }
             }
         }
+        .overlay(alignment: .topLeading) {
+            // The loaded thread draws its own back button in `topBar`; the
+            // loading and error states did not — leaving no visible way back
+            // (only the invisible edge-swipe) on a thread that is slow or fails
+            // to load ("Could not load thread"). Show a standalone back button
+            // for those states so the user is never trapped.
+            if isLoading || detail == nil || (detail?.messages.isEmpty ?? true) {
+                Button { dismiss() } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.primary)
+                        .frame(width: 38, height: 38)
+                }
+                .buttonStyle(LiquidGlassButtonStyle(cornerRadius: 19))
+                .minTouchTarget()
+                .accessibilityLabel("Back")
+                .padding(.leading, 16)
+                .padding(.top, 8)
+            }
+        }
         // UI testing hook — lets XCUITests assert that a notification tap
         // routed to the correct thread by querying `email.thread.<threadId>`.
         .accessibilityIdentifier("email.thread.\(threadId)")
