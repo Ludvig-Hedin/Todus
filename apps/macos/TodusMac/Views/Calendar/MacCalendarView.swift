@@ -565,9 +565,14 @@ struct MacCalendarView: View {
 
     private var dayView: some View {
         let cal = Calendar.current
-        let dayEvents = events.filter { cal.isDate($0.startDate, inSameDayAs: selectedDate) }
-        let allDayEvents = dayEvents.filter(\.isAllDay)
-        let timedEvents = dayEvents.filter { !$0.isAllDay }
+        let startOfDay = cal.startOfDay(for: selectedDate)
+        let endOfDay = cal.date(byAdding: .day, value: 1, to: startOfDay) ?? startOfDay
+        // All-day pills key off the start day (matches the week grid's all-day row).
+        let allDayEvents = events.filter { $0.isAllDay && cal.isDate($0.startDate, inSameDayAs: selectedDate) }
+        // Timed events use overlap, not start-day equality, so a multi-day event
+        // that began on an earlier day still appears here. Mirrors the week grid;
+        // the time grid clips at midnight.
+        let timedEvents = events.filter { !$0.isAllDay && $0.startDate < endOfDay && $0.endDate > startOfDay }
 
         return VStack(spacing: 0) {
             // Day-of-week subtitle

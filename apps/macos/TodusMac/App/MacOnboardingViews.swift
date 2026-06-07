@@ -126,15 +126,17 @@ struct MacGmailOnboardingView: View {
     private func connect() async {
         isConnecting = true
         errorMessage = nil
-        await services.authService.signInWithGoogle()
-        if services.authService.isAuthenticated {
-            await services.emailService.checkConnection()
-            if services.emailService.hasConnection {
-                await services.emailService.loadThreads(refresh: true)
-            }
+        // Use the link-aware path. Calling signInWithGoogle() directly meant a
+        // user who'd already signed in with Apple/OTP got their session
+        // OVERWRITTEN by a fresh Google sign-in (account hijack) instead of
+        // linking Gmail to the current account. connectGmail() links when
+        // authenticated, signs in only when signed out, and polls until the
+        // connection row appears — then loads threads. Mirrors iOS.
+        let ok = await services.emailService.connectGmail(authService: services.authService)
+        if ok {
             services.hasConfiguredGmailPrompt = true
         } else {
-            errorMessage = services.authService.lastErrorMessage
+            errorMessage = services.emailService.errorMessage
                 ?? "Connection did not finish. You can try again or set this up later in Settings."
         }
         isConnecting = false

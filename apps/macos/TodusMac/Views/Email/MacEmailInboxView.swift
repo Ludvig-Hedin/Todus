@@ -588,6 +588,12 @@ struct MacEmailInboxView: View {
             .keyboardShortcut("u", modifiers: [.command, .shift])
 
             Button {
+                // Close the detail pane if it's showing the thread we're archiving —
+                // otherwise it keeps rendering a thread that's no longer in the list,
+                // and reply/archive/delete from that stale pane act on a gone thread.
+                if selectedThreadId == thread.id {
+                    withAnimation(MacTheme.Motion.fast) { selectedThreadId = nil }
+                }
                 Task { await services.emailService.archiveThreads(ids: [thread.id]) }
             } label: {
                 Label("Archive", systemImage: "archivebox")
@@ -595,6 +601,9 @@ struct MacEmailInboxView: View {
             .keyboardShortcut("e", modifiers: .command)
 
             Button(role: .destructive) {
+                if selectedThreadId == thread.id {
+                    withAnimation(MacTheme.Motion.fast) { selectedThreadId = nil }
+                }
                 Task { await services.emailService.deleteThreads(ids: [thread.id]) }
             } label: {
                 Label("Move to Bin", systemImage: "trash")

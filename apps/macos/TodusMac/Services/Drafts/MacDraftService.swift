@@ -59,6 +59,15 @@ final class MacDraftService {
 
     private struct EmptyResult: Decodable {}
 
+    /// `mail.send` returns HTTP 200 even for recoverable failures (undo-send /
+    /// scheduled-send write errors) with `{ success: false, error }`. All fields
+    /// optional so older backends that return a bare object still decode and are
+    /// treated as success.
+    private struct SendResult: Decodable {
+        let success: Bool?
+        let error: String?
+    }
+
     func update(draftId: String, payload: DraftPayload) async throws {
         // Drop recipients with empty emails so we never produce malformed headers like ", a@b.com".
         let validTo = payload.to.filter { !$0.email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
@@ -122,7 +131,17 @@ final class MacDraftService {
             fromEmail: (trimmedFromEmail?.isEmpty ?? true) ? nil : trimmedFromEmail,
             attachments: normalizedAttachments
         )
-        let _: EmptyResult = try await api.trpcMutation("mail.send", input: input)
+        let result: SendResult = try await api.trpcMutation("mail.send", input: input)
+        // Inspect `success`: a 200 with `{ success: false }` is a real failure
+        // (undo-send / scheduled-send write error). Without this the compose sheet
+        // closes and the draft is cleared as if the mail had been sent.
+        if result.success == false {
+            throw NSError(
+                domain: "MacDraftService",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: result.error ?? "Failed to send email."]
+            )
+        }
     }
 
     private func recipientHeader(_ r: Recipient) -> String {

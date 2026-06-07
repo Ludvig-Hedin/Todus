@@ -662,8 +662,13 @@ struct MacEmailComposeView: View {
     /// Used at focus-loss and pre-send so users can type "alice@x.com, " without
     /// the binding setter dropping the trailing comma+space mid-edit.
     private static func tokenizeRecipients(_ raw: String) -> [String] {
-        raw
-            .split(separator: ",")
+        // Split on commas, semicolons, AND whitespace/newlines so pasting
+        // "a@x.com b@y.com" or "a@x.com; b@y.com" yields separate addresses
+        // instead of one invalid mega-token that blocks send. Email addresses
+        // never contain internal whitespace, so this is safe.
+        let separators = CharacterSet(charactersIn: ",;").union(.whitespacesAndNewlines)
+        return raw
+            .components(separatedBy: separators)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
     }

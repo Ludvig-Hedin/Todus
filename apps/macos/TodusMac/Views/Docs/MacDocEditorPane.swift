@@ -392,6 +392,12 @@ struct MacDocEditorPane: View {
             doc = d
             titleDraft = d.title
             lastSavedJSON = d.content
+            // Seed `lastText` from the loaded doc. It's otherwise only assigned in
+            // `onContentChange`, so a flush triggered before the editor emits its
+            // first change (open-then-close, or switching docs) wrote `contentText`
+            // as a single space — or worse, the PREVIOUS doc's text — silently
+            // corrupting the server's search/preview text.
+            lastText = d.contentText ?? ""
             // Apple-Notes / iOS parity: autofocus the title when the doc was
             // just created from the + button (empty or "Untitled"). Tiny
             // delay so the WebView mount + window animation settle first.

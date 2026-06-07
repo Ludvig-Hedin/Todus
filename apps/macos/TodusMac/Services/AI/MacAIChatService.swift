@@ -1343,7 +1343,11 @@ final class MacAIChatService {
 
     private func appendError(_ text: String, to messageID: UUID) {
         guard let idx = messages.firstIndex(where: { $0.id == messageID }) else { return }
-        messages[idx].content = "⚠️ \(text)"
+        // Preserve any tokens already streamed before the failure — overwriting
+        // wholesale (the old behavior) discarded a partial answer the user was
+        // already reading when a mid-stream network drop hit.
+        let existing = messages[idx].content
+        messages[idx].content = existing.isEmpty ? "⚠️ \(text)" : existing + "\n\n⚠️ \(text)"
         messages[idx].isStreaming = false
     }
 
@@ -1404,18 +1408,39 @@ final class MacAIChatService {
 
     private func saveCurrentConversation() {
         guard !messages.isEmpty else { return }
+        let savedMessages = messages.map {
+            MacChatConversation.SavedMessage(
+                role: $0.role == .user ? "user" : "assistant",
+                content: $0.content,
+                attachmentFileNames: $0.attachmentFileNames
+            )
+        }
+        // Continuing a known conversation → update its existing entry in place.
+        // The old code always minted a fresh `UUID()` and inserted, so every
+        // autosave / clearHistory / loadConversation for the SAME live chat
+        // appended a duplicate history row (and the new UUID defeated the
+        // server-side merge-by-id, so the dupes synced too).
+        if let id = currentConversationID,
+           let idx = savedConversations.firstIndex(where: { $0.id == id }) {
+            let existing = savedConversations[idx]
+            let updated = MacChatConversation(
+                id: existing.id,
+                title: chatTitle ?? existing.title,
+                createdAt: existing.createdAt,
+                folderID: currentConversationFolderID,
+                messages: savedMessages
+            )
+            savedConversations[idx] = updated
+            persistConversationsLocally()
+            Task { await syncSaveConversation(updated) }
+            return
+        }
         let saved = MacChatConversation(
             id: UUID(),
             title: chatTitle ?? "Untitled",
             createdAt: Date(),
             folderID: currentConversationFolderID,
-            messages: messages.map {
-                MacChatConversation.SavedMessage(
-                    role: $0.role == .user ? "user" : "assistant",
-                    content: $0.content,
-                    attachmentFileNames: $0.attachmentFileNames
-                )
-            }
+            messages: savedMessages
         )
         savedConversations.insert(saved, at: 0)
         currentConversationID = saved.id

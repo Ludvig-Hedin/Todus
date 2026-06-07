@@ -487,16 +487,20 @@ struct MacRootView: View {
             }
             hasBootstrappedAuthState = true
         }
-        .task {
+        .task(id: hasBootstrappedAuthState) {
             // Validate session on launch — but DON'T sign out on failure.
             // attemptSilentRefresh() returns false for both expired tokens AND
             // network errors (offline, DNS hiccup). Signing out here would
             // destroy a valid Keychain-stored session during a transient outage.
             // Instead, just refresh isSessionExpired so the UI can show a banner.
             // Actual sign-out on 401 is handled reactively by the API client.
-            if services.authService.isAuthenticated && hasBootstrappedAuthState {
-                _ = await services.authService.attemptSilentRefresh()
-            }
+            //
+            // Keyed on `hasBootstrappedAuthState` so it RE-RUNS once the bootstrap
+            // task flips the flag. Without the id it fired once on appear — before
+            // restorePersistedSession() finished and before the flag was set — so
+            // the guard always failed and the launch refresh never actually ran.
+            guard hasBootstrappedAuthState, services.authService.isAuthenticated else { return }
+            _ = await services.authService.attemptSilentRefresh()
         }
         .task(id: services.authService.isAuthenticated) {
             // Fetch user profile (name, avatar, email) ONCE per authenticated session.

@@ -1127,7 +1127,18 @@ final class EmailService {
                 connectionId: (normalizedConnectionId?.isEmpty ?? true) ? nil : normalizedConnectionId,
                 fromEmail: (normalizedFromEmail?.isEmpty ?? true) ? nil : normalizedFromEmail
             )
-            let _: SendResponse = try await api.trpcMutation("mail.send", input: input)
+            let response: SendResponse = try await api.trpcMutation("mail.send", input: input)
+            // The backend returns HTTP 200 for recoverable failures (undo-send /
+            // scheduled-send KV write, invalid scheduleAt) as `{ success: false,
+            // error }` — the SAME shape as a success `{ success: true }`, so it
+            // decodes into `SendResponse` either way and the only signal is the
+            // `success` value (matches iOS's `SendResponse`). Without this guard a
+            // failed send reports as sent, the compose sheet closes, and the
+            // autosaved draft is cleared — silently losing the user's message.
+            guard response.success else {
+                errorMessage = response.error ?? "Failed to send email."
+                return false
+            }
             return true
         } catch {
             errorMessage = "Failed to send email."
@@ -1457,6 +1468,8 @@ struct EmailConnection: Decodable, Identifiable {
 
 private struct SendResponse: Decodable {
     let success: Bool
+    /// Present on recoverable failures (`success == false`). Surfaced to the user.
+    let error: String?
 }
 
 private struct AssistantOpenLoopsResponse: Decodable {
