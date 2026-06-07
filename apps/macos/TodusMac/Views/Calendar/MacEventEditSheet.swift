@@ -409,11 +409,29 @@ struct MacEventEditSheet: View {
             location = ""        // EKEvent.location/notes aren't on CalendarEvent yet; left blank to avoid wiping on save.
             notes = ""           // updateEvent only patches fields we pass, so leaving these blank is safe.
             selectedFolderID = event.folderID
-            // Match the existing event's calendar in the picker (disabled in edit mode).
+            // Match the existing event's calendar in the picker. The picker stays
+            // editable in edit mode so the user can move the event to another
+            // calendar — and MUST, when the original calendar is missing (below).
             if let calId = event.calendarIdentifier {
                 let composite = "\(CalendarSourceIDPrefix.apple):\(calId)"
-                selectedCalendarSourceId = sources.first(where: { $0.id == composite })?.id
-                    ?? resolveDefaultSourceId(in: sources)
+                if let match = sources.first(where: { $0.id == composite })?.id {
+                    selectedCalendarSourceId = match
+                } else if sources.contains(where: { $0.isWritable }) {
+                    // Original calendar is gone from the list (account removed/
+                    // disabled) but writable calendars exist. Flag it + leave the
+                    // selection nil so `canSave` forces the user to actively pick
+                    // a calendar instead of silently saving the edit to a default
+                    // they didn't choose. Activates the existing
+                    // `originalCalendarMissing` guard, which was dead because
+                    // nothing ever set it true.
+                    originalCalendarMissing = true
+                    selectedCalendarSourceId = nil
+                } else {
+                    // No writable calendars at all — the picker's "No writable
+                    // calendars available" notice already covers this; don't
+                    // double-warn.
+                    selectedCalendarSourceId = nil
+                }
             } else {
                 selectedCalendarSourceId = resolveDefaultSourceId(in: sources)
             }
