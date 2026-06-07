@@ -460,7 +460,7 @@ struct InboxView<Footer: View>: View {
         if !olderCompletedTasks.isEmpty {
             return "Past wins are tucked away — tap + to capture the next thing."
         }
-        return "Tap + above to capture the first thing on your mind."
+        return "Tap + to capture the first thing on your mind."
     }
 }
 

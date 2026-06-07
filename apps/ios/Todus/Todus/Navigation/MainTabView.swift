@@ -34,6 +34,15 @@ struct MainTabView: View {
 
     @State private var sheetTab: AppTab? = nil
 
+    /// Transient banner shown when a just-captured task is rolled back because
+    /// its sync to the backend failed (offline, server error, or expired
+    /// session). Without this the rollback deleted the user's task silently —
+    /// `TaskCaptureService` published `lastRollbackCount`/`lastRollbackAt` for a
+    /// banner that never existed. Auto-dismisses after a few seconds.
+    @State private var captureFailureVisible = false
+    @State private var captureFailureCount = 0
+    @State private var captureFailureDismiss: Task<Void, Never>? = nil
+
     @ScaledMetric(relativeTo: .body) private var fabSize: CGFloat = 58
 
     /// Vertical room a scroll view needs at its bottom edge so the last row stays
@@ -52,18 +61,40 @@ struct MainTabView: View {
         ZStack(alignment: .top) {
             tabView
 
-            if !services.networkMonitor.isConnected {
-                offlineBanner
-                    .transition(.move(edge: .top).combined(with: .opacity))
-            }
+            // Stacked transient banners — VStack keeps them from overlapping
+            // when more than one is active (e.g. offline + capture failure).
+            VStack(spacing: 6) {
+                if !services.networkMonitor.isConnected {
+                    offlineBanner
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
 
-            if services.authService.isSessionExpired {
-                sessionExpiredBanner
-                    .transition(.move(edge: .top).combined(with: .opacity))
+                if services.authService.isSessionExpired {
+                    sessionExpiredBanner
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
+
+                if captureFailureVisible {
+                    captureFailureBanner
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
             }
+            .padding(.top, 4)
         }
         .animation(.easeInOut(duration: 0.3), value: services.networkMonitor.isConnected)
         .animation(.easeInOut(duration: 0.3), value: services.authService.isSessionExpired)
+        .animation(.easeInOut(duration: 0.3), value: captureFailureVisible)
+        .onChange(of: services.captureService.lastRollbackAt) { _, newValue in
+            guard newValue != nil else { return }
+            captureFailureCount = services.captureService.lastRollbackCount
+            captureFailureVisible = true
+            captureFailureDismiss?.cancel()
+            captureFailureDismiss = Task { @MainActor in
+                try? await Task.sleep(for: .seconds(5))
+                guard !Task.isCancelled else { return }
+                captureFailureVisible = false
+            }
+        }
         // Single overlay for both FABs. The VStack + ignoresSafeArea anchors to the
         // real screen bottom, not the keyboard-adjusted bottom, so FABs stay fixed
         // in place when the keyboard is shown (e.g. email search bar focused).
@@ -367,7 +398,29 @@ struct MainTabView: View {
                 .overlay(Capsule().fill(Color.red.opacity(0.10)))
                 .overlay(Capsule().stroke(Color.red.opacity(0.25), lineWidth: 0.8))
         )
-        .padding(.top, 4)
+    }
+
+    // MARK: - Capture Failure Banner
+
+    /// Shown briefly when a captured task was rolled back after its sync failed.
+    /// Tells the user the task was NOT saved so they can re-enter it, instead of
+    /// the previous silent deletion.
+    private var captureFailureBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.icloud.fill")
+                .font(.system(size: 12, weight: .semibold))
+            Text(captureFailureCount > 1
+                 ? "Couldn’t save \(captureFailureCount) tasks — check your connection"
+                 : "Couldn’t save your task — check your connection")
+                .font(.system(size: 13, weight: .semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(.orange.opacity(0.92), in: Capsule())
+        .accessibilityElement(children: .combine)
     }
 
     // MARK: - Session Expired Banner
@@ -391,7 +444,6 @@ struct MainTabView: View {
             .background(.orange.opacity(0.9), in: Capsule())
         }
         .buttonStyle(.plain)
-        .padding(.top, 4)
         .confirmationDialog("Your session has expired", isPresented: $showSessionExpiredConfirm, titleVisibility: .visible) {
             Button("Sign In Again") {
                 services.authService.isSessionExpired = false

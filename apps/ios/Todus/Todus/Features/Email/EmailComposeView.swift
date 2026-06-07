@@ -22,6 +22,14 @@ struct EmailComposeView: View {
     @State private var sendSuccessTick: Int = 0
     /// Controls visibility of CC/BCC fields — toggled by the chevron in the To row
     @State private var showCcBcc = false
+    /// Raw, what-the-user-typed recipient strings — one per field. The TextFields
+    /// bind to these directly so typing a separator (`,`/`;`) is preserved instead
+    /// of being eaten mid-keystroke. They are tokenized into `draft.to/cc/bcc` on
+    /// every change (and again before send), so a typed second recipient is no
+    /// longer impossible. Seeded from `draft` in `onAppear` after restore.
+    @State private var toRaw = ""
+    @State private var ccRaw = ""
+    @State private var bccRaw = ""
     /// Controls the AI draft assistant sheet
     @State private var showAIDraft = false
     /// Debounce task for draft autosave — re-armed on every field change.
@@ -212,6 +220,12 @@ struct EmailComposeView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button {
                         Task {
+                            // Flush any not-yet-tokenized raw recipient text (e.g. the
+                            // user tapped Send without leaving the field) so a typed
+                            // recipient is never dropped on send.
+                            draft.to = Self.tokenizeRecipients(toRaw)
+                            draft.cc = Self.tokenizeRecipients(ccRaw)
+                            draft.bcc = Self.tokenizeRecipients(bccRaw)
                             // Resolve the picked From connection to its email address
                             // so the backend routes the send through the correct
                             // mailbox (default behaviour when no picker selection).
@@ -277,6 +291,12 @@ struct EmailComposeView: View {
                 // Restore any in-progress autosaved draft. Only overwrites empty fields so
                 // we don't clobber explicitly-passed initializer values.
                 restoreAutosavedDraft()
+                // Seed the raw recipient fields from the (possibly prefilled/restored)
+                // draft so the To/Cc/Bcc text shows what's already there. Filtering
+                // empties drops the placeholder `[""]` an empty draft can carry.
+                toRaw = draft.to.filter { !$0.isEmpty }.joined(separator: ", ")
+                ccRaw = draft.cc.filter { !$0.isEmpty }.joined(separator: ", ")
+                bccRaw = draft.bcc.filter { !$0.isEmpty }.joined(separator: ", ")
                 // Pre-select default from connection
                 if draft.fromConnectionId == nil {
                     draft.fromConnectionId = connectionsService.connections.first?.id
@@ -533,18 +553,12 @@ struct EmailComposeView: View {
                 .frame(width: 60, alignment: .trailing)
 
             // Use prompt: to control placeholder color — avoids the default blue tint.
-            // Recipient string is tokenized on every change so users can paste
-            // `a@b.com, c@d.com; e@f.com` and get three separate recipients on send.
-            // TODO(bug-hunt): tokenizing in the Binding `set` on every keystroke eats the
-            // separator while typing — `"a@b.com,"` tokenizes to `["a@b.com"]`, then `get`
-            // re-joins to `"a@b.com"`, so the comma/semicolon vanishes and a 2nd recipient
-            // can't be typed (paste still works). Fix: bind to a raw @State string per field
-            // and tokenize on .onSubmit / before send, not on every change. Same for cc/bcc.
+            // Bound to a raw @State string (not a computed binding over `draft.to`)
+            // so the separator the user types is preserved. `draft.to` is kept live
+            // by tokenizing on every change — paste of `a@b.com, c@d.com` and typing
+            // a second recipient both work.
             TextField(
-                text: Binding(
-                    get: { draft.to.joined(separator: ", ") },
-                    set: { draft.to = Self.tokenizeRecipients($0) }
-                ),
+                text: $toRaw,
                 prompt: Text("Add recipients").foregroundColor(.secondary)
             ) {
                 EmptyView()
@@ -556,6 +570,7 @@ struct EmailComposeView: View {
             .autocorrectionDisabled()
             .focused($focusedField, equals: .to)
             .submitLabel(.next)
+            .onChange(of: toRaw) { draft.to = Self.tokenizeRecipients(toRaw) }
             // Advance to CC if it's expanded, otherwise jump straight to subject.
             .onSubmit { focusedField = showCcBcc ? .cc : .subject }
 
@@ -586,10 +601,7 @@ struct EmailComposeView: View {
                 .frame(width: 60, alignment: .trailing)
 
             TextField(
-                text: Binding(
-                    get: { draft.cc.joined(separator: ", ") },
-                    set: { draft.cc = Self.tokenizeRecipients($0) }
-                ),
+                text: $ccRaw,
                 // Plain placeholder text — an email-shaped placeholder ("cc@example.com")
                 // gets auto-styled blue by iOS data detectors, making the empty field
                 // look like it's prefilled with a tappable link in light mode.
@@ -604,6 +616,7 @@ struct EmailComposeView: View {
             .autocorrectionDisabled()
             .focused($focusedField, equals: .cc)
             .submitLabel(.next)
+            .onChange(of: ccRaw) { draft.cc = Self.tokenizeRecipients(ccRaw) }
             .onSubmit { focusedField = .bcc }
         }
         .padding(.horizontal, 16)
@@ -618,10 +631,7 @@ struct EmailComposeView: View {
                 .frame(width: 60, alignment: .trailing)
 
             TextField(
-                text: Binding(
-                    get: { draft.bcc.joined(separator: ", ") },
-                    set: { draft.bcc = Self.tokenizeRecipients($0) }
-                ),
+                text: $bccRaw,
                 prompt: Text("Add Bcc recipients").foregroundColor(.secondary)
             ) {
                 EmptyView()
@@ -633,6 +643,7 @@ struct EmailComposeView: View {
             .autocorrectionDisabled()
             .focused($focusedField, equals: .bcc)
             .submitLabel(.next)
+            .onChange(of: bccRaw) { draft.bcc = Self.tokenizeRecipients(bccRaw) }
             .onSubmit { focusedField = .subject }
         }
         .padding(.horizontal, 16)

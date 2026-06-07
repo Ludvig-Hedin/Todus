@@ -479,7 +479,9 @@ struct GroupChatView: View {
             // Reload immediately so user sees their own message before next poll
             try? await groupService.loadMessages(groupId: groupId)
         } catch {
-            messageText = content  // restore on failure
+            // Restore the failed message so it isn't lost — but only if the user
+            // hasn't already started typing a new one (don't clobber newer input).
+            if messageText.isEmpty { messageText = content }
         }
     }
 
