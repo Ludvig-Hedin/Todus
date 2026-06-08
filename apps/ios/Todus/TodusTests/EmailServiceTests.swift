@@ -260,6 +260,92 @@ final class EmailServiceTests: XCTestCase {
         XCTAssertEqual(msg.date, .distantPast,
             "An unparseable date must sort to the bottom (distantPast), not silently become 'now'.")
     }
+
+    // MARK: - Recipient tokenization (EmailComposeView multi-recipient fix)
+    //
+    // Pins the contract behind the raw-@State recipient fields: typing or pasting
+    // multiple addresses with mixed separators must yield distinct recipients.
+    // Regression guard for the "can't type a second recipient" bug.
+
+    func testTokenizeRecipientsSplitsOnCommaSemicolonAndWhitespace() {
+        XCTAssertEqual(
+            EmailComposeView.tokenizeRecipients("a@b.com, c@d.com; e@f.com"),
+            ["a@b.com", "c@d.com", "e@f.com"],
+            "Comma and semicolon (with surrounding whitespace) must each separate recipients."
+        )
+    }
+
+    func testTokenizeRecipientsKeepsSingleRecipient() {
+        XCTAssertEqual(EmailComposeView.tokenizeRecipients("a@b.com"), ["a@b.com"])
+    }
+
+    func testTokenizeRecipientsExtractsAddressFromDisplayNameForm() {
+        XCTAssertEqual(
+            EmailComposeView.tokenizeRecipients("Alice Example <alice@example.com>, bob@x.com"),
+            ["alice@example.com", "bob@x.com"],
+            "\"Name <addr>\" form must yield just the bare address."
+        )
+    }
+
+    func testTokenizeRecipientsDedupesCaseInsensitivelyKeepingFirst() {
+        XCTAssertEqual(
+            EmailComposeView.tokenizeRecipients("A@B.com, a@b.com"),
+            ["A@B.com"],
+            "Duplicate addresses (case-insensitive) collapse to the first occurrence's casing."
+        )
+    }
+
+    func testTokenizeRecipientsDropsEmptyAndTrailingSeparators() {
+        XCTAssertEqual(
+            EmailComposeView.tokenizeRecipients("a@b.com,  , ;"),
+            ["a@b.com"],
+            "Empty tokens from trailing/double separators must be dropped — no blank recipients on send."
+        )
+        XCTAssertEqual(EmailComposeView.tokenizeRecipients("   "), [])
+        XCTAssertEqual(EmailComposeView.tokenizeRecipients(""), [])
+    }
+
+    // MARK: - SenderIconRegistry domain resolution (avatar correctness)
+    //
+    // Pins root-domain extraction + personal-provider exclusion that drive which
+    // sender rows get a bundled brand icon vs. initials.
+
+    func testIconResolvesKnownBrand() {
+        XCTAssertEqual(SenderIconRegistry.icon(for: "noreply@github.com")?.slug, "github")
+    }
+
+    func testIconStripsSubdomainToRootDomain() {
+        XCTAssertEqual(
+            SenderIconRegistry.icon(for: "security@auth.github.com")?.slug, "github",
+            "Subdomains must resolve to the registered root domain."
+        )
+    }
+
+    func testIconReturnsNilForPersonalProviders() {
+        XCTAssertNil(SenderIconRegistry.icon(for: "someone@gmail.com"),
+            "Personal providers fall through to initials, never a brand icon.")
+        XCTAssertNil(SenderIconRegistry.icon(for: "x@icloud.com"))
+    }
+
+    func testIconReturnsNilForUnknownDomain() {
+        XCTAssertNil(SenderIconRegistry.icon(for: "hi@some-unknown-co.example"))
+    }
+
+    func testIconHandlesMultiPartTLD() {
+        XCTAssertEqual(
+            SenderIconRegistry.icon(for: "noreply@google.co.uk")?.slug, "google",
+            "Multi-part TLDs (co.uk) must keep the brand label, not collapse to co.uk."
+        )
+    }
+
+    func testIconIsCaseAndWhitespaceInsensitive() {
+        XCTAssertEqual(SenderIconRegistry.icon(for: "  NoReply@GitHub.COM  ")?.slug, "github")
+    }
+
+    func testIconReturnsNilForMalformedAddress() {
+        XCTAssertNil(SenderIconRegistry.icon(for: "not-an-email"))
+        XCTAssertNil(SenderIconRegistry.icon(for: "trailing@"))
+    }
 }
 
 // MARK: - URLProtocol stub for EmailService tests

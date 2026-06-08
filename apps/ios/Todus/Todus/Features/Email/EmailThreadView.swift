@@ -120,12 +120,15 @@ struct EmailThreadView: View {
                 ownedAddresses: ownedReplyAddresses()
             )
         case .forward:
-            // Forward path — pre-fill subject + body so the user only has to
-            // type a recipient. Used by the receipt chip's "Forward" action
-            // and any "Forward" button in the reply bar.
+            // Forward path — pre-fill subject + carry the FULL original message
+            // so the backend quotes it as a "Forwarded message" block. Previously
+            // this passed `lastMessage.plainText` (the title/snippet only), so
+            // forwarding silently truncated the email to a one-line preview.
+            // `body` is left empty for the user's own note above the quote.
             EmailComposeView(
                 subject: forwardSubject(for: lastMessage),
-                body: lastMessage.plainText ?? ""
+                isForward: true,
+                originalMessage: lastMessage.body.isEmpty ? lastMessage.plainText : lastMessage.body
             )
         }
     }

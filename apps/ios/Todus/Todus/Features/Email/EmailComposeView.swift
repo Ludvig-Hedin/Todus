@@ -109,8 +109,10 @@ struct EmailComposeView: View {
         _draftStorageKey = State(initialValue: "compose.\(threadId)")
     }
 
-    /// Create compose with pre-filled to, cc, bcc, subject, body, attachments, and/or sender (from CreateSheet)
-    init(to: String? = nil, cc: String? = nil, bcc: String? = nil, subject: String? = nil, body: String? = nil, seededAttachments: [String] = [], fromConnectionId: String? = nil) {
+    /// Create compose with pre-filled to, cc, bcc, subject, body, attachments, and/or sender (from CreateSheet).
+    /// Pass `isForward: true` + `originalMessage:` (the full message body) to forward — the backend
+    /// wraps `originalMessage` as the quoted "Forwarded message" block, so `body` stays the user's note.
+    init(to: String? = nil, cc: String? = nil, bcc: String? = nil, subject: String? = nil, body: String? = nil, seededAttachments: [String] = [], fromConnectionId: String? = nil, isForward: Bool = false, originalMessage: String? = nil) {
         var d = EmailDraft()
         if let to, !to.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             d.to = [to.trimmingCharacters(in: .whitespacesAndNewlines)]
@@ -125,6 +127,9 @@ struct EmailComposeView: View {
         if let body { d.body = body }
         // Pre-select the sender chosen in CreateSheet's From picker.
         if let fromConnectionId { d.fromConnectionId = fromConnectionId }
+        // Forward: carry the full original message so the backend can quote it.
+        d.isForward = isForward
+        d.originalMessage = originalMessage
         _draft = State(initialValue: d)
         _seededAttachmentNames = State(initialValue: seededAttachments)
         // The autosaved "new email" slot must NOT be reused when the caller
@@ -134,7 +139,7 @@ struct EmailComposeView: View {
         // wrong message without noticing.
         let calledWithSeed =
             to != nil || cc != nil || bcc != nil || subject != nil || body != nil
-            || !seededAttachments.isEmpty || fromConnectionId != nil
+            || !seededAttachments.isEmpty || fromConnectionId != nil || isForward
         _draftStorageKey = State(
             initialValue: calledWithSeed ? "new.\(UUID().uuidString)" : Self.newComposeStorageKey
         )

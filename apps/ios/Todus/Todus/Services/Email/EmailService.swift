@@ -307,6 +307,13 @@ final class EmailService {
                 return await self.fetchThreadDetails(ids: threadIds)
             }
 
+            // A newer load (higher generation) has superseded us — don't apply
+            // stale results (threads / errorMessage / nextPageToken) over the
+            // fresh run's state. The `defer` already gen-gates the spinner; this
+            // guards every state write below the same way. Without it a slow
+            // superseded run could clobber a successful newer load.
+            guard loadGeneration == myGen else { return }
+
             if refresh {
                 // Drop strictly-older refresh results — the backend's destructive forceSync
                 // workflow occasionally rebuilds the table from a stale Gmail history offset,
@@ -392,19 +399,22 @@ final class EmailService {
         } catch is CancellationError {
             // Superseded by a newer load — keep quiet, the newer run owns the UI now.
         } catch APIError.unauthorized {
-            // Auth failure — stop trying to load until the user re-authenticates
-            hasConnection = false
+            // Auth failure — stop trying to load until the user re-authenticates.
+            // Gen-gated: a stale superseded run must not flip a newer run's state.
+            if loadGeneration == myGen { hasConnection = false }
         } catch EmailServiceError.timeout {
             // Treat timeout the same as a transient network error: surface a recovery
             // CTA without blowing away whatever cached threads we already had on screen.
-            errorMessage = "Refreshing took too long. Pull to refresh to try again."
+            if loadGeneration == myGen {
+                errorMessage = "Refreshing took too long. Pull to refresh to try again."
+            }
             AppLogger.shared.log("[EmailService] loadThreads timed out")
         } catch {
             if let urlError = error as? URLError {
-                errorMessage = "No internet connection."
+                if loadGeneration == myGen { errorMessage = "No internet connection." }
                 AppLogger.shared.log("[EmailService] loadThreads network error: \(urlError)")
             } else {
-                errorMessage = "Failed to load emails. Please try again."
+                if loadGeneration == myGen { errorMessage = "Failed to load emails. Please try again." }
                 AppLogger.shared.log("[EmailService] loadThreads error: \(error)")
             }
         }
@@ -1535,6 +1545,15 @@ final class EmailService {
         threads = rebuilt
     }
 
+    /// Drops cached thread details for the given ids so the next open re-fetches
+    /// fresh state. The list mutations below update `threads` (unread / star /
+    /// labels) but would otherwise leave a stale `EmailThreadDetail` in
+    /// `threadDetailCache`, so opening a just-read or just-starred thread showed
+    /// the pre-mutation state until the cache TTL expired.
+    private func invalidateThreadDetail(ids: [String]) {
+        for id in ids { threadDetailCache.removeValue(forKey: id) }
+    }
+
     /// Marks the given threads as read. Returns `true` on success so call sites
     /// can gate side effects (e.g. dismissing a thread view) on the result.
     ///
@@ -1554,6 +1573,7 @@ final class EmailService {
                 messageCount: threads[i].messageCount, labels: threads[i].labels
             )
         }
+        invalidateThreadDetail(ids: ids)
         do {
             let _: EmailEmptyResponse = try await api.trpcMutation("mail.markAsRead", input: IdsInput(ids: ids))
             return true
@@ -1580,6 +1600,7 @@ final class EmailService {
                 messageCount: threads[i].messageCount, labels: threads[i].labels
             )
         }
+        invalidateThreadDetail(ids: ids)
         do {
             let _: EmailEmptyResponse = try await api.trpcMutation("mail.markAsUnread", input: IdsInput(ids: ids))
             return true
@@ -1654,6 +1675,7 @@ final class EmailService {
                 messageCount: threads[i].messageCount, labels: newLabels
             )
         }
+        invalidateThreadDetail(ids: ids)
         do {
             let _: SuccessResponse = try await api.trpcMutation("mail.toggleStar", input: IdsInput(ids: ids))
             return true
