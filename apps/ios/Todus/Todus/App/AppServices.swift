@@ -819,6 +819,12 @@ final class AppServices {
             self.hasConfiguredNotificationsPrompt = true
             self.hasConfiguredDefaultMailPrompt = true
             self.hasReachedMainTab = true
+            // Welcome tour + tab-bar prompt must be seeded explicitly. They are
+            // otherwise only migrated to "done" when `hasReachedMainTab` was
+            // persisted by a PREVIOUS launch — on a fresh test container the
+            // first XCUITest run landed on the tour instead of MainTabView.
+            self.hasSeenWelcomeTour = true
+            self.hasConfiguredTabBarPrompt = true
             authService._uiTesting_seedAuthenticatedSession(
                 bearer: "TEST_TOKEN",
                 email: "uitest@todus.app"

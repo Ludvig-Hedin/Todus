@@ -38,12 +38,12 @@ final class TodosAPIClient {
     // MARK: - TRPC Helpers
 
     /// Call a TRPC query (GET-style, but uses POST for input).
-    func trpcQuery<T: Decodable>(_ procedure: String, input: Encodable? = nil) async throws -> T {
+    func trpcQuery<T: Decodable & Sendable>(_ procedure: String, input: Encodable? = nil) async throws -> T {
         return try await trpcSingle(procedure, input: input, isMutation: false)
     }
 
     /// Call a TRPC mutation (POST).
-    func trpcMutation<T: Decodable>(_ procedure: String, input: Encodable? = nil) async throws -> T {
+    func trpcMutation<T: Decodable & Sendable>(_ procedure: String, input: Encodable? = nil) async throws -> T {
         return try await trpcSingle(procedure, input: input, isMutation: true)
     }
 
@@ -52,7 +52,7 @@ final class TodosAPIClient {
     /// failures don't fail the whole batch.
     ///
     /// Used to collapse the inbox cold-start enrichment from N round trips into 1.
-    func trpcBatchQuery<Input: Encodable, Output: Decodable>(
+    func trpcBatchQuery<Input: Encodable, Output: Decodable & Sendable>(
         _ procedure: String,
         inputs: [Input]
     ) async throws -> [Result<Output, Error>] {
@@ -88,36 +88,42 @@ final class TodosAPIClient {
             self.makeRequest(url: url, method: "POST", body: bodyData)
         }
 
-        guard let array = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
-            throw APIError.invalidResponse
-        }
-        guard array.count == inputs.count else {
-            throw APIError.invalidResponse
-        }
-
-        var out: [Result<Output, Error>] = []
-        out.reserveCapacity(array.count)
-        for entry in array {
-            if let result = entry["result"] as? [String: Any],
-               let dataObj = result["data"] as? [String: Any],
-               let json = dataObj["json"] {
-                do {
-                    // Use the null-/fragment-safe re-encoder so a single `null` or primitive
-                    // result inside a batch can't crash the whole call.
-                    let jsonData = try Self.serializeJSONValue(json)
-                    let decoded = try JSONDecoder.apiDecoder.decode(Output.self, from: jsonData)
-                    out.append(.success(decoded))
-                } catch {
-                    out.append(.failure(APIError.decodingError(error)))
-                }
-            } else if let err = entry["error"] as? [String: Any] {
-                let msg = (err["json"] as? [String: Any])?["message"] as? String
-                out.append(.failure(APIError.httpError(statusCode: 200, body: msg)))
-            } else {
-                out.append(.failure(APIError.invalidResponse))
+        // Parse + decode off the main actor — a 50-thread inbox batch carries every
+        // message's full HTML body (hundreds of KB), and doing JSONSerialization +
+        // per-entry Decodable work inline froze the UI for the whole parse.
+        let expectedCount = inputs.count
+        return try await Task.detached(priority: .userInitiated) {
+            guard let array = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+                throw APIError.invalidResponse
             }
-        }
-        return out
+            guard array.count == expectedCount else {
+                throw APIError.invalidResponse
+            }
+
+            var out: [Result<Output, Error>] = []
+            out.reserveCapacity(array.count)
+            for entry in array {
+                if let result = entry["result"] as? [String: Any],
+                   let dataObj = result["data"] as? [String: Any],
+                   let json = dataObj["json"] {
+                    do {
+                        // Use the null-/fragment-safe re-encoder so a single `null` or primitive
+                        // result inside a batch can't crash the whole call.
+                        let jsonData = try Self.serializeJSONValue(json)
+                        let decoded = try JSONDecoder.apiDecoder.decode(Output.self, from: jsonData)
+                        out.append(.success(decoded))
+                    } catch {
+                        out.append(.failure(APIError.decodingError(error)))
+                    }
+                } else if let err = entry["error"] as? [String: Any] {
+                    let msg = (err["json"] as? [String: Any])?["message"] as? String
+                    out.append(.failure(APIError.httpError(statusCode: 200, body: msg)))
+                } else {
+                    out.append(.failure(APIError.invalidResponse))
+                }
+            }
+            return out
+        }.value
     }
 
     // MARK: - Generic HTTP
@@ -199,7 +205,7 @@ final class TodosAPIClient {
 
     // MARK: - Private
 
-    private func trpcSingle<T: Decodable>(
+    private func trpcSingle<T: Decodable & Sendable>(
         _ procedure: String,
         input: Encodable?,
         isMutation: Bool
@@ -227,17 +233,22 @@ final class TodosAPIClient {
             self.makeRequest(url: url, method: "POST", body: bodyData)
         }
 
-        // TRPC responses are wrapped: { "result": { "data": { "json": <value> } } }
-        if let trpcResponse = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let result = trpcResponse["result"] as? [String: Any],
-           let dataObj = result["data"] as? [String: Any],
-           let json = dataObj["json"] {
-            let jsonData = try Self.serializeJSONValue(json)
-            return try JSONDecoder.apiDecoder.decode(T.self, from: jsonData)
-        }
+        // Parse + decode off the main actor. `mail.get` responses include every
+        // message's full HTML body — unwrapping the tRPC envelope and decoding
+        // inline blocked the main thread for the duration on large threads.
+        return try await Task.detached(priority: .userInitiated) {
+            // TRPC responses are wrapped: { "result": { "data": { "json": <value> } } }
+            if let trpcResponse = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let result = trpcResponse["result"] as? [String: Any],
+               let dataObj = result["data"] as? [String: Any],
+               let json = dataObj["json"] {
+                let jsonData = try Self.serializeJSONValue(json)
+                return try JSONDecoder.apiDecoder.decode(T.self, from: jsonData)
+            }
 
-        // Fallback: try decoding the whole response (e.g. for endpoints not wrapped in tRPC envelope)
-        return try JSONDecoder.apiDecoder.decode(T.self, from: data)
+            // Fallback: try decoding the whole response (e.g. for endpoints not wrapped in tRPC envelope)
+            return try JSONDecoder.apiDecoder.decode(T.self, from: data)
+        }.value
     }
 
     /// Re-encodes a value extracted from `dataObj["json"]` back to `Data`.
@@ -248,7 +259,9 @@ final class TodosAPIClient {
     /// `mail.forceSync` whose tRPC payload is `{ json: null }`. Special-case null to a `{}`
     /// stand-in so empty `Decodable` structs decode cleanly, and use `.fragmentsAllowed`
     /// for the rest so primitive returns (e.g. a bare string id) round-trip safely.
-    private static func serializeJSONValue(_ value: Any) throws -> Data {
+    /// `nonisolated` so the off-main decode tasks above can call it without
+    /// bouncing back to the main actor (it touches no client state).
+    private nonisolated static func serializeJSONValue(_ value: Any) throws -> Data {
         if value is NSNull {
             return try JSONSerialization.data(withJSONObject: [:] as [String: Any])
         }
@@ -560,6 +573,22 @@ extension TodosAPIClient {
 // MARK: - JSON Decoder for API responses
 
 extension JSONDecoder {
+    /// Shared parse-only formatters. `ISO8601DateFormatter` allocation is expensive
+    /// (~0.1–1ms) and the previous strategy built one per Date field, so a payload
+    /// with hundreds of dates burned visible main-thread time. Parsing is thread-safe
+    /// once `formatOptions` is configured; `nonisolated(unsafe)` because the type
+    /// isn't `Sendable` — same pattern as `EmailMessage`'s cached formatters.
+    private nonisolated(unsafe) static let isoFractionalFormatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+    private nonisolated(unsafe) static let isoPlainFormatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
+
     /// Decoder configured for API date formats (ISO 8601)
     static let apiDecoder: JSONDecoder = {
         let decoder = JSONDecoder()
@@ -567,14 +596,11 @@ extension JSONDecoder {
             let container = try decoder.singleValueContainer()
             let dateString = try container.decode(String.self)
             // Try ISO 8601 with fractional seconds
-            let formatter = ISO8601DateFormatter()
-            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            if let date = formatter.date(from: dateString) {
+            if let date = isoFractionalFormatter.date(from: dateString) {
                 return date
             }
             // Fallback without fractional seconds
-            formatter.formatOptions = [.withInternetDateTime]
-            if let date = formatter.date(from: dateString) {
+            if let date = isoPlainFormatter.date(from: dateString) {
                 return date
             }
             throw DecodingError.dataCorruptedError(in: container, debugDescription: "Invalid date: \(dateString)")

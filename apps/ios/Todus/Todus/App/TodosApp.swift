@@ -343,13 +343,23 @@ private func processUITestingLaunchArgs(services: AppServices) {
     // sets `pendingMutationConfirmation`. We open the chat sheet at the same
     // time so the dialog has a presenter in the view hierarchy.
     if args.contains("--simulated-ai-mutation-pending") {
-        services.showsAIChat = true
-        services.aiChatService.pendingMutationConfirmation = AIChatService.PendingMutationConfirmation(
-            kind: .sendEmail,
-            title: "Send email",
-            subtitle: "To: test@example.com",
-            body: "UI test stub"
-        )
+        // Stage the whole stub: flipping `showsAIChat` while MainTabView is
+        // still mounting gets the sheet presentation silently dropped (and
+        // `onDismiss` then resets the flag), and arming the confirmation
+        // while the sheet is mid-transition makes `confirmationDialog`
+        // silently skip presenting. Wait for the shell to settle, present
+        // the sheet, then arm the dialog.
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(700))
+            services.showsAIChat = true
+            try? await Task.sleep(for: .milliseconds(900))
+            services.aiChatService.pendingMutationConfirmation = AIChatService.PendingMutationConfirmation(
+                kind: .sendEmail,
+                title: "Send email",
+                subtitle: "To: test@example.com",
+                body: "UI test stub"
+            )
+        }
     }
 
     // Post the calendar-authorization-changed notification so the calendar

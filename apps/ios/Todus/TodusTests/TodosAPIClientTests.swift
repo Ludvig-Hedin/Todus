@@ -189,6 +189,162 @@ final class TodosAPIClientTests: XCTestCase {
         XCTAssertEqual(auth.bearerToken, "refreshed.jwt.token",
             "Bearer token must be updated to the refreshed JWT.")
     }
+
+    // MARK: - apiDecoder date strategy (cached-formatter regression)
+
+    func testApiDecoderParsesFractionalAndPlainISODates() throws {
+        struct Payload: Decodable {
+            let fractional: Date
+            let plain: Date
+        }
+        let json = Data("""
+        {"fractional":"2026-05-27T10:26:00.123Z","plain":"2026-05-27T10:26:00Z"}
+        """.utf8)
+        let decoded = try JSONDecoder.apiDecoder.decode(Payload.self, from: json)
+        // Both should land on the same wall-clock second; fractional carries .123.
+        XCTAssertEqual(
+            decoded.plain.timeIntervalSince1970,
+            1_779_877_560,
+            accuracy: 0.001,
+            "Plain ISO-8601 date must parse via the shared formatter."
+        )
+        XCTAssertEqual(
+            decoded.fractional.timeIntervalSince1970,
+            1_779_877_560.123,
+            accuracy: 0.001,
+            "Fractional ISO-8601 date must parse via the shared formatter."
+        )
+    }
+
+    func testApiDecoderThrowsOnGarbageDate() {
+        struct Payload: Decodable { let when: Date }
+        let json = Data(#"{"when":"not-a-date"}"#.utf8)
+        XCTAssertThrowsError(try JSONDecoder.apiDecoder.decode(Payload.self, from: json))
+    }
+
+    // MARK: - Off-main response decode (envelope + batch)
+
+    /// The tRPC single-call decode moved into a detached task — pin that the
+    /// decoded value still round-trips correctly (including Date fields, which
+    /// exercise `apiDecoder` from a non-main thread).
+    func testTrpcQueryDecodesEnvelopeWithDates() async throws {
+        APIClientURLProtocolStub.register()
+        defer { APIClientURLProtocolStub.unregister() }
+        APIClientURLProtocolStub.responder = { request in
+            let body = Data(#"{"result":{"data":{"json":{"id":"t1","createdAt":"2026-05-27T10:26:00Z"}}}}"#.utf8)
+            let resp = HTTPURLResponse(
+                url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1",
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (resp, body)
+        }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [APIClientURLProtocolStub.self] + (config.protocolClasses ?? [])
+        let auth = AuthService(
+            backendURL: URL(string: "http://stub.local")!,
+            preloaded: AuthBootstrapTokens(bearerToken: "t", refreshToken: nil, currentSessionId: nil)
+        )
+        let client = TodosAPIClient(
+            baseURL: URL(string: "http://stub.local")!,
+            authService: auth,
+            sessionConfiguration: config
+        )
+
+        struct Record: Decodable { let id: String; let createdAt: Date }
+        let record: Record = try await client.trpcQuery("some.proc")
+        XCTAssertEqual(record.id, "t1")
+        XCTAssertEqual(record.createdAt.timeIntervalSince1970, 1_779_877_560, accuracy: 0.001)
+    }
+
+    /// Batch decode also moved off-main. Pin the per-entry Result semantics:
+    /// success and error entries in the same response must map positionally.
+    func testTrpcBatchQueryMapsSuccessAndErrorEntries() async throws {
+        APIClientURLProtocolStub.register()
+        defer { APIClientURLProtocolStub.unregister() }
+        APIClientURLProtocolStub.responder = { request in
+            let body = Data("""
+            [
+              {"result":{"data":{"json":{"ok":true}}}},
+              {"error":{"json":{"message":"Thread not found"}}}
+            ]
+            """.utf8)
+            let resp = HTTPURLResponse(
+                url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1",
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (resp, body)
+        }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [APIClientURLProtocolStub.self] + (config.protocolClasses ?? [])
+        let auth = AuthService(
+            backendURL: URL(string: "http://stub.local")!,
+            preloaded: AuthBootstrapTokens(bearerToken: "t", refreshToken: nil, currentSessionId: nil)
+        )
+        let client = TodosAPIClient(
+            baseURL: URL(string: "http://stub.local")!,
+            authService: auth,
+            sessionConfiguration: config
+        )
+
+        struct OK: Decodable { let ok: Bool }
+        struct In: Encodable { let id: String }
+        let results: [Result<OK, Error>] = try await client.trpcBatchQuery(
+            "mail.get",
+            inputs: [In(id: "a"), In(id: "b")]
+        )
+        XCTAssertEqual(results.count, 2)
+        guard case .success(let first) = results[0] else {
+            return XCTFail("First entry must decode as success.")
+        }
+        XCTAssertTrue(first.ok)
+        guard case .failure(let err) = results[1] else {
+            return XCTFail("Second entry must surface as failure.")
+        }
+        guard case APIError.httpError(_, let bodyMessage) = err else {
+            return XCTFail("Batch error entries must map to APIError.httpError.")
+        }
+        XCTAssertEqual(bodyMessage, "Thread not found")
+    }
+
+    /// Count mismatch between inputs and response entries must throw rather than
+    /// silently mis-aligning thread ids with the wrong payloads.
+    func testTrpcBatchQueryThrowsOnCountMismatch() async throws {
+        APIClientURLProtocolStub.register()
+        defer { APIClientURLProtocolStub.unregister() }
+        APIClientURLProtocolStub.responder = { request in
+            let body = Data(#"[{"result":{"data":{"json":{"ok":true}}}}]"#.utf8)
+            let resp = HTTPURLResponse(
+                url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1",
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (resp, body)
+        }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [APIClientURLProtocolStub.self] + (config.protocolClasses ?? [])
+        let auth = AuthService(
+            backendURL: URL(string: "http://stub.local")!,
+            preloaded: AuthBootstrapTokens(bearerToken: "t", refreshToken: nil, currentSessionId: nil)
+        )
+        let client = TodosAPIClient(
+            baseURL: URL(string: "http://stub.local")!,
+            authService: auth,
+            sessionConfiguration: config
+        )
+
+        struct OK: Decodable { let ok: Bool }
+        struct In: Encodable { let id: String }
+        do {
+            let _: [Result<OK, Error>] = try await client.trpcBatchQuery(
+                "mail.get",
+                inputs: [In(id: "a"), In(id: "b")]
+            )
+            XCTFail("Mismatched batch count must throw.")
+        } catch {
+            guard case APIError.invalidResponse = error else {
+                return XCTFail("Expected APIError.invalidResponse, got \(error)")
+            }
+        }
+    }
 }
 
 // MARK: - URLProtocol stub for TodosAPIClient tests

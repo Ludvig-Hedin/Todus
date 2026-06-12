@@ -212,6 +212,11 @@ struct EmailThreadView: View {
         }
         // UI testing hook — lets XCUITests assert that a notification tap
         // routed to the correct thread by querying `email.thread.<threadId>`.
+        // `.contain` makes the ZStack itself an accessibility container (an
+        // `Other` element carrying the identifier) — without it SwiftUI
+        // cascades the identifier onto leaf children and the
+        // `otherElements["email.thread.<id>"]` query never matches.
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("email.thread.\(threadId)")
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .tabBar)
@@ -941,13 +946,19 @@ struct EmailThreadView: View {
         async let markRead: Bool = emailService.markAsRead(ids: [threadId], silent: true)
 
         let resolvedDetail = await threadDetail
-        detail = resolvedDetail
+        // Only replace `detail` when the fetch produced something. The cache-hit
+        // path above may already have painted a perfectly readable thread; the
+        // concurrent markAsRead invalidates the service's detail cache, so this
+        // fetch goes to the network — and a transient failure used to nil out
+        // `detail`, flipping the visible thread into "Could not load thread".
+        if let resolvedDetail {
+            detail = resolvedDetail
+            isStarred = resolvedDetail.labels?.contains(where: {
+                let n = $0.name.uppercased()
+                return n == "STARRED" || n == "\\STARRED"
+            }) ?? false
+        }
         isLoading = false
-
-        isStarred = resolvedDetail?.labels?.contains(where: {
-            let n = $0.name.uppercased()
-            return n == "STARRED" || n == "\\STARRED"
-        }) ?? false
 
         let resolvedAssistant = await assistant
         applyAssistantContext(resolvedAssistant)
@@ -1474,13 +1485,18 @@ private struct VerificationCodeAction: View {
     let onCopy: () -> Void
 
     @State private var didCopy = false
+    /// Pending revert of the "Copied" state. Cancelled on re-tap so a rapid
+    /// second tap doesn't have the first tap's timer flip the label back early.
+    @State private var copyResetTask: Task<Void, Never>?
 
     var body: some View {
         Button {
             onCopy()
             didCopy = true
-            Task {
+            copyResetTask?.cancel()
+            copyResetTask = Task {
                 try? await Task.sleep(for: .seconds(1.5))
+                guard !Task.isCancelled else { return }
                 didCopy = false
             }
         } label: {
