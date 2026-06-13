@@ -7,7 +7,15 @@ import {
   TodusProEmail,
   WelcomeEmail,
 } from './react-emails/email-sequences';
-import { createAuthMiddleware, phoneNumber, jwt, bearer, mcp, emailOTP } from 'better-auth/plugins';
+import {
+  createAuthMiddleware,
+  phoneNumber,
+  jwt,
+  bearer,
+  mcp,
+  emailOTP,
+  twoFactor,
+} from 'better-auth/plugins';
 import { account as accountTable, marketingEmailDelivery } from '../db/schema';
 import { type Account, betterAuth, type BetterAuthOptions } from 'better-auth';
 import { getBrowserTimezone, isValidTimezone } from './timezones';
@@ -592,6 +600,14 @@ export const createAuth = () => {
             });
           }
         },
+      }),
+      // TOTP-based two-factor auth. Exposes /two-factor/* endpoints used by the
+      // web client (`twoFactorClient`): enable (returns totpURI + backupCodes),
+      // verify-totp, disable, generate-backup-codes. Backed by the `mail0_twoFactor`
+      // table + `mail0_user.two_factor_enabled`. `issuer` is the label shown in
+      // authenticator apps.
+      twoFactor({
+        issuer: 'Todus',
       }),
     ],
     user: {

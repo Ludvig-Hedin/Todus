@@ -214,6 +214,16 @@
         "DD_API_KEY": "",
         "DD_APP_KEY": "",
         "DD_SITE": "datadoghq.com",
+        // Web Push (VAPID). Empty by default → push sending is a logged no-op.
+        // Generate locally with `npx web-push generate-vapid-keys` and paste here
+        // (or into .dev.vars). In dev/production, set VAPID_PUBLIC_KEY,
+        // VAPID_PRIVATE_KEY (secret), VAPID_SUBJECT and VITE_PUBLIC_VAPID_PUBLIC_KEY
+        // via the dashboard / `wrangler secret put` — NOT here, to avoid a deploy
+        // overwriting real values with empty strings.
+        "VAPID_PUBLIC_KEY": "",
+        "VAPID_PRIVATE_KEY": "",
+        "VAPID_SUBJECT": "mailto:ludvig@ludvighedin.com",
+        "VITE_PUBLIC_VAPID_PUBLIC_KEY": "",
       },
       "kv_namespaces": [
         {

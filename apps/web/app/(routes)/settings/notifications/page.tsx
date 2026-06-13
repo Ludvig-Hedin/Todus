@@ -2,6 +2,7 @@ import { useTRPC } from '@/providers/query-provider';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useSettings } from '@/hooks/use-settings';
 import { Section, RowList, ToggleRow } from '@/components/settings/primitives';
+import { PushNotificationsSection } from '@/components/settings/push-notifications-section';
 import { toast } from 'sonner';
 import { m } from '@/paraglide/messages';
 
@@ -77,6 +78,8 @@ export default function NotificationsPage() {
           />
         </RowList>
       </Section>
+
+      <PushNotificationsSection />
     </div>
   );
 }

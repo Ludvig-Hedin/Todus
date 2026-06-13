@@ -6,6 +6,7 @@ import { SettingsCard } from '@/components/settings/settings-card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
+import { TwoFactorCard } from '@/components/settings/two-factor-card';
 import { Monitor, Smartphone, Tablet, Globe, Clock, LogOut, ShieldCheck } from 'lucide-react';
 import { m } from '@/paraglide/messages';
 import { format, isValid } from 'date-fns';
@@ -61,6 +62,8 @@ export default function SecurityPage() {
 
   return (
     <div className="grid gap-5">
+      <TwoFactorCard />
+
       <SettingsCard
         title={m['pages.settings.security.title']()}
         description={m['pages.settings.security.description']()}

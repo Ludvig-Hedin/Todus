@@ -1,4 +1,4 @@
-import { emailOTPClient, phoneNumberClient } from 'better-auth/client/plugins';
+import { emailOTPClient, phoneNumberClient, twoFactorClient } from 'better-auth/client/plugins';
 import { createAuthClient } from 'better-auth/react';
 import type { Auth } from '@zero/server/auth';
 
@@ -17,7 +17,9 @@ export const authClient = createAuthClient({
   // can call signIn.emailOtp / emailOtp.sendVerificationOtp / verifyEmail
   // through the typed client. Without it those endpoints existed only as
   // raw POSTs and were effectively unreachable from the web UI.
-  plugins: [phoneNumberClient(), emailOTPClient()],
+  // twoFactorClient mirrors the server's `twoFactor()` plugin so the security
+  // settings page can call authClient.twoFactor.enable / verifyTotp / disable.
+  plugins: [phoneNumberClient(), emailOTPClient(), twoFactorClient()],
 });
 
 const paritySession = {

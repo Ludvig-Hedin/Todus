@@ -130,6 +130,19 @@ export type ZeroEnv = {
   FAST_MODEL_ANTHROPIC?: string;
   FAST_MODEL_OPENAI?: string;
   FAST_MODEL_GOOGLE?: string;
+  /**
+   * VAPID keys for Web Push (RFC 8292). Generate with
+   * `npx web-push generate-vapid-keys`. The public key is also exposed to the
+   * web client as VITE_PUBLIC_VAPID_PUBLIC_KEY. When unset, push sending is a
+   * no-op (logged) so the app runs without push configured. Set the private
+   * key via `wrangler secret put VAPID_PRIVATE_KEY` in production.
+   */
+  VAPID_PUBLIC_KEY?: string;
+  VAPID_PRIVATE_KEY?: string;
+  /** `mailto:` or https subject for the VAPID JWT (push service contact). */
+  VAPID_SUBJECT?: string;
+  /** Public VAPID key exposed to the web client for PushManager.subscribe(). */
+  VITE_PUBLIC_VAPID_PUBLIC_KEY?: string;
 };
 
 export const env = new Proxy(_env as ZeroEnv, {

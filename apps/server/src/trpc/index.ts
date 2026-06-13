@@ -29,6 +29,7 @@ import { docsRouter } from './routes/docs';
 import { aiRouter } from './routes/ai';
 import { subscriptionRouter } from './routes/subscription';
 import { contactRouter } from './routes/contact';
+import { pushRouter } from './routes/push';
 import { router } from './trpc';
 
 export const appRouter = router({
@@ -61,6 +62,7 @@ export const appRouter = router({
   docs: docsRouter,
   subscription: subscriptionRouter,
   contact: contactRouter,
+  push: pushRouter,
 });
 
 export type AppRouter = typeof appRouter;

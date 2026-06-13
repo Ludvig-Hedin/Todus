@@ -34,6 +34,8 @@ export const user = createTable('user', {
   aiUsageUsed: doublePrecision('ai_usage_used').notNull().default(0),
   aiUsageLimit: doublePrecision('ai_usage_limit').notNull().default(0),
   aiUsageResetAt: timestamp('ai_usage_reset_at'),
+  // Better Auth `twoFactor` plugin: true once the user has verified a TOTP setup.
+  twoFactorEnabled: boolean('two_factor_enabled').default(false),
 });
 
 export const session = createTable(
@@ -1092,4 +1094,54 @@ export const slackConnection = createTable(
     index('slack_connection_user_id_idx').on(t.userId),
     index('slack_connection_team_id_idx').on(t.teamId),
   ],
+);
+
+/**
+ * Web Push (RFC 8030/8291) subscriptions. One row per browser PushManager
+ * subscription. `endpoint` is the push service URL (FCM/Mozilla/WNS) and is
+ * globally unique, so re-subscribing the same browser upserts on it. `p256dh`
+ * and `auth` are the client public key + auth secret used to encrypt payloads.
+ * Native iOS/macOS use APNs and do NOT use this table.
+ */
+export const pushSubscription = createTable(
+  'push_subscription',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    endpoint: text('endpoint').notNull().unique(),
+    p256dh: text('p256dh').notNull(),
+    auth: text('auth').notNull(),
+    /** DOMHighResTimeStamp (ms) when the subscription expires, if the UA reports one. */
+    expirationTime: doublePrecision('expiration_time'),
+    /** User-agent that created the subscription — for display in a future device list. */
+    userAgent: text('user_agent'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at')
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (t) => [index('push_subscription_user_id_idx').on(t.userId)],
+);
+
+/**
+ * Better Auth `twoFactor` plugin table. Stores the user's TOTP `secret` and
+ * encrypted `backupCodes`. The plugin maps its model fields (`secret`,
+ * `backupCodes`, `userId`) to these drizzle property keys; DB column names are
+ * snake_case to match the rest of the schema. The companion
+ * `user.twoFactorEnabled` flag is set true once a setup is verified.
+ */
+export const twoFactor = createTable(
+  'twoFactor',
+  {
+    id: text('id').primaryKey(),
+    secret: text('secret').notNull(),
+    backupCodes: text('backup_codes').notNull(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+  },
+  (t) => [index('two_factor_user_id_idx').on(t.userId)],
 );
