@@ -537,6 +537,7 @@ struct MacTasksView: View {
                         task.syncState = .pendingUpload
                     }
                     try? modelContext.save()
+                    Task { await services.taskSyncService.enqueueUpsert(task, in: modelContext) }
                     recomputeTasks()
                     // Confirm the row was restored — the row disappearing from
                     // the Completed section alone isn't a clear "I did it" signal.
@@ -592,6 +593,7 @@ struct MacTasksView: View {
             task.syncState = .pendingUpload
             try? modelContext.save()
         }
+        Task { await services.taskSyncService.enqueueUpsert(task, in: modelContext) }
         recomputeTasks()
     }
 
@@ -863,6 +865,13 @@ struct MacTasksView: View {
     // MARK: - Helpers
 
     private func recomputeTasks() {
+        // Drop the detail-panel reference if its task was deleted — otherwise the
+        // panel keeps rendering/editing a SwiftData object that no longer exists.
+        // (A *completed* task stays in `allTasks` with status `.done`, so the panel
+        // correctly remains open for it.)
+        if let sel = selectedTask, !allTasks.contains(where: { $0.id == sel.id }) {
+            selectedTask = nil
+        }
         let activeTasks = allTasks.filter { task in
             task.status != .done &&
             (selectedFolderID == nil || task.folderID == selectedFolderID) &&
@@ -1085,6 +1094,7 @@ struct MacTaskRow: View {
                             task.syncState = .pendingUpload
                             try? modelContext.save()
                         }
+                        Task { await services.taskSyncService.enqueueUpsert(task, in: modelContext) }
                     } label: {
                         if p == task.priority {
                             Label(p.title, systemImage: "checkmark")
@@ -1153,6 +1163,7 @@ struct MacTaskRow: View {
             task.syncState = .pendingUpload
             try? modelContext.save()
         }
+        Task { await services.taskSyncService.enqueueUpsert(task, in: modelContext) }
     }
 
     /// Centralised pasteboard write — clears prior contents so older type
@@ -1218,6 +1229,7 @@ struct MacTaskRow: View {
                         "nextDueDate": next
                     ]
                 )
+                Task { await services.taskSyncService.enqueueUpsert(task, in: modelContext) }
                 return
             } else if task.dueDate == nil {
                 AppLogger.shared.log("[Tasks] recurrence rule '\(rule)' has no dueDate — completing as one-off")
@@ -1234,6 +1246,7 @@ struct MacTaskRow: View {
             task.syncState = .pendingUpload
             try? modelContext.save()
         }
+        Task { await services.taskSyncService.enqueueUpsert(task, in: modelContext) }
     }
 
     @ViewBuilder
@@ -1347,6 +1360,7 @@ struct MacTaskRow: View {
 /// Task detail sheet for viewing/editing a single task on macOS.
 struct MacTaskDetailSheet: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(MacAppServices.self) private var services
     @Query(sort: \FolderRecord.name) private var folders: [FolderRecord]
     let task: TaskRecord
     /// Optional close handler. When provided (inline split-panel mode) the header
@@ -1525,6 +1539,13 @@ struct MacTaskDetailSheet: View {
                                 .toggleStyle(.switch)
                                 .controlSize(.mini)
                                 .tint(MacTheme.switchTint)
+                                // Seed a concrete date the moment the toggle flips
+                                // on, so saving without touching the picker doesn't
+                                // silently write `nil` (the DatePicker's default is
+                                // display-only until the user interacts).
+                                .onChange(of: hasDueDate) { _, isOn in
+                                    if isOn && editedDueDate == nil { editedDueDate = Date() }
+                                }
                         }
                         if hasDueDate {
                             DatePicker("", selection: Binding(
@@ -1934,6 +1955,7 @@ struct MacTaskDetailSheet: View {
         // (`MacAppServices.flushPendingSync`) then uploads it.
         task.syncState = .pendingUpload
         try? modelContext.save()
+        Task { await services.taskSyncService.enqueueUpsert(task, in: modelContext) }
     }
 
     /// True when at least one draft field diverges from the underlying task.

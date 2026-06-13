@@ -144,6 +144,12 @@ final class AppleRemindersSyncService {
         let existingIdentifier = task.reminderIdentifier
         let taskID = task.id
 
+        // TODO(bug-hunt): two quick `upsert`s of the same task spawn two
+        // unstructured `Task`s. If both read `existingIdentifier == nil` before
+        // either writes the identifier back, they create duplicate reminders.
+        // Fix by deduping in-flight upserts per task id (e.g. an actor-held
+        // [taskID: Task] map that the second call awaits/replaces). Deferred —
+        // needs serialization design.
         Task {
             let identifier: String
             do {

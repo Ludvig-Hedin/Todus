@@ -1022,14 +1022,12 @@ struct MacRootView: View {
         .onReceive(NotificationCenter.default.publisher(for: .todusOpenEmailThread)) { note in
             guard let threadId = note.object as? String, !threadId.isEmpty else { return }
             pendingEmailThreadId = threadId
+            // If we're not on email, switch to it (the inbox consumes the pending
+            // id on appear). If we're already on email, the inbox reacts to the
+            // changed `initialThreadId` via `.onChange` — no view recreation
+            // needed (the old selection-toggle hack coalesced into a no-op).
             if selection.category != "email" {
                 selection = .email(.inbox)
-            } else {
-                // Already on email — force recreate so onAppear fires with the new ID.
-                // Temporarily switch away then back so .id(selection) resets the view.
-                let current = selection
-                selection = .home
-                selection = current
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .todusNavigateToEmail)) { _ in
@@ -1077,7 +1075,7 @@ struct MacRootView: View {
 
     /// Total number of onboarding steps shown — keep in sync with the if/else chain
     /// in `body` and the numbered branches in `onboardingStep`. Currently: Gmail,
-    /// Calendar, Reminders, Startup view, Notifications.
+    /// Calendar, Reminders, Startup view, Notifications, Welcome tour (6).
     private var onboardingTotalSteps: Int { 6 }
 
     private var startupSelection: MacPrimarySelection {

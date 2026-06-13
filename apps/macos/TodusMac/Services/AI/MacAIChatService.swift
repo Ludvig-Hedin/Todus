@@ -910,84 +910,11 @@ final class MacAIChatService {
     }
 
     // MARK: - Tool Call Processing
-
-    private func processToolCalls(
-        _ toolCalls: [MacSSEToolCall],
-        assistantMessageID: UUID,
-        modelContext: ModelContext
-    ) async {
-        for toolCall in toolCalls {
-            guard let fn = toolCall.function,
-                  let argsStr = fn.arguments,
-                  let argsData = argsStr.data(using: .utf8) else { continue }
-
-            switch fn.name ?? "" {
-            case "create_task":
-                if let args = try? JSONDecoder().decode(MacCreateTaskArgs.self, from: argsData) {
-                    let dueDate = args.dueDate.flatMap { Self.parseISODate($0) }
-                    // Create task in SwiftData
-                    let task = TaskRecord(rawInput: args.title, title: args.title)
-                    task.dueDate = dueDate
-                    if let priorityStr = args.priority {
-                        task.priority = AppTaskPriority(rawValue: priorityStr) ?? .none
-                    }
-                    modelContext.insert(task)
-                    try? modelContext.save()
-                    let mutation = MacTaskMutation(action: .create, title: args.title, dueDate: dueDate)
-                    appendMutation(mutation, to: assistantMessageID)
-                }
-
-            case "update_task":
-                if let args = try? JSONDecoder().decode(MacUpdateTaskArgs.self, from: argsData),
-                   let taskID = UUID(uuidString: args.id) {
-                    applyUpdateTask(taskID: taskID, args: args, modelContext: modelContext)
-                    let mutation = MacTaskMutation(action: .update, taskID: taskID, title: args.title)
-                    appendMutation(mutation, to: assistantMessageID)
-                }
-
-            case "delete_task":
-                if let args = try? JSONDecoder().decode(MacDeleteTaskArgs.self, from: argsData),
-                   let taskID = UUID(uuidString: args.id) {
-                    applyDeleteTask(taskID: taskID, modelContext: modelContext)
-                    let mutation = MacTaskMutation(action: .delete, taskID: taskID)
-                    appendMutation(mutation, to: assistantMessageID)
-                }
-
-            case "create_calendar_event":
-                if let args = try? JSONDecoder().decode(MacCreateCalendarEventArgs.self, from: argsData) {
-                    let iso = ISO8601DateFormatter()
-                    if let startDate = iso.date(from: args.startDate),
-                       let cal = calendarService, cal.canCreateEvents() {
-                        let endDate = args.endDate.flatMap { iso.date(from: $0) }
-                        // CalendarService is an actor — createEvent requires await
-                        try? await cal.createEvent(title: args.title, startDate: startDate, endDate: endDate)
-                        let mutation = MacTaskMutation(action: .create, title: "📅 \(args.title)")
-                        appendMutation(mutation, to: assistantMessageID)
-                    }
-                }
-
-            case "send_email":
-                if let args = try? JSONDecoder().decode(MacSendEmailArgs.self, from: argsData),
-                   let email = emailService {
-                    // Forward the optional connection so multi-account sends go from
-                    // the inbox the model selected. Nil = backend default behavior.
-                    let draft = EmailDraft(
-                        to: args.to,
-                        subject: args.subject,
-                        body: args.body,
-                        replyToThreadId: args.threadId,
-                        fromConnectionId: args.connectionId
-                    )
-                    Task { await email.sendEmail(draft) }
-                    let mutation = MacTaskMutation(action: .create, title: "✉️ Sent: \(args.subject)")
-                    appendMutation(mutation, to: assistantMessageID)
-                }
-
-            default:
-                break
-            }
-        }
-    }
+    // The live tool-call path is `executeToolCalls` / `executeSingleToolCall`
+    // above — cancellation-gated and returns structured results. A second
+    // `processToolCalls` implementation used to live here but had no callers and
+    // fire-and-forgot `send_email` with no cancel gate; it was removed to avoid
+    // the latent "send after the user cancelled" risk.
 
     /// Returns false when no task matches `taskID` so callers can report an
     /// honest tool result instead of a false "Task updated".

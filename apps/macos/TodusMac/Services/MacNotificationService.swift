@@ -77,7 +77,9 @@ final class MacNotificationService {
         )
         let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
         let request = UNNotificationRequest(identifier: "task-\(taskID)", content: content, trigger: trigger)
-        center.add(request)
+        center.add(request) { error in
+            if let error { AppLogger.shared.log("[Notifications] add failed: \(error.localizedDescription)") }
+        }
     }
 
     func cancelTaskReminder(taskID: String) {
@@ -104,7 +106,9 @@ final class MacNotificationService {
             content: content,
             trigger: trigger
         )
-        center.add(request)
+        center.add(request) { error in
+            if let error { AppLogger.shared.log("[Notifications] add failed: \(error.localizedDescription)") }
+        }
     }
 
     /// Schedule a reminder to revisit an email thread at a future date.
@@ -185,7 +189,9 @@ final class MacNotificationService {
         let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
         let request = UNNotificationRequest(identifier: "due-today-digest", content: content, trigger: trigger)
         center.removePendingNotificationRequests(withIdentifiers: ["due-today-digest"])
-        center.add(request)
+        center.add(request) { error in
+            if let error { AppLogger.shared.log("[Notifications] add failed: \(error.localizedDescription)") }
+        }
     }
 
     // MARK: - AI Response Notifications
@@ -214,7 +220,9 @@ final class MacNotificationService {
             trigger: trigger
         )
         center.removePendingNotificationRequests(withIdentifiers: ["ai-\(conversationId)"])
-        center.add(request)
+        center.add(request) { error in
+            if let error { AppLogger.shared.log("[Notifications] add failed: \(error.localizedDescription)") }
+        }
     }
 
     // MARK: - Utilities

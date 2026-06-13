@@ -54,12 +54,18 @@ final class AppLogger: @unchecked Sendable {
 
     private func appendLine(_ line: String) {
         guard let data = line.data(using: .utf8) else { return }
+        // First write of the session — the file doesn't exist yet, so create it.
+        if !FileManager.default.fileExists(atPath: fileURL.path) {
+            try? line.write(to: fileURL, atomically: true, encoding: .utf8)
+            return
+        }
+        // File exists: append. If the handle can't be opened (transient I/O
+        // error), drop this one line rather than overwriting the whole log with
+        // a single entry and destroying all prior history.
         if let handle = try? FileHandle(forWritingTo: fileURL) {
             handle.seekToEndOfFile()
             handle.write(data)
             try? handle.close()
-        } else {
-            try? line.write(to: fileURL, atomically: true, encoding: .utf8)
         }
     }
 }

@@ -93,7 +93,10 @@ final class TodosAPIClient {
                 }
             } else if let err = entry["error"] as? [String: Any] {
                 let msg = (err["json"] as? [String: Any])?["message"] as? String
-                out.append(.failure(APIError.httpError(statusCode: 200, body: msg)))
+                // Surface the extracted tRPC message directly — wrapping it as an
+                // httpError(body:) hid it, since `errorDescription` re-parses the
+                // body as a JSON envelope and a bare message string never matches.
+                out.append(.failure(APIError.serverMessage(msg ?? "Server error.")))
             } else {
                 out.append(.failure(APIError.invalidResponse))
             }
@@ -375,6 +378,9 @@ enum APIError: Error, LocalizedError {
     case invalidResponse
     case httpError(statusCode: Int, body: String?)
     case decodingError(Error)
+    /// An already-extracted, human-readable server message (e.g. a tRPC batch
+    /// entry error) that should be shown verbatim without re-parsing.
+    case serverMessage(String)
 
     var errorDescription: String? {
         switch self {
@@ -384,6 +390,7 @@ enum APIError: Error, LocalizedError {
             if let trpc = trpcErrorMessageFromBody(body) { return trpc }
             return "Server error (HTTP \(code))."
         case .decodingError(let error): return "Data error: \(error.localizedDescription)"
+        case .serverMessage(let message): return message
         }
     }
 }

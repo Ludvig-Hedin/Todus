@@ -31,6 +31,9 @@ struct MacEmailComposeView: View {
     /// True once the signature has been appended for the current draft so opening
     /// the same composition twice (e.g. via autosave restore) doesn't double up.
     @State private var didApplySignature = false
+    /// Bridge to the body NSTextView so the formatting toolbar can insert markdown
+    /// at the caret/selection instead of appending to the end of the message.
+    @State private var editorController = MacMarkdownEditorController()
     /// Tracks whether the recipient validation message should be visible.
     /// Only true after the user attempts to send with bad input — we don't want
     /// to nag with a red chip the moment compose opens.
@@ -379,7 +382,8 @@ struct MacEmailComposeView: View {
                         onFocusChange: { focused in
                             if focused { focusedField = .body }
                             else if focusedField == .body { focusedField = nil }
-                        }
+                        },
+                        controller: editorController
                     )
                     .frame(maxWidth: .infinity, minHeight: 260, maxHeight: .infinity)
                 }
@@ -412,7 +416,16 @@ struct MacEmailComposeView: View {
         // If the user picks a different From account the signature should refresh —
         // strip the old one (if still present) and append the new one so multi-account
         // users don't ship the wrong sign-off.
-        .onChange(of: draft.fromConnectionId) { _, _ in
+        .onChange(of: draft.fromConnectionId) { oldValue, newValue in
+            // Strip the previous account's signature block (if it's still
+            // present untouched) before appending the new account's sign-off,
+            // so switching From accounts doesn't stack two signatures.
+            if let oldId = oldValue,
+               oldId != newValue,
+               let oldBlock = MacSignatureStore.shared.formattedSignatureBlock(for: oldId),
+               let range = draft.body.range(of: oldBlock) {
+                draft.body.removeSubrange(range)
+            }
             didApplySignature = false
             appendSignatureIfNeeded()
         }
@@ -780,15 +793,25 @@ struct MacEmailComposeView: View {
     }
 
     private func insertFormat(_ opening: String, closing: String, placeholder: String) {
-        let newline = draft.body.isEmpty || draft.body.hasSuffix("\n") ? "" : "\n"
-        draft.body += "\(newline)\(opening)\(placeholder)\(closing)"
         focusedField = .body
+        if editorController.isReady {
+            // Wrap the selection / insert at the caret so formatting lands where
+            // the user is typing instead of at the end of the message.
+            editorController.wrapSelection(opening: opening, closing: closing, placeholder: placeholder)
+        } else {
+            let newline = draft.body.isEmpty || draft.body.hasSuffix("\n") ? "" : "\n"
+            draft.body += "\(newline)\(opening)\(placeholder)\(closing)"
+        }
     }
 
     private func insertLinePrefix(_ prefix: String) {
-        let newline = draft.body.isEmpty || draft.body.hasSuffix("\n") ? "" : "\n"
-        draft.body += "\(newline)\(prefix)"
         focusedField = .body
+        if editorController.isReady {
+            editorController.insertLinePrefix(prefix)
+        } else {
+            let newline = draft.body.isEmpty || draft.body.hasSuffix("\n") ? "" : "\n"
+            draft.body += "\(newline)\(prefix)"
+        }
     }
 
     // MARK: - Attachment Picker

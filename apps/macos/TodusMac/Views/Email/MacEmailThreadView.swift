@@ -1909,6 +1909,20 @@ struct EmailHTMLView: NSViewRepresentable {
         var onHeightUpdate: ((CGFloat) -> Void)?
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            measureHeight(webView)
+            // Remote images finish loading *after* didFinish and reflow the body.
+            // The page CSP blocks an in-page ResizeObserver, so re-measure a few
+            // times from the host side to catch the new height — otherwise
+            // image-heavy mail is clipped at its pre-image height.
+            for delay in [0.15, 0.5, 1.2] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self, weak webView] in
+                    guard let self, let webView else { return }
+                    self.measureHeight(webView)
+                }
+            }
+        }
+
+        private func measureHeight(_ webView: WKWebView) {
             webView.evaluateJavaScript("document.documentElement.scrollHeight") { result, _ in
                 if let h = result as? CGFloat { self.onHeightUpdate?(h) }
                 else if let h = result as? Int { self.onHeightUpdate?(CGFloat(h)) }

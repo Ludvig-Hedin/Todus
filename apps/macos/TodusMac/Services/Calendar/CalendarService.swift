@@ -105,7 +105,7 @@ actor CalendarService {
                 .filter { !hiddenAppleIds.contains($0.calendarIdentifier) }
         }()
         let predicate = eventStore.predicateForEvents(withStart: startDate, end: endDate, calendars: calendars)
-        let all = eventStore.events(matching: predicate).map { $0.toCalendarEvent(folderID: folderID(for: $0.eventIdentifier)) }
+        let all = eventStore.events(matching: predicate).compactMap { $0.toCalendarEvent(folderID: folderID(for: $0.eventIdentifier)) }
 
         // Deduplicate all-day events only: same title on the same day can appear
         // from multiple calendar sources, but timed events should remain distinct.
@@ -284,7 +284,11 @@ actor CalendarService {
 }
 
 private extension EKEvent {
-    func toCalendarEvent(folderID: UUID?) -> CalendarEvent {
+    func toCalendarEvent(folderID: UUID?) -> CalendarEvent? {
+        // `startDate`/`endDate` are implicitly-unwrapped (`Date!`) and can be nil
+        // for a corrupt EventKit record — skip those rather than crashing on the
+        // non-optional `CalendarEvent` init.
+        guard let startDate, let endDate else { return nil }
         // Extract actual RGB from the calendar's CGColor, falling back to system blue
         let (r, g, b): (Double, Double, Double) = {
             guard let cgColor = calendar?.cgColor,

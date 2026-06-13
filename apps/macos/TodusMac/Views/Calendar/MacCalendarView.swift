@@ -567,8 +567,10 @@ struct MacCalendarView: View {
         let cal = Calendar.current
         let startOfDay = cal.startOfDay(for: selectedDate)
         let endOfDay = cal.date(byAdding: .day, value: 1, to: startOfDay) ?? startOfDay
-        // All-day pills key off the start day (matches the week grid's all-day row).
-        let allDayEvents = events.filter { $0.isAllDay && cal.isDate($0.startDate, inSameDayAs: selectedDate) }
+        // All-day pills use overlap so a multi-day all-day event (e.g. a trip)
+        // shows on every day it spans, not just its first day. (EventKit stores
+        // all-day end exclusively at the next midnight, so `endDate > startOfDay`.)
+        let allDayEvents = events.filter { $0.isAllDay && $0.startDate < endOfDay && $0.endDate > startOfDay }
         // Timed events use overlap, not start-day equality, so a multi-day event
         // that began on an earlier day still appears here. Mirrors the week grid;
         // the time grid clips at midnight.
@@ -618,10 +620,17 @@ struct MacCalendarView: View {
     private var weekView: some View {
         let cal = Calendar.current
         let weekAllDay = events.filter(\.isAllDay)
-        let allDayByDay: [Date: [CalendarEvent]] = Dictionary(
-            grouping: weekAllDay,
-            by: { cal.startOfDay(for: $0.startDate) }
-        )
+        // Map each weekday to every all-day event overlapping it (not just events
+        // that *start* that day) so multi-day spans appear across all their days.
+        let allDayByDay: [Date: [CalendarEvent]] = {
+            var map: [Date: [CalendarEvent]] = [:]
+            for day in weekDates {
+                let dayStart = cal.startOfDay(for: day)
+                let dayEnd = cal.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart
+                map[dayStart] = weekAllDay.filter { $0.startDate < dayEnd && $0.endDate > dayStart }
+            }
+            return map
+        }()
         let hasAnyAllDay = !weekAllDay.isEmpty
         let columnCount = weekDates.count
 

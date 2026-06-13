@@ -299,6 +299,9 @@ final class MacVoiceChatViewModel {
                     engine.prepare()
                     try engine.start()
                 } catch {
+                    // Tear down the tap we just installed before discarding the
+                    // engine so nothing dangles on the input node.
+                    inputNode.removeTap(onBus: 0)
                     cont.resume(returning: .failed(
                         "Audio engine start failed: \(error.localizedDescription)"
                     ))

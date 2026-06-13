@@ -191,9 +191,13 @@ struct MacEventEditSheet: View {
                 .labelsHidden()
                 .datePickerStyle(.compact)
                 .onChange(of: startDate) { _, newStart in
-                    // Auto-bump end to keep at least the original duration (or 1h)
-                    // when the user moves the start past the existing end.
-                    if endDate <= newStart {
+                    // Auto-bump end when the user moves start past the existing end.
+                    // All-day uses inclusive day boundaries (end == start = single
+                    // day); timed events get the original-or-1h duration.
+                    if isAllDay {
+                        let dayStart = Calendar.current.startOfDay(for: newStart)
+                        if endDate < dayStart { endDate = dayStart }
+                    } else if endDate <= newStart {
                         endDate = newStart.addingTimeInterval(3600)
                     }
                 }
@@ -356,7 +360,11 @@ struct MacEventEditSheet: View {
         let cal = Calendar.current
         if isAllDay {
             let dayStart = cal.startOfDay(for: startDate)
-            let expectedEnd = dayStart.addingTimeInterval(86400)
+            // `endDate` here is the INCLUSIVE last day (the seed subtracts a day
+            // and `performSave` adds it back). A single-day all-day event must
+            // therefore have end == start; using +86400 produced a 2-day event
+            // once `performSave` bumped it again.
+            let expectedEnd = dayStart
             // Avoid stomping user-set values that already match the baseline.
             if startDate == dayStart && endDate == expectedEnd { return }
             startDate = dayStart

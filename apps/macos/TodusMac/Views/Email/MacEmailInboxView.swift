@@ -192,6 +192,15 @@ struct MacEmailInboxView: View {
                 onInitialThreadConsumed?()
             }
         }
+        // When the inbox is already mounted (user is on email) and a new thread
+        // is requested (e.g. tapping a notification), `onAppear` won't re-fire —
+        // react to the changed id directly so the thread still opens.
+        .onChange(of: initialThreadId) { _, newValue in
+            if let id = newValue {
+                selectedThreadId = id
+                onInitialThreadConsumed?()
+            }
+        }
         .onChange(of: viewMode) { _, newMode in
             let prefersThreads = newMode == .threads
             guard threadGroupingEnabled != prefersThreads else { return }

@@ -185,8 +185,9 @@ struct MacGroupChatView: View {
         isSending = true
         defer { isSending = false }
         do {
+            // `sendMessage` already reloads the thread on success, so no extra
+            // `loadMessages` call here (it would double-fetch every send).
             try await groupService.sendMessage(groupId: groupId, content: content)
-            try? await groupService.loadMessages(groupId: groupId)
         } catch {
             // Restore the draft so the user doesn't lose what they typed and
             // surface a toast so the failure isn't invisible.

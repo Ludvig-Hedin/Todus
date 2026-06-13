@@ -416,6 +416,13 @@ final class VoiceSessionCoordinator {
         case .audioReceived(let data):
             audioPlayer?.enqueue(data)
             if state != .speaking { transition(to: .speaking, reason: "audio chunk") }
+            // TODO(bug-hunt): `.speaking` only clears on `.turnComplete`. If that
+            // signal is dropped (network blip) the status window stays "Speaking"
+            // forever. Can't simply transition on AudioPlayerManager draining —
+            // `scheduledBufferCount` momentarily hits 0 between chunks mid-turn,
+            // which would flicker. Needs a debounced "no audio for N ms AND queue
+            // empty" guard, or a provider-level turn timeout. Deferred (real-time
+            // path, regression risk).
 
         case .transcriptUpdate(let role, let text, let isFinal):
             // Defensive accumulator: providers send deltas (per current

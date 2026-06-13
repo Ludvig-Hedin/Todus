@@ -106,7 +106,21 @@ final class MacSubscriptionService {
         self.aiUsageLimit = response.aiUsage.limit
         self.aiUsageRemaining = response.aiUsage.remaining
         self.aiUsageUnlimited = response.aiUsage.unlimited
-        self.aiUsageResetAt = response.aiUsage.resetAt.flatMap { ISO8601DateFormatter().date(from: $0) }
+        self.aiUsageResetAt = response.aiUsage.resetAt.flatMap { Self.parseISO8601($0) }
+    }
+
+    /// Backend `resetAt` timestamps may or may not carry fractional seconds
+    /// (e.g. `…:00Z` vs `…:00.123Z`). A bare `ISO8601DateFormatter` only matches
+    /// one shape and silently drops the other, so try both.
+    private static let iso8601WithFractional: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+    private static let iso8601Plain = ISO8601DateFormatter()
+
+    private static func parseISO8601(_ value: String) -> Date? {
+        iso8601WithFractional.date(from: value) ?? iso8601Plain.date(from: value)
     }
 }
 

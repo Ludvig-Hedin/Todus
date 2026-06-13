@@ -580,11 +580,12 @@ struct MacAssistantPanel: View {
         }
         // Auto-save conversation when panel hides
         .onChange(of: isPresented) { _, visible in
-            if !visible { chatService.autosave() }
-        }
-        // Re-attach context pill when panel re-opens
-        .onChange(of: isPresented) { _, visible in
-            if visible { pageContextAttached = true }
+            if visible {
+                // Re-attach context pill when the panel re-opens.
+                pageContextAttached = true
+            } else {
+                chatService.autosave()
+            }
         }
         // Draft persistence
         .onChange(of: inputText) { _, newValue in

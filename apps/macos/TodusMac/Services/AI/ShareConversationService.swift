@@ -53,7 +53,19 @@ private enum ShareJSONValue: Decodable {
         case .array(let arr): return arr.map { $0.displayText }.joined()
         case .object(let obj):
             if case .string(let t)? = obj["text"] { return t }
-            return obj.values.map { $0.displayText }.joined()
+            if let content = obj["content"] { return content.displayText }
+            // Don't dump arbitrary nested values — that leaks envelope metadata
+            // (role/type/id…) into the displayed text and in nondeterministic
+            // order. Only fall back to non-metadata fields, sorted for stability.
+            let metadataKeys: Set<String> = [
+                "type", "role", "id", "name", "index",
+                "cache_control", "citations", "tool_use_id"
+            ]
+            return obj
+                .filter { !metadataKeys.contains($0.key) }
+                .sorted { $0.key < $1.key }
+                .map { $0.value.displayText }
+                .joined()
         }
     }
 }

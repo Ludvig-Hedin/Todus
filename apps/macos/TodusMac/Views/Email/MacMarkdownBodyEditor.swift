@@ -1,6 +1,51 @@
 import AppKit
 import SwiftUI
 
+/// Handle that lets the compose toolbar insert markdown at the caret/selection
+/// instead of blindly appending to the end of the body. Held by the SwiftUI
+/// view and wired to the live `NSTextView` in `makeNSView`.
+@MainActor
+final class MacMarkdownEditorController {
+    weak var textView: NSTextView?
+
+    /// True once the underlying text view exists so callers can fall back to a
+    /// plain append when the editor hasn't mounted yet.
+    var isReady: Bool { textView != nil }
+
+    /// Wraps the current selection (or inserts `placeholder` when there's no
+    /// selection) with `opening`/`closing` markers, registering native undo and
+    /// leaving the inner text selected so the user can keep typing.
+    func wrapSelection(opening: String, closing: String, placeholder: String) {
+        guard let tv = textView else { return }
+        tv.window?.makeFirstResponder(tv)
+        let sel = tv.selectedRange()
+        let ns = tv.string as NSString
+        let selectedText = sel.length > 0 ? ns.substring(with: sel) : ""
+        let inner = selectedText.isEmpty ? placeholder : selectedText
+        let replacement = "\(opening)\(inner)\(closing)"
+        guard tv.shouldChangeText(in: sel, replacementString: replacement) else { return }
+        tv.textStorage?.replaceCharacters(in: sel, with: replacement)
+        tv.didChangeText()
+        let innerLocation = sel.location + (opening as NSString).length
+        tv.setSelectedRange(NSRange(location: innerLocation, length: (inner as NSString).length))
+    }
+
+    /// Inserts `prefix` at the start of the line containing the caret, keeping
+    /// the caret in the same logical spot relative to the typed text.
+    func insertLinePrefix(_ prefix: String) {
+        guard let tv = textView else { return }
+        tv.window?.makeFirstResponder(tv)
+        let sel = tv.selectedRange()
+        let ns = tv.string as NSString
+        let lineStart = ns.lineRange(for: NSRange(location: min(sel.location, ns.length), length: 0)).location
+        let insertRange = NSRange(location: lineStart, length: 0)
+        guard tv.shouldChangeText(in: insertRange, replacementString: prefix) else { return }
+        tv.textStorage?.replaceCharacters(in: insertRange, with: prefix)
+        tv.didChangeText()
+        tv.setSelectedRange(NSRange(location: sel.location + (prefix as NSString).length, length: sel.length))
+    }
+}
+
 /// NSTextView wrapper for the email compose body. Applies live markdown-aware
 /// NSAttributedString styling (bold, italic, headings, blockquote) so the user
 /// sees formatted output while the underlying `text` binding still stores raw
@@ -11,6 +56,7 @@ struct MacMarkdownBodyEditor: NSViewRepresentable {
     var isFocused: Bool = false
     var font: NSFont = .systemFont(ofSize: 13)
     var onFocusChange: ((Bool) -> Void)? = nil
+    var controller: MacMarkdownEditorController? = nil
 
     func makeNSView(context: Context) -> NSScrollView {
         let scrollView = NSScrollView()
@@ -60,6 +106,7 @@ struct MacMarkdownBodyEditor: NSViewRepresentable {
 
         scrollView.documentView = textView
 
+        controller?.textView = textView
         context.coordinator.applyText(text, to: textView)
         return scrollView
     }

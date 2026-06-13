@@ -92,8 +92,9 @@ private final class MacNotificationDigestService {
 
     init(backendURL: URL, authService: AuthService?) {
         self.backendURL = backendURL
-        // Use the same model preference as the AI chat panel
-        self.model = UserDefaults.standard.string(forKey: "mac_ai_selected_model") ?? "openai/gpt-4.1-mini"
+        // Use the same model preference (and default) as the AI chat panel so a
+        // user who never changed it doesn't get a stale/invalid model id here.
+        self.model = UserDefaults.standard.string(forKey: "mac_ai_selected_model") ?? "openai/gpt-5.4-mini"
         self.authService = authService
     }
 

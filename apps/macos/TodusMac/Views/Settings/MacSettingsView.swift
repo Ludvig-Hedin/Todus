@@ -1814,6 +1814,12 @@ struct MacSettingsView: View {
             try await services.apiClient.deleteAccount()
         } catch {
             AppLogger.shared.log("[Settings] Delete account failed: \(error)")
+            // Don't sign out and wipe local data when the server-side delete
+            // failed — that gives a false "account deleted" impression while the
+            // account still exists. Surface the error and stop.
+            settingsError = "Couldn't delete your account: \(error.localizedDescription)"
+            deleteConfirmText = ""
+            return
         }
         deleteConfirmText = ""
         services.signOut()
