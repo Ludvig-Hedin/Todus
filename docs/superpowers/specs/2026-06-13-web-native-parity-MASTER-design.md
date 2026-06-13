@@ -58,7 +58,7 @@ Each workstream is shippable on its own and gets its own design spec + plan.
 | B | **AI actionability** | task tools `createTask`/`updateTask`/`completeTask`/`listTasks` ✅ (B1 shipped, gated by `aiCanWriteTasks` — now enforced) · `createEvent` tool ⏳ (B2, needs Google client + `aiCanWriteCalendar` enforcement) · verify mention-context injection ⏳ | server + web | Med | (master) |
 | C | **Voice parity** | live transcript ✅ (shipped) + fixed misplaced `onMessage` · re-enable `clientTools` ⏳ (PAR-C — blocked on ElevenLabs dashboard config) | web | Med | (master) |
 | D | **Notifications & web push** | device-token table + VAPID web-push sender (gated by existing toggles), service worker + permission flow, notification center/history, actionable notifications | server + web | High | TBD |
-| E | **Settings completeness** | signatures server-sync, shortcuts customization, 2FA UI, share-creation UI | web (+ Better Auth) | Med | TBD |
+| E | **Settings completeness** | share-creation UI ✅ (shipped) · signatures server-sync ⏳ · shortcuts customization ⏳ · 2FA UI ⏳ | web (+ Better Auth) | Med | (master) |
 | F | **Auth & onboarding polish** | password-reset UI, email/password login+signup, Apple web sign-in, onboarding Gmail step + setup checklist | web | Low | TBD |
 | G | **Docs & realtime polish** | docs delete + search UI, group-chat realtime | web (+ server DO) | Low | TBD |
 
