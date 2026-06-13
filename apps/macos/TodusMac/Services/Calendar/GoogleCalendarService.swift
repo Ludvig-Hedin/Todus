@@ -196,14 +196,15 @@ final class GoogleCalendarService {
             let calendars: [GoogleCalendarListEntry]?
             let scopeMissing: Bool?
         }
+        struct CalendarsInput: Encodable { let connectionId: String }
         do {
-            // TODO(bug-hunt): `calendar.calendars` is queried with NO connection
-            // input, but every returned calendar is tagged with `conn.id`. With
-            // 2+ Google accounts this fetches the same (default) account's
-            // calendars for each connection and mislabels them. Fix needs the
-            // backend query to accept + scope by `connectionId` (verify schema
-            // before wiring) — deferred pending backend support.
-            let response: Response = try await api.trpcQuery("calendar.calendars")
+            // Scope the fetch to THIS connection so multi-account users get each
+            // Google account's own calendars (correctly labelled), instead of the
+            // default account's list tagged under every connection id.
+            let response: Response = try await api.trpcQuery(
+                "calendar.calendars",
+                input: CalendarsInput(connectionId: conn.id)
+            )
             if response.scopeMissing == true {
                 return (conn.id, [], true)
             }

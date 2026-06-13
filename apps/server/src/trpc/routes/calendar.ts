@@ -16,6 +16,7 @@ import { OAuth2Client } from 'google-auth-library';
 import { TRPCError } from '@trpc/server';
 import { env } from '../../env';
 import { z } from 'zod';
+import { getZeroDB } from '../../lib/server-utils';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -249,18 +250,39 @@ export const calendarRouter = router({
    * List the user's Google Calendar list (for multi-calendar display).
    * Returns only calendars the user can read.
    */
-  calendars: activeConnectionProcedure.query(async ({ ctx }) => {
-    const { activeConnection } = ctx;
+  calendars: activeConnectionProcedure
+    .input(
+      z
+        .object({
+          // When set, list calendars for this specific connection instead of the
+          // user's default — required so multi-account clients can fetch (and
+          // correctly label) each Google account's calendars. Omitted = default
+          // connection (backward compatible; the web client passes no input).
+          connectionId: z.string().optional(),
+        })
+        .optional(),
+    )
+    .query(async ({ ctx, input }) => {
+      const { activeConnection } = ctx;
 
-    if (activeConnection.providerId !== 'google') {
-      return { calendars: [], scopeMissing: false };
-    }
+      // Resolve the target connection. `findUserConnection` is user-scoped, so a
+      // client can only ever read its own connections (no IDOR).
+      let targetConnection = activeConnection;
+      if (input?.connectionId && input.connectionId !== activeConnection.id) {
+        const db = await getZeroDB(ctx.sessionUser.id);
+        const found = await db.findUserConnection(input.connectionId);
+        if (found) targetConnection = found;
+      }
 
-    if (!activeConnection.refreshToken) {
-      throw new TRPCError({ code: 'UNAUTHORIZED', message: 'No refresh token available' });
-    }
+      if (targetConnection.providerId !== 'google') {
+        return { calendars: [], scopeMissing: false };
+      }
 
-    const auth = buildAuthClient(activeConnection.refreshToken);
+      if (!targetConnection.refreshToken) {
+        throw new TRPCError({ code: 'UNAUTHORIZED', message: 'No refresh token available' });
+      }
+
+      const auth = buildAuthClient(targetConnection.refreshToken);
 
     let data: GCalCalendarListResponse;
     try {

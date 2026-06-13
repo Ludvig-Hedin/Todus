@@ -112,6 +112,14 @@ final class AppleRemindersSyncService {
 
     private let storage = RemindersStorageActor()
 
+    /// Serializes concurrent `upsert`s of the same task so two quick edits can't
+    /// both read `reminderIdentifier == nil` and create duplicate reminders.
+    /// Each new upsert awaits the prior one for that task id, then re-reads the
+    /// (possibly just-written) identifier. `upsertGeneration` lets the last
+    /// upsert clean the map without clobbering a newer one.
+    private var inFlightUpserts: [UUID: Task<Void, Never>] = [:]
+    private var upsertGeneration: [UUID: Int] = [:]
+
     func authorizationState() -> AuthorizationState {
         switch EKEventStore.authorizationStatus(for: .reminder) {
         case .notDetermined: return .notDetermined
@@ -141,16 +149,34 @@ final class AppleRemindersSyncService {
         let isCompleted = task.completed
         let completionDate = task.completed ? task.updatedAt : nil
         let dueDate = task.dueDate
-        let existingIdentifier = task.reminderIdentifier
         let taskID = task.id
 
-        // TODO(bug-hunt): two quick `upsert`s of the same task spawn two
-        // unstructured `Task`s. If both read `existingIdentifier == nil` before
-        // either writes the identifier back, they create duplicate reminders.
-        // Fix by deduping in-flight upserts per task id (e.g. an actor-held
-        // [taskID: Task] map that the second call awaits/replaces). Deferred —
-        // needs serialization design.
-        Task {
+        // Chain after any in-flight upsert for this same task so they run
+        // strictly one-at-a-time and the second reads the identifier the first
+        // wrote (preventing duplicate reminders on rapid edits).
+        let previous = inFlightUpserts[taskID]
+        let generation = (upsertGeneration[taskID] ?? 0) + 1
+        upsertGeneration[taskID] = generation
+
+        let work = Task { [weak self] in
+            guard let self else { return }
+            await previous?.value
+
+            // Re-read the latest identifier now that any prior upsert finished —
+            // the captured-at-call value may be stale (nil) for a back-to-back edit.
+            let existingIdentifier: String? = {
+                let descriptor = FetchDescriptor<TaskRecord>(predicate: #Predicate { $0.id == taskID })
+                return (try? context.fetch(descriptor).first)?.reminderIdentifier
+            }()
+
+            defer {
+                // Only clear the map if no newer upsert superseded us.
+                if self.upsertGeneration[taskID] == generation {
+                    self.inFlightUpserts[taskID] = nil
+                    self.upsertGeneration[taskID] = nil
+                }
+            }
+
             let identifier: String
             do {
                 identifier = try await storage.save(
@@ -209,6 +235,7 @@ final class AppleRemindersSyncService {
                 try? context.save()
             }
         }
+        inFlightUpserts[taskID] = work
     }
 
     func delete(_ task: TaskRecord) {

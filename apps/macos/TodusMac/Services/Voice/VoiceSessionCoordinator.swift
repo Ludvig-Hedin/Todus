@@ -135,7 +135,23 @@ final class VoiceSessionCoordinator {
         self.provider = GeminiLiveProvider()
         self.audioPlayer = AudioPlayerManager(sampleRate: 24000)
 
+        // Fallback exit from `.speaking`: if the provider's `.turnComplete` is
+        // dropped (network blip), the audio player's debounced drain callback
+        // recovers the state machine instead of leaving the UI stuck "Speaking".
+        self.audioPlayer?.onPlaybackComplete = { [weak self] in
+            Task { @MainActor in self?.handlePlaybackDrained() }
+        }
+
         wireTriggerCallbacks()
+    }
+
+    /// Called (debounced) when assistant audio has fully drained. Only acts if
+    /// we're still `.speaking` — a normal `.turnComplete` already moved us on.
+    /// Safe even if premature: a later audio chunk re-enters `.speaking`.
+    private func handlePlaybackDrained() {
+        guard state == .speaking else { return }
+        finalizeCurrentTurn()
+        transition(to: .recording, reason: "audio drained (turnComplete missing)")
     }
 
     // MARK: - Public API
@@ -416,13 +432,8 @@ final class VoiceSessionCoordinator {
         case .audioReceived(let data):
             audioPlayer?.enqueue(data)
             if state != .speaking { transition(to: .speaking, reason: "audio chunk") }
-            // TODO(bug-hunt): `.speaking` only clears on `.turnComplete`. If that
-            // signal is dropped (network blip) the status window stays "Speaking"
-            // forever. Can't simply transition on AudioPlayerManager draining —
-            // `scheduledBufferCount` momentarily hits 0 between chunks mid-turn,
-            // which would flicker. Needs a debounced "no audio for N ms AND queue
-            // empty" guard, or a provider-level turn timeout. Deferred (real-time
-            // path, regression risk).
+            // If `.turnComplete` is dropped, AudioPlayerManager's debounced
+            // `onPlaybackComplete` recovers `.speaking` (see handlePlaybackDrained).
 
         case .transcriptUpdate(let role, let text, let isFinal):
             // Defensive accumulator: providers send deltas (per current

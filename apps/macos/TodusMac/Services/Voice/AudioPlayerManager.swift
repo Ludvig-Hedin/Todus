@@ -19,6 +19,18 @@ final class AudioPlayerManager: @unchecked Sendable {
         audioQueue.sync { _isPlaying }
     }
 
+    /// Fired (on the main queue) once playback has fully drained AND stayed
+    /// drained for `drainDebounce` — i.e. the assistant genuinely stopped
+    /// talking, not just a momentary gap between streamed chunks. Lets the voice
+    /// coordinator recover from a dropped `turnComplete` without flickering the
+    /// "Speaking" state on every inter-chunk gap.
+    var onPlaybackComplete: (() -> Void)?
+
+    /// Bumped on every enqueue/stop so a pending drain check from an earlier
+    /// silence is invalidated when new audio arrives.
+    private var drainToken = 0
+    private static let drainDebounce: TimeInterval = 1.0
+
     private let engine = AVAudioEngine()
     private let playerNode = AVAudioPlayerNode()
     /// Gemini Live returns PCM16 at 24kHz mono.
@@ -52,6 +64,9 @@ final class AudioPlayerManager: @unchecked Sendable {
         guard !pcmData.isEmpty else { return }
         audioQueue.async { [weak self] in
             guard let self else { return }
+            // New audio — invalidate any pending "drained" check so a gap between
+            // chunks doesn't fire onPlaybackComplete mid-turn.
+            self.drainToken &+= 1
             self.ensureEngineRunning()
             self.schedulePCMBuffer(pcmData)
         }
@@ -65,6 +80,9 @@ final class AudioPlayerManager: @unchecked Sendable {
             // Reset the buffer count first so the derived `_isPlaying` flips to false
             // before any observer reads it during teardown.
             self.scheduledBufferCount = 0
+            // Explicit stop — cancel any pending drain callback so it can't fire
+            // after teardown.
+            self.drainToken &+= 1
             self.stopEngine()
         }
     }
@@ -129,6 +147,17 @@ final class AudioPlayerManager: @unchecked Sendable {
                 // `_isPlaying` is now derived from `scheduledBufferCount`, so just
                 // decrementing the counter is enough — no separate flag to maintain.
                 self.scheduledBufferCount = max(0, self.scheduledBufferCount - 1)
+                guard self.scheduledBufferCount == 0 else { return }
+                // Queue empty — wait out the debounce; if no new audio arrived
+                // (token unchanged) and we're still drained, signal completion.
+                let token = self.drainToken
+                self.audioQueue.asyncAfter(deadline: .now() + Self.drainDebounce) { [weak self] in
+                    guard let self else { return }
+                    guard self.scheduledBufferCount == 0, self.drainToken == token else { return }
+                    if let callback = self.onPlaybackComplete {
+                        DispatchQueue.main.async { callback() }
+                    }
+                }
             }
         }
         // No `_isPlaying = true` — the buffer count just bumped, so the derived
