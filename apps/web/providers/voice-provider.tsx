@@ -1,6 +1,6 @@
 import { createContext, useContext, useState } from 'react';
 import { useConversation } from '@elevenlabs/react';
-// import { callServerTool } from '@/lib/server-tool';
+import { callServerTool } from '@/lib/server-tool';
 import { useSession } from '@/lib/auth-client';
 import type { ReactNode } from 'react';
 import { toast } from 'sonner';
@@ -25,22 +25,47 @@ interface VoiceContextType {
   sendContext: (context: any) => void;
 }
 
-// const toolNames = [
-//   'listEmails',
-//   'getEmail',
-//   'sendEmail',
-//   'markAsRead',
-//   'markAsUnread',
-//   'archiveEmails',
-//   'deleteEmails',
-//   'deleteEmail',
-//   'createLabel',
-//   'applyLabel',
-//   'removeLabel',
-//   'searchEmails',
-//   'webSearch',
-//   'summarizeEmail',
-// ] as const;
+// Client-tool names exposed to the ElevenLabs voice agent. These MUST match the
+// server-side tool keys in apps/server/src/types.ts (`Tools` enum) verbatim, because
+// the name is passed straight through to `aiRouter.post('/do/:action')` and used to
+// look up `tools()[action]`. A mismatch → 404 "Tool not found".
+//
+// IMPORTANT: registering these here is only half the wiring. The same tool names +
+// their JSON parameter schemas must also be added as Client Tools to the ElevenLabs
+// agent in the dashboard, otherwise the model will never emit the tool call.
+// See the project docs / PR notes for the exact dashboard schemas.
+const toolNames = [
+  // Tasks
+  'createTask',
+  'updateTask',
+  'completeTask',
+  'listTasks',
+  // Calendar
+  'createEvent',
+  // Email actions
+  'sendEmail',
+  'composeEmail',
+  'markThreadsRead',
+  'markThreadsUnread',
+  'bulkArchive',
+  'bulkDelete',
+  // Labels
+  'createLabel',
+  'deleteLabel',
+  'modifyLabels',
+  'getUserLabels',
+  // Read / search
+  'getThread',
+  'getThreadSummary',
+  'inboxRag',
+  'buildGmailSearchQuery',
+  'webSearch',
+  'getCurrentDate',
+  // Meetings ("second brain")
+  'listMeetings',
+  'getMeetingSummary',
+  'searchMeetingTranscript',
+] as const;
 
 const VoiceContext = createContext<VoiceContextType | undefined>(undefined);
 
@@ -73,32 +98,37 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         setTranscript((prev) => [...prev, { role: source, text: message }]);
       }
     },
-    // clientTools: toolNames.reduce(
-    //   (acc, name) => {
-    //     acc[name] = async (params: any) => {
-    //       console.log(`[Voice Tool] ${name} called with params:`, params);
-    //       setLastToolCall(`Executing: ${name}`);
-
-    //       try {
-    //         const result = await callServerTool(
-    //           name,
-    //           { ...params, _context: currentContext },
-    //           session?.user.phoneNumber ?? session?.user.email ?? '',
-    //         );
-
-    //         console.log(`[Voice Tool] ${name} result:`, result);
-    //         setLastToolCall(null);
-    //         return result;
-    //       } catch (err) {
-    //         setLastToolCall(null);
-    //         toast.error(`Tool "${name}" failed: ${(err as Error).message}`);
-    //         throw err;
-    //       }
-    //     };
-    //     return acc;
-    //   },
-    //   {} as Record<string, (params: any) => Promise<any>>,
-    // ),
+    // Client tools: the voice agent calls these by name; we proxy each to the
+    // server via callServerTool → POST /api/ai/do/:name (authed by session cookie).
+    // ElevenLabs returns whatever we return here back into the conversation, so the
+    // agent can confirm the action and read back results. Errors surface as toasts
+    // and are re-thrown so the agent knows the tool failed.
+    clientTools: toolNames.reduce(
+      (acc, name) => {
+        acc[name] = async (params: Record<string, unknown>) => {
+          setLastToolCall(`Running ${name}…`);
+          try {
+            const result = await callServerTool(
+              name,
+              params ?? {},
+              session?.user?.email ?? '',
+            );
+            setLastToolCall(null);
+            // ElevenLabs requires a string return value for client tools.
+            return typeof result === 'string' ? result : JSON.stringify(result ?? { success: true });
+          } catch (err) {
+            setLastToolCall(null);
+            const message = err instanceof Error ? err.message : String(err);
+            toast.error(`Voice action "${name}" failed: ${message}`);
+            // Return (don't throw) a structured error so the agent can recover
+            // gracefully and tell the user, instead of crashing the turn.
+            return JSON.stringify({ success: false, error: message });
+          }
+        };
+        return acc;
+      },
+      {} as Record<string, (params: Record<string, unknown>) => Promise<string>>,
+    ),
   });
 
   const { status, isSpeaking } = conversation;

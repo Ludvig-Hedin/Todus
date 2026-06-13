@@ -28,6 +28,8 @@ export default [
 
   route('/login', '(auth)/todus/login/page.tsx'),
   route('/signup', '(auth)/todus/signup/page.tsx'),
+  route('/forgot-password', '(auth)/todus/forgot-password/page.tsx'),
+  route('/reset-password', '(auth)/todus/reset-password/page.tsx'),
 
   layout('(routes)/layout.tsx', [
     route('/developer', '(routes)/developer/page.tsx'),
