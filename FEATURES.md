@@ -68,7 +68,7 @@ Layout: [apps/web/app/(routes)/mail/layout.tsx](apps/web/app/(routes)/mail/layou
 | `/mail/chat` | [apps/web/app/(routes)/mail/chat/page.tsx](apps/web/app/(routes)/mail/chat/page.tsx) | Dedicated AI chat surface |
 | `/mail/search` | [apps/web/app/(routes)/mail/search/page.tsx](apps/web/app/(routes)/mail/search/page.tsx) | Search results page |
 | `/mail/tasks` | [apps/web/app/(routes)/mail/tasks/page.tsx](apps/web/app/(routes)/mail/tasks/page.tsx) | Tasks management |
-| `/mail/calendar` | [apps/web/app/(routes)/mail/calendar/page.tsx](apps/web/app/(routes)/mail/calendar/page.tsx) | Calendar view |
+| `/mail/calendar` | [apps/web/app/(routes)/mail/calendar/page.tsx](apps/web/app/(routes)/mail/calendar/page.tsx) | Calendar view + event create/edit/delete (primary calendar) via `EventEditDialog` |
 | `/mail/meetings` | [apps/web/app/(routes)/mail/meetings/page.tsx](apps/web/app/(routes)/mail/meetings/page.tsx) | Recorded meetings list |
 | `/mail/meetings/:meetingId` | [apps/web/app/(routes)/mail/meetings/[meetingId]/page.tsx](apps/web/app/(routes)/mail/meetings/[meetingId]/page.tsx) | Meeting detail + transcript + AI summary |
 | `/mail/docs` | [apps/web/app/(routes)/mail/docs/page.tsx](apps/web/app/(routes)/mail/docs/page.tsx) | Documents list |
