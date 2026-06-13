@@ -55,7 +55,7 @@ Each workstream is shippable on its own and gets its own design spec + plan.
 | # | Workstream | Closes | Touches | Risk | Spec |
 | --- | --- | --- | --- | --- | --- |
 | A | **Calendar write support** | event create/edit/delete UI ✅ (A1 shipped), multi-calendar visibility toggles ⏳ (A2 pending — needs server `calendarsMulti` + `connectionId` on write mutations) | web (server ready) | Low | `2026-06-13-web-calendar-write-support-design.md` · plan `plans/2026-06-13-web-calendar-event-crud.md` |
-| B | **AI actionability** | `createTask`/`updateTask`/`createEvent`/`updateEvent` chat tools; verify mention-context injection | server + web | Med | TBD |
+| B | **AI actionability** | task tools `createTask`/`updateTask`/`completeTask`/`listTasks` ✅ (B1 shipped, gated by `aiCanWriteTasks` — now enforced) · `createEvent` tool ⏳ (B2, needs Google client + `aiCanWriteCalendar` enforcement) · verify mention-context injection ⏳ | server + web | Med | (master) |
 | C | **Voice parity** | re-enable `clientTools`, bridge to B's tools, render live transcript | web | Med | TBD (depends on B) |
 | D | **Notifications & web push** | device-token table + VAPID web-push sender (gated by existing toggles), service worker + permission flow, notification center/history, actionable notifications | server + web | High | TBD |
 | E | **Settings completeness** | signatures server-sync, shortcuts customization, 2FA UI, share-creation UI | web (+ Better Auth) | Med | TBD |
