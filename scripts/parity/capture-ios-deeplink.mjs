@@ -18,7 +18,11 @@ const args = process.argv.slice(2);
 function flag(name) {
   const idx = args.indexOf(name);
   if (idx === -1) return undefined;
-  return args[idx + 1];
+  const val = args[idx + 1];
+  // Guard against `--surface --other` (next token is another flag) and
+  // `--surface` as the last arg — both would otherwise silently misread.
+  if (val === undefined || val.startsWith('--')) return undefined;
+  return val;
 }
 const surfaceFilter = flag('--surface');
 
@@ -97,7 +101,10 @@ function run(command, args) {
 }
 
 const booted = run('xcrun', ['simctl', 'list', 'devices', 'booted']);
-if (booted.status !== 0 || !booted.stdout.includes('Booted')) {
+// `spawnSync` returns `stdout: null` (not '') when the spawn itself fails
+// (e.g. `xcrun` not on PATH). `null.includes(...)` would throw a confusing
+// TypeError instead of the intended user-friendly message.
+if (booted.status !== 0 || !(booted.stdout ?? '').includes('Booted')) {
   console.error('No booted iOS simulator found.');
   process.exit(1);
 }
