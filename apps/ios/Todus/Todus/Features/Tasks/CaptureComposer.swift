@@ -680,11 +680,18 @@ struct PasteHandlingTextInput: UIViewRepresentable {
                 }
             }
             // Cheap markdown sniff — same patterns applyMarkdownStyling renders.
-            return text.contains("**")
-                || text.contains("_")
-                || text.contains("# ")
-                || text.contains("\n> ")
-                || text.hasPrefix("> ")
+            // Use the actual italic regex (requires a *paired* `_..._`) instead of a
+            // bare `contains("_")`: a lone underscore (email/file/snippet) would
+            // otherwise force the attributed rewrite and dismiss the keyboard mid-typing.
+            if text.contains("**") || text.contains("# ") || text.contains("\n> ") || text.hasPrefix("> ") {
+                return true
+            }
+            if text.contains("_"),
+               let regex = Coordinator.mdItalicRegex,
+               regex.firstMatch(in: text, range: NSRange(location: 0, length: (text as NSString).length)) != nil {
+                return true
+            }
+            return false
         }
 
         func applyHighlights(to textView: UITextView) {

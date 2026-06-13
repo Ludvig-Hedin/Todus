@@ -305,7 +305,7 @@ struct GlobalSearchView: View {
         } label: {
             HStack(spacing: 12) {
                 Circle()
-                    .fill(Color(hue: Double(event.calendarColor % 360) / 360.0, saturation: 0.6, brightness: 0.8))
+                    .fill(Color(red: event.calendarColorRed, green: event.calendarColorGreen, blue: event.calendarColorBlue))
                     .frame(width: 10, height: 10)
 
                 VStack(alignment: .leading, spacing: 2) {

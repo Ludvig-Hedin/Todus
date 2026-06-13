@@ -103,11 +103,14 @@ final class AudioPlayerManager: @unchecked Sendable {
 
         buffer.frameLength = frameCount
 
-        // Copy raw PCM16 bytes into the buffer's int16 channel data
+        // Copy raw PCM16 bytes into the buffer's int16 channel data. Copy only the
+        // frame-aligned byte count — a chunk with an odd byte count would otherwise
+        // memcpy 1 byte past the buffer's frameCount*2-byte allocation (heap overflow).
+        let byteCount = Int(frameCount) * MemoryLayout<Int16>.size
         data.withUnsafeBytes { rawPtr in
             guard let srcPtr = rawPtr.baseAddress else { return }
             if let dst = buffer.int16ChannelData?[0] {
-                memcpy(dst, srcPtr, data.count)
+                memcpy(dst, srcPtr, min(byteCount, data.count))
             }
         }
 

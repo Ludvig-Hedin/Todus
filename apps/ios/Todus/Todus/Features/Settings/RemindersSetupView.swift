@@ -197,10 +197,14 @@ struct RemindersSetupView: View {
         .onChange(of: isEnabled) { _, newValue in
             services.remindersSyncEnabled = newValue
             if newValue {
+                // Clear any stale denial banner from a previous failed attempt.
+                permissionDenied = false
                 Task {
                     let granted = await services.requestRemindersPermissionIfNeeded()
                     if granted {
                         await services.importFromReminders(in: modelContext)
+                        // Push existing app tasks out to Reminders, matching connect().
+                        services.syncExistingTasksToReminders(in: modelContext)
                     } else {
                         permissionDenied = true
                         isEnabled = false

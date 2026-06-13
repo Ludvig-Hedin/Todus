@@ -34,7 +34,6 @@ struct SettingsView: View {
 
     // AI permission flags — backed by the same UserDefaults keys read by AIChatService
     // so toggling these here updates the AI behaviour for the next request (#6).
-    @AppStorage("ios_accent_color") private var accentColorKey: String = "blue"
     @AppStorage("ai_can_read_tasks") private var aiCanReadTasks: Bool = true
     @AppStorage("ai_can_write_tasks") private var aiCanWriteTasks: Bool = true
     @AppStorage("ai_can_read_calendar") private var aiCanReadCalendar: Bool = true
@@ -748,15 +747,20 @@ struct SettingsView: View {
                 HStack(spacing: 8) {
                     ForEach(AppTheme.accentColorKeys, id: \.self) { key in
                         Button {
-                            withAnimation(.easeInOut(duration: 0.15)) {
-                                accentColorKey = key
+                            // Drive the single source of truth (accentPreference); its
+                            // didSet mirrors to `ios_accent_color` and syncs to server.
+                            // This keeps this picker and the Appearance picker in sync.
+                            if let pref = AccentPreference(rawValue: key) {
+                                withAnimation(.easeInOut(duration: 0.15)) {
+                                    services.accentPreference = pref
+                                }
                             }
                         } label: {
                             ZStack {
                                 Circle()
                                     .fill(AccentPreference(rawValue: key)?.color ?? AppTheme.Accents.blue)
                                     .frame(width: 22, height: 22)
-                                if accentColorKey == key {
+                                if services.accentPreference.rawValue == key {
                                     Image(systemName: "checkmark")
                                         .font(.system(size: 10, weight: .bold))
                                         .foregroundStyle(.white)
@@ -1906,7 +1910,6 @@ private struct SettingsSyncModifier: ViewModifier {
     @AppStorage("ai_can_write_calendar") private var aiCanWriteCalendar: Bool = true
     @AppStorage("ai_can_read_email")    private var aiCanReadEmail: Bool = true
     @AppStorage("ai_can_send_email")    private var aiCanSendEmail: Bool = true
-    @AppStorage("ios_accent_color")     private var accentColorKey: String = "blue"
 
     func body(content: Content) -> some View {
         // Chain is split with AnyView in the middle because 11 chained
@@ -1934,9 +1937,8 @@ private struct SettingsSyncModifier: ViewModifier {
             }
 
         return AnyView(firstHalf)
-            .onChange(of: accentColorKey) { _, value in
-                Task { await services.syncSetting("accentColor", value) }
-            }
+            // Accent server-sync now lives in AppServices.accentPreference.didSet
+            // (single source of truth), so the old accentColorKey onChange is gone.
             .onChange(of: services.preferredStartViewMode) { _, value in
                 Task { await services.syncSetting("defaultTaskView", value.rawValue) }
             }

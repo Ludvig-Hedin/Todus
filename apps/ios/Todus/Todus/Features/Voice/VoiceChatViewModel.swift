@@ -129,11 +129,9 @@ final class VoiceChatViewModel {
             //    main-thread stalls long enough for iOS's watchdog to terminate the app.
             //    The implementation runs the heavy work on a background queue.
             await startAudioCapture()
-            // TODO(bug-hunt): A trailing provider event delivered between
-            // eventConsumerTask cancellation and provider.disconnect() returning can
-            // call handleEvent and overwrite this .failed state, resurrecting a
-            // half-torn-down session. Consider ignoring events once connectionState is
-            // .failed, or re-asserting .failed after disconnect() returns.
+            // A trailing provider event delivered between eventConsumerTask
+            // cancellation and provider.disconnect() returning can no longer overwrite
+            // .failed — handleEvent ignores all events once connectionState is .failed.
             if case .failed = connectionState {
                 eventConsumerTask?.cancel()
                 eventConsumerTask = nil
@@ -230,6 +228,10 @@ final class VoiceChatViewModel {
     }
 
     private func handleEvent(_ event: VoiceSessionEvent) {
+        // Once the session has terminally failed, ignore trailing provider events
+        // (delivered between consumer cancellation and disconnect() returning) so a
+        // late event can't overwrite .failed and resurrect a half-torn-down session.
+        if case .failed = connectionState { return }
         switch event {
         case .connectionStateChanged(let state):
             connectionState = state
@@ -471,7 +473,7 @@ final class VoiceChatViewModel {
         // Back on the main actor — only state-mutating work happens here.
         switch result {
         case .success(let engine):
-            guard connectionState == .connecting || connectionState == .connected else {
+            guard connectionState == .connecting || connectionState == .connected || connectionState == .reconnecting else {
                 DispatchQueue.global(qos: .userInitiated).async {
                     engine.stop()
                     engine.inputNode.removeTap(onBus: 0)

@@ -16,7 +16,10 @@ struct RootView: View {
     /// once at sign-in. Returning users skip the welcome-tour / tab-bar steps (set
     /// done in `AppServices.init`), so the old hardcoded "of 5" lied — it showed
     /// "2 of 5" then dropped the user into the app after step 2. Reset on sign-out.
-    @State private var onboardingTotalSnapshot: Int? = nil
+    /// Indices (into `onboardingPendingFlags`, display order) of the steps that were
+    /// pending at sign-in. Snapshotting the *set* — not just a count — keeps the
+    /// "X of N" counter stable when a later step auto-skips before an earlier one.
+    @State private var onboardingPendingSnapshot: [Int]? = nil
 
     var body: some View {
         Group {
@@ -39,19 +42,16 @@ struct RootView: View {
                 NotificationsOnboardingView()
                     .transition(hasAppeared ? .opacity.combined(with: .move(edge: .trailing)) : .opacity)
             } else if !services.hasSeenWelcomeTour {
-                // Optional product explainer with prominent Skip — runs once per
-                // install. Surfaces what the app does before we ask the user to
-                // customise the tab bar.
+                // Optional product explainer with prominent Skip — runs once per install.
                 WelcomeTourView()
                     .transition(hasAppeared ? .opacity.combined(with: .move(edge: .trailing)) : .opacity)
-            } else if !services.hasConfiguredTabBarPrompt {
-                // Tab-bar customization — iOS only because the native TabView is
-                // capped at 4 configurable slots (+ the create FAB). The user
-                // can always come back via Settings, so this step is also
-                // skippable.
-                TabBarOnboardingView()
-                    .transition(hasAppeared ? .opacity.combined(with: .move(edge: .trailing)) : .opacity)
             } else {
+                // NOTE: the tab-bar customization onboarding step was removed — the live
+                // shell (MainTabView) uses a fixed native tab bar and does not yet consume
+                // `tabBarTabs`, so the step had no effect (a no-op control = UX bug). The
+                // TabBarOnboardingView/TabBarCustomizationView/CustomTabBar components remain
+                // in the codebase for if/when the dynamic tab bar is finished. See
+                // CODE_REVIEW_BACKLOG.md (BH-0613-6).
                 MainTabView()
                     .transition(hasAppeared ? .opacity : .identity)
             }
@@ -99,7 +99,6 @@ struct RootView: View {
         .animation(hasAppeared ? .snappy(duration: 0.3) : nil, value: services.hasConfiguredGmailPrompt)
         .animation(hasAppeared ? .snappy(duration: 0.3) : nil, value: services.hasConfiguredNotificationsPrompt)
         .animation(hasAppeared ? .snappy(duration: 0.3) : nil, value: services.hasSeenWelcomeTour)
-        .animation(hasAppeared ? .snappy(duration: 0.3) : nil, value: services.hasConfiguredTabBarPrompt)
         .animation(hasAppeared ? .snappy(duration: 0.3) : nil, value: services.authService.isAuthenticated)
         .onAppear {
             // Enable transitions only after the first frame renders.
@@ -118,15 +117,15 @@ struct RootView: View {
             guard services.authService.isAuthenticated else {
                 // Signed out — clear the snapshot so the next sign-in measures its
                 // own onboarding journey afresh.
-                onboardingTotalSnapshot = nil
+                onboardingPendingSnapshot = nil
                 return
             }
             // Capture the journey length once, now that the account's onboarding
             // flags are settled, so the "X of N" counter reflects the steps this
             // user will actually see instead of a hardcoded 5.
-            if onboardingTotalSnapshot == nil {
-                let remaining = remainingOnboardingSteps
-                if remaining > 0 { onboardingTotalSnapshot = remaining }
+            if onboardingPendingSnapshot == nil {
+                let pendingIndices = onboardingPendingFlags.indices.filter { onboardingPendingFlags[$0] }
+                if !pendingIndices.isEmpty { onboardingPendingSnapshot = Array(pendingIndices) }
             }
             guard !services.isUITestingMode else { return }
             await services.loadSharedAIProfile()
@@ -173,7 +172,7 @@ struct RootView: View {
             !services.hasConfiguredRemindersPrompt,
             !services.hasConfiguredNotificationsPrompt,
             !services.hasSeenWelcomeTour,
-            !services.hasConfiguredTabBarPrompt,
+            // Tab-bar customization step removed — see body NOTE / BH-0613-6.
         ]
     }
 
@@ -185,16 +184,23 @@ struct RootView: View {
     /// Total steps in this user's journey — the snapshot taken at sign-in, or the
     /// live remaining count before the snapshot lands.
     private var onboardingTotal: Int {
-        onboardingTotalSnapshot ?? remainingOnboardingSteps
+        onboardingPendingSnapshot?.count ?? remainingOnboardingSteps
     }
 
     /// Current step (1-based) within the journey, or nil once onboarding is done.
-    /// Numbered against the snapshotted total so it counts up (1→N) and never
-    /// claims more steps than the user will see.
+    /// Computed as the position, within the snapshotted pending set, of the first
+    /// step that is still pending. This counts up monotonically (1→N) and never
+    /// jumps backwards when a later step auto-skips before an earlier one.
     private var onboardingStep: Int? {
         guard !services.authService.showsOnboarding else { return nil }
-        let remaining = remainingOnboardingSteps
-        guard remaining > 0 else { return nil }
-        return max(1, onboardingTotal - remaining + 1)
+        let flags = onboardingPendingFlags
+        if let snapshot = onboardingPendingSnapshot {
+            guard let pos = snapshot.firstIndex(where: { flags.indices.contains($0) && flags[$0] }) else {
+                return nil // every snapshotted step is done
+            }
+            return pos + 1
+        }
+        // Pre-snapshot fallback: if anything is pending, we're on the first step.
+        return remainingOnboardingSteps > 0 ? 1 : nil
     }
 }

@@ -1615,7 +1615,7 @@ private struct ReceiptInfoChip: View {
     // re-allocated on every render of the chip.
     // nonisolated(unsafe): thread-safe for parsing once configured, but not Sendable.
     private nonisolated(unsafe) static let receiptISOParser = ISO8601DateFormatter()
-    private nonisolated(unsafe) static let receiptDateFormatter: DateFormatter = {
+    private static let receiptDateFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateStyle = .medium
         f.timeStyle = .none

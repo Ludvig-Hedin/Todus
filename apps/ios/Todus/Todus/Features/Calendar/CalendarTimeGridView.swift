@@ -139,7 +139,10 @@ struct CalendarTimeGridView: View {
                     .contentShape(Rectangle())
                     .onTapGesture { location in
                         let minutesSinceMidnight = location.y / (hourHeight / 60)
-                        let snappedMinutes = (Int(minutesSinceMidnight) / 30) * 30
+                        // Clamp to a valid slot. A tap in the bottom padding / overscroll
+                        // could otherwise yield hour 24 (or negative), making
+                        // bySettingHour return nil → the tap silently does nothing.
+                        let snappedMinutes = min(max((Int(minutesSinceMidnight) / 30) * 30, 0), 24 * 60 - 30)
                         let hour = snappedMinutes / 60
                         let minute = snappedMinutes % 60
                         let cal = Calendar.current
@@ -189,7 +192,12 @@ struct CalendarTimeGridView: View {
 
         return GeometryReader { geo in
             let width = geo.size.width
-            let columnWidth = totalColumns > 0 ? width / CGFloat(totalColumns) : width
+            // Account for the 0.5pt separators between columns (HStack above) so the
+            // today-dot lands at the true start of today's column, not drifted right.
+            let separatorWidth: CGFloat = 0.5
+            let separatorTotal = totalColumns > 1 ? separatorWidth * CGFloat(totalColumns - 1) : 0
+            let columnWidth = totalColumns > 0 ? (width - separatorTotal) / CGFloat(totalColumns) : width
+            let dotX = CGFloat(todayColumnIndex) * (columnWidth + separatorWidth)
             ZStack(alignment: .topLeading) {
                 Rectangle()
                     .fill(Color(red: 0.92, green: 0.23, blue: 0.21))
@@ -198,7 +206,7 @@ struct CalendarTimeGridView: View {
                 Circle()
                     .fill(Color(red: 0.92, green: 0.23, blue: 0.21))
                     .frame(width: 8, height: 8)
-                    .offset(x: columnWidth * CGFloat(todayColumnIndex) - 4, y: -3.25)
+                    .offset(x: dotX - 4, y: -3.25)
             }
             .offset(y: yOffset)
         }

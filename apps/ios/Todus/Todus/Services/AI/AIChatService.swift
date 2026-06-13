@@ -2335,6 +2335,9 @@ final class AIChatService {
     }
 
     func addSavedPrompt(_ prompt: SavedPrompt) {
+        // Replace any existing prompt with the same id (move-to-top), then insert —
+        // avoids duplicate rows when the same prompt is saved twice.
+        savedPrompts.removeAll { $0.id == prompt.id }
         savedPrompts.insert(prompt, at: 0)
     }
 

@@ -227,6 +227,9 @@ struct InboxView<Footer: View>: View {
             return tasks.sorted {
                 switch ($0.dueDate, $1.dueDate) {
                 case let (a?, b?): return a < b
+                // Break the no-due-date tie by createdAt, matching BoardView /
+                // TaskTableView / CalendarTaskView so rows don't reshuffle across views.
+                case (nil, nil): return $0.createdAt > $1.createdAt
                 case (nil, _): return false
                 case (_, nil): return true
                 }

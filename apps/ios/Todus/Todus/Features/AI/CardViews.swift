@@ -324,6 +324,13 @@ struct LabelCardView: View {
 
     private var parsed: LabelCardProps? { LabelCardProps(from: props) }
 
+    /// Pick a tag-icon color that stays legible on the swatch: dark on light swatches,
+    /// white on dark swatches, secondary when there's no color.
+    private func iconColor(for hex: String?) -> Color {
+        guard let hex else { return .secondary }
+        return Color.isLightHex(hex) ? .black.opacity(0.7) : .white
+    }
+
     var body: some View {
         if let p = parsed {
             HStack(spacing: 8) {
@@ -333,7 +340,7 @@ struct LabelCardView: View {
                     .overlay(
                         Image(systemName: "tag")
                             .font(.system(size: 11))
-                            .foregroundStyle(p.color != nil ? .white : .secondary)
+                            .foregroundStyle(iconColor(for: p.color))
                     )
                 Text(p.name)
                     .font(.subheadline)
@@ -530,10 +537,16 @@ struct CalendarEventListCardView: View {
         VStack(alignment: .leading, spacing: 8) {
             if let title { Text(title).font(.headline) }
 
-            ListCardContainer {
-                ForEach(Array(eventDicts.enumerated()), id: \.offset) { idx, eventProps in
-                    if idx > 0 { Divider() }
-                    CalendarEventCardView(props: eventProps, onAction: onAction)
+            if eventDicts.isEmpty {
+                Text("No events to show.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            } else {
+                ListCardContainer {
+                    ForEach(Array(eventDicts.enumerated()), id: \.offset) { idx, eventProps in
+                        if idx > 0 { Divider() }
+                        CalendarEventCardView(props: eventProps, onAction: onAction)
+                    }
                 }
             }
 
@@ -556,10 +569,16 @@ struct ContactListCardView: View {
         VStack(alignment: .leading, spacing: 8) {
             if let title { Text(title).font(.headline) }
 
-            ListCardContainer {
-                ForEach(Array(contactDicts.enumerated()), id: \.offset) { idx, contactProps in
-                    if idx > 0 { Divider() }
-                    ContactCardView(props: contactProps)
+            if contactDicts.isEmpty {
+                Text("No contacts to show.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            } else {
+                ListCardContainer {
+                    ForEach(Array(contactDicts.enumerated()), id: \.offset) { idx, contactProps in
+                        if idx > 0 { Divider() }
+                        ContactCardView(props: contactProps)
+                    }
                 }
             }
         }
@@ -664,7 +683,9 @@ struct InlineComposeCardView: View {
     @State private var subject: String = ""
     @State private var body_: String = ""
     @State private var showCcBcc: Bool = false
-    @State private var recipientInput: String = ""
+    @State private var toInput: String = ""
+    @State private var ccInput: String = ""
+    @State private var bccInput: String = ""
     @State private var saveStatus: String = "All changes are saved"
     @State private var sendStatus: String = "draft"
     @State private var debounceTask: Task<Void, Never>? = nil
@@ -702,7 +723,7 @@ struct InlineComposeCardView: View {
                             markDirty()
                         }
                         if !isLocked {
-                            TextField("Add email…", text: $recipientInput)
+                            TextField("Add email…", text: $toInput)
                                 .font(.caption)
                                 .textInputAutocapitalization(.never)
                                 .keyboardType(.emailAddress)
@@ -716,7 +737,13 @@ struct InlineComposeCardView: View {
                                 cc.removeAll { $0.email == email }
                                 markDirty()
                             }
-                            Spacer()
+                            if !isLocked {
+                                TextField("Add email…", text: $ccInput)
+                                    .font(.caption)
+                                    .textInputAutocapitalization(.never)
+                                    .keyboardType(.emailAddress)
+                                    .onSubmit { addRecipient(target: "cc") }
+                            }
                         }
                         HStack {
                             Text("BCC:").font(.caption).foregroundStyle(.secondary)
@@ -724,7 +751,13 @@ struct InlineComposeCardView: View {
                                 bcc.removeAll { $0.email == email }
                                 markDirty()
                             }
-                            Spacer()
+                            if !isLocked {
+                                TextField("Add email…", text: $bccInput)
+                                    .font(.caption)
+                                    .textInputAutocapitalization(.never)
+                                    .keyboardType(.emailAddress)
+                                    .onSubmit { addRecipient(target: "bcc") }
+                            }
                         }
                     }
                 }
@@ -846,30 +879,42 @@ struct InlineComposeCardView: View {
         }
     }
 
-    private func addRecipient(target: String) {
-        let trimmed = recipientInput.trimmingCharacters(in: .whitespaces)
+    @discardableResult
+    private func addRecipient(target: String) -> Bool {
+        let raw: String
+        switch target {
+        case "cc": raw = ccInput
+        case "bcc": raw = bccInput
+        default: raw = toInput
+        }
+        let trimmed = raw.trimmingCharacters(in: .whitespaces)
         // Reject empty, missing local part, missing domain, or any whitespace inside the address.
         guard let at = trimmed.firstIndex(of: "@"),
               at != trimmed.startIndex,
               at != trimmed.index(before: trimmed.endIndex),
-              !trimmed.contains(" ") else { return }
+              !trimmed.contains(" ") else { return false }
         let normalized = trimmed.lowercased()
         let r = (name: nil as String?, email: trimmed)
         func appendUnique(_ list: inout [(name: String?, email: String)]) {
             if !list.contains(where: { $0.email.lowercased() == normalized }) { list.append(r) }
         }
         switch target {
-        case "to": appendUnique(&to)
-        case "cc": appendUnique(&cc)
-        case "bcc": appendUnique(&bcc)
-        default: break
+        case "to": appendUnique(&to); toInput = ""
+        case "cc": appendUnique(&cc); ccInput = ""
+        case "bcc": appendUnique(&bcc); bccInput = ""
+        default: return false
         }
-        recipientInput = ""
         markDirty()
+        return true
     }
 
     private func handleSend() {
         guard let p = parsed else { return }
+        // Flush any typed-but-not-submitted recipients so they aren't silently dropped on send.
+        addRecipient(target: "to")
+        addRecipient(target: "cc")
+        addRecipient(target: "bcc")
+        guard !to.isEmpty else { return }
         // Cancel any pending autosave so it doesn't race the send mutation.
         debounceTask?.cancel()
         debounceTask = nil
@@ -1339,7 +1384,7 @@ struct WeeklyAgendaCardView: View {
     var body: some View {
         if let p = parsed {
             HStack(spacing: 0) {
-                ForEach(Array(p.days.prefix(7).enumerated()), id: \.element.id) { idx, day in
+                ForEach(Array(p.days.prefix(7).enumerated()), id: \.offset) { idx, day in
                     let date = parseDate(day.date)
                     let isToday = date.map { Calendar.current.isDateInToday($0) } ?? false
                     let total = day.eventCount + day.taskCount
@@ -1491,13 +1536,35 @@ private func isDatePast(_ iso: String) -> Bool {
 
 extension Color {
     init(hex: String) {
-        let hex = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
-        var rgb: UInt64 = 0
-        Scanner(string: hex).scanHexInt64(&rgb)
-        let r = Double((rgb >> 16) & 0xFF) / 255.0
-        let g = Double((rgb >> 8) & 0xFF) / 255.0
-        let b = Double(rgb & 0xFF) / 255.0
+        let (r, g, b) = Color.rgbComponents(fromHex: hex) ?? (0.906, 0.906, 0.906) // #E7E7E7 fallback
         self.init(red: r, green: g, blue: b)
+    }
+
+    /// Parses a 3/6/8-char hex string (with or without leading '#') into 0...1 RGB.
+    /// Returns nil for malformed input (wrong length or non-hex chars) so callers can fall back.
+    static func rgbComponents(fromHex raw: String) -> (Double, Double, Double)? {
+        let s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+            .uppercased()
+        guard s.allSatisfy({ $0.isHexDigit }) else { return nil }
+        var hex = s
+        if hex.count == 3 { hex = hex.map { "\($0)\($0)" }.joined() } // #RGB -> #RRGGBB
+        if hex.count == 8 { hex = String(hex.prefix(6)) }            // #RRGGBBAA -> drop alpha
+        guard hex.count == 6 else { return nil }
+        var rgb: UInt64 = 0
+        guard Scanner(string: hex).scanHexInt64(&rgb) else { return nil }
+        return (
+            Double((rgb >> 16) & 0xFF) / 255.0,
+            Double((rgb >> 8) & 0xFF) / 255.0,
+            Double(rgb & 0xFF) / 255.0
+        )
+    }
+
+    /// True when the given hex color is light enough that white foreground would be illegible.
+    static func isLightHex(_ hex: String) -> Bool {
+        guard let (r, g, b) = rgbComponents(fromHex: hex) else { return true }
+        // Relative luminance (sRGB approximation).
+        return (0.299 * r + 0.587 * g + 0.114 * b) > 0.6
     }
 }
 

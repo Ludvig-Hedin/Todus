@@ -508,9 +508,14 @@ struct SenderAvatarView: View {
 
     @Environment(AppServices.self) private var services
 
-    /// Index into the current candidates list. Advances when AsyncImage fails to load a URL,
+    /// Index into the snapshotted candidates list. Advances when AsyncImage fails to load a URL,
     /// giving a waterfall effect: try best → next → next → initials.
     @State private var urlIndex: Int = 0
+    /// Snapshot of the resolved candidate URLs for the current email. Frozen against
+    /// reordering (recordSuccess moves the winner to the front in the cache); only
+    /// re-adopted when the list *grows*, so a stable `urlIndex` never points at a
+    /// different URL mid-display (which caused avatar flicker).
+    @State private var resolvedCandidates: [URL] = []
 
     var body: some View {
         let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -539,12 +544,12 @@ struct SenderAvatarView: View {
         } else {
             // Network waterfall: initials base layer → try resolved URLs one by one.
             // Direct property access on @Observable triggers re-render when cache updates.
-            let candidates: [URL] = AvatarCache.shared.candidates(for: normalizedEmail) ?? []
+            let liveCandidates: [URL] = AvatarCache.shared.candidates(for: normalizedEmail) ?? []
             ZStack {
                 initialsCircle
 
-                if urlIndex < candidates.count {
-                    let currentURL = candidates[urlIndex]
+                if urlIndex < resolvedCandidates.count {
+                    let currentURL = resolvedCandidates[urlIndex]
                     AsyncImage(url: currentURL, transaction: Transaction(animation: .easeOut(duration: 0.15))) { phase in
                         switch phase {
                         case .success(let image):
@@ -573,7 +578,7 @@ struct SenderAvatarView: View {
                         case .failure:
                             Color.clear
                                 .onAppear {
-                                    if urlIndex < candidates.count {
+                                    if urlIndex < resolvedCandidates.count {
                                         urlIndex += 1
                                     }
                                 }
@@ -592,15 +597,25 @@ struct SenderAvatarView: View {
             .clipShape(Circle())
             .task(id: normalizedEmail) {
                 urlIndex = 0
+                // Adopt any already-cached candidates immediately (common path), then
+                // resolve and adopt the network result if it added more.
+                resolvedCandidates = AvatarCache.shared.candidates(for: normalizedEmail) ?? []
                 await AvatarCache.shared.resolveIfNeeded(
                     email: normalizedEmail,
                     name: name,
                     api: services.apiClient
                 )
+                let resolved = AvatarCache.shared.candidates(for: normalizedEmail) ?? []
+                if resolved.count > resolvedCandidates.count {
+                    resolvedCandidates = resolved
+                }
             }
-            .onChange(of: candidates.count) { _, newCount in
-                if urlIndex >= newCount && newCount > 0 {
-                    urlIndex = 0
+            .onChange(of: liveCandidates) { _, newCandidates in
+                // Adopt the resolved list on first populate or when it grows, but ignore
+                // pure reorders (same count) so recordSuccess can't shift urlIndex onto
+                // a different URL and cause flicker.
+                if newCandidates.count > resolvedCandidates.count {
+                    resolvedCandidates = newCandidates
                 }
             }
         }

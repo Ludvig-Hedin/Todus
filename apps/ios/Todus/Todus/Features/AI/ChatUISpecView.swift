@@ -198,11 +198,11 @@ struct CardContainerView<Content: View>: View {
             content()
         }
         .padding(padding)
-        .background(Color(.systemBackground).opacity(0.5))
+        .background(AppTheme.surfacePrimary)
         .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.compact, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: AppTheme.Radius.compact, style: .continuous)
-                .stroke(Color(.separator).opacity(0.3), lineWidth: 0.5)
+                .stroke(AppTheme.cardBorder, lineWidth: 1)
         )
     }
 }
@@ -254,7 +254,9 @@ struct ButtonElementView: View {
     private func handleTap() {
         guard let action = props["action"]?.stringValue else { return }
         var params: [String: String] = [:]
-        if let actionParams = props["actionParams"]?.objectValue {
+        // Accept both "actionParams" and "params" — different card emitters use
+        // different keys, and a button reading only one would silently no-op.
+        if let actionParams = props["actionParams"]?.objectValue ?? props["params"]?.objectValue {
             for (key, value) in actionParams {
                 if let str = value.stringValue {
                     params[key] = str

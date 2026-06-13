@@ -276,7 +276,7 @@ struct EmailComposeView: View {
             } message: {
                 Text(emailService.errorMessage ?? "Please check your connection and try again.")
             }
-            .navigationTitle(draft.replyToThreadId != nil ? "Reply" : "New Email")
+            .navigationTitle(draft.isForward ? "Forward" : (draft.replyToThreadId != nil ? "Reply" : "New Email"))
             .navigationBarTitleDisplayMode(.inline)
             // AI assistant — opens the full AI chat sheet on top of the composer, with
             // the email context pre-seeded into the input. The user asks naturally
@@ -888,7 +888,7 @@ struct EmailComposeView: View {
             clearAutosavedDraft()
             return
         }
-        let payload: [String: Any] = [
+        var payload: [String: Any] = [
             "to": draft.to,
             "cc": draft.cc,
             "bcc": draft.bcc,
@@ -896,6 +896,11 @@ struct EmailComposeView: View {
             "body": draft.body,
             "savedAt": Date().timeIntervalSince1970,
         ]
+        // Persist the chosen send account so reopening a backgrounded draft doesn't
+        // silently revert to the first connection (wrong send mailbox).
+        if let fromConnectionId = draft.fromConnectionId {
+            payload["fromConnectionId"] = fromConnectionId
+        }
         UserDefaults.standard.set(payload, forKey: autosaveKey)
     }
 
@@ -920,6 +925,10 @@ struct EmailComposeView: View {
         }
         if draft.body.isEmpty, let saved = payload["body"] as? String, !saved.isEmpty {
             draft.body = saved
+        }
+        // Restore the previously chosen send account before onAppear's default-fill runs.
+        if draft.fromConnectionId == nil, let saved = payload["fromConnectionId"] as? String, !saved.isEmpty {
+            draft.fromConnectionId = saved
         }
     }
 

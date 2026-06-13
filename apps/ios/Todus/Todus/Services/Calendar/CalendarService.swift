@@ -29,6 +29,9 @@ struct CalendarEvent: Identifiable, Sendable, Equatable {
     let calendarColorBlue: Double
     let calendarName: String
     let folderID: UUID?
+    /// EKCalendar.calendarIdentifier for Apple events (nil for non-Apple sources).
+    /// Used to build a real per-source id instead of a synthetic "apple:unknown".
+    let calendarId: String?
 }
 
 /// Shared calendar service actor that manages a single EKEventStore instance.
@@ -386,7 +389,10 @@ private extension EKEvent {
                 // Default blue (0x5B8DEF)
                 return (0.357, 0.553, 0.937)
             }
-            return (comps[0], comps[1], comps[2])
+            // Clamp to 0...1 — converting a P3/extended color to sRGB can produce
+            // out-of-gamut components that render as over-saturated colors via Color(red:…).
+            let clamp = { (v: CGFloat) in Double(max(0, min(1, v))) }
+            return (clamp(comps[0]), clamp(comps[1]), clamp(comps[2]))
         }()
 
         return CalendarEvent(
@@ -412,7 +418,8 @@ private extension EKEvent {
             calendarColorGreen: g,
             calendarColorBlue: b,
             calendarName: calendar?.title ?? "Calendar",
-            folderID: folderID
+            folderID: folderID,
+            calendarId: calendar?.calendarIdentifier
         )
     }
 

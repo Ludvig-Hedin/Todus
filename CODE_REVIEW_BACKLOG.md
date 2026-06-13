@@ -4,6 +4,52 @@ Last updated: 2026-06-13
 
 ---
 
+# Bug Hunt — 2026-06-13 — full iOS app (`/bug-hunt`)
+
+Full-app review via 5 parallel SwiftUI review agents (Services, Tasks/Folders/Home, Calendar, Email/AI/Docs, Settings/App/Nav). Build green before and after. ~22 real bugs found; high-confidence/safe ones auto-fixed, the rest deferred below.
+
+## Auto-fixed this pass (22 across 16 files — all build-verified)
+
+- `Features/Tasks/CalendarTaskView.swift` — inverted success haptic (fired on un-complete); capture `willBecomeDone` before toggle.
+- `Features/Search/GlobalSearchView.swift` — event dot used packed-RGB `calendarColor` as a hue → meaningless color; now uses `calendarColorRed/Green/Blue` like every other call site.
+- `Features/AI/CardViews.swift` — (1) robust `Color(hex:)` (3/6/8-char, validates hex, falls back) + new `rgbComponents`/`isLightHex`; (2) `LabelCardView` white tag-icon now luminance-aware (was invisible on light swatches); (3) WeeklyAgenda `ForEach` keyed by offset not duplicate date id; (4) empty-state messages for empty Calendar/Contact list cards (were blank bordered boxes).
+- `Features/AI/CardViews.swift` (InlineComposeCard) — CC/BCC had no input field (couldn't add recipients) + Send dropped typed-but-unsubmitted addresses. Added per-target inputs (`toInput`/`ccInput`/`bccInput`) + flush-on-send.
+- `Features/AI/ChatUISpecView.swift` — (1) button reads both `actionParams` and `params` (was silently no-op for `params` emitters); (2) card container uses visible `surfacePrimary`/`cardBorder` (was near-invisible `systemBackground.opacity(0.5)`).
+- `Features/Email/EmailComposeView.swift` — (1) forward title showed "New Email" (now "Forward"); (2) `fromConnectionId` persisted+restored in autosave (was reverting to first account on reopen).
+- `Features/Calendar/CalendarMonthView.swift` — month grid built with `bySetting:.day` (jumps months near boundaries/DST) → `byAdding`.
+- `Features/Calendar/CalendarTimeGridView.swift` — grid-tap minutes now clamped to a valid slot (bottom/overscroll tap yielded hour 24 → silent no-op).
+- `Services/Calendar/CalendarService.swift` — clamp sRGB-converted color components to 0...1 (P3 out-of-gamut rendered over-saturated).
+- `Features/Settings/RemindersSetupView.swift` — toggle path now clears stale `permissionDenied` banner + runs outbound `syncExistingTasksToReminders` for parity with `connect()`.
+- `Services/Voice/GeminiLiveProvider.swift` — input/output transcription emitted `isFinal:true` (REPLACE) → kept only last delta fragment; now `isFinal:false` (APPEND), finalized on `turnComplete`. Fixes both coordinator + VoiceChatViewModel consumers.
+- `Services/Voice/AudioPlayerManager.swift` — odd-byte PCM chunk caused 1-byte heap overflow in `memcpy`; copy only frame-aligned bytes.
+- `Features/Voice/VoiceChatViewModel.swift` — capture guard now accepts `.reconnecting` (was discarding started engine → mic-dead session).
+- `Features/Tasks/InboxView.swift` — `.dueDate` sort now breaks `(nil,nil)` tie by `createdAt`, matching Board/Table/Calendar (rows no longer reshuffle across views).
+- `Features/Docs/DocsListView.swift` — error empty-state Retry button + iPad detail pane loads a just-created doc not yet in `allDocs` (was stuck on "Select a document").
+- `Features/Tasks/CaptureComposer.swift` — `needsHighlights` triggered on any `_` (lone underscore in email/file) forcing attributed rewrite → keyboard dismiss; now tests the actual paired-italic regex.
+- `Domain/EmailModels.swift`, `Features/Email/EmailThreadView.swift` — removed unnecessary `nonisolated(unsafe)` (compiler warnings).
+
+## Second pass — ALL 13 deferred items now resolved (build + 94 unit tests green)
+
+The "deferred" items below were re-evaluated and resolved in the same session: 10 fixed in code, 3 verified to be non-bugs (no change needed).
+
+| ID | Area | Resolution |
+|----|------|-----------|
+| BH-0613-1 | Calendar (multi-account) | ✅ FIXED. Backend `calendar.calendars` already accepted `connectionId` (resolves target connection, user-scoped — no IDOR); added `accessRole` echo to its response (`apps/server/src/trpc/routes/calendar.ts`). Client `GoogleCalendarService` now passes `connectionId: conn.id` and decodes/uses the real `accessRole` (was hardcoded `"reader"`). |
+| BH-0613-2 | Calendar | ✅ FIXED. Added `calendarId` to `CalendarEvent` (set from `EKCalendar.calendarIdentifier`); `UnifiedCalendarService` builds `apple:{calId}` instead of `apple:unknown`. |
+| BH-0613-3 | Calendar | ✅ FIXED. `MultiDayPageView` column filter now uses an overlap test (`start < dayEnd && end > dayStart`) so cross-midnight events appear on each covered day. (EventKit's predicate already returns overlapping events, so no extra leading window pad needed.) |
+| BH-0613-4 | Calendar | ✅ FIXED. `loadMoreListEvents` dedupes appended events by id; the bottom trigger only re-fires when the list grows, so empty pages no longer loop. |
+| BH-0613-5 | Calendar | ✅ VERIFIED NOT A BUG. `didUpdate` is correct: new events set `editedEvent = self` (line 300) → `originalEvent === editingEvent` true → opens editor; existing events use `makeEditable()` clone → `editedEvent` points at the original → saves directly. |
+| BH-0613-6 | Navigation | ✅ FIXED (UX bug removed). The live `MainTabView` uses a fixed native tab bar and does not consume `tabBarTabs`, so the customization **onboarding step was a no-op** — removed it from the `RootView` chain + pending flags. The native bar (good UX) is kept; the customization components remain for if/when the dynamic tab bar is finished (out of scope: high-regression rebuild of core nav). |
+| BH-0613-7 | Settings | ✅ FIXED. Consolidated to a single source of truth: `AppServices.accentPreference.didSet` now mirrors to the server-synced `ios_accent_color` key and pushes `accentColor` to the server; both the Preferences and Appearance pickers drive `accentPreference`; removed the duplicate `accentColorKey` state + redundant onChange. (Visible app re-tinting via `.tint` remains a separate product decision — the footer already says some surfaces adopt the accent in a later release.) |
+| BH-0613-8 | Dead code | ✅ NOT A USER-FACING BUG. `MoreSheetView`/`DefaultMailOnboardingView`/`EmailAIDraftSheet` are never instantiated → zero runtime/UI effect. Left in place; deleting would require hand-editing `Todus.xcodeproj/project.pbxproj` (high risk, no user benefit). |
+| BH-0613-9 | Email | ✅ FIXED. `SenderAvatarView` snapshots candidate URLs into `@State` (`resolvedCandidates`), adopted on first populate + growth only — `recordSuccess` reordering the cache no longer shifts `urlIndex` onto a different URL (flicker gone). |
+| BH-0613-10 | App | ✅ FIXED. `RootView` snapshots the *set* of pending onboarding indices and computes the step as the position of the first still-pending flag — counts up monotonically even when a later step auto-skips first. |
+| BH-0613-11 | Voice | ✅ FIXED. `VoiceChatViewModel.handleEvent` ignores all events once `connectionState` is `.failed`, so a trailing provider event can't resurrect a torn-down session. |
+| BH-0613-12 | AI | ✅ FIXED (`addSavedPrompt` now dedupes by id / move-to-top). `aiCanSendEmail` verified NOT a bug — consistent with its two sibling flags and idempotent. |
+| BH-0613-13 | Calendar | ✅ FIXED. now-indicator dot accounts for the 0.5pt inter-column separators; `CalendarYearView` event dots index the full day-span (guard-capped) so multi-day events dot every covered day. |
+
+---
+
 # Web → Native parity — deferred sub-items (2026-06-13)
 
 Tracking follow-ups from the parity workstreams. Master plan:

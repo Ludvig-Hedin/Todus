@@ -602,7 +602,12 @@ struct CalendarTabView: View {
             to: end,
             preferences: services.calendarPreferences
         )
-        events.append(contentsOf: moreUnified.map { $0.legacyCalendarEvent })
+        // Dedupe by id — overlapping windows can re-return the tail of the previous
+        // page, and appending blindly would duplicate rows. If nothing new comes back
+        // the list doesn't grow, so the bottom load-more trigger won't re-fire.
+        let existingIDs = Set(events.map(\.id))
+        let newEvents = moreUnified.map { $0.legacyCalendarEvent }.filter { !existingIDs.contains($0.id) }
+        events.append(contentsOf: newEvents)
     }
 
     // MARK: - Event Presentation

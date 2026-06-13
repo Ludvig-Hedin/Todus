@@ -112,7 +112,7 @@ struct DocsListView: View {
                     .frame(maxWidth: .infinity, alignment: .center)
                     .listRowBackground(Color.clear)
             } else if let err = svc.lastError, svc.allDocs.isEmpty {
-                emptyState(message: err, showCreate: false)
+                emptyState(message: err, showCreate: false, showRetry: true)
                     .listRowBackground(Color.clear)
             } else if svc.workspaces.isEmpty {
                 emptyState(
@@ -391,7 +391,7 @@ struct DocsListView: View {
     }
 
     @ViewBuilder
-    private func emptyState(message: String, showCreate: Bool) -> some View {
+    private func emptyState(message: String, showCreate: Bool, showRetry: Bool = false) -> some View {
         VStack(spacing: 14) {
             Image(systemName: "doc.text")
                 .font(.system(size: 36, weight: .regular))
@@ -400,6 +400,15 @@ struct DocsListView: View {
                 .font(.system(size: 15))
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
+            if showRetry {
+                Button {
+                    Task { await services.docsService.refresh() }
+                } label: {
+                    Label("Retry", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier("docs.list.emptyState.retryButton")
+            }
             if showCreate {
                 Button {
                     Task { await createDoc() }
@@ -438,6 +447,11 @@ struct DocsListView: View {
             DocEditorView(doc: doc, isNewDoc: newlyCreatedDocID == id)
                 .id(doc.id)
                 .onAppear { newlyCreatedDocID = nil }
+        } else if let id = selectedDocID {
+            // A doc was selected (e.g. just created) before allDocs includes it —
+            // fetch it instead of showing the "Select a document" placeholder.
+            ProgressView()
+                .task { _ = await services.docsService.getDoc(id: id) }
         } else {
             VStack(spacing: 12) {
                 Image(systemName: "doc.text.magnifyingglass")

@@ -44,7 +44,8 @@ extension UnifiedCalendarEvent {
             calendarColorGreen: colorGreen,
             calendarColorBlue: colorBlue,
             calendarName: calendarName,
-            folderID: nil
+            folderID: nil,
+            calendarId: nil
         )
     }
 }
@@ -138,7 +139,7 @@ final class UnifiedCalendarService {
                 startDate: ev.startDate,
                 endDate: ev.endDate,
                 isAllDay: ev.isAllDay,
-                sourceId: "\(CalendarSourceIDPrefix.apple):unknown",
+                sourceId: "\(CalendarSourceIDPrefix.apple):\(ev.calendarId ?? "unknown")",
                 calendarName: ev.calendarName,
                 colorRed: ev.calendarColorRed,
                 colorGreen: ev.calendarColorGreen,

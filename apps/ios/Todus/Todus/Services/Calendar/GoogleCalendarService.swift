@@ -37,6 +37,9 @@ struct GoogleCalendarListEntry: Decodable, Sendable {
     let name: String
     let color: String
     let primary: Bool
+    /// Google access role: owner / writer / reader / freeBusyReader.
+    /// Optional for backward compatibility with older server responses.
+    let accessRole: String?
 }
 
 /// Service for fetching Google Calendar data through our backend tRPC routes.
@@ -312,8 +315,15 @@ final class GoogleCalendarService {
             let calendars: [GoogleCalendarListEntry]?
             let scopeMissing: Bool?
         }
+        struct CalendarsInput: Encodable { let connectionId: String }
         do {
-            let response: Response = try await api.trpcQuery("calendar.calendars")
+            // Scope the query to THIS connection so multi-account users get each
+            // Google account's own calendars (the backend resolves the target
+            // connection from connectionId; it's user-scoped, so no IDOR).
+            let response: Response = try await api.trpcQuery(
+                "calendar.calendars",
+                input: CalendarsInput(connectionId: conn.id)
+            )
             if response.scopeMissing == true {
                 return (conn.id, [], true)
             }
@@ -324,7 +334,7 @@ final class GoogleCalendarService {
                     calendarId: entry.id,
                     name: entry.name,
                     hexColor: entry.color,
-                    accessRole: "reader", // backend doesn't echo accessRole in `calendar.calendars` today
+                    accessRole: entry.accessRole ?? "reader",
                     isPrimary: entry.primary
                 )
             }

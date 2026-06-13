@@ -300,8 +300,11 @@ struct CalendarMonthView: View {
         guard let daysInMonth = cal.range(of: .day, in: .month, for: date) else {
             return dates.isEmpty ? [firstDayOfMonth] : dates
         }
+        // Use byAdding (offset from the first day) instead of bySetting:.day, which
+        // searches forward for the next matching day-of-month and can jump into the
+        // following month near boundaries / DST, producing a wrong or duplicated grid.
         for day in daysInMonth {
-            if let d = cal.date(bySetting: .day, value: day, of: firstDayOfMonth) {
+            if let d = cal.date(byAdding: .day, value: day - 1, to: firstDayOfMonth) {
                 dates.append(d)
             }
         }

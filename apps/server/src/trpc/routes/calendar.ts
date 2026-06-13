@@ -301,6 +301,9 @@ export const calendarRouter = router({
       name: c.summary,
       color: c.backgroundColor ?? '#5484ed',
       primary: c.primary ?? false,
+      // Echo the access role so clients know which calendars are writable
+      // (owner/writer) vs read-only (reader/freeBusyReader) instead of guessing.
+      accessRole: c.accessRole ?? 'reader',
     }));
 
     return { calendars, scopeMissing: false };

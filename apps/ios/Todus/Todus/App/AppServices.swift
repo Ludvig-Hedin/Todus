@@ -298,7 +298,13 @@ final class AppServices {
     /// when the user picks one. Default `.blue`.
     var accentPreference: AccentPreference {
         didSet {
+            guard oldValue != accentPreference else { return }
             defaults.set(accentPreference.rawValue, forKey: Keys.accentPreference)
+            // Keep the server-synced `ios_accent_color` key in lockstep and push to
+            // the server, so the Preferences and Appearance pickers (and other
+            // devices) never disagree. Single source of truth = accentPreference.
+            defaults.set(accentPreference.rawValue, forKey: "ios_accent_color")
+            Task { await syncSetting("accentColor", accentPreference.rawValue) }
         }
     }
     var developerModeEnabled: Bool {
@@ -634,8 +640,12 @@ final class AppServices {
         let storedAppearance = defaults.string(forKey: Keys.appearancePreference)
             .flatMap(AppAppearancePreference.init(rawValue:))
             ?? .system
+        // Single source of truth for the brand accent. Fall back to the
+        // server-synced `ios_accent_color` key (written by the settings response)
+        // so a cross-device accent choice is adopted on a fresh local install.
         let storedAccent = defaults.string(forKey: Keys.accentPreference)
             .flatMap(AccentPreference.init(rawValue:))
+            ?? defaults.string(forKey: "ios_accent_color").flatMap(AccentPreference.init(rawValue:))
             ?? .blue
         let storedStartView = defaults.string(forKey: Keys.preferredStartViewMode)
             .flatMap(TaskViewMode.init(rawValue:))

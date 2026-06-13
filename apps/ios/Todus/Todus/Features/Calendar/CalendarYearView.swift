@@ -62,10 +62,24 @@ struct CalendarYearView: View {
         cal: Calendar
     ) -> [YearMonthKey: Set<Int>] {
         var dict: [YearMonthKey: Set<Int>] = [:]
-        for event in events {
-            let comps = cal.dateComponents([.year, .month, .day], from: event.startDate)
-            guard let y = comps.year, let m = comps.month, let d = comps.day else { continue }
+        func mark(_ date: Date) {
+            let comps = cal.dateComponents([.year, .month, .day], from: date)
+            guard let y = comps.year, let m = comps.month, let d = comps.day else { return }
             dict[YearMonthKey(year: y, month: m), default: []].insert(d)
+        }
+        for event in events {
+            // Mark every day the event spans, not just its start day, so multi-day
+            // events show a dot on each covered day. Guard-capped against runaway spans.
+            var dayCursor = cal.startOfDay(for: event.startDate)
+            var guardCount = 0
+            while dayCursor < event.endDate && guardCount < 400 {
+                mark(dayCursor)
+                guard let next = cal.date(byAdding: .day, value: 1, to: dayCursor) else { break }
+                dayCursor = next
+                guardCount += 1
+            }
+            // Zero/negative-duration events still get their start day marked.
+            if event.endDate <= event.startDate { mark(event.startDate) }
         }
         return dict
     }

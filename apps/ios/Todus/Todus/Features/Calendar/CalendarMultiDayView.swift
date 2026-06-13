@@ -267,8 +267,13 @@ private struct MultiDayPageView: View {
             Divider()
 
             let columns = dates.map { date in
+                let dayStart = cal.startOfDay(for: date)
+                let dayEnd = cal.date(byAdding: .day, value: 1, to: dayStart) ?? date
+                // Overlap test instead of same-day start, so an event crossing midnight
+                // (e.g. 23:00 yesterday → 01:00 today) appears on today's column too.
+                // The grid layout already clamps start≥0 and end≤24:00 per column.
                 let dayEvents = events.filter {
-                    !$0.isAllDay && cal.isDate($0.startDate, inSameDayAs: date)
+                    !$0.isAllDay && $0.startDate < dayEnd && $0.endDate > dayStart
                 }
                 return CalendarTimeGridColumn(date: date, events: dayEvents)
             }

@@ -258,10 +258,13 @@ private struct CalendarTaskCard: View {
         HStack(alignment: .center, spacing: 6) {
             Button {
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                // Capture intent BEFORE the toggle flips `completed`, otherwise the
+                // success haptic fires on un-complete instead of complete.
+                let willBecomeDone = !task.completed
                 withAnimation(AppTheme.Motion.base) {
                     services.captureService.toggleCompletion(task, in: modelContext)
                 }
-                if !task.completed {
+                if willBecomeDone {
                     UINotificationFeedbackGenerator().notificationOccurred(.success)
                 }
             } label: {

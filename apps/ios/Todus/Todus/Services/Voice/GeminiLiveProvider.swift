@@ -442,16 +442,19 @@ final class GeminiLiveProvider: VoiceProvider, @unchecked Sendable {
             }
         }
 
-        // Input transcription — what the user said
+        // Input transcription — what the user said. Gemini streams these as incremental
+        // delta chunks, so emit isFinal:false to APPEND; the turn is committed on
+        // turnComplete. Emitting isFinal:true here would REPLACE, keeping only the last
+        // fragment of the utterance.
         if let inputTranscription = content["inputTranscription"] as? [String: Any],
            let text = inputTranscription["text"] as? String, !text.isEmpty {
-            yield(.transcriptUpdate(role: .user, text: text, isFinal: true))
+            yield(.transcriptUpdate(role: .user, text: text, isFinal: false))
         }
 
-        // Output transcription — text version of what the model said
+        // Output transcription — text version of what the model said (also delta chunks).
         if let outputTranscription = content["outputTranscription"] as? [String: Any],
            let text = outputTranscription["text"] as? String, !text.isEmpty {
-            yield(.transcriptUpdate(role: .assistant, text: text, isFinal: true))
+            yield(.transcriptUpdate(role: .assistant, text: text, isFinal: false))
         }
 
         // Turn complete

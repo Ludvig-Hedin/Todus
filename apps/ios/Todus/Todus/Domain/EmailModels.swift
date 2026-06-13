@@ -116,7 +116,7 @@ struct EmailMessage: Decodable, Identifiable {
         f.formatOptions = [.withInternetDateTime]
         return f
     }()
-    private nonisolated(unsafe) static let rfcFormatters: [DateFormatter] = {
+    private static let rfcFormatters: [DateFormatter] = {
         ["EEE, dd MMM yyyy HH:mm:ss Z", "dd MMM yyyy HH:mm:ss Z", "yyyy-MM-dd'T'HH:mm:ss.SSSZ"].map { fmt in
             let f = DateFormatter()
             f.locale = Locale(identifier: "en_US_POSIX")
