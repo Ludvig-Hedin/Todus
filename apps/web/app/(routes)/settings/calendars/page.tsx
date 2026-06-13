@@ -14,9 +14,10 @@ import { SettingsCard } from '@/components/settings/settings-card';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Link } from 'react-router';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTRPC } from '@/providers/query-provider';
 import { useSettings } from '@/hooks/use-settings';
+import { useCalendarVisibility } from '@/lib/calendar-visibility';
 import { m } from '@/paraglide/messages';
 import { toast } from 'sonner';
 
@@ -25,6 +26,11 @@ export default function CalendarsSettingsPage() {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const { mutateAsync: saveUserSettings } = useMutation(trpc.settings.save.mutationOptions());
+  const { data: calendarsData } = useQuery(
+    trpc.calendar.calendars.queryOptions(undefined, { staleTime: 1000 * 60 * 10 }),
+  );
+  const calendars = calendarsData?.calendars ?? [];
+  const { isHidden, toggle: toggleCalendar } = useCalendarVisibility();
 
   const hideAppleSide = (data?.settings as any)?.hideAppleSideGmailDuplicates ?? true;
 
@@ -60,21 +66,50 @@ export default function CalendarsSettingsPage() {
           </Button>
         }
       >
-        <div className="border-border/60 rounded-md border border-dashed px-4 py-8 text-center">
-          <CalendarDays className="text-muted-foreground/50 mx-auto h-8 w-8" />
-          <p className="text-muted-foreground mt-2 text-sm">
-            Connect a Google account from the Connections page to surface its calendars here.
-          </p>
-          <p className="text-muted-foreground mt-1 text-xs">
-            Per-calendar toggles and colors will appear once at least one account is connected.
-          </p>
-          <Button asChild variant="ghost" size="sm" className="mt-3">
-            <Link to="/settings/connections">
-              <LinkIcon className="mr-1.5 h-3.5 w-3.5" />
-              Open Connections
-            </Link>
-          </Button>
-        </div>
+        {calendars.length > 0 ? (
+          <div className="flex flex-col gap-1">
+            {calendars.map((cal) => {
+              const visible = !isHidden(cal.id);
+              return (
+                <div
+                  key={cal.id}
+                  className="flex items-center justify-between rounded-lg border p-3 shadow-sm"
+                >
+                  <div className="flex min-w-0 items-center gap-2.5">
+                    <span
+                      className="h-3.5 w-3.5 shrink-0 rounded-[4px] border"
+                      style={{ backgroundColor: cal.color, borderColor: cal.color }}
+                      aria-hidden
+                    />
+                    <span className="truncate text-sm font-medium">{cal.name}</span>
+                    {cal.primary ? (
+                      <span className="text-muted-foreground bg-muted/60 rounded-full px-1.5 py-0.5 text-[10px]">
+                        Primary
+                      </span>
+                    ) : null}
+                  </div>
+                  <Switch checked={visible} onCheckedChange={() => toggleCalendar(cal.id)} />
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="border-border/60 rounded-md border border-dashed px-4 py-8 text-center">
+            <CalendarDays className="text-muted-foreground/50 mx-auto h-8 w-8" />
+            <p className="text-muted-foreground mt-2 text-sm">
+              Connect a Google account from the Connections page to surface its calendars here.
+            </p>
+            <p className="text-muted-foreground mt-1 text-xs">
+              Per-calendar toggles and colors will appear once at least one account is connected.
+            </p>
+            <Button asChild variant="ghost" size="sm" className="mt-3">
+              <Link to="/settings/connections">
+                <LinkIcon className="mr-1.5 h-3.5 w-3.5" />
+                Open Connections
+              </Link>
+            </Button>
+          </div>
+        )}
       </SettingsCard>
 
       <SettingsCard

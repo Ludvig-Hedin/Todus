@@ -61,8 +61,9 @@ import {
   eventToFormValues,
   emptyFormValues,
 } from '@/lib/calendar-event-form';
+import { useCalendarVisibility } from '@/lib/calendar-visibility';
 
-type CalendarEvent = Outputs['calendar']['events']['events'][number];
+type CalendarEvent = Outputs['calendar']['eventsMulti']['events'][number];
 
 // Auth guard
 export async function clientLoader({ request }: Route.ClientLoaderArgs) {
@@ -156,7 +157,7 @@ export default function CalendarPage() {
   }, [viewMode, selectedDate, displayMonth, visibleWeekStart, visibleWeekEnd]);
 
   const { data: eventsData, isLoading: eventsLoading, isFetching: isFetchingEvents } = useQuery(
-    trpc.calendar.events.queryOptions(
+    trpc.calendar.eventsMulti.queryOptions(
       {
         timeMin: eventsTimeMin,
         timeMax: eventsTimeMax,
@@ -167,9 +168,26 @@ export default function CalendarPage() {
       },
     ),
   );
-  const calendarEvents = useMemo<CalendarEvent[]>(() => eventsData?.events ?? [], [eventsData]);
+  const allEvents = useMemo<CalendarEvent[]>(() => eventsData?.events ?? [], [eventsData]);
   // scopeMissing = true means the token lacks calendar.readonly (needs re-auth)
   const scopeMissing = eventsData?.scopeMissing ?? false;
+
+  // ── Calendar list + per-calendar visibility ─────────────────────────────────
+  const { data: calendarsData } = useQuery(
+    trpc.calendar.calendars.queryOptions(undefined, {
+      staleTime: 1000 * 60 * 10,
+      refetchOnMount: false,
+    }),
+  );
+  const calendars = useMemo(() => calendarsData?.calendars ?? [], [calendarsData]);
+  const { isHidden, toggle: toggleCalendar } = useCalendarVisibility();
+
+  // Only events on visible calendars reach the grid. Events without a
+  // calendarId are treated as 'primary'.
+  const calendarEvents = useMemo<CalendarEvent[]>(
+    () => allEvents.filter((e) => !isHidden(e.calendarId ?? 'primary')),
+    [allEvents, isHidden],
+  );
 
   // Keep displayMonth in sync when selectedDate jumps to a different month
   // (e.g. user clicked an out-of-month day in the grid). Deps intentionally
@@ -205,11 +223,12 @@ export default function CalendarPage() {
     open: boolean;
     mode: EventDialogMode;
     eventId: string | null;
+    calendarId: string;
     values: EventFormValues;
-  }>({ open: false, mode: 'create', eventId: null, values: emptyFormValues() });
+  }>({ open: false, mode: 'create', eventId: null, calendarId: 'primary', values: emptyFormValues() });
 
   const invalidateEvents = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: trpc.calendar.events.queryKey() });
+    queryClient.invalidateQueries({ queryKey: trpc.calendar.eventsMulti.queryKey() });
   }, [queryClient, trpc]);
 
   const createEvent = useMutation({
@@ -247,6 +266,7 @@ export default function CalendarPage() {
       open: true,
       mode: 'create',
       eventId: null,
+      calendarId: 'primary',
       values: emptyFormValues({ start, end }),
     });
   }, []);
@@ -259,6 +279,7 @@ export default function CalendarPage() {
         open: true,
         mode: 'edit',
         eventId,
+        calendarId: ev.calendarId ?? 'primary',
         values: eventToFormValues({
           title: ev.title,
           description: ev.description,
@@ -275,16 +296,16 @@ export default function CalendarPage() {
   const handleSaveEvent = useCallback(
     (values: EventFormValues) => {
       if (eventDialog.mode === 'create') {
-        createEvent.mutate(buildCreatePayload(values, 'primary'));
+        createEvent.mutate(buildCreatePayload(values, eventDialog.calendarId));
       } else if (eventDialog.eventId) {
         updateEvent.mutate({
-          calendarId: 'primary',
+          calendarId: eventDialog.calendarId,
           eventId: eventDialog.eventId,
           patch: buildUpdatePatch(values),
         });
       }
     },
-    [eventDialog.mode, eventDialog.eventId, createEvent, updateEvent],
+    [eventDialog.mode, eventDialog.eventId, eventDialog.calendarId, createEvent, updateEvent],
   );
 
   // ── Derived data ───────────────────────────────────────────────────────────
@@ -502,6 +523,49 @@ export default function CalendarPage() {
             </div>
           </div>
 
+          {/* Calendars — per-calendar visibility toggles */}
+          {calendars.length > 0 && (
+            <>
+              <Separator className="my-3" />
+              <div>
+                <p className="text-muted-foreground mb-2 text-[11px] font-semibold uppercase tracking-wide">
+                  Calendars
+                </p>
+                <div className="flex flex-col gap-0.5">
+                  {calendars.map((cal) => {
+                    const visible = !isHidden(cal.id);
+                    return (
+                      <button
+                        key={cal.id}
+                        type="button"
+                        onClick={() => toggleCalendar(cal.id)}
+                        aria-pressed={visible}
+                        className="hover:bg-accent flex items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[13px] transition-colors"
+                      >
+                        <span
+                          className="h-3 w-3 shrink-0 rounded-[4px] border"
+                          style={{
+                            backgroundColor: visible ? cal.color : 'transparent',
+                            borderColor: cal.color,
+                          }}
+                          aria-hidden
+                        />
+                        <span
+                          className={cn(
+                            'truncate',
+                            !visible && 'text-muted-foreground line-through',
+                          )}
+                        >
+                          {cal.name}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </>
+          )}
+
           {/* Google Calendar scope notice — shown only when auth re-needed */}
           {scopeMissing && (
             <>
@@ -582,7 +646,11 @@ export default function CalendarPage() {
         onSave={handleSaveEvent}
         onDelete={
           eventDialog.eventId
-            ? () => deleteEvent.mutate({ calendarId: 'primary', eventId: eventDialog.eventId! })
+            ? () =>
+                deleteEvent.mutate({
+                  calendarId: eventDialog.calendarId,
+                  eventId: eventDialog.eventId!,
+                })
             : undefined
         }
       />
