@@ -25,6 +25,17 @@ import Editor from '@/components/create/editor';
 import { Editor as TiptapEditor } from '@tiptap/react';
 import type { JSONContent } from 'novel';
 import { useRef, useCallback, useState, useEffect } from 'react';
+import { Button } from '@/components/ui/button';
+import { Trash2 } from 'lucide-react';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { toast } from 'sonner';
 
 // Auth guard — redirect to login if no session
 export async function clientLoader({ request }: Route.ClientLoaderArgs) {
@@ -114,6 +125,20 @@ export default function DocEditorPage() {
     onSuccess: () => {
       void queryClient.invalidateQueries(trpc.docs.get.queryFilter({ id: docId! }));
       void queryClient.invalidateQueries(trpc.docs.list.queryFilter());
+    },
+  });
+
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const deleteDoc = useMutation({
+    ...trpc.docs.delete.mutationOptions(),
+    onSuccess: () => {
+      void queryClient.invalidateQueries(trpc.docs.list.queryFilter());
+      setConfirmDeleteOpen(false);
+      toast.success('Page deleted');
+      void navigate('/mail/docs');
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'Could not delete page');
     },
   });
 
@@ -208,13 +233,13 @@ export default function DocEditorPage() {
           {/* Title — Affine-style large h1.
               data-doc-page-title lets native iOS / macOS shells inject CSS to
               hide this row when they render their own title TextField. */}
-          <div data-doc-page-title className="px-12 pb-0 pt-10">
+          <div data-doc-page-title className="flex items-start gap-2 px-12 pb-0 pt-10">
             <input
               type="text"
               value={title}
               placeholder="Untitled"
               aria-label="Document title"
-              className="text-foreground w-full rounded-md bg-transparent text-4xl font-bold tracking-tight outline-none placeholder:text-gray-300 focus-visible:ring-1 focus-visible:ring-ring dark:placeholder:text-gray-600"
+              className="text-foreground w-full flex-1 rounded-md bg-transparent text-4xl font-bold tracking-tight outline-none placeholder:text-gray-300 focus-visible:ring-1 focus-visible:ring-ring dark:placeholder:text-gray-600"
               onChange={(e) => setTitle(e.target.value)}
               onBlur={() => saveTitle(title)}
               onKeyDown={(e) => {
@@ -223,6 +248,15 @@ export default function DocEditorPage() {
                 }
               }}
             />
+            <Button
+              variant="ghost"
+              size="icon"
+              className="text-muted-foreground hover:text-destructive mt-1 shrink-0"
+              onClick={() => setConfirmDeleteOpen(true)}
+              aria-label="Delete page"
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
           </div>
 
           {/* Divider between title and body. Tagged data-doc-page-title so
@@ -244,6 +278,30 @@ export default function DocEditorPage() {
           </div>
         </div>
       </ResizablePanel>
+
+      <Dialog open={confirmDeleteOpen} onOpenChange={setConfirmDeleteOpen}>
+        <DialogContent className="sm:max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle className="text-[15px]">Delete page?</DialogTitle>
+            <DialogDescription className="text-[12px]">
+              This permanently deletes “{title || 'Untitled'}”. This can’t be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setConfirmDeleteOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => docId && deleteDoc.mutate({ id: docId })}
+              disabled={deleteDoc.isPending}
+            >
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </ResizablePanelGroup>
   );
 }

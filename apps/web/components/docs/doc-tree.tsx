@@ -7,11 +7,12 @@
  * - Workspace sections are collapsible with an inline "+" on hover
  * - No mandatory workspace setup step
  */
-import { ChevronRight, ChevronDown, FileText, Plus, PenLine } from 'lucide-react';
+import { ChevronRight, ChevronDown, FileText, Plus, PenLine, Search, X } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTRPC } from '@/providers/query-provider';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { useEffect, useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
 
@@ -136,6 +137,20 @@ export function DocTree({ selectedDocId, onSelectDoc }: DocTreeProps) {
   const queryClient = useQueryClient();
   const autoCreatedRef = useRef(false);
 
+  // ── Search ──────────────────────────────────────────────────────────────────
+  const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search.trim()), 250);
+    return () => clearTimeout(t);
+  }, [search]);
+  const isSearching = debouncedSearch.length >= 2;
+  const { data: searchData, isFetching: searchFetching } = useQuery({
+    ...trpc.docs.search.queryOptions({ query: debouncedSearch }),
+    enabled: isSearching,
+  });
+  const searchResults = searchData?.docs ?? [];
+
   const { data, isLoading, isError, error, refetch, isRefetching } = useQuery(
     trpc.docs.workspaces.list.queryOptions(),
   );
@@ -222,7 +237,65 @@ export function DocTree({ selectedDocId, onSelectDoc }: DocTreeProps) {
         )}
       </div>
 
-      {/* Workspace tree */}
+      {/* Search */}
+      <div className="border-b px-2.5 py-2">
+        <div className="relative">
+          <Search className="text-muted-foreground/60 pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2" />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search docs…"
+            aria-label="Search docs"
+            className="h-7 pl-7 pr-7 text-[12px]"
+          />
+          {search && (
+            <button
+              type="button"
+              onClick={() => setSearch('')}
+              aria-label="Clear search"
+              className="text-muted-foreground/60 hover:text-foreground absolute right-2 top-1/2 -translate-y-1/2"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {isSearching ? (
+        /* Search results */
+        <div className="flex-1 overflow-y-auto py-1.5 pr-1">
+          {searchFetching && searchResults.length === 0 ? (
+            <div className="space-y-2 px-3 py-2">
+              <Skeleton className="h-4 w-3/4 rounded" />
+              <Skeleton className="h-4 w-1/2 rounded" />
+            </div>
+          ) : searchResults.length === 0 ? (
+            <p className="text-muted-foreground px-3 py-2 text-[12px]">No matching pages.</p>
+          ) : (
+            <div className="space-y-0.5 px-1.5">
+              {searchResults.map((d) => (
+                <button
+                  key={d.id}
+                  onClick={() => onSelectDoc(d.id)}
+                  className={cn(
+                    'flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] transition-colors',
+                    selectedDocId === d.id
+                      ? 'bg-accent text-accent-foreground font-medium'
+                      : 'text-foreground/80 hover:bg-accent/40 hover:text-foreground',
+                  )}
+                >
+                  <FileText className="text-muted-foreground h-3.5 w-3.5 shrink-0" />
+                  <span className="flex-1 truncate">
+                    {d.emoji ? `${d.emoji} ` : ''}
+                    {d.title || 'Untitled'}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      ) : (
+      /* Workspace tree */
       <div className="flex-1 overflow-y-auto py-1.5 pr-1">
         {isSettingUp ? (
           <div className="space-y-2 px-3 py-2">
@@ -253,6 +326,7 @@ export function DocTree({ selectedDocId, onSelectDoc }: DocTreeProps) {
           </>
         )}
       </div>
+      )}
     </div>
   );
 }
