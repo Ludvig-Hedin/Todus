@@ -60,12 +60,35 @@ jobs:
       - name: Validate macOS wrapper entrypoint
         run: node --check apps/macos/main.mjs
 
-  eas-build:
-    name: EAS Build (${{ github.event.inputs.platform }} / ${{ github.event.inputs.profile }})
+  # The `secrets` context is NOT available in job-level `if:` expressions —
+  # referencing it there is a workflow validation error and makes GitHub mark
+  # the file as a startup_failure on every push. Surface the secret's presence
+  # as a job output instead (job-level `env` *can* read secrets).
+  check-secrets:
+    name: Check release secrets
     needs: native-qa
     runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    outputs:
+      has_expo_token: ${{ steps.check.outputs.has_expo_token }}
+    steps:
+      - name: Detect EXPO_TOKEN
+        id: check
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          if [ -n "$EXPO_TOKEN" ]; then
+            echo "has_expo_token=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_expo_token=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  eas-build:
+    name: EAS Build (${{ github.event.inputs.platform }} / ${{ github.event.inputs.profile }})
+    needs: [native-qa, check-secrets]
+    runs-on: ubuntu-latest
     timeout-minutes: 30
-    if: ${{ github.event_name == 'workflow_dispatch' && secrets.EXPO_TOKEN != '' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && needs.check-secrets.outputs.has_expo_token == 'true' }}
     env:
       EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
     defaults:
@@ -107,9 +130,9 @@ jobs:
 
   eas-build-skipped:
     name: EAS Build Skipped
-    needs: native-qa
+    needs: [native-qa, check-secrets]
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'workflow_dispatch' && secrets.EXPO_TOKEN == '' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && needs.check-secrets.outputs.has_expo_token != 'true' }}
     steps:
       - name: Missing EXPO_TOKEN
         run: |
