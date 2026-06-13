@@ -15,6 +15,16 @@ settings:
     SWIFT_VERSION: "6.0"
     CODE_SIGN_STYLE: Automatic
 
+# MLX local-inference packages. Previously these were added to the project via the
+# Xcode UI only, so they were missing from project.yml — any `xcodegen generate`
+# silently dropped them and broke the app's Cmlx/_NumericsShims resolution. Declaring
+# them here makes the project regen-safe (see MAC-1). Cmlx/_NumericsShims come
+# transitively via mlx-swift-examples' MLXLLM/MLXLMCommon products.
+packages:
+  mlx-swift-examples:
+    url: https://github.com/ml-explore/mlx-swift-examples
+    majorVersion: 2.29.1
+
 targets:
   TodusMac:
     type: application
@@ -43,6 +53,10 @@ targets:
         embed: false
       - target: TodusMacWidgets
         embed: true
+      - package: mlx-swift-examples
+        product: MLXLLM
+      - package: mlx-swift-examples
+        product: MLXLMCommon
     settings:
       base:
         PRODUCT_NAME: Todus
@@ -80,19 +94,20 @@ targets:
   TodusMacTests:
     type: bundle.unit-test
     platform: macOS
+    # Standalone (host-less) logic-test bundle: compiles the Foundation-only decode
+    # types directly instead of `@testable import`-ing the MLX-linked host app. The
+    # testable host rebuild couldn't resolve MLX's Cmlx/_NumericsShims C modules
+    # (MAC-1); a pure-logic decode test doesn't need the app at all. Add more
+    # Foundation-only sources here if future tests need them.
     sources:
       - path: TodusMacTests
-    dependencies:
-      - target: TodusMac
+      - path: TodusMac/Domain/EmailModels.swift
+      - path: TodusMac/Domain/EmailThreadResponse.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.ludvighedin.todus.macos.tests
         GENERATE_INFOPLIST_FILE: YES
         MACOSX_DEPLOYMENT_TARGET: "15.0"
-        # The host app's PRODUCT_NAME is "Todus" (not the target name "TodusMac"),
-        # so the built product is Todus.app — point TEST_HOST/BUNDLE_LOADER at it.
-        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Todus.app/Contents/MacOS/Todus"
-        BUNDLE_LOADER: "$(TEST_HOST)"
 
 schemes:
   TodusMac:
@@ -101,13 +116,20 @@ schemes:
         TodusMac: all
     run:
       config: Debug
-    test:
-      config: Debug
-      targets:
-        - TodusMacTests
     analyze:
       config: Debug
     archive:
       config: Release
     profile:
       config: Release
+  # Dedicated scheme so `xcodebuild test -scheme TodusMacTests` builds ONLY the
+  # standalone test bundle (Foundation-only sources) and never the MLX-linked app —
+  # avoiding the Cmlx/_NumericsShims resolution failure in the test build context.
+  TodusMacTests:
+    build:
+      targets:
+        TodusMacTests: [test]
+    test:
+      config: Debug
+      targets:
+        - TodusMacTests

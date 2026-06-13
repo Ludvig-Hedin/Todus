@@ -1,5 +1,7 @@
 import XCTest
-@testable import Todus
+// Host-less test bundle: EmailModels.swift + EmailThreadResponse.swift are compiled
+// directly into this target (see project.yml), so no `@testable import` of the
+// MLX-linked host is needed. See MAC-1.
 
 /// Regression tests for email model decoding tolerance.
 ///

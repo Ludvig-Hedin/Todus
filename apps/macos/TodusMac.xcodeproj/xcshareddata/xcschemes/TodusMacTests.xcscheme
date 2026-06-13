@@ -9,15 +9,15 @@
       <BuildActionEntries>
          <BuildActionEntry
             buildForTesting = "YES"
-            buildForRunning = "YES"
-            buildForProfiling = "YES"
-            buildForArchiving = "YES"
-            buildForAnalyzing = "YES">
+            buildForRunning = "NO"
+            buildForProfiling = "NO"
+            buildForArchiving = "NO"
+            buildForAnalyzing = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "D9E95D26876E07FF218F214A"
-               BuildableName = "TodusMac.app"
-               BlueprintName = "TodusMac"
+               BlueprintIdentifier = "A12C09E2545DCAE94709093E"
+               BuildableName = "TodusMacTests.xctest"
+               BlueprintName = "TodusMacTests"
                ReferencedContainer = "container:TodusMac.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
@@ -32,14 +32,27 @@
       <MacroExpansion>
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "D9E95D26876E07FF218F214A"
-            BuildableName = "TodusMac.app"
-            BlueprintName = "TodusMac"
+            BlueprintIdentifier = "A12C09E2545DCAE94709093E"
+            BuildableName = "TodusMacTests.xctest"
+            BlueprintName = "TodusMacTests"
             ReferencedContainer = "container:TodusMac.xcodeproj">
          </BuildableReference>
       </MacroExpansion>
       <Testables>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "A12C09E2545DCAE94709093E"
+               BuildableName = "TodusMacTests.xctest"
+               BlueprintName = "TodusMacTests"
+               ReferencedContainer = "container:TodusMac.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
+      <CommandLineArguments>
+      </CommandLineArguments>
    </TestAction>
    <LaunchAction
       buildConfiguration = "Debug"
@@ -51,18 +64,15 @@
       debugDocumentVersioning = "YES"
       debugServiceExtension = "internal"
       allowLocationSimulation = "YES">
-      <BuildableProductRunnable
-         runnableDebuggingMode = "0">
+      <MacroExpansion>
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "D9E95D26876E07FF218F214A"
-            BuildableName = "TodusMac.app"
-            BlueprintName = "TodusMac"
+            BlueprintIdentifier = "A12C09E2545DCAE94709093E"
+            BuildableName = "TodusMacTests.xctest"
+            BlueprintName = "TodusMacTests"
             ReferencedContainer = "container:TodusMac.xcodeproj">
          </BuildableReference>
-      </BuildableProductRunnable>
-      <CommandLineArguments>
-      </CommandLineArguments>
+      </MacroExpansion>
    </LaunchAction>
    <ProfileAction
       buildConfiguration = "Release"
@@ -70,18 +80,15 @@
       savedToolIdentifier = ""
       useCustomWorkingDirectory = "NO"
       debugDocumentVersioning = "YES">
-      <BuildableProductRunnable
-         runnableDebuggingMode = "0">
+      <MacroExpansion>
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "D9E95D26876E07FF218F214A"
-            BuildableName = "TodusMac.app"
-            BlueprintName = "TodusMac"
+            BlueprintIdentifier = "A12C09E2545DCAE94709093E"
+            BuildableName = "TodusMacTests.xctest"
+            BlueprintName = "TodusMacTests"
             ReferencedContainer = "container:TodusMac.xcodeproj">
          </BuildableReference>
-      </BuildableProductRunnable>
-      <CommandLineArguments>
-      </CommandLineArguments>
+      </MacroExpansion>
    </ProfileAction>
    <AnalyzeAction
       buildConfiguration = "Debug">

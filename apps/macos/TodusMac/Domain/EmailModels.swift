@@ -102,7 +102,11 @@ struct EmailMessage: Decodable, Identifiable {
             self.date = parsed
         } else {
             if !receivedOn.isEmpty {
-                AppLogger.shared.log("[EmailMessage] Failed to parse date string: \(receivedOn)")
+                // Foundation-only here (no AppLogger) so this model can compile into the
+                // standalone decode-tolerance test bundle without the MLX-linked host. See MAC-1.
+                #if DEBUG
+                print("[EmailMessage] Failed to parse date string: \(receivedOn)")
+                #endif
             }
             self.date = .distantPast
         }
