@@ -80,7 +80,8 @@ struct RemoteFirstTaskParsingService: TaskParsingService {
                     confidence: first.confidence,
                     originalText: first.originalText,
                     suggestedFolderName: first.suggestedFolderName,
-                    lowConfidence: first.lowConfidence
+                    lowConfidence: first.lowConfidence,
+                    hasTime: first.hasTime
                 )
             }
             // Empty response = the remote couldn't extract any task. Falling through to the
@@ -109,7 +110,8 @@ struct RemoteFirstTaskParsingService: TaskParsingService {
             confidence: result.confidence,
             originalText: result.originalText,
             suggestedFolderName: result.suggestedFolderName,
-            lowConfidence: true
+            lowConfidence: true,
+            hasTime: result.hasTime
         )
     }
 }

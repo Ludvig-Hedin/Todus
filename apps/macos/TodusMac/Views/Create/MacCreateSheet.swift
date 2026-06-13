@@ -286,7 +286,12 @@ struct MacCreateSheet: View {
             locale: .current,
             timeZone: .current
         )
+        // Event when an event-like keyword sits next to any date/time reference…
         if hasEventKeyword && parsed.dueDate != nil { return .event }
+        // …or when the input carries BOTH a date AND a specific time-of-day, even without a
+        // keyword: a timed thing ("Dentist Tuesday 2pm") is an appointment. A date with no
+        // time ("Pay rent Friday") stays a task — that's a deadline. (B-036.) Mirrors iOS.
+        if parsed.dueDate != nil && parsed.hasTime { return .event }
         return .task
     }
 

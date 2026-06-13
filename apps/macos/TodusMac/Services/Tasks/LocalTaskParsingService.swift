@@ -6,6 +6,10 @@ struct ParsedInputResult {
     let dueDate: Date?
     let confidence: Double
     let originalText: String
+    /// True when `dueDate` carries a specific time-of-day the user stated (e.g. "kl 13",
+    /// "2pm"), vs a bare calendar day where the time component is a synthesized default.
+    /// Lets auto-classification treat timed inputs as appointments. (B-036.)
+    var hasTime: Bool = false
 }
 
 /// Regex-based natural language parser for date/time extraction.
@@ -83,6 +87,8 @@ struct LocalTaskParsingService {
 
         // Step 3: find time — try patterns in priority order
         var dueDate: Date? = nil
+        // True when the user stated an explicit time-of-day (vs a bare day). (B-036.)
+        var hasExplicitTime = false
         let hasDateKeyword = foundDateKeyword
 
         if let match = findTimeMatch(in: trimmed, range: nsRange, hasDateKeyword: hasDateKeyword) {
@@ -90,6 +96,9 @@ struct LocalTaskParsingService {
             if let hours {
                 consumedRanges.append(matchRange)
                 dueDate = calendarDate(baseDate: baseDate, hour: hours, minute: minutes, timeZone: timeZone)
+                // Only count as a stated time when the calendar actually resolved the date
+                // (nil on a DST gap, per the note below).
+                hasExplicitTime = dueDate != nil
                 // Note: if `calendarDate` returns nil (e.g. the parsed time lands inside
                 // a DST gap and Calendar can't resolve it), leave dueDate nil rather than
                 // falling back to `baseDate`. Otherwise "kl 02:30" on a spring-forward
@@ -132,7 +141,8 @@ struct LocalTaskParsingService {
             title: cleanedTitle,
             dueDate: dueDate,
             confidence: confidence,
-            originalText: trimmed
+            originalText: trimmed,
+            hasTime: hasExplicitTime
         )
     }
 

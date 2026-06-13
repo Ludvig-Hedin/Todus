@@ -135,4 +135,58 @@ final class LocalTaskParsingServiceTests: XCTestCase {
         XCTAssertEqual(intents.count, 2)
         XCTAssertEqual(intents.last?.type, .email)
     }
+
+    // MARK: - hasTime flag (B-036)
+
+    /// A date keyword + specific time-of-day must set `hasTime` so auto-classification can
+    /// treat it as an appointment.
+    func testHasTimeTrueWhenSpecificTimeStated() {
+        let timeZone = TimeZone(identifier: "Europe/Stockholm")!
+        let locale = Locale(identifier: "en_US")
+        let calendar = Calendar(identifier: .gregorian)
+        // 2026-03-23 is a Monday; "Tuesday" resolves to the next day.
+        let now = calendar.date(from: DateComponents(year: 2026, month: 3, day: 23, hour: 9, minute: 0))!
+
+        let result = LocalTaskParsingService.parseImmediate(
+            rawText: "Dentist Tuesday 2pm",
+            now: now,
+            locale: locale,
+            timeZone: timeZone
+        )
+
+        XCTAssertNotNil(result.dueDate)
+        XCTAssertTrue(result.hasTime, "A stated time-of-day should mark hasTime = true")
+        let due = calendar.dateComponents(in: timeZone, from: result.dueDate!)
+        XCTAssertEqual(due.hour, 14)
+    }
+
+    /// A bare day with no time-of-day must leave `hasTime` false (deadline, not appointment).
+    func testHasTimeFalseForDateOnly() {
+        let timeZone = TimeZone(identifier: "Europe/Stockholm")!
+        let locale = Locale(identifier: "en_US")
+        let calendar = Calendar(identifier: .gregorian)
+        let now = calendar.date(from: DateComponents(year: 2026, month: 3, day: 23, hour: 9, minute: 0))!
+
+        let result = LocalTaskParsingService.parseImmediate(
+            rawText: "Pay rent Friday",
+            now: now,
+            locale: locale,
+            timeZone: timeZone
+        )
+
+        XCTAssertNotNil(result.dueDate, "A weekday keyword should still produce a (date-only) dueDate")
+        XCTAssertFalse(result.hasTime, "A bare day with no time should leave hasTime = false")
+    }
+
+    /// No date and no time → no dueDate, hasTime false.
+    func testHasTimeFalseWhenNothingParsed() {
+        let result = LocalTaskParsingService.parseImmediate(
+            rawText: "Buy groceries",
+            now: .now,
+            locale: Locale(identifier: "en_US"),
+            timeZone: .current
+        )
+        XCTAssertNil(result.dueDate)
+        XCTAssertFalse(result.hasTime)
+    }
 }

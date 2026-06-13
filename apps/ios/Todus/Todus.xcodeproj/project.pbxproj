@@ -14,6 +14,7 @@
 		0B29D173D8F05EF44595C6D8 /* CardViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EB6BB18CCC595B4F2BD4E4A /* CardViews.swift */; };
 		0B9C47CA469C398346609253 /* TaskRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B19153FC3B672DD3354CCD7 /* TaskRecord.swift */; };
 		0D07B92D45DF2600E81ADCD7 /* LocalTaskParsingServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBCCEB4BDF41611906248F96 /* LocalTaskParsingServiceTests.swift */; };
+		51B7C903E0F8886AD4B4E2BC /* SnoozeOptionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1CEE0611A784E9FE4BC844F /* SnoozeOptionTests.swift */; };
 		0DD27FD07846B19C5470685D /* GeminiLiveProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3422CECD506994C3DF4DD70 /* GeminiLiveProvider.swift */; };
 		0E48F8B62008F482F8EDD153 /* SheetPresentationChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = 688289DD0C896249DB323DBC /* SheetPresentationChrome.swift */; };
 		0FA4CFDBB3C217296F3F4DC2 /* TodusDeveloperAccess.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C8F6C510E8A8C8F9B33D718 /* TodusDeveloperAccess.swift */; };
@@ -426,6 +427,7 @@
 		C96CE3CD9C7618CB3B765B0C /* TaskDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskDetailSheet.swift; sourceTree = "<group>"; };
 		CA4DC21FEF1420D4009595C4 /* TaskRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskRowView.swift; sourceTree = "<group>"; };
 		CBCCEB4BDF41611906248F96 /* LocalTaskParsingServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalTaskParsingServiceTests.swift; sourceTree = "<group>"; };
+		E1CEE0611A784E9FE4BC844F /* SnoozeOptionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnoozeOptionTests.swift; sourceTree = "<group>"; };
 		CBE0EAB595D1C5E93BB868B0 /* TaskStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskStatus.swift; sourceTree = "<group>"; };
 		CDC66D75A3DD40D7645797BB /* LocalModelsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalModelsView.swift; sourceTree = "<group>"; };
 		CFA2CDDC4C644C1C586A7F4E /* MLXInferenceService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MLXInferenceService.swift; sourceTree = "<group>"; };
@@ -908,6 +910,7 @@
 				CFF63B656A9C0F5D59DC5B3A /* AuthServiceTests.swift */,
 				42D3E2B8B7C83DDC866BE666 /* EmailServiceTests.swift */,
 				CBCCEB4BDF41611906248F96 /* LocalTaskParsingServiceTests.swift */,
+				E1CEE0611A784E9FE4BC844F /* SnoozeOptionTests.swift */,
 				77780C86CFEBDD2EF8A241EA /* NetworkMonitorTests.swift */,
 				FD9B5F280C2C2907FB1F5ABB /* RemoteFirstTaskParsingServiceTests.swift */,
 				67EBC96D933AD3FB3FFB08B7 /* TaskCaptureServiceTests.swift */,
@@ -1335,6 +1338,7 @@
 				880257FF356E7679A412A20C /* AuthServiceTests.swift in Sources */,
 				3413BBD2399C7381A25DD931 /* EmailServiceTests.swift in Sources */,
 				0D07B92D45DF2600E81ADCD7 /* LocalTaskParsingServiceTests.swift in Sources */,
+				51B7C903E0F8886AD4B4E2BC /* SnoozeOptionTests.swift in Sources */,
 				5BAAE8B0CDA628C3602F08CD /* NetworkMonitorTests.swift in Sources */,
 				7A2B6953B61F8449740EAA9D /* RemoteFirstTaskParsingServiceTests.swift in Sources */,
 				29D1FB0557F18392BE7B43BF /* TaskCaptureServiceTests.swift in Sources */,

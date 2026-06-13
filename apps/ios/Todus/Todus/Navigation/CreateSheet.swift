@@ -998,6 +998,11 @@ struct CreateSheet: View {
             if selectedType == .auto, !input.isEmpty {
                 let intents = CompoundIntentParser.parse(text: input, now: .now, locale: .current, timeZone: .current)
                 if intents.count > 1 {
+                    // Contract (B-035): each sub-intent keeps its OWN parsed date.
+                    // `intent.date` is produced per-segment by CompoundIntentParser (including
+                    // anchor/relative resolution like "innan"/"before"), so the `?? selectedDate`
+                    // fallback only fires for sub-intents that parsed no date of their own — it is
+                    // NOT a single shared date applied across every intent.
                     for (index, intent) in intents.enumerated() {
                         let itemAttachments = index == 0 ? attachments : []
                         switch intent.type {
@@ -1121,7 +1126,12 @@ struct CreateSheet: View {
         ]
         let hasEventKeyword = eventKeywords.contains(where: lower.contains)
         let parsed = LocalTaskParsingService.parseImmediate(rawText: input, now: .now, locale: .current, timeZone: .current)
+        // Event when an event-like keyword sits next to any date/time reference…
         if hasEventKeyword && parsed.dueDate != nil { return .event }
+        // …or when the input carries BOTH a date AND a specific time-of-day, even without a
+        // keyword: a timed thing ("Dentist Tuesday 2pm") is an appointment. A date with no
+        // time ("Pay rent Friday") stays a task — that's a deadline, not an event. (B-036.)
+        if parsed.dueDate != nil && parsed.hasTime { return .event }
         return .task
     }
 

@@ -78,6 +78,9 @@ struct LocalTaskParsingService: TaskParsingService {
         // which is false for "today"/"idag" (offset 0 means baseDate == now)
         // and silently disables tail-time parsing for those phrases.
         var dueDate: Date? = nil
+        // True when the user stated an explicit time-of-day (e.g. "kl 13", "2pm"), as
+        // opposed to a bare day where we synthesize a default time. (B-036.)
+        var hasExplicitTime = false
         let hasDateKeyword = foundDateKeyword
 
         if let match = findTimeMatch(in: trimmed, range: nsRange, hasDateKeyword: hasDateKeyword) {
@@ -85,6 +88,8 @@ struct LocalTaskParsingService: TaskParsingService {
             if let hours {
                 consumedRanges.append(matchRange)
                 dueDate = calendarDate(baseDate: baseDate, hour: hours, minute: minutes, timeZone: timeZone)
+                // Only count as a stated time when the calendar actually resolved a date.
+                hasExplicitTime = dueDate != nil
                 // If no date keyword and the parsed time has already passed today, roll to tomorrow
                 if !foundDateKeyword, let resolved = dueDate, resolved < now {
                     dueDate = cal.date(byAdding: .day, value: 1, to: resolved)
@@ -124,7 +129,8 @@ struct LocalTaskParsingService: TaskParsingService {
             dueDate: dueDate,
             confidence: confidence,
             originalText: trimmed,
-            suggestedFolderName: nil
+            suggestedFolderName: nil,
+            hasTime: hasExplicitTime
         )
     }
 
