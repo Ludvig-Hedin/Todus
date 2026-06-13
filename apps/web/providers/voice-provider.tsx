@@ -5,6 +5,11 @@ import { useSession } from '@/lib/auth-client';
 import type { ReactNode } from 'react';
 import { toast } from 'sonner';
 
+export interface VoiceTranscriptEntry {
+  role: 'user' | 'ai';
+  text: string;
+}
+
 interface VoiceContextType {
   status: string;
   isInitializing: boolean;
@@ -12,6 +17,7 @@ interface VoiceContextType {
   hasPermission: boolean;
   lastToolCall: string | null;
   isOpen: boolean;
+  transcript: VoiceTranscriptEntry[];
 
   startConversation: (context?: any) => Promise<void>;
   endConversation: () => Promise<void>;
@@ -45,6 +51,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   const [lastToolCall, setLastToolCall] = useState<string | null>(null);
   const [isOpen, setOpen] = useState(false);
   const [, setCurrentContext] = useState<any>(null);
+  const [transcript, setTranscript] = useState<VoiceTranscriptEntry[]>([]);
 
   const conversation = useConversation({
     onConnect: () => {
@@ -58,6 +65,13 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     onError: (error: string | Error) => {
       toast.error(typeof error === 'string' ? error : error.message);
       setIsInitializing(false);
+    },
+    onMessage: ({ message, source }: { message: string; source: 'user' | 'ai' }) => {
+      // Surface the live transcript so the conversation isn't "blind".
+      // (Belongs on the hook callbacks, not startSession.)
+      if (typeof message === 'string' && message.length > 0) {
+        setTranscript((prev) => [...prev, { role: source, text: message }]);
+      }
     },
     // clientTools: toolNames.reduce(
     //   (acc, name) => {
@@ -111,6 +125,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
 
     try {
       setIsInitializing(true);
+      setTranscript([]);
       if (context) {
         setCurrentContext(context);
       }
@@ -120,10 +135,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
 
       await conversation.startSession({
         agentId: agentId,
-        onMessage: (message) => {
-          // TODO: Handle message, ideally send it to ai chat agent or show it somewhere on the screen?
-          console.log('message', message);
-        },
+        connectionType: 'webrtc',
         dynamicVariables: {
           user_name: session?.user.name.split(' ')[0] || 'User',
           user_email: session?.user.email || '',
@@ -163,6 +175,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     hasPermission,
     lastToolCall,
     isOpen,
+    transcript,
     startConversation,
     endConversation,
     requestPermission: requestPermission,

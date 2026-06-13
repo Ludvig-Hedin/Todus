@@ -9,7 +9,8 @@ export function VoiceButton() {
   const { data: session } = useSession();
   const [threadId] = useQueryState('threadId');
 
-  const { status, isInitializing, isSpeaking, startConversation, endConversation } = useVoice();
+  const { status, isInitializing, isSpeaking, transcript, startConversation, endConversation } =
+    useVoice();
 
   const isConnected = status === 'connected';
 
@@ -40,21 +41,44 @@ export function VoiceButton() {
 
   return (
     isConnected && (
-      <button type="button" onClick={endConversation} className="cursor-pointer">
-        <div className="dark:bg[#141414] flex h-7 items-center justify-center rounded-sm bg-[#262626] px-2">
-          {isInitializing && (
-            <div className="flex items-center justify-center gap-2">
-              <Loader2 className="h-4 w-4 animate-spin" />
+      <div className="relative">
+        {/* Live transcript — surfaces what was said so the call isn't "blind" */}
+        {transcript.length > 0 && (
+          <div className="bg-popover text-popover-foreground absolute bottom-full right-0 mb-2 max-h-48 w-72 overflow-y-auto rounded-lg border p-2 shadow-md">
+            <div className="flex flex-col gap-1.5">
+              {transcript.slice(-8).map((entry, i) => (
+                <div key={`${i}-${entry.role}`} className="text-[12px] leading-snug">
+                  <span
+                    className={
+                      entry.role === 'user'
+                        ? 'text-muted-foreground font-medium'
+                        : 'text-[var(--mainBlue)] font-medium'
+                    }
+                  >
+                    {entry.role === 'user' ? 'You' : 'Assistant'}:{' '}
+                  </span>
+                  <span>{entry.text}</span>
+                </div>
+              ))}
             </div>
-          )}
-          {!isInitializing &&
-            (isSpeaking ? (
-              <WavesIcon className="h-4 w-4 text-white dark:text-[#929292]" />
-            ) : (
-              <MicOff className="h-4 w-4 text-white dark:text-[#929292]" />
-            ))}
-        </div>
-      </button>
+          </div>
+        )}
+        <button type="button" onClick={endConversation} className="cursor-pointer">
+          <div className="dark:bg[#141414] flex h-7 items-center justify-center rounded-sm bg-[#262626] px-2">
+            {isInitializing && (
+              <div className="flex items-center justify-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin" />
+              </div>
+            )}
+            {!isInitializing &&
+              (isSpeaking ? (
+                <WavesIcon className="h-4 w-4 text-white dark:text-[#929292]" />
+              ) : (
+                <MicOff className="h-4 w-4 text-white dark:text-[#929292]" />
+              ))}
+          </div>
+        </button>
+      </div>
     )
   );
 }
