@@ -23,7 +23,7 @@ import { z } from 'zod';
  * Returns a fresh OAuth2Client pre-loaded with the connection's refresh token.
  * Calling `getAccessToken()` on the returned client will auto-refresh if needed.
  */
-function buildAuthClient(refreshToken: string): OAuth2Client {
+export function buildAuthClient(refreshToken: string): OAuth2Client {
   const auth = new OAuth2Client(env.GOOGLE_CLIENT_ID, env.GOOGLE_CLIENT_SECRET);
   auth.setCredentials({ refresh_token: refreshToken });
   return auth;
@@ -72,7 +72,7 @@ async function calendarFetch<T>(
  * Wraps a Google Calendar REST mutation (POST/PATCH/DELETE).
  * Same auth + 401/403 handling as `calendarFetch`, but takes a method and JSON body.
  */
-async function calendarFetchJSON<T>(
+export async function calendarFetchJSON<T>(
   auth: OAuth2Client,
   path: string,
   options: {

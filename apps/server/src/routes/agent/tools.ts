@@ -3,6 +3,7 @@ import { buildAIProfilePrompt } from '../../lib/ai-profile';
 import { getThread, getZeroAgent, getZeroDB } from '../../lib/server-utils';
 import type { IGetThreadResponse } from '../../lib/driver/types';
 import { composeEmail } from '../../trpc/routes/ai/compose';
+import { buildAuthClient, calendarFetchJSON } from '../../trpc/routes/calendar';
 import { meeting, meetingTranscript, connection, task } from '../../db/schema';
 import { perplexity } from '@ai-sdk/perplexity';
 import { eq, desc, and, like, inArray } from 'drizzle-orm';
@@ -781,6 +782,51 @@ const updateTaskTool = (userId: string) =>
     },
   });
 
+// ── Calendar tool — create events on the user's primary Google Calendar ──
+// Reuses the Google client + fetch helper from the calendar tRPC route.
+
+const createEventTool = (connectionId: string) =>
+  tool({
+    description:
+      "Create an event on the user's primary Google Calendar. For timed events pass ISO 8601 datetimes WITH a timezone offset (e.g. 2026-06-15T09:00:00-04:00); call getCurrentDate first if you need the current date/zone. For all-day events set allDay=true and pass date-only YYYY-MM-DD for start and end (Google treats end as EXCLUSIVE, so a single-day event ends the next day).",
+    parameters: z.object({
+      summary: z.string().describe('Event title'),
+      start: z.string().describe('ISO 8601 datetime (timed) or YYYY-MM-DD (all-day)'),
+      end: z.string().describe('ISO 8601 datetime (timed) or YYYY-MM-DD (all-day, exclusive)'),
+      allDay: z.boolean().optional().default(false),
+      description: z.string().optional(),
+      location: z.string().optional(),
+    }),
+    execute: async ({ summary, start, end, allDay, description, location }) => {
+      const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
+      try {
+        const [c] = await db
+          .select({ refreshToken: connection.refreshToken, providerId: connection.providerId })
+          .from(connection)
+          .where(eq(connection.id, connectionId))
+          .limit(1);
+        if (!c || c.providerId !== 'google') {
+          return { success: false, error: 'No Google calendar is connected' };
+        }
+        if (!c.refreshToken) {
+          return { success: false, error: 'Calendar connection is missing a refresh token' };
+        }
+        const auth = buildAuthClient(c.refreshToken);
+        const body = allDay
+          ? { summary, description, location, start: { date: start }, end: { date: end } }
+          : { summary, description, location, start: { dateTime: start }, end: { dateTime: end } };
+        const created = await calendarFetchJSON<{ id: string }>(
+          auth,
+          `/calendars/${encodeURIComponent('primary')}/events`,
+          { method: 'POST', body },
+        );
+        return { success: true, event: { id: created?.id, summary } };
+      } finally {
+        await conn.end();
+      }
+    },
+  });
+
 export const tools = async (connectionId: string, ragEffect: boolean = false) => {
   // Resolve userId from connectionId for meeting tools
   let userId: string | null = null;
@@ -813,10 +859,12 @@ export const tools = async (connectionId: string, ragEffect: boolean = false) =>
     // previously saved but never enforced server-side.
     meetingTools[Tools.ListTasks] = listTasksTool(userId);
     let aiCanWriteTasks = true;
+    let aiCanWriteCalendar = true;
     try {
       const zeroDB = await getZeroDB(userId);
       const s = await zeroDB.findUserSettings();
       aiCanWriteTasks = s?.settings?.aiCanWriteTasks ?? true;
+      aiCanWriteCalendar = s?.settings?.aiCanWriteCalendar ?? true;
     } catch {
       // best effort — default to allowed
     }
@@ -824,6 +872,9 @@ export const tools = async (connectionId: string, ragEffect: boolean = false) =>
       meetingTools[Tools.CreateTask] = createTaskTool(userId);
       meetingTools[Tools.UpdateTask] = updateTaskTool(userId);
       meetingTools[Tools.CompleteTask] = completeTaskTool(userId);
+    }
+    if (aiCanWriteCalendar) {
+      meetingTools[Tools.CreateEvent] = createEventTool(connectionId);
     }
   }
 

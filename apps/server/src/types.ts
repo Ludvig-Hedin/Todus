@@ -243,6 +243,7 @@ export enum Tools {
   UpdateTask = 'updateTask',
   CompleteTask = 'completeTask',
   ListTasks = 'listTasks',
+  CreateEvent = 'createEvent',
 }
 
 export type AppContext = Context<{ Bindings: Env }>;
