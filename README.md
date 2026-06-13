@@ -52,6 +52,12 @@ pnpm dev
 
 Visit [http://localhost:3000](http://localhost:3000).
 
+## Documentation
+
+- **[AGENT_CONTEXT.md](AGENT_CONTEXT.md)** — canonical reference for contributors and AI agents (repo map, feature index, working rules).
+- **[docs/](docs/README.md)** — code-derived technical reference: [architecture](docs/architecture.md), [backend](docs/backend.md), [frontend](docs/frontend.md), [database](docs/database.md), [API](docs/api.md), [deployment](docs/deployment.md), [MCP](docs/mcp.md).
+- **[APPS_ARCHITECTURE.md](APPS_ARCHITECTURE.md)** · **[DESIGN_SYSTEM.md](DESIGN_SYSTEM.md)** · **[SELF_HOSTING.md](SELF_HOSTING.md)** · **[SECURITY.md](SECURITY.md)**
+
 ## Contribute
 
 See the [contributing guide](.github/CONTRIBUTING.md) and the [translation guide](.github/TRANSLATION.md).

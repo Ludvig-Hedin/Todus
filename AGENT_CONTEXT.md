@@ -73,7 +73,7 @@ There are **two** React Router v7 apps in the repo. This trips up every new agen
 
 | Layer | Tech | Where |
 |---|---|---|
-| Web framework | React Router v7 (SSR via Vite + Cloudflare Workers) | `apps/web` |
+| Web framework | React Router v7 — client-rendered SPA (`ssr: false`) + build-time prerendered marketing pages, on Vite + Cloudflare Workers | `apps/web` |
 | Web styling | Tailwind CSS v4 (CSS-first config via `@theme` in `globals.css`) + shadcn/ui | `apps/web/app/globals.css`, `apps/web/components/ui/` |
 | Web state | Jotai atoms + TanStack Query | `apps/web/app/` |
 | Rich text | Tiptap (also bundled for macOS) | `packages/macos-doc-editor` |
@@ -175,7 +175,9 @@ iOS and macOS Services/ folders deliberately mirror each other so logic ports cl
 
 ## 5. tRPC routes (current, from `apps/server/src/trpc/routes/`)
 
-`ai`, `assistant`, `avatar`, `bimi`, `brain`, `calendar`, `categories`, `connections`, `contact`, `cookies`, `docs`, `drafts`, `groups`, `label`, `logging`, `mail`, `mail-assistant`, `meet`, `mentions`, `notes`, `sessions`, `settings`, `sharing`, `shortcut`, `subscription`, `tasks`, `templates`, `user`.
+Router **files** (`apps/server/src/trpc/routes/*.ts`): `ai`, `assistant`, `avatar`, `bimi`, `brain`, `calendar`, `categories`, `connections`, `contact`, `cookies`, `docs`, `drafts`, `groups`, `label`, `logging`, `mail`, `mail-assistant`, `meet`, `mentions`, `notes`, `sessions`, `settings`, `sharing`, `shortcut`, `subscription`, `tasks`, `templates`, `user`.
+
+⚠️ **The client mount key differs from the file name for a few** — call these on the client, not the file name: `cookies.ts` → `cookiePreferences`, `label.ts` → `labels`, `mail-assistant.ts` → `mailAssistant`, and `tasks.ts` exports **two** routers → `tasks` **and** `folders`. Full mount-key catalog: [docs/api.md](docs/api.md).
 
 When adding a new domain: create `apps/server/src/trpc/routes/<name>.ts`, register it in `apps/server/src/trpc/index.ts`, then call it from the client.
 
@@ -366,7 +368,7 @@ Every `.md` file in the root, what it's for, and whether to trust it:
 |---|---|
 | `docs/superpowers/specs/` | Approved design specs per feature. |
 | `docs/superpowers/plans/` | Implementation plans (post-approval). |
-| `docs/agent-context/` | Cross-cutting agent guides for the Weblab work. |
+| `docs/*.md` (architecture, backend, frontend, database, api, deployment, mcp, agents) | Code-derived technical reference set (added 2026-06-13). Start at [docs/README.md](docs/README.md). |
 
 ---
 

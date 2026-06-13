@@ -131,7 +131,9 @@ pnpm test -- -t "name"         # Single test
 - **Dev utilities:** `pnpm test:ai`, `pnpm eval`, `pnpm eval:dev`, `pnpm eval:ci`
 
 ### tRPC Routes
-Routers in `src/trpc/routes/` (one file per domain): `ai`, `assistant`, `avatar`, `bimi`, `brain`, `calendar`, `categories`, `connections`, `contact`, `cookies`, `docs`, `drafts`, `groups`, `label`, `logging`, `mail`, `mail-assistant`, `meet`, `mentions`, `notes`, `sessions`, `settings`, `sharing`, `shortcut`, `subscription`, `tasks`, `templates`, `user`.
+Router **files** in `src/trpc/routes/` (one per domain): `ai`, `assistant`, `avatar`, `bimi`, `brain`, `calendar`, `categories`, `connections`, `contact`, `cookies`, `docs`, `drafts`, `groups`, `label`, `logging`, `mail`, `mail-assistant`, `meet`, `mentions`, `notes`, `sessions`, `settings`, `sharing`, `shortcut`, `subscription`, `tasks`, `templates`, `user`.
+
+⚠️ **Client mount keys ≠ file names** for some (composed in `src/trpc/index.ts`): `cookies.ts`→`cookiePreferences`, `label.ts`→`labels`, `mail-assistant.ts`→`mailAssistant`; `tasks.ts` exports **both** `tasks` and `folders`. Full catalog: [docs/api.md](docs/api.md).
 
 ### Database Schema (Key Tables)
 `user`, `session`, `account`, `verification`, `connection`, `task`, `taskFolder`, `emailTemplate`, `userSettings`, `userHotkeys`, `note`, `oauthApplication`, `oauthAccessToken`, `oauthConsent`, `earlyAccess`, `jwks`, `summary`, `writingStyleMatrix`. Schema lives in `apps/server/src/db/schema.ts`; Zod validators in `apps/server/src/lib/schemas.ts`.
@@ -143,7 +145,7 @@ Routers in `src/trpc/routes/` (one file per domain): `ai`, `assistant`, `avatar`
 The active frontend. Serves marketing pages, auth, the mail product, the settings surface, the developer view, and gated dev tools — all in one React Router v7 app.
 
 - **Framework:** React Router v7 (file-based routes in `app/routes.ts`)
-- **Runtime:** Vite + Cloudflare Workers (SSR via Wrangler)
+- **Runtime:** Vite + Cloudflare Workers. Client-rendered SPA (`ssr: false`) + build-time prerender of public marketing pages for SEO (`apps/web/react-router.config.ts`) — not per-request SSR
 - **State:** Jotai (atoms) + TanStack Query (server state)
 - **Styling:** Tailwind CSS v4 (CSS-first `@theme` config in `app/globals.css`) + shadcn/ui-derived components
 - **Rich text:** Tiptap editor

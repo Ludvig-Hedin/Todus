@@ -1,5 +1,7 @@
 # PLAN.MD
 
+> ⚠️ **HISTORICAL — DO NOT ACT ON THIS FILE.** It plans converting iOS to **React Native (Expo Router)**, which is the *opposite* of current reality: iOS and macOS are **native SwiftUI** apps (`apps/ios/Todus`, `apps/macos/TodusMac`). No Expo/React Native app ships. For ground truth read [AGENT_CONTEXT.md](AGENT_CONTEXT.md). Kept only as a historical scratch note.
+
 ## Plan: Convert iOS App from WebView to Native React Native (Expo Router)
 
 ### Status: COMPLETED (All 7 Phases)

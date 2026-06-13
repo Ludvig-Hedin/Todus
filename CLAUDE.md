@@ -116,7 +116,7 @@ pnpm test -- -t "test name"     # Single test
 This is the single React app that serves marketing, auth, the mail product, settings, and the developer surface.
 
 - **Framework**: React Router v7 (routes defined in `apps/web/app/routes.ts`)
-- **Runtime**: Vite + Cloudflare Workers (SSR)
+- **Runtime**: Vite + Cloudflare Workers. Client-rendered SPA (`ssr: false`) with build-time **prerendering** of public marketing pages for SEO (`apps/web/react-router.config.ts`). Authenticated routes (`/mail`, `/settings`) are client-only — not server-rendered per request.
 - **State**: Jotai (atoms) + TanStack Query (server state)
 - **Styling**: Tailwind CSS v4 — CSS-first config via `@theme` directive in `apps/web/app/globals.css`
 - **Components**: shadcn/ui–derived in `apps/web/components/ui/`
@@ -148,7 +148,9 @@ Key route surfaces (from `apps/web/app/routes.ts`):
 - **Deploy**: `pnpm deploy:backend` → Wrangler (`wrangler.jsonc`)
 - **Dev utilities**: `pnpm test:ai`, `pnpm eval`, `pnpm eval:dev`, `pnpm eval:ci`
 
-tRPC routers in `src/trpc/routes/` (file → router): `ai`, `assistant`, `avatar`, `bimi`, `brain`, `calendar`, `categories`, `connections`, `contact`, `cookies`, `docs`, `drafts`, `groups`, `label`, `logging`, `mail`, `mail-assistant`, `meet`, `mentions`, `notes`, `sessions`, `settings`, `sharing`, `shortcut`, `subscription`, `tasks`, `templates`, `user`.
+tRPC router **files** in `src/trpc/routes/` (one per domain): `ai`, `assistant`, `avatar`, `bimi`, `brain`, `calendar`, `categories`, `connections`, `contact`, `cookies`, `docs`, `drafts`, `groups`, `label`, `logging`, `mail`, `mail-assistant`, `meet`, `mentions`, `notes`, `sessions`, `settings`, `sharing`, `shortcut`, `subscription`, `tasks`, `templates`, `user`.
+
+⚠️ **Client mount keys ≠ file names** for some routers (composed in `src/trpc/index.ts`) — call these from the client: `cookies.ts`→`cookiePreferences`, `label.ts`→`labels`, `mail-assistant.ts`→`mailAssistant`; and `tasks.ts` exports **both** `tasks` **and** `folders`. Full mount-key catalog: [docs/api.md](docs/api.md).
 
 ## Architecture: `apps/ios` (Native iOS)
 

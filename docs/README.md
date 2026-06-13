@@ -1,115 +1,34 @@
-# Todus Documentation
+# Todus — Technical Reference (`docs/`)
 
-Welcome to the Todus documentation. This folder contains comprehensive guides for development, deployment, architecture, and project management.
+> **The canonical agent landing doc is [`../AGENT_CONTEXT.md`](../AGENT_CONTEXT.md)** — read that first for the repo map, feature index, and working rules. This `docs/` set is the code-derived technical reference: deeper, per-subsystem detail kept in sync with `apps/server` and `apps/web`.
+>
+> Last verified against source: **2026-06-13**.
 
-## 📁 Folder Structure
+## Reference set
 
-### [`architecture/`](./architecture/)
-System design, app structure, and technical architecture documentation.
-- **APPS_ARCHITECTURE.md** - Overview of all app implementations (iOS, macOS, Web, Backend)
-- **APPS_STRUCTURE.md** - Detailed structure and organization of applications
+| Doc | Covers |
+|-----|--------|
+| [architecture.md](architecture.md) | System overview, the five apps, shared data model, request lifecycle, integrations |
+| [backend.md](backend.md) | `apps/server` — Hono, tRPC, Durable Objects, Workflows, Queues, KV, R2, Vectorize, bindings, env |
+| [frontend.md](frontend.md) | `apps/web` — React Router v7, routing, state, styling, build/deploy (`ssr: false` + prerender) |
+| [database.md](database.md) | PostgreSQL schema (Drizzle), every table, migration flow |
+| [api.md](api.md) | tRPC router catalog + **client mount keys** (which differ from file names) + REST/webhook/MCP HTTP routes |
+| [deployment.md](deployment.md) | Cloudflare deploy (web + backend), DB migrations, macOS DMG→R2, iOS/TestFlight, CI/CD |
+| [mcp.md](mcp.md) | The MCP server the app **provides** (ZeroMCP / ThinkingMCP) + how to connect |
+| [agents.md](agents.md) | How AI coding agents should work in this repo — rules, gotchas, verification |
+| [changelog.md](changelog.md) | Pointer to the canonical [`../CHANGELOG.md`](../CHANGELOG.md) |
 
-### [`deployment/`](./deployment/)
-Guides for deploying Todus to production, testing, and distribution.
-- **TESTFLIGHT_QUICK_START.md** - Fast-track 5-step TestFlight setup
-- **TESTFLIGHT_DEPLOYMENT_GUIDE.md** - Detailed step-by-step TestFlight deployment
-- **DEPLOYMENT_SESSION_SUMMARY.md** - Deployment session notes and progress
+## Native apps
 
-### [`development/`](./development/)
-Local development setup, environment configuration, and development workflows.
-- **GETTING_STARTED.md** - Complete getting started guide
-- **MANUAL_INPUTS_GUIDE.md** - Manual configuration steps and inputs
-- **SCRIPTS_GUIDE.md** - Reference for all npm scripts and commands
-- **SECURITY.md** - Security guidelines and best practices
-- **ALL_TERMINAL_COMMANDS.md** - Comprehensive list of all terminal commands
+iOS and macOS are **native SwiftUI** (Swift 6, iOS 18+ / macOS 15+). See [`../AGENT_CONTEXT.md`](../AGENT_CONTEXT.md) §4 and [`../CLAUDE.md`](../CLAUDE.md) for their folder structure. There is **no** React Native / Expo / Electron client — any doc that says otherwise is historical.
 
-### [`guides/`](./guides/)
-Quick reference guides and how-to documentation.
-- **TESTFLIGHT_QUICK_START.md** - Quick start guide for TestFlight
-- **README_TESTFLIGHT.md** - TestFlight overview and checklist
-- **AGENTS.md** - AI agents and automation documentation
+## Legacy subfolders in this directory
 
-### [`project-management/`](./project-management/)
-Project planning, roadmaps, checklists, and progress tracking.
-- **PROJECT_PLAN.md** - Comprehensive project plan and roadmap
-- **ROADMAP.md** - Feature roadmap and future direction
-- **PLANNING.md** - Detailed planning documents
-- **CHANGELOG.md** - Complete changelog of all changes
-- **PARITY_CHECKLIST.md** - Feature parity tracking
-- **CODEX_PARITY_CHECKLIST.md** - Codex feature tracking
-- **CLAUDE_PARITY_CHECKLIST.md** - Claude feature tracking
-- **WORKING_APP_CHECKLIST.md** - App readiness checklist
-- **CODE_REVIEW_BACKLOG.md** - Code review tracking
-- **APP_BUILD_STATUS.md** - Current build and deployment status
+The dated subfolders below predate the native-SwiftUI + `apps/web` rewrite and are **stale / superseded** by the files above and the root canonical docs. Treat as historical only:
 
-### [`technical/`](./technical/)
-Technical deep-dives, migration guides, and implementation details.
-- **APPS_NATIVE_MIGRATION.md** - Native app migration guide
-- **RESTRUCTURING_SUMMARY.md** - Project restructuring summary
+- `architecture/`, `deployment/`, `development/`, `guides/` — describe the old Expo / Electron / Next.js / `apps/mail` stack; several files are byte-identical stale duplicates of root docs (`APPS_STRUCTURE.md`, `TESTFLIGHT_QUICK_START.md`) or divergent stale forks (`guides/AGENTS.md`, `architecture/APPS_ARCHITECTURE.md`).
+- `superpowers/` — the **healthy** historical archive (approved specs + post-approval plans, all correctly native SwiftUI). Keep.
+- `voice/PHASE_1.md` — accurate except a stale `xcodegen generate` step (macOS no longer uses xcodegen; its `.xcodeproj` is checked in).
+- Loose files (`MIGRATION_GUIDE.md`, `share-asap.md`, `terminal-commands.md`, `PROJECT_UPDATES.md`, `local-duplicate-audit.md`, `sender-avatar-resolution.md`) — historical / niche.
 
-### [`reference/`](./reference/)
-Reference documentation and technical notes.
-- **sender-avatar-resolution.md** - Sender avatar resolution system
-- **testflight-checklist.md** - TestFlight pre-launch checklist
-- **terminal-commands.md** - Terminal command reference
-- **share-asap.md** - Fastest distribution path for testers
-
----
-
-## 🚀 Quick Start
-
-**New to Todus?** Start here:
-1. Read [`development/GETTING_STARTED.md`](./development/GETTING_STARTED.md)
-2. Review [`architecture/APPS_ARCHITECTURE.md`](./architecture/APPS_ARCHITECTURE.md)
-3. Check out [`guides/AGENTS.md`](./guides/AGENTS.md) for AI features
-
-**Deploying to TestFlight?** Start here:
-1. Read [`deployment/TESTFLIGHT_QUICK_START.md`](./deployment/TESTFLIGHT_QUICK_START.md)
-2. Follow detailed steps in [`deployment/TESTFLIGHT_DEPLOYMENT_GUIDE.md`](./deployment/TESTFLIGHT_DEPLOYMENT_GUIDE.md)
-
-**Looking for commands?** Check:
-- [`development/SCRIPTS_GUIDE.md`](./development/SCRIPTS_GUIDE.md) - npm script reference
-- [`development/ALL_TERMINAL_COMMANDS.md`](./development/ALL_TERMINAL_COMMANDS.md) - All terminal commands
-
-**Project status?** See:
-- [`project-management/PROJECT_PLAN.md`](./project-management/PROJECT_PLAN.md) - Current progress
-- [`project-management/CHANGELOG.md`](./project-management/CHANGELOG.md) - Recent changes
-
----
-
-## 📚 Document Index
-
-| Document | Category | Purpose |
-|----------|----------|---------|
-| GETTING_STARTED.md | Development | Initial setup and environment configuration |
-| APPS_ARCHITECTURE.md | Architecture | Overview of all app implementations |
-| APPS_STRUCTURE.md | Architecture | Detailed app structure and organization |
-| TESTFLIGHT_QUICK_START.md | Deployment | Fast-track 5-step TestFlight setup |
-| TESTFLIGHT_DEPLOYMENT_GUIDE.md | Deployment | Detailed TestFlight deployment steps |
-| PROJECT_PLAN.md | Project Management | Comprehensive project plan and status |
-| ROADMAP.md | Project Management | Feature roadmap and direction |
-| CHANGELOG.md | Project Management | Complete change history |
-| SCRIPTS_GUIDE.md | Development | npm script reference and usage |
-| MANUAL_INPUTS_GUIDE.md | Development | Manual configuration requirements |
-| AGENTS.md | Guides | AI agents documentation |
-| SECURITY.md | Development | Security guidelines and practices |
-| APPS_NATIVE_MIGRATION.md | Technical | Native app migration guide |
-| RESTRUCTURING_SUMMARY.md | Technical | Project restructuring notes |
-
----
-
-## 🤝 Contributing
-
-See [`development/SECURITY.md`](./development/SECURITY.md) for security guidelines and best practices.
-
-## 📞 Support
-
-For questions or issues:
-1. Check the relevant documentation folder
-2. Review [`project-management/CHANGELOG.md`](./project-management/CHANGELOG.md) for recent changes
-3. Consult [`development/MANUAL_INPUTS_GUIDE.md`](./development/MANUAL_INPUTS_GUIDE.md) for setup help
-
----
-
-**Last Updated**: 2026-03-26  
-**Documentation Version**: 1.0
+The full authoritative doc map (active vs historical) lives in [`../AGENT_CONTEXT.md`](../AGENT_CONTEXT.md) §10.

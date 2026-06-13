@@ -1,3 +1,7 @@
+> ⚠️ **HISTORICAL — DO NOT ACT ON THIS FILE.** Written for an architecture that no longer exists: it references a **Next.js** web app and `NEXT_PUBLIC_*`/Convex-style backend, Electron macOS, and an Expo-WebView iOS app. Current reality: **React Router v7 + Vite** web (`apps/web`), **Cloudflare Workers + tRPC + Postgres/Hyperdrive** backend (`apps/server`), and **native SwiftUI** iOS + macOS. For ground truth read [AGENT_CONTEXT.md](AGENT_CONTEXT.md). Kept only as a historical scratch note.
+
+---
+
 high‑level product + execution plan to follow.
 
 Think in phases, each shippable, building toward a real SaaS.
