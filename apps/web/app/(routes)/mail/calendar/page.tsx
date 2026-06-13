@@ -53,6 +53,14 @@ import {
   CalendarGrid,
   type CalendarGridMode,
 } from '@/components/calendar/calendar-grid';
+import { EventEditDialog, type EventDialogMode } from '@/components/calendar/event-edit-dialog';
+import {
+  type EventFormValues,
+  buildCreatePayload,
+  buildUpdatePatch,
+  eventToFormValues,
+  emptyFormValues,
+} from '@/lib/calendar-event-form';
 
 type CalendarEvent = Outputs['calendar']['events']['events'][number];
 
@@ -112,11 +120,6 @@ export default function CalendarPage() {
   // Inline quick-add state
   const [quickAdd, setQuickAdd] = useState('');
   const quickAddRef = useRef<HTMLInputElement>(null);
-  // Pulse highlight applied to the quick-add row when the user taps a grid
-  // slot — gives clear visual feedback that focus moved to the input
-  // (otherwise tapping the right pane mysteriously shifts focus to the left
-  // rail with no signal).
-  const [quickAddPulse, setQuickAddPulse] = useState(false);
 
   // ── Tasks ──────────────────────────────────────────────────────────────────
   const { data: tasksData, isLoading: tasksLoading, isFetching: isFetchingTasks } = useQuery(
@@ -197,6 +200,93 @@ export default function CalendarPage() {
     },
   });
 
+  // ── Event editor (create / edit / delete on the primary calendar) ────────────
+  const [eventDialog, setEventDialog] = useState<{
+    open: boolean;
+    mode: EventDialogMode;
+    eventId: string | null;
+    values: EventFormValues;
+  }>({ open: false, mode: 'create', eventId: null, values: emptyFormValues() });
+
+  const invalidateEvents = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: trpc.calendar.events.queryKey() });
+  }, [queryClient, trpc]);
+
+  const createEvent = useMutation({
+    ...trpc.calendar.createEvent.mutationOptions(),
+    onSuccess: () => {
+      invalidateEvents();
+      setEventDialog((p) => ({ ...p, open: false }));
+      toast.success('Event created');
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : 'Could not create event'),
+  });
+
+  const updateEvent = useMutation({
+    ...trpc.calendar.updateEvent.mutationOptions(),
+    onSuccess: () => {
+      invalidateEvents();
+      setEventDialog((p) => ({ ...p, open: false }));
+      toast.success('Event updated');
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : 'Could not update event'),
+  });
+
+  const deleteEvent = useMutation({
+    ...trpc.calendar.deleteEvent.mutationOptions(),
+    onSuccess: () => {
+      invalidateEvents();
+      setEventDialog((p) => ({ ...p, open: false }));
+      toast.success('Event deleted');
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : 'Could not delete event'),
+  });
+
+  const openCreateEvent = useCallback((start?: Date, end?: Date) => {
+    setEventDialog({
+      open: true,
+      mode: 'create',
+      eventId: null,
+      values: emptyFormValues({ start, end }),
+    });
+  }, []);
+
+  const openEditEvent = useCallback(
+    (eventId: string) => {
+      const ev = calendarEvents.find((e) => e.id === eventId);
+      if (!ev) return;
+      setEventDialog({
+        open: true,
+        mode: 'edit',
+        eventId,
+        values: eventToFormValues({
+          title: ev.title,
+          description: ev.description,
+          location: ev.location,
+          startTime: ev.startTime,
+          endTime: ev.endTime,
+          allDay: ev.allDay,
+        }),
+      });
+    },
+    [calendarEvents],
+  );
+
+  const handleSaveEvent = useCallback(
+    (values: EventFormValues) => {
+      if (eventDialog.mode === 'create') {
+        createEvent.mutate(buildCreatePayload(values, 'primary'));
+      } else if (eventDialog.eventId) {
+        updateEvent.mutate({
+          calendarId: 'primary',
+          eventId: eventDialog.eventId,
+          patch: buildUpdatePatch(values),
+        });
+      }
+    },
+    [eventDialog.mode, eventDialog.eventId, createEvent, updateEvent],
+  );
+
   // ── Derived data ───────────────────────────────────────────────────────────
 
   // Dates that have tasks — for calendar underline highlights
@@ -260,29 +350,6 @@ export default function CalendarPage() {
     }
   }, []);
 
-  // Create event from time-grid tap-to-create — same backing as quick-add but
-  // with the chosen slot's date. Renders an inline title input instead of a
-  // blocking `window.prompt`; tapping a slot focuses the left-rail quick-add
-  // input with the date pre-applied AND pulses it briefly so the user sees
-  // where focus moved.
-  const handleCreateAt = useCallback(
-    (start: Date) => {
-      setSelectedDate(start);
-      // Defer focus to two frames: one for React to commit the state update,
-      // one for the layout pass. A single rAF can miss the input if the
-      // left rail just rendered.
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          quickAddRef.current?.focus();
-          quickAddRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-        });
-      });
-      setQuickAddPulse(true);
-      window.setTimeout(() => setQuickAddPulse(false), 800);
-    },
-    [],
-  );
-
   // Adapt the tRPC events to CalendarGrid's event shape. CalendarGrid expects
   // optional fields so we just narrow types — the real shape is a strict superset.
   const gridEvents = useMemo(
@@ -319,12 +386,21 @@ export default function CalendarPage() {
           )}
         </div>
 
-        {/* Day / Week / Month / Year switcher — mirrors the iOS segmented control */}
-        <div
-          className="bg-muted/50 flex items-center gap-0.5 rounded-lg border p-0.5"
-          role="group"
-          aria-label="Calendar view mode"
-        >
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 text-[12px]"
+            onClick={() => openCreateEvent()}
+          >
+            <Plus className="mr-1 h-3.5 w-3.5" /> New event
+          </Button>
+          {/* Day / Week / Month / Year switcher — mirrors the iOS segmented control */}
+          <div
+            className="bg-muted/50 flex items-center gap-0.5 rounded-lg border p-0.5"
+            role="group"
+            aria-label="Calendar view mode"
+          >
           {VIEW_MODES.map((mode) => {
             const Icon = VIEW_MODE_ICONS[mode];
             const active = viewMode === mode;
@@ -348,6 +424,7 @@ export default function CalendarPage() {
               </button>
             );
           })}
+          </div>
         </div>
       </div>
 
@@ -374,12 +451,7 @@ export default function CalendarPage() {
           <Separator className="my-3" />
 
           {/* Quick-add row — always visible, prefills due date to selected day */}
-          <div
-            className={cn(
-              'bg-card mb-3 flex items-center gap-2 rounded-xl border px-3 py-2 transition-shadow',
-              quickAddPulse && 'shadow-[0_0_0_3px_var(--mainBlue)]',
-            )}
-          >
+          <div className="bg-card mb-3 flex items-center gap-2 rounded-xl border px-3 py-2">
             {createTask.isPending ? (
               <Loader2 className="text-muted-foreground h-4 w-4 shrink-0 animate-spin" aria-hidden />
             ) : (
@@ -491,12 +563,29 @@ export default function CalendarPage() {
                 selectedDate={selectedDate}
                 onSelectDate={setSelectedDate}
                 onModeChange={setViewMode}
-                onCreateAt={handleCreateAt}
+                onCreateAt={(start, end) => openCreateEvent(start, end)}
+                onEventClick={openEditEvent}
               />
             )}
           </div>
         </div>
       </div>
+
+      <EventEditDialog
+        open={eventDialog.open}
+        onOpenChange={(open) => setEventDialog((p) => ({ ...p, open }))}
+        mode={eventDialog.mode}
+        initialValues={eventDialog.values}
+        readOnly={scopeMissing}
+        saving={createEvent.isPending || updateEvent.isPending}
+        deleting={deleteEvent.isPending}
+        onSave={handleSaveEvent}
+        onDelete={
+          eventDialog.eventId
+            ? () => deleteEvent.mutate({ calendarId: 'primary', eventId: eventDialog.eventId! })
+            : undefined
+        }
+      />
     </div>
   );
 }
