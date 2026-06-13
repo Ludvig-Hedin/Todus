@@ -1997,7 +1997,7 @@ function NlpQuickAdd({ defaultStatus, folderId, onSubmit, isSubmitting }: NlpQui
             value={value}
             onChange={handleChange}
             onKeyDown={handleKeyDown}
-            placeholder={'Add task… (e.g. "Ring Lisa fredag kl 9")'}
+            placeholder={'Add task… (e.g. "Call Sam Friday 9am")'}
             className="h-9 pl-9 pr-3 text-sm"
             disabled={isSubmitting}
           />

@@ -99,6 +99,12 @@ final class EmailService {
     var assistantNudges: [MailAssistantNudge] = []
     var assistantBriefing: AssistantBriefing?
     private var currentFolder = "inbox"
+    /// Monotonically increases on every `loadThreads` invocation. Each call captures the
+    /// generation locally and only writes the folder cache / live `threads` on its way out
+    /// if it's still the latest. The live `threads` write was already guarded by
+    /// `currentFolder == folder`, but the cache write was not — so a slow, superseded
+    /// same-folder load could clobber a newer load's cache. Mirrors the iOS pattern.
+    private var loadGeneration: UInt64 = 0
     private var cachedThreadsByFolder: [String: [EmailThread]] = [:]
     private var cachedAssistantNudgesByFolder: [String: [MailAssistantNudge]] = [:]
     private var cachedNextPageTokenByFolder: [String: String] = [:]
@@ -277,11 +283,12 @@ final class EmailService {
                         try await api.trpcQuery("mail.listThreads", input: input)
                     }
                     guard !resp.threads.isEmpty else { continue }
-                    let enriched = try await Self.withTimeout(seconds: 12) { [weak self] in
-                        guard let self else { return [] as [EmailThread] }
+                    let enrichment = try await Self.withTimeout(seconds: 12) { [weak self] in
+                        guard let self else { return EnrichmentResult(threads: [], failedIds: []) }
                         return await self.fetchThreadDetails(ids: resp.threads.map(\.id))
                     }
                     if Task.isCancelled { return }
+                    let enriched = enrichment.threads
                     if !enriched.isEmpty {
                         // Staleness guard: the workflow occasionally produces a slice
                         // strictly older than what we're already showing — drop it so
@@ -300,8 +307,15 @@ final class EmailService {
                             )
                             return
                         }
+                        // Partial failure: some ids didn't enrich this pass. Merge the
+                        // survivors over the prior set (keeping the prior row for failed
+                        // ids) instead of writing the shrunk slice — otherwise those
+                        // threads vanish until a clean refresh.
+                        let merged = enrichment.hasFailures
+                            ? Self.mergeSurvivors(into: displayed, survivors: enriched, failedIds: enrichment.failedIds)
+                            : enriched
                         if query == nil {
-                            self.cachedThreadsByFolder[folder] = enriched
+                            self.cachedThreadsByFolder[folder] = merged
                             if let next = resp.nextPageToken {
                                 self.cachedNextPageTokenByFolder[folder] = next
                             } else {
@@ -309,7 +323,7 @@ final class EmailService {
                             }
                         }
                         if self.currentFolder == folder {
-                            self.threads = enriched
+                            self.threads = merged
                             self.nextPageToken = resp.nextPageToken
                             self.errorMessage = nil
                         }
@@ -403,6 +417,11 @@ final class EmailService {
         // A "load next page" request: not a refresh, not a search, and a cursor exists.
         let isPaginate = (refresh == false && query == nil && nextPageToken != nil)
         currentFolder = folder
+        // Capture this load's generation. A newer same-folder load increments it; on our
+        // way out we only write shared state (cache + live `threads`) when we're still the
+        // latest, so a slow superseded load can't clobber a newer load's results.
+        loadGeneration &+= 1
+        let myGen = loadGeneration
         if refresh && isLoadingActiveFolder { nextPageToken = nil }
         isLoadingThreads = true
         errorMessage = nil
@@ -446,17 +465,19 @@ final class EmailService {
                 }
                 if response.threads.isEmpty {
                     scheduleResyncReconciliation(folder: folder, query: query, input: input)
-                    isLoadingThreads = false
+                    // Only the latest load owns the spinner.
+                    if loadGeneration == myGen { isLoadingThreads = false }
                     return
                 }
             }
 
             // Step 2: Fetch full details for each thread in parallel (20 s ceiling).
             let threadIds = response.threads.map(\.id)
-            let enrichedThreads = try await Self.withTimeout(seconds: 20) { [weak self] in
-                guard let self else { return [] as [EmailThread] }
+            let enrichment = try await Self.withTimeout(seconds: 20) { [weak self] in
+                guard let self else { return EnrichmentResult(threads: [], failedIds: []) }
                 return await self.fetchThreadDetails(ids: threadIds)
             }
+            let enrichedThreads = enrichment.threads
 
             let mergedThreads: [EmailThread]
             if refresh {
@@ -487,6 +508,19 @@ final class EmailService {
                         "[EmailService] dropped stale refresh: incomingNewest=\(incomingNewest!) currentNewest=\(currentNewest!)"
                     )
                     mergedThreads = displayed
+                } else if enrichment.hasFailures {
+                    // Partial enrichment: at least one `mail.get` failed transiently this
+                    // refresh. Writing `enrichedThreads` would drop the failed ids until a
+                    // clean refresh ("threads vanish" bug). Merge the survivors over the
+                    // prior displayed set, keeping the previous row for each failed id.
+                    mergedThreads = Self.mergeSurvivors(
+                        into: displayed,
+                        survivors: enrichedThreads,
+                        failedIds: enrichment.failedIds
+                    )
+                    AppLogger.shared.log(
+                        "[EmailService] partial refresh: merged \(enrichment.failedIds.count) failed id(s) from prior set"
+                    )
                 } else {
                     mergedThreads = enrichedThreads
                 }
@@ -511,6 +545,14 @@ final class EmailService {
                 let unique = enrichedThreads.filter { !existingIds.contains($0.id) }
                 mergedThreads = existing + unique
             }
+
+            // A newer same-folder load (higher generation) has superseded us — don't write
+            // our (now stale) slice over the fresh run's cache or live state. The cache
+            // write was previously ungated, so a slow superseded load could clobber a newer
+            // load's cache even though the live `threads` write was guarded. Leave the
+            // spinner alone too: the newer load owns `isLoadingThreads` now, so we must NOT
+            // flip it off (the trailing `isLoadingThreads = false` is gen-gated below).
+            guard loadGeneration == myGen else { return }
 
             if query == nil {
                 cachedThreadsByFolder[folder] = mergedThreads
@@ -542,35 +584,76 @@ final class EmailService {
             // set `authService.isSessionExpired`). Do NOT clobber `hasConnection` — that
             // misrouted to the "Connect Gmail" onboarding prompt for a user who is in
             // fact connected. Surface a session-expired message; the root view observes
-            // `isSessionExpired` to drive re-auth.
-            errorMessage = "Your session expired. Please sign in again."
-            if isPaginate { paginationFailed = true }
+            // `isSessionExpired` to drive re-auth. Gen-gated so a superseded load's error
+            // doesn't overwrite a newer load's state.
+            if loadGeneration == myGen {
+                errorMessage = "Your session expired. Please sign in again."
+                if isPaginate { paginationFailed = true }
+            }
             AppLogger.shared.log("[EmailService] loadThreads unauthorized")
         } catch is CancellationError {
             // Folder switch / view torn down — not a user-facing error.
             AppLogger.shared.log("[EmailService] loadThreads cancelled")
         } catch {
+            if loadGeneration == myGen {
+                if case EmailServiceError.timeout = error {
+                    errorMessage = "Mail is taking longer than usual. Tap retry."
+                } else if error is URLError {
+                    errorMessage = "No internet connection."
+                } else {
+                    errorMessage = "Failed to load emails. Please try again."
+                }
+                if isPaginate { paginationFailed = true }
+            }
             if case EmailServiceError.timeout = error {
-                errorMessage = "Mail is taking longer than usual. Tap retry."
                 AppLogger.shared.log("[EmailService] loadThreads timed out")
             } else if let urlError = error as? URLError {
-                errorMessage = "No internet connection."
                 AppLogger.shared.log("[EmailService] loadThreads network error: \(urlError)")
             } else {
-                errorMessage = "Failed to load emails. Please try again."
                 AppLogger.shared.log("[EmailService] loadThreads error: \(error)")
             }
-            if isPaginate { paginationFailed = true }
         }
 
-        isLoadingThreads = false
+        // Only the latest load owns the spinner — a superseded load must not flip it off
+        // while the newer load is still running.
+        if loadGeneration == myGen {
+            isLoadingThreads = false
+        }
+    }
+
+    /// Outcome of an enrichment pass. `failedIds` lets `loadThreads` distinguish a
+    /// clean (complete) result from a partial one where some `mail.get` calls failed
+    /// transiently — a partial result must NOT overwrite the folder cache with the
+    /// shrunk set, or those threads vanish until a clean refresh.
+    private struct EnrichmentResult: Sendable {
+        let threads: [EmailThread]
+        let failedIds: [String]
+        var hasFailures: Bool { !failedIds.isEmpty }
+    }
+
+    /// Merges freshly-enriched `survivors` with the `prior` set, keeping the prior
+    /// `EmailThread` for any id in `failedIds` (its `mail.get` failed this pass). Survivors
+    /// win on id collisions so updated rows reflect the latest fetch. Result is sorted
+    /// newest-first to preserve the inbox's display ordering. Prevents a transient per-item
+    /// failure from dropping that thread out of the cached/displayed set.
+    private static func mergeSurvivors(
+        into prior: [EmailThread],
+        survivors: [EmailThread],
+        failedIds: [String]
+    ) -> [EmailThread] {
+        let survivorIds = Set(survivors.map(\.id))
+        let failedSet = Set(failedIds)
+        // Carry over only the prior rows for ids that failed this pass and aren't already
+        // present among the survivors (a survivor with the same id supersedes the old row).
+        let carried = prior.filter { failedSet.contains($0.id) && !survivorIds.contains($0.id) }
+        return (survivors + carried).sorted { $0.date > $1.date }
     }
 
     /// Fetches full details for multiple threads via a single batched `mail.get` request.
     /// On batch failure, falls back to per-thread concurrent fetches so a transient failure
     /// doesn't blank the inbox.
-    private func fetchThreadDetails(ids: [String]) async -> [EmailThread] {
-        guard !ids.isEmpty else { return [] }
+    private func fetchThreadDetails(ids: [String]) async -> EnrichmentResult {
+        guard !ids.isEmpty else { return EnrichmentResult(threads: [], failedIds: []) }
 
         do {
             let inputs = ids.map { GetThreadInput(id: $0) }
@@ -583,16 +666,22 @@ final class EmailService {
         }
     }
 
-    private func assembleThreads(ids: [String], results: [Result<GetThreadResponse, Error>]) -> [EmailThread] {
+    private func assembleThreads(ids: [String], results: [Result<GetThreadResponse, Error>]) -> EnrichmentResult {
         var threads: [EmailThread] = []
         threads.reserveCapacity(ids.count)
+        var failedIds: [String] = []
         let now = Date()
         for (i, result) in results.enumerated() {
             switch result {
             case .success(let detail):
                 // Stash full detail so opening the thread is zero-latency.
                 threadDetailCache[ids[i]] = (detail, now)
-                guard let latest = detail.latest ?? detail.messages.last else { continue }
+                guard let latest = detail.latest ?? detail.messages.last else {
+                    // No renderable message — treat as a soft failure so the prior
+                    // cached row for this id is preserved rather than dropped.
+                    failedIds.append(ids[i])
+                    continue
+                }
                 threads.append(EmailThread(
                     id: ids[i],
                     subject: latest.subject,
@@ -605,14 +694,18 @@ final class EmailService {
                 ))
             case .failure(let err):
                 AppLogger.shared.log("[EmailService] thread \(ids[i]) failed in batch: \(err)")
+                failedIds.append(ids[i])
             }
         }
-        return threads.sorted { $0.date > $1.date }
+        return EnrichmentResult(
+            threads: threads.sorted { $0.date > $1.date },
+            failedIds: failedIds
+        )
     }
 
     /// Fallback path used when the batch endpoint itself fails. Fans out N concurrent calls
     /// in groups of 8 to avoid URLSession connection saturation.
-    private func fetchThreadDetailsConcurrent(ids: [String]) async -> [EmailThread] {
+    private func fetchThreadDetailsConcurrent(ids: [String]) async -> EnrichmentResult {
         let batchSize = 8
         var allResults = [(Int, EmailThread?)]()
         allResults.reserveCapacity(ids.count)
@@ -637,7 +730,13 @@ final class EmailService {
             allResults.append(contentsOf: batchResults)
         }
 
-        return allResults.sorted { $0.0 < $1.0 }.compactMap(\.1).sorted { $0.date > $1.date }
+        let ordered = allResults.sorted { $0.0 < $1.0 }
+        let threads = ordered.compactMap(\.1).sorted { $0.date > $1.date }
+        // A nil EmailThread at a given index means that id failed (or had no
+        // renderable message). Map those back to ids so the caller can preserve
+        // the prior cached rows for them.
+        let failedIds = ordered.filter { $0.1 == nil }.compactMap { ids.indices.contains($0.0) ? ids[$0.0] : nil }
+        return EnrichmentResult(threads: threads, failedIds: failedIds)
     }
 
     /// Fetches a single thread's details and builds an EmailThread summary from the latest message.

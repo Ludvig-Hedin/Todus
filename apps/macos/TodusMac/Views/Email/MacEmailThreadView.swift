@@ -22,6 +22,12 @@ struct MacEmailThreadView: View {
     @State private var emailDarkMessages: Set<String> = []
     @State private var showCompose = false
     @State private var composeMode: ThreadComposeMode = .reply
+    /// The specific message the compose sheet should quote/reply to. Set in each
+    /// reply/forward action (per-message context menus pass the clicked message;
+    /// the reply bar / chips default to the latest). Falls back to the last
+    /// message when nil. Previously the sheet always bound to `messages.last`, so
+    /// a context-menu "Reply" on an older message wrongly quoted the newest one.
+    @State private var selectedComposeMessage: EmailMessage?
 
     private enum ThreadComposeMode: Hashable {
         case reply
@@ -202,6 +208,7 @@ struct MacEmailThreadView: View {
                                     // sheet in forward mode with the existing
                                     // body. Useful for sending to a
                                     // bookkeeper or expense tracker.
+                                    selectedComposeMessage = detail.messages.last
                                     composeMode = .forward
                                     showCompose = true
                                 }
@@ -273,24 +280,28 @@ struct MacEmailThreadView: View {
         .sheet(isPresented: $showCompose, onDismiss: {
             assistantDraftSeed = ""
             composeMode = .reply
+            selectedComposeMessage = nil
         }) {
-            if let lastMessage = detail?.messages.last {
+            // Quote the message the user actually acted on. Per-message context
+            // menus set `selectedComposeMessage`; the reply bar / chips leave it
+            // as the latest. Guard so the sheet never presents with no message.
+            if let composeMessage = selectedComposeMessage ?? detail?.messages.last {
                 Group {
                     switch composeMode {
                     case .reply:
-                        MacEmailComposeView(replyTo: lastMessage, threadId: threadId, body: assistantDraftSeed)
+                        MacEmailComposeView(replyTo: composeMessage, threadId: threadId, body: assistantDraftSeed)
                     case .replyAll:
                         // Pass the signed-in user's addresses so reply-all doesn't
                         // CC the user themselves. Covers both the active mailbox
                         // and any connected accounts/aliases.
                         MacEmailComposeView(
-                            replyAllTo: lastMessage,
+                            replyAllTo: composeMessage,
                             threadId: threadId,
                             body: assistantDraftSeed,
                             ownedAddresses: ownedAddressesForReplyAll()
                         )
                     case .forward:
-                        MacEmailComposeView(forwarding: lastMessage)
+                        MacEmailComposeView(forwarding: composeMessage)
                     }
                 }
                 .frame(minWidth: 520, minHeight: 380)
@@ -558,6 +569,7 @@ struct MacEmailThreadView: View {
         }
         if result.created {
             assistantDraftSeed = result.preview ?? ""
+            selectedComposeMessage = detail?.messages.last
             showCompose = true
             await refreshAssistant()
             // No inline confirmation or toast — the compose sheet opening
@@ -650,6 +662,7 @@ struct MacEmailThreadView: View {
             .buttonStyle(.plain)
             .contextMenu {
                 Button {
+                    selectedComposeMessage = message
                     composeMode = .reply
                     showCompose = true
                 } label: {
@@ -658,6 +671,7 @@ struct MacEmailThreadView: View {
                 .keyboardShortcut("r", modifiers: .command)
 
                 Button {
+                    selectedComposeMessage = message
                     composeMode = .replyAll
                     showCompose = true
                 } label: {
@@ -666,6 +680,7 @@ struct MacEmailThreadView: View {
                 .keyboardShortcut("r", modifiers: [.command, .shift])
 
                 Button {
+                    selectedComposeMessage = message
                     composeMode = .forward
                     showCompose = true
                 } label: {
@@ -853,6 +868,7 @@ struct MacEmailThreadView: View {
                     id: \.1
                 ) { icon, label, mode in
                     Button {
+                        selectedComposeMessage = detail?.messages.last
                         composeMode = mode
                         showCompose = true
                     } label: {
@@ -1147,6 +1163,7 @@ struct MacEmailThreadView: View {
         }
         if result.created {
             assistantDraftSeed = result.preview ?? ""
+            selectedComposeMessage = detail?.messages.last
             composeMode = .reply
             showCompose = true
             await refreshAssistant()

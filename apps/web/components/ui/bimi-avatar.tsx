@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import DOMPurify from 'dompurify';
 import * as SimpleIcons from 'simple-icons';
 import { getSenderIconSpec, type SenderIconSpec } from '@/lib/sender-icon-registry';
+import { useSettings } from '@/hooks/use-settings';
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MAX_FAVICON_URLS = 8;
@@ -170,6 +171,14 @@ const NetworkBimiAvatar = ({
 }: BimiAvatarProps) => {
   const trpc = useTRPC();
   const trpcClient = useTRPCClient();
+  const { data: settingsData } = useSettings();
+  // Privacy (B-014): the favicon/Gravatar fallback chain is fetched directly by
+  // the browser from third parties (clearbit, icon.horse, DuckDuckGo, the sender's
+  // own domain, Gravatar), which leaks the sender's domain + the user's IP to those
+  // services. Gate every third-party image fetch behind the user's "external images"
+  // privacy preference — the same setting that already controls remote images in
+  // email bodies (see hooks/use-threads.ts, components/mail/mail-content.tsx).
+  const allowExternalImages = settingsData?.settings?.externalImages ?? false;
   const [imageIndex, setImageIndex] = useState(0);
   const normalizedEmail = email?.trim().toLowerCase() ?? '';
   const hasValidEmail = EMAIL_PATTERN.test(normalizedEmail);
@@ -208,14 +217,32 @@ const NetworkBimiAvatar = ({
   }, [normalizedEmail, avatarData?.primary?.url, bimiData?.logo?.url]);
 
   const imageUrls = useMemo(() => {
-    const urls = [
-      avatarData?.primary?.url,
-      ...(avatarData?.fallbackUrls ?? []),
-      ...buildFaviconFallbackUrls(normalizedEmail),
-    ].filter((value): value is string => Boolean(value));
+    // The Google People photo (primary.source === 'google') comes from the user's
+    // OWN connected contacts, so it's allowed regardless of the external-images
+    // setting. Everything else in the chain (backend favicon fallbackUrls + the
+    // local clearbit/icon.horse/DuckDuckGo/direct-domain favicons) is a direct
+    // browser → third-party fetch that leaks the sender domain, so it's only
+    // included when the user has opted into external images (B-014).
+    const isOwnGooglePhoto = avatarData?.primary?.source === 'google';
+    const primaryUrl =
+      isOwnGooglePhoto || allowExternalImages ? avatarData?.primary?.url : undefined;
+
+    const thirdPartyUrls = allowExternalImages
+      ? [...(avatarData?.fallbackUrls ?? []), ...buildFaviconFallbackUrls(normalizedEmail)]
+      : [];
+
+    const urls = [primaryUrl, ...thirdPartyUrls].filter((value): value is string =>
+      Boolean(value),
+    );
 
     return Array.from(new Set(urls)).slice(0, MAX_FAVICON_URLS);
-  }, [avatarData?.fallbackUrls, avatarData?.primary?.url, normalizedEmail]);
+  }, [
+    allowExternalImages,
+    avatarData?.fallbackUrls,
+    avatarData?.primary?.source,
+    avatarData?.primary?.url,
+    normalizedEmail,
+  ]);
 
   const activeImageUrl = imageUrls[imageIndex] ?? '';
 

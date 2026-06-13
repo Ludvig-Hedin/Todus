@@ -424,6 +424,11 @@ export async function resolveSenderAvatar(input: {
   email: string;
   name?: string | null;
   googleAuth?: GoogleConnectionAuth | null;
+  // Privacy gate (B-015). When false, all third-party avatar lookups are skipped —
+  // no Gravatar/Clearbit/icon.horse/DuckDuckGo/favicon-scrape/BIMI requests are made,
+  // so the raw email/domain never leaks to those services. Defaults to true to preserve
+  // existing behavior when the caller can't resolve the user's setting.
+  externalImages?: boolean;
 }) {
   const normalizedEmail = normalizeEmailAddress(input.email);
   const domain = extractEmailDomain(normalizedEmail);
@@ -432,6 +437,51 @@ export async function resolveSenderAvatar(input: {
     return {
       email: normalizedEmail,
       domain: '',
+      primary: null,
+      fallbackUrls: [],
+    };
+  }
+
+  const allowExternalImages = input.externalImages ?? true;
+
+  // TODO(B-015): No general-purpose KV binding is available for caching avatar
+  // resolution (existing namespaces are all domain-specific: gmail history, pending
+  // emails, etc.). When a suitable KV/cache binding is added, wrap this resolution in
+  // a ~24h cache keyed by `normalizedEmail` (or `domain` for the favicon/BIMI paths,
+  // which are domain-scoped) to avoid re-fetching favicons/Gravatar on every request.
+
+  // Privacy gate: skip the Google-independent third-party leaks entirely. The Google
+  // People lookup below is still allowed because it queries the user's own authorized
+  // contacts via their OAuth token (not an anonymous third-party image host).
+  if (!allowExternalImages) {
+    if (input.googleAuth) {
+      try {
+        const googlePhotoUrl = await findGoogleContactPhoto(input.googleAuth, {
+          email: normalizedEmail,
+          name: input.name,
+        });
+
+        if (googlePhotoUrl) {
+          return {
+            email: normalizedEmail,
+            domain,
+            primary: {
+              source: 'google' as const,
+              url: googlePhotoUrl,
+              svgContent: null,
+            },
+            fallbackUrls: [],
+          };
+        }
+      } catch (error) {
+        console.warn(`[sender-avatar] Google People lookup failed for ${normalizedEmail}`, error);
+      }
+    }
+
+    // No external fallbacks — client renders initials.
+    return {
+      email: normalizedEmail,
+      domain,
       primary: null,
       fallbackUrls: [],
     };

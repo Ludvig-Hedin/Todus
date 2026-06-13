@@ -41,6 +41,17 @@ Systematic sweep of the entire backlog. 5 parallel read-only verification agents
 - `Views/AI/ChatUISpec/CardViews.swift` — AI compose-card CC/BCC now have add-fields (mirrors the iOS fix).
 - `Services/Email/EmailService.swift` (QA-0608-9) — read-state now also patches `threadDetailCache` so search-opened threads reflect read/unread (with symmetric rollback).
 
+## Fixed — second batch (same pass)
+- **Web B-014 (privacy)** — `bimi-avatar.tsx` now gates ALL third-party favicon fetches (local builder AND the backend `fallbackUrls`, which also carry clearbit/icon.horse/DDG/Gravatar URLs the browser fetches) behind the existing `externalImages` setting; keeps own Google contact photo + inlined sanitized BIMI SVG.
+- **Server B-015 (privacy)** — `lib/sender-avatar.ts` short-circuits before any anonymous third-party request when `externalImages` is off; `trpc/routes/avatar.ts` loads + passes the setting. (KV cache still deferred — no general-purpose KV binding; `// TODO(B-015)` left.)
+- **Web B-040** — tasks placeholder de-bilingualized to neutral English.
+- **iOS EM-8** — Copy message text / Copy as quote now copy the full `message.body` rendered to plain text (new `htmlToPlainText`), not the snippet.
+- **iOS B-037** — stale-refresh log now includes dropped/kept counts (telemetry); strict `<` kept.
+- **iOS B-034** — documented the intentional `hideTabBar` asymmetry (MainTabView resets per tab switch).
+- **macOS QA-0608-2** — per-message reply/forward quotes the clicked message (`selectedComposeMessage`), not always the latest.
+- **macOS QA-0608-4** — partial-enrichment failures no longer shrink the folder cache (`EnrichmentResult` + `mergeSurvivors`).
+- **macOS MAC-3** — `loadThreads` cache/live/spinner/error gated by a monotonic `loadGeneration` token.
+
 ## Verified ALREADY-FIXED (stale entries — no action needed)
 - iOS 2026-05-17 audit: **C1, C2, C3, C4, C5, H1, H3, H4, H10, H11, H12, H14, H15, H16, H17** (16/17 fixed by later passes).
 - iOS: B-010 (avatar cache key is SHA256, not hashValue), B-011 (`today 14` parsing), B-038 (deleteConversation skip-list), B-0601b-1 (compose recipient raw-binding).
@@ -56,13 +67,12 @@ Systematic sweep of the entire backlog. 5 parallel read-only verification agents
 ## Deferred (larger / product / external / test-infra — NOT fixed this pass)
 - **iOS avatar perf pipeline** (EM-1 downsampling, EM-3 disk image cache, EM-7 inbox precompute) — needs Instruments profiling against a real account; touches the image-loading pipeline.
 - **iOS H9** — Day view doesn't render Google/CalDAV events (mitigated with a banner + TODO); needs a CalendarKit timeline overlay.
-- **Server B-022** (analysis short-circuit), **B-025** (gate 21KB GENERATIVE_UI_PROMPT — needs a client-capability flag), **B-028** (needs new `autoLabelThreads` policy field), **B-015** (sender-avatar privacy gate + KV cache — privacy/product).
-- **Web B-014** (bimi-avatar third-party leak — needs backend proxy / externalImages gate), **001** (inline TaskItem dup), **B-040** (tasks placeholder i18n), **PAR-A2** (calendar multi-connection create/edit/list — needs `connectionId` on write mutations + a `calendarsMulti` query), **PAR-F1** (dead `/forgot-password` link, currently commented out).
-- **macOS** QA-0608-2 (selectedMessage capture), QA-0608-4 (assembleThreads merge survivors), MAC-3 (loadGeneration cache token), BH-0601-2/3, subscription-cancel productId (needs backend `getStatus` change), reminder scheduling (net-new feature), move-to-folder (net-new), notification cold-launch queue, event-edit prefill (needs `CalendarEvent` location/notes).
+- **Server B-022** (analysis short-circuit — touches the analysis flow, risk), **B-025** (gate 21KB GENERATIVE_UI_PROMPT — needs a client-capability flag), **B-028** (needs new `autoLabelThreads` policy field), **B-015 KV cache only** (privacy gate is DONE; the 24h KV cache is deferred — no general-purpose KV binding exists).
+- **Web 001** (inline TaskItem dup — design debt), **PAR-A2** (calendar multi-connection create/edit/list — needs `connectionId` on write mutations + a `calendarsMulti` query), **PAR-F1** (dead `/forgot-password` link, currently commented out / not user-reachable).
+- **macOS** BH-0601-2 (prefetch-join error copy), BH-0601-3 (composite display id), subscription-cancel productId (needs backend `getStatus` change), reminder scheduling (net-new feature), move-to-folder (net-new), notification cold-launch queue, event-edit prefill (needs `CalendarEvent` location/notes).
 - **PAR-C** voice client-tools — external blocker (ElevenLabs dashboard agent config).
 - **MAC-1** TodusMacTests target not runnable (MLX C-module resolution in testable build) — needs xcodegen + project regen.
-- **EM-8** copy full message body (needs an HTML→plaintext helper), **B-034**, **B-037**.
-- Older `apps/server/src/main.ts` queue/log items already handled above; remaining 2026-05-02 items (B-006..B-051) are largely repo-hygiene / older audits — triage separately.
+- Remaining 2026-05-02 items (B-006..B-051) are largely repo-hygiene / older audits — triage separately.
 
 ---
 

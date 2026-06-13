@@ -2,6 +2,8 @@ import {
   resolveSenderAvatar,
   senderAvatarPrimarySourceSchemaValues,
 } from '../../lib/sender-avatar';
+import { userSettingsSchema } from '../../lib/schemas';
+import { getZeroDB } from '../../lib/server-utils';
 import { activeConnectionProcedure, router } from '../trpc';
 import { z } from 'zod';
 
@@ -37,10 +39,30 @@ export const avatarRouter = router({
             }
           : null;
 
+      // Privacy gate (B-015): honor the user's `externalImages` setting. When disabled,
+      // resolveSenderAvatar skips all anonymous third-party image hosts (Gravatar,
+      // Clearbit, icon.horse, DuckDuckGo, favicon scraping, BIMI) so the sender's email
+      // and domain never leak to them. Defaults to true (matching defaultUserSettings)
+      // on any settings-load/parse failure to preserve existing behavior.
+      let externalImages = true;
+      try {
+        const db = await getZeroDB(ctx.sessionUser.id);
+        const result = await db.findUserSettings();
+        if (result) {
+          const parsed = userSettingsSchema.safeParse(result.settings);
+          if (parsed.success) {
+            externalImages = parsed.data.externalImages;
+          }
+        }
+      } catch (error) {
+        console.warn('[avatar] Failed to load externalImages setting; defaulting to true', error);
+      }
+
       return resolveSenderAvatar({
         email: input.email,
         name: input.name,
         googleAuth,
+        externalImages,
       });
     }),
 });

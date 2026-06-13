@@ -226,6 +226,13 @@ struct EmailThreadView: View {
             // has a way to ask AI about the current message. Pre-seed the chat
             // context here (instead of in `openAssistant()`) so a FAB tap from
             // anywhere in the thread already knows which thread the user is on.
+            //
+            // Intentionally asymmetric: there is no matching restore in
+            // `.onDisappear`. `hideTabBar` is a transient scroll-driven flag — the
+            // inbox (and every other tab) toggles it on its own scroll, and a tab
+            // switch force-resets it to `false` in MainTabView. So the inbox never
+            // depends on a value captured before navigating into the thread; on
+            // pop-back its own scroll handler re-establishes the correct state.
             services.hideTabBar = false
             services.aiChatService.currentPageContext =
                 "Email thread: \(detail?.messages.first?.subject ?? "Message")"
@@ -1777,16 +1784,25 @@ private struct MessageRow: View {
                 } label: {
                     Label("Copy subject", systemImage: "text.quote")
                 }
-                if let plain = message.plainText, !plain.isEmpty {
+                // Prefer the full body (rendered to plain text) over `plainText`,
+                // which only holds the snippet/title. Fall back to the snippet when
+                // the body is empty.
+                let copyText: String = {
+                    if !message.body.isEmpty {
+                        return htmlToPlainText(message.body)
+                    }
+                    return message.plainText?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                }()
+                if !copyText.isEmpty {
                     Button {
-                        UIPasteboard.general.string = plain
+                        UIPasteboard.general.string = copyText
                     } label: {
                         Label("Copy message text", systemImage: "doc.on.doc")
                     }
                     Button {
                         // Markdown-style quote with > prefix per line — drops directly
                         // into reply drafts in Notion / Slack / Bear without manual edit.
-                        let quoted = plain
+                        let quoted = copyText
                             .split(separator: "\n", omittingEmptySubsequences: false)
                             .map { "> \($0)" }
                             .joined(separator: "\n")
@@ -1875,6 +1891,50 @@ private struct MessageRow: View {
                 withAnimation(.easeIn(duration: 0.15)) { htmlReady = true }
             }
         }
+    }
+
+    // MARK: - Plain-text rendering
+
+    /// Strip HTML tags and decode common entities so the clipboard gets readable
+    /// text instead of raw markup when copying an email body. Caps the result to a
+    /// reasonable length to avoid pasting megabytes of inlined HTML.
+    private func htmlToPlainText(_ html: String) -> String {
+        var text = html
+        // Drop tags entirely.
+        text = text.replacingOccurrences(
+            of: "<[^>]+>",
+            with: " ",
+            options: .regularExpression
+        )
+        // Decode the handful of entities that show up in practice.
+        let entities: [(String, String)] = [
+            ("&nbsp;", " "),
+            ("&amp;", "&"),
+            ("&lt;", "<"),
+            ("&gt;", ">"),
+            ("&#39;", "'"),
+            ("&quot;", "\""),
+        ]
+        for (entity, replacement) in entities {
+            text = text.replacingOccurrences(of: entity, with: replacement)
+        }
+        // Collapse runs of whitespace (including the spaces left by stripped tags).
+        text = text.replacingOccurrences(
+            of: "[ \\t]+",
+            with: " ",
+            options: .regularExpression
+        )
+        text = text.replacingOccurrences(
+            of: "\\n[ \\t]*\\n\\s*",
+            with: "\n\n",
+            options: .regularExpression
+        )
+        text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let maxLength = 20_000
+        if text.count > maxLength {
+            text = String(text.prefix(maxLength))
+        }
+        return text
     }
 
     // MARK: - Details Card

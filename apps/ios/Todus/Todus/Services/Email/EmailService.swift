@@ -356,7 +356,9 @@ final class EmailService {
                 if isStaleRefresh {
                     let inc = incomingNewest.map { "\($0)" } ?? "nil"
                     let cur = currentNewest.map { "\($0)" } ?? "nil"
-                    AppLogger.shared.log("[EmailService] dropped stale refresh: incoming=\(inc) current=\(cur)")
+                    // Count what we silently discard vs. keep so dropped refreshes are
+                    // observable in telemetry rather than vanishing without a trace.
+                    AppLogger.shared.log("[EmailService] dropped stale refresh: incoming=\(inc) current=\(cur) dropped=\(enrichedThreads.count) kept=\(threads.count)")
                     // Treat as no-op — keep the displayed inbox, no error noise.
                     errorMessage = nil
                 } else if !isSameContext {
