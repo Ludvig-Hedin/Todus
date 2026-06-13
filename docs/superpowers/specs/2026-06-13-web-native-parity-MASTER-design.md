@@ -55,7 +55,7 @@ Each workstream is shippable on its own and gets its own design spec + plan.
 | # | Workstream | Closes | Touches | Risk | Spec |
 | --- | --- | --- | --- | --- | --- |
 | A | **Calendar write support** | event create/edit/delete UI ✅ (A1 shipped), multi-calendar visibility toggles ⏳ (A2 pending — needs server `calendarsMulti` + `connectionId` on write mutations) | web (server ready) | Low | `2026-06-13-web-calendar-write-support-design.md` · plan `plans/2026-06-13-web-calendar-event-crud.md` |
-| B | **AI actionability** | task tools `createTask`/`updateTask`/`completeTask`/`listTasks` ✅ (B1 shipped, gated by `aiCanWriteTasks` — now enforced) · `createEvent` tool ⏳ (B2, needs Google client + `aiCanWriteCalendar` enforcement) · verify mention-context injection ⏳ | server + web | Med | (master) |
+| B | **AI actionability** | task tools `createTask`/`updateTask`/`completeTask`/`listTasks` ✅ (B1) · `createEvent` tool ✅ (B2) — both gated by now-enforced `aiCanWriteTasks`/`aiCanWriteCalendar` · verify mention-context injection ⏳ (PAR-B3) | server + web | Med | (master) |
 | C | **Voice parity** | live transcript ✅ (shipped) + fixed misplaced `onMessage` · re-enable `clientTools` ⏳ (PAR-C — blocked on ElevenLabs dashboard config) | web | Med | (master) |
 | D | **Notifications & web push** | device-token table + VAPID web-push sender (gated by existing toggles), service worker + permission flow, notification center/history, actionable notifications | server + web | High | TBD |
 | E | **Settings completeness** | share-creation UI ✅ (shipped) · signatures server-sync ⏳ · shortcuts customization ⏳ · 2FA UI ⏳ | web (+ Better Auth) | Med | (master) |
