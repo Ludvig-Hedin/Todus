@@ -239,6 +239,10 @@ export enum Tools {
   ListMeetings = 'listMeetings',
   GetMeetingSummary = 'getMeetingSummary',
   SearchMeetingTranscript = 'searchMeetingTranscript',
+  CreateTask = 'createTask',
+  UpdateTask = 'updateTask',
+  CompleteTask = 'completeTask',
+  ListTasks = 'listTasks',
 }
 
 export type AppContext = Context<{ Bindings: Env }>;

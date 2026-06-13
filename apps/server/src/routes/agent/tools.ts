@@ -3,7 +3,7 @@ import { buildAIProfilePrompt } from '../../lib/ai-profile';
 import { getThread, getZeroAgent, getZeroDB } from '../../lib/server-utils';
 import type { IGetThreadResponse } from '../../lib/driver/types';
 import { composeEmail } from '../../trpc/routes/ai/compose';
-import { meeting, meetingTranscript, connection } from '../../db/schema';
+import { meeting, meetingTranscript, connection, task } from '../../db/schema';
 import { perplexity } from '@ai-sdk/perplexity';
 import { eq, desc, and, like, inArray } from 'drizzle-orm';
 import { colors } from '../../lib/prompts';
@@ -633,6 +633,154 @@ export const webSearch = () =>
     },
   });
 
+// ── Task tools — let the assistant manage the user's tasks (mirrors tasks.create) ──
+
+const createTaskTool = (userId: string) =>
+  tool({
+    description:
+      "Create a new task/to-do for the user. Use whenever the user asks to add a task, to-do, or reminder. If a relative due date is mentioned (e.g. 'tomorrow'), call getCurrentDate first and pass an absolute ISO 8601 datetime.",
+    parameters: z.object({
+      title: z.string().describe('Short title of the task'),
+      description: z.string().optional().describe('Optional longer details'),
+      priority: z
+        .enum(['none', 'low', 'medium', 'high'])
+        .optional()
+        .describe('Task priority (default none)'),
+      dueDate: z
+        .string()
+        .optional()
+        .nullable()
+        .describe('Due date as an ISO 8601 datetime string, or null for no due date'),
+    }),
+    execute: async ({ title, description, priority, dueDate }) => {
+      const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
+      try {
+        const id = crypto.randomUUID();
+        const now = new Date();
+        const [created] = await db
+          .insert(task)
+          .values({
+            id,
+            userId,
+            title,
+            description: description ?? '',
+            status: 'todo',
+            priority: priority ?? 'none',
+            dueDate: dueDate ? new Date(dueDate) : null,
+            folderId: null,
+            createdAt: now,
+            updatedAt: now,
+          })
+          .returning();
+        return {
+          success: true,
+          task: {
+            id: created?.id,
+            title: created?.title,
+            priority: created?.priority,
+            dueDate: created?.dueDate,
+          },
+        };
+      } finally {
+        await conn.end();
+      }
+    },
+  });
+
+const listTasksTool = (userId: string) =>
+  tool({
+    description:
+      "List the user's tasks. Use to answer questions about to-dos, or to find a task's id before completing or updating it.",
+    parameters: z.object({
+      status: z.enum(['todo', 'doing', 'done']).optional().describe('Filter by status'),
+      limit: z.number().default(25).describe('Max tasks to return'),
+    }),
+    execute: async ({ status, limit }) => {
+      const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
+      try {
+        const conditions = [eq(task.userId, userId)];
+        if (status) conditions.push(eq(task.status, status));
+        const rows = await db
+          .select({
+            id: task.id,
+            title: task.title,
+            status: task.status,
+            priority: task.priority,
+            dueDate: task.dueDate,
+          })
+          .from(task)
+          .where(and(...conditions))
+          .orderBy(desc(task.createdAt))
+          .limit(limit);
+        return { tasks: rows };
+      } finally {
+        await conn.end();
+      }
+    },
+  });
+
+const completeTaskTool = (userId: string) =>
+  tool({
+    description:
+      "Mark a task as done. Call listTasks first to find the task id if you don't already have it.",
+    parameters: z.object({
+      taskId: z.string().describe('The id of the task to mark complete'),
+    }),
+    execute: async ({ taskId }) => {
+      const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
+      try {
+        const [updated] = await db
+          .update(task)
+          .set({ status: 'done', updatedAt: new Date() })
+          .where(and(eq(task.id, taskId), eq(task.userId, userId)))
+          .returning();
+        if (!updated) return { success: false, error: 'Task not found' };
+        return { success: true, task: { id: updated.id, title: updated.title, status: updated.status } };
+      } finally {
+        await conn.end();
+      }
+    },
+  });
+
+const updateTaskTool = (userId: string) =>
+  tool({
+    description:
+      "Update an existing task's fields (title, description, priority, status, due date). Call listTasks to find the id first.",
+    parameters: z.object({
+      taskId: z.string().describe('The id of the task to update'),
+      title: z.string().optional(),
+      description: z.string().optional(),
+      priority: z.enum(['none', 'low', 'medium', 'high']).optional(),
+      status: z.enum(['todo', 'doing', 'done']).optional(),
+      dueDate: z
+        .string()
+        .optional()
+        .nullable()
+        .describe('ISO 8601 datetime, or null to clear the due date'),
+    }),
+    execute: async ({ taskId, title, description, priority, status, dueDate }) => {
+      const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const patch: Record<string, any> = { updatedAt: new Date() };
+        if (title !== undefined) patch.title = title;
+        if (description !== undefined) patch.description = description;
+        if (priority !== undefined) patch.priority = priority;
+        if (status !== undefined) patch.status = status;
+        if (dueDate !== undefined) patch.dueDate = dueDate ? new Date(dueDate) : null;
+        const [updated] = await db
+          .update(task)
+          .set(patch)
+          .where(and(eq(task.id, taskId), eq(task.userId, userId)))
+          .returning();
+        if (!updated) return { success: false, error: 'Task not found' };
+        return { success: true, task: { id: updated.id, title: updated.title, status: updated.status } };
+      } finally {
+        await conn.end();
+      }
+    },
+  });
+
 export const tools = async (connectionId: string, ragEffect: boolean = false) => {
   // Resolve userId from connectionId for meeting tools
   let userId: string | null = null;
@@ -652,13 +800,31 @@ export const tools = async (connectionId: string, ragEffect: boolean = false) =>
     // Best effort — meeting tools won't be available if lookup fails
   }
 
-  // Build meeting tools dynamically — only include when userId is resolved
+  // Build user-scoped tools dynamically — only include when userId is resolved
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const meetingTools: Record<string, any> = {};
   if (userId) {
     meetingTools[Tools.ListMeetings] = listMeetingsTool(userId);
     meetingTools[Tools.GetMeetingSummary] = getMeetingSummaryTool(userId);
     meetingTools[Tools.SearchMeetingTranscript] = searchMeetingTranscriptTool(userId);
+
+    // Task tools. Reads are always available; writes respect the user's
+    // `aiCanWriteTasks` permission (Settings → AI → Permissions), which was
+    // previously saved but never enforced server-side.
+    meetingTools[Tools.ListTasks] = listTasksTool(userId);
+    let aiCanWriteTasks = true;
+    try {
+      const zeroDB = await getZeroDB(userId);
+      const s = await zeroDB.findUserSettings();
+      aiCanWriteTasks = s?.settings?.aiCanWriteTasks ?? true;
+    } catch {
+      // best effort — default to allowed
+    }
+    if (aiCanWriteTasks) {
+      meetingTools[Tools.CreateTask] = createTaskTool(userId);
+      meetingTools[Tools.UpdateTask] = updateTaskTool(userId);
+      meetingTools[Tools.CompleteTask] = completeTaskTool(userId);
+    }
   }
 
   const _tools = {
