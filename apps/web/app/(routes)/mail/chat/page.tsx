@@ -23,7 +23,9 @@ import {
   MoreHorizontal,
   FolderIcon,
   PanelLeft,
+  Share2,
 } from 'lucide-react';
+import { ShareConversationDialog } from '@/components/ai/share-conversation-dialog';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRef, useEffect, useState, useCallback, useMemo, memo, type FormEvent, type ClipboardEvent } from 'react';
 import { useActiveConnection } from '@/hooks/use-connections';
@@ -153,6 +155,7 @@ export default function ChatPage() {
 
   // Active conversation ID in memory — not persisted to URL to keep it simple
   const [conversationId, setConversationId] = useState<string>(() => newId());
+  const [shareOpen, setShareOpen] = useState(false);
   const [conversationFolderId, setConversationFolderId] = useState<string | null>(null);
   // Whether the current session has been saved to backend yet
   const [isSaved, setIsSaved] = useState(false);
@@ -727,17 +730,34 @@ export default function ChatPage() {
             ) : null}
           </div>
           {messages.length > 0 && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 gap-1.5 text-[12px]"
-              onClick={handleNewChat}
-            >
-              <Plus className="h-3.5 w-3.5" />
-              New chat
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 gap-1.5 text-[12px]"
+                onClick={() => setShareOpen(true)}
+              >
+                <Share2 className="h-3.5 w-3.5" />
+                Share
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 gap-1.5 text-[12px]"
+                onClick={handleNewChat}
+              >
+                <Plus className="h-3.5 w-3.5" />
+                New chat
+              </Button>
+            </div>
           )}
         </div>
+
+        <ShareConversationDialog
+          open={shareOpen}
+          onOpenChange={setShareOpen}
+          conversationId={conversationId}
+        />
 
         {/* Messages */}
         <div className="flex-1 overflow-y-auto">
