@@ -111,7 +111,10 @@ struct MacTasksView: View {
                     }
                 })
                 .id(task.id)
-                .frame(width: 420)
+                // Compressible (was a hard 420) so opening a task can't force the
+                // content wider than the window and shove the sidebar off-screen
+                // when the AI panel is also open.
+                .frame(minWidth: 300, idealWidth: 420, maxWidth: 460)
                 .frame(maxHeight: .infinity)
                 .background(MacTheme.contentBackground)
                 .transition(.move(edge: .trailing).combined(with: .opacity))

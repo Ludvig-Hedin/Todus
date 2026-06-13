@@ -736,6 +736,10 @@ struct MacWelcomeTourView: View {
 
             Spacer()
         }
+        // Fill the parent ZStack(alignment: .topTrailing) so the content centers
+        // horizontally. Without this the VStack hugged its intrinsic width and
+        // inherited the ZStack's trailing alignment → everything shoved right.
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(.vertical, 32)
         .padding(.horizontal, 24)
     }
@@ -770,6 +774,9 @@ struct MacWelcomeTourView: View {
 
             Spacer().frame(height: 32)
         }
+        // Fill the parent ZStack(alignment: .topTrailing) so the card centers
+        // instead of inheriting the trailing alignment (see `consent`).
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(.horizontal, 24)
         .animation(MacTheme.Motion.base, value: pageIndex)
     }

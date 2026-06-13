@@ -1531,9 +1531,16 @@ struct MacSettingsView: View {
 
     private func formatCredits(_ value: Double) -> String {
         let scaled = value * Self.creditsDisplayScale
+        // Guard against NaN / ±infinity: `Int(NaN.rounded())` traps and would
+        // crash the Billing tab on any upstream divide-by-zero or bad decode.
+        // Mirrors the iOS `BillingSettingsView.formatCredits` guards.
+        guard scaled.isFinite else { return "—" }
         if scaled == 0 { return "0" }
         if scaled < 1 { return String(format: "%.2f", scaled) }
         if scaled < 10 { return String(format: "%.1f", scaled) }
+        // `Int(Double.rounded())` traps on overflow (>~9.2e18); a corrupted
+        // upstream value would crash the Billing tab. Render "—" as a fallback.
+        guard scaled < Double(Int.max) else { return "—" }
         return String(Int(scaled.rounded()))
     }
 

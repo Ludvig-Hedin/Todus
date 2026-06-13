@@ -234,6 +234,11 @@ struct MacEmailInboxView: View {
 
             if services.emailService.isCheckingConnection && !services.emailService.hasResolvedConnection {
                 loadingState(message: "Checking Gmail connection…")
+            } else if !services.emailService.hasConnection && services.emailService.connectionCheckFailed {
+                // Couldn't verify the connection (offline / timeout / server error).
+                // Show a retry instead of wrongly prompting "Connect Gmail" — the user
+                // may well be connected; we just couldn't confirm it.
+                connectionCheckFailedState
             } else if !services.emailService.hasConnection {
                 connectPrompt
             } else if isInitialSyncInFlight {
@@ -449,7 +454,21 @@ struct MacEmailInboxView: View {
                 }
 
                 // Load more indicator
-                if services.emailService.nextPageToken != nil {
+                if services.emailService.paginationFailed {
+                    // A paginate call failed. Show an explicit retry instead of an
+                    // auto-firing spinner — otherwise `.onAppear` re-fired against the
+                    // same cursor on every LazyVStack rebuild, hammering the backend.
+                    Button {
+                        Task { await services.emailService.loadThreads(folder: folder) }
+                    } label: {
+                        Label("Couldn't load more — Retry", systemImage: "arrow.clockwise")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(MacTheme.textSecondary)
+                    }
+                    .buttonStyle(.plain)
+                    .frame(maxWidth: .infinity)
+                    .padding(MacTheme.spacing12)
+                } else if services.emailService.nextPageToken != nil {
                     ProgressView()
                         .controlSize(.small)
                         .frame(maxWidth: .infinity)
@@ -459,7 +478,8 @@ struct MacEmailInboxView: View {
                             // call is already in flight — `.onAppear` fires multiple
                             // times when LazyVStack rebuilds, which previously stacked
                             // duplicate `loadThreads` calls against the same cursor.
-                            guard !services.emailService.isLoadingThreads else { return }
+                            guard !services.emailService.isLoadingThreads,
+                                  !services.emailService.paginationFailed else { return }
                             Task { await services.emailService.loadThreads(folder: folder) }
                         }
                 }
@@ -862,6 +882,33 @@ struct MacEmailInboxView: View {
         }
         .buttonStyle(MacOnboardingPrimaryButtonStyle())
         .disabled(isConnectGmailLoading)
+    }
+
+    /// Shown when the connection check itself failed (network/timeout/5xx) — distinct
+    /// from "no connection". Offers a retry rather than the Connect Gmail onboarding.
+    private var connectionCheckFailedState: some View {
+        VStack(spacing: MacTheme.spacing12) {
+            Spacer()
+            Image(systemName: "wifi.exclamationmark")
+                .font(.system(size: 28, weight: .light))
+                .foregroundStyle(MacTheme.mutedText.opacity(0.5))
+            Text("Couldn't reach your mailbox")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(MacTheme.textSecondary)
+            Text("Check your connection and try again.")
+                .font(MacTheme.cardSubtitleFont())
+                .foregroundStyle(MacTheme.mutedText)
+                .multilineTextAlignment(.center)
+            Button("Try Again") {
+                Task {
+                    await services.emailService.checkConnection(force: true)
+                    await services.emailService.ensureMailboxReady(for: folder)
+                }
+            }
+            .font(.system(size: 12, weight: .medium))
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func loadingState(message: String) -> some View {

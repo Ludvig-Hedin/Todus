@@ -232,6 +232,11 @@ final class TodosAPIClient {
         var didRefresh = false
 
         while true {
+            // Stop promptly if the surrounding task was cancelled (folder switch,
+            // view torn down, or a `withTimeout` deadline). Without this the loop
+            // could burn another attempt — and a full URLSession timeout — on work
+            // whose result will be discarded.
+            try Task.checkCancellation()
             attempt += 1
             let req = build()
 

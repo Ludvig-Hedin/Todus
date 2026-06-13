@@ -598,6 +598,18 @@ struct MacEmailThreadView: View {
                         Text(message.from.name)
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(MacTheme.textPrimary)
+                            .lineLimit(1)
+                        // Surface the actual address when the message is open so the
+                        // sender is verifiable (display names can be spoofed). It was
+                        // previously only reachable via the right-click menu.
+                        if isExpanded, !message.from.email.isEmpty, message.from.email != message.from.name {
+                            Text(message.from.email)
+                                .font(MacTheme.metaFont())
+                                .foregroundStyle(MacTheme.textSecondary)
+                                .lineLimit(1)
+                                .textSelection(.enabled)
+                                .help(message.from.email)
+                        }
                         Text(message.date, format: .dateTime.month().day().hour().minute())
                             .font(MacTheme.metaFont())
                             .foregroundStyle(MacTheme.mutedText)
@@ -907,7 +919,12 @@ struct MacEmailThreadView: View {
         autoCopyVerificationCodeIfNeeded(resolvedAssistant)
         isLoadingAssistant = false
 
-        Task { await services.emailService.markAsRead(ids: [threadId]) }
+        // Only mark read once the thread actually loaded. A failed/cancelled open
+        // shouldn't optimistically flip the inbox row to read for mail the user
+        // never saw.
+        if detail != nil {
+            Task { await services.emailService.markAsRead(ids: [threadId]) }
+        }
     }
 
     /// Run the regex-based verification + tracking extractors over the
@@ -921,8 +938,15 @@ struct MacEmailThreadView: View {
         // HTML tags coarsely so we at least operate on something resembling
         // prose.
         let bodyText: String = {
-            if let plain = firstMessage?.plainText, !plain.isEmpty { return plain }
-            let html = firstMessage?.body ?? ""
+            if let plain = firstMessage?.plainText, !plain.isEmpty {
+                // Cap to bound the regex scan — verification codes / tracking
+                // numbers live near the top of an email, never deep in a long body.
+                return String(plain.prefix(20_000))
+            }
+            // Cap BEFORE the tag-strip regex. A large newsletter HTML body ran a
+            // full-document `<[^>]+>` regex on the main actor at thread-open, which
+            // stalled the UI. 20k chars covers the meaningful header content.
+            let html = String((firstMessage?.body ?? "").prefix(20_000))
             // Very loose tag strip — good enough for keyword + digit hits.
             return html.replacingOccurrences(
                 of: "<[^>]+>",
@@ -1016,7 +1040,10 @@ struct MacEmailThreadView: View {
     // before the assistant round-trip finishes. Each handler pipes into
     // the existing assistant mutation paths.
     private func smartActionToolbar(detail: GetThreadResponse) -> some View {
-        HStack(spacing: MacTheme.spacing8) {
+        // Flow layout so the buttons WRAP to a second row when the thread column
+        // is narrow (e.g. the AI panel is open) instead of word-breaking the
+        // labels ("Cre / ate / tas / k").
+        MacFlowLayout(spacing: MacTheme.spacing8, lineSpacing: MacTheme.spacing8) {
             MacSmartActionIcon(
                 systemImage: "checklist",
                 label: "Create task",
@@ -1049,8 +1076,6 @@ struct MacEmailThreadView: View {
             ) {
                 Task { await runSmartGenerateReply() }
             }
-
-            Spacer(minLength: 0)
         }
     }
 
@@ -2052,6 +2077,54 @@ private struct MacReceiptInfoChip: View {
 /// visually so the toolbar feels native to the rest of the assistant
 /// surfaces. Shows a spinner when `isRunning`, dims when `isDimmed`, and
 /// gates touch when `isDisabled`.
+/// Minimal flow layout — lays children left-to-right, wrapping to a new row when
+/// the next child would overflow the proposed width. Used so the smart-action
+/// buttons wrap instead of compressing/word-breaking in a narrow column.
+private struct MacFlowLayout: Layout {
+    var spacing: CGFloat = 8
+    var lineSpacing: CGFloat = 8
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let maxWidth = proposal.width ?? .infinity
+        var x: CGFloat = 0
+        var rowHeight: CGFloat = 0
+        var totalHeight: CGFloat = 0
+        var widest: CGFloat = 0
+        for sub in subviews {
+            let size = sub.sizeThatFits(.unspecified)
+            if x > 0 && x + size.width > maxWidth {
+                totalHeight += rowHeight + lineSpacing
+                widest = max(widest, x - spacing)
+                x = 0
+                rowHeight = 0
+            }
+            x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+        }
+        totalHeight += rowHeight
+        widest = max(widest, x - spacing)
+        let resolvedWidth = (proposal.width == nil) ? widest : maxWidth
+        return CGSize(width: max(0, resolvedWidth), height: totalHeight)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var x = bounds.minX
+        var y = bounds.minY
+        var rowHeight: CGFloat = 0
+        for sub in subviews {
+            let size = sub.sizeThatFits(.unspecified)
+            if x > bounds.minX && x + size.width > bounds.maxX {
+                x = bounds.minX
+                y += rowHeight + lineSpacing
+                rowHeight = 0
+            }
+            sub.place(at: CGPoint(x: x, y: y), anchor: .topLeading, proposal: ProposedViewSize(size))
+            x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+        }
+    }
+}
+
 private struct MacSmartActionIcon: View {
     let systemImage: String
     let label: String
@@ -2072,6 +2145,8 @@ private struct MacSmartActionIcon: View {
                 }
                 Text(label)
                     .font(.system(size: 11, weight: .semibold))
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
             }
             .foregroundStyle(MacTheme.textPrimary)
             .padding(.horizontal, 10)

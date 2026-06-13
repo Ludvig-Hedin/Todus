@@ -58,7 +58,10 @@ final class HuggingFaceCacheConnector {
     private(set) var installedModels: [HuggingFaceInstalledModel] = []
 
     /// Last error from a scan attempt — surfaced in the UI when we expected
-    /// to find something but couldn't (e.g. permissions issue).
+    /// to find something but couldn't (e.g. permissions issue). `nil` for
+    /// the legitimate empty case (no HF models on disk yet); UI should
+    /// branch on `installedModels.isEmpty` for the empty state instead of
+    /// treating this string as a sentinel.
     private(set) var lastError: String?
 
     private let log = Logger(subsystem: "com.todus.macos", category: "HuggingFaceCacheConnector")
@@ -88,11 +91,11 @@ final class HuggingFaceCacheConnector {
         // clobber the fresher scan's `installedModels`.
         if Task.isCancelled { return }
         installedModels = found
-        if found.isEmpty {
-            lastError = "No HuggingFace models found on this Mac."
-        } else {
-            lastError = nil
-        }
+        // Empty result is a legitimate state ("user has no HF models on
+        // disk yet"), not an error. Clear `lastError` so the UI renders an
+        // empty state rather than a stale error string from a previous
+        // failed scan.
+        lastError = nil
         log.info("[HFCache] Found \(found.count, privacy: .public) HF model(s) on disk")
     }
 
@@ -126,49 +129,30 @@ final class HuggingFaceCacheConnector {
         let appCache = LocalModelStateStore.modelsDirectory
         let target = appCache.appendingPathComponent(entry.id, isDirectory: true)
 
-        // `fileExists` follows symlinks, so a *dangling* symlink (target
-        // deleted out from under us) reports false. We need lstat-style
-        // semantics: ask only for `.isSymbolicLinkKey` so the URL APIs don't
-        // also try to resolve the (possibly-missing) destination. Requesting
-        // `.isDirectoryKey` together with `.isSymbolicLinkKey` would call
-        // `stat()` on the destination and `try?` to nil for a dangling link,
-        // and we'd fall through and skip removal — leaving the stale link in
-        // place and a subsequent `createSymbolicLink` to throw `EEXIST`.
-        let symLinkValues = try? target.resourceValues(forKeys: [.isSymbolicLinkKey])
-        if symLinkValues?.isSymbolicLink == true {
-            if fm.fileExists(atPath: target.path) {
-                // Live symlink — leave it alone.
-                return
-            }
-            // Dangling — remove so we can re-create. If removal fails the
-            // subsequent `createSymbolicLink` will throw and we'll log it.
-            try? fm.removeItem(at: target)
-        } else if fm.fileExists(atPath: target.path) {
-            // Real regular directory at the target (live download or other
-            // pre-existing content). Never touch — the factory will decide.
-            return
-        }
-
-        // Resolve the active commit via `refs/main`; otherwise pick the most
-        // recently modified snapshot dir and verify it contains real weights
-        // (rather than an arbitrary, possibly-stale or partial snapshot — HF
-        // can leave aborted snapshots behind alongside healthy ones).
+        // Resolve the desired source snapshot FIRST so we can compare against
+        // an existing live symlink — without this comparison, a previously
+        // bridged repo keeps pointing at the old snapshot even after the
+        // user pulls a new commit (HF moves `refs/main` and we'd never see
+        // the update). Validate the `refs/main` payload looks like a real
+        // hex commit hash before using it as a path component — defends
+        // against a malformed or tampered refs file embedding `../` etc.
+        // and pointing the symlink outside the snapshots dir.
         let refsMain = entry.path.appendingPathComponent("refs/main")
         var sha: String?
         if let data = try? Data(contentsOf: refsMain),
            let s = String(data: data, encoding: .utf8)?
                .trimmingCharacters(in: .whitespacesAndNewlines),
-           !s.isEmpty {
+           !s.isEmpty,
+           s.count <= 64,
+           Self.isAsciiHex(s) {
             sha = s
         }
         let snapshotsDir = entry.path.appendingPathComponent("snapshots", isDirectory: true)
 
-        // Build a list of candidate snapshot dirs sorted newest-first. Try
-        // `refs/main` first (HF's canonical pointer), then fall back to a
-        // mtime walk. We iterate ALL candidates and pick the first one that
-        // contains weights — picking only the newest gave up entirely when
-        // HF left an aborted snapshot newer than a healthy one, defeating
-        // the whole point of the bridge.
+        // Candidate list newest-first: `refs/main` (canonical) then mtime
+        // fallback. Iterate all and pick the first dir that has real
+        // weights — picking only the newest gave up entirely when HF left
+        // an aborted snapshot newer than a healthy one.
         var candidates: [URL] = []
         if let sha {
             candidates.append(snapshotsDir.appendingPathComponent(sha, isDirectory: true))
@@ -188,8 +172,6 @@ final class HuggingFaceCacheConnector {
         }
         candidates.append(contentsOf: sortedByMtime)
 
-        // De-dupe (refs/main's pick is likely also in sortedByMtime) and
-        // pick the first candidate that actually has weights.
         var seen = Set<String>()
         let source = candidates.first { url in
             guard seen.insert(url.path).inserted else { return false }
@@ -200,6 +182,66 @@ final class HuggingFaceCacheConnector {
             log?.warning("[HFBridge] Skipped \(entry.id, privacy: .public): no snapshot with weights under \(snapshotsDir.path, privacy: .public)")
             return
         }
+        // Resolve symlinks in path components too — `~/Documents`, `~/.cache`,
+        // or their ancestors may themselves be symlinks (external volume,
+        // user alias). Without `.resolvingSymlinksInPath()` the equality
+        // check against a destination URL — which Foundation does fully
+        // resolve — spuriously fails, and the bridge tears down and
+        // recreates the symlink on every refresh.
+        let canonicalSource = source.resolvingSymlinksInPath().standardizedFileURL.path
+        // Containment check: refuse to symlink into anywhere outside the
+        // expected external HF cache root. `contentsOfDirectory` doesn't
+        // recurse but each entry under `snapshots/` COULD be a symlink
+        // pointing outside the cache. Validate before treating any path
+        // as a trusted source.
+        let externalRoot = LocalModelStateStore.externalHuggingFaceCache
+            .resolvingSymlinksInPath().standardizedFileURL.path
+        if !canonicalSource.hasPrefix(externalRoot + "/") {
+            log?.error("[HFBridge] Refused \(entry.id, privacy: .public): resolved source \(canonicalSource, privacy: .public) escapes \(externalRoot, privacy: .public)")
+            return
+        }
+
+        // Inspect the target. `fileExists` follows symlinks, so a *dangling*
+        // symlink reports false — we ask only for `.isSymbolicLinkKey`
+        // (lstat semantics) to distinguish the cases:
+        //   - live symlink pointing at `source`  → already up to date, done
+        //   - live symlink pointing elsewhere    → stale, repoint to `source`
+        //   - dangling symlink                   → remove + recreate
+        //   - real regular dir                   → leave alone (real download)
+        let symLinkValues = try? target.resourceValues(forKeys: [.isSymbolicLinkKey])
+        if symLinkValues?.isSymbolicLink == true {
+            if let destPath = try? fm.destinationOfSymbolicLink(atPath: target.path) {
+                let resolvedDest = URL(fileURLWithPath: destPath, relativeTo: target.deletingLastPathComponent())
+                    .resolvingSymlinksInPath()
+                    .standardizedFileURL.path
+                if resolvedDest == canonicalSource, fm.fileExists(atPath: target.path) {
+                    // Live symlink to the same snapshot — nothing to do.
+                    return
+                }
+            }
+            // Stale or dangling — remove so we can re-create. Surface
+            // removal failures (typically permissions) into the log so a
+            // "MLX keeps re-downloading multi-GB weights" support ticket
+            // can be diagnosed at the right layer instead of looking like
+            // an inference bug.
+            // TODO(bug-hunt): Non-atomic symlink replace. bridgeIntoAppCacheIfPossible
+            // is nonisolated static with no serialization, so two concurrent refresh()
+            // calls (or a concurrent real download) can interleave between this
+            // removeItem and the createSymbolicLink below, leaving a missing/stale link
+            // → MLX re-downloads multi-GB weights (the exact symptom this bridge prevents).
+            // Fix: create the link at a temp path in the same dir, then
+            // fm.replaceItemAt(target, withItemAt: tempLink) for an atomic rename.
+            do {
+                try fm.removeItem(at: target)
+            } catch {
+                log?.error("[HFBridge] Failed to remove stale symlink at \(target.path, privacy: .public): \(String(describing: error), privacy: .public)")
+            }
+        } else if fm.fileExists(atPath: target.path) {
+            // Real regular directory at the target (live download or other
+            // pre-existing content). Never touch — the factory will decide.
+            return
+        }
+
         let parent = target.deletingLastPathComponent()
         do {
             try fm.createDirectory(at: parent, withIntermediateDirectories: true)
@@ -325,7 +367,9 @@ final class HuggingFaceCacheConnector {
 
     /// Detects whether the directory tree contains at least one weight file
     /// (`*.safetensors`, `*.npz`, or `*.gguf`). Saves us from listing partial /
-    /// failed downloads as installed.
+    /// failed downloads as installed. Gates on `.isRegularFile` so a directory
+    /// whose name happens to end in one of those extensions doesn't false-
+    /// positive and crash the MLX loader.
     private nonisolated static func hasWeightFile(at url: URL, fileManager fm: FileManager) -> Bool {
         guard let enumerator = fm.enumerator(
             at: url,
@@ -333,6 +377,8 @@ final class HuggingFaceCacheConnector {
             options: [.skipsHiddenFiles]
         ) else { return false }
         for case let fileURL as URL in enumerator {
+            let values = try? fileURL.resourceValues(forKeys: [.isRegularFileKey])
+            guard values?.isRegularFile == true else { continue }
             let ext = fileURL.pathExtension.lowercased()
             if ext == "safetensors" || ext == "npz" || ext == "gguf" {
                 return true
@@ -374,6 +420,21 @@ final class HuggingFaceCacheConnector {
             }
         }
         return total
+    }
+
+    /// Strict ASCII-hex check. Swift's `Character.isHexDigit` accepts
+    /// Unicode-equivalents (Arabic-Indic digits, fullwidth Latin letters)
+    /// which a git SHA never contains. The downstream containment check
+    /// catches escapes anyway, but this is defense-in-depth.
+    private nonisolated static func isAsciiHex(_ s: String) -> Bool {
+        for scalar in s.unicodeScalars {
+            let v = scalar.value
+            let isDigit = v >= 0x30 && v <= 0x39       // '0'...'9'
+            let isUpper = v >= 0x41 && v <= 0x46       // 'A'...'F'
+            let isLower = v >= 0x61 && v <= 0x66       // 'a'...'f'
+            if !(isDigit || isUpper || isLower) { return false }
+        }
+        return true
     }
 
     private nonisolated static func humanize(repo: String) -> String {

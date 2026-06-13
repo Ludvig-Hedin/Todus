@@ -85,7 +85,16 @@ final class EmailService {
     var hasConnection = false
     var isCheckingConnection = false
     var hasResolvedConnection = false
+    /// True when the most recent `checkConnection` could NOT determine connection
+    /// status (timeout / network / 5xx) rather than confirming "no connection".
+    /// Lets the view show a retry affordance instead of wrongly prompting an
+    /// already-connected user to "Connect Gmail".
+    var connectionCheckFailed = false
     var errorMessage: String?
+    /// True when a "load next page" request failed. Stops the paginator's
+    /// `.onAppear` from immediately re-firing against the same cursor (a tight
+    /// retry loop that hammered the backend) and drives an inline "Retry" footer.
+    var paginationFailed = false
     var nextPageToken: String?
     var assistantNudges: [MailAssistantNudge] = []
     var assistantBriefing: AssistantBriefing?
@@ -391,10 +400,13 @@ final class EmailService {
         // overwrite `currentFolder`, then update it so subsequent reads see the new
         // active folder.
         let isLoadingActiveFolder = currentFolder == folder
+        // A "load next page" request: not a refresh, not a search, and a cursor exists.
+        let isPaginate = (refresh == false && query == nil && nextPageToken != nil)
         currentFolder = folder
         if refresh && isLoadingActiveFolder { nextPageToken = nil }
         isLoadingThreads = true
         errorMessage = nil
+        paginationFailed = false
 
         // Only enter the post-forceSync reconciliation path when we actually ran a forceSync
         // this call — coalesced calls under cooldown should fall straight through to a normal
@@ -526,16 +538,29 @@ final class EmailService {
                 await loadAssistantNudges(folder: folder)
             }
         } catch APIError.unauthorized {
-            // Auth failure — stop trying to load until the user re-authenticates
-            hasConnection = false
+            // Session expired (the API client already attempted one silent refresh and
+            // set `authService.isSessionExpired`). Do NOT clobber `hasConnection` — that
+            // misrouted to the "Connect Gmail" onboarding prompt for a user who is in
+            // fact connected. Surface a session-expired message; the root view observes
+            // `isSessionExpired` to drive re-auth.
+            errorMessage = "Your session expired. Please sign in again."
+            if isPaginate { paginationFailed = true }
+            AppLogger.shared.log("[EmailService] loadThreads unauthorized")
+        } catch is CancellationError {
+            // Folder switch / view torn down — not a user-facing error.
+            AppLogger.shared.log("[EmailService] loadThreads cancelled")
         } catch {
-            if let urlError = error as? URLError {
+            if case EmailServiceError.timeout = error {
+                errorMessage = "Mail is taking longer than usual. Tap retry."
+                AppLogger.shared.log("[EmailService] loadThreads timed out")
+            } else if let urlError = error as? URLError {
                 errorMessage = "No internet connection."
                 AppLogger.shared.log("[EmailService] loadThreads network error: \(urlError)")
             } else {
                 errorMessage = "Failed to load emails. Please try again."
                 AppLogger.shared.log("[EmailService] loadThreads error: \(error)")
             }
+            if isPaginate { paginationFailed = true }
         }
 
         isLoadingThreads = false
@@ -1017,10 +1042,20 @@ final class EmailService {
             let response: ConnectionsResponse = try await Self.withTimeout(seconds: 8) { [api] in
                 try await api.trpcQuery("connections.list")
             }
+            // Only a *successful* response is authoritative about connection state.
             hasConnection = !response.connections.isEmpty
+            connectionCheckFailed = false
             lastConnectionCheckAt = now
         } catch {
-            hasConnection = false
+            // Couldn't verify (timeout / offline / 5xx). Do NOT downgrade a
+            // previously-confirmed connection to the "Connect Gmail" prompt — that
+            // parked connected users on the onboarding state on any flaky network.
+            // Mark the failure so the view can offer a retry instead. `hasConnection`
+            // is left untouched: if it was true it stays true (inbox keeps loading);
+            // if it was never resolved it stays false but the failure flag routes the
+            // view to a retry state rather than the connect prompt.
+            connectionCheckFailed = true
+            AppLogger.shared.log("[EmailService] checkConnection failed (status unknown): \(error)")
         }
     }
 
@@ -1449,6 +1484,43 @@ struct GetThreadResponse: Decodable {
     struct ThreadLabel: Decodable {
         let id: String
         let name: String
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case messages, latest, hasUnread, totalReplies, labels
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        // Decode messages element-by-element so a single malformed message (e.g.
+        // missing `id`) is dropped instead of aborting the entire thread decode and
+        // surfacing as a hard "couldn't load thread" error screen.
+        self.messages = (try? container.decode([FailableDecodable<EmailMessage>].self, forKey: .messages))?
+            .compactMap(\.value) ?? []
+        self.latest = (try? container.decodeIfPresent(EmailMessage.self, forKey: .latest)) ?? nil
+        self.hasUnread = try container.decodeIfPresent(Bool.self, forKey: .hasUnread)
+        self.totalReplies = try container.decodeIfPresent(Int.self, forKey: .totalReplies)
+        self.labels = try container.decodeIfPresent([ThreadLabel].self, forKey: .labels)
+    }
+
+    /// Synthesised initializer for tests / cache assembly that build a response directly.
+    init(messages: [EmailMessage], latest: EmailMessage? = nil, hasUnread: Bool? = nil,
+         totalReplies: Int? = nil, labels: [ThreadLabel]? = nil) {
+        self.messages = messages
+        self.latest = latest
+        self.hasUnread = hasUnread
+        self.totalReplies = totalReplies
+        self.labels = labels
+    }
+}
+
+/// Wraps a `Decodable` element so a decode failure yields `nil` instead of
+/// throwing — lets an array decode survive individual malformed elements.
+struct FailableDecodable<T: Decodable>: Decodable {
+    let value: T?
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        self.value = try? container.decode(T.self)
     }
 }
 

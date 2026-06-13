@@ -77,6 +77,23 @@ targets:
         com.apple.security.application-groups:
           - group.com.ludvighedin.todus
 
+  TodusMacTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: TodusMacTests
+    dependencies:
+      - target: TodusMac
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.ludvighedin.todus.macos.tests
+        GENERATE_INFOPLIST_FILE: YES
+        MACOSX_DEPLOYMENT_TARGET: "15.0"
+        # The host app's PRODUCT_NAME is "Todus" (not the target name "TodusMac"),
+        # so the built product is Todus.app — point TEST_HOST/BUNDLE_LOADER at it.
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Todus.app/Contents/MacOS/Todus"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+
 schemes:
   TodusMac:
     build:
@@ -84,6 +101,10 @@ schemes:
         TodusMac: all
     run:
       config: Debug
+    test:
+      config: Debug
+      targets:
+        - TodusMacTests
     analyze:
       config: Debug
     archive:

@@ -2554,6 +2554,15 @@ private struct MacChatTextInput: NSViewRepresentable {
         textView.isRichText = false
         textView.allowsUndo = true
         textView.font = .systemFont(ofSize: 13)
+        // Explicit label color + typing attributes. Without these the NSTextView
+        // rendered typed text with a default color that was invisible on the
+        // light panel background (white-on-white). labelColor adapts to light/dark.
+        textView.textColor = .labelColor
+        textView.insertionPointColor = .labelColor
+        textView.typingAttributes = [
+            .font: NSFont.systemFont(ofSize: 13),
+            .foregroundColor: NSColor.labelColor,
+        ]
         textView.backgroundColor = .clear
         textView.drawsBackground = false
         textView.isVerticallyResizable = true

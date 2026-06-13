@@ -22,11 +22,17 @@ struct EmailSender: Codable, Identifiable, Hashable {
     let name: String
     let email: String
 
-    /// Backend sends `name` as optional — default to email if nil
+    /// Backend sends `name` as optional — default to email if nil. `email` is
+    /// decoded tolerantly: a malformed/automated sender with a null address must
+    /// NOT throw, or one bad message would abort decoding of the entire thread
+    /// (`mail.get` returns all messages in one payload) and surface as a hard
+    /// "couldn't load thread" error screen.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.email = try container.decode(String.self, forKey: .email)
-        self.name = try container.decodeIfPresent(String.self, forKey: .name) ?? self.email
+        let decodedEmail = (try? container.decodeIfPresent(String.self, forKey: .email)) ?? nil
+        let decodedName = (try? container.decodeIfPresent(String.self, forKey: .name)) ?? nil
+        self.email = decodedEmail ?? ""
+        self.name = decodedName ?? self.email
     }
 
     init(name: String, email: String) {
@@ -72,9 +78,15 @@ struct EmailMessage: Decodable, Identifiable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.id = try container.decode(String.self, forKey: .id)
         self.threadId = try container.decodeIfPresent(String.self, forKey: .threadId) ?? ""
-        // Backend uses "sender" not "from"
-        self.from = try container.decode(EmailSender.self, forKey: .sender)
-        self.to = try container.decodeIfPresent([EmailSender].self, forKey: .to) ?? []
+        // Backend uses "sender" not "from". Decode tolerantly: a missing/malformed
+        // sender falls back to a placeholder instead of throwing, so one bad message
+        // can't abort the whole-thread decode.
+        if let sender = (try? container.decodeIfPresent(EmailSender.self, forKey: .sender)) ?? nil {
+            self.from = sender
+        } else {
+            self.from = EmailSender(name: "Unknown sender", email: "")
+        }
+        self.to = (try? container.decodeIfPresent([EmailSender].self, forKey: .to)) ?? nil ?? []
         self.cc = try container.decodeIfPresent([EmailSender].self, forKey: .cc)
         self.subject = try container.decodeIfPresent(String.self, forKey: .subject) ?? "(no subject)"
         // HTML body from decodedBody, fallback to body
