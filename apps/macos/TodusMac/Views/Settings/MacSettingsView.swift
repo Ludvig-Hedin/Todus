@@ -161,6 +161,9 @@ struct MacSettingsView: View {
             }
             .onChange(of: taskRemindersEnabled) { _, value in
                 Task { await services.syncSetting("taskRemindersEnabled", value) }
+                // Apply immediately: toggling off clears pending reminders, toggling on
+                // (re)schedules them — without this the switch only took effect next launch.
+                services.reconcileTaskReminders()
             }
             .onChange(of: calendarRemindersEnabled) { _, value in
                 Task { await services.syncSetting("calendarRemindersEnabled", value) }
@@ -1780,7 +1783,10 @@ struct MacSettingsView: View {
         isCancelingSubscription = true
         defer { isCancelingSubscription = false }
         do {
-            try await services.subscriptionService.cancel(productId: "pro_monthly")
+            // Cancel the actually-active product (resolved server-side from Autumn).
+            // Fall back to pro_monthly only if the id hasn't been resolved yet.
+            let productId = services.subscriptionService.activeProductId ?? "pro_monthly"
+            try await services.subscriptionService.cancel(productId: productId)
         } catch {
             billingError = (error as? LocalizedError)?.errorDescription ?? "\(error)"
         }

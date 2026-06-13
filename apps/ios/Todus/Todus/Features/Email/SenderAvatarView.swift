@@ -1,5 +1,7 @@
 import SwiftUI
 import CryptoKit
+import ImageIO
+import UIKit
 
 // MARK: - Avatar API DTOs
 
@@ -494,6 +496,99 @@ final class AvatarCache {
 }
 
 
+// MARK: - Downsampling Avatar Image Loader
+
+/// Loads avatar images through the shared `AvatarDiskCache`, downsampling to the
+/// display size via ImageIO so we decode a thumbnail-sized bitmap instead of the
+/// raw (often 256–512px) source. The previous `AsyncImage` path decoded full-size
+/// images on the main thread for every row and bypassed the on-disk image cache
+/// entirely (only the URL list was cached). This consolidates both: disk hit →
+/// instant decode; miss → fetch, downsample, persist, return.
+///
+/// Keyed by the **source URL** (matching `CachedAvatarImage`), so a logo cached
+/// for one sender is reused for another sender on the same domain.
+enum AvatarImageLoader {
+
+    /// In-memory decoded-image cache. Disk gives us the bytes back cheaply, but
+    /// re-decoding the same JPEG on every scroll-in still costs CPU; an
+    /// `NSCache` of already-decoded `UIImage`s keeps hot rows instant and is
+    /// evicted automatically under memory pressure. Keyed by "diskKey@px".
+    // nonisolated(unsafe): NSCache is documented thread-safe for concurrent access;
+    // the Swift 6 checker can't see that for a non-Sendable Cocoa type.
+    private nonisolated(unsafe) static let memoryCache: NSCache<NSString, UIImage> = {
+        let cache = NSCache<NSString, UIImage>()
+        cache.countLimit = 400
+        return cache
+    }()
+
+    /// Returns a downsampled `UIImage` for `url` at `pointSize`, or nil on failure
+    /// (caller advances the waterfall). Disk + network + decode all happen off the
+    /// main thread inside a detached task; only the cache key math runs on the caller.
+    static func load(url: URL, pointSize: CGFloat, scale: CGFloat) async -> UIImage? {
+        let maxPixel = max(1, Int((pointSize * scale).rounded()))
+        let diskKey = AvatarDiskCache.key(for: url.absoluteString)
+        let memoryKey = "\(diskKey)@\(maxPixel)" as NSString
+
+        if let cached = memoryCache.object(forKey: memoryKey) {
+            return cached
+        }
+
+        let image: UIImage? = await Task.detached(priority: .userInitiated) {
+            // 1. Disk hit — decode the persisted (already-small) bytes, downsampling
+            //    again defensively in case a legacy full-size blob is present.
+            if let data = AvatarDiskCache.read(key: diskKey),
+               let downsampled = downsample(data: data, maxPixel: maxPixel) {
+                return downsampled
+            }
+
+            // 2. Miss — fetch, downsample, persist the downsampled JPEG so future
+            //    cold starts (and the legacy `CachedAvatarImage`) stay small.
+            guard let (data, response) = try? await URLSession.shared.data(from: url) else {
+                return nil
+            }
+            // Reject obvious non-success HTTP responses so a 404 HTML body isn't
+            // decoded into a broken image (the waterfall must advance instead).
+            if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+                return nil
+            }
+            guard let downsampled = downsample(data: data, maxPixel: maxPixel) else {
+                return nil
+            }
+            // Persist the downsampled bytes (JPEG) rather than the raw source so the
+            // on-disk cache stays compact. Quality 0.9 is visually lossless at avatar size.
+            if let encoded = downsampled.jpegData(compressionQuality: 0.9) {
+                AvatarDiskCache.write(encoded, key: diskKey)
+            }
+            return downsampled
+        }.value
+
+        if let image {
+            memoryCache.setObject(image, forKey: memoryKey)
+        }
+        return image
+    }
+
+    /// ImageIO thumbnail downsample — decodes directly to `maxPixel` so we never
+    /// inflate a full-size bitmap. `kCGImageSourceCreateThumbnailFromImageAlways`
+    /// forces a thumbnail even when the source embeds none.
+    private static func downsample(data: Data, maxPixel: Int) -> UIImage? {
+        let sourceOptions = [kCGImageSourceShouldCache: false] as CFDictionary
+        guard let source = CGImageSourceCreateWithData(data as CFData, sourceOptions) else {
+            return nil
+        }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixel,
+        ]
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+            return nil
+        }
+        return UIImage(cgImage: cgImage)
+    }
+}
+
 // MARK: - Sender Avatar View
 
 /// Displays a sender's avatar with automatic remote resolution and graceful fallbacks.
@@ -561,46 +656,26 @@ struct SenderAvatarView: View {
 
                 if urlIndex < resolvedCandidates.count {
                     let currentURL = resolvedCandidates[urlIndex]
-                    AsyncImage(url: currentURL, transaction: Transaction(animation: .easeOut(duration: 0.15))) { phase in
-                        switch phase {
-                        case .success(let image):
-                            // Person photos (Google contacts, Gravatar) fill the circle edge-to-edge.
-                            // Brand logos (Clearbit, favicon) get a white background so dark/monochrome
-                            // logos (e.g. Quiksilver, GitHub black) remain visible in dark mode.
-                            // A white circle is the standard treatment in Gmail, Outlook, and Apple Mail.
-                            let isPhoto = Self.isPersonPhoto(currentURL)
-                            ZStack {
-                                Circle().fill(isPhoto ? Color.clear : Color.white)
-                                if isPhoto {
-                                    image
-                                        .resizable()
-                                        .aspectRatio(contentMode: .fill)
-                                } else {
-                                    image
-                                        .resizable()
-                                        .aspectRatio(contentMode: .fit)
-                                        .padding(size * 0.16)
-                                }
+                    // Downsampling, disk-cached loader replaces the raw AsyncImage:
+                    // decodes a thumbnail-sized bitmap off-main and reuses the shared
+                    // `AvatarDiskCache`. The waterfall is preserved — `onFailure`
+                    // advances `urlIndex` exactly as the old `.failure` branch did,
+                    // and `onSuccess` records the winner for reorder-on-next-launch.
+                    WaterfallAvatarImage(
+                        url: currentURL,
+                        size: size,
+                        isPhoto: Self.isPersonPhoto(currentURL),
+                        onSuccess: {
+                            AvatarCache.shared.recordSuccess(email: normalizedEmail, url: currentURL)
+                        },
+                        onFailure: {
+                            if urlIndex < resolvedCandidates.count {
+                                urlIndex += 1
                             }
-                            .transition(.opacity)
-                            .onAppear {
-                                AvatarCache.shared.recordSuccess(email: normalizedEmail, url: currentURL)
-                            }
-                        case .failure:
-                            Color.clear
-                                .onAppear {
-                                    if urlIndex < resolvedCandidates.count {
-                                        urlIndex += 1
-                                    }
-                                }
-                        case .empty:
-                            Color.clear
-                        @unknown default:
-                            Color.clear
                         }
-                    }
+                    )
                     // Keying by URL forces SwiftUI to treat each candidate as a fresh
-                    // AsyncImage so the failure-driven .onAppear fires cleanly per URL.
+                    // load so the failure-driven advance fires cleanly per URL.
                     .id(currentURL)
                 }
             }
@@ -673,4 +748,67 @@ struct SenderAvatarView: View {
         return "?"
     }
 
+}
+
+// MARK: - Waterfall Avatar Image
+
+/// Renders a single candidate URL through `AvatarImageLoader` (downsampling +
+/// disk cache). Reports success/failure to the parent so the existing waterfall
+/// (advance `urlIndex` on failure) and last-known-good memoization keep working
+/// unchanged. While loading, renders nothing — the initials base layer shows
+/// through, matching the old `.empty`/`.failure` (Color.clear) behaviour.
+///
+/// The person-photo-vs-brand-logo treatment is identical to the previous
+/// `AsyncImage` path: photos fill edge-to-edge; brand logos sit on a white
+/// circle with padding so dark/monochrome logos stay visible in dark mode.
+private struct WaterfallAvatarImage: View {
+    let url: URL
+    let size: CGFloat
+    let isPhoto: Bool
+    let onSuccess: () -> Void
+    let onFailure: () -> Void
+
+    @State private var image: UIImage?
+    /// Guards against double-firing the failure callback if the task re-runs.
+    @State private var didReport = false
+
+    var body: some View {
+        Group {
+            if let image {
+                ZStack {
+                    Circle().fill(isPhoto ? Color.clear : Color.white)
+                    if isPhoto {
+                        Image(uiImage: image)
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                    } else {
+                        Image(uiImage: image)
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .padding(size * 0.16)
+                    }
+                }
+                .transition(.opacity)
+            } else {
+                // Loading or failed — show nothing; the initials base layer is visible.
+                Color.clear
+            }
+        }
+        .task(id: url) {
+            // Reset for a fresh URL (the parent keys this view by URL via `.id`,
+            // but `.task(id:)` is the canonical place to re-arm).
+            didReport = false
+            // `.task` runs on the main actor; `UIScreen.main.scale` is read directly
+            // here (same access pattern as `SheetPresentationChrome`).
+            let scale = UIScreen.main.scale
+            let loaded = await AvatarImageLoader.load(url: url, pointSize: size, scale: scale)
+            guard !Task.isCancelled else { return }
+            if let loaded {
+                withAnimation(.easeOut(duration: 0.15)) { image = loaded }
+                if !didReport { didReport = true; onSuccess() }
+            } else {
+                if !didReport { didReport = true; onFailure() }
+            }
+        }
+    }
 }

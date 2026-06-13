@@ -4,7 +4,16 @@ import Foundation
 /// Lightweight sendable representation of a calendar event.
 /// Used to safely cross actor boundaries from CalendarService to @MainActor views.
 struct CalendarEvent: Identifiable, Sendable {
+    /// SwiftUI `Identifiable` identity. For events built from `UnifiedCalendarEvent`
+    /// this is the namespaced composite id (`apple:…` / `google:…`) so an Apple and a
+    /// Google event that happen to share a raw provider id don't collide in a `ForEach`.
+    /// For events built directly from `CalendarService` (single-provider EventKit) it
+    /// defaults to the raw provider id.
     let id: String
+    /// Raw provider event id used for EKEventStore lookups + the folder map. NEVER the
+    /// composite id — `EKEventStore.event(withIdentifier:)` only matches the raw id, and
+    /// the folder map is keyed by the raw `EKEvent.eventIdentifier`.
+    let providerEventId: String
     let title: String
     let startDate: Date
     let endDate: Date
@@ -15,6 +24,12 @@ struct CalendarEvent: Identifiable, Sendable {
     let calendarColorBlue: Double
     let calendarName: String
     let folderID: UUID?
+    /// Event location string (`EKEvent.location`). Optional; nil/empty when the
+    /// event has no location. Carried so the edit sheet can prefill it instead of
+    /// discarding a user-typed location on save.
+    let location: String?
+    /// Event notes/body (`EKEvent.notes`). Optional; nil/empty when absent.
+    let notes: String?
     /// Underlying `EKEvent.calendar.calendarIdentifier`, when available. Used by
     /// `UnifiedCalendarService` to build per-source ids that survive dedup so each
     /// Apple calendar (Home, Work, Holidays, etc.) can be toggled independently.
@@ -28,6 +43,7 @@ struct CalendarEvent: Identifiable, Sendable {
 
     init(
         id: String,
+        providerEventId: String? = nil,
         title: String,
         startDate: Date,
         endDate: Date,
@@ -37,10 +53,15 @@ struct CalendarEvent: Identifiable, Sendable {
         calendarColorBlue: Double,
         calendarName: String,
         folderID: UUID?,
+        location: String? = nil,
+        notes: String? = nil,
         calendarIdentifier: String? = nil,
         isWritable: Bool = true
     ) {
         self.id = id
+        // Default to the raw `id` when no explicit provider id is given — preserves
+        // behavior for direct CalendarService construction where `id` IS the raw id.
+        self.providerEventId = providerEventId ?? id
         self.title = title
         self.startDate = startDate
         self.endDate = endDate
@@ -50,6 +71,8 @@ struct CalendarEvent: Identifiable, Sendable {
         self.calendarColorBlue = calendarColorBlue
         self.calendarName = calendarName
         self.folderID = folderID
+        self.location = location
+        self.notes = notes
         self.calendarIdentifier = calendarIdentifier
         self.isWritable = isWritable
     }
@@ -167,6 +190,8 @@ actor CalendarService {
         title: String,
         startDate: Date,
         endDate: Date? = nil,
+        location: String? = nil,
+        notes: String? = nil,
         folderID: UUID? = nil,
         calendarIdentifier: String? = nil
     ) throws {
@@ -174,6 +199,9 @@ actor CalendarService {
         event.title = title
         event.startDate = startDate
         event.endDate = endDate ?? startDate.addingTimeInterval(3600)
+        // Empty strings are skipped so a blank field doesn't write an empty location/notes.
+        if let location, !location.isEmpty { event.location = location }
+        if let notes, !notes.isEmpty { event.notes = notes }
         if let calendarIdentifier,
            let target = eventStore.calendars(for: .event)
                .first(where: { $0.calendarIdentifier == calendarIdentifier }) {
@@ -202,6 +230,7 @@ actor CalendarService {
         title: String? = nil,
         startDate: Date? = nil,
         endDate: Date? = nil,
+        location: String? = nil,
         notes: String? = nil,
         calendarIdentifier: String? = nil
     ) throws {
@@ -215,6 +244,7 @@ actor CalendarService {
         if let title { event.title = title }
         if let startDate { event.startDate = startDate }
         if let endDate { event.endDate = endDate }
+        if let location { event.location = location }
         if let notes { event.notes = notes }
         if let calendarIdentifier,
            calendarIdentifier != event.calendar?.calendarIdentifier,
@@ -310,6 +340,8 @@ private extension EKEvent {
             calendarColorBlue: b,
             calendarName: calendar?.title ?? "Calendar",
             folderID: folderID,
+            location: location,
+            notes: notes,
             calendarIdentifier: calendar?.calendarIdentifier
         )
     }

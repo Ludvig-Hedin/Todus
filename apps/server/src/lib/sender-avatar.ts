@@ -44,6 +44,58 @@ type AvatarImage = {
   svgContent: string | null;
 };
 
+type ResolvedSenderAvatar = {
+  email: string;
+  domain: string;
+  primary: AvatarImage | { source: 'google'; url: string; svgContent: null } | null;
+  fallbackUrls: string[];
+};
+
+// --- In-memory isolate cache (B-015) -----------------------------------------
+// No general-purpose KV binding exists, so we cache avatar resolution in-process.
+// This survives only within a single Worker isolate's lifetime (best-effort, not
+// cross-isolate), but it eliminates repeat third-party hits (favicon scrape,
+// Gravatar, BIMI DNS, Clearbit) for the same sender while an isolate is warm.
+//
+// Only the *deterministic* resolution path is cached — i.e. requests WITHOUT
+// googleAuth. The Google People lookup is per-user (queries the caller's own
+// authorized contacts) and must never be shared across users, so those calls
+// bypass the cache entirely.
+const AVATAR_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // ~24h
+const AVATAR_CACHE_MAX_ENTRIES = 2000;
+const avatarCache = new Map<string, { value: ResolvedSenderAvatar; expiresAt: number }>();
+
+function avatarCacheKey(normalizedEmail: string, allowExternalImages: boolean) {
+  return `${normalizedEmail}|ext=${allowExternalImages ? 1 : 0}`;
+}
+
+function readAvatarCache(key: string): ResolvedSenderAvatar | null {
+  const entry = avatarCache.get(key);
+  if (!entry) {
+    return null;
+  }
+  if (entry.expiresAt <= Date.now()) {
+    avatarCache.delete(key);
+    return null;
+  }
+  // Refresh insertion order so frequently-hit entries are evicted last (LRU-ish).
+  avatarCache.delete(key);
+  avatarCache.set(key, entry);
+  return entry.value;
+}
+
+function writeAvatarCache(key: string, value: ResolvedSenderAvatar) {
+  // Evict the oldest entry (Map preserves insertion order) when over the cap.
+  while (avatarCache.size >= AVATAR_CACHE_MAX_ENTRIES) {
+    const oldestKey = avatarCache.keys().next().value;
+    if (oldestKey === undefined) {
+      break;
+    }
+    avatarCache.delete(oldestKey);
+  }
+  avatarCache.set(key, { value, expiresAt: Date.now() + AVATAR_CACHE_TTL_MS });
+}
+
 export function normalizeEmailAddress(email: string) {
   return email.trim().toLowerCase();
 }
@@ -444,11 +496,26 @@ export async function resolveSenderAvatar(input: {
 
   const allowExternalImages = input.externalImages ?? true;
 
-  // TODO(B-015): No general-purpose KV binding is available for caching avatar
-  // resolution (existing namespaces are all domain-specific: gmail history, pending
-  // emails, etc.). When a suitable KV/cache binding is added, wrap this resolution in
-  // a ~24h cache keyed by `normalizedEmail` (or `domain` for the favicon/BIMI paths,
-  // which are domain-scoped) to avoid re-fetching favicons/Gravatar on every request.
+  // In-memory isolate cache (B-015): serve a previously-resolved result for this
+  // sender when the caller has no googleAuth (the deterministic domain/BIMI/favicon/
+  // Gravatar path). Google-authed lookups are per-user and intentionally uncached.
+  const cacheKey = avatarCacheKey(normalizedEmail, allowExternalImages);
+  const hasGoogleAuth = Boolean(input.googleAuth);
+  if (!hasGoogleAuth) {
+    const cached = readAvatarCache(cacheKey);
+    if (cached) {
+      return cached;
+    }
+  }
+
+  // Cache + return helper for the deterministic (non-Google) resolution paths.
+  // Skips caching when a per-user Google lookup was involved.
+  const finalize = (result: ResolvedSenderAvatar): ResolvedSenderAvatar => {
+    if (!hasGoogleAuth) {
+      writeAvatarCache(cacheKey, result);
+    }
+    return result;
+  };
 
   // Privacy gate: skip the Google-independent third-party leaks entirely. The Google
   // People lookup below is still allowed because it queries the user's own authorized
@@ -479,12 +546,12 @@ export async function resolveSenderAvatar(input: {
     }
 
     // No external fallbacks — client renders initials.
-    return {
+    return finalize({
       email: normalizedEmail,
       domain,
       primary: null,
       fallbackUrls: [],
-    };
+    });
   }
 
   const isFreeProvider = FREE_EMAIL_PROVIDERS.has(domain);
@@ -528,18 +595,18 @@ export async function resolveSenderAvatar(input: {
   if (!isFreeProvider) {
     const bimiAvatar = await findBimiAvatar(domain);
     if (bimiAvatar) {
-      return {
+      return finalize({
         email: normalizedEmail,
         domain,
         primary: bimiAvatar,
         fallbackUrls: augmentedFallbackUrls,
-      };
+      });
     }
   }
 
   const [primaryFallbackUrl] = augmentedFallbackUrls;
   if (primaryFallbackUrl) {
-    return {
+    return finalize({
       email: normalizedEmail,
       domain,
       primary: {
@@ -548,13 +615,13 @@ export async function resolveSenderAvatar(input: {
         svgContent: null,
       },
       fallbackUrls: augmentedFallbackUrls,
-    };
+    });
   }
 
-  return {
+  return finalize({
     email: normalizedEmail,
     domain,
     primary: null,
     fallbackUrls: [],
-  };
+  });
 }

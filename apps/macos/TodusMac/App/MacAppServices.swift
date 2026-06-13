@@ -921,6 +921,44 @@ final class MacAppServices {
         }
     }
 
+    /// Reconciles all local task reminders against the current SwiftData task set and
+    /// (re)builds the due-today digest. macOS has no central task-capture service (tasks
+    /// are mutated directly across views), so we reconcile the whole set at launch and on
+    /// foreground rather than hooking every mutation site. Gated by the "Task Due
+    /// Reminders" setting (`taskRemindersEnabled`, default on). Requests notification
+    /// authorization on first run when reminders are enabled but permission is undetermined.
+    func reconcileTaskReminders() {
+        guard let context = modelContainer?.mainContext else { return }
+        // Default true mirrors the Settings toggle (`@AppStorage("taskRemindersEnabled") = true`).
+        let enabled = defaults.object(forKey: "taskRemindersEnabled") as? Bool ?? true
+        let tasks: [TaskRecord]
+        do {
+            tasks = try context.fetch(FetchDescriptor<TaskRecord>())
+        } catch {
+            AppLogger.shared.log("[MacAppServices] reconcileTaskReminders fetch failed: \(error)")
+            return
+        }
+        let snapshots = tasks.map { task in
+            MacNotificationService.TaskReminderSnapshot(
+                taskID: task.id.uuidString,
+                title: task.title,
+                dueDate: task.dueDate,
+                completed: task.completed
+            )
+        }
+        Task { @MainActor [notificationService] in
+            // First-run permission: if reminders are on but we've never asked, request now
+            // so the very first scheduled reminder can actually fire.
+            if enabled {
+                await notificationService.checkAuthorization()
+                if !notificationService.isAuthorized {
+                    _ = await notificationService.requestPermission()
+                }
+            }
+            await notificationService.reconcileTaskReminders(snapshots, enabled: enabled)
+        }
+    }
+
     func signOut() {
         // Cleanup runs via `authService.onSignOut` (wired in setupNetworkSync) so
         // both this manual path and AuthService's automatic session-expiry

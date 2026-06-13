@@ -106,6 +106,11 @@ struct EmailInboxView: View {
     /// changes — previously the computed property rebuilt the entire group-by + sort on
     /// every body evaluation, including when the user was in Threads mode.
     @State private var cachedSenderGroups: [SenderGroup] = []
+    /// Precomputed lowercased search blob per thread (`subject + name + email + snippet`),
+    /// rebuilt once whenever `emailService.threads` changes. `recomputeFilteredThreads`
+    /// then matches against this instead of lowercasing four fields × every thread on
+    /// every keystroke — search was previously O(threads × 4 lowercasings) per character.
+    @State private var searchBlobs: [String: String] = [:]
     /// Debounce task for server-side search — cancelled on each new keystroke.
     @State private var searchDebounceTask: Task<Void, Never>?
     /// Active in-flight search Task. Held separately so a stale request can be cancelled
@@ -313,6 +318,7 @@ struct EmailInboxView: View {
         }
         .onAppear {
             syncViewModeFromPreference()
+            rebuildSearchBlobs()
             recomputeFilteredThreads()
             consumePendingThreadNavigation()
         }
@@ -334,7 +340,10 @@ struct EmailInboxView: View {
         .onChange(of: services.threadGroupingEnabled) { _, _ in
             syncViewModeFromPreference()
         }
-        .onChange(of: emailService.threads) { recomputeFilteredThreads() }
+        .onChange(of: emailService.threads) {
+            rebuildSearchBlobs()
+            recomputeFilteredThreads()
+        }
         .onChange(of: emailService.hasResolvedConnection) { _, resolved in
             // Once the connection check returns, drop the timeout flag so subsequent
             // re-checks don't keep showing the timeout copy.
@@ -1411,6 +1420,34 @@ struct EmailInboxView: View {
 
     // MARK: - Filtering
 
+    /// Rebuilds the per-thread lowercased search blob cache. Called once when
+    /// `emailService.threads` changes (and on first appear) so per-keystroke
+    /// filtering only does cheap `contains` checks against precomputed strings.
+    private func rebuildSearchBlobs() {
+        var blobs: [String: String] = [:]
+        blobs.reserveCapacity(emailService.threads.count)
+        for thread in emailService.threads {
+            blobs[thread.id] = Self.searchBlob(for: thread)
+        }
+        searchBlobs = blobs
+    }
+
+    /// Joins the searchable fields into a single lowercased blob. A space
+    /// separator prevents adjacent fields from forming spurious cross-field
+    /// matches (e.g. subject ending "ab" + name starting "cd" matching "abcd").
+    private static func searchBlob(for thread: EmailThread) -> String {
+        [thread.subject, thread.from.name, thread.from.email, thread.snippet]
+            .joined(separator: " ")
+            .lowercased()
+    }
+
+    /// Looks up a thread's cached blob, falling back to computing it on the fly
+    /// if the cache hasn't been populated for this id yet (defensive — keeps
+    /// search correct even on the first keystroke after a thread set swap).
+    private func blob(for thread: EmailThread) -> String {
+        searchBlobs[thread.id] ?? Self.searchBlob(for: thread)
+    }
+
     private func recomputeFilteredThreads() {
         guard !searchText.isEmpty else {
             filteredThreads = emailService.threads
@@ -1424,13 +1461,9 @@ struct EmailInboxView: View {
             return
         }
 
-        // Exact contains — fast path, highest precision
-        let exactMatches = emailService.threads.filter {
-            $0.subject.lowercased().contains(query)
-            || $0.from.name.lowercased().contains(query)
-            || $0.from.email.lowercased().contains(query)
-            || $0.snippet.lowercased().contains(query)
-        }
+        // Exact contains — fast path, highest precision. Matches the precomputed
+        // lowercased blob instead of re-lowercasing four fields per thread per keystroke.
+        let exactMatches = emailService.threads.filter { blob(for: $0).contains(query) }
         if !exactMatches.isEmpty {
             filteredThreads = exactMatches
             recomputeSenderGroupsIfPeopleMode()
@@ -1445,8 +1478,7 @@ struct EmailInboxView: View {
             return
         }
         filteredThreads = emailService.threads.filter { thread in
-            [thread.subject, thread.from.name, thread.from.email, thread.snippet]
-                .contains { fuzzyContains($0.lowercased(), query: query) }
+            fuzzyContains(blob(for: thread), query: query)
         }
         recomputeSenderGroupsIfPeopleMode()
     }
@@ -1487,18 +1519,27 @@ struct SenderThreadsView: View {
     @Environment(AppServices.self) private var services
     @State private var selectedThreadId: String?
     @State private var pendingDeleteThread: EmailThread?
+    /// Cached filtered+sorted thread list for this sender. Recomputed only when the
+    /// underlying thread pool or the search query changes — previously this was a
+    /// computed property that re-filtered + re-sorted the entire inbox on every
+    /// body evaluation (e.g. every swipe-action render, every state change).
+    @State private var cachedThreads: [EmailThread] = []
 
     private var emailService: EmailService { services.emailService }
 
     /// Matches `EmailInboxView.recomputeFilteredThreads` + sender filter so People drill-in stays consistent with search.
-    private var threadsForSender: [EmailThread] {
+    private static func computeThreads(
+        from threads: [EmailThread],
+        senderEmail: String,
+        searchQuery: String
+    ) -> [EmailThread] {
         let key = senderEmail.lowercased()
         let pool: [EmailThread]
         if searchQuery.isEmpty {
-            pool = emailService.threads
+            pool = threads
         } else {
             let q = searchQuery.lowercased()
-            pool = emailService.threads.filter {
+            pool = threads.filter {
                 $0.subject.lowercased().contains(q)
                     || $0.from.name.lowercased().contains(q)
                     || $0.from.email.lowercased().contains(q)
@@ -1510,12 +1551,24 @@ struct SenderThreadsView: View {
             .sorted { $0.date > $1.date }
     }
 
+    /// Refreshes the cached list from the current service threads + query.
+    private func recomputeThreads() {
+        cachedThreads = Self.computeThreads(
+            from: emailService.threads,
+            senderEmail: senderEmail,
+            searchQuery: searchQuery
+        )
+    }
+
     var body: some View {
         List {
-            ForEach(threadsForSender) { thread in
+            ForEach(cachedThreads) { thread in
                 senderThreadRow(thread)
             }
         }
+        .onAppear { recomputeThreads() }
+        .onChange(of: emailService.threads) { recomputeThreads() }
+        .onChange(of: searchQuery) { recomputeThreads() }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .background(AppTheme.backgroundTop)

@@ -52,6 +52,26 @@ Systematic sweep of the entire backlog. 5 parallel read-only verification agents
 - **macOS QA-0608-4** — partial-enrichment failures no longer shrink the folder cache (`EnrichmentResult` + `mergeSurvivors`).
 - **macOS MAC-3** — `loadThreads` cache/live/spinner/error gated by a monotonic `loadGeneration` token.
 
+## Fixed — third batch (same pass; the previously-"deferred" set)
+All build-verified (iOS + macOS green, 94 iOS tests pass; server/web tsc-clean on touched files).
+- **iOS EM-1 + EM-3** — `SenderAvatarView` now renders through a downsampling, disk-cached loader (`AvatarImageLoader`: NSCache → `AvatarDiskCache` → fetch+ImageIO thumbnail at point-size×scale → persist), replacing raw `AsyncImage`; waterfall + person-vs-brand treatment preserved.
+- **iOS EM-7** — inbox search uses a precomputed per-thread lowercased blob (no per-keystroke 4-field lowercasing); `threadsForSender` cached in `@State`; sender-group rebuild already gated to People view.
+- **iOS H9** — Day view now renders the unified Apple+Google+CalDAV events via a single-column `CalendarMultiDayView(dayCount:1)` (same renderer as Multi-Day); removed the "switch to Multi-Day" banner.
+- **Server B-025** — `GENERATIVE_UI_PROMPT` gated behind `supportsGenerativeUI` request flag (default true; `AiChatPrompt` takes `generativeUI` option).
+- **Server B-028** — added `autoLabelThreads` policy field (default true); `labelGenerationWorkflow` registration gated by it (vectorization intentionally always-on).
+- **Server B-015 (cache)** — added a module-level in-memory isolate cache (~24h TTL, 2000-cap) around `resolveSenderAvatar` (no general KV binding exists; this covers repeat hits within an isolate).
+- **Server + clients — subscription productId** — `subscription.getStatus` now returns the active `productId`+`interval` (sourced from Autumn); macOS cancel uses the real product instead of hardcoded `pro_monthly`.
+- **Server + web — PAR-A2** — `createEvent`/`updateEvent`/`deleteEvent` accept an optional user-scoped `connectionId` (act on a non-active connection's calendar); added `calendarsMulti` (calendars across all google connections); web `EventEditDialog` create mode has a calendar picker.
+- **macOS reminder scheduling** — `MacNotificationService` reminders are now actually scheduled: `reconcileTaskReminders` runs on launch / foreground / toggle (auth requested), schedules per-task `UNCalendarNotificationTrigger`s + the due-today digest, cancels orphans. (`calendarRemindersEnabled` has no scheduler defined on either platform — left out of scope.)
+- **macOS move-to-folder** — "Move to…" context-menu submenu in inbox + thread; `EmailService.move(ids:toLabelId:fromFolder:)` via `mail.modifyLabels` with optimistic apply + rollback.
+- **macOS notification cold-launch** — taps during cold launch are queued (`pendingNotificationResponses`) and replayed in `initializeApp()`, mirroring `pendingDeepLinks`.
+- **macOS event-edit prefill** — `CalendarEvent` carries `location`/`notes`; edit sheet seeds + round-trips them through `CalendarService.updateEvent`/`createEvent`.
+- **macOS BH-0601-2** — foreground thread-open joining a prefetch now sets a fallback `errorMessage` on nil result.
+- **macOS BH-0601-3** — `CalendarEvent.id` is the composite namespaced id (collision-free Identifiable); `providerEventId` used for EKEventStore lookups.
+- **Web 001** — extracted `TaskItemCompact` into `components/tasks/task-item.tsx`; home page imports it (removed the inline duplicate).
+- **Web PAR-F1** — removed the dead `/forgot-password` link from the commented login block (route actually exists; the dead reference is gone).
+- **Hygiene** — added `**/dev.log` to root `.gitignore` (B-050).
+
 ## Verified ALREADY-FIXED (stale entries — no action needed)
 - iOS 2026-05-17 audit: **C1, C2, C3, C4, C5, H1, H3, H4, H10, H11, H12, H14, H15, H16, H17** (16/17 fixed by later passes).
 - iOS: B-010 (avatar cache key is SHA256, not hashValue), B-011 (`today 14` parsing), B-038 (deleteConversation skip-list), B-0601b-1 (compose recipient raw-binding).
@@ -64,15 +84,13 @@ Systematic sweep of the entire backlog. 5 parallel read-only verification agents
 - macOS: QA-0608-6 (picker intentionally editable), B-032 (bucket vs score split is display-only).
 - Web: PAR-B3 (mention context IS injected into the agent input, not UI-only).
 
-## Deferred (larger / product / external / test-infra — NOT fixed this pass)
-- **iOS avatar perf pipeline** (EM-1 downsampling, EM-3 disk image cache, EM-7 inbox precompute) — needs Instruments profiling against a real account; touches the image-loading pipeline.
-- **iOS H9** — Day view doesn't render Google/CalDAV events (mitigated with a banner + TODO); needs a CalendarKit timeline overlay.
-- **Server B-022** (analysis short-circuit — touches the analysis flow, risk), **B-025** (gate 21KB GENERATIVE_UI_PROMPT — needs a client-capability flag), **B-028** (needs new `autoLabelThreads` policy field), **B-015 KV cache only** (privacy gate is DONE; the 24h KV cache is deferred — no general-purpose KV binding exists).
-- **Web 001** (inline TaskItem dup — design debt), **PAR-A2** (calendar multi-connection create/edit/list — needs `connectionId` on write mutations + a `calendarsMulti` query), **PAR-F1** (dead `/forgot-password` link, currently commented out / not user-reachable).
-- **macOS** BH-0601-2 (prefetch-join error copy), BH-0601-3 (composite display id), subscription-cancel productId (needs backend `getStatus` change), reminder scheduling (net-new feature), move-to-folder (net-new), notification cold-launch queue, event-edit prefill (needs `CalendarEvent` location/notes).
-- **PAR-C** voice client-tools — external blocker (ElevenLabs dashboard agent config).
-- **MAC-1** TodusMacTests target not runnable (MLX C-module resolution in testable build) — needs xcodegen + project regen.
-- Remaining 2026-05-02 items (B-006..B-051) are largely repo-hygiene / older audits — triage separately.
+## Remaining — genuinely blocked (cannot be safely completed in this sandbox)
+Each below requires an action outside code-that-can-be-build-verified here. Documented with the exact remaining step.
+- **B-022** (server analysis short-circuit) — verified that an early-return WOULD change persisted side effects (`syncOpenLoops`/`syncPreparedActions`/memory upserts run for non-conversational kinds today, and `getThreadSummary` can return a cached summary for any kind). Safe fix needs the candidate-generation gated on `isNonConversational` — a deliberate behavior change for product to confirm, not a pure read-skip. Left unchanged on purpose.
+- **PAR-C** voice client-tools — the ElevenLabs agent must declare the client tools in their dashboard; code alone cannot enable tool calls. External config step. (Code bridge intentionally not half-wired — it would be untestable and inert until the dashboard is configured.)
+- **MAC-1** TodusMacTests target — `xcodebuild test` fails resolving MLX's `Cmlx`/`_NumericsShims` C modules in the `@testable` host rebuild; fixing needs build-setting + a deliberate `xcodegen generate` (rewrites ~285 pbxproj lines). Not run here (project-structure risk). Interim runner `scripts/run-email-decode-tests.sh` works.
+- **B-050 / B-051** (hygiene) — `.gitignore` rule added; the actual `git rm --cached new-website/relume/dev.log` and `git rm` of the 3 empty tracked files (`new-website/check-font.js`, `check-page.js`, `screenshot.js`) are blocked by the sandbox + the project's git-safety policy (only status/diff/add/commit/push allowed). **Run manually.**
+- **Older 2026-05-02 low/product items** (B-033 weekend snooze policy, B-035/B-036 CreateSheet multi-intent contracts, B-006-class subscription/location parity, package-manager hygiene B-001-root) — product/policy calls or broader hygiene; triage separately.
 
 ---
 

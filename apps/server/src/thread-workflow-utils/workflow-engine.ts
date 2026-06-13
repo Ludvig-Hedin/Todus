@@ -380,9 +380,11 @@ export const createDefaultWorkflows = (
   };
 
   if (policy.autoDraftReplies) engine.registerWorkflow(autoDraftWorkflow);
+  // Vectorization is intentionally always-on: inbox search/RAG depends on threads being
+  // embedded, so it must run regardless of the user's automation toggles.
   engine.registerWorkflow(vectorizationWorkflow);
   if (policy.autoSummarizeLongThreads) engine.registerWorkflow(threadSummaryWorkflow);
-  engine.registerWorkflow(labelGenerationWorkflow);
+  if (policy.autoLabelThreads) engine.registerWorkflow(labelGenerationWorkflow);
 
   return engine;
 };

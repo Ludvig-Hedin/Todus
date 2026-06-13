@@ -147,6 +147,11 @@ struct MacEmailInboxView: View {
             recomputeFiltered()
             await services.emailService.ensureMailboxReady(for: folder)
         }
+        .task {
+            // Warm the "Move to…" label list once so the context-menu submenu is
+            // populated the first time the user opens it.
+            await services.emailService.loadUserLabels()
+        }
         .task(id: folder) {
             // Poll every 60s while this folder is visible — re-reads the backend DB so
             // newly synced threads appear without user intervention. Routine polls
@@ -616,6 +621,8 @@ struct MacEmailInboxView: View {
             }
             .keyboardShortcut("u", modifiers: [.command, .shift])
 
+            moveToMenu(for: thread)
+
             Button {
                 // Close the detail pane if it's showing the thread we're archiving —
                 // otherwise it keeps rendering a thread that's no longer in the list,
@@ -639,6 +646,38 @@ struct MacEmailInboxView: View {
             }
             .keyboardShortcut(.delete, modifiers: .command)
         }
+    }
+
+    /// "Move to…" submenu listing the user's Gmail labels as destinations. Selecting one
+    /// adds that label and removes the current folder's system label (so the thread leaves
+    /// this mailbox), with optimistic apply + rollback handled by `EmailService.move`.
+    @ViewBuilder
+    private func moveToMenu(for thread: EmailThread) -> some View {
+        Menu {
+            let labels = services.emailService.userLabels
+            if labels.isEmpty {
+                Text("No labels")
+            } else {
+                ForEach(labels) { label in
+                    Button(label.name) {
+                        if selectedThreadId == thread.id {
+                            withAnimation(MacTheme.Motion.fast) { selectedThreadId = nil }
+                        }
+                        Task {
+                            await services.emailService.move(
+                                ids: [thread.id],
+                                toLabelId: label.id,
+                                fromFolder: folder
+                            )
+                        }
+                    }
+                }
+            }
+        } label: {
+            Label("Move to…", systemImage: "folder")
+        }
+        // Populate the submenu lazily when the user hovers it open.
+        .onAppear { Task { await services.emailService.loadUserLabels() } }
     }
 
     /// Writes a string to the system pasteboard. Centralised so every Copy

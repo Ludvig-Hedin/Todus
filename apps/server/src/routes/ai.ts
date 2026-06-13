@@ -242,6 +242,14 @@ const chatRequestSchema = z.object({
   stream: z.boolean().optional().default(true),
   /** Base64-encoded files from the client; merged into the last user message for the model */
   attachments: z.array(serializedFileSchema).optional(),
+  /**
+   * Whether the requesting client can render generative-UI inline cards
+   * (InlineComposeCard, TaskListCard, EmailListCard, …). When false we skip
+   * injecting the ~21KB GENERATIVE_UI_PROMPT, saving tokens for clients that
+   * only render plain markdown. Defaults to true for backward compatibility
+   * with existing clients that don't send this flag.
+   */
+  supportsGenerativeUI: z.boolean().optional().default(true),
 });
 
 const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
@@ -525,7 +533,11 @@ aiRouter.post('/chat', async (c) => {
   // (InlineComposeCard, TaskListCard, EmailListCard, etc.). Without this, clients only see
   // plain markdown — no rich card UI. Append to the existing system message so client-side
   // base rules still take precedence.
-  {
+  //
+  // Gated by the client's capability flag (B-025): only clients that can actually
+  // render these cards pay the ~21KB prompt cost. Defaults to true so existing
+  // clients are unaffected.
+  if (parsed.data.supportsGenerativeUI) {
     const systemIdx = enrichedMessages.findIndex((m) => m.role === 'system');
     if (systemIdx >= 0) {
       enrichedMessages = [...enrichedMessages];

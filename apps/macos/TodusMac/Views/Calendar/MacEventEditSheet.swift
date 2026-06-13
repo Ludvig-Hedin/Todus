@@ -414,8 +414,8 @@ struct MacEventEditSheet: View {
             } else {
                 endDate = event.endDate
             }
-            location = ""        // EKEvent.location/notes aren't on CalendarEvent yet; left blank to avoid wiping on save.
-            notes = ""           // updateEvent only patches fields we pass, so leaving these blank is safe.
+            location = event.location ?? ""
+            notes = event.notes ?? ""
             selectedFolderID = event.folderID
             // Match the existing event's calendar in the picker. The picker stays
             // editable in edit mode so the user can move the event to another
@@ -493,20 +493,27 @@ struct MacEventEditSheet: View {
                     title: trimmedTitle,
                     startDate: startDate,
                     endDate: resolvedEnd,
+                    location: location.isEmpty ? nil : location,
+                    notes: notes.isEmpty ? nil : notes,
                     folderID: selectedFolderID,
                     calendarIdentifier: appleCalendarId
                 )
             case .edit(let event):
                 try await services.calendarService.updateEvent(
-                    identifier: event.id,
+                    // Raw provider id — EKEventStore never matches the composite id.
+                    identifier: event.providerEventId,
                     title: trimmedTitle,
                     startDate: startDate,
                     endDate: resolvedEnd,
-                    notes: notes.isEmpty ? nil : notes,
+                    // Pass the raw (possibly-empty) strings so clearing a field on edit
+                    // actually clears it on the EKEvent — `updateEvent` only skips nil params.
+                    location: location,
+                    notes: notes,
                     calendarIdentifier: appleCalendarId
                 )
-                // Folder mapping lives in CalendarService's UserDefaults map.
-                await services.calendarService.setFolderID(selectedFolderID, for: event.id)
+                // Folder mapping lives in CalendarService's UserDefaults map, keyed by
+                // the raw provider id (the EKEvent.eventIdentifier), not the composite id.
+                await services.calendarService.setFolderID(selectedFolderID, for: event.providerEventId)
             }
             onCompletion?()
             dismiss()
@@ -521,7 +528,7 @@ struct MacEventEditSheet: View {
         isDeleting = true
         defer { isDeleting = false }
         do {
-            try await services.calendarService.deleteEvent(identifier: event.id)
+            try await services.calendarService.deleteEvent(identifier: event.providerEventId)
             onCompletion?()
             dismiss()
         } catch {

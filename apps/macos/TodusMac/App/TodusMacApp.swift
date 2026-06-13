@@ -84,6 +84,9 @@ struct TodusMacApp: App {
                                 // and apply widget-tapped task completions.
                                 services.flushPendingSync()
                                 services.drainWidgetTaskCompletions()
+                                // Re-arm task reminders + refresh the due-today digest in
+                                // case tasks changed (or the day rolled over) while inactive.
+                                services.reconcileTaskReminders()
                             }
                         }
                 } else {
@@ -229,11 +232,17 @@ struct TodusMacApp: App {
             services.flushPendingSync()
             // Apply any task completions tapped on a widget while the app was closed.
             services.drainWidgetTaskCompletions()
+            // Reconcile local task reminders + due-today digest against the loaded task
+            // set (the toggles previously persisted but scheduled nothing).
+            services.reconcileTaskReminders()
             // Wire the delegate so UNUserNotificationCenter callbacks can resolve tasks
             // (SwiftData) and reach email/AI services for routing + actions.
             appDelegate.modelContainer = container
             appDelegate.services = services
             UNUserNotificationCenter.current().delegate = appDelegate
+            // Replay any notification taps that arrived during cold launch before the
+            // delegate's services/container were wired (mirrors pendingDeepLinks below).
+            appDelegate.replayPendingNotificationResponses()
             // Wire SwiftData into the voice coordinator so tool calls
             // (create_task etc.) have a context to mutate. Without this,
             // voice tools fall back to a friendly "open the chat panel
@@ -488,6 +497,27 @@ private struct MacSnoozeContentSnapshot: Sendable {
     let badge: Int?
 }
 
+/// Sendable snapshot of a tapped notification response. Captured on the nonisolated
+/// delegate callback so a cold-launch tap (services/modelContainer still nil) can be
+/// queued and replayed once `initializeApp()` wires the services — mirroring the
+/// `pendingDeepLinks` mechanism for `todus://` / `mailto:` URLs.
+fileprivate struct MacNotificationResponseSnapshot: Sendable {
+    let taskIDString: String
+    let threadIdString: String?
+    let conversationIdString: String?
+    let categoryIdentifier: String
+    let actionIdentifier: String
+    let requestIdentifier: String
+    let snoozeSnapshot: MacSnoozeContentSnapshot?
+
+    /// True when routing this response needs the wired `services` / `modelContainer`
+    /// (everything except the self-contained snooze re-schedule). A cold-launch tap of
+    /// one of these must be queued rather than dropped.
+    var requiresServices: Bool {
+        actionIdentifier != MacNotificationService.Action.snooze
+    }
+}
+
 // MARK: - MacAppDelegate (Notification Action Handling)
 
 /// Handles `UNUserNotificationCenter` foreground presentation + tap/action routing for
@@ -504,6 +534,28 @@ final class MacAppDelegate: NSObject, NSApplicationDelegate {
     var modelContainer: ModelContainer?
     /// Weak reference so the delegate doesn't extend `MacAppServices` lifetime.
     weak var services: MacAppServices?
+
+    /// Notification taps that arrived during cold launch before `services` /
+    /// `modelContainer` were wired. Queued here and replayed by
+    /// `replayPendingNotificationResponses()` at the end of `initializeApp()` so a tap
+    /// that launches the app from cold isn't silently dropped (mirrors `pendingDeepLinks`).
+    private var pendingNotificationResponses: [MacNotificationResponseSnapshot] = []
+
+    /// Replays any notification taps queued during cold launch. Called once after
+    /// `services` + `modelContainer` are set in `initializeApp()`.
+    func replayPendingNotificationResponses() {
+        guard !pendingNotificationResponses.isEmpty else { return }
+        let queued = pendingNotificationResponses
+        pendingNotificationResponses = []
+        for snapshot in queued {
+            route(snapshot)
+        }
+    }
+
+    /// Queue a response for later replay (services not ready yet).
+    fileprivate func enqueuePendingNotificationResponse(_ snapshot: MacNotificationResponseSnapshot) {
+        pendingNotificationResponses.append(snapshot)
+    }
 }
 
 extension MacAppDelegate: UNUserNotificationCenterDelegate {
@@ -545,16 +597,49 @@ extension MacAppDelegate: UNUserNotificationCenterDelegate {
             )
         }()
 
+        let snapshot = MacNotificationResponseSnapshot(
+            taskIDString: taskIDString,
+            threadIdString: threadIdString,
+            conversationIdString: conversationIdString,
+            categoryIdentifier: categoryIdentifier,
+            actionIdentifier: actionIdentifier,
+            requestIdentifier: requestIdentifier,
+            snoozeSnapshot: snoozeSnapshot
+        )
+
         // Call completionHandler immediately on the nonisolated context so we don't
         // capture an `@escaping` handler in a MainActor Task (Sendability risk).
         completionHandler()
 
         Task { @MainActor in
+            // Cold-launch tap: services/modelContainer not wired yet. Queue the
+            // (Sendable) snapshot so `initializeApp()` can replay it once ready, rather
+            // than dropping it on the floor. Self-contained actions (snooze) still run now.
+            if snapshot.requiresServices, self.services == nil {
+                self.enqueuePendingNotificationResponse(snapshot)
+                return
+            }
+            self.route(snapshot)
+        }
+    }
+
+    /// Routes a (possibly-replayed) notification response on the MainActor. Split out of
+    /// `didReceive` so both the live path and the cold-launch replay path share identical
+    /// routing logic.
+    @MainActor
+    fileprivate func route(_ snapshot: MacNotificationResponseSnapshot) {
+        let taskIDString = snapshot.taskIDString
+        let threadIdString = snapshot.threadIdString
+        let conversationIdString = snapshot.conversationIdString
+        let categoryIdentifier = snapshot.categoryIdentifier
+        let actionIdentifier = snapshot.actionIdentifier
+        let requestIdentifier = snapshot.requestIdentifier
+        let snoozeSnapshot = snapshot.snoozeSnapshot
+
+        Task { @MainActor in
             switch actionIdentifier {
             case MacNotificationService.Action.complete:
-                // Mark the task complete via SwiftData. If the model container isn't
-                // ready yet (action delivered during cold launch), the user can tap
-                // again after launch completes — we don't have a queued retry path.
+                // Mark the task complete via SwiftData.
                 guard let container = self.modelContainer,
                       let taskID = UUID(uuidString: taskIDString) else { return }
                 let context = container.mainContext

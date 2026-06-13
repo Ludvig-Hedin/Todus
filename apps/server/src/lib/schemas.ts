@@ -23,6 +23,8 @@ export const assistantAutomationPolicySchema = z.object({
   showHomeBriefing: z.boolean().default(true),
   trackWaitingOnThreads: z.boolean().default(true),
   peopleMemoryEnabled: z.boolean().default(true),
+  /** When true, the thread-sync workflow auto-generates/applies AI labels on new threads. */
+  autoLabelThreads: z.boolean().default(true),
   batchApprovalEnabled: z.boolean().default(false),
   workdayStartHour: z.number().int().min(0).max(23).default(8),
   workdayEndHour: z.number().int().min(0).max(23).default(18),
@@ -49,6 +51,7 @@ export const defaultAssistantAutomationPolicy: AssistantAutomationPolicy = {
   showHomeBriefing: true,
   trackWaitingOnThreads: true,
   peopleMemoryEnabled: true,
+  autoLabelThreads: true,
   batchApprovalEnabled: false,
   workdayStartHour: 8,
   workdayEndHour: 18,

@@ -1,8 +1,9 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { Outputs } from '@zero/server/trpc';
-import { formatDistanceToNow } from 'date-fns';
-import { Calendar as CalendarIcon, Check, Circle } from 'lucide-react';
+import { formatDistanceToNow, isToday } from 'date-fns';
+import { Calendar as CalendarIcon, Check, CheckCircle2, Circle } from 'lucide-react';
 import { useTRPC } from '@/providers/query-provider';
+import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
@@ -87,6 +88,59 @@ export function TaskItem({ task }: { task: Task }) {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Compact, *controlled* task row used in dense surfaces (home page sections).
+ * Unlike {@link TaskItem}, it does not own the mutation — the parent supplies
+ * `onToggle` and manages cache updates. Keeps the home page's exact compact
+ * styling so behavior is unchanged after de-duplicating the inline copy.
+ */
+export function TaskItemCompact({ task, onToggle }: { task: Task; onToggle: () => void }) {
+  return (
+    <div className="flex items-center gap-3 py-2.5">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="text-muted-foreground hover:text-primary shrink-0 transition-colors"
+      >
+        {task.status === 'done' ? (
+          <CheckCircle2 className="text-primary h-4 w-4" />
+        ) : (
+          <Circle className="h-4 w-4" />
+        )}
+      </button>
+      <div className="min-w-0 flex-1">
+        <p
+          className={cn(
+            'truncate text-[13px] font-medium',
+            task.status === 'done' && 'text-muted-foreground line-through',
+          )}
+        >
+          {task.title}
+        </p>
+        {task.dueDate && isToday(new Date(task.dueDate)) && (
+          <p className="text-muted-foreground text-[11px]">Due today</p>
+        )}
+      </div>
+      {task.priority && task.priority !== 'none' && (
+        <Badge
+          variant="secondary"
+          className={cn(
+            'h-4 shrink-0 border-0 px-1.5 text-[10px] font-medium',
+            task.priority === 'high' &&
+              'bg-red-50 text-red-600 dark:bg-red-950/30 dark:text-red-400',
+            task.priority === 'medium' &&
+              'bg-yellow-50 text-yellow-600 dark:bg-yellow-950/30 dark:text-yellow-400',
+            task.priority === 'low' &&
+              'bg-blue-50 text-blue-600 dark:bg-blue-950/30 dark:text-blue-400',
+          )}
+        >
+          {task.priority}
+        </Badge>
+      )}
     </div>
   );
 }

@@ -6,7 +6,6 @@
 import {
   ArrowRight,
   CheckCircle2,
-  Circle,
   Inbox,
   Plus,
   CalendarDays,
@@ -27,13 +26,13 @@ import { Badge } from '@/components/ui/badge';
 import { useSettings } from '@/hooks/use-settings';
 import { authProxy } from '@/lib/auth-proxy';
 import { upsertTaskInTaskCaches } from '@/lib/task-cache';
+import { TaskItemCompact } from '@/components/tasks/task-item';
 import type { Route } from './+types/page';
 import { Link, redirect } from 'react-router';
 import { cn } from '@/lib/utils';
 import { useMemo } from 'react';
 import { toast } from 'sonner';
 
-type Task = Outputs['tasks']['list']['tasks'][number];
 type CalendarEvent = Outputs['calendar']['events']['events'][number];
 type AssistantBriefing = Outputs['assistant']['getBriefing'];
 
@@ -333,7 +332,7 @@ export default function HomePage() {
               ) : (
                 <div className="divide-border/60 flex flex-col divide-y">
                   {todayTasks.map((task) => (
-                    <TaskItem
+                    <TaskItemCompact
                       key={task.id}
                       task={task}
                       onToggle={() =>
@@ -378,56 +377,6 @@ export default function HomePage() {
           </div>
         </div>
       </div>
-    </div>
-  );
-}
-
-// ─── TaskItem ─────────────────────────────────────────────────────────────────
-// Compact task row with toggle checkbox + priority badge
-
-function TaskItem({ task, onToggle }: { task: Task; onToggle: () => void }) {
-  return (
-    <div className="flex items-center gap-3 py-2.5">
-      <button
-        type="button"
-        onClick={onToggle}
-        className="text-muted-foreground hover:text-primary shrink-0 transition-colors"
-      >
-        {task.status === 'done' ? (
-          <CheckCircle2 className="text-primary h-4 w-4" />
-        ) : (
-          <Circle className="h-4 w-4" />
-        )}
-      </button>
-      <div className="min-w-0 flex-1">
-        <p
-          className={cn(
-            'truncate text-[13px] font-medium',
-            task.status === 'done' && 'text-muted-foreground line-through',
-          )}
-        >
-          {task.title}
-        </p>
-        {task.dueDate && isToday(new Date(task.dueDate)) && (
-          <p className="text-muted-foreground text-[11px]">Due today</p>
-        )}
-      </div>
-      {task.priority && task.priority !== 'none' && (
-        <Badge
-          variant="secondary"
-          className={cn(
-            'h-4 shrink-0 border-0 px-1.5 text-[10px] font-medium',
-            task.priority === 'high' &&
-              'bg-red-50 text-red-600 dark:bg-red-950/30 dark:text-red-400',
-            task.priority === 'medium' &&
-              'bg-yellow-50 text-yellow-600 dark:bg-yellow-950/30 dark:text-yellow-400',
-            task.priority === 'low' &&
-              'bg-blue-50 text-blue-600 dark:bg-blue-950/30 dark:text-blue-400',
-          )}
-        >
-          {task.priority}
-        </Badge>
-      )}
     </div>
   );
 }

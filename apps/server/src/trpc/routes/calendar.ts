@@ -8,8 +8,10 @@
  * Exposed procedures:
  *   calendar.events — list events for a given time window
  *   calendar.calendars — list the user's calendar list (for multi-cal support)
+ *   calendar.calendarsMulti — list calendars across ALL google connections, grouped
  *   calendar.eventsMulti — list events across multiple connections in parallel
  *   calendar.createEvent / updateEvent / deleteEvent — write operations
+ *     (optional `connectionId` targets a specific user-owned connection's calendar)
  */
 import { activeConnectionProcedure, multiConnectionProcedure, router } from '../trpc';
 import { OAuth2Client } from 'google-auth-library';
@@ -28,6 +30,33 @@ export function buildAuthClient(refreshToken: string): OAuth2Client {
   const auth = new OAuth2Client(env.GOOGLE_CLIENT_ID, env.GOOGLE_CLIENT_SECRET);
   auth.setCredentials({ refresh_token: refreshToken });
   return auth;
+}
+
+/**
+ * Resolve the connection a write/read should target. When `connectionId` is
+ * provided and differs from the active one, look it up scoped to the current
+ * user via `findUserConnection` (so a client can only ever reach its own
+ * connections — no IDOR). Omitted `connectionId` falls back to the active
+ * connection (backward compatible). Throws NOT_FOUND when the id doesn't
+ * resolve to one of the user's connections, so a bad id never silently acts on
+ * the active calendar.
+ */
+async function resolveTargetConnection<T extends { id: string }>(
+  ctx: { sessionUser: { id: string }; activeConnection: T },
+  connectionId: string | undefined,
+): Promise<T> {
+  if (!connectionId || connectionId === ctx.activeConnection.id) {
+    return ctx.activeConnection;
+  }
+  const db = await getZeroDB(ctx.sessionUser.id);
+  const found = (await db.findUserConnection(connectionId)) as T | null | undefined;
+  if (!found) {
+    throw new TRPCError({
+      code: 'NOT_FOUND',
+      message: 'Connection not found',
+    });
+  }
+  return found;
 }
 
 /**
@@ -309,6 +338,114 @@ export const calendarRouter = router({
     return { calendars, scopeMissing: false };
   }),
 
+  /**
+   * List calendars across ALL of the user's Google connections, grouped and
+   * annotated by connection. Mirrors `calendars` per-connection but lets a
+   * multi-account client populate a unified calendar picker in one round-trip
+   * (e.g. to pick which connection's calendar a new event should land on).
+   *
+   * Each group reports its own `scopeMissing` / `error` so one connection that
+   * needs re-auth doesn't blank out the others.
+   */
+  calendarsMulti: multiConnectionProcedure
+    .input(
+      z
+        .object({
+          /** Filter to specific connection IDs (omit for all the user's connections). */
+          connectionIds: z.array(z.string()).optional(),
+        })
+        .optional(),
+    )
+    .query(async ({ ctx, input }) => {
+      const { connections } = ctx;
+
+      const targetConnections = input?.connectionIds
+        ? connections.filter((c) => input.connectionIds!.includes(c.id))
+        : connections;
+
+      const googleConnections = targetConnections.filter(
+        (c) => c.providerId === 'google' && c.refreshToken,
+      );
+
+      type CalendarGroup = {
+        connectionId: string;
+        connectionEmail: string;
+        connectionColor: string | null;
+        calendars: Array<{
+          id: string;
+          name: string;
+          color: string;
+          primary: boolean;
+          accessRole: string;
+        }>;
+        scopeMissing: boolean;
+        error: string | null;
+      };
+
+      const results = await Promise.allSettled(
+        googleConnections.map(async (conn): Promise<CalendarGroup> => {
+          const auth = buildAuthClient(conn.refreshToken!);
+          try {
+            const data = await calendarFetch<GCalCalendarListResponse>(
+              auth,
+              '/users/me/calendarList',
+              { minAccessRole: 'reader', maxResults: '50' },
+            );
+            return {
+              connectionId: conn.id,
+              connectionEmail: conn.email,
+              connectionColor: conn.color,
+              calendars: (data.items ?? []).map((c) => ({
+                id: c.id,
+                name: c.summary,
+                color: c.backgroundColor ?? '#5484ed',
+                primary: c.primary ?? false,
+                accessRole: c.accessRole ?? 'reader',
+              })),
+              scopeMissing: false,
+              error: null,
+            };
+          } catch (err) {
+            if (err instanceof CalendarScopeMissingError) {
+              return {
+                connectionId: conn.id,
+                connectionEmail: conn.email,
+                connectionColor: conn.color,
+                calendars: [],
+                scopeMissing: true,
+                error: null,
+              };
+            }
+            console.error(
+              `[calendar.calendarsMulti] connection=${conn.id} failed:`,
+              err,
+            );
+            return {
+              connectionId: conn.id,
+              connectionEmail: conn.email,
+              connectionColor: conn.color,
+              calendars: [],
+              scopeMissing: false,
+              error: err instanceof Error ? err.message : 'Unknown error',
+            };
+          }
+        }),
+      );
+
+      const groups: CalendarGroup[] = [];
+      let anyScopeMissing = false;
+      for (const result of results) {
+        if (result.status === 'fulfilled') {
+          if (result.value.scopeMissing) anyScopeMissing = true;
+          groups.push(result.value);
+        }
+        // Rejected promises are unexpected here (the inner map catches everything),
+        // but if one slips through we simply omit that connection's group.
+      }
+
+      return { groups, scopeMissing: anyScopeMissing };
+    }),
+
   /** Fetch calendar events from ALL connections in parallel — for unified calendar view */
   eventsMulti: multiConnectionProcedure
     .input(
@@ -498,6 +635,9 @@ export const calendarRouter = router({
   createEvent: activeConnectionProcedure
     .input(
       z.object({
+        // Target a specific (user-owned) connection's calendar instead of the
+        // active one. Omitted = active connection (backward compatible).
+        connectionId: z.string().optional(),
         calendarId: z.string().default('primary'),
         summary: z.string(),
         description: z.string().optional(),
@@ -537,16 +677,17 @@ export const calendarRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const { activeConnection } = ctx;
-      if (activeConnection.providerId !== 'google') {
+      const targetConnection = await resolveTargetConnection(ctx, input.connectionId);
+      if (targetConnection.providerId !== 'google') {
         return { scopeMissing: false, event: null };
       }
-      if (!activeConnection.refreshToken) {
+      if (!targetConnection.refreshToken) {
         throw new TRPCError({ code: 'UNAUTHORIZED', message: 'No refresh token available' });
       }
 
-      const auth = buildAuthClient(activeConnection.refreshToken);
-      const { calendarId, ...body } = input;
+      const auth = buildAuthClient(targetConnection.refreshToken);
+      // Strip routing-only fields from the Google event body.
+      const { calendarId, connectionId: _connectionId, ...body } = input;
 
       try {
         const created = await calendarFetchJSON<GCalEvent>(
@@ -569,6 +710,9 @@ export const calendarRouter = router({
   updateEvent: activeConnectionProcedure
     .input(
       z.object({
+        // Target a specific (user-owned) connection's calendar instead of the
+        // active one. Omitted = active connection (backward compatible).
+        connectionId: z.string().optional(),
         calendarId: z.string().default('primary'),
         eventId: z.string(),
         patch: z.object({
@@ -603,15 +747,15 @@ export const calendarRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const { activeConnection } = ctx;
-      if (activeConnection.providerId !== 'google') {
+      const targetConnection = await resolveTargetConnection(ctx, input.connectionId);
+      if (targetConnection.providerId !== 'google') {
         return { scopeMissing: false, event: null };
       }
-      if (!activeConnection.refreshToken) {
+      if (!targetConnection.refreshToken) {
         throw new TRPCError({ code: 'UNAUTHORIZED', message: 'No refresh token available' });
       }
 
-      const auth = buildAuthClient(activeConnection.refreshToken);
+      const auth = buildAuthClient(targetConnection.refreshToken);
 
       try {
         const updated = await calendarFetchJSON<GCalEvent>(
@@ -634,21 +778,24 @@ export const calendarRouter = router({
   deleteEvent: activeConnectionProcedure
     .input(
       z.object({
+        // Target a specific (user-owned) connection's calendar instead of the
+        // active one. Omitted = active connection (backward compatible).
+        connectionId: z.string().optional(),
         calendarId: z.string().default('primary'),
         eventId: z.string(),
         sendUpdates: z.enum(['all', 'externalOnly', 'none']).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const { activeConnection } = ctx;
-      if (activeConnection.providerId !== 'google') {
+      const targetConnection = await resolveTargetConnection(ctx, input.connectionId);
+      if (targetConnection.providerId !== 'google') {
         return { scopeMissing: false, success: false };
       }
-      if (!activeConnection.refreshToken) {
+      if (!targetConnection.refreshToken) {
         throw new TRPCError({ code: 'UNAUTHORIZED', message: 'No refresh token available' });
       }
 
-      const auth = buildAuthClient(activeConnection.refreshToken);
+      const auth = buildAuthClient(targetConnection.refreshToken);
 
       try {
         await calendarFetchJSON<null>(

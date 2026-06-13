@@ -798,7 +798,16 @@ final class EmailService {
         errorMessage = nil
         defer { isLoadingThread = false }
 
-        return await fetchThreadDetail(id: id, updateLoadingState: true)
+        let detail = await fetchThreadDetail(id: id, updateLoadingState: true)
+        // A foreground-opened thread may join an in-flight *prefetch* whose
+        // `updateLoadingState` was false (BH-0601-2). In that case `fetchThreadDetail`
+        // swallows the error and never sets `errorMessage`, so a failed open showed a
+        // blank pane with no error. Backstop here: if we asked to surface loading state
+        // and got nil with no message already set, show the generic failure.
+        if detail == nil, errorMessage == nil {
+            errorMessage = "Failed to load thread."
+        }
+        return detail
     }
 
     /// Warms the in-memory cache for the first N inbox threads so user clicks
@@ -1457,6 +1466,77 @@ final class EmailService {
         }
     }
 
+    /// User-defined Gmail labels available as "Move to…" destinations. Loaded lazily
+    /// from `labels.list` and cached for the session; the menu reads this synchronously.
+    var userLabels: [EmailUserLabel] = []
+    private var lastLabelsLoadAt: Date?
+    private static let labelsCacheInterval: TimeInterval = 60 * 5
+
+    /// Fetches the user's labels for the "Move to…" submenu. Cached for 5 min; pass
+    /// `force` to bypass. Filters to user-type labels (system labels like INBOX/SENT
+    /// aren't useful move destinations). Best-effort — failures leave the prior list.
+    func loadUserLabels(force: Bool = false) async {
+        if !force,
+           let last = lastLabelsLoadAt,
+           Date().timeIntervalSince(last) < Self.labelsCacheInterval,
+           !userLabels.isEmpty {
+            return
+        }
+        do {
+            let labels: [EmailUserLabel] = try await api.trpcQuery("labels.list")
+            // Only user labels are meaningful move targets; system labels (INBOX, SENT,
+            // SPAM, …) are managed by archive/delete/folder navigation instead.
+            userLabels = labels
+                .filter { $0.type.lowercased() == "user" }
+                .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            lastLabelsLoadAt = Date()
+        } catch {
+            AppLogger.shared.log("[EmailService] loadUserLabels error: \(error)")
+        }
+    }
+
+    /// Moves threads into a user label via `mail.modifyLabels`: adds the target label and
+    /// removes the source folder's system label (e.g. INBOX) so the thread actually leaves
+    /// the current mailbox view. Optimistic — removes the rows from the current list/cache
+    /// and rolls back on failure, matching archive/delete. When `removeFromFolder` maps to
+    /// no system label (e.g. a custom view) only the add is performed and rows stay put.
+    func move(ids: [String], toLabelId labelId: String, fromFolder folder: String) async {
+        guard !ids.isEmpty, !labelId.isEmpty else { return }
+
+        let removeLabel = Self.systemLabel(forFolder: folder)
+        // Only physically remove the rows when the move takes them out of the current
+        // mailbox (i.e. we're removing the folder's system label). Otherwise just tag.
+        let snapshot: [EmailThread] = removeLabel != nil ? removeThreads(ids: ids) : []
+
+        do {
+            let _: EmailEmptyResponse = try await api.trpcMutation(
+                "mail.modifyLabels",
+                input: ModifyLabelsInput(
+                    threadId: ids,
+                    addLabels: [labelId],
+                    removeLabels: removeLabel.map { [$0] } ?? []
+                )
+            )
+        } catch {
+            if removeLabel != nil { restoreThreadSnapshot(snapshot) }
+            errorMessage = "Could not move. Please try again."
+            AppLogger.shared.log("[EmailService] move error: \(error)")
+        }
+    }
+
+    /// Maps a folder key to the Gmail system label that, when removed, takes a thread out
+    /// of that mailbox. Only folders that represent a removable system label return one;
+    /// folders without a clean inverse (sent/draft/search/custom) return nil so a move
+    /// only adds the label without trying to "remove" the view.
+    private static func systemLabel(forFolder folder: String) -> String? {
+        switch folder.lowercased() {
+        case "inbox": return "INBOX"
+        case "spam": return "SPAM"
+        case "bin", "trash": return "TRASH"
+        default: return nil
+        }
+    }
+
     func toggleStar(ids: [String]) async {
         // Optimistic apply, rollback on failure — previously the star only
         // changed after a full refresh, so the action looked like a no-op.
@@ -1523,6 +1603,12 @@ private struct GetThreadInput: Encodable {
 
 private struct IdsInput: Encodable {
     let ids: [String]
+}
+
+private struct ModifyLabelsInput: Encodable {
+    let threadId: [String]
+    let addLabels: [String]
+    let removeLabels: [String]
 }
 
 private struct SendRecipient: Encodable {
@@ -1665,6 +1751,14 @@ struct FailableDecodable<T: Decodable>: Decodable {
 
 /// Alias for readability in thread detail views
 typealias EmailThreadDetail = GetThreadResponse
+
+/// A user-defined Gmail label, used as a "Move to…" destination. Mirrors the
+/// `labels.list` output shape (`id`, `name`, optional color, `type`).
+struct EmailUserLabel: Decodable, Identifiable, Sendable {
+    let id: String
+    let name: String
+    let type: String
+}
 
 struct ConnectionsResponse: Decodable {
     let connections: [EmailConnection]

@@ -86,6 +86,88 @@ final class MacNotificationService {
         center.removePendingNotificationRequests(withIdentifiers: ["task-\(taskID)"])
     }
 
+    /// Sendable snapshot of a task used for reminder reconciliation. Captured on the
+    /// MainActor (where SwiftData lives) and handed to the reconcile pass so the
+    /// non-Sendable `TaskRecord` never crosses an actor boundary.
+    struct TaskReminderSnapshot: Sendable {
+        let taskID: String
+        let title: String
+        let dueDate: Date?
+        let completed: Bool
+    }
+
+    /// Reconciles all pending task reminders against the current task set in one pass.
+    ///
+    /// macOS mutates `TaskRecord`s directly across many views (no central capture
+    /// service like iOS), so instead of hooking every mutation site we reconcile the
+    /// whole set at launch / foreground:
+    ///   * Incomplete tasks with a future reminder time → (re)scheduled.
+    ///   * Completed / past-due / date-cleared tasks → their pending request cancelled.
+    ///   * Tasks that no longer exist (deleted) → their orphaned `task-…` request removed.
+    ///
+    /// When `enabled` is false (the "Task Due Reminders" toggle is off) every task
+    /// reminder is cleared so turning the setting off actually silences pending fires.
+    /// Also (re)builds the due-today digest from the same snapshot.
+    func reconcileTaskReminders(_ tasks: [TaskReminderSnapshot], enabled: Bool) async {
+        // Only act once we know the authorization state — a stale `isAuthorized`
+        // would otherwise drop every schedule on cold launch.
+        await checkAuthorization()
+
+        let pending = await center.pendingNotificationRequests()
+        let pendingTaskIdentifiers = Set(
+            pending.map(\.identifier).filter { $0.hasPrefix("task-") }
+        )
+
+        guard enabled, isAuthorized else {
+            // Setting off (or not authorized): clear all task reminders + the digest.
+            if !pendingTaskIdentifiers.isEmpty {
+                center.removePendingNotificationRequests(
+                    withIdentifiers: Array(pendingTaskIdentifiers)
+                )
+            }
+            center.removePendingNotificationRequests(withIdentifiers: ["due-today-digest"])
+            return
+        }
+
+        var keepIdentifiers = Set<String>()
+        for task in tasks {
+            let identifier = "task-\(task.taskID)"
+            guard !task.completed, let dueDate = task.dueDate else {
+                // No longer eligible — drop any stale pending request for it.
+                continue
+            }
+            // scheduleTaskReminder already guards reminderDate > now + authorization,
+            // so a past-due task simply won't (re)schedule and its old request (if any)
+            // is left for removal below.
+            let reminderDate = dueDate.addingTimeInterval(-3600)
+            guard reminderDate > Date() else { continue }
+            keepIdentifiers.insert(identifier)
+            scheduleTaskReminder(taskID: task.taskID, title: task.title, dueDate: dueDate)
+        }
+
+        // Remove orphaned / no-longer-eligible task requests (completed, deleted,
+        // past-due, or date-cleared) so they don't fire for stale state.
+        let toRemove = pendingTaskIdentifiers.subtracting(keepIdentifiers)
+        if !toRemove.isEmpty {
+            center.removePendingNotificationRequests(withIdentifiers: Array(toRemove))
+        }
+
+        // Rebuild the due-today digest from the same snapshot.
+        let cal = Calendar.current
+        let todayTasks = tasks.filter { task in
+            guard !task.completed, let due = task.dueDate else { return false }
+            return cal.isDateInToday(due)
+        }
+        if todayTasks.isEmpty {
+            center.removePendingNotificationRequests(withIdentifiers: ["due-today-digest"])
+        } else {
+            scheduleDueTodayDigest(
+                count: todayTasks.count,
+                titles: todayTasks.map(\.title)
+            )
+        }
+    }
+
     // MARK: - Email Notifications
 
     /// Show a notification for a newly received email thread.

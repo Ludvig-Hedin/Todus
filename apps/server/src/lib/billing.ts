@@ -95,6 +95,63 @@ export const getCachedSubscription = async (userId: string): Promise<CachedSubsc
   };
 };
 
+export type ActiveProduct = {
+  /** The Autumn product id the user should cancel/manage (e.g. `pro_annual`). */
+  productId: string | null;
+  /** Billing interval derived from the product id, when determinable. */
+  interval: 'monthly' | 'annual' | null;
+  /** Product status as reported by Autumn (`active` / `trialing` / `scheduled`). */
+  status: string | null;
+};
+
+const intervalFromProductId = (productId: string | null): ActiveProduct['interval'] => {
+  if (!productId) return null;
+  if (/annual|year/i.test(productId)) return 'annual';
+  if (/month/i.test(productId)) return 'monthly';
+  return null;
+};
+
+/**
+ * Resolve the user's *active* paid product directly from Autumn (source of truth).
+ *
+ * The local DB cache only stores a coarse `plan` ("free"/"pro"/…) — it does NOT
+ * distinguish `pro_monthly` from `pro_annual`, so clients can't tell which product
+ * to cancel from the cached read alone. This does the authoritative lookup.
+ *
+ * Skips paid (non-free) products that are already canceled/expired so the returned
+ * id is genuinely cancellable. Free users return the `free` product id. Failures
+ * fail soft (return nulls) — surfacing product metadata must never break getStatus.
+ */
+export const getActiveProduct = async (userId: string): Promise<ActiveProduct> => {
+  try {
+    const result = await autumnClient().customers.get(userId);
+    const products = result.data?.products ?? [];
+    if (products.length === 0) return { productId: null, interval: null, status: null };
+
+    // Prefer a live paid product (not expired, not canceled). Free is the fallback.
+    // Compare status via String() so a string-enum value matches the literal at
+    // runtime without a TS enum-vs-literal comparison error.
+    const paid = products.filter((p) => p.id && p.id !== 'free');
+    const statusOf = (p: { status: unknown }) => String(p.status);
+    const live =
+      paid.find((p) => statusOf(p) === 'active' || statusOf(p) === 'trialing') ??
+      paid.find((p) => statusOf(p) === 'scheduled' && !p.canceled_at) ??
+      paid[0] ??
+      products.find((p) => p.id === 'free') ??
+      products[0];
+
+    const productId = live?.id ?? null;
+    return {
+      productId,
+      interval: intervalFromProductId(productId),
+      status: live?.status ? String(live.status) : null,
+    };
+  } catch (error) {
+    console.error('[billing] getActiveProduct failed (failing soft)', error);
+    return { productId: null, interval: null, status: null };
+  }
+};
+
 /**
  * Hydrate the cache from Autumn (called after attach/cancel/webhook events).
  * If no Autumn customer exists yet (legacy user from before billing existed,

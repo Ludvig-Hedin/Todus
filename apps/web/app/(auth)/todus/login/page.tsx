@@ -380,12 +380,6 @@ export default function LoginTodus() {
                     <FormItem>
                       <div className="flex items-center justify-between">
                         <FormLabel>Password</FormLabel>
-                        <Link
-                          to="/forgot-password"
-                          className="text-muted-foreground text-xs hover:text-foreground"
-                        >
-                          Forgot your password?
-                        </Link>
                       </div>
                       <FormControl>
                         <Input type="password" placeholder="••••••••" {...field} />

@@ -261,15 +261,32 @@ export default function CalendarPage() {
     onError: (err) => toast.error(err instanceof Error ? err.message : 'Could not delete event'),
   });
 
-  const openCreateEvent = useCallback((start?: Date, end?: Date) => {
-    setEventDialog({
-      open: true,
-      mode: 'create',
-      eventId: null,
-      calendarId: 'primary',
-      values: emptyFormValues({ start, end }),
-    });
-  }, []);
+  // Writable calendars the user can create events on. Read-only calendars
+  // (reader / freeBusyReader) are excluded — Google rejects writes to them.
+  const writableCalendars = useMemo(
+    () => calendars.filter((c) => c.accessRole === 'owner' || c.accessRole === 'writer'),
+    [calendars],
+  );
+
+  // Default create target: the user's primary writable calendar if we know it,
+  // else the Google `primary` alias (backward compatible).
+  const defaultCreateCalendarId = useMemo(
+    () => writableCalendars.find((c) => c.primary)?.id ?? 'primary',
+    [writableCalendars],
+  );
+
+  const openCreateEvent = useCallback(
+    (start?: Date, end?: Date) => {
+      setEventDialog({
+        open: true,
+        mode: 'create',
+        eventId: null,
+        calendarId: defaultCreateCalendarId,
+        values: emptyFormValues({ start, end }),
+      });
+    },
+    [defaultCreateCalendarId],
+  );
 
   const openEditEvent = useCallback(
     (eventId: string) => {
@@ -643,6 +660,9 @@ export default function CalendarPage() {
         readOnly={scopeMissing}
         saving={createEvent.isPending || updateEvent.isPending}
         deleting={deleteEvent.isPending}
+        calendars={writableCalendars}
+        calendarId={eventDialog.calendarId}
+        onCalendarChange={(calendarId) => setEventDialog((p) => ({ ...p, calendarId }))}
         onSave={handleSaveEvent}
         onDelete={
           eventDialog.eventId

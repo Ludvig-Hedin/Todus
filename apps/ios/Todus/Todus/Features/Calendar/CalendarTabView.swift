@@ -20,15 +20,11 @@ struct CalendarTabView: View {
     @State private var isLoading = false
     @State private var calendarHeaderHeight: CGFloat = 90
     @AppStorage("calendarMultiDayCount") private var multiDayCount: Int = 3
-    @State private var eventSaveError: Error?
-    @State private var showEventSaveError: Bool = false
-    /// Start-of-day shown in CalendarKit (Day mode); drives “go to today” visibility.
-    @State private var dayViewDisplayedDay: Date = Calendar.current.startOfDay(for: Date())
-    /// Bumped to tell `CalendarContainerView` to call `move(to: Date())`.
-    @State private var dayGoToTodayTick: Int = 0
-    /// True while EKEventViewController is on top inside the day view's nav stack.
-    /// Hides the SwiftUI AppTopHeader overlay and the outer tab bar so the event
-    /// detail looks like Apple's Calendar.
+    /// True while EKEventViewController is on top of the calendar's nav stack —
+    /// hides the SwiftUI AppTopHeader overlay and outer tab bar so the event detail
+    /// reads like Apple's Calendar. `presentEvent` pushes the detail onto the UIKit
+    /// nav stack outside SwiftUI, so this currently stays false (matching the
+    /// Multi-Day flow); kept so the chrome-hiding plumbing remains available.
     @State private var isShowingEventDetail: Bool = false
     /// Presents the multi-calendar source picker (visibility toggles).
     @State private var showCalendarPicker: Bool = false
@@ -77,7 +73,7 @@ struct CalendarTabView: View {
         let now = Date()
         switch viewMode {
         case .day:
-            return cal.isDate(dayViewDisplayedDay, inSameDayAs: now)
+            return cal.isDate(selectedDate, inSameDayAs: now)
         case .multiDay:
             let start = cal.startOfDay(for: selectedDate)
             guard let lastDay = cal.date(byAdding: .day, value: multiDayCount - 1, to: start) else { return false }
@@ -99,13 +95,10 @@ struct CalendarTabView: View {
     }
 
     private func goToToday() {
-        switch viewMode {
-        case .day:
-            dayGoToTodayTick += 1
-        default:
-            withAnimation(AppTheme.Motion.base) {
-                selectedDate = Date()
-            }
+        // All modes (including Day, now a unified SwiftUI grid) anchor on
+        // `selectedDate`; the Multi-Day pager moves to the new date via its binding.
+        withAnimation(AppTheme.Motion.base) {
+            selectedDate = Date()
         }
     }
 
@@ -237,9 +230,9 @@ struct CalendarTabView: View {
             scheduleLoadEvents()
         }
         .onChange(of: selectedDate) {
-            if viewMode != .day {
-                scheduleLoadEvents()
-            }
+            // All modes (Day included, now a unified SwiftUI grid keyed on
+            // `selectedDate`) reload their event window when the date changes.
+            scheduleLoadEvents()
         }
         .onChange(of: viewMode) {
             scheduleLoadEvents()
@@ -358,7 +351,10 @@ struct CalendarTabView: View {
             .padding(.top, 4)
             .padding(.bottom, 4)
 
-            if viewMode != .day && viewMode != .month {
+            if viewMode != .month {
+                // Day mode now renders a unified SwiftUI grid (like Multi-Day), so it
+                // gets the nav bar too — it provides the date label + prev/next/today
+                // controls the old CalendarKit day strip used to own.
                 CalendarNavBar(
                     selectedDate: $selectedDate,
                     viewMode: viewMode,
@@ -387,50 +383,30 @@ struct CalendarTabView: View {
     private var contentView: some View {
         switch viewMode {
         case .day:
-            CalendarContainerView(
-                topInset: calendarHeaderHeight,
-                displayedDay: $dayViewDisplayedDay,
-                goToTodayTick: $dayGoToTodayTick,
-                isShowingEventDetail: $isShowingEventDetail,
-                onSaveError: { error in
-                eventSaveError = error
-                showEventSaveError = true
-                },
-                preferredDefaultAppleCalendarId: services.calendarPreferences.defaultId(forAccountKey: CalendarSourceIDPrefix.apple)
-            )
-            .ignoresSafeArea(.container, edges: .bottom)
-            .transition(viewTransition)
-            .overlay(alignment: .bottom) {
-                // TODO(bug-hunt): render Google/CalDAV events as an overlay on
-                // top of CalendarKit's day timeline. CalendarKit owns its own
-                // EKEventStore so non-Apple events aren't visible here yet —
-                // warn the user and point them to Multi-Day where the unified
-                // event list IS rendered.
-                if hasNonAppleEventsToday && !isShowingEventDetail {
-                    HStack(spacing: 8) {
-                        Image(systemName: "info.circle")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                        Text("Google events aren’t shown in Day view yet — switch to Multi-Day to see all events.")
-                            .font(.system(size: 12, weight: .regular))
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.leading)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 12)
-                    .accessibilityElement(children: .combine)
-                    .accessibilityLabel("Google events not shown in Day view. Switch to Multi-Day to see all events.")
+            // Unified single-day grid (reuses the Multi-Day renderer with a single
+            // column) so Google / CalDAV events appear alongside Apple events. The
+            // previous CalendarKit day view owned its own EKEventStore and therefore
+            // only rendered Apple events; the `events` list here is the unified set
+            // (Apple + Google + CalDAV), so every source now shows. Event taps go
+            // through `presentEvent` (same EKEventViewController flow Multi-Day uses
+            // for editing Apple events); non-Apple taps surface the "can't open" alert.
+            CalendarMultiDayView(
+                selectedDate: $selectedDate,
+                events: events,
+                dayCount: 1,
+                onEventTap: { event in presentEvent(event) },
+                onCreateEventAt: { date in
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    NotificationCenter.default.post(
+                        name: .todusCalendarRequestCreateEventAt,
+                        object: nil,
+                        userInfo: ["date": date]
+                    )
+                    services.requestCreateSheet = .event
                 }
-            }
-            .alert(String(localized: "Could not save event"), isPresented: $showEventSaveError) {
-                Button(String(localized: "OK"), role: .cancel) { }
-            } message: {
-                Text(eventSaveError?.localizedDescription ?? "")
-            }
+            )
+            .padding(.top, calendarHeaderHeight)
+            .transition(viewTransition)
 
         case .multiDay:
             CalendarMultiDayView(
@@ -538,13 +514,12 @@ struct CalendarTabView: View {
         let (start, end): (Date, Date)
         switch viewMode {
         case .day:
-            // TODO(bug-hunt): full Google overlay rendering for the Day view.
-            // Until that lands we still fetch the unified events so the
-            // "non-Apple events exist today" banner and a future overlay layer
-            // have data to render.
-            let dayStart = cal.startOfDay(for: dayViewDisplayedDay)
+            // Single-day window for the unified day grid. Pad the end by an extra
+            // day (same as Multi-Day) so all-day events stored with an exclusive
+            // end-of-day boundary aren't dropped by the fetch predicate.
+            let dayStart = cal.startOfDay(for: selectedDate)
             start = dayStart
-            end = cal.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart
+            end = cal.date(byAdding: .day, value: 2, to: dayStart) ?? dayStart
         case .multiDay:
             let dayStart = cal.startOfDay(for: selectedDate)
             start = dayStart
@@ -573,22 +548,6 @@ struct CalendarTabView: View {
         // Drop the result if a newer reload superseded us mid-fetch.
         guard !Task.isCancelled else { return }
         events = unified.map { $0.legacyCalendarEvent }
-    }
-
-    /// True when the unified event list contains at least one event for the
-    /// currently displayed day whose source is *not* the Apple EventKit store.
-    /// Drives the Day-view "Google events not shown here" banner.
-    private var hasNonAppleEventsToday: Bool {
-        let cal = Calendar.current
-        let day = cal.startOfDay(for: dayViewDisplayedDay)
-        guard let next = cal.date(byAdding: .day, value: 1, to: day) else { return false }
-        let applePrefix = "\(CalendarSourceIDPrefix.apple):"
-        return events.contains { ev in
-            // Apple events are namespaced `apple:<eventIdentifier>`; Google and
-            // future providers use their own provider prefix.
-            guard ev.startDate < next, ev.endDate > day else { return false }
-            return !ev.id.hasPrefix(applePrefix)
-        }
     }
 
     private func loadMoreListEvents() async {

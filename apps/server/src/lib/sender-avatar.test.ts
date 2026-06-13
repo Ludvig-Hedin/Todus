@@ -3,7 +3,7 @@ vi.mock('cloudflare:workers', () => ({
   env: {},
 }));
 
-import { buildDomainCandidates, resolveFaviconUrls } from './sender-avatar';
+import { buildDomainCandidates, resolveFaviconUrls, resolveSenderAvatar } from './sender-avatar';
 
 describe('sender-avatar helpers', () => {
   afterEach(() => {
@@ -41,5 +41,24 @@ describe('sender-avatar helpers', () => {
     );
     expect(urls[0]).toBe('https://stripe.com/assets/favicon-32x32.png');
     expect(urls).toContain('https://stripe.com/favicon.ico');
+  });
+
+  it('serves resolveSenderAvatar from the in-memory cache on repeat calls (no googleAuth)', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      // All third-party lookups fail/404 so resolution is deterministic and fast.
+      .mockResolvedValue(new Response('', { status: 404 }));
+
+    // Use a unique domain so the module-level cache isn't pre-populated by another test.
+    const email = `someone@cache-test-${Date.now()}.example`;
+
+    const first = await resolveSenderAvatar({ email });
+    const callsAfterFirst = fetchMock.mock.calls.length;
+    expect(callsAfterFirst).toBeGreaterThan(0);
+
+    const second = await resolveSenderAvatar({ email });
+    // Second call must be served from cache — no additional network calls.
+    expect(fetchMock.mock.calls.length).toBe(callsAfterFirst);
+    expect(second).toEqual(first);
   });
 });

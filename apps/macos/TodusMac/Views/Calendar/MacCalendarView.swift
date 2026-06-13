@@ -1492,7 +1492,7 @@ struct MacCalendarView: View {
         guard !isMovingEvent else { return }
         isMovingEvent = true
         Task {
-            await services.calendarService.setFolderID(folderID, for: event.id)
+            await services.calendarService.setFolderID(folderID, for: event.providerEventId)
             await loadEvents()
             await MainActor.run {
                 isMovingEvent = false

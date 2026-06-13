@@ -325,7 +325,7 @@ export const OutlookSearchAssistantSystemPrompt = () =>
 
         `;
 
-export const AiChatPrompt = () =>
+export const AiChatPrompt = (options?: { generativeUI?: boolean }) =>
   dedent`
     <system_prompt>
       <role>
@@ -608,6 +608,6 @@ export const AiChatPrompt = () =>
          6. When showing structured data (emails, tasks, events), did I use a ui-spec card instead of plain text?
        </self_check>
 
-       ${GENERATIVE_UI_PROMPT}
+       ${(options?.generativeUI ?? true) ? GENERATIVE_UI_PROMPT : ''}
     </system_prompt>
   `;

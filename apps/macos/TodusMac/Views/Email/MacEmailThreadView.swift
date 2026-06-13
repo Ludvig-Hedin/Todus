@@ -277,6 +277,7 @@ struct MacEmailThreadView: View {
             }
         }
         .task { await loadThread() }
+        .task { await services.emailService.loadUserLabels() }
         .sheet(isPresented: $showCompose, onDismiss: {
             assistantDraftSeed = ""
             composeMode = .reply
@@ -420,6 +421,29 @@ struct MacEmailThreadView: View {
                         showReminderOptions = true
                     } label: {
                         Label("Remind me about this…", systemImage: "alarm")
+                    }
+
+                    // Move-to-label submenu (parity with the inbox row menu).
+                    Menu {
+                        let labels = services.emailService.userLabels
+                        if labels.isEmpty {
+                            Text("No labels")
+                        } else {
+                            ForEach(labels) { label in
+                                Button(label.name) {
+                                    Task {
+                                        await services.emailService.move(
+                                            ids: [threadId],
+                                            toLabelId: label.id,
+                                            fromFolder: "inbox"
+                                        )
+                                    }
+                                    if let onClose { onClose() } else { dismiss() }
+                                }
+                            }
+                        }
+                    } label: {
+                        Label("Move to…", systemImage: "folder")
                     }
                 } label: {
                     Image(systemName: "ellipsis")

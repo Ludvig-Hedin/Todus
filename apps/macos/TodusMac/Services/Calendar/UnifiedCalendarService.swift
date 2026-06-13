@@ -16,15 +16,22 @@ struct UnifiedCalendarEvent: Identifiable, Sendable, Equatable {
     let providerEventId: String
     let googleCalendarId: String?
     let googleConnectionId: String?
+    /// Event location, carried through so the edit sheet can prefill it for Apple
+    /// events opened from the calendar grid. Google events leave this nil.
+    let location: String?
+    /// Event notes/body — same provenance as `location`.
+    let notes: String?
 }
 
 extension UnifiedCalendarEvent {
     var legacyCalendarEvent: CalendarEvent {
         CalendarEvent(
-            // Use the raw provider id, not the composite `apple:`/`google:` id —
-            // edit/delete pass this straight to `EKEventStore.event(withIdentifier:)`,
-            // which never matches a prefixed id (every grid edit/delete 404'd).
-            id: providerEventId,
+            // Identifiable identity uses the namespaced composite id so an Apple event
+            // and a Google event that share a raw provider id don't collide in SwiftUI
+            // `ForEach`/`Identifiable` (BH-0601-3). EKEventStore + folder-map lookups go
+            // through `providerEventId` below, which carries the raw id the store expects.
+            id: id,
+            providerEventId: providerEventId,
             title: title,
             startDate: startDate,
             endDate: endDate,
@@ -34,6 +41,8 @@ extension UnifiedCalendarEvent {
             calendarColorBlue: colorBlue,
             calendarName: calendarName,
             folderID: nil,
+            location: location,
+            notes: notes,
             isWritable: isWritable
         )
     }
@@ -113,7 +122,9 @@ final class UnifiedCalendarService {
                 isWritable: true,
                 providerEventId: ev.id,
                 googleCalendarId: nil,
-                googleConnectionId: nil
+                googleConnectionId: nil,
+                location: ev.location,
+                notes: ev.notes
             )
         }
     }
@@ -177,7 +188,10 @@ final class UnifiedCalendarService {
                 isWritable: false,
                 providerEventId: ev.id,
                 googleCalendarId: ev.calendarId,
-                googleConnectionId: ev.connectionId
+                googleConnectionId: ev.connectionId,
+                // Google events are read-only here; location/notes aren't surfaced for edit.
+                location: nil,
+                notes: nil
             )
         }
     }

@@ -1,4 +1,4 @@
-import { getCachedSubscription, refreshSubscriptionCache } from '../../lib/billing';
+import { getActiveProduct, getCachedSubscription, refreshSubscriptionCache } from '../../lib/billing';
 import { privateProcedure, publicProcedure, router } from '../trpc';
 import { Autumn, fetchPricingTable } from 'autumn-js';
 import { TRPCError } from '@trpc/server';
@@ -25,9 +25,20 @@ export const subscriptionRouter = router({
         email: ctx.sessionUser.email,
       });
     }
+
+    // The DB cache only stores a coarse `plan` and can't distinguish pro_monthly
+    // from pro_annual. Resolve the real active product id from Autumn so clients
+    // cancel the correct one. Free plans skip the round-trip — the id is just `free`.
+    const activeProduct =
+      sub.plan === 'free'
+        ? { productId: 'free', interval: null as 'monthly' | 'annual' | null }
+        : await getActiveProduct(ctx.sessionUser.id);
+
     return {
       plan: sub.plan,
       status: sub.subscriptionStatus,
+      productId: activeProduct.productId,
+      interval: activeProduct.interval,
       aiUsage: {
         used: sub.aiUsageUsed,
         limit: sub.aiUsageLimit,

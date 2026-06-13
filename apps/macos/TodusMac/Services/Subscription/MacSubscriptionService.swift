@@ -38,6 +38,13 @@ final class MacSubscriptionService {
 
     private(set) var plan: Plan = .free
     private(set) var status: String = "active"
+    /// Active Autumn product id (e.g. `pro_monthly`, `pro_annual`, `free`). Resolved
+    /// server-side from Autumn so cancellation targets the correct product instead of a
+    /// hardcoded guess. Only `subscription.getStatus` returns it; `subscription.refresh`
+    /// does not, so it persists across a refresh that omits the field.
+    private(set) var activeProductId: String?
+    /// Billing interval (`monthly` / `annual`) when known. Same provenance as `activeProductId`.
+    private(set) var billingInterval: String?
     private(set) var aiUsageUsed: Double = 0
     private(set) var aiUsageLimit: Double = 0
     private(set) var aiUsageRemaining: Double = 0
@@ -102,6 +109,14 @@ final class MacSubscriptionService {
     private func apply(_ response: SubscriptionStatusResponse) {
         self.plan = Plan(rawValue: response.plan)
         self.status = response.status
+        // `refresh` omits productId/interval — only overwrite when present so a
+        // post-cancel refresh doesn't blank the id resolved by the prior getStatus.
+        if let productId = response.productId {
+            self.activeProductId = productId
+        }
+        if let interval = response.interval {
+            self.billingInterval = interval
+        }
         self.aiUsageUsed = response.aiUsage.used
         self.aiUsageLimit = response.aiUsage.limit
         self.aiUsageRemaining = response.aiUsage.remaining
@@ -129,6 +144,11 @@ final class MacSubscriptionService {
 private struct SubscriptionStatusResponse: Decodable {
     let plan: String
     let status: String
+    /// Active product id from Autumn (`pro_monthly` / `pro_annual` / `free`). Optional
+    /// because `subscription.refresh` returns the same shape minus this field.
+    let productId: String?
+    /// Billing interval (`monthly` / `annual`). Optional for the same reason.
+    let interval: String?
     let aiUsage: AiUsageInfo
 }
 
