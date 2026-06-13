@@ -38,7 +38,12 @@ function getPlanKey(planId: string): string {
 const CREDITS_DISPLAY_SCALE = 10;
 
 const formatCredits = (n: number) => {
-  const scaled = n * CREDITS_DISPLAY_SCALE;
+  // Defensive: if the server ever returns NaN / Infinity (division upstream,
+  // bad migration), render "0" rather than "NaN" and avoid propagating the
+  // bad value into `pct` math below — which would render `NaN%` and break
+  // the progress bar.
+  const safe = Number.isFinite(n) && n >= 0 ? n : 0;
+  const scaled = safe * CREDITS_DISPLAY_SCALE;
   if (scaled === 0) return '0';
   if (scaled < 1) return scaled.toFixed(2);
   if (scaled < 10) return scaled.toFixed(1);

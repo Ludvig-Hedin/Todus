@@ -410,7 +410,12 @@ function MotionSection() {
 }
 
 function MotionDemo() {
-  const [activeDuration, setActiveDuration] = useState<string>(MOTION_DEMOS[1].durationVar);
+  const [activeDuration, setActiveDuration] = useState<string>(
+    // Default to `Base` (index 1) but guard against future trims of
+    // `MOTION_DEMOS` — accessing `[1]` directly would crash at module
+    // init if someone left a single entry.
+    MOTION_DEMOS[1]?.durationVar ?? MOTION_DEMOS[0]?.durationVar ?? 'var(--motion-duration-base)',
+  );
   const [pulse, setPulse] = useState(false);
 
   function trigger(durationVar: string) {

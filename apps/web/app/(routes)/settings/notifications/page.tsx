@@ -41,17 +41,13 @@ export default function NotificationsPage() {
       await saveUserSettings(changes as any);
     } catch {
       toast.error(m['common.settings.failedToSave']());
-      // Rollback only the keys this patch touched — re-reading the cache and
-      // restoring `before` would also undo any unrelated patch that succeeded
-      // between this call's optimistic write and its rejection.
-      queryClient.setQueryData(settingsKey, (updater: { settings: Record<string, unknown> } | undefined) => {
-        if (!updater) return updater;
-        const restored: Record<string, unknown> = { ...updater.settings };
-        for (const key of Object.keys(changes)) {
-          restored[key] = before.settings[key];
-        }
-        return { settings: restored };
-      });
+      // Don't manually rollback — a stale `before.settings[key]` snapshot
+      // would silently overwrite a concurrent successful patch for the
+      // same key. `onSettled: invalidate` (on the mutation above) refetches
+      // from the server immediately, so the cache converges on server
+      // truth without us having to guess the rollback value. Worst case
+      // the UI shows the optimistic value for ~one round-trip before
+      // flipping back, which is strictly correct.
     }
   };
 
