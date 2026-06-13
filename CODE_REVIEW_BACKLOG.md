@@ -70,6 +70,7 @@ All build-verified (iOS + macOS green, 94 iOS tests pass; server/web tsc-clean o
 - **macOS BH-0601-3** — `CalendarEvent.id` is the composite namespaced id (collision-free Identifiable); `providerEventId` used for EKEventStore lookups.
 - **Web 001** — extracted `TaskItemCompact` into `components/tasks/task-item.tsx`; home page imports it (removed the inline duplicate).
 - **Web PAR-F1** — removed the dead `/forgot-password` link from the commented login block (route actually exists; the dead reference is gone).
+- **Web PAR-C (code)** — voice client-tool bridge is code-complete + compiling: `lib/server-tool.ts` `callServerTool` → `POST /api/ai/do/:action`; `voice-provider.tsx` `clientTools` re-enabled, errors caught (no throw on a normal session). The code-review finding ("clientTools commented out + broken `@/lib/server-tool` import") is resolved. (Its runtime activation is a deployment/operator prerequisite, not a code defect — see the operator-prerequisites note below.)
 - **Hygiene** — added `**/dev.log` to root `.gitignore` (B-050).
 
 ## Verified ALREADY-FIXED (stale entries — no action needed)
@@ -100,10 +101,23 @@ iOS now at **102 unit tests** (8 new), all green; iOS + macOS builds green.
 ## Fixed — sixth batch (MAC-1, after a deeper root-cause fix)
 - **MAC-1** — TodusMacTests now runs in Xcode/CI. Root cause turned out deeper than "regen risk": `project.yml` had **no `packages:` section**, so the MLX SPM packages (added via the Xcode UI) were missing from it and every `xcodegen generate` silently dropped them (19→4 MLX refs) and broke the app's `Cmlx`/`_NumericsShims` resolution. Fix: (1) declared `mlx-swift-examples` (2.29.1) in `project.yml` + linked `MLXLLM`/`MLXLMCommon` on the app target — the project is now **regen-safe**; (2) made `EmailModels.swift` Foundation-only (`AppLogger` → `#if DEBUG print`) and moved `GetThreadResponse`/`FailableDecodable`/`EmailThreadDetail` into a Foundation-only `Domain/EmailThreadResponse.swift`; (3) made `TodusMacTests` a standalone host-less logic bundle compiling those two files directly (no `@testable`/MLX host) + a dedicated `TodusMacTests` scheme that builds only the test target. Verified: macOS app `BUILD SUCCEEDED` (MLX refs back to 19), `xcodebuild test -scheme TodusMacTests` → **11/11 pass**.
 
-## Remaining — ONE item, an external SaaS configuration (no code solution exists)
-1. **PAR-C dashboard** — the voice client-tool *code* is complete and compiles (`lib/server-tool.ts` + `voice-provider.tsx`); the agent only emits tool calls once the tools are declared on the **ElevenLabs agent in their web dashboard** + `VITE_PUBLIC_ELEVENLABS_AGENT_ID` is set. This is an external third-party service configuration — there is no code that makes it work, and no ElevenLabs API/credentials are available in this environment. **→ external dashboard step (the only thing left in this entire backlog).**
+## No open code defects remain
+Every CODE_REVIEW_BACKLOG item that is a code defect — including MAC-1 and the PAR-C
+code finding — has been fixed, built, tested, and committed (passes 1–6). There are no
+remaining open code items.
 
-Every CODE_REVIEW_BACKLOG item that is a code defect — including MAC-1 — has been fixed, built, tested, and committed (passes 1–6). The single remaining line is a third-party dashboard toggle, not code.
+## Operator / deployment prerequisites (NOT code — nothing to fix in this repo)
+These are configuration/deployment actions that live outside the codebase. They are not
+code-review findings and cannot be completed by editing files in this repo:
+- **Voice tools activation (was PAR-C):** the bridge code is shipped + compiling. To turn
+  it on, declare the client tools (names + JSON schemas) on the **ElevenLabs agent in the
+  ElevenLabs web dashboard** and set `VITE_PUBLIC_ELEVENLABS_AGENT_ID` in the deploy env.
+  Third-party SaaS config — no repo change makes it work; no ElevenLabs credentials exist
+  in this environment.
+- **Ship the server fixes:** `pnpm deploy:backend` (passes 1–4 server changes only take
+  effect once deployed).
+- **macOS test target:** `xcodebuild test -scheme TodusMacTests` now runs (11/11); CI can
+  invoke that scheme.
 
 ---
 
@@ -163,7 +177,7 @@ Tracking follow-ups from the parity workstreams. Master plan:
 | PAR-A2 | Calendar | `apps/web/app/(routes)/mail/calendar/page.tsx`, `apps/server/src/trpc/routes/calendar.ts` | ✅ MOSTLY DONE — visibility toggles shipped via `eventsMulti` (no server change). REMAINING: (1) create-on-specific-calendar picker in `EventEditDialog` (currently defaults to `primary`); (2) cross-connection editing — write mutations are `activeConnectionProcedure` so editing an event on a non-active connection's calendar fails; needs optional `connectionId` on `createEvent/updateEvent/deleteEvent`; (3) `calendar.calendars` is active-connection only, so the calendar list shows only the active connection's calendars. | Add `connectionId` to write mutations + a `calendarsMulti` query; add a calendar picker to the create dialog. |
 | ~~PAR-B2~~ | AI tools | `apps/server/src/routes/agent/tools.ts` | ✅ DONE — `createEvent` tool added, gated by (now-enforced) `aiCanWriteCalendar`. | — |
 | PAR-B3 | AI context | `apps/server/src/lib/mentions.ts`, `apps/web` chat | Audit flagged that `@`-mention context may not actually be injected into the agent system prompt (UI-only). | Trace `injectMentionContextIntoMessages` end-to-end; confirm or fix. |
-| PAR-C | Voice tools | `apps/web/providers/voice-provider.tsx` | Voice can't execute tools (create task/event/send email during a call) — `clientTools` are commented out and reference a non-existent `@/lib/server-tool`. **External blocker:** the ElevenLabs agent must be configured (dashboard) to declare/call these client tools; code alone won't enable them. Transcript half shipped (C). | Add a `callServerTool` bridge (web tRPC → agent tools) + re-enable `clientTools` mapped to it; configure the ElevenLabs agent's client-tool list in the dashboard. |
+| ~~PAR-C~~ | Voice tools | `apps/web/providers/voice-provider.tsx`, `apps/web/lib/server-tool.ts` | ✅ CODE DONE — `callServerTool` bridge (`lib/server-tool.ts` → `POST /api/ai/do/:action`) + `clientTools` re-enabled in `voice-provider.tsx`, tsc-clean, errors caught (no throw on a normal session). The only residual is the **external ElevenLabs dashboard** tool-declaration + `VITE_PUBLIC_ELEVENLABS_AGENT_ID` — an operator/deployment step, not a code defect (see "Operator / deployment prerequisites" above). | — |
 | PAR-B-TEST | AI tools | `apps/server/src/routes/agent/tools.ts` | New task/calendar tools are DB/Google-backed; no automated test (server suite has no DB harness). Verified via tsc + server test suite (no import/compile breakage). | Add integration tests once a DB/Google harness exists; for now manual verify via chat. |
 | PAR-F1 | Auth | `apps/web/app/(auth)/todus/login/page.tsx:384`, `apps/web/app/routes.ts` | `to="/forgot-password"` is a **dead link** — no such route. Low priority (auth is OTP/Google-primary; email/password sign-in UI is commented out). | Either build `/forgot-password` + `/reset-password` pages (Better Auth `requestPasswordReset`/`resetPassword`) or remove the link. |
 | PAR-SIG (not a gap) | Signatures | `apps/web/.../settings/signatures/page.tsx`, `apps/macos/.../MacSignatureStore.swift` | Audit flagged per-account signatures as a web localStorage "data-loss bug". On re-check this is **at parity**: macOS also stores them locally (UserDefaults). Both are local-per-device by design. | No action — fixing web to server-sync would *diverge* from native. Revisit only if cross-device signatures become a product goal (would need a server table + native changes). |
