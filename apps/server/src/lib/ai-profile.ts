@@ -74,8 +74,17 @@ export const buildAIProfilePrompt = (
   const sections: string[] = [];
 
   // ─── User identity ──────────────────────────────────────────────
-  const name = normalizeBlock(identity?.name);
-  const email = normalizeBlock(identity?.email);
+  // Sanitize user-controlled identity values before interpolating into the system
+  // prompt — strip backticks/code fences, leading markdown headers, and newlines so
+  // a crafted display name ("# SYSTEM: ...") can't break out of the prompt structure.
+  const sanitizeInline = (value: string) =>
+    value
+      .replace(/`/g, '')
+      .replace(/^#+\s*/gm, '')
+      .replace(/[\r\n]+/g, ' ')
+      .trim();
+  const name = sanitizeInline(normalizeBlock(identity?.name));
+  const email = sanitizeInline(normalizeBlock(identity?.email));
   if (name || email) {
     const lines: string[] = ['## About the user'];
     if (name) lines.push(`- Name: ${name}`);
@@ -99,6 +108,9 @@ export const buildAIProfilePrompt = (
       timeZone: timezone,
       dateStyle: 'full',
       timeStyle: 'short',
+      // Include the timezone designator so the same wall-clock string isn't
+      // ambiguous across zones (e.g. PST vs EDT).
+      timeZoneName: 'short',
     }).format(now);
   } catch {
     // Invalid timezone — keep the UTC fallback.

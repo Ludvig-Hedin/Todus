@@ -17,6 +17,12 @@ struct EmailComposeView: View {
     @State private var seededAttachmentNames: [String] = []
     @State private var pendingAttachmentRemovals: Set<String> = []
     @State private var showSendError = false
+    /// Set when the draft's chosen From connection no longer resolves to a real
+    /// account at send time (e.g. the connection was removed while composing). The
+    /// send is blocked, the From picker is reset to the default account, and this
+    /// notice is surfaced via an alert so the user can confirm the new sending
+    /// account instead of the message silently going from the backend default.
+    @State private var fromResetNotice: String?
     /// Monotonic counter incremented on successful sends so the form's
     /// `.sensoryFeedback(.success, trigger:)` fires a haptic before dismissal.
     @State private var sendSuccessTick: Int = 0
@@ -234,8 +240,30 @@ struct EmailComposeView: View {
                             // Resolve the picked From connection to its email address
                             // so the backend routes the send through the correct
                             // mailbox (default behaviour when no picker selection).
-                            let fromEmail = draft.fromConnectionId.flatMap { id in
-                                connectionsService.connections.first { $0.id == id }?.email
+                            let fromEmail: String?
+                            if let id = draft.fromConnectionId {
+                                if let resolved = connectionsService.connections.first(where: { $0.id == id })?.email {
+                                    fromEmail = resolved
+                                } else {
+                                    // The chosen From account no longer exists (removed
+                                    // while composing). Don't silently fall back to the
+                                    // backend default — reset the From picker to the first
+                                    // connection, surface a visible notice, and BLOCK this
+                                    // send so the user can confirm the new sending account
+                                    // (now shown in the From row) before sending. This keeps
+                                    // them on the sheet rather than dismissing past an
+                                    // unseen alert.
+                                    let fallback = connectionsService.connections.first
+                                    draft.fromConnectionId = fallback?.id
+                                    if let fallbackEmail = fallback?.email {
+                                        fromResetNotice = "The account you picked is no longer connected. Review the From field — your message will now send from \(fallbackEmail). Tap Send again to confirm."
+                                    } else {
+                                        fromResetNotice = "The account you picked is no longer connected. Reconnect an account and try again."
+                                    }
+                                    return
+                                }
+                            } else {
+                                fromEmail = nil
                             }
                             let success = await emailService.sendEmail(draft, fromEmail: fromEmail)
                             if success {
@@ -275,6 +303,17 @@ struct EmailComposeView: View {
                 Button("OK", role: .cancel) {}
             } message: {
                 Text(emailService.errorMessage ?? "Please check your connection and try again.")
+            }
+            // Heads-up when the picked From account was removed mid-compose. We reset
+            // the From picker to the default account and block the send so the user
+            // can confirm the new sending account instead of it silently changing.
+            .alert("Sending account changed", isPresented: Binding(
+                get: { fromResetNotice != nil },
+                set: { if !$0 { fromResetNotice = nil } }
+            )) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(fromResetNotice ?? "")
             }
             .navigationTitle(draft.isForward ? "Forward" : (draft.replyToThreadId != nil ? "Reply" : "New Email"))
             .navigationBarTitleDisplayMode(.inline)

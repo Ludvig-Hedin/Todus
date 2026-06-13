@@ -15,6 +15,16 @@ import {
   getZeroAgent,
   isMissingConnectionColorError,
 } from '../../lib/server-utils';
+import {
+  AUTOMATED_KEYWORDS,
+  MEETING_KEYWORDS,
+  REPLY_KEYWORDS,
+  THREAD_KIND_VALUES,
+  URGENT_KEYWORDS,
+  classifyThreadKind,
+  latestMessageText,
+  type ThreadKind,
+} from '../../lib/thread-classification';
 import { activeConnectionProcedure, privateProcedure, router } from '../trpc';
 import { and, desc, eq, inArray, lte } from 'drizzle-orm';
 import { OAuth2Client } from 'google-auth-library';
@@ -175,16 +185,9 @@ const assistantBriefingSchema = z.object({
   changedSinceLastTime: z.array(assistantChangeFeedItemSchema),
 });
 
-// Hoisted above the schema so `assistantThreadContextSchema` can reference it.
-// The matching `ThreadKind` runtime type is exported below near the email
-// classifier helpers; the value list lives here so it stays close to the schema.
-const THREAD_KIND_VALUES = [
-  'verification',
-  'receipt',
-  'marketing',
-  'notification',
-  'conversational',
-] as const;
+// `THREAD_KIND_VALUES` + the `ThreadKind` type + `classifyThreadKind` and the
+// keyword/sender regexes now live in `lib/thread-classification.ts` (shared with
+// `mail-assistant.ts`). They are imported at the top of this file.
 
 // Structured "smart action" payloads extracted from low-signal threads.
 // These give the client something concrete to render in place of the AI
@@ -314,32 +317,6 @@ type PreparedActionCandidate = {
   evidence: AssistantEvidence[];
 };
 
-const REPLY_KEYWORDS =
-  /\b(reply|respond|follow up|can you|could you|would you|let me know|please|need|review|send|confirm)\b/i;
-const MEETING_KEYWORDS =
-  /\b(meeting|schedule|calendar|appointment|call|zoom|teams|meet|availability|reschedule)\b/i;
-const URGENT_KEYWORDS = /\b(urgent|asap|today|immediately|priority|by end of day|deadline)\b/i;
-const AUTOMATED_KEYWORDS = /\b(no-?reply|unsubscribe|notification|automated|do not reply)\b/i;
-
-const VERIFICATION_KEYWORDS =
-  /\b(verification|one[- ]?time|otp|verify your|confirmation code|security code|2fa|two[- ]?factor|magic link|sign[- ]?in code|access code|passcode)\b/i;
-// Strong receipt phrases — these alone are enough to classify a thread as a
-// receipt regardless of sender automation signal. Currency tokens were
-// previously OR'd in here, but newsletters/marketing emails routinely include
-// prices, so we keep them as a soft signal only.
-const RECEIPT_PHRASE_KEYWORDS =
-  /\b(receipt|invoice|order\s*#?\d|payment\s+(received|confirmation)|order\s+(confirmation|summary)|tax\s+invoice|your\s+purchase|amount\s+paid|amount\s+charged|amount\s+billed|charge\s+(receipt|confirmation)|payment\s+method|billed\s+to|paid\s+to|transaction\s+(id|details)|refund\s+confirmation|subscription\s+renewed|your\s+(payment|charge|order)\s+(was|is))\b/i;
-const RECEIPT_KEYWORDS = new RegExp(
-  `${RECEIPT_PHRASE_KEYWORDS.source}|\\$\\s?\\d|(?:USD|EUR|GBP|JPY|SEK|NOK|DKK|kr)\\s?\\d`,
-  'i',
-);
-const MARKETING_SENDER_PATTERN = /(news|newsletter|updates|digest|marketing|hello|info|hi|team)@/i;
-const NOREPLY_SENDER_PATTERN =
-  /(no[- ]?reply|do[- ]?not[- ]?reply|notification|notifications|alerts?|automated|billing|payments?|receipts?|invoices?|subscriptions?|orders?|accounts?|support|hello|noreply|donotreply|mailer-daemon|postmaster|notifications?-noreply)@/i;
-const SHORT_CODE_PATTERN = /\b\d{4,8}\b/;
-
-export type ThreadKind = (typeof THREAD_KIND_VALUES)[number];
-
 function unique<T>(items: T[]) {
   return [...new Set(items)];
 }
@@ -349,72 +326,59 @@ function cleanText(value: string | null | undefined) {
   return stripHtml(value).result.replace(/\s+/g, ' ').trim();
 }
 
-function latestMessageText(thread: Awaited<ReturnType<typeof getThread>>['result']) {
-  const latest = thread.latest ?? thread.messages[thread.messages.length - 1];
-  return cleanText(latest?.decodedBody || latest?.body || '');
-}
+// Verification keywords used to anchor the *fallback* (unlabelled) code path.
+// A bare digit run is only accepted when it sits within ~20 chars of one of
+// these so we don't grab order numbers, postal codes, or phone numbers.
+const VERIFICATION_CONTEXT_KEYWORDS = /(code|verification|verify|otp|passcode|pin)/i;
+// US state names/abbreviations that, when immediately preceding a 5-digit run,
+// strongly imply a ZIP code rather than a verification code.
+const US_STATE_BEFORE_ZIP =
+  /\b(?:A[KLRZ]|C[AOT]|D[CE]|FL|GA|HI|I[ADLN]|K[SY]|LA|M[ADEINOST]|N[CDEHJMVY]|O[HKR]|PA|RI|S[CD]|T[NX]|UT|V[AT]|W[AIVY]|alabama|alaska|arizona|arkansas|california|colorado|connecticut|delaware|florida|georgia|hawaii|idaho|illinois|indiana|iowa|kansas|kentucky|louisiana|maine|maryland|massachusetts|michigan|minnesota|mississippi|missouri|montana|nebraska|nevada|new hampshire|new jersey|new mexico|new york|north carolina|north dakota|ohio|oklahoma|oregon|pennsylvania|rhode island|south carolina|south dakota|tennessee|texas|utah|vermont|virginia|washington|west virginia|wisconsin|wyoming)\s*,?\s*$/i;
 
-export function classifyThreadKind(
-  thread: Awaited<ReturnType<typeof getThread>>['result'],
-): ThreadKind {
-  const latest = thread.latest ?? thread.messages[thread.messages.length - 1];
-  if (!latest) return 'conversational';
-  const subject = latest.subject ?? '';
-  const senderEmail = (latest.sender?.email ?? '').toLowerCase();
-  const bodyText = latestMessageText(thread);
-  const haystack = `${subject} ${bodyText}`;
-  // Marketing senders (news@, hello@, team@, etc.) count as automated for
-  // classification — kept in lockstep with mail-assistant.ts.
-  const isAutomatedSender =
-    NOREPLY_SENDER_PATTERN.test(senderEmail) ||
-    AUTOMATED_KEYWORDS.test(senderEmail) ||
-    MARKETING_SENDER_PATTERN.test(senderEmail);
-  const automated = AUTOMATED_KEYWORDS.test(haystack) || isAutomatedSender;
-  const singleMessage = thread.messages.length <= 1;
+/**
+ * Decide whether a bare (unlabelled) digit run is a plausible verification
+ * code given its surrounding context. Rejects obvious non-codes:
+ *   - 10+ digit phone numbers (handled by the 4–8 length cap upstream, but the
+ *     raw token here may be longer)
+ *   - 5-digit US ZIP codes immediately preceded by a state name/abbreviation
+ *   - a pure 4-digit year (1900–2099)
+ * and requires the run to sit within ~20 chars of a verification keyword.
+ */
+function isPlausibleFallbackCode(haystack: string, index: number, token: string): boolean {
+  // Phone numbers: a 10+ digit run is never a code. (The `\b\d{4,8}\b` matcher
+  // upstream already won't return such a run, but guard here too in case the
+  // caller is changed.)
+  if (token.length >= 10) return false;
 
-  if (
-    singleMessage &&
-    (isAutomatedSender || automated) &&
-    VERIFICATION_KEYWORDS.test(haystack) &&
-    SHORT_CODE_PATTERN.test(bodyText)
-  ) {
-    return 'verification';
-  }
+  // Pure 4-digit year (1900–2099) — almost never the verification code even if
+  // it happens to sit near a keyword.
+  if (/^(?:19|20)\d{2}$/.test(token)) return false;
 
-  // Strong receipt phrases (e.g. "tax invoice", "amount paid", "your purchase")
-  // are enough on their own to classify as a receipt — many vendors send
-  // receipts from `support@`, `accounts@`, or even a personal-looking address
-  // that doesn't trip the no-reply pattern, and incorrectly classifying these
-  // as conversational was producing bogus "Urgent reply" briefing entries.
-  if (RECEIPT_PHRASE_KEYWORDS.test(haystack)) {
-    return 'receipt';
-  }
+  const windowStart = Math.max(0, index - 20);
+  const before = haystack.slice(windowStart, index);
+  const after = haystack.slice(index + token.length, index + token.length + 20);
 
-  if ((isAutomatedSender || automated) && RECEIPT_KEYWORDS.test(haystack)) {
-    return 'receipt';
-  }
+  // 5-digit US ZIP preceded by a state name/abbreviation.
+  if (token.length === 5 && US_STATE_BEFORE_ZIP.test(before)) return false;
 
-  if (isAutomatedSender && MARKETING_SENDER_PATTERN.test(senderEmail)) {
-    return 'marketing';
-  }
-
-  if (automated) {
-    return 'notification';
-  }
-
-  return 'conversational';
+  // Require a verification keyword within ~20 chars on either side.
+  return VERIFICATION_CONTEXT_KEYWORDS.test(before) || VERIFICATION_CONTEXT_KEYWORDS.test(after);
 }
 
 /**
  * Try to pull the verification code out of a verification email body.
  *
  * Strategy: prefer codes that appear right after a verification keyword
- * ("code: 178691", "your code is 178 691"), then fall back to the longest
- * standalone digit run in the body. We accept 4-8 digits with an optional
- * single space splitting them in half (e.g. "178 691" rendered for
- * readability). Returns the code with a single space inserted in the middle
- * for any 6+ digit code so the UI can render it readably without doing the
- * formatting itself.
+ * ("code: 178691", "your code is 178 691"). The fallback (no labelled code)
+ * only accepts a bare digit run when it sits within ~20 chars of a
+ * verification keyword AND survives the non-code rejection rules in
+ * `isPlausibleFallbackCode` (phone numbers, state-prefixed ZIPs, pure years).
+ * When nothing confidently qualifies we return null rather than risk handing
+ * the user an order number / postal code / phone number. We accept 4-8 digits
+ * with an optional single space splitting them in half (e.g. "178 691"
+ * rendered for readability). Returns the code with a single space inserted in
+ * the middle for any 6+ digit code so the UI can render it readably without
+ * doing the formatting itself.
  */
 export function extractVerificationCode(body: string): string | null {
   if (!body) return null;
@@ -422,19 +386,27 @@ export function extractVerificationCode(body: string): string | null {
 
   // Look for "<keyword> ... <code>" patterns first — they're the most
   // reliable. The code may have an optional space (Mailchimp / SendGrid
-  // sometimes render "178 691" for readability).
+  // sometimes render "178 691" for readability). This primary path is
+  // unchanged.
   const labelled = haystack.match(
     /(?:code|otp|passcode|pin|password)[^0-9]{0,30}(\d{3,4}[\s-]?\d{3,4}|\d{4,8})/i,
   );
-  const candidate = labelled?.[1] ?? null;
+  let result = labelled?.[1] ?? null;
 
-  // Fallback: longest 4–8 digit number in the body.
-  let result = candidate;
+  // Fallback: a bare 4–8 digit run, but only when it's adjacent to a
+  // verification keyword and not an obvious non-code (phone / ZIP / year).
+  // Among the plausible candidates we pick the longest, matching the prior
+  // "longest run wins" heuristic but scoped to context-validated tokens.
   if (!result) {
-    const all = haystack.match(/\b\d{4,8}\b/g) ?? [];
-    if (all.length) {
-      result = all.reduce((a, b) => (b.length > a.length ? b : a));
+    const re = /\b\d{4,8}\b/g;
+    let best: string | null = null;
+    let match: RegExpExecArray | null;
+    while ((match = re.exec(haystack)) !== null) {
+      const token = match[0];
+      if (!isPlausibleFallbackCode(haystack, match.index, token)) continue;
+      if (!best || token.length > best.length) best = token;
     }
+    result = best;
   }
 
   if (!result) return null;
@@ -478,13 +450,30 @@ export function extractReceiptDetails(
       : 'Sender';
 
   const body = cleanText(latest.decodedBody || latest.body || '');
-  // Match common currency patterns: $29.00, USD 29.00, €19,95, kr 100,
-  // 100 SEK, etc. We deliberately stay conservative — better to render
-  // no amount than the wrong amount.
-  const amountMatch =
-    body.match(/(?:[$€£¥]|US\$|USD|EUR|GBP|JPY|SEK|NOK|DKK|kr)\s?\d{1,3}(?:[ ,.]\d{3})*(?:[.,]\d{2})?/i)
-    ?? body.match(/\d{1,3}(?:[ ,.]\d{3})*(?:[.,]\d{2})?\s?(?:USD|EUR|GBP|JPY|SEK|NOK|DKK|kr)/i);
-  const amount = amountMatch?.[0] ?? null;
+  // Currency amount sub-patterns reused by both the labelled and fallback
+  // matches. Match common currency patterns: $29.00, USD 29.00, €19,95,
+  // kr 100, 100 SEK, etc.
+  const CURRENCY_PREFIXED = String.raw`(?:[$€£¥]|US\$|USD|EUR|GBP|JPY|SEK|NOK|DKK|kr)\s?\d{1,3}(?:[ ,.]\d{3})*(?:[.,]\d{2})?`;
+  const CURRENCY_SUFFIXED = String.raw`\d{1,3}(?:[ ,.]\d{3})*(?:[.,]\d{2})?\s?(?:USD|EUR|GBP|JPY|SEK|NOK|DKK|kr)`;
+  const CURRENCY_AMOUNT = `(?:${CURRENCY_PREFIXED}|${CURRENCY_SUFFIXED})`;
+
+  // 1. Label-anchored amount FIRST: a total/amount-paid label within ~20 chars
+  // before the currency number. This avoids grabbing a per-line-item price.
+  const labelledAmount = body.match(
+    new RegExp(
+      String.raw`(?:total|amount\s+paid|amount\s+charged|grand\s+total|you\s+paid)[^0-9$€£¥]{0,20}(${CURRENCY_AMOUNT})`,
+      'i',
+    ),
+  );
+
+  // 2. Fall back to the first currency number anywhere in the body. We stay
+  // conservative — better to render no amount than the wrong amount.
+  const amountMatch = labelledAmount?.[1]
+    ? labelledAmount[1]
+    : (body.match(new RegExp(CURRENCY_PREFIXED, 'i'))?.[0] ??
+      body.match(new RegExp(CURRENCY_SUFFIXED, 'i'))?.[0] ??
+      null);
+  const amount = amountMatch ?? null;
 
   const receivedAt = latest.receivedOn
     ? new Date(latest.receivedOn).toISOString()

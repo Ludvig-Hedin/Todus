@@ -344,17 +344,10 @@ export function useOptimisticActions() {
 
         optimisticActionsManager.pendingActions.delete(pendingActionId);
         optimisticActionsManager.pendingActionsByType.get(type)?.delete(pendingActionId);
-        // TODO(bug-hunt): `typeActions.size === 1` checked AFTER the delete on
-        // line above mutates the same Set — so this fires only when one OTHER
-        // action of the same type is still pending. For the common single-
-        // action case (Set went 1 → 0) this branch never runs, so
-        // refreshData(), invalidateFolderLists(), and removeOptimisticAction()
-        // are skipped. Symptoms: jotai `optimisticActionsAtom` grows
-        // unboundedly across a session (memory leak), and MOVE actions leave
-        // `shouldHide` true forever in the optimistic state. Intended check is
-        // almost certainly `=== 0` (this was the last in flight). Needs human
-        // review before flipping because it also affects multi-action timing.
-        if (typeActions?.size === 1) {
+        // The delete above already removed this action from the Set, so a size
+        // of 0 means this was the last in-flight action of its type — only then
+        // do we reconcile against server truth.
+        if (typeActions?.size === 0) {
           await refreshData();
           // Invalidate folder caches so server-truth replaces optimistic state.
           if (folders?.length) invalidateFolderLists(folders);

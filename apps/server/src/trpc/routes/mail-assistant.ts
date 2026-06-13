@@ -1,6 +1,14 @@
 import { activeDriverProcedure, router } from '../trpc';
 import { composeEmail } from './ai/compose';
 import { getThread, getThreadsFromDB, getZeroAgent } from '../../lib/server-utils';
+import {
+  AUTOMATED_KEYWORDS,
+  MEETING_KEYWORDS,
+  REPLY_KEYWORDS,
+  URGENT_KEYWORDS,
+  classifyThreadKind,
+  latestMessageText,
+} from '../../lib/thread-classification';
 import { createDb } from '../../db';
 import { task } from '../../db/schema';
 import { env } from '../../env';
@@ -74,65 +82,6 @@ const assistantNudgeSchema = z.object({
 type AssistantSuggestedTask = z.infer<typeof assistantSuggestedTaskSchema>;
 type AssistantSuggestedEvent = z.infer<typeof assistantSuggestedEventSchema>;
 
-const REPLY_KEYWORDS = /\b(reply|respond|follow up|can you|could you|would you|let me know|please|need|review|send|confirm)\b/i;
-const MEETING_KEYWORDS =
-  /\b(meeting|schedule|calendar|appointment|call|zoom|teams|meet|availability|reschedule)\b/i;
-const URGENT_KEYWORDS = /\b(urgent|asap|today|immediately|priority|by end of day|deadline)\b/i;
-const AUTOMATED_KEYWORDS = /\b(no-?reply|unsubscribe|notification|automated|do not reply)\b/i;
-
-const VERIFICATION_KEYWORDS =
-  /\b(verification|one[- ]?time|otp|verify your|confirmation code|security code|2fa|two[- ]?factor|magic link|sign[- ]?in code|access code|passcode)\b/i;
-// Tightened — see assistant.ts for rationale. Kept in lockstep here.
-const RECEIPT_KEYWORDS =
-  /\b(receipt|invoice|order\s*#?\d|payment\s+(received|confirmation)|order\s+(confirmation|summary)|tax\s+invoice|your\s+purchase)\b|\$\s?\d|(?:USD|EUR|GBP|JPY|SEK|NOK|DKK|kr)\s?\d/i;
-const MARKETING_SENDER_PATTERN = /(news|newsletter|updates|digest|marketing|hello|info|hi|team)@/i;
-const NOREPLY_SENDER_PATTERN = /(no[- ]?reply|do[- ]?not[- ]?reply|notification|notifications|alerts?|automated)@/i;
-const SHORT_CODE_PATTERN = /\b\d{4,8}\b/;
-
-export type ThreadKind = 'verification' | 'receipt' | 'marketing' | 'notification' | 'conversational';
-
-export function classifyThreadKind(thread: Awaited<ReturnType<typeof getThread>>['result']): ThreadKind {
-  const latest = thread.latest ?? thread.messages[thread.messages.length - 1];
-  if (!latest) return 'conversational';
-  const subject = latest.subject ?? '';
-  const senderEmail = (latest.sender?.email ?? '').toLowerCase();
-  const bodyText = latestMessageText(thread);
-  const haystack = `${subject} ${bodyText}`;
-  const isAutomatedSender =
-    NOREPLY_SENDER_PATTERN.test(senderEmail) ||
-    AUTOMATED_KEYWORDS.test(senderEmail) ||
-    MARKETING_SENDER_PATTERN.test(senderEmail);
-  const automated = AUTOMATED_KEYWORDS.test(haystack) || isAutomatedSender;
-  const singleMessage = thread.messages.length <= 1;
-
-  // Verification / OTP — typically short single message from a no-reply sender containing a code.
-  if (
-    singleMessage &&
-    (isAutomatedSender || automated) &&
-    VERIFICATION_KEYWORDS.test(haystack) &&
-    SHORT_CODE_PATTERN.test(bodyText)
-  ) {
-    return 'verification';
-  }
-
-  // Receipt / invoice / subscription renewal — automated sender + transactional language.
-  if ((isAutomatedSender || automated) && RECEIPT_KEYWORDS.test(haystack)) {
-    return 'receipt';
-  }
-
-  // Marketing / newsletter — broad sender alias + automated.
-  if (isAutomatedSender && MARKETING_SENDER_PATTERN.test(senderEmail)) {
-    return 'marketing';
-  }
-
-  // Generic automated notification — automated keywords or no-reply sender, no other category matched.
-  if (automated) {
-    return 'notification';
-  }
-
-  return 'conversational';
-}
-
 function buildActivityKey(userId: string, threadId: string | null) {
   return `assistant-activity:${userId}:${threadId ?? 'global'}:${Date.now()}:${crypto.randomUUID()}`;
 }
@@ -182,11 +131,6 @@ function unique<T>(items: T[]) {
 function cleanText(value: string | null | undefined) {
   if (!value) return '';
   return stripHtml(value).result.replace(/\s+/g, ' ').trim();
-}
-
-function latestMessageText(thread: Awaited<ReturnType<typeof getThread>>['result']) {
-  const latest = thread.latest ?? thread.messages[thread.messages.length - 1];
-  return cleanText(latest?.decodedBody || latest?.body || '');
 }
 
 /**

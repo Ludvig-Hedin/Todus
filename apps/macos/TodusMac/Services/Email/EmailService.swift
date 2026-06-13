@@ -1200,6 +1200,24 @@ final class EmailService {
             cache[i] = mutate(cache[i])
         }
         cachedThreadsByFolder[currentFolder] = cache
+
+        // A thread opened from search (or any surface not in the current
+        // `threads` list) only lives in `threadDetailCache`. Patch its
+        // `hasUnread` flag too so re-opening it — or returning to a list that
+        // reads from the cache — reflects the read state instead of showing a
+        // stale unread dot.
+        for id in ids {
+            guard let entry = threadDetailCache[id] else { continue }
+            let d = entry.detail
+            let patched = EmailThreadDetail(
+                messages: d.messages,
+                latest: d.latest,
+                hasUnread: !unread,
+                totalReplies: d.totalReplies,
+                labels: d.labels
+            )
+            threadDetailCache[id] = (patched, entry.at)
+        }
     }
 
     /// Optimistically toggle the STARRED label per thread so the star UI flips
@@ -1229,6 +1247,24 @@ final class EmailService {
         cachedThreadsByFolder[currentFolder] = cache
     }
 
+    /// Reverts the `threadDetailCache` `hasUnread` flag for `ids` on an
+    /// optimistic-action rollback. Keeps the detail cache (which drives
+    /// search-opened threads) in sync with the list/cache snapshot restore.
+    private func revertDetailCacheReadState(ids: [String], unread: Bool) {
+        for id in ids {
+            guard let entry = threadDetailCache[id] else { continue }
+            let d = entry.detail
+            let patched = EmailThreadDetail(
+                messages: d.messages,
+                latest: d.latest,
+                hasUnread: unread,
+                totalReplies: d.totalReplies,
+                labels: d.labels
+            )
+            threadDetailCache[id] = (patched, entry.at)
+        }
+    }
+
     func markAsRead(ids: [String]) async {
         // Optimistic apply, rollback on failure.
         let snapshot = threads.filter { ids.contains($0.id) }
@@ -1247,6 +1283,8 @@ final class EmailService {
                     cachedThreadsByFolder[currentFolder] = cache
                 }
             }
+            // Search-opened threads only live in the detail cache — revert there too.
+            revertDetailCacheReadState(ids: ids, unread: true)
             errorMessage = "Could not mark as read. Please try again."
             AppLogger.shared.log("[EmailService] markAsRead error: \(error)")
         }
@@ -1268,6 +1306,8 @@ final class EmailService {
                     cachedThreadsByFolder[currentFolder] = cache
                 }
             }
+            // Search-opened threads only live in the detail cache — revert there too.
+            revertDetailCacheReadState(ids: ids, unread: false)
             errorMessage = "Could not mark as unread. Please try again."
             AppLogger.shared.log("[EmailService] markAsUnread error: \(error)")
         }

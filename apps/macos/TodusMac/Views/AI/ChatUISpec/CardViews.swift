@@ -589,6 +589,8 @@ struct MacInlineComposeCardView: View {
     @State private var bodyText = ""
     @State private var showCcBcc = false
     @State private var recipientInput = ""
+    @State private var ccInput = ""
+    @State private var bccInput = ""
     @State private var saveStatus = "All changes are saved"
     @State private var sendStatus = "draft"
     @State private var debounceTask: Task<Void, Never>? = nil
@@ -635,6 +637,12 @@ struct MacInlineComposeCardView: View {
                                     cc.removeAll { $0.email == r.email }; markDirty()
                                 })
                             }
+                            if !isLocked {
+                                TextField("Add email…", text: $ccInput)
+                                    .textFieldStyle(.plain)
+                                    .font(.caption)
+                                    .onSubmit { addRecipient(target: "cc") }
+                            }
                             Spacer()
                         }
                         HStack {
@@ -643,6 +651,12 @@ struct MacInlineComposeCardView: View {
                                 MacRecipientPill(display: r.name ?? r.email, onRemove: isLocked ? nil : {
                                     bcc.removeAll { $0.email == r.email }; markDirty()
                                 })
+                            }
+                            if !isLocked {
+                                TextField("Add email…", text: $bccInput)
+                                    .textFieldStyle(.plain)
+                                    .font(.caption)
+                                    .onSubmit { addRecipient(target: "bcc") }
                             }
                             Spacer()
                         }
@@ -748,7 +762,15 @@ struct MacInlineComposeCardView: View {
     }
 
     private func addRecipient(target: String) {
-        let trimmed = recipientInput.trimmingCharacters(in: .whitespaces)
+        // Each row owns its own input field so typing in CC/BCC doesn't bleed
+        // into the To field (and vice versa).
+        let raw: String
+        switch target {
+        case "cc": raw = ccInput
+        case "bcc": raw = bccInput
+        default: raw = recipientInput
+        }
+        let trimmed = raw.trimmingCharacters(in: .whitespaces)
         // Reject empty, missing local part, missing domain, or any whitespace inside the address.
         guard let at = trimmed.firstIndex(of: "@"),
               at != trimmed.startIndex,
@@ -760,12 +782,11 @@ struct MacInlineComposeCardView: View {
             if !list.contains(where: { $0.email.lowercased() == normalized }) { list.append(r) }
         }
         switch target {
-        case "to": appendUnique(&to)
-        case "cc": appendUnique(&cc)
-        case "bcc": appendUnique(&bcc)
-        default: break
+        case "to": appendUnique(&to); recipientInput = ""
+        case "cc": appendUnique(&cc); ccInput = ""
+        case "bcc": appendUnique(&bcc); bccInput = ""
+        default: return
         }
-        recipientInput = ""
         markDirty()
     }
 

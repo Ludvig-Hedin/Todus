@@ -1273,9 +1273,12 @@ const api = new Hono<HonoContext>()
           .limit(1);
       }
 
-      // Fallback: verify the provided token belongs to this user without the expiry
-      // constraint (covers replication lag and freshly-rotated tokens).
+      // Fallback: verify the provided token belongs to this user with a short
+      // expiry grace window (covers replication lag and freshly-rotated tokens)
+      // — but NOT long-expired tokens, so a leaked old token (logs/backups)
+      // paired with a current Bearer can't resurrect a dead session.
       if (!activeSession?.token && trimmedRefreshToken) {
+        const refreshGraceCutoff = new Date(Date.now() - 15 * 60 * 1000);
         const [ownedSession] = await db
           .select({ token: session.token })
           .from(session)
@@ -1283,6 +1286,7 @@ const api = new Hono<HonoContext>()
             and(
               eq(session.userId, sessionUser.id),
               eq(session.token, trimmedRefreshToken),
+              gt(session.expiresAt, refreshGraceCutoff),
             ),
           )
           .limit(1);
@@ -1424,7 +1428,7 @@ const app = new Hono<HonoContext>()
       exposeHeaders: ['X-Zero-Redirect'],
     }),
   )
-  .get('.well-known/oauth-authorization-server', async (c) => {
+  .get('/.well-known/oauth-authorization-server', async (c) => {
     const auth = createAuth();
     return oAuthDiscoveryMetadata(auth)(c.req.raw);
   })
@@ -1883,6 +1887,10 @@ const app = new Hono<HonoContext>()
         }
         return c.json({ message: 'OK' }, { status: 200 });
       }
+      // Unsupported provider — return an explicit 200 so the caller doesn't get a
+      // 500/404 from an undefined handler return (and doesn't retry forever).
+      span.setAttributes({ 'provider.unsupported': true });
+      return c.json({ message: 'ignored' }, { status: 200 });
     } catch (error) {
       span.recordException(error as Error);
       span.setStatus({ code: 2, message: (error as Error).message });
@@ -2008,8 +2016,16 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
               console.log(`Email ${messageId} sent successfully`);
             } catch (error) {
               console.error(`Failed to send scheduled email ${messageId}:`, error);
-              await statusKV.delete(messageId);
-              await payloadKV.delete(messageId);
+              // Do NOT delete the status/payload on failure — that would ack the
+              // message and silently drop a scheduled email the user thinks was
+              // sent. Retry the message instead so a transient error (network
+              // blip, Gmail rate limit, DO hiccup) gets another attempt; the
+              // queue's max_retries / dead-letter bounds permanent failures.
+              if (typeof msg.retry === 'function') {
+                msg.retry();
+              } else {
+                throw error;
+              }
             }
           }),
         );
@@ -2124,11 +2140,17 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
   private async processExpiredSubscriptions() {
     console.log('[SCHEDULED] Checking for expired subscriptions...');
     const { db, conn } = createDb(this.env.HYPERDRIVE.connectionString);
-    const allAccounts = await db.query.connection.findMany({
-      where: (fields, { isNotNull, and }) =>
-        and(isNotNull(fields.accessToken), isNotNull(fields.refreshToken)),
-    });
-    await conn.end();
+    let allAccounts: Awaited<ReturnType<typeof db.query.connection.findMany>>;
+    try {
+      allAccounts = await db.query.connection.findMany({
+        where: (fields, { isNotNull, and }) =>
+          and(isNotNull(fields.accessToken), isNotNull(fields.refreshToken)),
+      });
+    } finally {
+      // Close the pooled connection even if the query throws, so a failed
+      // findMany doesn't leak the Hyperdrive/Postgres connection.
+      await conn.end();
+    }
     console.log('[SCHEDULED] allAccounts', allAccounts.length);
     const now = new Date();
     const fiveDaysAgo = new Date(now.getTime() - 5 * 24 * 60 * 60 * 1000);
@@ -2208,7 +2230,7 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
     }
 
     console.log(
-      `[SCHEDULED] Processed ${allAccounts.keys.length} accounts, found ${expiredSubscriptions.length} expired subscriptions`,
+      `[SCHEDULED] Processed ${allAccounts.length} accounts, found ${expiredSubscriptions.length} expired subscriptions`,
     );
   }
 }

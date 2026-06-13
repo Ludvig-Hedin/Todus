@@ -7,7 +7,7 @@ import * as SimpleIcons from 'simple-icons';
 import { getSenderIconSpec, type SenderIconSpec } from '@/lib/sender-icon-registry';
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const MAX_FAVICON_URLS = 6;
+const MAX_FAVICON_URLS = 8;
 
 // Domains of free personal email providers. Brand-favicon lookup is skipped for these —
 // the result would be the provider's own logo (Gmail's G etc.), not the sender's avatar.
@@ -214,7 +214,7 @@ const NetworkBimiAvatar = ({
       ...buildFaviconFallbackUrls(normalizedEmail),
     ].filter((value): value is string => Boolean(value));
 
-    return Array.from(new Set(urls));
+    return Array.from(new Set(urls)).slice(0, MAX_FAVICON_URLS);
   }, [avatarData?.fallbackUrls, avatarData?.primary?.url, normalizedEmail]);
 
   const activeImageUrl = imageUrls[imageIndex] ?? '';

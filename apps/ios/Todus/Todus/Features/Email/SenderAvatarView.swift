@@ -325,6 +325,13 @@ final class AvatarCache {
         hostCandidates = hostCandidates.filter { seen.insert($0).inserted }
 
         var candidates: [URL] = []
+        // Cap on how many favicon/logo URLs we'll ever attempt per logoless sender.
+        // Without it the assembled list reaches 10+ candidates (Clearbit ×N hosts,
+        // Gravatar, icon.horse/DDG ×N, apple-touch/favicon.ico ×N), and the
+        // AsyncImage failure waterfall fires a GET for each on scroll. 4 keeps the
+        // highest-quality sources (Clearbit, then one favicon API) while bounding
+        // network fan-out. Applied via `.prefix(4)` on the final deduped list.
+        let maxCandidates = 4
 
         // 1. Clearbit: high-quality brand logos, returns proper 404 (not a globe).
         //    Covers Anthropic, Ryanair, Apple, OpenAI, Cursor, Sky Showtime, and thousands more.
@@ -369,7 +376,10 @@ final class AvatarCache {
             }
         }
 
-        return candidates
+        // Cap the waterfall — keeps the highest-quality candidates first (Clearbit,
+        // then the first favicon API) and drops the long tail so a logoless sender
+        // can't trigger 10+ favicon GETs as it scrolls into view.
+        return Array(candidates.prefix(maxCandidates))
     }
 
     /// Computes the SHA-256 Gravatar URL for the given email (CryptoKit, iOS 13+).
@@ -520,33 +530,34 @@ struct SenderAvatarView: View {
     var body: some View {
         let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
 
-        if let spec = SenderIconRegistry.icon(for: normalizedEmail) {
+        let registrySpec = SenderIconRegistry.icon(for: normalizedEmail)
+
+        if let spec = registrySpec, let slug = spec.slug {
             // Bundled brand icon — instant, zero network, no flash, crisp at any scale.
             // SVG path → brand-color circle + tinted glyph.
-            // No SVG (letter-only registry entry) → falls through to the neutral
-            // initialsCircle below so the avatar reads as a generic initial rather
-            // than a loud brand-colored letter.
-            if let slug = spec.slug {
-                ZStack {
-                    Circle().fill(spec.background)
-                    Image("sender-icon-\(slug)")
-                        .renderingMode(.template)
-                        .resizable()
-                        .scaledToFit()
-                        .foregroundStyle(spec.foreground)
-                        .padding(size * 0.25)
-                }
-                .frame(width: size, height: size)
-                .clipShape(Circle())
-            } else {
-                initialsCircle
+            ZStack {
+                Circle().fill(spec.background)
+                Image("sender-icon-\(slug)")
+                    .renderingMode(.template)
+                    .resizable()
+                    .scaledToFit()
+                    .foregroundStyle(spec.foreground)
+                    .padding(size * 0.25)
             }
+            .frame(width: size, height: size)
+            .clipShape(Circle())
         } else {
-            // Network waterfall: initials base layer → try resolved URLs one by one.
-            // Direct property access on @Observable triggers re-render when cache updates.
+            // Network waterfall — covers both:
+            //   • No registry hit → neutral gray initials base layer.
+            //   • Letter-only registry hit (slug == nil) → brand-tinted initials base
+            //     layer, then the SAME favicon waterfall on top. These senders
+            //     (office/azure/monday/beehiiv/…) previously short-circuited to a gray
+            //     circle and never tried the network, so they looked worse than unknown
+            //     senders. Falling through lets a real favicon win when one exists, with
+            //     the brand-colored initial as the graceful base.
             let liveCandidates: [URL] = AvatarCache.shared.candidates(for: normalizedEmail) ?? []
             ZStack {
-                initialsCircle
+                initialsCircle(brand: registrySpec)
 
                 if urlIndex < resolvedCandidates.count {
                     let currentURL = resolvedCandidates[urlIndex]
@@ -631,15 +642,21 @@ struct SenderAvatarView: View {
 
     // MARK: - Initials fallback
 
-    /// Neutral muted avatar — gray circle + white initials.
-    /// Matches Notion Mail's restrained style: no rotating colors, no per-sender
-    /// brand color noise. Saves visual saturation budget for real brand icons.
-    private var initialsCircle: some View {
-        Text(initials)
+    /// Initials avatar used as the base layer under the favicon waterfall.
+    ///
+    /// - `brand == nil` → neutral muted avatar (gray circle + white initials),
+    ///   matching Notion Mail's restrained style for unknown senders.
+    /// - `brand != nil` (a letter-only registry hit) → brand-tinted circle + glyph,
+    ///   so senders like office/azure/monday read as their brand color while the
+    ///   favicon waterfall loads on top (and replaces it if a real logo resolves).
+    private func initialsCircle(brand: SenderIconSpec? = nil) -> some View {
+        let background = brand?.background ?? Color(UIColor.systemGray2)
+        let foreground = brand?.foreground ?? .white
+        return Text(initials)
             .font(.system(size: size * 0.38, weight: .semibold, design: .rounded))
-            .foregroundStyle(.white)
+            .foregroundStyle(foreground)
             .frame(width: size, height: size)
-            .background(Color(UIColor.systemGray2), in: Circle())
+            .background(background, in: Circle())
     }
 
     /// Up to two initials extracted from the display name, or a single letter from the email.

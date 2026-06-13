@@ -341,14 +341,9 @@ struct GlobalSearchView: View {
 
     private func personRow(_ sender: EmailSender) -> some View {
         HStack(spacing: 12) {
-            // Initials avatar
-            ZStack {
-                Circle().fill(AppTheme.surfaceSecondary)
-                Text(String(sender.name.first(where: { $0.isLetter }) ?? "?").uppercased())
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.secondary)
-            }
-            .frame(width: 34, height: 34)
+            // Real sender avatar (brand logo / contact photo / initials fallback) —
+            // matches the People tab instead of a flat gray-initials placeholder.
+            SenderAvatarView(email: sender.email, name: sender.name, size: 34)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(sender.name)

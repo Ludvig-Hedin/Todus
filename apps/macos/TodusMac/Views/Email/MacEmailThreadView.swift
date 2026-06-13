@@ -156,7 +156,10 @@ struct MacEmailThreadView: View {
                 // Messages use PassthroughWKWebView which forwards scroll events upward
                 // so the WebView itself never consumes scroll wheel input.
                 ScrollView {
-                    VStack(spacing: 0) {
+                    // LazyVStack so long threads don't build every message row
+                    // (each carries a WKWebView) eagerly — rows materialize as
+                    // they scroll into view.
+                    LazyVStack(spacing: 0) {
                         // The "Latest message" preview block was removed —
                         // it duplicated the first lines of the most recent
                         // message that was already rendered just below it,

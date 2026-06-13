@@ -2033,6 +2033,8 @@ struct EmailHTMLView: UIViewRepresentable {
     /// leaking memory in long threads. Stop loading and detach the navigation
     /// delegate so the webview can be deallocated promptly.
     static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
+        coordinator.deferredMeasure?.cancel()
+        coordinator.deferredMeasure = nil
         webView.stopLoading()
         webView.navigationDelegate = nil
         coordinator.webView = nil
@@ -2125,15 +2127,24 @@ struct EmailHTMLView: UIViewRepresentable {
         weak var webView: WKWebView?
         var lastLoadedHTML: String?
         var lastDarkMode: Bool?
+        /// Deferred second height measurement scheduled in `didFinish`. Held so it
+        /// can be cancelled on teardown — otherwise the 0.7s block keeps a (weak)
+        /// reference alive and fires after the row has gone, doing needless JS work.
+        var deferredMeasure: DispatchWorkItem?
 
         init(_ parent: EmailHTMLView) { self.parent = parent }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             measureHeight(in: webView)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { [weak webView, weak self] in
+            // Re-measure once after late layout (web fonts, images) settles. Stored
+            // as a cancellable work item so `dismantleUIView` can stop it on teardown.
+            deferredMeasure?.cancel()
+            let work = DispatchWorkItem { [weak webView, weak self] in
                 guard let webView, let self else { return }
                 self.measureHeight(in: webView)
             }
+            deferredMeasure = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.7, execute: work)
         }
 
         private func measureHeight(in webView: WKWebView) {

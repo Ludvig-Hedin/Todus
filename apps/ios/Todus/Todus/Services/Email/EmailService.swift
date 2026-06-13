@@ -381,7 +381,14 @@ final class EmailService {
                     saveCachedThreads(enrichedThreads)
                 }
             } else {
+                // Re-sort after merge so a newer thread that arrived on a later page
+                // doesn't land below older first-page rows. `mergePages` deliberately
+                // appends new ids at the end (its contract is pinned by
+                // EmailServiceTests.testPaginationDedupePreservesNewerVersion), so the
+                // date-desc ordering is applied here at the call site rather than inside
+                // the pure merge function.
                 threads = EmailService.mergePages(existing: threads, incoming: enrichedThreads)
+                    .sorted { $0.date > $1.date }
                 loadedFolder = folder
                 loadedQuery = query
             }
@@ -1353,7 +1360,6 @@ final class EmailService {
         )
         defer {
             isCheckingConnection = false
-            hasResolvedConnection = true
             PerformanceTrace.endInterval(
                 PerformanceTrace.checkEmailConnection,
                 trace,
@@ -1370,6 +1376,10 @@ final class EmailService {
             }
             hasConnection = !response.connections.isEmpty
             lastConnectionCheckAt = now
+            // Only mark resolved on a SUCCESSFUL check — a timeout/throw must not
+            // flip this true, or the cooldown guard would skip the next re-check and
+            // strand a connected user on the connect screen.
+            hasResolvedConnection = true
             UserDefaults.standard.set(hasConnection, forKey: Self.hasConnectionDefaultsKey)
         } catch {
             // Network failure during a re-check shouldn't flip a previously-connected user
@@ -1381,12 +1391,33 @@ final class EmailService {
         }
     }
 
+    /// Best-effort current Gmail connection count from the backend. Returns nil on
+    /// any failure (network, timeout, decode) so callers can fall back rather than
+    /// treating "couldn't read" as "zero connections". Bounded so a hung network
+    /// can't trap the connect flow.
+    private func currentConnectionCount() async -> Int? {
+        do {
+            let response: ConnectionsResponse = try await withTimeout(seconds: 8) { [api] in
+                try await api.trpcQuery("connections.list")
+            }
+            return response.connections.count
+        } catch {
+            return nil
+        }
+    }
+
     /// Initiates Gmail OAuth connection and waits for the backend connection row.
     /// Google sign-in authenticates the Todus account, while link-social grants
     /// Gmail scopes and persists the email connection used by the mail UI.
     @discardableResult
     func connectGmail(authService: AuthService) async -> Bool {
         errorMessage = nil
+
+        // Snapshot the current connection count BEFORE linking so the multi-account
+        // path can verify a brand-new connection actually landed (rather than
+        // returning true after a blind sleep). Best-effort: nil means we couldn't
+        // read the count and will fall back to the connected-bool check.
+        let priorConnectionCount = await currentConnectionCount()
 
         do {
             if authService.isAuthenticated {
@@ -1410,13 +1441,38 @@ final class EmailService {
         // runs fire-and-forget after Better Auth processes the OAuth callback, so the row
         // may not appear immediately.
         //
-        // Multi-account path: if the user already had a connection, hasConnection is already
-        // true and we don't need to poll — but we do sleep briefly so the new row has time
-        // to land before the caller calls loadConnections().
+        // Multi-account path: if the user already had a connection, `hasConnection` is
+        // already true, so the bool check below can't tell whether the NEW account
+        // actually linked. Poll the connection count until it grows past the snapshot
+        // taken before linking — this catches the "tapped add account, OAuth completed,
+        // but the new row never landed" failure instead of silently reporting success.
         if hasConnection {
-            // User already had at least one connection — give the hook ~1.5 s to write the
-            // new row before performConnectGmail calls connectionsService.loadConnections().
-            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            if let prior = priorConnectionCount {
+                var attempt = 0
+                let maxAttempts = 12  // 12 × 500ms = 6 seconds max
+                var landed = false
+                while attempt < maxAttempts {
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                    // Poll the count directly — `hasConnection` is already true here so
+                    // checkConnection() can't signal the NEW account; the count growing
+                    // past the pre-link snapshot is the real "it landed" signal.
+                    if let now = await currentConnectionCount(), now > prior {
+                        landed = true
+                        break
+                    }
+                    attempt += 1
+                }
+                if !landed {
+                    errorMessage =
+                        "Could not link your Gmail account. Make sure you granted access to Gmail and try again."
+                    return false
+                }
+            } else {
+                // Couldn't read a baseline count — fall back to the previous behaviour:
+                // give the fire-and-forget backend hook ~1.5 s to write the new row
+                // before performConnectGmail calls connectionsService.loadConnections().
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+            }
         } else {
             var attempt = 0
             let maxAttempts = 12  // 12 × 500ms = 6 seconds max

@@ -267,8 +267,6 @@ export default function TasksPage() {
     ...trpc.tasks.create.mutationOptions(),
     onSuccess: ({ task }) => {
       upsertTaskInTaskCaches(queryClient, task);
-      // Also invalidate so any filter/sort mismatch gets reconciled
-      void queryClient.invalidateQueries(trpc.tasks.list.queryFilter());
     },
   });
 

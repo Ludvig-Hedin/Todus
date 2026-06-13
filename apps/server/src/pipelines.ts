@@ -17,7 +17,11 @@ import {
 } from './thread-workflow-utils/workflow-engine';
 import { getServiceAccount } from './lib/factories/google-subscription.factory';
 import { getThread, getZeroAgent, getZeroDB } from './lib/server-utils';
-import { userSettingsSchema, defaultAssistantAutomationPolicy } from './lib/schemas';
+import {
+  userSettingsSchema,
+  defaultAssistantAutomationPolicy,
+  type AssistantAutomationPolicy,
+} from './lib/schemas';
 import { DurableObject } from 'cloudflare:workers';
 import { bulkDeleteKeys } from './lib/bulk-delete';
 import { type gmail_v1 } from '@googleapis/gmail';
@@ -37,6 +41,30 @@ const isValidUUID = (str: string): boolean => {
   const regex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
   return regex.test(str);
 };
+
+/**
+ * Resolve the user's assistant automation policy, falling back to the default
+ * on any failure (missing user, missing settings row, parse error, or DB
+ * error). Shared by both the Effect and imperative thread-workflow paths so the
+ * fetch + fallback logic lives in one place.
+ */
+async function getUserAutomationPolicy(
+  userId: string | null | undefined,
+): Promise<AssistantAutomationPolicy> {
+  try {
+    if (!userId) return defaultAssistantAutomationPolicy;
+    const zeroDB = await getZeroDB(userId);
+    const settingsRow = await zeroDB.findUserSettings();
+    if (!settingsRow) return defaultAssistantAutomationPolicy;
+    const parsed = userSettingsSchema.safeParse(settingsRow.settings);
+    return parsed.success
+      ? parsed.data.assistantAutomationPolicy
+      : defaultAssistantAutomationPolicy;
+  } catch (error) {
+    console.error('[THREAD_WORKFLOW] Failed to fetch automation policy:', error);
+    return defaultAssistantAutomationPolicy;
+  }
+}
 
 const validateArguments = (
   params: MainWorkflowParams,
@@ -619,20 +647,13 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
           return 'Thread has no messages';
         }
 
-        // Fetch user automation policy to gate which workflows run
-        const automationPolicy = yield* Effect.tryPromise({
-          try: async () => {
-            if (!foundConnection.userId) return defaultAssistantAutomationPolicy;
-            const zeroDB = await getZeroDB(foundConnection.userId);
-            const settingsRow = await zeroDB.findUserSettings();
-            if (!settingsRow) return defaultAssistantAutomationPolicy;
-            const parsed = userSettingsSchema.safeParse(settingsRow.settings);
-            return parsed.success
-              ? parsed.data.assistantAutomationPolicy
-              : defaultAssistantAutomationPolicy;
-          },
-          catch: () => defaultAssistantAutomationPolicy,
-        }).pipe(Effect.orElse(() => Effect.succeed(defaultAssistantAutomationPolicy)));
+        // Fetch user automation policy to gate which workflows run.
+        // `getUserAutomationPolicy` already returns the default on any internal
+        // failure; the single `Effect.orElse` here is the only remaining
+        // fallback (covers the unlikely case the promise itself rejects).
+        const automationPolicy = yield* Effect.tryPromise(() =>
+          getUserAutomationPolicy(foundConnection.userId),
+        ).pipe(Effect.orElse(() => Effect.succeed(defaultAssistantAutomationPolicy)));
 
         // Initialize workflow engine with default workflows
         const workflowEngine = createDefaultWorkflows(automationPolicy);
@@ -795,21 +816,7 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
           return 'Thread has no messages';
         }
 
-        const automationPolicy = await (async () => {
-          try {
-            if (!foundConnection.userId) return defaultAssistantAutomationPolicy;
-            const zeroDB = await getZeroDB(foundConnection.userId);
-            const settingsRow = await zeroDB.findUserSettings();
-            if (!settingsRow) return defaultAssistantAutomationPolicy;
-            const parsed = userSettingsSchema.safeParse(settingsRow.settings);
-            return parsed.success
-              ? parsed.data.assistantAutomationPolicy
-              : defaultAssistantAutomationPolicy;
-          } catch (error) {
-            console.error('[THREAD_WORKFLOW] Failed to fetch automation policy:', error);
-            return defaultAssistantAutomationPolicy;
-          }
-        })();
+        const automationPolicy = await getUserAutomationPolicy(foundConnection.userId);
 
         const workflowEngine = createDefaultWorkflows(automationPolicy);
 

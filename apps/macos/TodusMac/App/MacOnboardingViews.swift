@@ -121,6 +121,16 @@ struct MacGmailOnboardingView: View {
                 .buttonStyle(MacOnboardingSecondaryButtonStyle())
             }
         }
+        // Auto-advance: a user who already connected Gmail (e.g. signed in with
+        // Google) shouldn't be shown "Connect Gmail" — verify the live
+        // connection state and skip the prompt when one already exists.
+        // Mirrors the iOS onboarding pattern.
+        .task {
+            await services.emailService.checkConnection()
+            if services.emailService.hasConnection {
+                services.hasConfiguredGmailPrompt = true
+            }
+        }
     }
 
     private func connect() async {

@@ -413,6 +413,13 @@ struct MacEmailComposeView: View {
                 focusedField = .body
             }
         }
+        // Cancel any pending ~1s autosave when the compose view goes away so a
+        // debounced snapshot can't fire and re-persist a draft after it was
+        // cleared/sent (the Task isn't tied to the view's lifecycle otherwise).
+        .onDisappear {
+            autosaveTask?.cancel()
+            autosaveTask = nil
+        }
         // If the user picks a different From account the signature should refresh —
         // strip the old one (if still present) and append the new one so multi-account
         // users don't ship the wrong sign-off.
@@ -535,6 +542,10 @@ struct MacEmailComposeView: View {
                 hasUserClearedCc = true
                 hasUserClearedBcc = true
                 didRestoreFromAutosave = false
+                // Body was just emptied — re-arm the signature so "Start fresh"
+                // still ships the per-account sign-off instead of a blank body.
+                didApplySignature = false
+                appendSignatureIfNeeded()
                 persistAutosaveSnapshot()
             }
             .buttonStyle(.borderless)
