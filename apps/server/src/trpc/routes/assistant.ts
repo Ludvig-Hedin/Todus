@@ -1224,6 +1224,108 @@ async function buildThreadAnalysis(
   const extractedCode =
     threadKind === 'verification' ? extractVerificationCode(latestText) : null;
   const extractedReceipt = threadKind === 'receipt' ? extractReceiptDetails(thread) : null;
+
+  // Non-conversational kinds (receipts, notifications, marketing, verification)
+  // never require a human reply, even if their bodies happen to contain reply
+  // keywords like "please" or action-item phrases. This was the source of
+  // the receipt-as-urgent-reply briefing bug. Keep these in lockstep with the
+  // classifier's kind enum.
+  const isNonConversational =
+    threadKind === 'receipt' ||
+    threadKind === 'notification' ||
+    threadKind === 'marketing' ||
+    threadKind === 'verification';
+
+  // B-022: short-circuit for non-conversational threads BEFORE the expensive DB
+  // reads (getRelatedTasks / findRelatedMeetings / getThreadSummary), the memory
+  // upserts (upsertPersonMemory / upsertWorkstreamMemory), candidate generation,
+  // and the batched LLM action-line call. None of those outputs are wanted for
+  // receipts / notifications / marketing / verification — that's the entire
+  // point of classifying them — and the callers already zero every actionable
+  // field out for these kinds (`isConversational ? … : []` in getThreadContext;
+  // syncRecentThreads discards the result entirely).
+  //
+  // We deliberately do NOT call syncOpenLoops / syncPreparedActions with empty
+  // arrays here: both are destructive when `threadId` is non-null (their
+  // obsolete-reconciliation block flips every existing `open` loop to `done` and
+  // every `pending` action to `dismissed`). If a thread was previously
+  // conversational and is now reclassified, passing [] would silently retire
+  // legitimately-created loops/actions. Skipping the sync leaves prior rows
+  // untouched; we still read back whatever already exists so the shape matches.
+  if (isNonConversational) {
+    const workstreamKey = normalizeWorkstreamKey(subject);
+    // Build a workstream object matching upsertWorkstreamMemory's return shape
+    // WITHOUT writing to the DB. No caller reads analysis.workstream, but we
+    // keep the field shape identical so the inferred return type stays stable.
+    const now = new Date();
+    const workstream = {
+      id: crypto.randomUUID(),
+      userId,
+      key: workstreamKey,
+      title: normalizeSubject(subject) || 'General',
+      summary: '',
+      status: 'active' as const,
+      pendingDecisions: [] as string[],
+      risks: [] as string[],
+      relatedPeople: [] as string[],
+      relatedThreadIds: [] as string[],
+      relatedMeetingIds: [] as string[],
+      relatedTaskIds: [] as string[],
+      nextMilestone: null as string | null,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    // Read back any rows that already exist for this thread (e.g. from a prior
+    // conversational classification) so we neither create nor destroy data, and
+    // the returned collections stay correctly typed as DB rows.
+    const openLoops = await db
+      .select()
+      .from(assistantOpenLoop)
+      .where(
+        and(eq(assistantOpenLoop.userId, userId), eq(assistantOpenLoop.sourceThreadId, threadId)),
+      )
+      .orderBy(desc(assistantOpenLoop.updatedAt));
+    const preparedActions = await db
+      .select()
+      .from(assistantPreparedAction)
+      .where(
+        and(
+          eq(assistantPreparedAction.userId, userId),
+          eq(assistantPreparedAction.sourceThreadId, threadId),
+        ),
+      )
+      .orderBy(desc(assistantPreparedAction.updatedAt));
+
+    return {
+      subject,
+      summary: '',
+      // buildAiLeadLine returns '' for every non-conversational kind anyway.
+      aiLeadLine: '',
+      threadKind,
+      extractedCode,
+      extractedReceipt,
+      recommendation: {
+        label: 'Nothing needed',
+        reason: 'The assistant does not see a strong follow-up obligation right now.',
+      },
+      waitingState: 'done' as WaitingState,
+      confidence: 0.25,
+      riskLevel: 'low' as AssistantRisk,
+      reason:
+        'This thread looks like an automated / non-conversational message, so the assistant is staying out of the way.',
+      actionItems: [] as string[],
+      researchQueries: [] as string[],
+      relatedTasks: [] as Awaited<ReturnType<typeof getRelatedTasks>>,
+      relatedMeetings: [] as Awaited<ReturnType<typeof findRelatedMeetings>>,
+      openLoops,
+      preparedActions,
+      peopleContext: [] as Awaited<ReturnType<typeof upsertPersonMemory>>[],
+      workstream,
+      latest,
+    };
+  }
+
   const relatedTasks = await getRelatedTasks(db, userId, threadId);
   const relatedMeetings = await findRelatedMeetings(db, userId, subject, senderEmail);
   const summary = await getThreadSummary(threadId, activeConnection.id, thread);
@@ -1235,16 +1337,6 @@ async function buildThreadAnalysis(
     AUTOMATED_KEYWORDS.test(senderEmail ?? '');
   const latestFromUser =
     (latest?.sender?.email || '').toLowerCase() === activeConnection.email.toLowerCase();
-  // Non-conversational kinds (receipts, notifications, marketing, verification)
-  // never require a human reply, even if their bodies happen to contain reply
-  // keywords like "please" or action-item phrases. This was the source of
-  // the receipt-as-urgent-reply briefing bug. Keep these in lockstep with the
-  // classifier's kind enum.
-  const isNonConversational =
-    threadKind === 'receipt' ||
-    threadKind === 'notification' ||
-    threadKind === 'marketing' ||
-    threadKind === 'verification';
   const replyNeeded =
     !automated &&
     !isNonConversational &&
