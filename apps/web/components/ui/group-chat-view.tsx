@@ -35,13 +35,20 @@ export function GroupChatView({ groupId }: Props) {
   );
 
   // Messages — polled every 5 seconds.
-  // TODO(realtime): Replace refetchInterval with a Durable Object WebSocket
-  // subscription. Subscribe on mount, unsubscribe on unmount, and update the
-  // React Query cache directly from incoming WebSocket messages.
+  // Messages — polled. Interval tightened to 2.5s (from 5s) and refetch-on-focus
+  // added so returning to the tab updates instantly. TanStack pauses polling
+  // while the tab is hidden by default (refetchIntervalInBackground is false),
+  // so this doesn't hammer the backend in the background.
+  //
+  // TODO(realtime): true push requires a new Group Durable Object (rooms with
+  // WebSocket hibernation + broadcast on new message), a `wrangler.jsonc` DO
+  // binding, server `sendMessage` triggering the DO broadcast, and a client WS
+  // subscription here that writes incoming messages straight into the React
+  // Query cache. That DO does not exist yet — see groups.ts:72/348/363 TODOs.
   const { data: messageData, isLoading } = useQuery(
     trpc.groups.listMessages.queryOptions(
       { groupId, limit: 50 },
-      { refetchInterval: 5000 },
+      { refetchInterval: 2500, refetchOnWindowFocus: true },
     ),
   );
 
