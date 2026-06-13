@@ -58,13 +58,9 @@ final class SupabaseSyncService: SyncService {
     }
 
     /// Re-enqueues every task currently in `.localOnly` or `.failed` state for another upload
-    /// attempt. Intended to be called when network connectivity is restored, so offline tasks
-    /// don't sit forever waiting for the next manual mutation to flush them.
-    ///
-    /// TODO: Wire this to fire on `NetworkMonitor.isConnected` false→true transitions in
-    /// `AppServices`. The infrastructure exists (`apps/ios/Todus/Todus/Services/NetworkMonitor.swift`),
-    /// but observation must be set up at the AppServices level since this service has no
-    /// reference to it.
+    /// attempt. Called when network connectivity is restored — wired in `AppServices` via
+    /// `NetworkMonitor.onReconnect` — so offline tasks don't sit forever waiting for the next
+    /// manual mutation to flush them.
     func retryUnsyncedTasks(in context: ModelContext) async {
         guard client != nil else { return }
         let descriptor = FetchDescriptor<TaskRecord>()

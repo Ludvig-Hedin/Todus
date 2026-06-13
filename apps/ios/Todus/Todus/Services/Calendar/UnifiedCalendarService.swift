@@ -90,7 +90,7 @@ final class UnifiedCalendarService {
             preferences: preferences
         )
 
-        var (apple, google) = await (appleEventsTask, googleEventsTask)
+        let (apple, google) = await (appleEventsTask, googleEventsTask)
 
         // Sort merged results by start; stable ordering helps the timeline UI.
         var merged: [UnifiedCalendarEvent] = []
@@ -165,6 +165,11 @@ final class UnifiedCalendarService {
             await googleService.refresh(googleConnections: googleConnections)
         }
 
+        // TODO(bug-hunt): If a connection's calendar list isn't loaded yet (cold start /
+        // isStale race not fully resolved by the refresh above), GoogleCalendarService.events
+        // falls back to fetching `primary` and ignores hiddenCalendarIds, so a hidden primary
+        // can briefly reappear. Ensure refresh() populates sources for every connection
+        // before events() runs, or make the primary fallback respect hiddenCalendarIds.
         let (events, _) = await googleService.events(
             from: startDate,
             to: endDate,

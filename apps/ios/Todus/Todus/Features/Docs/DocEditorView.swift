@@ -322,6 +322,8 @@ private struct DocInfoSheet: View {
                         .truncationMode(.middle)
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(AppTheme.sheetBackground)
             .navigationTitle("Info")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

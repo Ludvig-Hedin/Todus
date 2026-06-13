@@ -12,6 +12,11 @@ struct RootView: View {
     /// when multiple state values are already determined from Keychain/UserDefaults.
     @State private var hasAppeared = false
     @State private var hasRunDeferredStartup = false
+    /// Snapshot of how many onboarding steps THIS user's journey contains, taken
+    /// once at sign-in. Returning users skip the welcome-tour / tab-bar steps (set
+    /// done in `AppServices.init`), so the old hardcoded "of 5" lied — it showed
+    /// "2 of 5" then dropped the user into the app after step 2. Reset on sign-out.
+    @State private var onboardingTotalSnapshot: Int? = nil
 
     var body: some View {
         Group {
@@ -53,7 +58,7 @@ struct RootView: View {
         }
         .safeAreaInset(edge: .top, spacing: 0) {
             if let onboardingStep = onboardingStep {
-                let onboardingTotal = 5
+                let onboardingTotal = onboardingTotal
                 let progressText = String(
                     localized: "\(onboardingStep) of \(onboardingTotal)",
                     comment: "Compact onboarding progress label showing current step and total steps"
@@ -110,7 +115,19 @@ struct RootView: View {
             await runDeferredStartupWork()
         }
         .task(id: services.authService.isAuthenticated) {
-            guard services.authService.isAuthenticated else { return }
+            guard services.authService.isAuthenticated else {
+                // Signed out — clear the snapshot so the next sign-in measures its
+                // own onboarding journey afresh.
+                onboardingTotalSnapshot = nil
+                return
+            }
+            // Capture the journey length once, now that the account's onboarding
+            // flags are settled, so the "X of N" counter reflects the steps this
+            // user will actually see instead of a hardcoded 5.
+            if onboardingTotalSnapshot == nil {
+                let remaining = remainingOnboardingSteps
+                if remaining > 0 { onboardingTotalSnapshot = remaining }
+            }
             guard !services.isUITestingMode else { return }
             await services.loadSharedAIProfile()
         }
@@ -149,13 +166,35 @@ struct RootView: View {
         await services.completeAuthUpgradeIfNeeded(in: modelContext)
     }
 
+    /// The five onboarding steps in display order, each flagged as still-pending.
+    private var onboardingPendingFlags: [Bool] {
+        [
+            !services.hasConfiguredGmailPrompt,
+            !services.hasConfiguredRemindersPrompt,
+            !services.hasConfiguredNotificationsPrompt,
+            !services.hasSeenWelcomeTour,
+            !services.hasConfiguredTabBarPrompt,
+        ]
+    }
+
+    /// Steps still to complete, including the current one.
+    private var remainingOnboardingSteps: Int {
+        onboardingPendingFlags.filter { $0 }.count
+    }
+
+    /// Total steps in this user's journey — the snapshot taken at sign-in, or the
+    /// live remaining count before the snapshot lands.
+    private var onboardingTotal: Int {
+        onboardingTotalSnapshot ?? remainingOnboardingSteps
+    }
+
+    /// Current step (1-based) within the journey, or nil once onboarding is done.
+    /// Numbered against the snapshotted total so it counts up (1→N) and never
+    /// claims more steps than the user will see.
     private var onboardingStep: Int? {
         guard !services.authService.showsOnboarding else { return nil }
-        if !services.hasConfiguredGmailPrompt { return 1 }
-        if !services.hasConfiguredRemindersPrompt { return 2 }
-        if !services.hasConfiguredNotificationsPrompt { return 3 }
-        if !services.hasSeenWelcomeTour { return 4 }
-        if !services.hasConfiguredTabBarPrompt { return 5 }
-        return nil
+        let remaining = remainingOnboardingSteps
+        guard remaining > 0 else { return nil }
+        return max(1, onboardingTotal - remaining + 1)
     }
 }

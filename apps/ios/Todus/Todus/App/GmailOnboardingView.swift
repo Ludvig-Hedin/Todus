@@ -108,6 +108,15 @@ struct GmailOnboardingView: View {
         // Auto-advance if Gmail is already connected (e.g. sign-in with Google
         // auto-created a connection via the server accountCreateHook).
         .task {
+            // Fast path: if we already know a mailbox is connected (restored
+            // from cache in EmailService.init), skip this step IMMEDIATELY rather
+            // than rendering the full "Connect Gmail" screen for the ~2s the
+            // forced network check takes and then yanking it away — the flash
+            // that read as a bug.
+            if services.emailService.hasConnection {
+                services.hasConfiguredGmailPrompt = true
+                return
+            }
             await services.emailService.checkConnection(force: true)
             if services.emailService.hasConnection {
                 services.hasConfiguredGmailPrompt = true

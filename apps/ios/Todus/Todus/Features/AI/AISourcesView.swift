@@ -134,6 +134,8 @@ struct AISourcesListSheet: View {
                 }
             }
             .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .background(AppTheme.sheetBackground)
             .navigationTitle("Sources")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

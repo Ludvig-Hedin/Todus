@@ -51,12 +51,20 @@ struct BillingSettingsView: View {
 
     /// Tighter than NumberFormatter for our specific case: hide decimals on
     /// integer-ish values so "10 credits" doesn't render as "10.00". Applies the
-    /// display scale so the usage meter matches the scaled plan copy.
+    /// display scale so the usage meter matches the scaled plan copy. Guards
+    /// against NaN / ±infinity: `Int(NaN.rounded())` traps and would crash the
+    /// Billing tab on any upstream divide-by-zero or bad decode.
     private func formatCredits(_ value: Double) -> String {
         let scaled = value * Self.creditsDisplayScale
+        guard scaled.isFinite else { return "—" }
         if scaled == 0 { return "0" }
         if scaled < 1 { return String(format: "%.2f", scaled) }
         if scaled < 10 { return String(format: "%.1f", scaled) }
+        // `Int(Double.rounded())` traps on overflow (>~9.2e18). Subscription
+        // credits won't realistically hit that range, but a corrupted
+        // upstream value would crash the Billing tab. Render `"—"` as a
+        // safe fallback for any too-large value.
+        guard scaled < Double(Int.max) else { return "—" }
         return String(Int(scaled.rounded()))
     }
 
@@ -67,11 +75,17 @@ struct BillingSettingsView: View {
     private var percentRemaining: Int {
         guard !subscription.aiUsageUnlimited else { return 100 }
         guard subscription.aiUsageLimit > 0 else { return 0 }
+        // `Int(ceil(NaN * 100))` traps. Guard against a non-finite
+        // `aiUsagePercent` (upstream 0/0, bad decode) so the Billing tab
+        // doesn't crash on bad data — render "100% remaining" as a safe
+        // fallback when the percent is unknowable.
+        let pct = subscription.aiUsagePercent
+        guard pct.isFinite else { return 100 }
         // Use `ceil` for the consumed slice so any non-zero usage drops the
         // headline below 100% — `.rounded()` would report "100% remaining"
         // for small (e.g. 0.4%) consumption while the "Used X of Y" subtitle
         // simultaneously shows real consumption.
-        return max(0, 100 - Int(ceil(subscription.aiUsagePercent * 100)))
+        return max(0, 100 - Int(ceil(pct * 100)))
     }
 
     var body: some View {
@@ -225,8 +239,13 @@ struct BillingSettingsView: View {
                 }
                 .frame(maxWidth: .infinity)
 
-                // Big progress bar
-                ProgressView(value: subscription.aiUsageLimit > 0 ? subscription.aiUsagePercent : 0)
+                // Big progress bar. Clamp to [0, 1] and guard non-finite so
+                // SwiftUI doesn't render undefined output when upstream
+                // surfaces NaN / ±infinity (consistent with the percentRemaining
+                // + warning-banner guards above).
+                ProgressView(value: (subscription.aiUsageLimit > 0 && subscription.aiUsagePercent.isFinite)
+                             ? min(max(subscription.aiUsagePercent, 0), 1)
+                             : 0)
                     .tint(progressTint)
                     .scaleEffect(x: 1, y: 1.6, anchor: .center)
                     .padding(.horizontal, 4)
@@ -245,12 +264,17 @@ struct BillingSettingsView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-                if !subscription.aiUsageUnlimited && subscription.aiUsagePercent >= 1 && subscription.aiUsageLimit > 0 {
+                // `+infinity >= 0.8` is true and `Int(infinity.rounded())`
+                // traps. Gate the warning banner on `.isFinite` so a bad
+                // upstream percent value can't crash the Billing tab.
+                if !subscription.aiUsageUnlimited && subscription.aiUsagePercent.isFinite
+                    && subscription.aiUsagePercent >= 1 && subscription.aiUsageLimit > 0 {
                     Text("Out of AI credits this period.")
                         .font(.footnote)
                         .foregroundStyle(.red)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                } else if !subscription.aiUsageUnlimited && subscription.aiUsagePercent >= 0.8 && subscription.aiUsageLimit > 0 {
+                } else if !subscription.aiUsageUnlimited && subscription.aiUsagePercent.isFinite
+                    && subscription.aiUsagePercent >= 0.8 && subscription.aiUsageLimit > 0 {
                     Text("You've used \(Int((subscription.aiUsagePercent * 100).rounded()))% of your AI credits.")
                         .font(.footnote)
                         .foregroundStyle(.orange)
@@ -276,6 +300,10 @@ struct BillingSettingsView: View {
 
     private var progressTint: Color {
         let pct = subscription.aiUsagePercent
+        // Match the .isFinite guarding used by every other consumer of
+        // aiUsagePercent in this view — a NaN/±infinity value shouldn't pick a
+        // misleading tint.
+        guard pct.isFinite else { return .accentColor }
         if pct >= 1 { return .red }
         if pct >= 0.8 { return .orange }
         return .accentColor

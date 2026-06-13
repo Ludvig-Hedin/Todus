@@ -228,7 +228,7 @@ final class NotificationService {
         if count == 0 {
             center.removePendingNotificationRequests(withIdentifiers: ["due-today-digest"])
             center.removeDeliveredNotifications(withIdentifiers: ["due-today-digest"])
-            UIApplication.shared.applicationIconBadgeNumber = 0
+            center.setBadgeCount(0)
             return
         }
 
@@ -287,6 +287,9 @@ final class NotificationService {
     func clearAll() {
         center.removeAllDeliveredNotifications()
         center.removeAllPendingNotificationRequests()
+        // The due-today digest carries the app icon badge; clearing notifications
+        // without resetting it leaves a stale due-count badge on the icon.
+        center.setBadgeCount(0)
     }
 
     func cancel(withIdentifiers identifiers: [String]) {

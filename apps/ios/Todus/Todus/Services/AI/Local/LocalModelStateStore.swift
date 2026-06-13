@@ -69,11 +69,29 @@ final class LocalModelStateStore {
     /// Root directory for downloaded model weights. `mlx-swift-examples` writes
     /// to `Documents/huggingface/models/<org>/<name>/` — we mirror that path so
     /// installed weights interop with any other MLX tool the user might run.
+    /// The `huggingface/` parent is marked `isExcludedFromBackup` the first
+    /// time it's created so multi-GB weight files don't balloon the user's
+    /// iCloud backup quota and slow restores.
     nonisolated static var modelsDirectory: URL {
         let fm = FileManager.default
         let docs = (try? fm.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true))
             ?? URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
-        let dir = docs.appendingPathComponent("huggingface/models", isDirectory: true)
+        let parent = docs.appendingPathComponent("huggingface", isDirectory: true)
+        if !fm.fileExists(atPath: parent.path) {
+            try? fm.createDirectory(at: parent, withIntermediateDirectories: true)
+        }
+        // Apply / re-apply `isExcludedFromBackup` outside the create gate
+        // so a directory created by a prior app version still gets the
+        // flag backfilled on next launch (otherwise existing users would
+        // never see the iCloud-backup exclusion).
+        var mutableParent = parent
+        let alreadyExcluded = (try? mutableParent.resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup) ?? false
+        if !alreadyExcluded {
+            var values = URLResourceValues()
+            values.isExcludedFromBackup = true
+            try? mutableParent.setResourceValues(values)
+        }
+        let dir = parent.appendingPathComponent("models", isDirectory: true)
         if !fm.fileExists(atPath: dir.path) {
             try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
         }
@@ -87,11 +105,17 @@ final class LocalModelStateStore {
     // MARK: - Reads
 
     func state(for model: LocalModel) -> LocalModelInstallState {
-        // Apple Foundation Models is "always installed" when the OS exposes
-        // it. The UI uses ModelRecommender / DeviceProfile to gate visibility,
-        // but the store treats it as installed-with-zero-disk so the chat
-        // service's `isReady` check is uniform.
-        if model.runtime == .appleFM { return .installed(diskBytes: 0) }
+        // Apple Foundation Models is "installed" only when the OS actually
+        // exposes it on this iPhone (older devices, regions without Apple
+        // Intelligence, beta gate off → unavailable). Pre-fix this returned
+        // `.installed` unconditionally and any caller enumerating installed
+        // models for a runtime pick would see Apple FM and fail at
+        // invocation time. Mirror macOS + the UI's `DeviceProfile` gate.
+        if model.runtime == .appleFM {
+            return DeviceProfile.current.appleFMAvailable
+                ? .installed(diskBytes: 0)
+                : .notInstalled
+        }
         return stateById[model.id] ?? .notInstalled
     }
 
@@ -172,20 +196,52 @@ final class LocalModelStateStore {
             // `directorySize > 0` but no actual weight file. The MLX runtime
             // would then crash on first turn. Gate on a real weight artifact.
             guard hasWeightFile(at: candidate, fileManager: fm) else { continue }
-            // Presence is already proven by `hasWeightFile`. Don't drop the
-            // entry when `directorySize` returns 0 — that can happen when
-            // `totalFileAllocatedSize` is unavailable for every file
-            // (sandboxed FS, network volumes), and a 0-byte report would
-            // re-offer the model for download.
-            let bytes = max(directorySize(at: candidate, fileManager: fm), 0)
-            seeded[model.id] = .installed(diskBytes: bytes)
+            // Presence is already proven by `hasWeightFile`. `directorySize`
+            // sums unsigned allocated sizes so it can't go negative — but
+            // it CAN return 0 when `totalFileAllocatedSize` is unavailable
+            // for every file (sandboxed FS, network volumes). Fall back to
+            // `fileSize` (the un-rounded logical size) before resorting to
+            // a 1-byte sentinel, so the UI shows a real number for the
+            // common case and "1 B" only when both reports fail.
+            var measured = directorySize(at: candidate, fileManager: fm)
+            if measured == 0 {
+                measured = fileSizeFallback(at: candidate, fileManager: fm)
+            }
+            seeded[model.id] = .installed(diskBytes: measured > 0 ? measured : 1)
         }
         return seeded
     }
 
+    /// Sum of `fileSize` (logical) over every regular file in the tree.
+    /// Used as a fallback when `directorySize` returns 0 because
+    /// `totalFileAllocatedSize` is unavailable for the volume (sandboxed
+    /// mounts, network drives) — without this the UI would render "1 B"
+    /// for a real multi-GB install.
+    private nonisolated static func fileSizeFallback(at url: URL, fileManager fm: FileManager) -> Int64 {
+        guard let enumerator = fm.enumerator(
+            at: url,
+            includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else { return 0 }
+        var total: Int64 = 0
+        var seen = Set<String>()
+        for case let fileURL as URL in enumerator {
+            let resolvedPath = fileURL.resolvingSymlinksInPath().standardizedFileURL.path
+            if !seen.insert(resolvedPath).inserted { continue }
+            let resolvedURL = URL(fileURLWithPath: resolvedPath)
+            let values = try? resolvedURL.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
+            if values?.isRegularFile == true, let size = values?.fileSize {
+                total += Int64(size)
+            }
+        }
+        return total
+    }
+
     /// True when the directory tree contains at least one MLX-compatible weight
     /// file (`*.safetensors`, `*.npz`, or `*.gguf`). Used by the disk scan to
-    /// reject partial downloads that would crash the runtime on load.
+    /// reject partial downloads that would crash the runtime on load. Gates on
+    /// `.isRegularFile` so a directory whose name happens to end in one of
+    /// those extensions doesn't false-positive.
     private nonisolated static func hasWeightFile(at url: URL, fileManager fm: FileManager) -> Bool {
         guard let enumerator = fm.enumerator(
             at: url,
@@ -193,6 +249,8 @@ final class LocalModelStateStore {
             options: [.skipsHiddenFiles]
         ) else { return false }
         for case let fileURL as URL in enumerator {
+            let values = try? fileURL.resourceValues(forKeys: [.isRegularFileKey])
+            guard values?.isRegularFile == true else { continue }
             let ext = fileURL.pathExtension.lowercased()
             if ext == "safetensors" || ext == "npz" || ext == "gguf" {
                 return true
@@ -201,16 +259,28 @@ final class LocalModelStateStore {
         return false
     }
 
-    private nonisolated static func directorySize(at url: URL, fileManager: FileManager) -> Int64 {
-        guard let enumerator = fileManager.enumerator(
+    private nonisolated static func directorySize(at url: URL, fileManager fm: FileManager) -> Int64 {
+        // Resolve and de-dupe by canonical path so the HF blob+snapshot
+        // layout (real file under `blobs/<sha>` plus a symlink alias under
+        // `snapshots/<commit>/...`) doesn't double-count, and a tree of
+        // symlinks-pointing-at-real-files doesn't undercount. iOS today only
+        // probes `Documents/huggingface/models/<repo>` written by
+        // `mlx-swift-examples`, but if that path ever ships a symlinked
+        // snapshot the math stays consistent across platforms (mirrors
+        // macOS `directorySize`).
+        guard let enumerator = fm.enumerator(
             at: url,
             includingPropertiesForKeys: [.totalFileAllocatedSizeKey, .isRegularFileKey],
             options: [.skipsHiddenFiles]
         ) else { return 0 }
 
         var total: Int64 = 0
+        var seen = Set<String>()
         for case let fileURL as URL in enumerator {
-            let values = try? fileURL.resourceValues(forKeys: [.totalFileAllocatedSizeKey, .isRegularFileKey])
+            let resolvedPath = fileURL.resolvingSymlinksInPath().standardizedFileURL.path
+            if !seen.insert(resolvedPath).inserted { continue }
+            let resolvedURL = URL(fileURLWithPath: resolvedPath)
+            let values = try? resolvedURL.resourceValues(forKeys: [.totalFileAllocatedSizeKey, .isRegularFileKey])
             if values?.isRegularFile == true {
                 total += Int64(values?.totalFileAllocatedSize ?? 0)
             }

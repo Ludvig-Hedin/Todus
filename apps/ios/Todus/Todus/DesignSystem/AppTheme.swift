@@ -77,24 +77,35 @@ struct CachedAvatarImage<Fallback: View>: View {
         }
         .frame(width: size, height: size)
         .clipShape(Circle())
-        .onAppear(perform: loadFromCache)
-        .task(id: urlString) { await fetchAndCache() }
+        .task(id: urlString) {
+            await loadFromCache()
+            await fetchAndCache()
+        }
     }
 
-    private func loadFromCache() {
+    /// Disk read + JPEG decode happen on a background task. The previous
+    /// `.onAppear`-driven sync `Data(contentsOf:)` ran on the main thread for
+    /// every row scrolling into view — a steady source of inbox scroll hitching.
+    private func loadFromCache() async {
         guard loadedImage == nil, let diskCacheKey else { return }
-        if let data = AvatarDiskCache.read(key: diskCacheKey),
-           let uiImage = UIImage(data: data) {
-            loadedImage = Image(uiImage: uiImage)
-            return
-        }
-        // One-shot migration: surface a stale UserDefaults blob, copy it to disk,
-        // then drop the defaults entry so we stop carrying it across launches.
-        if let legacyDefaultsKey,
-           let legacyData = UserDefaults.standard.data(forKey: legacyDefaultsKey),
-           let uiImage = UIImage(data: legacyData) {
-            AvatarDiskCache.write(legacyData, key: diskCacheKey)
-            UserDefaults.standard.removeObject(forKey: legacyDefaultsKey)
+        let legacyKey = legacyDefaultsKey
+        let uiImage: UIImage? = await Task.detached(priority: .userInitiated) {
+            if let data = AvatarDiskCache.read(key: diskCacheKey),
+               let image = UIImage(data: data) {
+                return image
+            }
+            // One-shot migration: surface a stale UserDefaults blob, copy it to disk,
+            // then drop the defaults entry so we stop carrying it across launches.
+            if let legacyKey,
+               let legacyData = UserDefaults.standard.data(forKey: legacyKey),
+               let image = UIImage(data: legacyData) {
+                AvatarDiskCache.write(legacyData, key: diskCacheKey)
+                UserDefaults.standard.removeObject(forKey: legacyKey)
+                return image
+            }
+            return nil
+        }.value
+        if let uiImage, loadedImage == nil {
             loadedImage = Image(uiImage: uiImage)
         }
     }
@@ -104,7 +115,11 @@ struct CachedAvatarImage<Fallback: View>: View {
         guard let urlString, let url = URL(string: urlString), let diskCacheKey else { return }
         guard let (data, _) = try? await URLSession.shared.data(from: url),
               let uiImage = UIImage(data: data) else { return }
-        AvatarDiskCache.write(data, key: diskCacheKey)
+        // Persist off-main — `.atomic` writes a temp file + rename, which is real
+        // disk I/O that doesn't belong on the main thread.
+        Task.detached(priority: .utility) {
+            AvatarDiskCache.write(data, key: diskCacheKey)
+        }
         loadedImage = Image(uiImage: uiImage)
     }
 }
@@ -665,7 +680,13 @@ struct AppPrimaryButtonStyle: ButtonStyle {
             if #available(iOS 26.0, *) {
                 configuration.label
                     .interactiveHitTarget(expansion: 6)
-                    .foregroundStyle(AppTheme.primaryButtonForeground.opacity(configuration.isPressed ? 0.85 : 1))
+                    // White, not `primaryButtonForeground` (= systemBackground, which
+                    // is BLACK in dark mode): the background is the saturated
+                    // `Color.accentColor` (the asset AccentColor / blue), not
+                    // `Color.primary`, so the inverting foreground rendered black
+                    // text on a blue pill in dark mode. White reads on the accent
+                    // in both light and dark.
+                    .foregroundStyle(Color.white.opacity(configuration.isPressed ? 0.85 : 1))
                     .glassEffect(
                         .regular.tint(Color.accentColor.opacity(configuration.isPressed ? 0.72 : 0.88)),
                         in: Capsule()
@@ -673,7 +694,7 @@ struct AppPrimaryButtonStyle: ButtonStyle {
             } else {
                 configuration.label
                     .interactiveHitTarget(expansion: 6)
-                    .foregroundStyle(AppTheme.primaryButtonForeground.opacity(configuration.isPressed ? 0.9 : 1))
+                    .foregroundStyle(Color.white.opacity(configuration.isPressed ? 0.9 : 1))
                     .background(
                         Capsule()
                             .fill(Color.accentColor.opacity(configuration.isPressed ? 0.82 : 1.0))
@@ -898,21 +919,26 @@ enum AppHaptic {
     /// Fire immediately. Prefer `.hapticOnChange` modifier when feedback is
     /// tied to a state change — that variant skips the haptic on first appear.
     func play() {
-        switch self {
-        case .light:
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        case .medium:
-            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-        case .heavy:
-            UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
-        case .selection:
-            UISelectionFeedbackGenerator().selectionChanged()
-        case .success:
-            UINotificationFeedbackGenerator().notificationOccurred(.success)
-        case .warning:
-            UINotificationFeedbackGenerator().notificationOccurred(.warning)
-        case .error:
-            UINotificationFeedbackGenerator().notificationOccurred(.error)
+        // UIKit feedback generators are main-actor-isolated. Every caller fires
+        // from a synchronous SwiftUI main-thread context (button taps, onChange),
+        // so assume isolation instead of hopping actors and delaying the buzz.
+        MainActor.assumeIsolated {
+            switch self {
+            case .light:
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            case .medium:
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            case .heavy:
+                UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+            case .selection:
+                UISelectionFeedbackGenerator().selectionChanged()
+            case .success:
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+            case .warning:
+                UINotificationFeedbackGenerator().notificationOccurred(.warning)
+            case .error:
+                UINotificationFeedbackGenerator().notificationOccurred(.error)
+            }
         }
     }
 }

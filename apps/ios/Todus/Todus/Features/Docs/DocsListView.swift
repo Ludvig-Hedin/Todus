@@ -132,6 +132,10 @@ struct DocsListView: View {
             }
         }
         .listStyle(.insetGrouped)
+        // Drop the system grouped background (pure black in dark mode) and paint the
+        // shared app page surface so Docs matches Mail / Tasks / Meetings.
+        .scrollContentBackground(.hidden)
+        .background(AppTheme.backgroundTop)
         .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .automatic), prompt: "Search docs")
         .refreshable { await svc.refresh() }
         .toolbar {
@@ -300,9 +304,16 @@ struct DocsListView: View {
         .contextMenu { docContextMenu(doc) }
     }
 
-    private func docRow(_ doc: DocRecordDTO, in workspace: DocWorkspaceDTO, depth: Int) -> AnyView {
+    private func docRow(_ doc: DocRecordDTO, in workspace: DocWorkspaceDTO, depth: Int, visited: Set<String> = []) -> AnyView {
         let svc = services.docsService
-        let children = svc.children(ofParentId: doc.id, workspaceId: workspace.id)
+        // Guard against server-provided cyclic / self-referential parent pointers
+        // (A→B→A, or a doc that is its own parent) and pathological nesting depth.
+        // Without this, docRow recurses forever and the Docs tab crashes with a
+        // stack overflow on malformed hierarchy data.
+        let children = (depth < 32 && !visited.contains(doc.id))
+            ? svc.children(ofParentId: doc.id, workspaceId: workspace.id)
+            : []
+        let nextVisited = visited.union([doc.id])
 
         let row = Button {
             open(docID: doc.id)
@@ -346,7 +357,7 @@ struct DocsListView: View {
             Group {
                 row
                 ForEach(children) { child in
-                    docRow(child, in: workspace, depth: depth + 1)
+                    docRow(child, in: workspace, depth: depth + 1, visited: nextVisited)
                 }
             }
         )

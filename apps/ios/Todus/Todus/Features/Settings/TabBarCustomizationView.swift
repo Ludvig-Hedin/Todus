@@ -23,6 +23,8 @@ struct TabBarCustomizationView: View {
             availableSection
         }
         .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(AppTheme.backgroundTop)
         .environment(\.editMode, $editMode)
         .navigationTitle("Tab Bar")
         .navigationBarTitleDisplayMode(.inline)

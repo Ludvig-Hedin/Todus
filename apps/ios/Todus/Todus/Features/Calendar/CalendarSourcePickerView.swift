@@ -72,7 +72,7 @@ struct CalendarSourcePickerView: View {
                     } header: {
                         HStack(spacing: 8) {
                             Circle()
-                                .fill(Color(hex: group.connection.displayColor) ?? .accentColor)
+                                .fill(Color(hex: group.connection.displayColor as String?) ?? .accentColor)
                                 .frame(width: 8, height: 8)
                             Text(group.connection.email)
                         }
@@ -104,6 +104,8 @@ struct CalendarSourcePickerView: View {
             }
         }
         .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(AppTheme.sheetBackground)
         .refreshable { await refresh(force: true) }
         .overlay(alignment: .top) {
             if isLoading {

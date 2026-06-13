@@ -451,7 +451,7 @@ enum SnoozeOption: Hashable {
             return calendar.date(bySettingHour: 9, minute: 0, second: 0, of: tomorrow) ?? tomorrow
         case .weekend:
             // Next Saturday at 9am.
-            var components = calendar.dateComponents([.year, .month, .day, .weekday], from: now)
+            let components = calendar.dateComponents([.year, .month, .day, .weekday], from: now)
             let weekday = components.weekday ?? 1 // Sunday = 1, Saturday = 7
             let daysUntilSaturday = ((7 - weekday) + 7) % 7
             let target = daysUntilSaturday == 0 ? 7 : daysUntilSaturday

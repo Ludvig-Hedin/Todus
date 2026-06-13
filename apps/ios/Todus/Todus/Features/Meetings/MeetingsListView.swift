@@ -115,6 +115,9 @@ struct MeetingsListView: View {
                 }
             }
             .listStyle(.insetGrouped)
+            // Reveal the AppTheme.backgroundTop layer behind the List instead of
+            // the system grouped background (pure black in dark mode).
+            .scrollContentBackground(.hidden)
             .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y } action: { old, new in
                 let delta = new - old
                 if delta > 8 && new > 40 {

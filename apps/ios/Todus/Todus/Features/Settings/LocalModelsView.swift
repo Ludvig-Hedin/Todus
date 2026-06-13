@@ -26,6 +26,8 @@ struct LocalModelsView: View {
             footerSection
         }
         .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(AppTheme.sheetBackground)
         .navigationTitle("Local Models")
         .navigationBarTitleDisplayMode(.large)
         .sheet(item: $detailModel) { model in

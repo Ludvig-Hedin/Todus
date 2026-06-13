@@ -977,7 +977,6 @@ struct HomeView: View {
 
     private var upcomingTimelineSection: some View {
         let sections = upcomingTimelineSections
-        let totalCount = sections.reduce(0) { $0 + $1.items.count }
         return VStack(alignment: .leading, spacing: 12) {
             sectionHeader(
                 title: "This Week",
@@ -1534,6 +1533,10 @@ struct HomeView: View {
             Image(systemName: icon)
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(.secondary)
+                // Decorative — the adjacent title already labels the section.
+                // Without this, SF Symbols leak their system VoiceOver names
+                // ("Get Mail", "Facetime Video Call", "Move") onto the header.
+                .accessibilityHidden(true)
             Text(title)
                 .font(.system(size: 15, weight: .semibold))
             if count > 0 {
@@ -1816,7 +1819,11 @@ struct HomeView: View {
             && services.assistantAutomationPolicy.showHomeBriefing
         if shouldLoadBriefing {
             let hasCached = services.emailService.assistantBriefing != nil
-            if !hasCached {
+            // Mirror the retryBriefing() guard: loadHomeData() fires from .task,
+            // scenePhase-active, and the refresh tick, so without the in-flight
+            // check a second auto-load could stack a parallel briefing fetch — the
+            // same double-Task race runBriefingFetchWithTimeout is designed to avoid.
+            if !hasCached && !isLoadingAssistantBriefing {
                 isLoadingAssistantBriefing = true
                 briefingDidFail = false
                 // Detached from loadHomeData so the other Home data fetches below

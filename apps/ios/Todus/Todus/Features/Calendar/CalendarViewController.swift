@@ -10,6 +10,14 @@ import CalendarKit
 import EventKit
 import EventKitUI
 
+/// EKEventStore isn't Sendable, but each store is owned by a single
+/// `CalendarViewController` and only touched on its serial `backgroundQueue` or
+/// the main thread — never concurrently. Box it so `@Sendable` closures can
+/// carry it across the queue hop without a false data-race warning.
+private struct SendableStoreBox: @unchecked Sendable {
+    let store: EKEventStore
+}
+
 final class CalendarViewController: DayViewController {
     // nil until initialized off the main thread in viewDidLoad.
     // EKEventStore() is a synchronous XPC call to the calendardd daemon that blocks
@@ -58,9 +66,16 @@ final class CalendarViewController: DayViewController {
         view.backgroundColor = pageBg
         dayView.backgroundColor = pageBg
 
-        // Customize CalendarKit event styling — slightly more rounded event pills
+        // Customize CalendarKit event styling — slightly more rounded event pills.
+        // CalendarStyle defaults the timeline + day-header backgrounds to
+        // `.systemBackground` (pure black in dark mode). Those paint OVER
+        // `dayView.backgroundColor`, so without overriding them the timeline read
+        // black instead of the app's #1c1c1e page surface. Pin both to `pageBg`
+        // so the calendar matches every other screen.
         var style = CalendarStyle()
         style.timeline.eventGap = 2
+        style.timeline.backgroundColor = pageBg
+        style.header.backgroundColor = pageBg
         updateStyle(style)
 
         // Create EKEventStore off the main thread — its constructor makes a synchronous
@@ -136,7 +151,7 @@ final class CalendarViewController: DayViewController {
 
     private func requestAccessToCalendar() {
         guard let store = eventStore else { return }
-        let completionHandler: EKEventStoreRequestAccessCompletionHandler = { granted, error in
+        let completionHandler: @Sendable (Bool, (any Error)?) -> Void = { granted, error in
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 _ = granted; _ = error
@@ -168,6 +183,12 @@ final class CalendarViewController: DayViewController {
                 guard let self else { return }
                 self.eventStore = store
                 self.subscribeToNotifications()
+                // A fresh store (created after an authorization change) makes any
+                // prior cache stale — pre-grant fetches returned empty arrays that
+                // would otherwise stick. Drop them so visible days re-fetch against
+                // the new store instead of staying blank until EKEventStoreChanged.
+                self.cachedEvents.removeAll()
+                self.inFlightDates.removeAll()
                 self.reloadData()
             }
         }
@@ -204,7 +225,9 @@ final class CalendarViewController: DayViewController {
         guard let store = eventStore else { return }
         let key = Calendar.current.startOfDay(for: date)
         inFlightDates.insert(key)
-        backgroundQueue.async { [weak self, store, date] in
+        let boxedStore = SendableStoreBox(store: store)
+        backgroundQueue.async { [weak self, boxedStore, date] in
+            let store = boxedStore.store
             let startDate = date
             var oneDayComponents = DateComponents()
             oneDayComponents.day = 1
@@ -265,7 +288,9 @@ final class CalendarViewController: DayViewController {
 
         var components = DateComponents()
         components.hour = 1
-        let endDate = calendar.date(byAdding: components, to: date)
+        // EKEvent.endDate is an implicitly-unwrapped Date!; a nil here would later
+        // trap when EKWrapper builds a DateInterval(start:end:). Guard the optional.
+        guard let endDate = calendar.date(byAdding: components, to: date) else { return nil }
 
         newEKEvent.startDate = date
         newEKEvent.endDate = endDate

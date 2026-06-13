@@ -123,6 +123,8 @@ struct EmailAutomationPolicyView: View {
                 }
             }
         }
+        .scrollContentBackground(.hidden)
+        .background(AppTheme.sheetBackground)
         .navigationTitle("Email automation")
         .navigationBarTitleDisplayMode(.inline)
         .confirmationDialog(

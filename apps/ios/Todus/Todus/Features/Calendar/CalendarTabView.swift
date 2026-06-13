@@ -194,11 +194,15 @@ struct CalendarTabView: View {
                     .transition(.opacity)
             }
 
-            // Today FAB — bottom-left, liquid glass, only when today isn't visible.
+            // Today FAB — bottom-center, liquid glass, only when today isn't visible.
             if showGoToTodayControl && !isShowingEventDetail {
                 VStack {
                     Spacer()
                     HStack {
+                        // Centered so it sits in the gap between the create FAB
+                        // (bottom-leading) and the AI FAB (bottom-trailing) — it
+                        // previously hid behind the create "+" in the corner.
+                        Spacer()
                         Button(action: goToToday) {
                             HStack(spacing: 6) {
                                 Image(systemName: "calendar")
@@ -214,7 +218,6 @@ struct CalendarTabView: View {
                         .accessibilityLabel(String(localized: "Go to today"))
                         Spacer()
                     }
-                    .padding(.leading, 20)
                     .padding(.bottom, 16)
                 }
                 .transition(.scale(scale: 0.8).combined(with: .opacity))

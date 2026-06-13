@@ -47,6 +47,8 @@ struct CalendarAccountsView: View {
                     .font(.caption)
             }
         }
+        .scrollContentBackground(.hidden)
+        .background(AppTheme.sheetBackground)
         .navigationTitle("Calendar Accounts")
         .navigationBarTitleDisplayMode(.inline)
         .task { await refresh() }
@@ -116,7 +118,7 @@ struct CalendarAccountsView: View {
         } header: {
             HStack(spacing: 8) {
                 Circle()
-                    .fill(Color(hex: conn.displayColor) ?? .accentColor)
+                    .fill(Color(hex: conn.displayColor as String?) ?? .accentColor)
                     .frame(width: 8, height: 8)
                 Text(conn.email)
             }

@@ -44,12 +44,13 @@ final class VoiceChatViewModel {
     private var captureEngine: AVAudioEngine?
     /// Timer-based audio chunk sending (100ms intervals)
     private var audioSendTimer: DispatchSourceTimer?
-    /// Buffer accumulating PCM samples between timer fires
-    private var pcmBuffer = Data()
+    /// Buffer accumulating PCM samples between timer fires. Lock-guarded audio
+    /// plumbing, not UI state — kept out of @Observable tracking.
+    @ObservationIgnored nonisolated(unsafe) private var pcmBuffer = Data()
     private let pcmBufferLock = NSLock()
     /// Thread-safe copy of isMicMuted for audio processing threads (tap + timer).
     /// Audio threads read this under micMutedLock; toggleMute() syncs it from isMicMuted.
-    private var _micMutedAtomic = false
+    @ObservationIgnored nonisolated(unsafe) private var _micMutedAtomic = false
     private let micMutedLock = NSLock()
 
     // MARK: - Tasks
@@ -128,6 +129,11 @@ final class VoiceChatViewModel {
             //    main-thread stalls long enough for iOS's watchdog to terminate the app.
             //    The implementation runs the heavy work on a background queue.
             await startAudioCapture()
+            // TODO(bug-hunt): A trailing provider event delivered between
+            // eventConsumerTask cancellation and provider.disconnect() returning can
+            // call handleEvent and overwrite this .failed state, resurrecting a
+            // half-torn-down session. Consider ignoring events once connectionState is
+            // .failed, or re-asserting .failed after disconnect() returns.
             if case .failed = connectionState {
                 eventConsumerTask?.cancel()
                 eventConsumerTask = nil

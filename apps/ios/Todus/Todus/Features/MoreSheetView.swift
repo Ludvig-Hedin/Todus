@@ -69,6 +69,10 @@ struct MoreSheetView: View {
                     }
                 }
             }
+            // Match the destination pages this sheet links to (Meetings / Calendar /
+            // Docs) instead of the system grouped background (pure black in dark mode).
+            .scrollContentBackground(.hidden)
+            .background(AppTheme.backgroundTop)
             .navigationTitle("More")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
