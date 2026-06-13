@@ -3,40 +3,151 @@ import { formatDisplayKeys } from '@/lib/hotkeys/use-hotkey-utils';
 import { useShortcutCache } from '@/lib/hotkeys/use-hotkey-utils';
 import { useCategorySettings } from '@/hooks/use-categories';
 import { type Shortcut } from '@/config/shortcuts';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
 import { m } from '@/paraglide/messages';
-import { type ReactNode } from 'react';
+import { useState, type KeyboardEvent, type ReactNode } from 'react';
+import { toast } from 'sonner';
+
+/** Build the app's key tokens from a raw keyboard event (modifiers → 'mod'/'shift'/'alt'). */
+function keysFromEvent(e: KeyboardEvent): string[] {
+  const mods: string[] = [];
+  if (e.metaKey || e.ctrlKey) mods.push('mod');
+  if (e.shiftKey) mods.push('shift');
+  if (e.altKey) mods.push('alt');
+  const k = e.key.toLowerCase();
+  if (['meta', 'control', 'shift', 'alt', 'os'].includes(k)) return mods;
+  const main =
+    k === ' '
+      ? 'space'
+      : k === 'arrowup'
+        ? 'up'
+        : k === 'arrowdown'
+          ? 'down'
+          : k === 'arrowleft'
+            ? 'left'
+            : k === 'arrowright'
+              ? 'right'
+              : k;
+  return [...mods, main];
+}
+
+function HotkeyRecorderDialog({
+  shortcut,
+  onClose,
+  onSave,
+  saving,
+}: {
+  shortcut: Shortcut | null;
+  onClose: () => void;
+  onSave: (keys: string[]) => void;
+  saving: boolean;
+}) {
+  const [keys, setKeys] = useState<string[]>([]);
+  const open = shortcut !== null;
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        if (!o) {
+          setKeys([]);
+          onClose();
+        }
+      }}
+    >
+      <DialogContent className="sm:max-w-[400px]">
+        <DialogHeader>
+          <DialogTitle className="text-[15px]">Record shortcut</DialogTitle>
+          <DialogDescription className="text-[12px]">
+            Press the key combination you want, then save.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div
+          tabIndex={0}
+          // eslint-disable-next-line jsx-a11y/no-autofocus
+          autoFocus
+          role="textbox"
+          aria-label="Shortcut recorder"
+          onKeyDown={(e) => {
+            e.preventDefault();
+            const next = keysFromEvent(e);
+            if (next.length) setKeys(next);
+          }}
+          className="bg-muted/40 focus-visible:ring-ring flex h-20 items-center justify-center gap-1 rounded-lg border outline-none focus-visible:ring-2"
+        >
+          {keys.length ? (
+            formatDisplayKeys(keys).map((k, i) => (
+              <kbd
+                key={`${k}-${i}`}
+                className="border-muted-foreground/10 bg-background h-7 rounded-[6px] border px-2 font-mono text-sm leading-7"
+              >
+                {k}
+              </kbd>
+            ))
+          ) : (
+            <span className="text-muted-foreground text-[12px]">Listening… press keys</span>
+          )}
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" size="sm" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button size="sm" disabled={keys.length === 0 || saving} onClick={() => onSave(keys)}>
+            Save
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 export default function ShortcutsPage() {
-  const {
-    shortcuts,
-    // TODO: Implement shortcuts syncing and caching
-    // updateShortcut,
-  } = useShortcutCache();
+  const { shortcuts, updateShortcut, resetShortcuts, isUpdating } = useShortcutCache();
   const categorySettings = useCategorySettings();
+  const [recording, setRecording] = useState<Shortcut | null>(null);
+
+  const handleSave = async (keys: string[]) => {
+    if (!recording) return;
+    try {
+      await updateShortcut({ ...recording, keys });
+      toast.success('Shortcut saved');
+      setRecording(null);
+    } catch {
+      toast.error('Failed to save shortcut');
+    }
+  };
+
+  const handleReset = async () => {
+    try {
+      await resetShortcuts();
+      toast.success('Shortcuts reset to defaults');
+    } catch {
+      toast.error('Failed to reset shortcuts');
+    }
+  };
 
   return (
     <div className="grid gap-6">
       <SettingsCard
         title={m['pages.settings.shortcuts.title']()}
         description={m['pages.settings.shortcuts.description']()}
-        // footer={
-        //   <div className="flex gap-4">
-        //     <Button
-        //       variant="outline"
-        //       onClick={async () => {
-        //         try {
-        //           await Promise.all(keyboardShortcuts.map((shortcut) => updateShortcut(shortcut)));
-        //           toast.success('Shortcuts reset to defaults');
-        //         } catch (error) {
-        //           console.error('Failed to reset shortcuts:', error);
-        //           toast.error('Failed to reset shortcuts');
-        //         }
-        //       }}
-        //     >
-        //       {t('common.actions.resetToDefaults')}
-        //     </Button>
-        //   </div>
-        // }
+        footer={
+          <div className="flex gap-4">
+            <Button variant="outline" size="sm" onClick={handleReset} disabled={isUpdating}>
+              Reset to defaults
+            </Button>
+          </div>
+        }
       >
         <div className="grid max-w-3xl gap-6">
           {Object.entries(
@@ -96,7 +207,7 @@ export default function ShortcutsPage() {
                     <ShortcutItem
                       key={`${scope}-${index}`}
                       keys={shortcut.keys}
-                      //   action={shortcut.action}
+                      onEdit={() => setRecording(shortcut)}
                     >
                       {label}
                     </ShortcutItem>
@@ -107,63 +218,52 @@ export default function ShortcutsPage() {
           ))}
         </div>
       </SettingsCard>
+
+      <HotkeyRecorderDialog
+        shortcut={recording}
+        onClose={() => setRecording(null)}
+        onSave={handleSave}
+        saving={isUpdating}
+      />
     </div>
   );
 }
 
-function ShortcutItem({ children, keys }: { children: ReactNode; keys: string[] }) {
-  // const [isRecording, setIsRecording] = useState(false);
+function ShortcutItem({
+  children,
+  keys,
+  onEdit,
+}: {
+  children: ReactNode;
+  keys: string[];
+  onEdit: () => void;
+}) {
   const displayKeys = formatDisplayKeys(keys);
 
-  // const { updateShortcut } = useShortcutCache(session?.user?.id);
-
-  // const handleHotkeyRecorded = async (newKeys: string[]) => {
-  //   try {
-  //     // Find the original shortcut to preserve its type and description
-  //     const originalShortcut = keyboardShortcuts.find((s) => s.action === action);
-  //     if (!originalShortcut) {
-  //       throw new Error('Original shortcut not found');
-  //     }
-
-  //     const updatedShortcut: Shortcut = {
-  //       ...originalShortcut,
-  //       keys: newKeys,
-  //     };
-
-  //     await updateShortcut(updatedShortcut);
-  //     toast.success('Shortcut saved successfully');
-  //   } catch (error) {
-  //     console.error('Failed to save shortcut:', error);
-  //     toast.error('Failed to save shortcut');
-  //   }
-  // };
-
   return (
-    <>
-      <div
-        className="bg-popover text-muted-foreground hover:bg-accent/50 flex cursor-pointer items-center justify-between gap-2 rounded-lg border p-2 text-sm"
-        // onClick={() => setIsRecording(true)}
-        role="button"
-        tabIndex={0}
-      >
-        <span className="font-medium">{children}</span>
-        <div className="flex select-none gap-1">
-          {displayKeys.map((key) => (
-            <kbd
-              key={key}
-              className="border-muted-foreground/10 bg-accent h-6 rounded-[6px] border px-1.5 font-mono text-xs leading-6"
-            >
-              {key}
-            </kbd>
-          ))}
-        </div>
+    <div
+      className="bg-popover text-muted-foreground hover:bg-accent/50 flex cursor-pointer items-center justify-between gap-2 rounded-lg border p-2 text-sm"
+      onClick={onEdit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onEdit();
+        }
+      }}
+      role="button"
+      tabIndex={0}
+    >
+      <span className="font-medium">{children}</span>
+      <div className="flex select-none gap-1">
+        {displayKeys.map((key) => (
+          <kbd
+            key={key}
+            className="border-muted-foreground/10 bg-accent h-6 rounded-[6px] border px-1.5 font-mono text-xs leading-6"
+          >
+            {key}
+          </kbd>
+        ))}
       </div>
-      {/* <HotkeyRecorder
-        isOpen={isRecording}
-        onClose={() => setIsRecording(false)}
-        onHotkeyRecorded={handleHotkeyRecorded}
-        currentKeys={keys}
-      /> */}
-    </>
+    </div>
   );
 }

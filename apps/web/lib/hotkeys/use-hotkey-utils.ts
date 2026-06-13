@@ -1,52 +1,69 @@
-// TODO: Implement shortcuts syncing and caching
 import { type Shortcut, keyboardShortcuts, enhancedKeyboardShortcuts } from '@/config/shortcuts';
 import { keyboardLayoutMapper, type KeyboardLayout } from '@/utils/keyboard-layout-map';
 import { getKeyCodeFromKey } from '@/utils/keyboard-utils';
 import { useHotkeys } from 'react-hotkeys-hook';
 import { useCallback, useMemo } from 'react';
 import { isMac } from '@/lib/platform';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useTRPC } from '@/providers/query-provider';
 
+/**
+ * Loads the user's keyboard shortcuts, merging any saved customizations over the
+ * built-in defaults (matched by `action`). Persists changes via the existing
+ * `shortcut` tRPC router (no schema change — the `user_hotkeys` table already
+ * exists). Returns `updateShortcut` (change one) and `resetShortcuts` (restore
+ * defaults).
+ */
 export const useShortcutCache = () => {
-  // const { data: shortcuts, mutate } = useSWR<Shortcut[]>(
-  //   userId ? `/hotkeys/${userId}` : null,
-  //   () => axios.get('/api/v1/shortcuts').then((res) => res.data),
-  //   {
-  //     dedupingInterval: 24 * 60 * 60 * 1000,
-  //   },
-  // );
+  const trpc = useTRPC();
+  const queryClient = useQueryClient();
 
-  // const updateShortcut = useCallback(
-  //   async (shortcut: Shortcut) => {
-  //     const currentShortcuts = shortcuts;
-  //     const index = currentShortcuts?.findIndex((s) => s.action === shortcut.action);
+  const { data } = useQuery({
+    ...trpc.shortcut.list.queryOptions(),
+    staleTime: 1000 * 60 * 60,
+  });
+  const overrides = useMemo<Shortcut[]>(
+    () => (data?.shortcuts ?? []) as Shortcut[],
+    [data],
+  );
 
-  //     let newShortcuts: Shortcut[];
-  //     if (index >= 0) {
-  //       newShortcuts = [
-  //         ...currentShortcuts?.slice(0, index),
-  //         shortcut,
-  //         ...currentShortcuts?.slice(index + 1),
-  //       ];
-  //     } else {
-  //       newShortcuts = [...currentShortcuts, shortcut];
-  //     }
+  const shortcuts = useMemo<Shortcut[]>(() => {
+    if (!overrides.length) return keyboardShortcuts;
+    const byAction = new Map(overrides.map((s) => [s.action, s]));
+    return keyboardShortcuts.map((s) => {
+      const o = byAction.get(s.action);
+      return o ? { ...s, keys: o.keys } : s;
+    });
+  }, [overrides]);
 
-  //     try {
-  //       // Update server using server action
-  //       await updateShortcuts(newShortcuts);
-  //       // Update cache only after successful server update
-  //       await mutate(newShortcuts, false);
-  //     } catch (error) {
-  //       console.error('Error updating shortcuts:', error);
-  //       throw error;
-  //     }
-  //   },
-  //   [shortcuts, mutate],
-  // );
+  const updateMutation = useMutation({
+    ...trpc.shortcut.update.mutationOptions(),
+    onSuccess: () => {
+      void queryClient.invalidateQueries(trpc.shortcut.list.queryFilter());
+    },
+  });
+
+  const updateShortcut = useCallback(
+    async (shortcut: Shortcut) => {
+      // Merge the single change into the full set and persist everything, so the
+      // stored array is always a complete, self-describing snapshot.
+      const next = shortcuts.map((s) =>
+        s.action === shortcut.action ? { ...s, keys: shortcut.keys } : s,
+      );
+      await updateMutation.mutateAsync({ shortcuts: next });
+    },
+    [shortcuts, updateMutation],
+  );
+
+  const resetShortcuts = useCallback(async () => {
+    await updateMutation.mutateAsync({ shortcuts: keyboardShortcuts });
+  }, [updateMutation]);
 
   return {
-    shortcuts: keyboardShortcuts,
-    // updateShortcut,
+    shortcuts,
+    updateShortcut,
+    resetShortcuts,
+    isUpdating: updateMutation.isPending,
   };
 };
 
