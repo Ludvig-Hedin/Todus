@@ -387,7 +387,14 @@ struct TaskRowView: View {
             task.priority = priority
             task.updatedAt = .now
             task.syncState = .pendingUpload
-            try? modelContext.save()
+            // Surface save errors instead of swallowing — a failed persist here
+            // would leave a phantom in-memory priority change that's lost on next
+            // launch. Matches TaskCaptureService.capture's error handling.
+            do {
+                try modelContext.save()
+            } catch {
+                AppLogger.shared.log("TaskRowView.setPriority: save failed: \(error.localizedDescription)")
+            }
         }
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
     }

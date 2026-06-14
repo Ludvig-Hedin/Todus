@@ -283,7 +283,15 @@ final class TaskCaptureService {
         deleteReminder(task)
         notificationService?.cancelTaskReminder(taskID: task.id.uuidString)
         context.delete(task)
-        try? context.save()
+        // Only enqueue the remote delete if the local deletion actually persisted.
+        // Swallowing this previously could leave the task in the local store while
+        // still deleting it on the backend — a sync-state mismatch on next sync.
+        do {
+            try context.save()
+        } catch {
+            AppLogger.shared.log("TaskCaptureService.delete: save failed: \(error.localizedDescription)")
+            return
+        }
 
         Task { @MainActor [syncService] in
             await syncService.enqueue([mutation], in: context)

@@ -508,7 +508,12 @@ struct MeetingDetailView: View {
         actionError = nil
         let result = await services.meetingsService.generateSummary(meetingId: meetingId)
         if result == nil { actionError = "Failed to generate summary. Please try again." }
+        // Preserve the currently-shown meeting if the refresh fails — otherwise a
+        // failed getMeeting() would nil out `meeting` and replace the just-generated
+        // summary with the "Meeting not found" state.
+        let previousMeeting = meeting
         await loadMeeting()
+        if meeting == nil { meeting = previousMeeting }
         isGeneratingSummary = false
     }
 
@@ -517,7 +522,10 @@ struct MeetingDetailView: View {
         actionError = nil
         let success = await services.meetingsService.scheduleBot(meetingId: meetingId)
         if !success { actionError = "Failed to schedule recording. Please try again." }
+        // Preserve the currently-shown meeting if the refresh fails (see generateSummary).
+        let previousMeeting = meeting
         await loadMeeting()
+        if meeting == nil { meeting = previousMeeting }
         isSchedulingBot = false
     }
 

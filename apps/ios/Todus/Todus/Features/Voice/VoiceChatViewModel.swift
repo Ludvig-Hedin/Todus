@@ -32,6 +32,13 @@ final class VoiceChatViewModel {
     /// Displayed in the transcript scroll area and written to AIChatService on disconnect.
     private(set) var finalizedTurns: [(id: UUID, user: String, assistant: String)] = []
 
+    /// Tracks whether a final transcript has already been received for the current
+    /// turn, per role. Guards against out-of-order provider events where a partial
+    /// (isFinal == false) arrives after the final, which would otherwise be appended
+    /// onto the finalized text and corrupt the displayed transcript.
+    private var userTranscriptFinalized = false
+    private var assistantTranscriptFinalized = false
+
     // MARK: - Dependencies
 
     private let tokenService: VoiceTokenService
@@ -243,14 +250,18 @@ final class VoiceChatViewModel {
         case .transcriptUpdate(let role, let text, let isFinal):
             switch role {
             case .user:
+                guard !userTranscriptFinalized else { return }
                 if isFinal {
                     userTranscript = text
+                    userTranscriptFinalized = true
                 } else {
                     userTranscript += text
                 }
             case .assistant:
+                guard !assistantTranscriptFinalized else { return }
                 if isFinal {
                     assistantTranscript = text
+                    assistantTranscriptFinalized = true
                 } else {
                     assistantTranscript += text
                 }
@@ -282,6 +293,8 @@ final class VoiceChatViewModel {
 
         userTranscript = ""
         assistantTranscript = ""
+        userTranscriptFinalized = false
+        assistantTranscriptFinalized = false
     }
 
     // MARK: - Tool Call Handling

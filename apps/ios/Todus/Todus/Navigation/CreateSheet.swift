@@ -1008,6 +1008,11 @@ struct CreateSheet: View {
                         switch intent.type {
                         case .event:
                             await createEvent(intent.title, startDate: intent.date, attachments: itemAttachments)
+                            // If event creation failed (permission denied / EventKit error),
+                            // createEvent set eventSaveFallbackPrompt and returned. Stop here so
+                            // we don't keep creating the remaining intents and then close() the
+                            // sheet out from under the alert the user still needs to act on.
+                            if eventSaveFallbackPrompt != nil { return }
                         case .task:
                             createTask(intent.title, dueDate: intent.date ?? selectedDate, attachments: itemAttachments)
                         case .email:

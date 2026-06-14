@@ -942,6 +942,13 @@ struct HomeView: View {
         }
     }
 
+    // TODO(bug-hunt): These three handlers call the backend with `item.backendId`
+    // without first re-validating the item still exists in the current briefing. If
+    // the server removed/refreshed the item between render and tap, the mutation
+    // silently fails (errors are logged, not surfaced) while the row is removed
+    // locally — leaving the app's view and the server out of sync. Fix needs a UX
+    // decision (toast on stale item? refresh briefing? optimistic-then-reconcile?),
+    // so it's flagged rather than auto-fixed. See CODE_REVIEW_BACKLOG.md (bug-hunt 2026-06-14).
     private func dismissBriefingItem(_ item: BriefingFeedItem) async {
         switch item.source {
         case .openLoop:

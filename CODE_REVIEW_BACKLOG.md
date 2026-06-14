@@ -1,6 +1,6 @@
 # Code Review Backlog
 
-Last updated: 2026-06-13
+Last updated: 2026-06-14
 
 ---
 
@@ -998,3 +998,33 @@ Scope: all unstaged changes (43 files) + the 3 latest local-but-unpushed commits
 | CR-0613-16 | Build config (macOS) | `apps/macos/project.yml:85` + `TodusMac.xcscheme` vs `TodusMac.xcodeproj/project.pbxproj` | 🟠 high | `project.yml` adds a `TodusMacTests` unit-test target + a `test:` scheme action, and the **tracked** `.xcscheme` was regenerated to reference its blueprint (`A12C09E2545DCAE94709093E`) — but the **tracked** `project.pbxproj` was NOT regenerated and contains zero `TodusMacTests` (blueprint absent). So the committed Xcode project's Test action (⌘U / `xcodebuild test -scheme TodusMac`) references a target that doesn't exist → fails. App Build/Run is unaffected (app blueprint exists). The new `TodusMacTests/EmailDecodeToleranceTests.swift` can't run via Xcode until regenerated. (`TEST_HOST`/`BuildableName` `Todus.app`-vs-`TodusMac.app` is **not** a bug — xcodegen sets the file-ref `name = TodusMac.app, path = Todus.app` since `PRODUCT_NAME: Todus`; both are internally consistent.) | Run `cd apps/macos && xcodegen generate` (xcodegen 2.45.3 is installed) to materialize `TodusMacTests` into the pbxproj, then commit the regenerated `project.pbxproj`. Standalone fallback that already works without Xcode: `apps/macos/scripts/run-email-decode-tests.sh` (compiles `EmailModels.swift` + `main.swift` via `swiftc`). |
 
 **Verified clean (checked, no action):** iOS commits 2ca46e3b + 22afa335 (forward full-body data-loss fix, load-state gen-gate, `invalidateThreadDetail`, off-main decode with `nonisolated(unsafe)` formatters, `copyResetTask` cancellation) are all correct and genuinely tested end-to-end. iOS `BillingSettingsView` `.isFinite` guards on `aiUsagePercent` are dead defensive code (the upstream getter already clamps) but harmless. Web `button.tsx` per-attribute merge order, `[&_svg]:size-4` retention, `aria-disabled:opacity-50` slot-only dimming, `loadingText ?? children`, and `import.meta.env.DEV` guard are correct. Email-HTML WKWebView CSP (`default-src 'none'; script-src 'none'`, `baseURL: nil`, link routing) neutralizes sender JS/forms on both platforms. iOS dark-mode background fixes, `RootView` onboarding step counter, `CachedAvatarImage` off-main decode, `AppHaptic.assumeIsolated`, `CalendarViewController` Sendable boxing, and `DocsListView` cycle/depth guard all sound.
+
+---
+
+# Bug Hunt — 2026-06-14 (iOS main user-flow surfaces)
+
+Scoped bug review of the iOS app's main-flow surfaces (auth, email, tasks, calendar, AI/voice, home/create, docs/meetings, sync). Method: 10 parallel finders → adversarial verifier per candidate (default-skeptic, re-read the real code). 14 candidates → 8 confirmed real, 5 refuted as false positives. 6 confirmed bugs auto-fixed (small, unambiguous, no-regression); 1 confirmed bug flagged for human review (needs UX decision); the rest investigated and downgraded. Not yet compiled in this environment — `xcodebuild` validation pending.
+
+## Auto-fixed this pass (6)
+
+- `Features/Tasks/TaskRowView.swift:390` (`setPriority`) — `try? modelContext.save()` swallowed save errors → silent priority-change loss. Replaced with `do/catch` + `AppLogger`, matching `TaskCaptureService.capture`.
+- `Services/Tasks/TaskCaptureService.swift:286` (`delete`) — `try? context.save()` swallowed; remote delete was enqueued even when the local delete failed → local/server divergence. Now `do/catch` and `return` before enqueue if the save throws.
+- `Features/Voice/VoiceChatViewModel.swift:243-257` (`handleEvent .transcriptUpdate`) — out-of-order provider events (a partial arriving after `isFinal`) appended onto finalized text and corrupted the transcript. Added per-role `userTranscriptFinalized`/`assistantTranscriptFinalized` guards; reset in `finalizeCurrentTurn()`.
+- `Navigation/CreateSheet.swift:1010` (compound-intent loop) — when `createEvent` failed (permission/EventKit) it set `eventSaveFallbackPrompt` and returned, but the loop kept creating the remaining intents and then `close()`d the sheet out from under the alert. Added `if eventSaveFallbackPrompt != nil { return }` after `createEvent`, mirroring the existing single-intent guard at `:1049`.
+- `Features/Meetings/MeetingDetailView.swift:506` (`generateSummary`) — a failed post-action `loadMeeting()` nils `meeting`, replacing the just-generated summary with "Meeting not found". Now snapshots `meeting` and restores it if the refresh returns nil.
+- `Features/Meetings/MeetingDetailView.swift:515` (`scheduleBot`) — same failed-reload-blanks-the-view defect; same snapshot/restore fix.
+
+## Needs human review (1)
+
+| ID | Area | Where | Severity | Problem | Suggested fix |
+|----|------|-------|----------|---------|---------------|
+| BH-0614-1 | Home briefing | `Features/Home/HomeView.swift:945-974` (`dismissBriefingItem`/`markBriefingItemDone`/`snoozeBriefingItem`) | 🟠 high | Handlers call the backend with `item.backendId` without re-validating the item still exists in the current briefing. If the server removed/refreshed the item between render and tap, the mutation silently fails (errors logged, not surfaced) while the row is removed locally → app view and server diverge. TODO comment added at the handler site. | Re-validate the item exists in the current briefing before the call; on miss, show a toast / refresh the briefing rather than firing a doomed mutation. Needs a UX decision, so not auto-fixed. |
+
+## Refuted — investigated, NOT bugs (no action)
+
+- `Features/Tasks/TaskDetailSheet.swift:120` (camera picker) — claimed off-main `@State` mutation. False: `UIImagePickerControllerDelegate` callbacks fire on the main thread; `appendAttachments` runs on main.
+- `Services/Tasks/TaskCaptureService.swift:122` (`try? context.fetch` in rollback) — error-swallow is intentional & documented; the just-saved mutations are already persisted at `:106`, and a failed fetch only skips an optional rollback (tasks keep their visible `.failed` state, not phantom data).
+- `Features/Calendar/CalendarTabView.swift:500` (`loadEvents`) and `:553` (`loadMoreListEvents`) — claimed off-main `@State` mutation. Both are called from main-actor contexts (`.task`, `.onChange`); Swift concurrency violations are compile-time, and the app builds, so no runtime isolation violation exists. (Adding explicit `@MainActor` would be redundant.)
+- `Features/Voice/VoiceChatViewModel.swift:135` (trailing-event state resurrection) — already guarded by `if case .failed = connectionState { return }` at the top of `handleEvent`. (Overlaps the broader, still-open `CR-0613-7` TODO; left as-is.)
+- `Navigation/MainTabView.swift:87` (capture-failure dismiss timer) — idiomatic cancel-and-replace `Task` on the main actor; `guard !Task.isCancelled` + `try?` handle cancellation correctly.
+- `App/AppServices.swift:806` (`Task { @MainActor … }` after `Task.yield()`) — class is `@MainActor`; the closure is explicitly `@MainActor`; mutated properties have no `didSet`. Correct as written.
