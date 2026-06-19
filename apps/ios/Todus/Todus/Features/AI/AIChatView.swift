@@ -8,6 +8,11 @@ private struct EventDetailSheetID: Identifiable {
     let id: String
 }
 
+private enum AICloudDisclosureAction {
+    case sendMessage
+    case startVoiceChat
+}
+
 // MARK: - AIChatView
 
 /// Full-screen chat sheet. Streams AI responses with live markdown rendering and typewriter animation.
@@ -67,6 +72,8 @@ struct AIChatView: View {
 
     // Live voice chat
     @State private var showVoiceChat = false
+    @State private var showsAICloudProcessingDisclosure = false
+    @State private var pendingAICloudDisclosureAction: AICloudDisclosureAction? = nil
 
     // Full-screen compose overlay — expands input into a dedicated sheet for long prompts
     @State private var showsFullScreenInput = false
@@ -76,6 +83,7 @@ struct AIChatView: View {
     // Animated thinking text cycles while streaming
     @State private var thinkingIndex = 0
     private let thinkingPhrases = ["Thinking", "Reading tasks", "Searching", "Writing"]
+    private static let aiCloudProcessingDisclosureKey = "ai_cloud_processing_disclosure_acknowledged"
 
     // Auto-scroll behavior: only follow the bottom while the user is already there.
     // Set to false when the user manually scrolls back so token streams don't yank
@@ -343,12 +351,34 @@ struct AIChatView: View {
             )
             .preferredColorScheme(services.appearancePreference.colorScheme)
         }
+        .alert("Cloud AI processing", isPresented: $showsAICloudProcessingDisclosure) {
+            Button("Continue") {
+                UserDefaults.standard.set(true, forKey: Self.aiCloudProcessingDisclosureKey)
+                let action = pendingAICloudDisclosureAction
+                pendingAICloudDisclosureAction = nil
+                switch action {
+                case .sendMessage:
+                    sendMessage()
+                case .startVoiceChat:
+                    showVoiceChat = true
+                case .none:
+                    break
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                pendingAICloudDisclosureAction = nil
+            }
+        } message: {
+            Text(
+                "Your prompt, selected context, attachments, and enabled app data may be processed by Todus and its configured AI providers. You can change AI permissions in settings."
+            )
+        }
         // Full-screen compose — lets users write long prompts comfortably
         .sheet(isPresented: $showsFullScreenInput) {
             FullScreenComposeView(inputText: $inputText, onSend: {
                 showsFullScreenInput = false
                 // Brief delay so the sheet dismiss animation plays before sending
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { sendMessage() }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { requestSendMessage() }
             })
             .presentationDragIndicator(.visible)
             .appSheetBackground()
@@ -987,7 +1017,7 @@ struct AIChatView: View {
     private func suggestionRow(icon: String, text: String) -> some View {
         Button {
             inputText = text
-            sendMessage()
+            requestSendMessage()
         } label: {
             HStack(spacing: 12) {
                 Image(systemName: icon)
@@ -1472,7 +1502,7 @@ struct AIChatView: View {
                 }
 
                 // Live voice chat button — opens full-screen voice modal
-                Button { showVoiceChat = true } label: {
+                Button { requestStartVoiceChat() } label: {
                     Image(systemName: "waveform")
                         .font(.system(size: 15, weight: .medium))
                         .foregroundStyle(voiceButtonGradient)
@@ -1504,7 +1534,7 @@ struct AIChatView: View {
                     .accessibilityIdentifier("ai.chat.stopButton")
                     .transition(.scale.combined(with: .opacity))
                 } else {
-                    Button(action: sendMessage) {
+                    Button(action: requestSendMessage) {
                         Image(systemName: "arrow.up")
                             .font(.system(size: 15, weight: .bold))
                             .foregroundStyle(.white)
@@ -1626,6 +1656,24 @@ struct AIChatView: View {
     }
 
     // MARK: - Actions
+
+    private func requestSendMessage() {
+        guard UserDefaults.standard.bool(forKey: Self.aiCloudProcessingDisclosureKey) else {
+            pendingAICloudDisclosureAction = .sendMessage
+            showsAICloudProcessingDisclosure = true
+            return
+        }
+        sendMessage()
+    }
+
+    private func requestStartVoiceChat() {
+        guard UserDefaults.standard.bool(forKey: Self.aiCloudProcessingDisclosureKey) else {
+            pendingAICloudDisclosureAction = .startVoiceChat
+            showsAICloudProcessingDisclosure = true
+            return
+        }
+        showVoiceChat = true
+    }
 
     private func sendMessage() {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)

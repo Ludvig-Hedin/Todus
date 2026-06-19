@@ -52,7 +52,9 @@
   Account deletion now also attempts to delete external Mem0 AI memories and always
   invalidates Mem0 local/KV caches before the local user row is deleted. Native iOS AI
   sharing now uses only the local system share sheet for a redacted transcript and no
-  longer creates or opens hosted public conversation links.
+  longer creates or opens hosted public conversation links. First cloud AI chat send and
+  voice start are gated by a one-time processing disclosure before any prompt, attachment,
+  selected context, or enabled app data is sent.
   (`BillingSettingsView.swift`, `AIChatService.swift`, `ai.ts`,
   `PrivacyInfo.xcprivacy`, `privacy.tsx`, `terms.tsx`, `mem0.ts`,
   `mem0.test.ts`, `auth.ts`, `AIChatView.swift`, `TodosApp.swift`, `.gitignore`,

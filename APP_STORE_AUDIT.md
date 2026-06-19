@@ -12,8 +12,9 @@ Overall readiness: NOT READY for App Store submission.
 The current iOS app is a substantial native SwiftUI app and has several review-positive items:
 Sign in with Apple is present beside Google sign-in, permission prompts are contextual and skippable,
 the privacy manifest exists, legal links are reachable from sign-in, the iOS billing screen no longer
-links to external web checkout/hosted billing portals, iOS no longer creates or opens public shared
-AI conversation links, and the simulator build/test suite was green after the first audit pass.
+links to external web checkout/hosted billing portals, iOS now shows a one-time cloud AI processing
+disclosure before chat/voice sends data, iOS no longer creates or opens public shared AI conversation
+links, and the simulator build/test suite was green after the first audit pass.
 
 Submission should still be held. The highest-risk blockers are:
 
@@ -79,8 +80,14 @@ Validation run during this audit:
 - 2026-06-19 UGC hardening: iOS AI sharing now uses only the local system share sheet for a redacted
   transcript. The app no longer creates public AI conversation links from the native AI toolbar or
   presents public shared conversations from `todus://share` deep links.
+- 2026-06-19 AI disclosure hardening: iOS now gates first cloud AI chat send and voice start behind a
+  one-time disclosure that prompts/context/attachments/enabled app data may be processed by Todus and
+  configured AI providers, with cancellation before anything is sent.
 - 2026-06-19 post-UGC validation: XcodeBuildMCP simulator build passed with no warnings/errors; simulator
   tests passed, 109 passed / 0 failed / 3 skipped.
+- 2026-06-19 post-AI-disclosure validation: fallback `xcodebuild build` and `xcodebuild test -quiet`
+  passed with `CODE_SIGNING_ALLOWED=NO` after XcodeBuildMCP transport became unavailable. Test output
+  still contains pre-existing test concurrency warnings and debugger snapshot messages.
 
 ## Compliance Matrix
 
@@ -98,7 +105,7 @@ Validation run during this audit:
 | Permission prompts and purpose strings      | PASS                                    | Info.plist contains calendar, camera, Face ID, microphone, photos, reminders, and speech purpose strings. Code uses contextual prompts with skip/denied paths for Gmail, Reminders, Notifications, Calendar, voice, camera/photos.                                                                                                 | Low      | Verify prompts on device. Keep strings aligned if permission usage changes.                                                                                                                                  |
 | Billing / IAP / external purchase links     | PARTIAL                                 | iOS no longer links free users to web pricing or paid users to the hosted billing portal. No StoreKit/IAP code or products are present, so paid iOS upgrades are not offered in this build.                                                                                                                                        | Medium   | Keep iOS free/no-upgrade for submission, or implement StoreKit auto-renewable subscriptions with restore/manage purchase before selling paid digital access in iOS.                                          |
 | Restore purchases / subscription management | PARTIAL                                 | No StoreKit restore flow exists because iOS paid purchases are not offered. Existing paid users can cancel via the app's API, but payment-method changes are outside this build.                                                                                                                                                   | Medium   | If paid iOS purchases are introduced, implement StoreKit purchase, restore, subscription status, receipt/server notification handling, and Apple subscription management links.                              |
-| AI and third-party data sharing             | PARTIAL                                 | iOS settings expose AI read/write toggles. Backend routes to OpenRouter/Google/OpenAI/Anthropic/Groq/Perplexity/Tavily depending config. The rewritten privacy policy now discloses AI provider processing at a high level.                                                                                                        | Medium   | Consider adding first-use in-app AI data-sharing copy before sending personal email/calendar/task/doc data to third-party AI.                                                                                |
+| AI and third-party data sharing             | PASS/PARTIAL                            | iOS settings expose AI read/write toggles. First cloud AI chat send and voice start now show a one-time disclosure before sending data. Backend routes to OpenRouter/Google/OpenAI/Anthropic/Groq/Perplexity/Tavily depending config. The rewritten privacy policy now discloses AI provider processing at a high level.           | Medium   | Verify disclosure copy in TestFlight and keep provider/privacy wording aligned with production routing and App Store privacy labels.                                                                         |
 | User-generated content / sharing            | PASS/PARTIAL                            | iOS AI toolbar sharing now uses the local system share sheet with a redacted transcript instead of creating hosted public links. `todus://share` no longer opens public shared conversations in iOS. Group chat code exists but no iOS entry point was found. Web/server sharing still exists outside this iOS submission surface. | Medium   | Keep group/public sharing unsurfaced in the iOS submission build, state this in review notes if needed, and add report/block/moderation/contact flows before shipping public or social UGC in iOS.           |
 | Minimum functionality / not a thin wrapper  | PASS                                    | Current iOS app is native SwiftUI with tasks, email, calendar, AI, docs, meetings, widgets, native permissions, and local storage. Docs editor uses a WKWebView wrapper for the editor surface only.                                                                                                                               | Low      | Ensure metadata does not describe the app as a WebView wrapper or legacy app.                                                                                                                                |
 | Metadata / screenshots / support URL        | UNKNOWN                                 | `https://todus.app/privacy`, `/terms`, and `/contact` are reachable, but App Store Connect metadata/screenshots are not in repo.                                                                                                                                                                                                   | High     | Prepare screenshots, description, support URL, privacy URL, keywords, age rating, category, copyright, review notes, and export compliance answers.                                                          |
