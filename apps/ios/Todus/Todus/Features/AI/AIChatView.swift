@@ -3,12 +3,6 @@ import SwiftData
 import PhotosUI
 import AVFoundation
 
-/// Identifiable wrapper used by .sheet(item:) to guarantee the share sheet
-/// only appears when a conversation ID is actually available.
-private struct ShareConversationID: Identifiable {
-    let id: String
-}
-
 /// EventKit id for presenting `EKEventDetailSheet` from generative UI card taps.
 private struct EventDetailSheetID: Identifiable {
     let id: String
@@ -55,8 +49,6 @@ struct AIChatView: View {
     @State private var showsPromptLibrary = false
     // Surfaced when a generative-UI card tap maps to an action this build doesn't handle.
     @State private var unhandledCardActionMessage: String? = nil
-    // ShareConversationSheet — use .sheet(item:) so blank sheet cannot appear when ID is nil
-    @State private var shareSheetConversationId: ShareConversationID? = nil
     /// System calendar event detail (from generative `CalendarEventCard` taps).
     @State private var eventDetailSheetID: EventDetailSheetID? = nil
 
@@ -202,14 +194,6 @@ struct AIChatView: View {
                 .presentationDragIndicator(.visible)
                 .appSheetBackground()
                 .preferredColorScheme(services.appearancePreference.colorScheme)
-        }
-        // Share conversation sheet — creates a shareable public link
-        .sheet(item: $shareSheetConversationId) { item in
-            ShareConversationSheet(
-                conversationId: item.id,
-                conversationTitle: chatService.chatTitle ?? "AI conversation"
-            )
-            .preferredColorScheme(services.appearancePreference.colorScheme)
         }
         .sheet(item: $eventDetailSheetID) { item in
             EKEventDetailSheet(eventId: item.id)
@@ -529,14 +513,8 @@ struct AIChatView: View {
                         Label("Duplicate", systemImage: "plus.square.on.square")
                     }
 
-                    // Share — opens ShareConversationSheet to create a public link,
-                    // falls back to UIActivityViewController when no conversation is saved yet
                     Button {
-                        if let id = chatService.currentConversationID?.uuidString {
-                            shareSheetConversationId = ShareConversationID(id: id)
-                        } else {
-                            shareConversation()
-                        }
+                        shareConversation()
                     } label: {
                         Label("Share", systemImage: "square.and.arrow.up")
                     }

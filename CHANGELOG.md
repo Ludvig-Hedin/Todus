@@ -50,11 +50,13 @@
   removed from the current tree and future `.p8` files are ignored; stale top-level
   TestFlight WebView-wrapper docs were replaced with native SwiftUI release guidance.
   Account deletion now also attempts to delete external Mem0 AI memories and always
-  invalidates Mem0 local/KV caches before the local user row is deleted.
+  invalidates Mem0 local/KV caches before the local user row is deleted. Native iOS AI
+  sharing now uses only the local system share sheet for a redacted transcript and no
+  longer creates or opens hosted public conversation links.
   (`BillingSettingsView.swift`, `AIChatService.swift`, `ai.ts`,
   `PrivacyInfo.xcprivacy`, `privacy.tsx`, `terms.tsx`, `mem0.ts`,
-  `mem0.test.ts`, `auth.ts`, `.gitignore`, `README_TESTFLIGHT.md`,
-  `TESTFLIGHT_DEPLOYMENT_GUIDE.md`, `APP_STORE_AUDIT.md`)
+  `mem0.test.ts`, `auth.ts`, `AIChatView.swift`, `TodosApp.swift`, `.gitignore`,
+  `README_TESTFLIGHT.md`, `TESTFLIGHT_DEPLOYMENT_GUIDE.md`, `APP_STORE_AUDIT.md`)
 
 #### Backend efficiency + correctness pass (server-only)
 

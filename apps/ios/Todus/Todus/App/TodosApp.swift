@@ -14,8 +14,6 @@ struct TodosApp: App {
     /// We render a non-crashing error view instead of `fatalError`'ing on launch.
     @State private var modelContainerFailed: Bool = false
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    /// Slug from a todus://share?slug=... deep link — presents SharedConversationView when set
-    @State private var sharedConversationSlug: String? = nil
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
@@ -47,11 +45,6 @@ struct TodosApp: App {
                             case "auth-callback", "link-callback":
                                 services.authService.handleAuthCallback(url: url)
                                 services.authStore.handleIncomingAuthCallback(url: url)
-                            case "share":
-                                if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-                                   let slug = components.queryItems?.first(where: { $0.name == "slug" })?.value {
-                                    sharedConversationSlug = slug
-                                }
                             default:
                                 break
                             }
@@ -59,15 +52,6 @@ struct TodosApp: App {
                         }
                         services.authService.handleAuthCallback(url: url)
                         services.authStore.handleIncomingAuthCallback(url: url)
-                    }
-                    .sheet(item: Binding(
-                        get: { sharedConversationSlug.map { SlugWrapper(slug: $0) } },
-                        set: { sharedConversationSlug = $0?.slug }
-                    )) { wrapper in
-                        SharedConversationView(slug: wrapper.slug)
-                            .environment(services)
-                            .presentationDragIndicator(.visible)
-                            .appSheetBackground()
                     }
                     .tint(AppTheme.accent)
                     .preferredColorScheme(services.appearancePreference.colorScheme)
@@ -288,13 +272,6 @@ private func handleMailtoURL(_ url: URL, services: AppServices) {
     services.composeEmailSeedSubject = subject
     services.composeEmailSeedBody = body
     services.showsComposeEmail = true
-}
-
-/// Identifiable wrapper for a share slug — used to drive the SharedConversationView sheet
-/// from a `todus://share?slug=...` deep link.
-private struct SlugWrapper: Identifiable {
-    let slug: String
-    var id: String { slug }
 }
 
 /// Bridges `--simulated-deep-link <url>` / `--simulated-notification <payload>`
