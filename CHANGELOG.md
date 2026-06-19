@@ -54,11 +54,15 @@
   sharing now uses only the local system share sheet for a redacted transcript and no
   longer creates or opens hosted public conversation links. First cloud AI chat send and
   voice start are gated by a one-time processing disclosure before any prompt, attachment,
-  selected context, or enabled app data is sent.
+  selected context, or enabled app data is sent. Removed unreachable native public
+  share-link and group-chat views/services from the iOS target, and refreshed the stale
+  TestFlight quick-start/checklist docs to use the active native app path and bundle ID.
   (`BillingSettingsView.swift`, `AIChatService.swift`, `ai.ts`,
   `PrivacyInfo.xcprivacy`, `privacy.tsx`, `terms.tsx`, `mem0.ts`,
-  `mem0.test.ts`, `auth.ts`, `AIChatView.swift`, `TodosApp.swift`, `.gitignore`,
-  `README_TESTFLIGHT.md`, `TESTFLIGHT_DEPLOYMENT_GUIDE.md`, `APP_STORE_AUDIT.md`)
+  `mem0.test.ts`, `auth.ts`, `AIChatView.swift`, `TodosApp.swift`, `AppServices.swift`,
+  `Todus.xcodeproj`, `.gitignore`, `README_TESTFLIGHT.md`,
+  `TESTFLIGHT_DEPLOYMENT_GUIDE.md`, `TESTFLIGHT_QUICK_START.md`,
+  `docs/testflight-checklist.md`, `APP_STORE_AUDIT.md`)
 
 #### Backend efficiency + correctness pass (server-only)
 

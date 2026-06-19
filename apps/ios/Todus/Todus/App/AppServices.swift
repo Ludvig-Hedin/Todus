@@ -166,10 +166,6 @@ final class AppServices {
     let captureService: TaskCaptureService
     /// AI chat service — manages streaming conversation and task mutations
     let aiChatService: AIChatService
-    /// Share conversation service — creates and manages public/protected share links
-    let shareConversationService: ShareConversationService
-    /// Group chat service — multi-user rooms with AI participation
-    let groupChatService: GroupChatService
     /// Voice endpoint service — provides the backend WS proxy URL (API key stays server-side)
     let voiceTokenService: VoiceTokenService
     /// Server-rendered system prompt (persona + Mem0 memories) for Gemini Live.
@@ -605,8 +601,6 @@ final class AppServices {
             calendarService: calendarService,
             emailService: emailService
         )
-        self.shareConversationService = ShareConversationService(apiClient: apiClient)
-        self.groupChatService = GroupChatService(apiClient: apiClient)
         self.voiceTokenService = VoiceTokenService(authService: authService, backendURL: backendURL)
         let voiceSystemPromptClient = VoiceSystemPromptClient(
             authService: authService,

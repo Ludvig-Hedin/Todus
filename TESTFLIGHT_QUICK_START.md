@@ -1,181 +1,84 @@
-# TestFlight Quick Start (5-Step Process)
+# TestFlight Quick Start
 
-**⏱️ Total Time: 1-2 hours**
+Fast path for uploading the active native iOS app. For the full release checklist, see
+`TESTFLIGHT_DEPLOYMENT_GUIDE.md` and `APP_STORE_AUDIT.md`.
 
-This is the fast-track version. For detailed steps, see `TESTFLIGHT_DEPLOYMENT_GUIDE.md`
+## 1. Confirm Release Blockers
 
----
+- Current iOS app: `apps/ios/Todus`
+- Xcode project: `apps/ios/Todus/Todus.xcodeproj`
+- Scheme: `Todus`
+- Bundle ID: `com.ludvighedin.todus`
+- Version/build in project config: `1.1` / `3`
 
-## Step 1: Apple Developer Setup (20 minutes)
+Before uploading for review, confirm the manual blockers in `APP_STORE_AUDIT.md` are closed:
 
-### 1.1 Register App IDs
-- Visit: https://developer.apple.com/account/resources/identifiers/list
-- Create "App ID" for iOS with bundle ID: `com.zero.nativeapp` (or your choice)
-- Create "App ID" for macOS with bundle ID: `com.zero.nativeapp.macos`
+- App Store Connect metadata, screenshots, privacy labels, age rating, export compliance, support URL,
+  and review notes.
+- Reviewer account or full demo-mode access.
+- Revoked/rotated App Store Connect `.p8` key material.
+- Physical-device TestFlight smoke test.
 
-### 1.2 Create Distribution Certificates
-- Visit: https://developer.apple.com/account/resources/certificates/list
-- Click "+" and select "Apple Distribution"
-- Create certificate for **iOS** (download and install)
-- Create certificate for **macOS** (download and install)
+## 2. Local Validation
 
-### 1.3 Create Provisioning Profiles
-- Visit: https://developer.apple.com/account/resources/profiles/list
-- Click "+" and select "App Store"
-- Create "Todus iOS AppStore" profile (select iOS bundle ID, iOS certificate)
-- Create "Todus macOS AppStore" profile (select macOS bundle ID, macOS certificate)
-- Download and install both profiles
-
-### 1.4 Create App Records in App Store Connect
-- Visit: https://appstoreconnect.apple.com/apps
-- Click "New App"
-- Create iOS app: Name=Todus, Bundle ID=com.zero.nativeapp, SKU=TODUS-iOS
-- Create macOS app: Name=Todus, Bundle ID=com.zero.nativeapp.macos, SKU=TODUS-macOS
-
----
-
-## Step 2: Xcode Configuration (10 minutes)
-
-### 2.1 Update Xcode Project
+From the repo root:
 
 ```bash
-# Open the project
-open /Users/ludvighedin/Programming/personal/mail/apps/apple/Todus/Todus.xcodeproj
+plutil -lint \
+  apps/ios/Todus/Todus/Resources/Info.plist \
+  apps/ios/Todus/Todus/Resources/PrivacyInfo.xcprivacy \
+  apps/ios/Todus/Todus/Resources/Todus.entitlements \
+  packages/swift-widgets/Sources/TodusWidgetsExtension/Info.plist \
+  packages/swift-widgets/Sources/TodusWidgetsExtension/TodusWidgets.entitlements
+
+xcodebuild -project apps/ios/Todus/Todus.xcodeproj \
+  -scheme Todus \
+  -configuration Debug \
+  -destination 'platform=iOS Simulator,name=iPhone 17' \
+  CODE_SIGNING_ALLOWED=NO \
+  build
 ```
 
-### 2.2 Configure Signing for iOS Target
-
-1. Select target: `Todus`
-2. Go to: Signing & Capabilities
-3. Set:
-   - **Team:** Your Apple Team
-   - **Bundle Identifier:** com.zero.nativeapp
-   - **Signing Certificate:** Apple Distribution
-   - **Provisioning Profile:** Todus iOS AppStore
-
-### 2.3 Configure Signing for macOS Target (if present)
-
-Same as above but with macOS profiles.
-
----
-
-## Step 3: Build Archive (15 minutes)
-
-### 3.1 Build iOS Archive
+Run the simulator test suite before archiving if time permits:
 
 ```bash
-# In Xcode:
-# 1. Select scheme: Todus
-# 2. Select destination: Generic iOS Device
-# 3. Menu: Product → Archive
-# 4. Wait for build to complete (usually 5-10 minutes)
+xcodebuild test -quiet \
+  -project apps/ios/Todus/Todus.xcodeproj \
+  -scheme Todus \
+  -configuration Debug \
+  -destination 'platform=iOS Simulator,name=iPhone 17' \
+  CODE_SIGNING_ALLOWED=NO
 ```
 
-### 3.2 Distribute to App Store Connect
+## 3. Archive and Upload
 
-After build completes in Xcode Organizer:
+1. Open `apps/ios/Todus/Todus.xcodeproj` in Xcode.
+2. Select the `Todus` scheme.
+3. Select `Any iOS Device (arm64)` or a generic iOS device destination.
+4. Use `Product -> Archive`.
+5. In Organizer, choose `Distribute App -> App Store Connect -> Upload`.
+6. Resolve any privacy manifest, signing, entitlement, or upload warnings before assigning testers.
 
-```bash
-# In Organizer window:
-# 1. Click "Distribute App"
-# 2. Select "App Store Connect"
-# 3. Select "Upload"
-# 4. Sign in with Apple ID
-# 5. Click "Upload"
-# 6. Wait for processing (5-15 minutes)
-```
+## 4. TestFlight Smoke Test
 
-### 3.3 Build macOS Archive (same steps, select macOS destination)
+On a fresh TestFlight install:
 
----
+- Launch and sign in with the reviewer/test account.
+- Verify Home, Tasks, Email, Calendar, AI chat, voice, Docs, Meetings, Settings, Billing, and Account
+  Deletion entry points.
+- Verify the AI cloud-processing disclosure appears before the first chat send or voice start.
+- Verify Billing does not open external web checkout or hosted billing portals in the iOS build.
+- Verify public AI share-link creation and `todus://share` viewing are not present in the iOS app.
+- Sign out, relaunch, sign back in, and confirm the backend remains reachable.
 
-## Step 4: TestFlight Setup (10 minutes)
+## 5. App Review Notes
 
-### 4.1 Create Internal Tester Group
+Use the draft in `APP_STORE_AUDIT.md` as the source of truth. Include:
 
-- Visit: https://appstoreconnect.apple.com/testers/ios
-- Click "Create a Group"
-- Name: "Core Team"
-- Add your Apple ID and any team members
-
-### 4.2 Assign Build to Internal Testing
-
-Once build is processed:
-- TestFlight → Builds (iOS/macOS)
-- Select your build
-- Click "Add for Testing"
-- Select "Internal Testing"
-- Select "Core Team"
-- Click "Save"
-
-### 4.3 Send Invitations
-
-- Testers will receive email from TestFlight
-- They download via TestFlight app
-
----
-
-## Step 5: Pre-Flight Verification (10 minutes)
-
-Before sending to others, test yourself:
-
-### Download & Test
-- [ ] App launches without crash
-- [ ] See login screen
-- [ ] Tap "Sign in with Google"
-- [ ] Redirected to Google auth
-- [ ] Back to app after auth
-- [ ] Can see inbox
-- [ ] Can open email
-- [ ] Logout works
-- [ ] No crashes in 5 minutes of use
-
----
-
-## ✅ Done!
-
-Your app is now on TestFlight and ready for internal testing.
-
-**Next:**
-- Invite team members
-- Collect feedback
-- Fix bugs if needed
-- Re-upload new build if changes made
-
----
-
-## Common Mistakes (Don't Do These!)
-
-❌ **Don't use** "iOS App Development" certificate (use "Apple Distribution")
-❌ **Don't use** wrong bundle ID (must match App Store Connect)
-❌ **Don't forget** to download and install provisioning profiles
-❌ **Don't sign** with personal team on business app (select correct team)
-❌ **Don't increment** version instead of build number between uploads
-
----
-
-## If Something Fails
-
-| Error | Solution |
-|-------|----------|
-| "Code Sign Error" | Check Team ID, Bundle ID, and signing certificate are all set |
-| "Invalid Provisioning" | Download and reinstall provisioning profiles |
-| "Build Already Exists" | Increment build number in Xcode and rebuild |
-| "Upload Failed" | Verify bundle ID matches App Store Connect app record |
-| "OAuth Not Working" | Verify `todus://` scheme registered in Google OAuth |
-
----
-
-## Need More Details?
-
-See **TESTFLIGHT_DEPLOYMENT_GUIDE.md** for:
-- Detailed instructions with screenshots
-- Troubleshooting guide
-- Configuration options
-- Release notes template
-
----
-
-**Status:** 🟢 Ready to start
-**Time to completion:** 1-2 hours
-**Next action:** Step 1 - Apple Developer Setup
+- Reviewer credentials and OTP/password instructions.
+- Backend URL: `https://api.todus.app`
+- Privacy URL: `https://todus.app/privacy`
+- Support URL: `https://todus.app/contact`
+- Billing posture: no paid upgrades are offered in the submitted iOS build unless StoreKit has been
+  implemented.
+- Any beta-disabled features and the account deletion path.
