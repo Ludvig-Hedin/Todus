@@ -25,6 +25,7 @@ import { redis, resend, twilio } from './services';
 import { dubAnalytics } from '@dub/better-auth';
 import { defaultUserSettings } from './schemas';
 import { disableBrainFunction } from './brain';
+import { deleteUserMemories } from './mem0';
 import { APIError } from 'better-auth/api';
 import { getZeroDB } from './server-utils';
 import { type EProviders } from '../types';
@@ -675,6 +676,15 @@ export const createAuth = () => {
 
           if (!revokedAccounts.every((value) => !!value)) {
             console.log('Failed to revoke some accounts');
+          }
+
+          const memoriesDeleted = await deleteUserMemories(
+            env.MEM0_API_KEY,
+            user.id,
+            env.prompts_storage,
+          );
+          if (!memoriesDeleted) {
+            console.log('Failed to delete some external AI memories');
           }
 
           await db.deleteUser();

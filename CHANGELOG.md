@@ -49,9 +49,12 @@
   declares collected data categories; the tracked App Store Connect `.p8` key was
   removed from the current tree and future `.p8` files are ignored; stale top-level
   TestFlight WebView-wrapper docs were replaced with native SwiftUI release guidance.
+  Account deletion now also attempts to delete external Mem0 AI memories and always
+  invalidates Mem0 local/KV caches before the local user row is deleted.
   (`BillingSettingsView.swift`, `AIChatService.swift`, `ai.ts`,
-  `PrivacyInfo.xcprivacy`, `privacy.tsx`, `terms.tsx`, `.gitignore`,
-  `README_TESTFLIGHT.md`, `TESTFLIGHT_DEPLOYMENT_GUIDE.md`, `APP_STORE_AUDIT.md`)
+  `PrivacyInfo.xcprivacy`, `privacy.tsx`, `terms.tsx`, `mem0.ts`,
+  `mem0.test.ts`, `auth.ts`, `.gitignore`, `README_TESTFLIGHT.md`,
+  `TESTFLIGHT_DEPLOYMENT_GUIDE.md`, `APP_STORE_AUDIT.md`)
 
 #### Backend efficiency + correctness pass (server-only)
 

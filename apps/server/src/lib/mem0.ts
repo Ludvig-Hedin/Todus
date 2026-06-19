@@ -145,10 +145,7 @@ export async function searchMemories(
 /**
  * Get all memories for a user (used for preloading / cache warm-up).
  */
-export async function getAllMemories(
-  apiKey: string,
-  userId: string,
-): Promise<MemoryEntry[]> {
+export async function getAllMemories(apiKey: string, userId: string): Promise<MemoryEntry[]> {
   try {
     const response = await fetch(`${MEM0_API_BASE}/v2/memories/`, {
       method: 'POST',
@@ -272,6 +269,46 @@ export async function invalidateMemoryCache(
     } catch (error) {
       console.warn('[Mem0] KV invalidation error:', error);
     }
+  }
+}
+
+/**
+ * Best-effort erasure for external Mem0 memories during account deletion.
+ * Never throw from here: account deletion must continue even if Mem0 is down,
+ * but caches are always invalidated so deleted users cannot be rehydrated from
+ * stale local/KV memory.
+ */
+export async function deleteUserMemories(
+  apiKey: string | undefined,
+  userId: string,
+  kv: KVNamespace | undefined,
+): Promise<boolean> {
+  await invalidateMemoryCache(userId, kv);
+
+  if (!apiKey || !userId) {
+    return true;
+  }
+
+  try {
+    const url = `${MEM0_API_BASE}/v1/memories/?user_id=${encodeURIComponent(userId)}`;
+    const response = await fetch(url, {
+      method: 'DELETE',
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Token ${apiKey}`,
+      },
+    });
+
+    if (!response.ok && response.status !== 404) {
+      const errorText = await response.text().catch(() => 'unknown');
+      console.warn(`[Mem0] deleteUserMemories failed (${response.status}): ${errorText}`);
+      return false;
+    }
+
+    return true;
+  } catch (error) {
+    console.warn('[Mem0] deleteUserMemories error:', error);
+    return false;
   }
 }
 
