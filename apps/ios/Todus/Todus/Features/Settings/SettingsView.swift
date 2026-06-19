@@ -10,6 +10,7 @@ struct SettingsView: View {
     @State private var showsDeleteAlert = false
     @State private var deleteConfirmText = ""
     @State private var deleteConfirmError: String?
+    @State private var deleteAccountErrorMessage: String?
     @State private var isDeletingAccount = false
     /// True while `performLogout` is running — drives a small "Signing out…" HUD so
     /// the user sees feedback during the network round-trip before the auth state
@@ -191,6 +192,25 @@ struct SettingsView: View {
         ) { _ in
             Button("Try Again") {
                 deleteConfirmError = nil
+                deleteConfirmText = ""
+                showsDeleteAlert = true
+            }
+            Button("Cancel", role: .cancel) {
+                deleteConfirmText = ""
+            }
+        } message: { msg in
+            Text(msg)
+        }
+        .alert(
+            "Couldn't delete account",
+            isPresented: Binding<Bool>(
+                get: { deleteAccountErrorMessage != nil },
+                set: { if !$0 { deleteAccountErrorMessage = nil } }
+            ),
+            presenting: deleteAccountErrorMessage
+        ) { _ in
+            Button("Try Again") {
+                deleteAccountErrorMessage = nil
                 deleteConfirmText = ""
                 showsDeleteAlert = true
             }
@@ -1154,14 +1174,17 @@ struct SettingsView: View {
     /// Deletes the user's account on the backend, clears local auth state, and dismisses settings.
     private func performDeleteAccount() async {
         isDeletingAccount = true
+        deleteAccountErrorMessage = nil
         defer { isDeletingAccount = false }
 
         do {
             // Call backend to delete account and all associated data
             try await services.apiClient.deleteAccount()
         } catch {
-            // Even if the backend call fails, sign out locally so the user isn't stuck
             AppLogger.shared.log("Delete account failed: \(error.localizedDescription)")
+            deleteConfirmText = ""
+            deleteAccountErrorMessage = "Your account was not deleted. Check your connection and try again."
+            return
         }
 
         // Clear local state — Keychain token, auth flags, SwiftData

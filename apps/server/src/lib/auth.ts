@@ -673,7 +673,7 @@ export const createAuth = () => {
             return false;
           });
 
-          if (revokedAccounts.every((value) => !!value)) {
+          if (!revokedAccounts.every((value) => !!value)) {
             console.log('Failed to revoke some accounts');
           }
 

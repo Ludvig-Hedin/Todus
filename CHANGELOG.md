@@ -22,6 +22,17 @@
 
 ### Fixed
 
+#### App Store submission audit
+- **iOS account deletion no longer masks backend failure as success.** If the
+  `delete-user` request fails, Settings now shows a retryable error and keeps the
+  session intact instead of signing out locally and implying the account was
+  deleted. Also fixed an inverted backend revocation log condition in the same
+  deletion path, and updated the Docs parity smoke test to skip when the current
+  More surface does not expose Docs in `--ui-testing` mode. Added
+  `APP_STORE_AUDIT.md` with the current App Store Review readiness matrix and
+  required pre-submission fixes. (`SettingsView.swift`, `auth.ts`,
+  `ParitySmokeTests.swift`, `APP_STORE_AUDIT.md`)
+
 #### Backend efficiency + correctness pass (server-only)
 - **B-025 — generative-UI prompt no longer forced on every client.** The ~21KB `GENERATIVE_UI_PROMPT` was injected into every `/ai/chat` system prompt regardless of whether the client could render the cards. Added an optional `supportsGenerativeUI` flag to the chat request schema (default `true`, backward compatible) and gated the injection on it; the duplicate injection in `lib/prompts.ts` (`AiChatPrompt`) is now gated behind an optional `{ generativeUI }` option (default `true`). Clients that only render markdown can now opt out and save the tokens. (`apps/server/src/routes/ai.ts`, `apps/server/src/lib/prompts.ts`)
 - **B-028 — auto-labeling is now a user-controllable automation.** Added `autoLabelThreads` (default `true`) to `assistantAutomationPolicySchema` + `defaultAssistantAutomationPolicy`, and gated `labelGenerationWorkflow` registration behind it in the thread-sync engine. `vectorizationWorkflow` stays unconditional (inbox search/RAG depends on it) with a comment noting it's intentionally always-on. (`apps/server/src/lib/schemas.ts`, `apps/server/src/thread-workflow-utils/workflow-engine.ts`)
