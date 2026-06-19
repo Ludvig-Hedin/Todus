@@ -27,8 +27,9 @@ Submission should still be held. The highest-risk blockers are:
 - Account deletion can be initiated in-app, database cascades cover the main user-owned tables, and
   external AI memory deletion is now wired best-effort. A production-like deletion test is still
   required before submission.
-- An exposed App Store Connect API private key was removed from the current tree and `*.p8` is now
-  ignored, but the key must still be revoked/rotated and purged from history before submission.
+- Exposed App Store Connect API private key material was removed from the current tree and local
+  workspace scan, and `*.p8` is now ignored. The key must still be revoked/rotated and purged from
+  history before submission.
 
 Recommended path: continue TestFlight/internal QA, but do not submit for App Review until every item in
 Critical Fixes Before Submission is closed and verified on a physical device/TestFlight build.
@@ -75,6 +76,9 @@ Validation run during this audit:
 - 2026-06-19 continuation: removed the tracked `.p8` key from the current tree, added `*.p8` to
   `.gitignore`, rewrote the hosted privacy policy, updated the iOS privacy manifest data categories,
   removed iOS external billing links, and replaced stale top-level TestFlight wrapper docs.
+- 2026-06-19 local secret cleanup: removed ignored local `.p8` copies from `.claude/worktrees/...` and
+  `reference/soma`; follow-up `find` scan found no remaining local `.p8` files outside `.git` and
+  `node_modules`.
 - 2026-06-19 UGC hardening: iOS AI sharing now uses only the local system share sheet for a redacted
   transcript. The app no longer creates public AI conversation links from the native AI toolbar or
   presents public shared conversations from `todus://share` deep links.
@@ -113,9 +117,9 @@ Validation run during this audit:
 | Minimum functionality / not a thin wrapper  | PASS                                    | Current iOS app is native SwiftUI with tasks, email, calendar, AI, docs, meetings, widgets, native permissions, and local storage. Docs editor uses a WKWebView wrapper for the editor surface only.                                                                                                                                                               | Low      | Ensure metadata does not describe the app as a WebView wrapper or legacy app.                                                                                                                                |
 | Metadata / screenshots / support URL        | UNKNOWN                                 | `https://todus.app/privacy`, `/terms`, and `/contact` are reachable, but App Store Connect metadata/screenshots are not in repo.                                                                                                                                                                                                                                   | High     | Prepare screenshots, description, support URL, privacy URL, keywords, age rating, category, copyright, review notes, and export compliance answers.                                                          |
 | TestFlight / release docs                   | PASS/PARTIAL                            | Top-level TestFlight docs now describe the active native SwiftUI app and point to this audit. Physical TestFlight validation is still manual.                                                                                                                                                                                                                      | Medium   | Run the updated checklist against a signed TestFlight build.                                                                                                                                                 |
-| Security / secrets                          | PARTIAL                                 | `AuthKey_ZJC3UFF6WX.p8` was removed from the current tree and `*.p8` is ignored. The exposed key remains in git history and must be revoked/rotated by the account owner.                                                                                                                                                                                          | Critical | Revoke exposed App Store Connect API keys, rotate replacement credentials, purge history if this repo is shared, and remove any local/worktree copies.                                                       |
+| Security / secrets                          | PARTIAL                                 | `AuthKey_ZJC3UFF6WX.p8` was removed from the current tree, ignored local `.p8` copies were removed from the workspace, and `*.p8` is ignored. The exposed key remains in git history and must be revoked/rotated by the account owner.                                                                                                                             | Critical | Revoke exposed App Store Connect API keys, rotate replacement credentials, and purge history if this repo is shared.                                                                                         |
 | Export compliance                           | PARTIAL                                 | `ITSAppUsesNonExemptEncryption=false` is set. App uses TLS/HTTPS and standard Apple/network crypto.                                                                                                                                                                                                                                                                | Medium   | Confirm App Store Connect export-compliance answers with counsel/account owner for all backend/client cryptography and territories.                                                                          |
-| Age rating / AI content                     | UNKNOWN                                 | AI chat, email content, web search, public share links, and group chat exist. No App Store Connect age questionnaire evidence in repo.                                                                                                                                                                                                                             | Medium   | Complete age rating honestly for unrestricted web/AI/user content and apply any required age gating/disclosures.                                                                                             |
+| Age rating / AI content                     | UNKNOWN                                 | AI chat, email content, and web search exist in the iOS app. Native public share-link and group-chat surfaces were removed from the iOS target. No App Store Connect age questionnaire evidence exists in the repo.                                                                                                                                                | Medium   | Complete age rating honestly for unrestricted web/AI/user content and apply any required age gating/disclosures.                                                                                             |
 | Default mail entitlement                    | PASS/PARTIAL                            | App registers `mailto`; `com.apple.developer.mail-client` entitlement is absent and documented pending. Root onboarding does not show default-mail setup.                                                                                                                                                                                                          | Low      | Do not market default mail app support until Apple grants entitlement and signed profiles include it.                                                                                                        |
 
 ## Critical Fixes Before Submission
@@ -139,8 +143,9 @@ Validation run during this audit:
    backups/log retention and the user-facing completion state.
 
 5. Revoke and remove exposed App Store Connect API private keys.
-   The current tree no longer tracks the key, but the account owner must revoke/rotate it and purge
-   history or otherwise confirm the exposure cannot affect release operations.
+   The current tree no longer tracks the key and the local workspace no longer has `.p8` copies, but
+   the account owner must revoke/rotate it and purge history or otherwise confirm the exposure cannot
+   affect release operations.
 
 6. Keep UGC/group/share features out of the iOS submission surface.
    This audit removed iOS public AI share-link creation/viewing and removed the native public sharing
@@ -212,9 +217,10 @@ Notes:
 - [ ] Publish/review accurate privacy policy.
 - [ ] Update App Store Connect privacy labels.
 - [x] Update terms/support/legal copy as needed in the repo.
-- [ ] Revoke/rotate exposed `.p8` App Store Connect keys.
+- [ ] Revoke/rotate exposed `.p8` App Store Connect keys and purge history if needed.
 - [x] Remove tracked `.p8` key material from the current tree.
 - [x] Add `*.p8` to `.gitignore` after removing tracked key material.
+- [x] Remove ignored local `.p8` key copies from the workspace.
 - [x] Wire external AI memory deletion into account deletion.
 - [x] Add one-time iOS cloud AI processing disclosure before first chat send or voice start.
 - [x] Remove native iOS public share-link and group-chat surfaces from the submission target.
@@ -239,6 +245,7 @@ Notes:
 - Rewrote the hosted privacy policy to match the current server-backed product.
 - Updated the active iOS privacy manifest with collected data categories.
 - Removed the tracked App Store Connect `.p8` key from the current tree and ignored future `.p8` files.
+- Removed ignored local `.p8` key copies from the workspace.
 - Replaced stale top-level TestFlight WebView-wrapper docs with native SwiftUI release guidance.
 - Added best-effort Mem0 external AI memory deletion and cache invalidation to account deletion.
 - Added a one-time iOS cloud AI processing disclosure before the first AI chat send or voice start.
